@@ -6,7 +6,7 @@ This project is a runnable Agent client, not a Markdown knowledge-base manager. 
 
 ## Status
 
-Current MVP status: **Phase 15 keychain LLM settings build**.
+Current MVP status: **Phase 16 chat session persistence build**.
 
 Implemented layers:
 
@@ -24,6 +24,7 @@ Implemented layers:
 - Read-only knowledge import UI for legacy Markdown repositories.
 - Promotion Queue Review UI for promote / dismiss / pin memory candidates.
 - LLM Settings UI with macOS Keychain-backed API key storage.
+- SQLite-backed Agent Chat session and message persistence.
 
 ## Product principle
 
@@ -98,7 +99,7 @@ Current SwiftUI pages:
 - **Graph Nodes** — inspect graph nodes and edges loaded from SQLite.
 - **Search** — run graph / edge / observe-log search against the loaded SQLite snapshot.
 - **Observe Log** — inspect short-term memory entries.
-- **Agent Chat** — ask the graph-backed agent using the selected LLM provider.
+- **Agent Chat** — ask the graph-backed agent using the selected LLM provider, with sessions and messages persisted to SQLite.
 - **Promotion Queue** — review active memory candidates and promote / dismiss / pin them.
 - **Import** — read-only import of a legacy Markdown knowledge repository into SQLite.
 - **LLM Settings** — configure Stub vs OpenAI-compatible mode, base URL, model and Keychain API key.
@@ -113,7 +114,7 @@ swift build
 Current acceptance baseline:
 
 ```text
-67 tests passing
+75 tests passing
 Build complete
 ```
 
@@ -274,6 +275,33 @@ Candidate kinds are:
 - `decision_hint`
 - `user_preference`
 
+## Chat session persistence
+
+Agent Chat sessions are persisted in SQLite alongside graph runtime data.
+
+SQLite tables:
+
+```text
+chat_sessions
+chat_messages
+```
+
+Persisted session data includes:
+
+- session id
+- title
+- created / updated timestamps
+- user and assistant messages
+- assistant citations
+- optional context snapshot text
+
+The SwiftUI **Agent Chat** page supports:
+
+- creating a new chat session
+- selecting a recent chat session
+- reloading persisted sessions
+- saving each user/assistant turn after submission
+
 ## Current limitations
 
 This is intentionally an MVP, not the final Agent OS client.
@@ -281,7 +309,7 @@ This is intentionally an MVP, not the final Agent OS client.
 Known limitations:
 
 - SwiftUI app seeds demo graph data only when the Application Support SQLite database is empty.
-- App UI does not yet persist chat sessions to SQLite.
+- Chat sessions are persisted to SQLite, but the UI does not yet support editing, deleting, branching or summarizing conversations.
 - App UI exposes basic LLM configuration, but does not yet include model testing, provider health checks or multi-profile management.
 - Legacy importer uses frontmatter and path heuristics; it does not yet run LLM-based entity extraction.
 - Search is currently in-memory lexical matching, not embedding / hybrid search.
@@ -293,8 +321,8 @@ Known limitations:
 
 Recommended next phases:
 
-1. Add real chat session persistence.
-2. Add provider health checks / test connection for LLM Settings.
+1. Add provider health checks / test connection for LLM Settings.
+2. Add chat session compaction / summary.
 3. Add hybrid retrieval: lexical + embedding + graph neighborhood.
 4. Add Graphiti adapter for temporal fact extraction, deduplication and invalidation.
 5. Add human-readable export projections for graph slices.

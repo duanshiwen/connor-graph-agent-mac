@@ -1,52 +1,7 @@
 import Foundation
+import ConnorGraphCore
 import ConnorGraphMemory
 import ConnorGraphSearch
-
-public enum AgentRole: String, Codable, Sendable, Equatable {
-    case user
-    case assistant
-    case system
-}
-
-public struct AgentMessage: Codable, Sendable, Equatable, Identifiable {
-    public let id: String
-    public var role: AgentRole
-    public var content: String
-    public var createdAt: Date
-
-    public init(id: String = UUID().uuidString, role: AgentRole, content: String, createdAt: Date = Date()) {
-        self.id = id
-        self.role = role
-        self.content = content
-        self.createdAt = createdAt
-    }
-}
-
-public struct AgentSession: Codable, Sendable, Equatable, Identifiable {
-    public let id: String
-    public var messages: [AgentMessage]
-    public var createdAt: Date
-
-    public init(id: String = UUID().uuidString, messages: [AgentMessage] = [], createdAt: Date = Date()) {
-        self.id = id
-        self.messages = messages
-        self.createdAt = createdAt
-    }
-
-    @discardableResult
-    public mutating func appendUserMessage(_ content: String) -> AgentMessage {
-        let message = AgentMessage(role: .user, content: content)
-        messages.append(message)
-        return message
-    }
-
-    @discardableResult
-    public mutating func appendAssistantMessage(_ content: String) -> AgentMessage {
-        let message = AgentMessage(role: .assistant, content: content)
-        messages.append(message)
-        return message
-    }
-}
 
 public struct ObserveLogRecorder: Sendable, Equatable {
     public init() {}
@@ -154,7 +109,7 @@ public struct GraphAgent<Provider: LLMProvider>: Sendable {
         let observeEntry = observeLogRecorder.entry(for: userMessage, sessionID: updatedSession.id)
         let context = try contextBuilder.context(for: prompt)
         let answer = try await llmProvider.complete(prompt: prompt, context: context)
-        updatedSession.appendAssistantMessage(answer.text)
+        updatedSession.appendAssistantMessage(answer.text, citations: answer.citations, contextSnapshot: context.renderedText)
         return GraphAgentAskResponse(
             answer: answer,
             context: context,
