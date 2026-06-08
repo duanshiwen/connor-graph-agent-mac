@@ -15,6 +15,13 @@ public struct OpenAICompatibleConfig: Sendable, Equatable {
         self.model = model
     }
 
+    public var requestModel: String {
+        model
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty } ?? model.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     public static func fromEnvironment(_ environment: [String: String]) throws -> OpenAICompatibleConfig {
         guard let apiKey = environment["CONNOR_LLM_API_KEY"], !apiKey.isEmpty else {
             throw OpenAICompatibleProviderError.missingAPIKey
@@ -126,15 +133,15 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, Se
         let response = try await complete(prompt: "Reply with exactly: OK", context: context)
         return LLMProviderHealthCheckResult(
             ok: !response.text.isEmpty,
-            model: config.model,
-            message: "Connection OK: \(config.model)"
+            model: config.requestModel,
+            message: "Connection OK: \(config.requestModel)"
         )
     }
 
     private func makeRequest(prompt: String, context: AgentContext) throws -> AgentHTTPRequest {
         let endpoint = config.baseURL.appendingPathComponent("chat/completions")
         let body = OpenAIChatCompletionRequest(
-            model: config.model,
+            model: config.requestModel,
             messages: [
                 OpenAIChatMessage(role: "system", content: systemPrompt),
                 OpenAIChatMessage(role: "user", content: "Question:\n\(prompt)\n\nGraph Context:\n\(context.renderedText)")
