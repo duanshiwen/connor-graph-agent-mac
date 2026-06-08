@@ -793,6 +793,9 @@ struct AgentChatView: View {
                     Text("Recent messages: \(inspection.recentMessageCount)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    Text("Prompt size: \(inspection.renderedPromptCharacterCount) chars · ~\(inspection.estimatedPromptTokenCount) tokens")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     Text("Current request: \(inspection.currentRequest)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -816,7 +819,7 @@ struct AgentChatView: View {
                         Text(message.content)
                         if message.role == .assistant, let inspection = message.promptInspection {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("Context: summary \(inspection.includesSummary ? "included" : "not included") · recent \(inspection.recentMessageCount)")
+                                Text("Context: summary \(inspection.includesSummary ? "included" : "not included") · recent \(inspection.recentMessageCount) · ~\(inspection.estimatedPromptTokenCount) tokens")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                 DisclosureGroup("Prompt snapshot") {
