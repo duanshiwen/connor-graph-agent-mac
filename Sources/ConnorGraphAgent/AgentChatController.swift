@@ -1,4 +1,5 @@
 import Foundation
+import ConnorGraphCore
 import ConnorGraphSearch
 
 public struct AgentChatController<Provider: LLMProvider>: Sendable {

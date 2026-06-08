@@ -42,7 +42,7 @@ let package = Package(
         .executableTarget(name: "ConnorGraphAgentMac", dependencies: ["ConnorGraphAgent", "ConnorGraphStore", "ConnorGraphAppSupport"]),
         .testTarget(name: "ConnorGraphCoreTests", dependencies: ["ConnorGraphCore"]),
         .testTarget(name: "ConnorGraphMemoryTests", dependencies: ["ConnorGraphMemory"]),
-        .testTarget(name: "ConnorGraphStoreTests", dependencies: ["ConnorGraphStore"]),
+        .testTarget(name: "ConnorGraphStoreTests", dependencies: ["ConnorGraphStore", "ConnorGraphCore"]),
         .testTarget(name: "ConnorGraphSearchTests", dependencies: ["ConnorGraphSearch"]),
         .testTarget(name: "ConnorGraphAgentTests", dependencies: ["ConnorGraphAgent"]),
         .testTarget(name: "ConnorGraphImportTests", dependencies: ["ConnorGraphImport"]),
