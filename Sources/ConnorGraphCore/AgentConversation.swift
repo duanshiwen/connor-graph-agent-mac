@@ -31,6 +31,34 @@ public struct AgentMessage: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
+public struct AgentSessionSummary: Codable, Sendable, Equatable, Identifiable {
+    public var id: String
+    public var sessionID: String
+    public var content: String
+    public var createdAt: Date
+    public var updatedAt: Date
+    public var sourceMessageCount: Int
+    public var lastMessageID: String?
+
+    public init(
+        id: String = UUID().uuidString,
+        sessionID: String,
+        content: String,
+        createdAt: Date = Date(),
+        updatedAt: Date? = nil,
+        sourceMessageCount: Int,
+        lastMessageID: String? = nil
+    ) {
+        self.id = id
+        self.sessionID = sessionID
+        self.content = content
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt ?? createdAt
+        self.sourceMessageCount = sourceMessageCount
+        self.lastMessageID = lastMessageID
+    }
+}
+
 public struct AgentSession: Codable, Sendable, Equatable, Identifiable {
     public let id: String
     public var title: String
