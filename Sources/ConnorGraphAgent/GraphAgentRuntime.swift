@@ -90,17 +90,20 @@ public struct GraphAgent<Provider: LLMProvider>: Sendable {
     public var contextBuilder: AgentContextBuilder
     public var llmProvider: Provider
     public var observeLogRecorder: ObserveLogRecorder
+    public var recentMessageLimit: Int
 
     public init(
         session: AgentSession,
         contextBuilder: AgentContextBuilder,
         llmProvider: Provider,
-        observeLogRecorder: ObserveLogRecorder = ObserveLogRecorder()
+        observeLogRecorder: ObserveLogRecorder = ObserveLogRecorder(),
+        recentMessageLimit: Int = 6
     ) {
         self.session = session
         self.contextBuilder = contextBuilder
         self.llmProvider = llmProvider
         self.observeLogRecorder = observeLogRecorder
+        self.recentMessageLimit = recentMessageLimit
     }
 
     public func ask(_ prompt: String) async throws -> GraphAgentAskResponse {
@@ -108,11 +111,16 @@ public struct GraphAgent<Provider: LLMProvider>: Sendable {
     }
 
     public func ask(_ prompt: String, sessionSummary: AgentSessionSummary?) async throws -> GraphAgentAskResponse {
+        let recentMessages = Array(session.messages.suffix(max(0, recentMessageLimit)))
         var updatedSession = session
         let userMessage = updatedSession.appendUserMessage(prompt)
         let observeEntry = observeLogRecorder.entry(for: userMessage, sessionID: updatedSession.id)
         let context = try contextBuilder.context(for: prompt)
-        let effectivePrompt = Self.effectivePrompt(userPrompt: prompt, sessionSummary: sessionSummary)
+        let effectivePrompt = AgentChatPromptContext(
+            userPrompt: prompt,
+            sessionSummary: sessionSummary,
+            recentMessages: recentMessages
+        ).renderedPrompt
         let answer = try await llmProvider.complete(prompt: effectivePrompt, context: context)
         updatedSession.appendAssistantMessage(answer.text, citations: answer.citations, contextSnapshot: context.renderedText)
         return GraphAgentAskResponse(
@@ -121,18 +129,5 @@ public struct GraphAgent<Provider: LLMProvider>: Sendable {
             session: updatedSession,
             observeLogEntries: [observeEntry]
         )
-    }
-
-    private static func effectivePrompt(userPrompt: String, sessionSummary: AgentSessionSummary?) -> String {
-        guard let sessionSummary, !sessionSummary.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return userPrompt
-        }
-        return """
-        Previous session summary:
-        \(sessionSummary.content)
-
-        Current user request:
-        \(userPrompt)
-        """
     }
 }
