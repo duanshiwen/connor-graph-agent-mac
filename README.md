@@ -287,7 +287,7 @@ Known limitations:
 - Search is currently in-memory lexical matching, not embedding / hybrid search.
 - Promotion Queue Review UI is available, but does not yet include advanced filtering, conflict resolution or diff previews.
 - No Graphiti sidecar adapter yet.
-- No Keychain-backed credential manager yet.
+- Keychain-backed LLM settings are available, but real provider connection testing is not yet exposed in the UI.
 
 ## Roadmap after MVP
 
