@@ -6,7 +6,7 @@ This project is a runnable Agent client, not a Markdown knowledge-base manager. 
 
 ## Status
 
-Current MVP status: **Phase 12 runnable acceptance build**.
+Current MVP status: **Phase 13 app SQLite import build**.
 
 Implemented layers:
 
@@ -20,6 +20,8 @@ Implemented layers:
 - Observe Log promotion queue.
 - Stub LLM provider for deterministic local testing.
 - OpenAI-compatible LLM provider interface for real model calls.
+- Application Support SQLite bootstrap for the SwiftUI app.
+- Read-only knowledge import UI for legacy Markdown repositories.
 
 ## Product principle
 
@@ -74,8 +76,9 @@ Sources/
   ConnorGraphStore/     SQLite graph and observe-log persistence
   ConnorGraphImport/    Legacy Markdown → graph import
   ConnorGraphSearch/    In-memory search index and AgentContext assembly
-  ConnorGraphAgent/     Agent runtime, chat controller, LLM providers
-  ConnorGraphAgentMac/  SwiftUI macOS app shell
+  ConnorGraphAgent/       Agent runtime, chat controller, LLM providers
+  ConnorGraphAppSupport/  App storage paths, SQLite bootstrap, repository state loading
+  ConnorGraphAgentMac/    SwiftUI macOS app shell
 ```
 
 ## Run locally
@@ -86,14 +89,15 @@ From this directory:
 swift run connor-graph-agent-mac
 ```
 
-The current app launches with demo graph data so the UI works without any API key or external dependency.
+The app launches against a local SQLite graph store in macOS Application Support. If the database is empty, it seeds a small demo graph so the UI works without any API key or external dependency.
 
 Current SwiftUI pages:
 
-- **Graph Nodes** — inspect demo nodes and edges.
-- **Search** — run graph / edge / observe-log search.
+- **Graph Nodes** — inspect graph nodes and edges loaded from SQLite.
+- **Search** — run graph / edge / observe-log search against the loaded SQLite snapshot.
 - **Observe Log** — inspect short-term memory entries.
 - **Agent Chat** — ask the graph-backed agent using `StubLLMProvider`.
+- **Import** — read-only import of a legacy Markdown knowledge repository into SQLite.
 
 ## Test and build
 
@@ -105,7 +109,7 @@ swift build
 Current acceptance baseline:
 
 ```text
-50 tests passing
+55 tests passing
 Build complete
 ```
 
@@ -136,9 +140,41 @@ Notes:
 - The provider sends graph context through `AgentContext.renderedText`.
 - `LLMResponse.citations` preserves graph source IDs from the context assembler.
 
+## App database
+
+The SwiftUI app stores its runtime graph database at:
+
+```text
+~/Library/Application Support/ConnorGraphAgent/connor-graph.sqlite
+```
+
+On launch the app:
+
+1. Resolves the Application Support directory.
+2. Creates `ConnorGraphAgent/` when needed.
+3. Opens `connor-graph.sqlite`.
+4. Runs SQLite migrations.
+5. Loads a `GraphStoreSnapshot` into the in-memory search index.
+6. Seeds demo data only when the database is empty.
+
+The runtime source of truth remains SQLite; Markdown is used only as a read-only import source.
+
 ## Read-only legacy knowledge import
 
 The importer can scan an existing Markdown-based repository without modifying source files.
+
+SwiftUI entry point:
+
+1. Open the **Import** page.
+2. Enter a Markdown repository path, such as:
+
+```text
+/Users/duanshiwen/notes/intelligence-repository
+```
+
+3. Click **Import Read-only**.
+4. Review scanned files, imported nodes, imported edges, skipped files and warnings.
+5. Use **Graph Nodes** or **Search** to inspect imported graph data.
 
 Programmatic entry point:
 
@@ -203,7 +239,7 @@ This is intentionally an MVP, not the final Agent OS client.
 
 Known limitations:
 
-- SwiftUI app currently uses demo graph data by default.
+- SwiftUI app seeds demo graph data only when the Application Support SQLite database is empty.
 - App UI does not yet persist chat sessions to SQLite.
 - App UI does not yet expose real LLM configuration.
 - Legacy importer uses frontmatter and path heuristics; it does not yet run LLM-based entity extraction.
@@ -216,14 +252,12 @@ Known limitations:
 
 Recommended next phases:
 
-1. Wire SwiftUI app to Application Support SQLite instead of demo-only memory.
-2. Add import command / UI for read-only intelligence-repository ingestion.
-3. Add Promotion Queue review screen with promote / dismiss / pin actions.
-4. Add Keychain-backed LLM credential storage.
-5. Add real chat session persistence.
-6. Add hybrid retrieval: lexical + embedding + graph neighborhood.
-7. Add Graphiti adapter for temporal fact extraction, deduplication and invalidation.
-8. Add human-readable export projections for graph slices.
+1. Add Promotion Queue review screen with promote / dismiss / pin actions.
+2. Add Keychain-backed LLM credential storage.
+3. Add real chat session persistence.
+4. Add hybrid retrieval: lexical + embedding + graph neighborhood.
+5. Add Graphiti adapter for temporal fact extraction, deduplication and invalidation.
+6. Add human-readable export projections for graph slices.
 
 ## Development discipline
 
