@@ -18,6 +18,8 @@ private func temporaryDatabaseURL(_ name: String = UUID().uuidString) -> URL {
     #expect(tables.contains("graph_nodes"))
     #expect(tables.contains("semantic_edges"))
     #expect(tables.contains("observe_log_entries"))
+    #expect(tables.contains("chat_sessions"))
+    #expect(tables.contains("chat_messages"))
 }
 
 @Test func graphStoreSavesAndLoadsGraphNode() throws {
