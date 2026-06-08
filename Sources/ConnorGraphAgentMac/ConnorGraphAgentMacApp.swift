@@ -672,6 +672,18 @@ struct LLMSettingsView: View {
             Text(viewModel.llmHasAPIKey ? "API key: stored in Keychain" : "API key: not stored")
                 .foregroundStyle(viewModel.llmHasAPIKey ? .green : .secondary)
 
+            GroupBox {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("API keys are stored in macOS Keychain.", systemImage: "lock.shield")
+                        .font(.caption.weight(.semibold))
+                    Text("If macOS asks Connor Graph Agent to access the saved secret, choose “Always Allow” to avoid repeated prompts for this signed app build.")
+                    Text("If the prompt still appears after every Xcode rebuild, open the app target’s Signing & Capabilities tab and confirm Team is set to 诗闻 段 (Personal Team).")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             if let message = viewModel.llmSettingsMessage {
                 Text(message).foregroundStyle(.secondary)
             }
