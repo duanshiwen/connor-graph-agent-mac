@@ -76,12 +76,30 @@ public struct GraphAgentAskResponse: Sendable, Equatable {
     public var context: AgentContext
     public var session: AgentSession
     public var observeLogEntries: [ObserveLogEntry]
+    public var promptInspection: AgentChatPromptInspection?
 
     public init(answer: LLMResponse, context: AgentContext, session: AgentSession, observeLogEntries: [ObserveLogEntry]) {
+        self.init(
+            answer: answer,
+            context: context,
+            session: session,
+            observeLogEntries: observeLogEntries,
+            promptInspection: nil
+        )
+    }
+
+    public init(
+        answer: LLMResponse,
+        context: AgentContext,
+        session: AgentSession,
+        observeLogEntries: [ObserveLogEntry],
+        promptInspection: AgentChatPromptInspection?
+    ) {
         self.answer = answer
         self.context = context
         self.session = session
         self.observeLogEntries = observeLogEntries
+        self.promptInspection = promptInspection
     }
 }
 
@@ -116,18 +134,20 @@ public struct GraphAgent<Provider: LLMProvider>: Sendable {
         let userMessage = updatedSession.appendUserMessage(prompt)
         let observeEntry = observeLogRecorder.entry(for: userMessage, sessionID: updatedSession.id)
         let context = try contextBuilder.context(for: prompt)
-        let effectivePrompt = AgentChatPromptContext(
+        let promptContext = AgentChatPromptContext(
             userPrompt: prompt,
             sessionSummary: sessionSummary,
             recentMessages: recentMessages
-        ).renderedPrompt
+        )
+        let effectivePrompt = promptContext.renderedPrompt
         let answer = try await llmProvider.complete(prompt: effectivePrompt, context: context)
         updatedSession.appendAssistantMessage(answer.text, citations: answer.citations, contextSnapshot: context.renderedText)
         return GraphAgentAskResponse(
             answer: answer,
             context: context,
             session: updatedSession,
-            observeLogEntries: [observeEntry]
+            observeLogEntries: [observeEntry],
+            promptInspection: promptContext.inspection
         )
     }
 }

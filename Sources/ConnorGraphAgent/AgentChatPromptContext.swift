@@ -17,7 +17,7 @@ public struct AgentChatPromptContext: Sendable, Equatable {
     }
 
     public var renderedPrompt: String {
-        let summaryContent = sessionSummary?.content.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let summaryContent = trimmedSummaryContent
         let shouldRenderSummary = !summaryContent.isEmpty
         let shouldRenderRecentMessages = !recentMessages.isEmpty
 
@@ -44,6 +44,19 @@ public struct AgentChatPromptContext: Sendable, Equatable {
         \(userPrompt)
         """)
         return blocks.joined(separator: "\n\n")
+    }
+
+    public var inspection: AgentChatPromptInspection {
+        AgentChatPromptInspection(
+            includesSummary: !trimmedSummaryContent.isEmpty,
+            recentMessageCount: recentMessages.count,
+            currentRequest: userPrompt,
+            renderedPrompt: renderedPrompt
+        )
+    }
+
+    private var trimmedSummaryContent: String {
+        sessionSummary?.content.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
     private static func render(message: AgentMessage) -> String {
