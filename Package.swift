@@ -12,6 +12,7 @@ let package = Package(
         .library(name: "ConnorGraphStore", targets: ["ConnorGraphStore"]),
         .library(name: "ConnorGraphSearch", targets: ["ConnorGraphSearch"]),
         .library(name: "ConnorGraphAgent", targets: ["ConnorGraphAgent"]),
+        .library(name: "ConnorGraphImport", targets: ["ConnorGraphImport"]),
         .executable(name: "connor-graph-agent-mac", targets: ["ConnorGraphAgentMac"])
     ],
     targets: [
@@ -24,11 +25,13 @@ let package = Package(
         ),
         .target(name: "ConnorGraphSearch", dependencies: ["ConnorGraphCore", "ConnorGraphMemory"]),
         .target(name: "ConnorGraphAgent", dependencies: ["ConnorGraphCore", "ConnorGraphMemory", "ConnorGraphSearch"]),
+        .target(name: "ConnorGraphImport", dependencies: ["ConnorGraphCore"]),
         .executableTarget(name: "ConnorGraphAgentMac", dependencies: ["ConnorGraphAgent", "ConnorGraphStore"]),
         .testTarget(name: "ConnorGraphCoreTests", dependencies: ["ConnorGraphCore"]),
         .testTarget(name: "ConnorGraphMemoryTests", dependencies: ["ConnorGraphMemory"]),
         .testTarget(name: "ConnorGraphStoreTests", dependencies: ["ConnorGraphStore"]),
         .testTarget(name: "ConnorGraphSearchTests", dependencies: ["ConnorGraphSearch"]),
-        .testTarget(name: "ConnorGraphAgentTests", dependencies: ["ConnorGraphAgent"])
+        .testTarget(name: "ConnorGraphAgentTests", dependencies: ["ConnorGraphAgent"]),
+        .testTarget(name: "ConnorGraphImportTests", dependencies: ["ConnorGraphImport"])
     ]
 )
