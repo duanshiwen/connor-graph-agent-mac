@@ -66,6 +66,18 @@ final class AppViewModel: ObservableObject {
     private var searchIndex: InMemoryGraphSearchIndex
     private var chatController: AgentChatController<AnyLLMProvider>
 
+    var latestChatSummaryFreshness: AgentSessionSummaryFreshness? {
+        latestChatSummary?.freshness(for: chatController.agent.session)
+    }
+
+    var latestChatSummaryContextMessage: String {
+        guard let freshness = latestChatSummaryFreshness else { return "" }
+        if freshness.isFresh {
+            return "Summary is up to date and will be included in the next answer."
+        }
+        return "Summary is stale: \(freshness.uncoveredMessageCount) messages are not covered, so it will not be included in the next answer."
+    }
+
     init(
         nodes: [GraphNode],
         edges: [SemanticEdge],
@@ -405,7 +417,8 @@ final class AppViewModel: ObservableObject {
             let previousMessageCount = controller.transcript.count
             let sessionSummary: AgentSessionSummary?
             if let chatSessionRepository, let selectedChatSessionID {
-                sessionSummary = try chatSessionRepository.loadLatestSummary(sessionID: selectedChatSessionID)
+                let candidateSummary = try chatSessionRepository.loadLatestSummary(sessionID: selectedChatSessionID)
+                sessionSummary = AgentSessionSummaryPolicy().summaryForContext(candidateSummary, session: controller.agent.session)
             } else {
                 sessionSummary = nil
             }
@@ -727,12 +740,14 @@ struct AgentChatView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Latest Summary").font(.headline)
                     Text(summary.content).font(.subheadline)
-                    Text("Covers \(summary.sourceMessageCount) messages · Updated \(summary.updatedAt.formatted())")
+                    if let freshness = viewModel.latestChatSummaryFreshness {
+                        Text("Covers \(freshness.coveredMessageCount) / \(freshness.currentMessageCount) messages · Updated \(summary.updatedAt.formatted())")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(viewModel.latestChatSummaryContextMessage)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text("Summary will be included in the next answer.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundColor(viewModel.latestChatSummaryFreshness?.isFresh == true ? .secondary : .orange)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(10)

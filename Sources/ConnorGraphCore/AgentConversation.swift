@@ -31,6 +31,20 @@ public struct AgentMessage: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
+public struct AgentSessionSummaryFreshness: Sendable, Equatable {
+    public var coveredMessageCount: Int
+    public var currentMessageCount: Int
+    public var uncoveredMessageCount: Int
+    public var isFresh: Bool
+
+    public init(coveredMessageCount: Int, currentMessageCount: Int) {
+        self.coveredMessageCount = coveredMessageCount
+        self.currentMessageCount = currentMessageCount
+        self.uncoveredMessageCount = max(0, currentMessageCount - coveredMessageCount)
+        self.isFresh = uncoveredMessageCount == 0
+    }
+}
+
 public struct AgentSessionSummary: Codable, Sendable, Equatable, Identifiable {
     public var id: String
     public var sessionID: String
@@ -56,6 +70,13 @@ public struct AgentSessionSummary: Codable, Sendable, Equatable, Identifiable {
         self.updatedAt = updatedAt ?? createdAt
         self.sourceMessageCount = sourceMessageCount
         self.lastMessageID = lastMessageID
+    }
+
+    public func freshness(for session: AgentSession) -> AgentSessionSummaryFreshness {
+        AgentSessionSummaryFreshness(
+            coveredMessageCount: sourceMessageCount,
+            currentMessageCount: session.messages.count
+        )
     }
 }
 
