@@ -55,6 +55,8 @@ final class AppViewModel: ObservableObject {
     @Published var isTestingLLMConnection: Bool = false
     @Published var chatSessions: [AgentSession] = []
     @Published var selectedChatSessionID: String?
+    @Published var latestChatSummary: AgentSessionSummary?
+    @Published var isSummarizingChatSession: Bool = false
 
     private var repository: AppGraphRepository?
     private var promotionRepository: AppPromotionQueueRepository?
@@ -275,6 +277,9 @@ final class AppViewModel: ObservableObject {
             if let selectedID, let session = try chatSessionRepository.loadSession(id: selectedID) {
                 chatController = Self.makeChatController(searchIndex: searchIndex, settingsRepository: llmSettingsRepository, session: session)
                 transcript = session.messages
+                latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: selectedID)
+            } else {
+                latestChatSummary = nil
             }
             errorMessage = nil
         } catch {
@@ -289,6 +294,7 @@ final class AppViewModel: ObservableObject {
             selectedChatSessionID = session.id
             chatController = Self.makeChatController(searchIndex: searchIndex, settingsRepository: llmSettingsRepository, session: session)
             transcript = []
+            latestChatSummary = nil
             reloadChatSessions()
             errorMessage = nil
         } catch {
@@ -303,6 +309,7 @@ final class AppViewModel: ObservableObject {
             selectedChatSessionID = session.id
             chatController = Self.makeChatController(searchIndex: searchIndex, settingsRepository: llmSettingsRepository, session: session)
             transcript = session.messages
+            latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: session.id)
             lastContext = nil
             errorMessage = nil
         } catch {
@@ -405,6 +412,21 @@ final class AppViewModel: ObservableObject {
             selectedChatSessionID = response.session.id
             if chatSessionRepository != nil { reloadChatSessions() }
             lastContext = response.context
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func summarizeSelectedChatSession() async {
+        guard let selectedChatSessionID, let chatSessionRepository else { return }
+        isSummarizingChatSession = true
+        defer { isSummarizingChatSession = false }
+        do {
+            let provider = Self.makeLLMProvider(settingsRepository: llmSettingsRepository)
+            let summarizer = AgentSessionSummarizer(provider: provider)
+            let summary = try await chatSessionRepository.summarizeSession(id: selectedChatSessionID, using: summarizer)
+            latestChatSummary = summary
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -688,7 +710,24 @@ struct AgentChatView: View {
                 }
                 .frame(maxWidth: 320)
                 Button("Reload") { viewModel.reloadChatSessions() }
+                Button(viewModel.isSummarizingChatSession ? "Summarizing…" : "Summarize Session") {
+                    Task { await viewModel.summarizeSelectedChatSession() }
+                }
+                .disabled(viewModel.isSummarizingChatSession || viewModel.transcript.isEmpty)
                 Spacer()
+            }
+
+            if let summary = viewModel.latestChatSummary {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Latest Summary").font(.headline)
+                    Text(summary.content).font(.subheadline)
+                    Text("Covers \(summary.sourceMessageCount) messages · Updated \(summary.updatedAt.formatted())")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+                .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
             }
 
             List {
