@@ -104,11 +104,16 @@ public struct GraphAgent<Provider: LLMProvider>: Sendable {
     }
 
     public func ask(_ prompt: String) async throws -> GraphAgentAskResponse {
+        try await ask(prompt, sessionSummary: nil)
+    }
+
+    public func ask(_ prompt: String, sessionSummary: AgentSessionSummary?) async throws -> GraphAgentAskResponse {
         var updatedSession = session
         let userMessage = updatedSession.appendUserMessage(prompt)
         let observeEntry = observeLogRecorder.entry(for: userMessage, sessionID: updatedSession.id)
         let context = try contextBuilder.context(for: prompt)
-        let answer = try await llmProvider.complete(prompt: prompt, context: context)
+        let effectivePrompt = Self.effectivePrompt(userPrompt: prompt, sessionSummary: sessionSummary)
+        let answer = try await llmProvider.complete(prompt: effectivePrompt, context: context)
         updatedSession.appendAssistantMessage(answer.text, citations: answer.citations, contextSnapshot: context.renderedText)
         return GraphAgentAskResponse(
             answer: answer,
@@ -116,5 +121,18 @@ public struct GraphAgent<Provider: LLMProvider>: Sendable {
             session: updatedSession,
             observeLogEntries: [observeEntry]
         )
+    }
+
+    private static func effectivePrompt(userPrompt: String, sessionSummary: AgentSessionSummary?) -> String {
+        guard let sessionSummary, !sessionSummary.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return userPrompt
+        }
+        return """
+        Previous session summary:
+        \(sessionSummary.content)
+
+        Current user request:
+        \(userPrompt)
+        """
     }
 }
