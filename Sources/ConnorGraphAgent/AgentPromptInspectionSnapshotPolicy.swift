@@ -18,7 +18,9 @@ public struct AgentPromptInspectionSnapshotPolicy: Sendable, Equatable {
             includesSummary: inspection.includesSummary,
             recentMessageCount: inspection.recentMessageCount,
             currentRequest: inspection.currentRequest,
-            renderedPrompt: renderedPromptSnapshot(from: inspection.renderedPrompt)
+            renderedPrompt: renderedPromptSnapshot(from: inspection.renderedPrompt),
+            renderedPromptCharacterCount: inspection.renderedPromptCharacterCount,
+            estimatedPromptTokenCount: inspection.estimatedPromptTokenCount
         )
     }
 

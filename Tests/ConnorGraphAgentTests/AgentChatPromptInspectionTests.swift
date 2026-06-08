@@ -67,3 +67,17 @@ import ConnorGraphAgent
     #expect(snapshot.currentRequest == "What next?")
     #expect(snapshot.renderedPrompt == "Rendered prompt")
 }
+
+@Test func agentChatPromptInspectionIncludesPromptBudgetEstimate() {
+    let context = AgentChatPromptContext(
+        userPrompt: "What next?",
+        recentMessages: [
+            AgentMessage(id: "message-1", role: .user, content: "Earlier question")
+        ]
+    )
+
+    let inspection = context.inspection
+
+    #expect(inspection.renderedPromptCharacterCount == inspection.renderedPrompt.count)
+    #expect(inspection.estimatedPromptTokenCount == AgentPromptBudgetEstimator().estimate(inspection.renderedPrompt).estimatedTokenCount)
+}
