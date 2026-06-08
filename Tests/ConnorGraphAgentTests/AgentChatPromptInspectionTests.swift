@@ -51,3 +51,19 @@ import ConnorGraphAgent
 
     #expect(inspection.recentMessageCount == 0)
 }
+
+@Test func agentChatPromptInspectionConvertsToCoreSnapshot() {
+    let inspection = AgentChatPromptInspection(
+        includesSummary: true,
+        recentMessageCount: 2,
+        currentRequest: "What next?",
+        renderedPrompt: "Rendered prompt"
+    )
+
+    let snapshot = AgentPromptInspectionSnapshot(inspection)
+
+    #expect(snapshot.includesSummary)
+    #expect(snapshot.recentMessageCount == 2)
+    #expect(snapshot.currentRequest == "What next?")
+    #expect(snapshot.renderedPrompt == "Rendered prompt")
+}

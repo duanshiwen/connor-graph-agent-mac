@@ -141,7 +141,12 @@ public struct GraphAgent<Provider: LLMProvider>: Sendable {
         )
         let effectivePrompt = promptContext.renderedPrompt
         let answer = try await llmProvider.complete(prompt: effectivePrompt, context: context)
-        updatedSession.appendAssistantMessage(answer.text, citations: answer.citations, contextSnapshot: context.renderedText)
+        updatedSession.appendAssistantMessage(
+            answer.text,
+            citations: answer.citations,
+            contextSnapshot: context.renderedText,
+            promptInspection: AgentPromptInspectionSnapshot(promptContext.inspection)
+        )
         return GraphAgentAskResponse(
             answer: answer,
             context: context,

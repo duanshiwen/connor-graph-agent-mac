@@ -40,6 +40,43 @@ import ConnorGraphAgent
     #expect(message.contextSnapshot == "Node[work_object] Memory")
 }
 
+@Test func assistantMessageCanCarryPromptInspectionSnapshot() throws {
+    let snapshot = AgentPromptInspectionSnapshot(
+        includesSummary: true,
+        recentMessageCount: 3,
+        currentRequest: "What next?",
+        renderedPrompt: "Previous session summary..."
+    )
+    let message = AgentMessage(
+        id: "message-1",
+        role: .assistant,
+        content: "Answer",
+        promptInspection: snapshot
+    )
+
+    #expect(message.promptInspection == snapshot)
+}
+
+@Test func agentMessageCodableRoundTripsPromptInspectionSnapshot() throws {
+    let snapshot = AgentPromptInspectionSnapshot(
+        includesSummary: true,
+        recentMessageCount: 2,
+        currentRequest: "What next?",
+        renderedPrompt: "Rendered prompt"
+    )
+    let message = AgentMessage(
+        id: "message-1",
+        role: .assistant,
+        content: "Answer",
+        promptInspection: snapshot
+    )
+
+    let data = try JSONEncoder().encode(message)
+    let decoded = try JSONDecoder().decode(AgentMessage.self, from: data)
+
+    #expect(decoded.promptInspection == snapshot)
+}
+
 @Test func userMessageCanBeRecordedAsObserveLogEntry() throws {
     let session = AgentSession(id: "session-1")
     let message = AgentMessage(id: "message-1", role: .user, content: "Remember this insight")
@@ -148,6 +185,33 @@ private struct RuntimeCapturingProvider: LLMProvider, Sendable {
     #expect(inspection.renderedPrompt.contains("Previous session summary:"))
     #expect(inspection.renderedPrompt.contains("Recent conversation:"))
     #expect(inspection.renderedPrompt.contains("Current user request:"))
+}
+
+@Test func graphAgentStoresPromptInspectionOnAssistantMessage() async throws {
+    let recorder = RuntimePromptRecorder()
+    let session = AgentSession(
+        id: "session-1",
+        messages: [
+            AgentMessage(id: "message-1", role: .user, content: "Earlier question"),
+            AgentMessage(id: "message-2", role: .assistant, content: "Earlier answer")
+        ]
+    )
+    let agent = GraphAgent(
+        session: session,
+        contextBuilder: AgentContextBuilder(searchIndex: InMemoryGraphSearchIndex(nodes: [], edges: [], observeLogEntries: []), assembler: ContextAssembler()),
+        llmProvider: RuntimeCapturingProvider(recorder: recorder),
+        recentMessageLimit: 1
+    )
+
+    let response = try await agent.ask("What next?")
+    let assistantMessage = try #require(response.session.messages.last)
+
+    #expect(assistantMessage.role == .assistant)
+    let snapshot = try #require(assistantMessage.promptInspection)
+    #expect(!snapshot.includesSummary)
+    #expect(snapshot.recentMessageCount == 1)
+    #expect(snapshot.currentRequest == "What next?")
+    #expect(snapshot.renderedPrompt?.contains("Current user request:") == true)
 }
 
 @Test func graphAgentIncludesRecentConversationWindowInProviderPrompt() async throws {
