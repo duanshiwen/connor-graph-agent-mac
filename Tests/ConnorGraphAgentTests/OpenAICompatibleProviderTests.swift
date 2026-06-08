@@ -101,6 +101,46 @@ private struct CapturingHTTPClient: AgentHTTPClient {
     }
 }
 
+@Test func openAICompatibleProviderHealthCheckUsesChatCompletionEndpoint() async throws {
+    let body = """
+    {
+      "choices": [
+        { "message": { "role": "assistant", "content": "OK" } }
+      ]
+    }
+    """.data(using: .utf8)!
+    let client = CapturingHTTPClient(responseBody: body)
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(baseURL: URL(string: "https://llm.example.com/v1")!, apiKey: "secret-key", model: "gpt-health"),
+        httpClient: client
+    )
+
+    let result = try await provider.healthCheck()
+
+    #expect(result.ok == true)
+    #expect(result.model == "gpt-health")
+    #expect(result.message.contains("gpt-health"))
+    #expect(result.message.contains("secret-key") == false)
+    #expect(client.captured?.url.absoluteString == "https://llm.example.com/v1/chat/completions")
+    #expect(client.captured?.headers["Authorization"] == "Bearer secret-key")
+    let requestBody = try #require(client.captured?.body)
+    let requestText = String(data: requestBody, encoding: .utf8) ?? ""
+    #expect(requestText.contains("Reply with exactly: OK"))
+}
+
+@Test func openAICompatibleProviderHealthCheckFailsOnHTTPError() async throws {
+    let body = #"{\"error\":{\"message\":\"bad key\"}}"#.data(using: .utf8)!
+    let client = CapturingHTTPClient(responseBody: body, statusCode: 403)
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(baseURL: URL(string: "https://llm.example.com/v1")!, apiKey: "bad", model: "gpt-health"),
+        httpClient: client
+    )
+
+    await #expect(throws: OpenAICompatibleProviderError.httpStatus(403)) {
+        try await provider.healthCheck()
+    }
+}
+
 @Test func realOpenAICompatibleProviderSmokeSkipsWithoutApiKey() async throws {
     guard let config = try OpenAICompatibleConfig.optionalFromEnvironment(ProcessInfo.processInfo.environment) else {
         return
