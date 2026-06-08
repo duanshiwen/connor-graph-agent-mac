@@ -16,9 +16,9 @@ public struct AgentSessionSummaryRefreshState: Sendable, Equatable {
     }
 
     public var buttonTitle: String {
-        if isSummarizing { return "Summarizing…" }
-        if freshness?.isFresh == false { return "Refresh Summary" }
-        return "Summarize Session"
+        if isSummarizing { return "摘要生成中…" }
+        if freshness?.isFresh == false { return "刷新摘要" }
+        return "生成会话摘要"
     }
 
     public var canSubmit: Bool {
@@ -26,6 +26,6 @@ public struct AgentSessionSummaryRefreshState: Sendable, Equatable {
     }
 
     public var successMessage: String {
-        "Summary refreshed and will be included in the next answer."
+        "会话摘要已刷新，将包含在下一次回答中。"
     }
 }
