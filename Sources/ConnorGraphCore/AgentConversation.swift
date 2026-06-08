@@ -6,6 +6,12 @@ public enum AgentRole: String, Codable, Sendable, Equatable {
     case system
 }
 
+public enum AgentPromptBudgetStatus: String, Codable, Sendable, Equatable {
+    case safe
+    case warning
+    case over
+}
+
 public struct AgentPromptInspectionSnapshot: Codable, Sendable, Equatable {
     public var includesSummary: Bool
     public var recentMessageCount: Int
@@ -13,6 +19,7 @@ public struct AgentPromptInspectionSnapshot: Codable, Sendable, Equatable {
     public var renderedPrompt: String?
     public var renderedPromptCharacterCount: Int
     public var estimatedPromptTokenCount: Int
+    public var promptBudgetStatus: AgentPromptBudgetStatus
 
     public init(
         includesSummary: Bool,
@@ -20,7 +27,8 @@ public struct AgentPromptInspectionSnapshot: Codable, Sendable, Equatable {
         currentRequest: String,
         renderedPrompt: String? = nil,
         renderedPromptCharacterCount: Int = 0,
-        estimatedPromptTokenCount: Int = 0
+        estimatedPromptTokenCount: Int = 0,
+        promptBudgetStatus: AgentPromptBudgetStatus = .safe
     ) {
         self.includesSummary = includesSummary
         self.recentMessageCount = recentMessageCount
@@ -28,6 +36,7 @@ public struct AgentPromptInspectionSnapshot: Codable, Sendable, Equatable {
         self.renderedPrompt = renderedPrompt
         self.renderedPromptCharacterCount = renderedPromptCharacterCount
         self.estimatedPromptTokenCount = estimatedPromptTokenCount
+        self.promptBudgetStatus = promptBudgetStatus
     }
 }
 
