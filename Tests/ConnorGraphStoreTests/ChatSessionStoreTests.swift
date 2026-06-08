@@ -53,6 +53,32 @@ private func temporaryChatDatabaseURL(_ name: String = UUID().uuidString) -> URL
     #expect(messages[1].contextSnapshot == "Node[work_object] Memory")
 }
 
+@Test func graphStorePersistsPromptInspectionSnapshotOnChatMessage() throws {
+    let store = try SQLiteGraphStore(path: temporaryChatDatabaseURL().path)
+    try store.migrate()
+    let session = AgentSession(id: "session-1", title: "Graph memory")
+    let snapshot = AgentPromptInspectionSnapshot(
+        includesSummary: true,
+        recentMessageCount: 2,
+        currentRequest: "What next?",
+        renderedPrompt: "Rendered prompt"
+    )
+    let assistant = AgentMessage(
+        id: "message-1",
+        role: .assistant,
+        content: "Answer",
+        createdAt: Date(timeIntervalSince1970: 1_000),
+        promptInspection: snapshot
+    )
+
+    try store.upsert(chatSession: session)
+    try store.append(chatMessage: assistant, sessionID: session.id)
+
+    let loaded = try #require(try store.chatMessages(sessionID: session.id).first)
+
+    #expect(loaded.promptInspection == snapshot)
+}
+
 @Test func graphStoreLoadsRecentChatSessionsByUpdatedAt() throws {
     let store = try SQLiteGraphStore(path: temporaryChatDatabaseURL().path)
     try store.migrate()

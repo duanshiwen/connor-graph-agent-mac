@@ -23,6 +23,14 @@ public enum SQLiteGraphStoreError: Error, Equatable, CustomStringConvertible {
     }
 }
 
+private struct ChatMessageMetadata: Codable, Equatable {
+    var promptInspection: AgentPromptInspectionSnapshot?
+
+    init(promptInspection: AgentPromptInspectionSnapshot? = nil) {
+        self.promptInspection = promptInspection
+    }
+}
+
 public final class SQLiteGraphStore: @unchecked Sendable {
     private let path: String
     private var db: OpaquePointer?
@@ -431,7 +439,7 @@ public final class SQLiteGraphStore: @unchecked Sendable {
             try bind(iso(message.createdAt), at: 5, in: statement)
             try bind(jsonString(message.citations), at: 6, in: statement)
             try bind(message.contextSnapshot, at: 7, in: statement)
-            try bind(jsonString([String: String]()), at: 8, in: statement)
+            try bind(jsonString(ChatMessageMetadata(promptInspection: message.promptInspection)), at: 8, in: statement)
             try stepDone(statement)
         }
     }
@@ -630,17 +638,20 @@ public final class SQLiteGraphStore: @unchecked Sendable {
             let content = text(statement, 3),
             let createdRaw = text(statement, 4),
             let createdAt = date(createdRaw),
-            let citationsRaw = text(statement, 5)
+            let citationsRaw = text(statement, 5),
+            let metadataRaw = text(statement, 7)
         else {
             throw SQLiteGraphStoreError.decodeFailed("chat_messages row")
         }
+        let metadata = try json(ChatMessageMetadata.self, from: metadataRaw)
         return AgentMessage(
             id: id,
             role: role,
             content: content,
             createdAt: createdAt,
             citations: try json([String].self, from: citationsRaw),
-            contextSnapshot: text(statement, 6)
+            contextSnapshot: text(statement, 6),
+            promptInspection: metadata.promptInspection
         )
     }
 

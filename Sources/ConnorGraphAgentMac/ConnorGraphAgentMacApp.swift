@@ -811,9 +811,31 @@ struct AgentChatView: View {
 
             List {
                 ForEach(viewModel.transcript) { message in
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: 6) {
                         Text(message.role.rawValue.capitalized).font(.caption).foregroundStyle(.secondary)
                         Text(message.content)
+                        if message.role == .assistant, let inspection = message.promptInspection {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Context: summary \(inspection.includesSummary ? "included" : "not included") · recent \(inspection.recentMessageCount)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                DisclosureGroup("Prompt snapshot") {
+                                    if let renderedPrompt = inspection.renderedPrompt {
+                                        Text(renderedPrompt)
+                                            .font(.system(.caption, design: .monospaced))
+                                            .textSelection(.enabled)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                    } else {
+                                        Text("No rendered prompt snapshot saved.")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .font(.caption)
+                            }
+                            .padding(8)
+                            .background(.quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: 6))
+                        }
                     }
                     .padding(.vertical, 4)
                 }
