@@ -403,7 +403,13 @@ final class AppViewModel: ObservableObject {
         do {
             var controller = chatController
             let previousMessageCount = controller.transcript.count
-            let response = try await controller.submit(prompt)
+            let sessionSummary: AgentSessionSummary?
+            if let chatSessionRepository, let selectedChatSessionID {
+                sessionSummary = try chatSessionRepository.loadLatestSummary(sessionID: selectedChatSessionID)
+            } else {
+                sessionSummary = nil
+            }
+            let response = try await controller.submit(prompt, sessionSummary: sessionSummary)
             if let chatSessionRepository {
                 _ = try chatSessionRepository.saveTurn(previousMessageCount: previousMessageCount, response: response)
             }
@@ -722,6 +728,9 @@ struct AgentChatView: View {
                     Text("Latest Summary").font(.headline)
                     Text(summary.content).font(.subheadline)
                     Text("Covers \(summary.sourceMessageCount) messages · Updated \(summary.updatedAt.formatted())")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("Summary will be included in the next answer.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

@@ -15,7 +15,12 @@ public struct AgentChatController<Provider: LLMProvider>: Sendable {
 
     @discardableResult
     public mutating func submit(_ prompt: String) async throws -> GraphAgentAskResponse {
-        let response = try await agent.ask(prompt)
+        try await submit(prompt, sessionSummary: nil)
+    }
+
+    @discardableResult
+    public mutating func submit(_ prompt: String, sessionSummary: AgentSessionSummary?) async throws -> GraphAgentAskResponse {
+        let response = try await agent.ask(prompt, sessionSummary: sessionSummary)
         agent.session = response.session
         transcript = response.session.messages
         lastContext = response.context
