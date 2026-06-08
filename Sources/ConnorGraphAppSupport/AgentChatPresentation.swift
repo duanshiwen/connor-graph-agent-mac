@@ -29,6 +29,41 @@ public struct AgentChatSessionPresentation: Sendable, Equatable, Identifiable {
     }
 }
 
+public struct AgentChatPendingAssistantPresentation: Sendable, Equatable, Identifiable {
+    public var id: String
+    public var turnNumber: Int
+    public var title: String
+    public var processingSummary: String
+
+    public init(messages: [AgentMessage]) {
+        self.id = "pending-assistant"
+        self.turnNumber = Self.pendingTurnNumber(messages: messages)
+        self.title = "Assistant is thinking…"
+        self.processingSummary = "Preparing graph context and prompt…"
+    }
+
+    private static func pendingTurnNumber(messages: [AgentMessage]) -> Int {
+        var currentTurn = 0
+        var hasOpenUserTurn = false
+        for message in messages {
+            switch message.role {
+            case .user:
+                currentTurn += 1
+                hasOpenUserTurn = true
+            case .assistant:
+                if !hasOpenUserTurn {
+                    currentTurn += 1
+                }
+                hasOpenUserTurn = false
+            case .system:
+                if currentTurn == 0 { currentTurn = 1 }
+            }
+        }
+        if hasOpenUserTurn { return max(currentTurn, 1) }
+        return max(currentTurn + 1, 1)
+    }
+}
+
 public struct AgentChatMessagePresentation: Sendable, Equatable, Identifiable {
     public var id: String
     public var message: AgentMessage
