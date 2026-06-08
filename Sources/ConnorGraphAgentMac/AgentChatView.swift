@@ -333,8 +333,41 @@ private struct AgentChatTurnProcessRow: View {
                             Label("正在调用已配置的模型提供方", systemImage: "network")
                         }
 
+                        Text("这里展示的是本轮调用前真实可见的会话历史，以及本轮提示词快照；其中“对话上下文”只代表发送给模型的近期消息数量，不等于完整历史。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
                         if let request = process.currentRequest {
-                            MetadataBlock(title: "用户请求", text: request)
+                            MetadataBlock(title: "本轮用户输入", text: request)
+                        }
+
+                        if !process.conversationHistory.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("完整对话历史（截至本轮回复前 \(process.fullConversationMessageCount) 条）")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                ForEach(process.conversationHistory) { historyRow in
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack(spacing: 6) {
+                                            Text(historyRow.roleLabel)
+                                                .font(.caption.weight(.semibold))
+                                            Text("第 \(historyRow.turnNumber) 轮")
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                            Text(historyRow.message.createdAt.formatted(date: .omitted, time: .shortened))
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        Text(historyRow.message.content)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .textSelection(.enabled)
+                                    }
+                                    .padding(8)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(.quaternary.opacity(0.14), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                }
+                            }
                         }
 
                         if !process.citationIDs.isEmpty {
