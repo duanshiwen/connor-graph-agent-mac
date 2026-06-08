@@ -233,5 +233,3 @@ Every implementation phase should be validated with:
 swift test
 swift build
 ```
-
-Each phase should be committed independently with a clear commit message and Craft Agent co-author trailer.
