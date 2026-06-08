@@ -87,6 +87,32 @@ private struct CapturingHTTPClient: AgentHTTPClient {
     #expect(requestText.contains("Graph memory context"))
 }
 
+@Test func openAICompatibleProviderUsesFirstModelFromCommaSeparatedModelList() async throws {
+    let body = """
+    {
+      "choices": [
+        { "message": { "role": "assistant", "content": "OK" } }
+      ]
+    }
+    """.data(using: .utf8)!
+    let client = CapturingHTTPClient(responseBody: body)
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(
+            baseURL: URL(string: "https://llm.example.com/v1")!,
+            apiKey: "test-key",
+            model: "mimo-v2.5-pro, mimo-v2.5, mimo-v2.5-tts"
+        ),
+        httpClient: client
+    )
+    let context = AgentContext(query: "ping", items: [])
+
+    _ = try await provider.complete(prompt: "ping", context: context)
+
+    let requestBody = try #require(client.captured?.body)
+    let requestObject = try JSONSerialization.jsonObject(with: requestBody) as? [String: Any]
+    #expect(requestObject?["model"] as? String == "mimo-v2.5-pro")
+}
+
 @Test func openAICompatibleProviderReportsHTTPError() async throws {
     let body = #"{"error":{"message":"bad key"}}"#.data(using: .utf8)!
     let client = CapturingHTTPClient(responseBody: body, statusCode: 401)
