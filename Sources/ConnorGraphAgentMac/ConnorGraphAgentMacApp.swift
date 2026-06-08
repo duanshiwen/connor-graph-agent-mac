@@ -20,6 +20,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case search = "Search"
     case observeLog = "Observe Log"
     case agentChat = "Agent Chat"
+    case promotionQueue = "Promotion Queue"
     case importKnowledge = "Import"
 
     var id: String { rawValue }
@@ -41,8 +42,11 @@ final class AppViewModel: ObservableObject {
     @Published var isImporting: Bool = false
     @Published var lastImportReport: AppImportReport?
     @Published var databasePath: String?
+    @Published var promotionCandidates: [ObserveLogEntry] = []
+    @Published var lastPromotionResultSummary: String?
 
     private var repository: AppGraphRepository?
+    private var promotionRepository: AppPromotionQueueRepository?
     private var searchIndex: InMemoryGraphSearchIndex
     private var chatController: AgentChatController<StubLLMProvider>
 
@@ -51,6 +55,9 @@ final class AppViewModel: ObservableObject {
         self.edges = edges
         self.observeLogEntries = observeLogEntries
         self.repository = repository
+        if let repository {
+            self.promotionRepository = AppPromotionQueueRepository(store: repository.store)
+        }
         self.databasePath = databasePath
         self.searchIndex = InMemoryGraphSearchIndex(nodes: nodes, edges: edges, observeLogEntries: observeLogEntries)
         self.chatController = Self.makeChatController(searchIndex: searchIndex)
@@ -69,13 +76,15 @@ final class AppViewModel: ObservableObject {
                 for entry in demo.observeLogEntries { try repository.store.upsert(observeLogEntry: entry) }
                 snapshot = try repository.loadSnapshot()
             }
-            return AppViewModel(
+            let viewModel = AppViewModel(
                 nodes: snapshot.nodes,
                 edges: snapshot.edges,
                 observeLogEntries: snapshot.observeLogEntries,
                 repository: repository,
                 databasePath: paths.databaseURL.path
             )
+            viewModel.reloadPromotionCandidates()
+            return viewModel
         } catch {
             let viewModel = AppViewModel.demo()
             viewModel.errorMessage = "Fell back to demo data: \(error)"
@@ -133,6 +142,54 @@ final class AppViewModel: ObservableObject {
         searchIndex = InMemoryGraphSearchIndex(nodes: snapshot.nodes, edges: snapshot.edges, observeLogEntries: snapshot.observeLogEntries)
         chatController = Self.makeChatController(searchIndex: searchIndex)
         runSearch()
+        reloadPromotionCandidates()
+    }
+
+    func reloadPromotionCandidates() {
+        do {
+            promotionCandidates = try promotionRepository?.loadCandidates() ?? []
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func promote(_ entry: ObserveLogEntry) {
+        guard let promotionRepository, let repository else {
+            errorMessage = "Promotion queue is not available."
+            return
+        }
+        do {
+            let result = try promotionRepository.promote(entry)
+            let snapshot = try repository.loadSnapshot()
+            lastPromotionResultSummary = "Promoted \(entry.id): \(result.nodes.count) nodes, \(result.edges.count) edges"
+            apply(snapshot: snapshot)
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func dismissPromotionCandidate(_ entry: ObserveLogEntry) {
+        do {
+            _ = try promotionRepository?.dismiss(entry)
+            reloadPromotionCandidates()
+            lastPromotionResultSummary = "Dismissed \(entry.id)"
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func pinPromotionCandidate(_ entry: ObserveLogEntry) {
+        do {
+            _ = try promotionRepository?.pin(entry)
+            reloadPromotionCandidates()
+            lastPromotionResultSummary = "Pinned \(entry.id) for 30 days"
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
     }
 
     func runSearch() {
@@ -204,6 +261,8 @@ struct AppShellView: View {
                     ObserveLogView(entries: viewModel.observeLogEntries)
                 case .agentChat:
                     AgentChatView(viewModel: viewModel)
+                case .promotionQueue:
+                    PromotionQueueView(viewModel: viewModel)
                 case .importKnowledge:
                     ImportKnowledgeView(viewModel: viewModel)
                 }
@@ -282,6 +341,64 @@ struct ObserveLogView: View {
             }
         }
         .navigationTitle("Observe Log")
+    }
+}
+
+struct PromotionQueueView: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Button("Refresh") { viewModel.reloadPromotionCandidates() }
+                if let summary = viewModel.lastPromotionResultSummary {
+                    Text(summary).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+
+            if viewModel.promotionCandidates.isEmpty {
+                Text("No active promotion candidates.")
+                    .foregroundStyle(.secondary)
+                Spacer()
+            } else {
+                List(viewModel.promotionCandidates) { entry in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text(entry.kind.rawValue).font(.headline)
+                            Spacer()
+                            Text(entry.status.rawValue).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Text(entry.content)
+                        if !entry.normalizedSummary.isEmpty {
+                            Text(entry.normalizedSummary).font(.subheadline).foregroundStyle(.secondary)
+                        }
+                        HStack(spacing: 12) {
+                            if let workObjectID = entry.workObjectID {
+                                Text("Work Object: \(workObjectID)")
+                            }
+                            Text("Importance: \(entry.importance, format: .number.precision(.fractionLength(2)))")
+                            Text("Confidence: \(entry.confidence, format: .number.precision(.fractionLength(2)))")
+                            Text("Expires: \(entry.expiresAt.formatted())")
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        HStack {
+                            Button("Promote") { viewModel.promote(entry) }
+                            Button("Dismiss") { viewModel.dismissPromotionCandidate(entry) }
+                            Button("Pin 30 days") { viewModel.pinPromotionCandidate(entry) }
+                        }
+                    }
+                    .padding(.vertical, 6)
+                }
+            }
+
+            if let error = viewModel.errorMessage {
+                Text(error).foregroundStyle(.red)
+            }
+        }
+        .padding()
+        .navigationTitle("Promotion Queue")
+        .onAppear { viewModel.reloadPromotionCandidates() }
     }
 }
 
