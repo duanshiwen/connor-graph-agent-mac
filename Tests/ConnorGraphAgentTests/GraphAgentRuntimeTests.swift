@@ -116,6 +116,40 @@ private struct RuntimeCapturingProvider: LLMProvider, Sendable {
     }
 }
 
+@Test func graphAgentReturnsPromptInspectionForAsk() async throws {
+    let recorder = RuntimePromptRecorder()
+    let session = AgentSession(
+        id: "session-1",
+        messages: [
+            AgentMessage(id: "message-1", role: .user, content: "Earlier question"),
+            AgentMessage(id: "message-2", role: .assistant, content: "Earlier answer")
+        ]
+    )
+    let agent = GraphAgent(
+        session: session,
+        contextBuilder: AgentContextBuilder(searchIndex: InMemoryGraphSearchIndex(nodes: [], edges: [], observeLogEntries: []), assembler: ContextAssembler()),
+        llmProvider: RuntimeCapturingProvider(recorder: recorder),
+        recentMessageLimit: 1
+    )
+    let summary = AgentSessionSummary(
+        id: "summary-1",
+        sessionID: "session-1",
+        content: "Summary content",
+        sourceMessageCount: 2,
+        lastMessageID: "message-2"
+    )
+
+    let response = try await agent.ask("What next?", sessionSummary: summary)
+    let inspection = try #require(response.promptInspection)
+
+    #expect(inspection.includesSummary)
+    #expect(inspection.recentMessageCount == 1)
+    #expect(inspection.currentRequest == "What next?")
+    #expect(inspection.renderedPrompt.contains("Previous session summary:"))
+    #expect(inspection.renderedPrompt.contains("Recent conversation:"))
+    #expect(inspection.renderedPrompt.contains("Current user request:"))
+}
+
 @Test func graphAgentIncludesRecentConversationWindowInProviderPrompt() async throws {
     let recorder = RuntimePromptRecorder()
     let session = AgentSession(
