@@ -683,9 +683,10 @@ struct LLMSettingsView: View {
 
             GroupBox {
                 VStack(alignment: .leading, spacing: 6) {
-                    Label("API keys are stored in macOS Keychain.", systemImage: "lock.shield")
+                    Label("Security: API keys are saved to macOS Keychain", systemImage: "lock.shield")
                         .font(.caption.weight(.semibold))
-                    Text("If macOS asks Connor Graph Agent to access the saved secret, choose “Always Allow” to avoid repeated prompts for this signed app build.")
+                    Text("For your safety, Connor Graph Agent stores the API key in macOS Keychain instead of writing it in plain text to app settings or project files.")
+                    Text("When macOS asks for Keychain access, choose “Always Allow” for this signed app build to avoid repeated prompts.")
                     Text("If the prompt still appears after every Xcode rebuild, open the app target’s Signing & Capabilities tab and confirm Team is set to 诗闻 段 (Personal Team).")
                 }
                 .font(.caption)
