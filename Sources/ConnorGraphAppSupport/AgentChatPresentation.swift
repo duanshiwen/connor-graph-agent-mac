@@ -44,12 +44,20 @@ public struct AgentChatTurnProcessPresentation: Sendable, Equatable, Identifiabl
     public var promptSnapshotText: String?
     public var citationIDs: [String]
     public var expandedContextItems: [AgentContextItem]
+    public var fullConversationMessageCount: Int
+    public var conversationHistory: [AgentChatMessagePresentation]
 
-    public init(completedAssistant row: AgentChatMessagePresentation) {
+    public init(completedAssistant row: AgentChatMessagePresentation, conversationHistory: [AgentChatMessagePresentation]) {
         self.id = "process-\(row.id)"
         self.turnNumber = row.turnNumber
         self.state = .completed
-        self.summary = row.turnMetadataSummary ?? "第 \(row.turnNumber) 轮 · 已完成"
+        self.fullConversationMessageCount = conversationHistory.count
+        self.conversationHistory = conversationHistory
+        if let inspection = row.message.promptInspection {
+            self.summary = Self.completedSummary(turnNumber: row.turnNumber, inspection: inspection, fullConversationMessageCount: conversationHistory.count)
+        } else {
+            self.summary = "第 \(row.turnNumber) 轮 · 已完成 · 完整历史 \(conversationHistory.count) 条"
+        }
         self.title = "第 \(row.turnNumber) 轮处理详情"
         self.currentRequest = row.currentRequest
         self.promptSnapshotText = row.promptSnapshotText
@@ -57,16 +65,22 @@ public struct AgentChatTurnProcessPresentation: Sendable, Equatable, Identifiabl
         self.expandedContextItems = row.expandedContextItems
     }
 
-    public init(pending: AgentChatPendingAssistantPresentation) {
+    public init(pending: AgentChatPendingAssistantPresentation, conversationHistory: [AgentChatMessagePresentation]) {
         self.id = "process-\(pending.id)"
         self.turnNumber = pending.turnNumber
         self.state = .running
-        self.summary = pending.processingSummary
+        self.fullConversationMessageCount = conversationHistory.count
+        self.conversationHistory = conversationHistory
+        self.summary = "第 \(pending.turnNumber) 轮 · 正在处理 · 完整历史 \(conversationHistory.count) 条"
         self.title = "第 \(pending.turnNumber) 轮处理中…"
-        self.currentRequest = nil
+        self.currentRequest = conversationHistory.last(where: { $0.message.role == .user })?.message.content
         self.promptSnapshotText = nil
         self.citationIDs = []
         self.expandedContextItems = []
+    }
+
+    private static func completedSummary(turnNumber: Int, inspection: AgentPromptInspectionSnapshot, fullConversationMessageCount: Int) -> String {
+        "第 \(turnNumber) 轮 · 本轮提示词：摘要\(inspection.includesSummary ? "已包含" : "未包含") · 对话上下文 \(inspection.recentMessageCount) 条 · 完整历史 \(fullConversationMessageCount) 条 · 约 \(inspection.estimatedPromptTokenCount) tokens · \(AgentChatMessagePresentation.budgetStatusText(inspection.promptBudgetStatus))"
     }
 }
 
@@ -90,14 +104,16 @@ public struct AgentChatTurnTimelineItem: Sendable, Equatable, Identifiable {
     public static func items(messages: [AgentMessage], lastContext: AgentContext?, isSubmitting: Bool) -> [AgentChatTurnTimelineItem] {
         let rows = AgentChatMessagePresentation.rows(messages: messages, lastContext: lastContext)
         var items: [AgentChatTurnTimelineItem] = []
+        var conversationHistory: [AgentChatMessagePresentation] = []
         for row in rows {
             if row.message.role == .assistant {
-                items.append(.process(AgentChatTurnProcessPresentation(completedAssistant: row)))
+                items.append(.process(AgentChatTurnProcessPresentation(completedAssistant: row, conversationHistory: conversationHistory)))
             }
             items.append(.message(row))
+            conversationHistory.append(row)
         }
         if isSubmitting {
-            items.append(.process(AgentChatTurnProcessPresentation(pending: AgentChatPendingAssistantPresentation(messages: messages))))
+            items.append(.process(AgentChatTurnProcessPresentation(pending: AgentChatPendingAssistantPresentation(messages: messages), conversationHistory: conversationHistory)))
         }
         return items
     }
@@ -205,7 +221,7 @@ public struct AgentChatMessagePresentation: Sendable, Equatable, Identifiable {
     }
 
     public static func turnMetadataSummary(turnNumber: Int, inspection: AgentPromptInspectionSnapshot) -> String {
-        "第 \(turnNumber) 轮 · 摘要\(inspection.includesSummary ? "已包含" : "未包含") · 近期消息 \(inspection.recentMessageCount) 条 · 约 \(inspection.estimatedPromptTokenCount) tokens · \(budgetStatusText(inspection.promptBudgetStatus))"
+        "第 \(turnNumber) 轮 · 本轮提示词：摘要\(inspection.includesSummary ? "已包含" : "未包含") · 对话上下文 \(inspection.recentMessageCount) 条 · 约 \(inspection.estimatedPromptTokenCount) tokens · \(budgetStatusText(inspection.promptBudgetStatus))"
     }
 
     public static func budgetStatusText(_ status: AgentPromptBudgetStatus) -> String {
