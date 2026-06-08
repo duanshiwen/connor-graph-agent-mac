@@ -35,6 +35,7 @@ final class AppViewModel: ObservableObject {
     @Published var chatInput: String = "memory"
     @Published var transcript: [AgentMessage] = []
     @Published var lastContext: AgentContext?
+    @Published var lastPromptInspection: AgentChatPromptInspection?
     @Published var errorMessage: String?
     @Published var nodes: [GraphNode]
     @Published var edges: [SemanticEdge]
@@ -326,6 +327,7 @@ final class AppViewModel: ObservableObject {
             transcript = []
             latestChatSummary = nil
             chatSummaryMessage = nil
+            lastPromptInspection = nil
             reloadChatSessions()
             errorMessage = nil
         } catch {
@@ -343,6 +345,7 @@ final class AppViewModel: ObservableObject {
             latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: session.id)
             chatSummaryMessage = nil
             lastContext = nil
+            lastPromptInspection = nil
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -451,6 +454,7 @@ final class AppViewModel: ObservableObject {
             selectedChatSessionID = response.session.id
             if chatSessionRepository != nil { reloadChatSessions() }
             lastContext = response.context
+            lastPromptInspection = response.promptInspection
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -778,6 +782,31 @@ struct AgentChatView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(10)
                 .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+            }
+
+            if let inspection = viewModel.lastPromptInspection {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Last Prompt Context").font(.headline)
+                    Text("Summary: \(inspection.includesSummary ? "included" : "not included")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("Recent messages: \(inspection.recentMessageCount)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("Current request: \(inspection.currentRequest)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    DisclosureGroup("Rendered prompt") {
+                        Text(inspection.renderedPrompt)
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .font(.caption)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+                .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8))
             }
 
             List {
