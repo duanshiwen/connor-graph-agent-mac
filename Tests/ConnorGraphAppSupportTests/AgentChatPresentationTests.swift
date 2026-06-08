@@ -34,6 +34,41 @@ import ConnorGraphAppSupport
     #expect(rows.map(\.roleLabel) == ["User", "Assistant", "User", "Assistant"])
 }
 
+@Test func agentChatTurnTimelinePlacesProcessBetweenUserAndAssistant() {
+    let snapshot = AgentPromptInspectionSnapshot(
+        includesSummary: false,
+        recentMessageCount: 2,
+        currentRequest: "memory",
+        renderedPrompt: "Prompt",
+        renderedPromptCharacterCount: 120,
+        estimatedPromptTokenCount: 30,
+        promptBudgetStatus: .safe
+    )
+    let messages = [
+        AgentMessage(id: "user-1", role: .user, content: "memory"),
+        AgentMessage(id: "assistant-1", role: .assistant, content: "Answer", promptInspection: snapshot)
+    ]
+
+    let items = AgentChatTurnTimelineItem.items(messages: messages, lastContext: nil, isSubmitting: false)
+
+    #expect(items.map(\.id) == ["user-1", "process-assistant-1", "assistant-1"])
+    #expect(items.map(\.kindLabel) == ["message", "process", "message"])
+    #expect(items[1].process?.turnNumber == 1)
+    #expect(items[1].process?.state == .completed)
+    #expect(items[1].process?.summary == "Turn 1 · summary not included · recent 2 · ~30 tokens · safe")
+}
+
+@Test func agentChatTurnTimelinePlacesPendingProcessAfterOpenUserTurn() {
+    let messages = [AgentMessage(id: "user-1", role: .user, content: "memory")]
+
+    let items = AgentChatTurnTimelineItem.items(messages: messages, lastContext: nil, isSubmitting: true)
+
+    #expect(items.map(\.id) == ["user-1", "process-pending-assistant"])
+    #expect(items.map(\.kindLabel) == ["message", "process"])
+    #expect(items[1].process?.turnNumber == 1)
+    #expect(items[1].process?.state == .running)
+}
+
 @Test func agentChatAssistantTurnMetadataSummarizesPromptInspection() {
     let snapshot = AgentPromptInspectionSnapshot(
         includesSummary: true,
