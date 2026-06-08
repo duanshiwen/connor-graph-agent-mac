@@ -42,4 +42,30 @@ public struct AppChatSessionRepository: Sendable {
         }
         return try store.chatSession(id: response.session.id) ?? response.session
     }
+
+    public func loadLatestSummary(sessionID: String) throws -> AgentSessionSummary? {
+        try store.latestChatSessionSummary(sessionID: sessionID)
+    }
+
+    @discardableResult
+    public func saveSummary(_ summary: AgentSessionSummary) throws -> AgentSessionSummary {
+        try store.upsert(chatSessionSummary: summary)
+        return summary
+    }
+
+    @discardableResult
+    public func summarizeSession<Provider: LLMProvider>(
+        id: String,
+        using summarizer: AgentSessionSummarizer<Provider>
+    ) async throws -> AgentSessionSummary {
+        guard let session = try loadSession(id: id) else {
+            throw AppChatSessionRepositoryError.sessionNotFound(id)
+        }
+        let summary = try await summarizer.summarize(session: session)
+        return try saveSummary(summary)
+    }
+}
+
+public enum AppChatSessionRepositoryError: Error, Equatable {
+    case sessionNotFound(String)
 }

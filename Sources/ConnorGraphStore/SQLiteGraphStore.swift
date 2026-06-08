@@ -130,9 +130,23 @@ public final class SQLiteGraphStore: @unchecked Sendable {
         """)
         try execute("CREATE INDEX IF NOT EXISTS idx_observe_log_status ON observe_log_entries(status);")
         try execute("CREATE INDEX IF NOT EXISTS idx_observe_log_expires_at ON observe_log_entries(expires_at);")
+        try execute("""
+        CREATE TABLE IF NOT EXISTS chat_session_summaries (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            source_message_count INTEGER NOT NULL,
+            last_message_id TEXT,
+            metadata_json TEXT NOT NULL,
+            FOREIGN KEY(session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+        );
+        """)
         try execute("CREATE INDEX IF NOT EXISTS idx_chat_sessions_updated_at ON chat_sessions(updated_at);")
         try execute("CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id ON chat_messages(session_id);")
         try execute("CREATE INDEX IF NOT EXISTS idx_chat_messages_created_at ON chat_messages(created_at);")
+        try execute("CREATE INDEX IF NOT EXISTS idx_chat_session_summaries_session_updated_at ON chat_session_summaries(session_id, updated_at);")
         try execute("""
         INSERT OR IGNORE INTO schema_migrations(version, applied_at)
         VALUES (1, \(quote(iso(Date()))));
@@ -439,6 +453,40 @@ public final class SQLiteGraphStore: @unchecked Sendable {
         }
     }
 
+    public func upsert(chatSessionSummary summary: AgentSessionSummary) throws {
+        let sql = """
+        INSERT OR REPLACE INTO chat_session_summaries
+        (id, session_id, content, created_at, updated_at, source_message_count, last_message_id, metadata_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+        """
+        try withStatement(sql) { statement in
+            try bind(summary.id, at: 1, in: statement)
+            try bind(summary.sessionID, at: 2, in: statement)
+            try bind(summary.content, at: 3, in: statement)
+            try bind(iso(summary.createdAt), at: 4, in: statement)
+            try bind(iso(summary.updatedAt), at: 5, in: statement)
+            sqlite3_bind_int(statement, 6, Int32(summary.sourceMessageCount))
+            try bind(summary.lastMessageID, at: 7, in: statement)
+            try bind(jsonString([String: String]()), at: 8, in: statement)
+            try stepDone(statement)
+        }
+    }
+
+    public func latestChatSessionSummary(sessionID: String) throws -> AgentSessionSummary? {
+        let sql = """
+        SELECT id, session_id, content, created_at, updated_at, source_message_count, last_message_id, metadata_json
+        FROM chat_session_summaries
+        WHERE session_id = ?
+        ORDER BY updated_at DESC
+        LIMIT 1;
+        """
+        return try withStatement(sql) { statement in
+            try bind(sessionID, at: 1, in: statement)
+            guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+            return try decodeChatSessionSummary(statement)
+        }
+    }
+
     public func snapshot(
         nodeLimit: Int = 1_000,
         edgeLimit: Int = 2_000,
@@ -593,6 +641,29 @@ public final class SQLiteGraphStore: @unchecked Sendable {
             createdAt: createdAt,
             citations: try json([String].self, from: citationsRaw),
             contextSnapshot: text(statement, 6)
+        )
+    }
+
+    private func decodeChatSessionSummary(_ statement: OpaquePointer?) throws -> AgentSessionSummary {
+        guard
+            let id = text(statement, 0),
+            let sessionID = text(statement, 1),
+            let content = text(statement, 2),
+            let createdRaw = text(statement, 3),
+            let createdAt = date(createdRaw),
+            let updatedRaw = text(statement, 4),
+            let updatedAt = date(updatedRaw)
+        else {
+            throw SQLiteGraphStoreError.decodeFailed("chat_session_summaries row")
+        }
+        return AgentSessionSummary(
+            id: id,
+            sessionID: sessionID,
+            content: content,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            sourceMessageCount: Int(sqlite3_column_int(statement, 5)),
+            lastMessageID: text(statement, 6)
         )
     }
 

@@ -74,3 +74,26 @@ private func temporaryAppChatDatabaseURL(_ name: String = UUID().uuidString) -> 
     #expect(loaded.messages.map(\.id) == ["user-1", "assistant-1"])
     #expect(loaded.messages[1].citations == ["node:memory"])
 }
+
+@Test func appChatRepositorySavesAndLoadsLatestSummary() throws {
+    let store = try SQLiteGraphStore(path: temporaryAppChatDatabaseURL().path)
+    try store.migrate()
+    let repository = AppChatSessionRepository(store: store)
+    let session = AgentSession(id: "session-1", title: "Graph memory")
+    let summary = AgentSessionSummary(
+        id: "summary-1",
+        sessionID: "session-1",
+        content: "The session discussed graph memory.",
+        createdAt: Date(timeIntervalSince1970: 1_000),
+        updatedAt: Date(timeIntervalSince1970: 1_000),
+        sourceMessageCount: 2,
+        lastMessageID: "message-2"
+    )
+
+    try store.upsert(chatSession: session)
+    let saved = try repository.saveSummary(summary)
+    let loaded = try #require(try repository.loadLatestSummary(sessionID: "session-1"))
+
+    #expect(saved == summary)
+    #expect(loaded == summary)
+}
