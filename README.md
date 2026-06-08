@@ -6,7 +6,7 @@ This project is a runnable Agent client, not a Markdown knowledge-base manager. 
 
 ## Status
 
-Current MVP status: **Phase 17 LLM provider health check build**.
+Current MVP status: **Phase 27 context budget status build**.
 
 Implemented layers:
 
@@ -53,6 +53,31 @@ Existing knowledge-base concepts are represented as graph-native typed nodes and
 - SOP / Runbook → `GraphNode(type: .procedure)`
 - Person Profile → `GraphNode(type: .person)`
 - User Preference → `GraphNode(type: .preference)`
+
+## Running from Xcode
+
+This repository keeps the SwiftPM package as the command-line and test source of truth, but also includes a minimal Xcode macOS app project for reliable GUI launch/debug:
+
+```text
+ConnorGraphAgentMac.xcodeproj
+```
+
+To run in Xcode:
+
+1. Open `ConnorGraphAgentMac.xcodeproj`.
+2. Select the `ConnorGraphAgentMacApp` scheme.
+3. Select the `My Mac` destination.
+4. Click Run.
+
+The SwiftPM executable scheme `connor-graph-agent-mac` may build as a bare executable rather than a `.app` bundle. Use `ConnorGraphAgentMacApp` when launching from Xcode.
+
+Command-line workflows remain unchanged:
+
+```bash
+swift test
+swift build
+swift run connor-graph-agent-mac
+```
 
 ## Architecture
 
