@@ -36,7 +36,8 @@ let package = Package(
                 "ConnorGraphSearch",
                 "ConnorGraphImport",
                 "ConnorGraphAgent"
-            ]
+            ],
+            linkerSettings: [.linkedFramework("Security")]
         ),
         .executableTarget(name: "ConnorGraphAgentMac", dependencies: ["ConnorGraphAgent", "ConnorGraphStore", "ConnorGraphAppSupport"]),
         .testTarget(name: "ConnorGraphCoreTests", dependencies: ["ConnorGraphCore"]),
