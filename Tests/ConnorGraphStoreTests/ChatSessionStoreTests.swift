@@ -67,3 +67,44 @@ private func temporaryChatDatabaseURL(_ name: String = UUID().uuidString) -> URL
     #expect(sessions.map(\.id) == ["session-new", "session-old"])
     #expect(sessions.allSatisfy { $0.messages.isEmpty })
 }
+
+@Test func graphStoreMigratesChatSessionSummariesTable() throws {
+    let store = try SQLiteGraphStore(path: temporaryChatDatabaseURL().path)
+    try store.migrate()
+
+    let tables = try store.tableNames()
+
+    #expect(tables.contains("chat_session_summaries"))
+}
+
+@Test func graphStoreSavesAndLoadsLatestChatSessionSummary() throws {
+    let store = try SQLiteGraphStore(path: temporaryChatDatabaseURL().path)
+    try store.migrate()
+    let session = AgentSession(id: "session-1", title: "Graph memory")
+    let old = AgentSessionSummary(
+        id: "summary-old",
+        sessionID: "session-1",
+        content: "Old summary",
+        createdAt: Date(timeIntervalSince1970: 1_000),
+        updatedAt: Date(timeIntervalSince1970: 1_000),
+        sourceMessageCount: 2,
+        lastMessageID: "message-2"
+    )
+    let latest = AgentSessionSummary(
+        id: "summary-latest",
+        sessionID: "session-1",
+        content: "Latest summary",
+        createdAt: Date(timeIntervalSince1970: 2_000),
+        updatedAt: Date(timeIntervalSince1970: 3_000),
+        sourceMessageCount: 4,
+        lastMessageID: "message-4"
+    )
+
+    try store.upsert(chatSession: session)
+    try store.upsert(chatSessionSummary: old)
+    try store.upsert(chatSessionSummary: latest)
+
+    let loaded = try #require(try store.latestChatSessionSummary(sessionID: "session-1"))
+
+    #expect(loaded == latest)
+}
