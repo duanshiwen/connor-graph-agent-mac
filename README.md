@@ -6,7 +6,7 @@ This project is a runnable Agent client, not a Markdown knowledge-base manager. 
 
 ## Status
 
-Current MVP status: **Phase 13 app SQLite import build**.
+Current MVP status: **Phase 14 promotion queue review UI build**.
 
 Implemented layers:
 
@@ -22,6 +22,7 @@ Implemented layers:
 - OpenAI-compatible LLM provider interface for real model calls.
 - Application Support SQLite bootstrap for the SwiftUI app.
 - Read-only knowledge import UI for legacy Markdown repositories.
+- Promotion Queue Review UI for promote / dismiss / pin memory candidates.
 
 ## Product principle
 
@@ -97,6 +98,7 @@ Current SwiftUI pages:
 - **Search** — run graph / edge / observe-log search against the loaded SQLite snapshot.
 - **Observe Log** — inspect short-term memory entries.
 - **Agent Chat** — ask the graph-backed agent using `StubLLMProvider`.
+- **Promotion Queue** — review active memory candidates and promote / dismiss / pin them.
 - **Import** — read-only import of a legacy Markdown knowledge repository into SQLite.
 
 ## Test and build
@@ -109,7 +111,7 @@ swift build
 Current acceptance baseline:
 
 ```text
-55 tests passing
+61 tests passing
 Build complete
 ```
 
@@ -233,6 +235,18 @@ Queue operations:
 - `dismiss`
 - `pin` for another 30 days
 
+The SwiftUI **Promotion Queue** page loads active promotion candidates from SQLite and supports:
+
+- **Promote** — writes the draft node / edge produced by `MemoryPromotionService` into `SQLiteGraphStore`, updates the source observe log to `promoted`, then refreshes graph state.
+- **Dismiss** — marks the observe-log entry as `dismissed` and removes it from the active queue.
+- **Pin 30 days** — keeps the entry active and extends its expiry by another 30 days.
+
+Candidate kinds are:
+
+- `candidate_fact`
+- `decision_hint`
+- `user_preference`
+
 ## Current limitations
 
 This is intentionally an MVP, not the final Agent OS client.
@@ -244,7 +258,7 @@ Known limitations:
 - App UI does not yet expose real LLM configuration.
 - Legacy importer uses frontmatter and path heuristics; it does not yet run LLM-based entity extraction.
 - Search is currently in-memory lexical matching, not embedding / hybrid search.
-- Promotion queue exists in the domain layer but is not yet wired into a full review UI.
+- Promotion Queue Review UI is available, but does not yet include advanced filtering, conflict resolution or diff previews.
 - No Graphiti sidecar adapter yet.
 - No Keychain-backed credential manager yet.
 
@@ -252,12 +266,11 @@ Known limitations:
 
 Recommended next phases:
 
-1. Add Promotion Queue review screen with promote / dismiss / pin actions.
-2. Add Keychain-backed LLM credential storage.
-3. Add real chat session persistence.
-4. Add hybrid retrieval: lexical + embedding + graph neighborhood.
-5. Add Graphiti adapter for temporal fact extraction, deduplication and invalidation.
-6. Add human-readable export projections for graph slices.
+1. Add Keychain-backed LLM credential storage.
+2. Add real chat session persistence.
+3. Add hybrid retrieval: lexical + embedding + graph neighborhood.
+4. Add Graphiti adapter for temporal fact extraction, deduplication and invalidation.
+5. Add human-readable export projections for graph slices.
 
 ## Development discipline
 

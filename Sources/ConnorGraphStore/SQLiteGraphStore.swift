@@ -301,6 +301,32 @@ public final class SQLiteGraphStore: @unchecked Sendable {
         }
     }
 
+    public func promotionCandidates(limit: Int = 100) throws -> [ObserveLogEntry] {
+        let sql = """
+        SELECT id, timestamp, kind, source, content, normalized_summary, work_object_id, session_id, related_node_ids_json, related_edge_ids_json, importance, confidence, status, expires_at, promoted_node_id, metadata_json
+        FROM observe_log_entries
+        WHERE status = ? AND kind IN (?, ?, ?)
+        ORDER BY id ASC
+        LIMIT ?;
+        """
+        return try withStatement(sql) { statement in
+            try bind(ObserveLogStatus.active.rawValue, at: 1, in: statement)
+            try bind(ObserveLogKind.candidateFact.rawValue, at: 2, in: statement)
+            try bind(ObserveLogKind.decisionHint.rawValue, at: 3, in: statement)
+            try bind(ObserveLogKind.userPreference.rawValue, at: 4, in: statement)
+            sqlite3_bind_int(statement, 5, Int32(limit))
+            var entries: [ObserveLogEntry] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                entries.append(try decodeObserveLogEntry(statement))
+            }
+            return entries
+        }
+    }
+
+    public func update(observeLogEntry entry: ObserveLogEntry) throws {
+        try upsert(observeLogEntry: entry)
+    }
+
     public func observeLogEntries(limit: Int) throws -> [ObserveLogEntry] {
         try recentObserveLogEntries(limit: limit)
     }
