@@ -62,7 +62,10 @@ import ConnorGraphAgent
         includesSummary: true,
         recentMessageCount: 2,
         currentRequest: "What next?",
-        renderedPrompt: "Rendered prompt"
+        renderedPrompt: "Rendered prompt",
+        renderedPromptCharacterCount: 24_000,
+        estimatedPromptTokenCount: 6_000,
+        promptBudgetStatus: .warning
     )
     let message = AgentMessage(
         id: "message-1",

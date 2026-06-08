@@ -740,6 +740,22 @@ struct ImportKnowledgeView: View {
 struct AgentChatView: View {
     @ObservedObject var viewModel: AppViewModel
 
+    private func promptBudgetStatusText(_ status: AgentPromptBudgetStatus) -> String {
+        switch status {
+        case .safe: return "safe"
+        case .warning: return "warning"
+        case .over: return "over"
+        }
+    }
+
+    private func promptBudgetStatusColor(_ status: AgentPromptBudgetStatus) -> Color {
+        switch status {
+        case .safe: return .secondary
+        case .warning: return .orange
+        case .over: return .red
+        }
+    }
+
     var body: some View {
         VStack(spacing: 12) {
             HStack {
@@ -793,9 +809,9 @@ struct AgentChatView: View {
                     Text("Recent messages: \(inspection.recentMessageCount)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text("Prompt size: \(inspection.renderedPromptCharacterCount) chars · ~\(inspection.estimatedPromptTokenCount) tokens")
+                    Text("Prompt size: \(inspection.renderedPromptCharacterCount) chars · ~\(inspection.estimatedPromptTokenCount) tokens · \(promptBudgetStatusText(inspection.promptBudgetStatus))")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundColor(promptBudgetStatusColor(inspection.promptBudgetStatus))
                     Text("Current request: \(inspection.currentRequest)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -819,9 +835,9 @@ struct AgentChatView: View {
                         Text(message.content)
                         if message.role == .assistant, let inspection = message.promptInspection {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("Context: summary \(inspection.includesSummary ? "included" : "not included") · recent \(inspection.recentMessageCount) · ~\(inspection.estimatedPromptTokenCount) tokens")
+                                Text("Context: summary \(inspection.includesSummary ? "included" : "not included") · recent \(inspection.recentMessageCount) · ~\(inspection.estimatedPromptTokenCount) tokens · \(promptBudgetStatusText(inspection.promptBudgetStatus))")
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundColor(promptBudgetStatusColor(inspection.promptBudgetStatus))
                                 DisclosureGroup("Prompt snapshot") {
                                     if let renderedPrompt = inspection.renderedPrompt {
                                         Text(renderedPrompt)

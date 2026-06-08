@@ -48,14 +48,16 @@ public struct AgentChatPromptContext: Sendable, Equatable {
 
     public var inspection: AgentChatPromptInspection {
         let renderedPrompt = renderedPrompt
-        let estimate = AgentPromptBudgetEstimator().estimate(renderedPrompt)
+        let estimator = AgentPromptBudgetEstimator()
+        let estimate = estimator.estimate(renderedPrompt)
         return AgentChatPromptInspection(
             includesSummary: !trimmedSummaryContent.isEmpty,
             recentMessageCount: recentMessages.count,
             currentRequest: userPrompt,
             renderedPrompt: renderedPrompt,
             renderedPromptCharacterCount: estimate.characterCount,
-            estimatedPromptTokenCount: estimate.estimatedTokenCount
+            estimatedPromptTokenCount: estimate.estimatedTokenCount,
+            promptBudgetStatus: estimator.status(estimatedTokenCount: estimate.estimatedTokenCount)
         )
     }
 
