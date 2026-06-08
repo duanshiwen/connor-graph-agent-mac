@@ -106,8 +106,33 @@ public final class SQLiteGraphStore: @unchecked Sendable {
         try execute("CREATE INDEX IF NOT EXISTS idx_semantic_edges_source ON semantic_edges(source_node_id);")
         try execute("CREATE INDEX IF NOT EXISTS idx_semantic_edges_target ON semantic_edges(target_node_id);")
         try execute("CREATE INDEX IF NOT EXISTS idx_semantic_edges_relation ON semantic_edges(relation);")
+        try execute("""
+        CREATE TABLE IF NOT EXISTS chat_sessions (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            metadata_json TEXT NOT NULL
+        );
+        """)
+        try execute("""
+        CREATE TABLE IF NOT EXISTS chat_messages (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            citations_json TEXT NOT NULL,
+            context_snapshot TEXT,
+            metadata_json TEXT NOT NULL,
+            FOREIGN KEY(session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+        );
+        """)
         try execute("CREATE INDEX IF NOT EXISTS idx_observe_log_status ON observe_log_entries(status);")
         try execute("CREATE INDEX IF NOT EXISTS idx_observe_log_expires_at ON observe_log_entries(expires_at);")
+        try execute("CREATE INDEX IF NOT EXISTS idx_chat_sessions_updated_at ON chat_sessions(updated_at);")
+        try execute("CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id ON chat_messages(session_id);")
+        try execute("CREATE INDEX IF NOT EXISTS idx_chat_messages_created_at ON chat_messages(created_at);")
         try execute("""
         INSERT OR IGNORE INTO schema_migrations(version, applied_at)
         VALUES (1, \(quote(iso(Date()))));
@@ -331,6 +356,89 @@ public final class SQLiteGraphStore: @unchecked Sendable {
         try recentObserveLogEntries(limit: limit)
     }
 
+    public func upsert(chatSession session: AgentSession) throws {
+        let sql = """
+        INSERT OR REPLACE INTO chat_sessions
+        (id, title, created_at, updated_at, metadata_json)
+        VALUES (?, ?, ?, ?, ?);
+        """
+        try withStatement(sql) { statement in
+            try bind(session.id, at: 1, in: statement)
+            try bind(session.title, at: 2, in: statement)
+            try bind(iso(session.createdAt), at: 3, in: statement)
+            try bind(iso(session.updatedAt), at: 4, in: statement)
+            try bind(jsonString([String: String]()), at: 5, in: statement)
+            try stepDone(statement)
+        }
+    }
+
+    public func chatSessions(limit: Int = 50) throws -> [AgentSession] {
+        let sql = """
+        SELECT id, title, created_at, updated_at, metadata_json
+        FROM chat_sessions
+        ORDER BY updated_at DESC
+        LIMIT ?;
+        """
+        return try withStatement(sql) { statement in
+            sqlite3_bind_int(statement, 1, Int32(limit))
+            var sessions: [AgentSession] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                sessions.append(try decodeChatSession(statement, includeMessages: false))
+            }
+            return sessions
+        }
+    }
+
+    public func chatSession(id: String) throws -> AgentSession? {
+        let sql = """
+        SELECT id, title, created_at, updated_at, metadata_json
+        FROM chat_sessions
+        WHERE id = ?
+        LIMIT 1;
+        """
+        return try withStatement(sql) { statement in
+            try bind(id, at: 1, in: statement)
+            guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+            return try decodeChatSession(statement, includeMessages: true)
+        }
+    }
+
+    public func append(chatMessage message: AgentMessage, sessionID: String) throws {
+        let sql = """
+        INSERT OR REPLACE INTO chat_messages
+        (id, session_id, role, content, created_at, citations_json, context_snapshot, metadata_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+        """
+        try withStatement(sql) { statement in
+            try bind(message.id, at: 1, in: statement)
+            try bind(sessionID, at: 2, in: statement)
+            try bind(message.role.rawValue, at: 3, in: statement)
+            try bind(message.content, at: 4, in: statement)
+            try bind(iso(message.createdAt), at: 5, in: statement)
+            try bind(jsonString(message.citations), at: 6, in: statement)
+            try bind(message.contextSnapshot, at: 7, in: statement)
+            try bind(jsonString([String: String]()), at: 8, in: statement)
+            try stepDone(statement)
+        }
+    }
+
+    public func chatMessages(sessionID: String) throws -> [AgentMessage] {
+        let sql = """
+        SELECT id, session_id, role, content, created_at, citations_json, context_snapshot, metadata_json
+        FROM chat_messages
+        WHERE session_id = ?
+        ORDER BY created_at ASC;
+        """
+        return try withStatement(sql) { statement in
+            try bind(sessionID, at: 1, in: statement)
+            var messages: [AgentMessage] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                messages.append(try decodeChatMessage(statement))
+            }
+            return messages
+        }
+    }
+
     public func snapshot(
         nodeLimit: Int = 1_000,
         edgeLimit: Int = 2_000,
@@ -449,6 +557,43 @@ public final class SQLiteGraphStore: @unchecked Sendable {
             edges.append(try decodeEdge(statement))
         }
         return edges
+    }
+
+    private func decodeChatSession(_ statement: OpaquePointer?, includeMessages: Bool) throws -> AgentSession {
+        guard
+            let id = text(statement, 0),
+            let title = text(statement, 1),
+            let createdRaw = text(statement, 2),
+            let createdAt = date(createdRaw),
+            let updatedRaw = text(statement, 3),
+            let updatedAt = date(updatedRaw)
+        else {
+            throw SQLiteGraphStoreError.decodeFailed("chat_sessions row")
+        }
+        let messages = includeMessages ? try chatMessages(sessionID: id) : []
+        return AgentSession(id: id, title: title, messages: messages, createdAt: createdAt, updatedAt: updatedAt)
+    }
+
+    private func decodeChatMessage(_ statement: OpaquePointer?) throws -> AgentMessage {
+        guard
+            let id = text(statement, 0),
+            let roleRaw = text(statement, 2),
+            let role = AgentRole(rawValue: roleRaw),
+            let content = text(statement, 3),
+            let createdRaw = text(statement, 4),
+            let createdAt = date(createdRaw),
+            let citationsRaw = text(statement, 5)
+        else {
+            throw SQLiteGraphStoreError.decodeFailed("chat_messages row")
+        }
+        return AgentMessage(
+            id: id,
+            role: role,
+            content: content,
+            createdAt: createdAt,
+            citations: try json([String].self, from: citationsRaw),
+            contextSnapshot: text(statement, 6)
+        )
     }
 
     private func decodeObserveLogEntry(_ statement: OpaquePointer?) throws -> ObserveLogEntry {
