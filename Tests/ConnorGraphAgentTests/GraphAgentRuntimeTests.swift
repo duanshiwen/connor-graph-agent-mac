@@ -15,6 +15,31 @@ import ConnorGraphAgent
     #expect(session.messages.map(\.content) == ["How should memory work?"])
 }
 
+@Test func agentSessionTracksTitleAndUpdatedAt() throws {
+    let createdAt = Date(timeIntervalSince1970: 1_000)
+    let updatedAt = Date(timeIntervalSince1970: 2_000)
+
+    let session = AgentSession(id: "session-1", title: "Planning", messages: [], createdAt: createdAt, updatedAt: updatedAt)
+
+    #expect(session.title == "Planning")
+    #expect(session.createdAt == createdAt)
+    #expect(session.updatedAt == updatedAt)
+}
+
+@Test func assistantMessageCanCarryCitationsAndContextSnapshot() throws {
+    let message = AgentMessage(
+        id: "message-1",
+        role: .assistant,
+        content: "Use graph memory.",
+        createdAt: Date(timeIntervalSince1970: 1_000),
+        citations: ["node:memory"],
+        contextSnapshot: "Node[work_object] Memory"
+    )
+
+    #expect(message.citations == ["node:memory"])
+    #expect(message.contextSnapshot == "Node[work_object] Memory")
+}
+
 @Test func userMessageCanBeRecordedAsObserveLogEntry() throws {
     let session = AgentSession(id: "session-1")
     let message = AgentMessage(id: "message-1", role: .user, content: "Remember this insight")
