@@ -51,9 +51,12 @@ final class AppViewModel: ObservableObject {
     @Published var llmAPIKeyInput: String = ""
     @Published var llmHasAPIKey: Bool = false
     @Published var llmSettingsMessage: String?
+    @Published var chatSessions: [AgentSession] = []
+    @Published var selectedChatSessionID: String?
 
     private var repository: AppGraphRepository?
     private var promotionRepository: AppPromotionQueueRepository?
+    private var chatSessionRepository: AppChatSessionRepository?
     private var llmSettingsRepository: AppLLMSettingsRepository
     private var searchIndex: InMemoryGraphSearchIndex
     private var chatController: AgentChatController<AnyLLMProvider>
@@ -72,6 +75,7 @@ final class AppViewModel: ObservableObject {
         self.repository = repository
         if let repository {
             self.promotionRepository = AppPromotionQueueRepository(store: repository.store)
+            self.chatSessionRepository = AppChatSessionRepository(store: repository.store)
         }
         self.llmSettingsRepository = llmSettingsRepository
         self.databasePath = databasePath
@@ -79,6 +83,7 @@ final class AppViewModel: ObservableObject {
         self.chatController = Self.makeChatController(searchIndex: searchIndex, settingsRepository: llmSettingsRepository)
         self.searchResults = (try? searchIndex.search(query: query, options: .init(includeNeighborhood: true))) ?? []
         loadLLMSettings()
+        reloadChatSessions()
     }
 
     static func live() -> AppViewModel {
@@ -144,12 +149,13 @@ final class AppViewModel: ObservableObject {
 
     private static func makeChatController(
         searchIndex: InMemoryGraphSearchIndex,
-        settingsRepository: AppLLMSettingsRepository
+        settingsRepository: AppLLMSettingsRepository,
+        session: AgentSession = AgentSession(id: "app-session")
     ) -> AgentChatController<AnyLLMProvider> {
         let provider = Self.makeLLMProvider(settingsRepository: settingsRepository)
         return AgentChatController(
             agent: GraphAgent(
-                session: AgentSession(id: "app-session"),
+                session: session,
                 contextBuilder: AgentContextBuilder(searchIndex: searchIndex, assembler: ContextAssembler()),
                 llmProvider: provider
             )
@@ -180,7 +186,7 @@ final class AppViewModel: ObservableObject {
         edges = snapshot.edges
         observeLogEntries = snapshot.observeLogEntries
         searchIndex = InMemoryGraphSearchIndex(nodes: snapshot.nodes, edges: snapshot.edges, observeLogEntries: snapshot.observeLogEntries)
-        chatController = Self.makeChatController(searchIndex: searchIndex, settingsRepository: llmSettingsRepository)
+        chatController = Self.makeChatController(searchIndex: searchIndex, settingsRepository: llmSettingsRepository, session: chatController.agent.session)
         runSearch()
         reloadPromotionCandidates()
     }
@@ -210,7 +216,7 @@ final class AppViewModel: ObservableObject {
             let apiKey = llmAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
             try llmSettingsRepository.save(settings: settings, apiKey: apiKey.isEmpty ? nil : apiKey)
             loadLLMSettings()
-            chatController = Self.makeChatController(searchIndex: searchIndex, settingsRepository: llmSettingsRepository)
+            chatController = Self.makeChatController(searchIndex: searchIndex, settingsRepository: llmSettingsRepository, session: chatController.agent.session)
             llmSettingsMessage = "LLM settings saved."
             errorMessage = nil
         } catch {
@@ -222,8 +228,61 @@ final class AppViewModel: ObservableObject {
         do {
             try llmSettingsRepository.clearAPIKey()
             loadLLMSettings()
-            chatController = Self.makeChatController(searchIndex: searchIndex, settingsRepository: llmSettingsRepository)
+            chatController = Self.makeChatController(searchIndex: searchIndex, settingsRepository: llmSettingsRepository, session: chatController.agent.session)
             llmSettingsMessage = "API key cleared."
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func reloadChatSessions() {
+        guard let chatSessionRepository else {
+            transcript = chatController.transcript
+            selectedChatSessionID = chatController.agent.session.id
+            return
+        }
+        do {
+            var sessions = try chatSessionRepository.loadRecentSessions()
+            if sessions.isEmpty {
+                let session = try chatSessionRepository.createSession()
+                sessions = [session]
+            }
+            chatSessions = sessions
+            let selectedID = selectedChatSessionID ?? sessions.first?.id
+            selectedChatSessionID = selectedID
+            if let selectedID, let session = try chatSessionRepository.loadSession(id: selectedID) {
+                chatController = Self.makeChatController(searchIndex: searchIndex, settingsRepository: llmSettingsRepository, session: session)
+                transcript = session.messages
+            }
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func newChatSession() {
+        guard let chatSessionRepository else { return }
+        do {
+            let session = try chatSessionRepository.createSession()
+            selectedChatSessionID = session.id
+            chatController = Self.makeChatController(searchIndex: searchIndex, settingsRepository: llmSettingsRepository, session: session)
+            transcript = []
+            reloadChatSessions()
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func selectChatSession(_ sessionID: String) {
+        guard let chatSessionRepository else { return }
+        do {
+            guard let session = try chatSessionRepository.loadSession(id: sessionID) else { return }
+            selectedChatSessionID = session.id
+            chatController = Self.makeChatController(searchIndex: searchIndex, settingsRepository: llmSettingsRepository, session: session)
+            transcript = session.messages
+            lastContext = nil
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -315,9 +374,15 @@ final class AppViewModel: ObservableObject {
         chatInput = ""
         do {
             var controller = chatController
+            let previousMessageCount = controller.transcript.count
             let response = try await controller.submit(prompt)
+            if let chatSessionRepository {
+                _ = try chatSessionRepository.saveTurn(previousMessageCount: previousMessageCount, response: response)
+            }
             chatController = controller
             transcript = controller.transcript
+            selectedChatSessionID = response.session.id
+            if chatSessionRepository != nil { reloadChatSessions() }
             lastContext = response.context
             errorMessage = nil
         } catch {
@@ -583,6 +648,21 @@ struct AgentChatView: View {
 
     var body: some View {
         VStack(spacing: 12) {
+            HStack {
+                Button("New Chat") { viewModel.newChatSession() }
+                Picker("Session", selection: Binding(
+                    get: { viewModel.selectedChatSessionID ?? "" },
+                    set: { viewModel.selectChatSession($0) }
+                )) {
+                    ForEach(viewModel.chatSessions) { session in
+                        Text(session.title).tag(session.id)
+                    }
+                }
+                .frame(maxWidth: 320)
+                Button("Reload") { viewModel.reloadChatSessions() }
+                Spacer()
+            }
+
             List {
                 ForEach(viewModel.transcript) { message in
                     VStack(alignment: .leading, spacing: 4) {
@@ -614,5 +694,6 @@ struct AgentChatView: View {
         }
         .padding()
         .navigationTitle("Agent Chat")
+        .onAppear { viewModel.reloadChatSessions() }
     }
 }
