@@ -214,6 +214,25 @@ private struct RuntimeCapturingProvider: LLMProvider, Sendable {
     #expect(snapshot.renderedPrompt?.contains("Current user request:") == true)
 }
 
+@Test func graphAgentStoresPolicyFilteredPromptInspectionSnapshot() async throws {
+    let recorder = RuntimePromptRecorder()
+    let agent = GraphAgent(
+        session: AgentSession(id: "session-1"),
+        contextBuilder: AgentContextBuilder(searchIndex: InMemoryGraphSearchIndex(nodes: [], edges: [], observeLogEntries: []), assembler: ContextAssembler()),
+        llmProvider: RuntimeCapturingProvider(recorder: recorder),
+        promptInspectionSnapshotPolicy: AgentPromptInspectionSnapshotPolicy(includeRenderedPrompt: false)
+    )
+
+    let response = try await agent.ask("What next?")
+    let responseInspection = try #require(response.promptInspection)
+    let assistantMessage = try #require(response.session.messages.last)
+    let snapshot = try #require(assistantMessage.promptInspection)
+
+    #expect(responseInspection.renderedPrompt == "What next?")
+    #expect(snapshot.currentRequest == "What next?")
+    #expect(snapshot.renderedPrompt == nil)
+}
+
 @Test func graphAgentIncludesRecentConversationWindowInProviderPrompt() async throws {
     let recorder = RuntimePromptRecorder()
     let session = AgentSession(
