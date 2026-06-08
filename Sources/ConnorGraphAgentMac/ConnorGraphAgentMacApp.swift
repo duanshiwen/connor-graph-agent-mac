@@ -22,6 +22,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case agentChat = "Agent Chat"
     case promotionQueue = "Promotion Queue"
     case importKnowledge = "Import"
+    case llmSettings = "LLM Settings"
 
     var id: String { rawValue }
 }
@@ -44,13 +45,27 @@ final class AppViewModel: ObservableObject {
     @Published var databasePath: String?
     @Published var promotionCandidates: [ObserveLogEntry] = []
     @Published var lastPromotionResultSummary: String?
+    @Published var llmProviderMode: AppLLMProviderMode = .stub
+    @Published var llmBaseURLString: String = AppLLMSettings.default.baseURLString
+    @Published var llmModel: String = AppLLMSettings.default.model
+    @Published var llmAPIKeyInput: String = ""
+    @Published var llmHasAPIKey: Bool = false
+    @Published var llmSettingsMessage: String?
 
     private var repository: AppGraphRepository?
     private var promotionRepository: AppPromotionQueueRepository?
+    private var llmSettingsRepository: AppLLMSettingsRepository
     private var searchIndex: InMemoryGraphSearchIndex
-    private var chatController: AgentChatController<StubLLMProvider>
+    private var chatController: AgentChatController<AnyLLMProvider>
 
-    init(nodes: [GraphNode], edges: [SemanticEdge], observeLogEntries: [ObserveLogEntry], repository: AppGraphRepository? = nil, databasePath: String? = nil) {
+    init(
+        nodes: [GraphNode],
+        edges: [SemanticEdge],
+        observeLogEntries: [ObserveLogEntry],
+        repository: AppGraphRepository? = nil,
+        databasePath: String? = nil,
+        llmSettingsRepository: AppLLMSettingsRepository = AppLLMSettingsRepository()
+    ) {
         self.nodes = nodes
         self.edges = edges
         self.observeLogEntries = observeLogEntries
@@ -58,10 +73,12 @@ final class AppViewModel: ObservableObject {
         if let repository {
             self.promotionRepository = AppPromotionQueueRepository(store: repository.store)
         }
+        self.llmSettingsRepository = llmSettingsRepository
         self.databasePath = databasePath
         self.searchIndex = InMemoryGraphSearchIndex(nodes: nodes, edges: edges, observeLogEntries: observeLogEntries)
-        self.chatController = Self.makeChatController(searchIndex: searchIndex)
+        self.chatController = Self.makeChatController(searchIndex: searchIndex, settingsRepository: llmSettingsRepository)
         self.searchResults = (try? searchIndex.search(query: query, options: .init(includeNeighborhood: true))) ?? []
+        loadLLMSettings()
     }
 
     static func live() -> AppViewModel {
@@ -125,14 +142,37 @@ final class AppViewModel: ObservableObject {
         return GraphStoreSnapshot(nodes: [workObject, question, answer], edges: [edge], observeLogEntries: [observe])
     }
 
-    private static func makeChatController(searchIndex: InMemoryGraphSearchIndex) -> AgentChatController<StubLLMProvider> {
-        AgentChatController(
+    private static func makeChatController(
+        searchIndex: InMemoryGraphSearchIndex,
+        settingsRepository: AppLLMSettingsRepository
+    ) -> AgentChatController<AnyLLMProvider> {
+        let provider = Self.makeLLMProvider(settingsRepository: settingsRepository)
+        return AgentChatController(
             agent: GraphAgent(
                 session: AgentSession(id: "app-session"),
                 contextBuilder: AgentContextBuilder(searchIndex: searchIndex, assembler: ContextAssembler()),
-                llmProvider: StubLLMProvider()
+                llmProvider: provider
             )
         )
+    }
+
+    private static func makeLLMProvider(settingsRepository: AppLLMSettingsRepository) -> AnyLLMProvider {
+        do {
+            let settings = try settingsRepository.loadSettings()
+            switch settings.providerMode {
+            case .stub:
+                return AnyLLMProvider(StubLLMProvider())
+            case .openAICompatible:
+                guard let config = try settingsRepository.openAICompatibleConfig() else {
+                    return AnyLLMProvider { _, _ in
+                        throw OpenAICompatibleProviderError.missingAPIKey
+                    }
+                }
+                return AnyLLMProvider(OpenAICompatibleProvider(config: config))
+            }
+        } catch {
+            return AnyLLMProvider { _, _ in throw error }
+        }
     }
 
     private func apply(snapshot: GraphStoreSnapshot) {
@@ -140,9 +180,54 @@ final class AppViewModel: ObservableObject {
         edges = snapshot.edges
         observeLogEntries = snapshot.observeLogEntries
         searchIndex = InMemoryGraphSearchIndex(nodes: snapshot.nodes, edges: snapshot.edges, observeLogEntries: snapshot.observeLogEntries)
-        chatController = Self.makeChatController(searchIndex: searchIndex)
+        chatController = Self.makeChatController(searchIndex: searchIndex, settingsRepository: llmSettingsRepository)
         runSearch()
         reloadPromotionCandidates()
+    }
+
+    func loadLLMSettings() {
+        do {
+            let settings = try llmSettingsRepository.loadSettings()
+            llmProviderMode = settings.providerMode
+            llmBaseURLString = settings.baseURLString
+            llmModel = settings.model
+            llmHasAPIKey = settings.hasAPIKey
+            llmAPIKeyInput = ""
+            llmSettingsMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func saveLLMSettings() {
+        do {
+            let settings = AppLLMSettings(
+                baseURLString: llmBaseURLString.trimmingCharacters(in: .whitespacesAndNewlines),
+                model: llmModel.trimmingCharacters(in: .whitespacesAndNewlines),
+                hasAPIKey: llmHasAPIKey,
+                providerMode: llmProviderMode
+            )
+            let apiKey = llmAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+            try llmSettingsRepository.save(settings: settings, apiKey: apiKey.isEmpty ? nil : apiKey)
+            loadLLMSettings()
+            chatController = Self.makeChatController(searchIndex: searchIndex, settingsRepository: llmSettingsRepository)
+            llmSettingsMessage = "LLM settings saved."
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func clearLLMAPIKey() {
+        do {
+            try llmSettingsRepository.clearAPIKey()
+            loadLLMSettings()
+            chatController = Self.makeChatController(searchIndex: searchIndex, settingsRepository: llmSettingsRepository)
+            llmSettingsMessage = "API key cleared."
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
     }
 
     func reloadPromotionCandidates() {
@@ -265,6 +350,8 @@ struct AppShellView: View {
                     PromotionQueueView(viewModel: viewModel)
                 case .importKnowledge:
                     ImportKnowledgeView(viewModel: viewModel)
+                case .llmSettings:
+                    LLMSettingsView(viewModel: viewModel)
                 }
             }
             .frame(minWidth: 720, minHeight: 480)
@@ -399,6 +486,45 @@ struct PromotionQueueView: View {
         .padding()
         .navigationTitle("Promotion Queue")
         .onAppear { viewModel.reloadPromotionCandidates() }
+    }
+}
+
+struct LLMSettingsView: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        Form {
+            Picker("Provider", selection: $viewModel.llmProviderMode) {
+                Text("Stub").tag(AppLLMProviderMode.stub)
+                Text("OpenAI Compatible").tag(AppLLMProviderMode.openAICompatible)
+            }
+            .pickerStyle(.segmented)
+
+            TextField("Base URL", text: $viewModel.llmBaseURLString)
+                .textFieldStyle(.roundedBorder)
+            TextField("Model", text: $viewModel.llmModel)
+                .textFieldStyle(.roundedBorder)
+            SecureField("API Key", text: $viewModel.llmAPIKeyInput)
+                .textFieldStyle(.roundedBorder)
+
+            HStack {
+                Button("Save Settings") { viewModel.saveLLMSettings() }
+                Button("Clear API Key") { viewModel.clearLLMAPIKey() }
+                Button("Reload") { viewModel.loadLLMSettings() }
+            }
+
+            Text(viewModel.llmHasAPIKey ? "API key: stored in Keychain" : "API key: not stored")
+                .foregroundStyle(viewModel.llmHasAPIKey ? .green : .secondary)
+
+            if let message = viewModel.llmSettingsMessage {
+                Text(message).foregroundStyle(.secondary)
+            }
+            if let error = viewModel.errorMessage {
+                Text(error).foregroundStyle(.red)
+            }
+        }
+        .padding()
+        .navigationTitle("LLM Settings")
     }
 }
 

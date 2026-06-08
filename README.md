@@ -6,7 +6,7 @@ This project is a runnable Agent client, not a Markdown knowledge-base manager. 
 
 ## Status
 
-Current MVP status: **Phase 14 promotion queue review UI build**.
+Current MVP status: **Phase 15 keychain LLM settings build**.
 
 Implemented layers:
 
@@ -23,6 +23,7 @@ Implemented layers:
 - Application Support SQLite bootstrap for the SwiftUI app.
 - Read-only knowledge import UI for legacy Markdown repositories.
 - Promotion Queue Review UI for promote / dismiss / pin memory candidates.
+- LLM Settings UI with macOS Keychain-backed API key storage.
 
 ## Product principle
 
@@ -97,9 +98,10 @@ Current SwiftUI pages:
 - **Graph Nodes** — inspect graph nodes and edges loaded from SQLite.
 - **Search** — run graph / edge / observe-log search against the loaded SQLite snapshot.
 - **Observe Log** — inspect short-term memory entries.
-- **Agent Chat** — ask the graph-backed agent using `StubLLMProvider`.
+- **Agent Chat** — ask the graph-backed agent using the selected LLM provider.
 - **Promotion Queue** — review active memory candidates and promote / dismiss / pin them.
 - **Import** — read-only import of a legacy Markdown knowledge repository into SQLite.
+- **LLM Settings** — configure Stub vs OpenAI-compatible mode, base URL, model and Keychain API key.
 
 ## Test and build
 
@@ -111,13 +113,13 @@ swift build
 Current acceptance baseline:
 
 ```text
-61 tests passing
+67 tests passing
 Build complete
 ```
 
 ## Real LLM provider
 
-The runtime supports an OpenAI-compatible provider. Secrets are read only from environment variables and must not be committed.
+The runtime supports an OpenAI-compatible provider. In the SwiftUI app, API keys are stored in macOS Keychain through the **LLM Settings** page. Environment variables remain available for programmatic tests and smoke runs.
 
 Environment variables:
 
@@ -141,6 +143,31 @@ Notes:
 - `StubLLMProvider` remains the default for tests and local demo UI.
 - The provider sends graph context through `AgentContext.renderedText`.
 - `LLMResponse.citations` preserves graph source IDs from the context assembler.
+
+## LLM Settings and Keychain
+
+The SwiftUI **LLM Settings** page supports:
+
+- Provider mode: `Stub` or `OpenAI Compatible`
+- Base URL, defaulting to `https://api.openai.com/v1`
+- Model, defaulting to `gpt-4o-mini`
+- API key save / clear
+
+Secret storage:
+
+```text
+macOS Keychain generic password
+service: ConnorGraphAgent
+account: openai-compatible-api-key
+```
+
+Non-secret settings are stored outside SQLite:
+
+- provider mode
+- base URL
+- model
+
+The API key is never stored in SQLite, README, fixtures or committed source. If OpenAI-compatible mode is selected without a stored key, chat returns a clear missing API key error.
 
 ## App database
 
@@ -255,19 +282,19 @@ Known limitations:
 
 - SwiftUI app seeds demo graph data only when the Application Support SQLite database is empty.
 - App UI does not yet persist chat sessions to SQLite.
-- App UI does not yet expose real LLM configuration.
+- App UI exposes basic LLM configuration, but does not yet include model testing, provider health checks or multi-profile management.
 - Legacy importer uses frontmatter and path heuristics; it does not yet run LLM-based entity extraction.
 - Search is currently in-memory lexical matching, not embedding / hybrid search.
 - Promotion Queue Review UI is available, but does not yet include advanced filtering, conflict resolution or diff previews.
 - No Graphiti sidecar adapter yet.
-- No Keychain-backed credential manager yet.
+- Keychain-backed LLM settings are available, but real provider connection testing is not yet exposed in the UI.
 
 ## Roadmap after MVP
 
 Recommended next phases:
 
-1. Add Keychain-backed LLM credential storage.
-2. Add real chat session persistence.
+1. Add real chat session persistence.
+2. Add provider health checks / test connection for LLM Settings.
 3. Add hybrid retrieval: lexical + embedding + graph neighborhood.
 4. Add Graphiti adapter for temporal fact extraction, deduplication and invalidation.
 5. Add human-readable export projections for graph slices.
