@@ -61,7 +61,9 @@ private func temporaryChatDatabaseURL(_ name: String = UUID().uuidString) -> URL
         includesSummary: true,
         recentMessageCount: 2,
         currentRequest: "What next?",
-        renderedPrompt: "Rendered prompt"
+        renderedPrompt: "Rendered prompt",
+        renderedPromptCharacterCount: 15,
+        estimatedPromptTokenCount: 4
     )
     let assistant = AgentMessage(
         id: "message-1",
