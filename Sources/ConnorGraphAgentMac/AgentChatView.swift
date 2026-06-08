@@ -108,6 +108,14 @@ private struct AgentChatConversationView: View {
         AgentChatMessagePresentation.rows(messages: viewModel.transcript, lastContext: viewModel.lastContext)
     }
 
+    private func scrollToBottom(proxy: ScrollViewProxy) {
+        let targetID = viewModel.isSubmittingChat ? "pending-assistant" : viewModel.transcript.last?.id
+        guard let targetID else { return }
+        withAnimation(.easeOut(duration: 0.2)) {
+            proxy.scrollTo(targetID, anchor: .bottom)
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             AgentChatConversationHeader(viewModel: viewModel)
@@ -127,17 +135,20 @@ private struct AgentChatConversationView: View {
                                 AgentChatMessageRow(row: row)
                                     .id(row.id)
                             }
+                            if viewModel.isSubmittingChat {
+                                AgentChatPendingAssistantRow(pending: AgentChatPendingAssistantPresentation(messages: viewModel.transcript))
+                                    .id("pending-assistant")
+                            }
                         }
                     }
                     .padding(.horizontal, 28)
                     .padding(.vertical, 22)
                 }
                 .onChange(of: viewModel.transcript.count) { _, _ in
-                    if let lastID = viewModel.transcript.last?.id {
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            proxy.scrollTo(lastID, anchor: .bottom)
-                        }
-                    }
+                    scrollToBottom(proxy: proxy)
+                }
+                .onChange(of: viewModel.isSubmittingChat) { _, _ in
+                    scrollToBottom(proxy: proxy)
                 }
             }
 
@@ -273,6 +284,73 @@ private struct AgentChatMessageRow: View {
     private var messageBackground: Color {
         if isUser { return Color.accentColor.opacity(0.88) }
         return Color(nsColor: .controlBackgroundColor).opacity(0.85)
+    }
+}
+
+private struct AgentChatPendingAssistantRow: View {
+    var pending: AgentChatPendingAssistantPresentation
+
+    var body: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Text("Assistant")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text("Turn \(pending.turnNumber)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    ProgressView()
+                        .scaleEffect(0.55)
+                    Text(pending.title)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                ThinkingDotsView()
+
+                DisclosureGroup {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label(pending.processingSummary, systemImage: "magnifyingglass")
+                        Label("Assembling recent conversation and optional session summary", systemImage: "text.bubble")
+                        Label("Calling the configured LLM provider", systemImage: "network")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 8)
+                } label: {
+                    Text("Processing")
+                        .font(.caption.weight(.semibold))
+                }
+                .font(.caption)
+            }
+            .padding(12)
+            .frame(maxWidth: 760, alignment: .leading)
+            .background(Color(nsColor: .controlBackgroundColor).opacity(0.85), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+            )
+
+            Spacer(minLength: 80)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct ThinkingDotsView: View {
+    var body: some View {
+        HStack(spacing: 5) {
+            ForEach(0..<3, id: \.self) { index in
+                Circle()
+                    .fill(Color.secondary.opacity(0.65))
+                    .frame(width: 6, height: 6)
+                    .opacity(index == 0 ? 1.0 : 0.45)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(.quaternary.opacity(0.18), in: Capsule())
     }
 }
 
@@ -419,11 +497,11 @@ private struct AgentChatComposerView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .clipShape(Circle())
-                .disabled(viewModel.chatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(viewModel.chatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.isSubmittingChat)
             }
 
             HStack(spacing: 8) {
-                Label("graph context", systemImage: "link")
+                Label(viewModel.isSubmittingChat ? "processing" : "graph context", systemImage: viewModel.isSubmittingChat ? "clock.arrow.circlepath" : "link")
                 if let inspection = viewModel.lastPromptInspection {
                     Text("~\(inspection.estimatedPromptTokenCount) tokens")
                     Text(AgentChatMessagePresentation.budgetStatusText(inspection.promptBudgetStatus))

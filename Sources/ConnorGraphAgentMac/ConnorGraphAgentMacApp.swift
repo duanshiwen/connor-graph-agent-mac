@@ -59,6 +59,7 @@ final class AppViewModel: ObservableObject {
     @Published var latestChatSummary: AgentSessionSummary?
     @Published var isSummarizingChatSession: Bool = false
     @Published var chatSummaryMessage: String?
+    @Published var isSubmittingChat: Bool = false
 
     private var repository: AppGraphRepository?
     private var promotionRepository: AppPromotionQueueRepository?
@@ -433,8 +434,15 @@ final class AppViewModel: ObservableObject {
 
     func submitChat() async {
         let prompt = chatInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !prompt.isEmpty else { return }
+        guard !prompt.isEmpty, !isSubmittingChat else { return }
         chatInput = ""
+        isSubmittingChat = true
+        let optimisticTranscript = transcript
+        let optimisticUserMessage = AgentMessage(role: .user, content: prompt)
+        transcript = optimisticTranscript + [optimisticUserMessage]
+        lastContext = nil
+        lastPromptInspection = nil
+        defer { isSubmittingChat = false }
         do {
             var controller = chatController
             let previousMessageCount = controller.transcript.count
@@ -457,6 +465,7 @@ final class AppViewModel: ObservableObject {
             lastPromptInspection = response.promptInspection
             errorMessage = nil
         } catch {
+            transcript = optimisticTranscript + [optimisticUserMessage]
             errorMessage = String(describing: error)
         }
     }

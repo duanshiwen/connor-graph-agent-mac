@@ -53,6 +53,21 @@ import ConnorGraphAppSupport
     #expect(row.currentRequest == "What changed?")
 }
 
+@Test func agentChatPendingAssistantPresentationUsesOpenUserTurn() {
+    let messages = [
+        AgentMessage(id: "user-1", role: .user, content: "First"),
+        AgentMessage(id: "assistant-1", role: .assistant, content: "Answer 1"),
+        AgentMessage(id: "user-2", role: .user, content: "Second")
+    ]
+
+    let pending = AgentChatPendingAssistantPresentation(messages: messages)
+
+    #expect(pending.id == "pending-assistant")
+    #expect(pending.turnNumber == 2)
+    #expect(pending.title == "Assistant is thinking…")
+    #expect(pending.processingSummary == "Preparing graph context and prompt…")
+}
+
 @Test func agentChatMessagePresentationShowsLastContextOnlyForLatestAssistantMessage() {
     let context = AgentContext(
         query: "memory",
