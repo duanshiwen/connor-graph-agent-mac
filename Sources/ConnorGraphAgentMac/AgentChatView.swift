@@ -18,7 +18,7 @@ struct AgentChatView: View {
             AgentChatConversationView(viewModel: viewModel)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .navigationTitle("Agent Chat")
+        .navigationTitle("智能体聊天")
         .onAppear { viewModel.reloadChatSessions() }
     }
 }
@@ -29,21 +29,21 @@ private struct AgentChatSessionListView: View {
     var body: some View {
         VStack(spacing: 12) {
             Button(action: { viewModel.newChatSession() }) {
-                Label("New Chat", systemImage: "square.and.pencil")
+                Label("新建对话", systemImage: "square.and.pencil")
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
 
             HStack {
-                Text("All Sessions")
+                Text("全部会话")
                     .font(.headline)
                 Spacer()
                 Button(action: { viewModel.reloadChatSessions() }) {
                     Image(systemName: "arrow.clockwise")
                 }
                 .buttonStyle(.borderless)
-                .help("Reload sessions")
+                .help("重新加载会话")
             }
 
             ScrollView {
@@ -170,7 +170,7 @@ private struct AgentChatConversationHeader: View {
     @ObservedObject var viewModel: AppViewModel
 
     private var selectedTitle: String {
-        viewModel.chatSessions.first(where: { $0.id == viewModel.selectedChatSessionID })?.title ?? "Agent Chat"
+        viewModel.chatSessions.first(where: { $0.id == viewModel.selectedChatSessionID })?.title ?? "智能体聊天"
     }
 
     var body: some View {
@@ -180,12 +180,12 @@ private struct AgentChatConversationHeader: View {
                     Text(selectedTitle)
                         .font(.headline)
                         .lineLimit(1)
-                    Text("Graph-backed conversation workspace")
+                    Text("基于图谱上下文的对话工作区")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Reload") { viewModel.reloadChatSessions() }
+                Button("重新加载") { viewModel.reloadChatSessions() }
                 Button(viewModel.summarizeChatSessionButtonTitle) {
                     Task { await viewModel.summarizeSelectedChatSession() }
                 }
@@ -199,7 +199,7 @@ private struct AgentChatConversationHeader: View {
                             .font(.subheadline)
                             .textSelection(.enabled)
                         if let freshness = viewModel.latestChatSummaryFreshness {
-                            Text("Covers \(freshness.coveredMessageCount) / \(freshness.currentMessageCount) messages · Updated \(summary.updatedAt.formatted())")
+                            Text("覆盖 \(freshness.coveredMessageCount) / \(freshness.currentMessageCount) 条消息 · 更新于 \(summary.updatedAt.formatted())")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -214,7 +214,7 @@ private struct AgentChatConversationHeader: View {
                     }
                     .padding(.top, 6)
                 } label: {
-                    Label("Session summary", systemImage: "text.quote")
+                    Label("会话摘要", systemImage: "text.quote")
                         .font(.caption.weight(.semibold))
                 }
                 .padding(10)
@@ -230,9 +230,9 @@ private struct AgentChatEmptyStateView: View {
             Image(systemName: "sparkles.rectangle.stack")
                 .font(.system(size: 42))
                 .foregroundStyle(.secondary)
-            Text("Start a graph-backed conversation")
+            Text("开始基于图谱的对话")
                 .font(.title3.weight(.semibold))
-            Text("Ask about your imported graph knowledge. Each assistant turn can expose prompt, context, token budget, and citations.")
+            Text("你可以询问已导入的图谱知识。每一轮助手回复都可以展开查看提示词、上下文、Token 预算和引用。")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -256,7 +256,7 @@ private struct AgentChatMessageRow: View {
                     Text(row.roleLabel)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(isUser ? .white.opacity(0.90) : .secondary)
-                    Text("Turn \(row.turnNumber)")
+                    Text("第 \(row.turnNumber) 轮")
                         .font(.caption2)
                         .foregroundStyle(isUser ? .white.opacity(0.65) : .secondary)
                     Text(row.message.createdAt.formatted(date: .omitted, time: .shortened))
@@ -328,22 +328,22 @@ private struct AgentChatTurnProcessRow: View {
                 DisclosureGroup {
                     VStack(alignment: .leading, spacing: 10) {
                         if process.state == .running {
-                            Label("Preparing graph context and prompt", systemImage: "magnifyingglass")
-                            Label("Assembling recent conversation and optional session summary", systemImage: "text.bubble")
-                            Label("Calling the configured LLM provider", systemImage: "network")
+                            Label("正在准备图谱上下文和提示词", systemImage: "magnifyingglass")
+                            Label("正在组装近期对话和可选会话摘要", systemImage: "text.bubble")
+                            Label("正在调用已配置的模型提供方", systemImage: "network")
                         }
 
                         if let request = process.currentRequest {
-                            MetadataBlock(title: "User request", text: request)
+                            MetadataBlock(title: "用户请求", text: request)
                         }
 
                         if !process.citationIDs.isEmpty {
-                            MetadataChips(title: "Citations used by this turn", values: process.citationIDs)
+                            MetadataChips(title: "本轮使用的引用", values: process.citationIDs)
                         }
 
                         if !process.expandedContextItems.isEmpty {
                             VStack(alignment: .leading, spacing: 8) {
-                                Text("Graph context used")
+                                Text("使用的图谱上下文")
                                     .font(.caption.weight(.semibold))
                                     .foregroundStyle(.secondary)
                                 ForEach(process.expandedContextItems) { item in
@@ -363,9 +363,9 @@ private struct AgentChatTurnProcessRow: View {
                         }
 
                         if let prompt = process.promptSnapshotText, !prompt.isEmpty {
-                            MetadataBlock(title: "Prompt snapshot", text: prompt, monospaced: true)
+                            MetadataBlock(title: "提示词快照", text: prompt, monospaced: true)
                         } else if process.state == .completed {
-                            Text("No rendered prompt snapshot saved for this turn.")
+                            Text("本轮没有保存渲染后的提示词快照。")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -374,7 +374,7 @@ private struct AgentChatTurnProcessRow: View {
                     .foregroundStyle(.secondary)
                     .padding(.top, 8)
                 } label: {
-                    Text(process.state == .running ? "Processing details" : "Turn details")
+                    Text(process.state == .running ? "处理详情" : "轮次详情")
                         .font(.caption.weight(.semibold))
                 }
                 .font(.caption)
@@ -400,10 +400,10 @@ private struct AgentChatPendingAssistantRow: View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
-                    Text("Assistant")
+                    Text("助手")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                    Text("Turn \(pending.turnNumber)")
+                    Text("第 \(pending.turnNumber) 轮")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                     ProgressView()
@@ -418,14 +418,14 @@ private struct AgentChatPendingAssistantRow: View {
                 DisclosureGroup {
                     VStack(alignment: .leading, spacing: 8) {
                         Label(pending.processingSummary, systemImage: "magnifyingglass")
-                        Label("Assembling recent conversation and optional session summary", systemImage: "text.bubble")
-                        Label("Calling the configured LLM provider", systemImage: "network")
+                        Label("正在组装近期对话和可选会话摘要", systemImage: "text.bubble")
+                        Label("正在调用已配置的模型提供方", systemImage: "network")
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .padding(.top, 8)
                 } label: {
-                    Text("Processing")
+                    Text("处理中")
                         .font(.caption.weight(.semibold))
                 }
                 .font(.caption)
@@ -481,16 +481,16 @@ private struct AgentChatTurnInspectorView: View {
             DisclosureGroup {
                 VStack(alignment: .leading, spacing: 10) {
                     if let request = row.currentRequest {
-                        MetadataBlock(title: "Current request", text: request)
+                        MetadataBlock(title: "当前请求", text: request)
                     }
 
                     if !row.citationIDs.isEmpty {
-                        MetadataChips(title: "Citations", values: row.citationIDs)
+                        MetadataChips(title: "引用", values: row.citationIDs)
                     }
 
                     if !row.expandedContextItems.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Cited graph context")
+                            Text("引用的图谱上下文")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.secondary)
                             ForEach(row.expandedContextItems) { item in
@@ -510,16 +510,16 @@ private struct AgentChatTurnInspectorView: View {
                     }
 
                     if let prompt = row.promptSnapshotText, !prompt.isEmpty {
-                        MetadataBlock(title: "Prompt snapshot", text: prompt, monospaced: true)
+                        MetadataBlock(title: "提示词快照", text: prompt, monospaced: true)
                     } else if row.message.promptInspection != nil {
-                        Text("No rendered prompt snapshot saved for this turn.")
+                        Text("本轮没有保存渲染后的提示词快照。")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
                 .padding(.top, 8)
             } label: {
-                Text("Turn information")
+                Text("轮次信息")
                     .font(.caption.weight(.semibold))
             }
             .font(.caption)
@@ -584,7 +584,7 @@ private struct AgentChatComposerView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 10) {
-                TextField("Ask the graph-backed agent", text: $viewModel.chatInput, axis: .vertical)
+                TextField("询问图谱智能体", text: $viewModel.chatInput, axis: .vertical)
                     .textFieldStyle(.plain)
                     .lineLimit(1...4)
                     .padding(.horizontal, 12)
@@ -607,14 +607,14 @@ private struct AgentChatComposerView: View {
             }
 
             HStack(spacing: 8) {
-                Label(viewModel.isSubmittingChat ? "processing" : "graph context", systemImage: viewModel.isSubmittingChat ? "clock.arrow.circlepath" : "link")
+                Label(viewModel.isSubmittingChat ? "处理中" : "图谱上下文", systemImage: viewModel.isSubmittingChat ? "clock.arrow.circlepath" : "link")
                 if let inspection = viewModel.lastPromptInspection {
-                    Text("~\(inspection.estimatedPromptTokenCount) tokens")
+                    Text("约 \(inspection.estimatedPromptTokenCount) tokens")
                     Text(AgentChatMessagePresentation.budgetStatusText(inspection.promptBudgetStatus))
                         .foregroundStyle(promptBudgetStatusColor(inspection.promptBudgetStatus))
                 }
                 Spacer()
-                Text("Return to send")
+                Text("按 Return 发送")
             }
             .font(.caption2)
             .foregroundStyle(.secondary)

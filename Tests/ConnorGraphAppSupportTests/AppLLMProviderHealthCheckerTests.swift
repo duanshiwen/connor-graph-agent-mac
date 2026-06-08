@@ -36,7 +36,7 @@ private final class HealthCheckFakeSettingsStore: LLMSettingsStore, @unchecked S
     let result = await checker.testConnection()
 
     #expect(result.status == .success)
-    #expect(result.message == "Stub provider is available.")
+    #expect(result.message == "模拟模型提供方可用。")
 }
 
 @Test func healthCheckerReportsMissingOpenAICompatibleConfig() async throws {
@@ -53,7 +53,7 @@ private final class HealthCheckFakeSettingsStore: LLMSettingsStore, @unchecked S
     let result = await checker.testConnection()
 
     #expect(result.status == .notConfigured)
-    #expect(result.message.contains("API key"))
+    #expect(result.message.contains("API Key"))
 }
 
 @Test func healthCheckerReportsOpenAICompatibleSuccess() async throws {

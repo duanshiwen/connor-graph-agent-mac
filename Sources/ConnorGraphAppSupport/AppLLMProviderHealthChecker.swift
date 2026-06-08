@@ -38,10 +38,10 @@ public struct AppLLMProviderHealthChecker: Sendable {
             let settings = try settingsRepository.loadSettings()
             switch settings.providerMode {
             case .stub:
-                return AppLLMProviderHealthCheckResult(status: .success, message: "Stub provider is available.")
+                return AppLLMProviderHealthCheckResult(status: .success, message: "模拟模型提供方可用。")
             case .openAICompatible:
                 guard let config = try settingsRepository.openAICompatibleConfig() else {
-                    return AppLLMProviderHealthCheckResult(status: .notConfigured, message: "OpenAI-compatible provider is missing an API key.")
+                    return AppLLMProviderHealthCheckResult(status: .notConfigured, message: "OpenAI 兼容模型提供方缺少 API Key。")
                 }
                 let result = try await openAICompatibleHealthCheck(config)
                 return AppLLMProviderHealthCheckResult(
@@ -57,15 +57,15 @@ public struct AppLLMProviderHealthChecker: Sendable {
     private static func safeMessage(for error: Error) -> String {
         switch error {
         case OpenAICompatibleProviderError.missingAPIKey:
-            return "OpenAI-compatible provider is missing an API key."
+            return "OpenAI 兼容模型提供方缺少 API Key。"
         case let OpenAICompatibleProviderError.invalidBaseURL(value):
-            return "Invalid base URL: \(value)"
+            return "Base URL 无效：\(value)"
         case OpenAICompatibleProviderError.invalidResponse:
-            return "Provider returned an invalid response."
+            return "模型提供方返回了无效响应。"
         case let OpenAICompatibleProviderError.httpStatus(code):
-            return "Provider returned HTTP status \(code)."
+            return "模型提供方返回 HTTP 状态码 \(code)。"
         case OpenAICompatibleProviderError.missingAssistantMessage:
-            return "Provider response did not include an assistant message."
+            return "模型提供方响应中没有助手消息。"
         default:
             return String(describing: error)
         }
