@@ -1,4 +1,5 @@
 import Foundation
+import ConnorGraphCore
 
 public struct AgentPromptBudgetEstimate: Sendable, Equatable {
     public var characterCount: Int
@@ -20,5 +21,11 @@ public struct AgentPromptBudgetEstimator: Sendable, Equatable {
             characterCount: characterCount,
             estimatedTokenCount: estimatedTokenCount
         )
+    }
+
+    public func status(estimatedTokenCount: Int) -> AgentPromptBudgetStatus {
+        if estimatedTokenCount >= 8_000 { return .over }
+        if estimatedTokenCount >= 6_000 { return .warning }
+        return .safe
     }
 }

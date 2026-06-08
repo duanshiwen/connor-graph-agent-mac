@@ -7,6 +7,7 @@ public struct AgentChatPromptInspection: Sendable, Equatable {
     public var renderedPrompt: String
     public var renderedPromptCharacterCount: Int
     public var estimatedPromptTokenCount: Int
+    public var promptBudgetStatus: AgentPromptBudgetStatus
 
     public init(
         includesSummary: Bool,
@@ -14,14 +15,16 @@ public struct AgentChatPromptInspection: Sendable, Equatable {
         currentRequest: String,
         renderedPrompt: String
     ) {
-        let estimate = AgentPromptBudgetEstimator().estimate(renderedPrompt)
+        let estimator = AgentPromptBudgetEstimator()
+        let estimate = estimator.estimate(renderedPrompt)
         self.init(
             includesSummary: includesSummary,
             recentMessageCount: recentMessageCount,
             currentRequest: currentRequest,
             renderedPrompt: renderedPrompt,
             renderedPromptCharacterCount: estimate.characterCount,
-            estimatedPromptTokenCount: estimate.estimatedTokenCount
+            estimatedPromptTokenCount: estimate.estimatedTokenCount,
+            promptBudgetStatus: estimator.status(estimatedTokenCount: estimate.estimatedTokenCount)
         )
     }
 
@@ -31,7 +34,8 @@ public struct AgentChatPromptInspection: Sendable, Equatable {
         currentRequest: String,
         renderedPrompt: String,
         renderedPromptCharacterCount: Int,
-        estimatedPromptTokenCount: Int
+        estimatedPromptTokenCount: Int,
+        promptBudgetStatus: AgentPromptBudgetStatus
     ) {
         self.includesSummary = includesSummary
         self.recentMessageCount = recentMessageCount
@@ -39,6 +43,7 @@ public struct AgentChatPromptInspection: Sendable, Equatable {
         self.renderedPrompt = renderedPrompt
         self.renderedPromptCharacterCount = renderedPromptCharacterCount
         self.estimatedPromptTokenCount = estimatedPromptTokenCount
+        self.promptBudgetStatus = promptBudgetStatus
     }
 }
 
@@ -50,7 +55,8 @@ public extension AgentPromptInspectionSnapshot {
             currentRequest: inspection.currentRequest,
             renderedPrompt: includeRenderedPrompt ? inspection.renderedPrompt : nil,
             renderedPromptCharacterCount: inspection.renderedPromptCharacterCount,
-            estimatedPromptTokenCount: inspection.estimatedPromptTokenCount
+            estimatedPromptTokenCount: inspection.estimatedPromptTokenCount,
+            promptBudgetStatus: inspection.promptBudgetStatus
         )
     }
 }
