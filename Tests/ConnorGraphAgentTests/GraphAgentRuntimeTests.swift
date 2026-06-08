@@ -98,3 +98,46 @@ import ConnorGraphAgent
     #expect(response.observeLogEntries.count == 1)
     #expect(response.observeLogEntries[0].content == "memory")
 }
+
+private actor RuntimePromptRecorder {
+    private(set) var prompt: String?
+
+    func record(_ prompt: String) {
+        self.prompt = prompt
+    }
+}
+
+private struct RuntimeCapturingProvider: LLMProvider, Sendable {
+    let recorder: RuntimePromptRecorder
+
+    func complete(prompt: String, context: AgentContext) async throws -> LLMResponse {
+        await recorder.record(prompt)
+        return LLMResponse(text: "Captured answer", citations: context.items.map(\.sourceID))
+    }
+}
+
+@Test func graphAgentInjectsSessionSummaryIntoProviderPrompt() async throws {
+    let recorder = RuntimePromptRecorder()
+    let agent = GraphAgent(
+        session: AgentSession(id: "session-1"),
+        contextBuilder: AgentContextBuilder(searchIndex: InMemoryGraphSearchIndex(nodes: [], edges: [], observeLogEntries: []), assembler: ContextAssembler()),
+        llmProvider: RuntimeCapturingProvider(recorder: recorder)
+    )
+    let summary = AgentSessionSummary(
+        id: "summary-1",
+        sessionID: "session-1",
+        content: "Phase 18 added manual summary persistence.",
+        sourceMessageCount: 4,
+        lastMessageID: "message-4"
+    )
+
+    let response = try await agent.ask("What next?", sessionSummary: summary)
+    let providerPrompt = try #require(await recorder.prompt)
+
+    #expect(providerPrompt.contains("Previous session summary:"))
+    #expect(providerPrompt.contains("Phase 18 added manual summary persistence."))
+    #expect(providerPrompt.contains("Current user request:"))
+    #expect(providerPrompt.contains("What next?"))
+    #expect(response.session.messages.first?.content == "What next?")
+    #expect(!response.session.messages.first!.content.contains("Previous session summary"))
+}
