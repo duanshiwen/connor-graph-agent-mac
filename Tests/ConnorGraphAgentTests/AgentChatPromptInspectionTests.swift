@@ -81,3 +81,12 @@ import ConnorGraphAgent
     #expect(inspection.renderedPromptCharacterCount == inspection.renderedPrompt.count)
     #expect(inspection.estimatedPromptTokenCount == AgentPromptBudgetEstimator().estimate(inspection.renderedPrompt).estimatedTokenCount)
 }
+
+@Test func agentChatPromptInspectionIncludesPromptBudgetStatus() {
+    let context = AgentChatPromptContext(userPrompt: String(repeating: "a", count: 24_000))
+
+    let inspection = context.inspection
+
+    #expect(inspection.estimatedPromptTokenCount == 6_000)
+    #expect(inspection.promptBudgetStatus == .warning)
+}

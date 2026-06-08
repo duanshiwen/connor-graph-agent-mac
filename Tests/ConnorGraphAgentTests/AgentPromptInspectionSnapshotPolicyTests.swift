@@ -81,4 +81,21 @@ import ConnorGraphAgent
     #expect(snapshot.renderedPrompt == nil)
     #expect(snapshot.renderedPromptCharacterCount == 10)
     #expect(snapshot.estimatedPromptTokenCount == 3)
+    #expect(snapshot.promptBudgetStatus == .safe)
+}
+
+@Test func promptInspectionSnapshotPolicyCarriesPromptBudgetStatusWhenPromptIsOmitted() {
+    let inspection = AgentChatPromptInspection(
+        includesSummary: false,
+        recentMessageCount: 1,
+        currentRequest: "What next?",
+        renderedPrompt: String(repeating: "a", count: 32_000)
+    )
+    let policy = AgentPromptInspectionSnapshotPolicy(includeRenderedPrompt: false)
+
+    let snapshot = policy.snapshot(for: inspection)
+
+    #expect(snapshot.renderedPrompt == nil)
+    #expect(snapshot.estimatedPromptTokenCount == 8_000)
+    #expect(snapshot.promptBudgetStatus == .over)
 }
