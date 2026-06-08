@@ -380,9 +380,14 @@ public final class SQLiteGraphStore: @unchecked Sendable {
 
     public func upsert(chatSession session: AgentSession) throws {
         let sql = """
-        INSERT OR REPLACE INTO chat_sessions
+        INSERT INTO chat_sessions
         (id, title, created_at, updated_at, metadata_json)
-        VALUES (?, ?, ?, ?, ?);
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            title = excluded.title,
+            created_at = excluded.created_at,
+            updated_at = excluded.updated_at,
+            metadata_json = excluded.metadata_json;
         """
         try withStatement(sql) { statement in
             try bind(session.id, at: 1, in: statement)
