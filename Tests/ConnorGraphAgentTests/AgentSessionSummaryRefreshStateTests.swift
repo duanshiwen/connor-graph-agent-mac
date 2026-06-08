@@ -9,7 +9,7 @@ import ConnorGraphAgent
         freshness: AgentSessionSummaryFreshness(coveredMessageCount: 2, currentMessageCount: 3)
     )
 
-    #expect(state.buttonTitle == "Refresh Summary")
+    #expect(state.buttonTitle == "刷新摘要")
     #expect(state.canSubmit)
 }
 
@@ -20,7 +20,7 @@ import ConnorGraphAgent
         freshness: AgentSessionSummaryFreshness(coveredMessageCount: 2, currentMessageCount: 2)
     )
 
-    #expect(state.buttonTitle == "Summarize Session")
+    #expect(state.buttonTitle == "生成会话摘要")
     #expect(state.canSubmit)
 }
 
@@ -31,7 +31,7 @@ import ConnorGraphAgent
         freshness: nil
     )
 
-    #expect(state.buttonTitle == "Summarize Session")
+    #expect(state.buttonTitle == "生成会话摘要")
     #expect(!state.canSubmit)
 }
 
@@ -42,7 +42,7 @@ import ConnorGraphAgent
         freshness: AgentSessionSummaryFreshness(coveredMessageCount: 2, currentMessageCount: 3)
     )
 
-    #expect(state.buttonTitle == "Summarizing…")
+    #expect(state.buttonTitle == "摘要生成中…")
     #expect(!state.canSubmit)
 }
 
@@ -53,5 +53,5 @@ import ConnorGraphAgent
         freshness: AgentSessionSummaryFreshness(coveredMessageCount: 3, currentMessageCount: 3)
     )
 
-    #expect(state.successMessage == "Summary refreshed and will be included in the next answer.")
+    #expect(state.successMessage == "会话摘要已刷新，将包含在下一次回答中。")
 }

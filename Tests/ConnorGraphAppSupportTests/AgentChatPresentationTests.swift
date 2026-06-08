@@ -17,7 +17,7 @@ import ConnorGraphAppSupport
 
     #expect(row.id == "session-1")
     #expect(row.title == "Prompt inspection timeline")
-    #expect(row.relativeUpdatedTime == "15m")
+    #expect(row.relativeUpdatedTime == "15 分钟")
 }
 
 @Test func agentChatMessagePresentationAssignsTurnNumbersByUserAssistantPairs() {
@@ -31,7 +31,7 @@ import ConnorGraphAppSupport
     let rows = AgentChatMessagePresentation.rows(messages: messages, lastContext: nil)
 
     #expect(rows.map(\.turnNumber) == [1, 1, 2, 2])
-    #expect(rows.map(\.roleLabel) == ["User", "Assistant", "User", "Assistant"])
+    #expect(rows.map(\.roleLabel) == ["用户", "助手", "用户", "助手"])
 }
 
 @Test func agentChatTurnTimelinePlacesProcessBetweenUserAndAssistant() {
@@ -55,7 +55,7 @@ import ConnorGraphAppSupport
     #expect(items.map(\.kindLabel) == ["message", "process", "message"])
     #expect(items[1].process?.turnNumber == 1)
     #expect(items[1].process?.state == .completed)
-    #expect(items[1].process?.summary == "Turn 1 · summary not included · recent 2 · ~30 tokens · safe")
+    #expect(items[1].process?.summary == "第 1 轮 · 摘要未包含 · 近期消息 2 条 · 约 30 tokens · 安全")
 }
 
 @Test func agentChatTurnTimelinePlacesPendingProcessAfterOpenUserTurn() {
@@ -83,7 +83,7 @@ import ConnorGraphAppSupport
 
     let row = AgentChatMessagePresentation(message: message, turnNumber: 3, isLatestAssistantMessage: true, lastContext: nil)
 
-    #expect(row.turnMetadataSummary == "Turn 3 · summary included · recent 4 · ~100 tokens · safe")
+    #expect(row.turnMetadataSummary == "第 3 轮 · 摘要已包含 · 近期消息 4 条 · 约 100 tokens · 安全")
     #expect(row.promptSnapshotText == "Rendered prompt")
     #expect(row.currentRequest == "What changed?")
 }
@@ -99,8 +99,8 @@ import ConnorGraphAppSupport
 
     #expect(pending.id == "pending-assistant")
     #expect(pending.turnNumber == 2)
-    #expect(pending.title == "Assistant is thinking…")
-    #expect(pending.processingSummary == "Preparing graph context and prompt…")
+    #expect(pending.title == "助手正在思考…")
+    #expect(pending.processingSummary == "正在准备图谱上下文和提示词…")
 }
 
 @Test func agentChatMessagePresentationShowsLastContextOnlyForLatestAssistantMessage() {
