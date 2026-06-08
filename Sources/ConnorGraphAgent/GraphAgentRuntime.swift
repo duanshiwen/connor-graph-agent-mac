@@ -109,6 +109,7 @@ public struct GraphAgent<Provider: LLMProvider>: Sendable {
     public var llmProvider: Provider
     public var observeLogRecorder: ObserveLogRecorder
     public var recentMessageLimit: Int
+    public var promptInspectionSnapshotPolicy: AgentPromptInspectionSnapshotPolicy
 
     public init(
         session: AgentSession,
@@ -117,11 +118,30 @@ public struct GraphAgent<Provider: LLMProvider>: Sendable {
         observeLogRecorder: ObserveLogRecorder = ObserveLogRecorder(),
         recentMessageLimit: Int = 6
     ) {
+        self.init(
+            session: session,
+            contextBuilder: contextBuilder,
+            llmProvider: llmProvider,
+            observeLogRecorder: observeLogRecorder,
+            recentMessageLimit: recentMessageLimit,
+            promptInspectionSnapshotPolicy: AgentPromptInspectionSnapshotPolicy()
+        )
+    }
+
+    public init(
+        session: AgentSession,
+        contextBuilder: AgentContextBuilder,
+        llmProvider: Provider,
+        observeLogRecorder: ObserveLogRecorder = ObserveLogRecorder(),
+        recentMessageLimit: Int = 6,
+        promptInspectionSnapshotPolicy: AgentPromptInspectionSnapshotPolicy
+    ) {
         self.session = session
         self.contextBuilder = contextBuilder
         self.llmProvider = llmProvider
         self.observeLogRecorder = observeLogRecorder
         self.recentMessageLimit = recentMessageLimit
+        self.promptInspectionSnapshotPolicy = promptInspectionSnapshotPolicy
     }
 
     public func ask(_ prompt: String) async throws -> GraphAgentAskResponse {
@@ -145,7 +165,7 @@ public struct GraphAgent<Provider: LLMProvider>: Sendable {
             answer.text,
             citations: answer.citations,
             contextSnapshot: context.renderedText,
-            promptInspection: AgentPromptInspectionSnapshot(promptContext.inspection)
+            promptInspection: promptInspectionSnapshotPolicy.snapshot(for: promptContext.inspection)
         )
         return GraphAgentAskResponse(
             answer: answer,
