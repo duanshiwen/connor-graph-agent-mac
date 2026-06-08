@@ -43,6 +43,18 @@ public enum OpenAICompatibleProviderError: Error, Equatable, Sendable {
     case missingAssistantMessage
 }
 
+public struct LLMProviderHealthCheckResult: Sendable, Equatable {
+    public var ok: Bool
+    public var model: String
+    public var message: String
+
+    public init(ok: Bool, model: String, message: String) {
+        self.ok = ok
+        self.model = model
+        self.message = message
+    }
+}
+
 public struct AgentHTTPRequest: Sendable, Equatable {
     public var url: URL
     public var method: String
@@ -107,6 +119,16 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, Se
         }
         let text = try parseResponse(response.body)
         return LLMResponse(text: text, citations: context.items.map(\.sourceID))
+    }
+
+    public func healthCheck() async throws -> LLMProviderHealthCheckResult {
+        let context = AgentContext(query: "provider-health-check", items: [])
+        let response = try await complete(prompt: "Reply with exactly: OK", context: context)
+        return LLMProviderHealthCheckResult(
+            ok: !response.text.isEmpty,
+            model: config.model,
+            message: "Connection OK: \(config.model)"
+        )
     }
 
     private func makeRequest(prompt: String, context: AgentContext) throws -> AgentHTTPRequest {

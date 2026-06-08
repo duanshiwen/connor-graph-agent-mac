@@ -51,6 +51,8 @@ final class AppViewModel: ObservableObject {
     @Published var llmAPIKeyInput: String = ""
     @Published var llmHasAPIKey: Bool = false
     @Published var llmSettingsMessage: String?
+    @Published var llmHealthCheckMessage: String?
+    @Published var isTestingLLMConnection: Bool = false
     @Published var chatSessions: [AgentSession] = []
     @Published var selectedChatSessionID: String?
 
@@ -58,6 +60,7 @@ final class AppViewModel: ObservableObject {
     private var promotionRepository: AppPromotionQueueRepository?
     private var chatSessionRepository: AppChatSessionRepository?
     private var llmSettingsRepository: AppLLMSettingsRepository
+    private var llmProviderHealthChecker: AppLLMProviderHealthChecker
     private var searchIndex: InMemoryGraphSearchIndex
     private var chatController: AgentChatController<AnyLLMProvider>
 
@@ -78,6 +81,7 @@ final class AppViewModel: ObservableObject {
             self.chatSessionRepository = AppChatSessionRepository(store: repository.store)
         }
         self.llmSettingsRepository = llmSettingsRepository
+        self.llmProviderHealthChecker = AppLLMProviderHealthChecker(settingsRepository: llmSettingsRepository)
         self.databasePath = databasePath
         self.searchIndex = InMemoryGraphSearchIndex(nodes: nodes, edges: edges, observeLogEntries: observeLogEntries)
         self.chatController = Self.makeChatController(searchIndex: searchIndex, settingsRepository: llmSettingsRepository)
@@ -200,6 +204,7 @@ final class AppViewModel: ObservableObject {
             llmHasAPIKey = settings.hasAPIKey
             llmAPIKeyInput = ""
             llmSettingsMessage = nil
+            llmHealthCheckMessage = nil
         } catch {
             errorMessage = String(describing: error)
         }
@@ -218,6 +223,7 @@ final class AppViewModel: ObservableObject {
             loadLLMSettings()
             chatController = Self.makeChatController(searchIndex: searchIndex, settingsRepository: llmSettingsRepository, session: chatController.agent.session)
             llmSettingsMessage = "LLM settings saved."
+            llmHealthCheckMessage = nil
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -230,9 +236,24 @@ final class AppViewModel: ObservableObject {
             loadLLMSettings()
             chatController = Self.makeChatController(searchIndex: searchIndex, settingsRepository: llmSettingsRepository, session: chatController.agent.session)
             llmSettingsMessage = "API key cleared."
+            llmHealthCheckMessage = nil
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
+        }
+    }
+
+    func testLLMConnection() async {
+        isTestingLLMConnection = true
+        defer { isTestingLLMConnection = false }
+        llmHealthCheckMessage = nil
+        let result = await llmProviderHealthChecker.testConnection()
+        llmHealthCheckMessage = result.message
+        switch result.status {
+        case .success:
+            errorMessage = nil
+        case .notConfigured, .failed:
+            errorMessage = result.message
         }
     }
 
@@ -576,6 +597,10 @@ struct LLMSettingsView: View {
                 Button("Save Settings") { viewModel.saveLLMSettings() }
                 Button("Clear API Key") { viewModel.clearLLMAPIKey() }
                 Button("Reload") { viewModel.loadLLMSettings() }
+                Button(viewModel.isTestingLLMConnection ? "Testing…" : "Test Connection") {
+                    Task { await viewModel.testLLMConnection() }
+                }
+                .disabled(viewModel.isTestingLLMConnection)
             }
 
             Text(viewModel.llmHasAPIKey ? "API key: stored in Keychain" : "API key: not stored")
@@ -583,6 +608,9 @@ struct LLMSettingsView: View {
 
             if let message = viewModel.llmSettingsMessage {
                 Text(message).foregroundStyle(.secondary)
+            }
+            if let message = viewModel.llmHealthCheckMessage {
+                Text(message).foregroundStyle(message.contains("OK") || message.contains("available") ? .green : .secondary)
             }
             if let error = viewModel.errorMessage {
                 Text(error).foregroundStyle(.red)
