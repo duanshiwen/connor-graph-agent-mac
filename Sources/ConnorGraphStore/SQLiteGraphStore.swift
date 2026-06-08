@@ -254,6 +254,69 @@ public final class SQLiteGraphStore: @unchecked Sendable {
         }
     }
 
+    public func allNodes(limit: Int = 1_000) throws -> [GraphNode] {
+        let sql = """
+        SELECT id, type, title, summary, source_path, status, created_at, valid_at, metadata_json
+        FROM graph_nodes
+        ORDER BY id ASC
+        LIMIT ?;
+        """
+        return try withStatement(sql) { statement in
+            sqlite3_bind_int(statement, 1, Int32(limit))
+            var nodes: [GraphNode] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                nodes.append(try decodeNode(statement))
+            }
+            return nodes
+        }
+    }
+
+    public func allEdges(limit: Int = 2_000) throws -> [SemanticEdge] {
+        let sql = """
+        SELECT id, source_node_id, target_node_id, relation, fact, confidence, created_at, valid_at, invalid_at, source_episode_id, metadata_json
+        FROM semantic_edges
+        ORDER BY id ASC
+        LIMIT ?;
+        """
+        return try withStatement(sql) { statement in
+            sqlite3_bind_int(statement, 1, Int32(limit))
+            return try collectEdges(statement)
+        }
+    }
+
+    public func recentObserveLogEntries(limit: Int = 500) throws -> [ObserveLogEntry] {
+        let sql = """
+        SELECT id, timestamp, kind, source, content, normalized_summary, work_object_id, session_id, related_node_ids_json, related_edge_ids_json, importance, confidence, status, expires_at, promoted_node_id, metadata_json
+        FROM observe_log_entries
+        ORDER BY timestamp DESC
+        LIMIT ?;
+        """
+        return try withStatement(sql) { statement in
+            sqlite3_bind_int(statement, 1, Int32(limit))
+            var entries: [ObserveLogEntry] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                entries.append(try decodeObserveLogEntry(statement))
+            }
+            return entries
+        }
+    }
+
+    public func observeLogEntries(limit: Int) throws -> [ObserveLogEntry] {
+        try recentObserveLogEntries(limit: limit)
+    }
+
+    public func snapshot(
+        nodeLimit: Int = 1_000,
+        edgeLimit: Int = 2_000,
+        observeLogLimit: Int = 500
+    ) throws -> GraphStoreSnapshot {
+        GraphStoreSnapshot(
+            nodes: try allNodes(limit: nodeLimit),
+            edges: try allEdges(limit: edgeLimit),
+            observeLogEntries: try recentObserveLogEntries(limit: observeLogLimit)
+        )
+    }
+
     private func execute(_ sql: String) throws {
         if sqlite3_exec(db, sql, nil, nil, nil) != SQLITE_OK {
             throw SQLiteGraphStoreError.executeFailed(Self.message(db))
