@@ -104,12 +104,16 @@ private struct AgentChatSessionRow: View {
 private struct AgentChatConversationView: View {
     @ObservedObject var viewModel: AppViewModel
 
-    private var messageRows: [AgentChatMessagePresentation] {
-        AgentChatMessagePresentation.rows(messages: viewModel.transcript, lastContext: viewModel.lastContext)
+    private var timelineItems: [AgentChatTurnTimelineItem] {
+        AgentChatTurnTimelineItem.items(
+            messages: viewModel.transcript,
+            lastContext: viewModel.lastContext,
+            isSubmitting: viewModel.isSubmittingChat
+        )
     }
 
     private func scrollToBottom(proxy: ScrollViewProxy) {
-        let targetID = viewModel.isSubmittingChat ? "pending-assistant" : viewModel.transcript.last?.id
+        let targetID = timelineItems.last?.id
         guard let targetID else { return }
         withAnimation(.easeOut(duration: 0.2)) {
             proxy.scrollTo(targetID, anchor: .bottom)
@@ -127,17 +131,18 @@ private struct AgentChatConversationView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 16) {
-                        if viewModel.transcript.isEmpty {
+                        if timelineItems.isEmpty {
                             AgentChatEmptyStateView()
                                 .frame(maxWidth: .infinity, minHeight: 360)
                         } else {
-                            ForEach(messageRows) { row in
-                                AgentChatMessageRow(row: row)
-                                    .id(row.id)
-                            }
-                            if viewModel.isSubmittingChat {
-                                AgentChatPendingAssistantRow(pending: AgentChatPendingAssistantPresentation(messages: viewModel.transcript))
-                                    .id("pending-assistant")
+                            ForEach(timelineItems) { item in
+                                if let message = item.message {
+                                    AgentChatMessageRow(row: message)
+                                        .id(item.id)
+                                } else if let process = item.process {
+                                    AgentChatTurnProcessRow(process: process)
+                                        .id(item.id)
+                                }
                             }
                         }
                     }
@@ -264,9 +269,6 @@ private struct AgentChatMessageRow: View {
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                if row.message.role == .assistant {
-                    AgentChatTurnInspectorView(row: row)
-                }
             }
             .padding(12)
             .frame(maxWidth: isUser ? 560 : 760, alignment: .leading)
@@ -284,6 +286,110 @@ private struct AgentChatMessageRow: View {
     private var messageBackground: Color {
         if isUser { return Color.accentColor.opacity(0.88) }
         return Color(nsColor: .controlBackgroundColor).opacity(0.85)
+    }
+}
+
+private struct AgentChatTurnProcessRow: View {
+    var process: AgentChatTurnProcessPresentation
+
+    var body: some View {
+        HStack(alignment: .top) {
+            Spacer(minLength: 120)
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Image(systemName: process.state == .running ? "clock.arrow.circlepath" : "checkmark.circle")
+                        .foregroundStyle(process.state == .running ? .orange : .secondary)
+                    Text(process.title)
+                        .font(.caption.weight(.semibold))
+                    if process.state == .running {
+                        ProgressView()
+                            .scaleEffect(0.55)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(.secondary)
+
+                HStack(spacing: 8) {
+                    Image(systemName: "info.circle")
+                    Text(process.summary)
+                    Spacer(minLength: 0)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(.quaternary.opacity(0.18), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                if process.state == .running {
+                    ThinkingDotsView()
+                }
+
+                DisclosureGroup {
+                    VStack(alignment: .leading, spacing: 10) {
+                        if process.state == .running {
+                            Label("Preparing graph context and prompt", systemImage: "magnifyingglass")
+                            Label("Assembling recent conversation and optional session summary", systemImage: "text.bubble")
+                            Label("Calling the configured LLM provider", systemImage: "network")
+                        }
+
+                        if let request = process.currentRequest {
+                            MetadataBlock(title: "User request", text: request)
+                        }
+
+                        if !process.citationIDs.isEmpty {
+                            MetadataChips(title: "Citations used by this turn", values: process.citationIDs)
+                        }
+
+                        if !process.expandedContextItems.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Graph context used")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                ForEach(process.expandedContextItems) { item in
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(item.sourceID)
+                                            .font(.caption.weight(.semibold))
+                                        Text(item.content)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .textSelection(.enabled)
+                                    }
+                                    .padding(8)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(.quaternary.opacity(0.14), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                }
+                            }
+                        }
+
+                        if let prompt = process.promptSnapshotText, !prompt.isEmpty {
+                            MetadataBlock(title: "Prompt snapshot", text: prompt, monospaced: true)
+                        } else if process.state == .completed {
+                            Text("No rendered prompt snapshot saved for this turn.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 8)
+                } label: {
+                    Text(process.state == .running ? "Processing details" : "Turn details")
+                        .font(.caption.weight(.semibold))
+                }
+                .font(.caption)
+            }
+            .padding(10)
+            .frame(maxWidth: 700, alignment: .leading)
+            .background(.quaternary.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.10), lineWidth: 1)
+            )
+
+            Spacer(minLength: 120)
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 }
 

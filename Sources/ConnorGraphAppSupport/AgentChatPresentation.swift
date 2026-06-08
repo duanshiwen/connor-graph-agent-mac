@@ -29,6 +29,80 @@ public struct AgentChatSessionPresentation: Sendable, Equatable, Identifiable {
     }
 }
 
+public enum AgentChatTurnProcessState: String, Sendable, Equatable {
+    case running
+    case completed
+}
+
+public struct AgentChatTurnProcessPresentation: Sendable, Equatable, Identifiable {
+    public var id: String
+    public var turnNumber: Int
+    public var state: AgentChatTurnProcessState
+    public var summary: String
+    public var title: String
+    public var currentRequest: String?
+    public var promptSnapshotText: String?
+    public var citationIDs: [String]
+    public var expandedContextItems: [AgentContextItem]
+
+    public init(completedAssistant row: AgentChatMessagePresentation) {
+        self.id = "process-\(row.id)"
+        self.turnNumber = row.turnNumber
+        self.state = .completed
+        self.summary = row.turnMetadataSummary ?? "Turn \(row.turnNumber) · completed"
+        self.title = "Turn \(row.turnNumber) processing details"
+        self.currentRequest = row.currentRequest
+        self.promptSnapshotText = row.promptSnapshotText
+        self.citationIDs = row.citationIDs
+        self.expandedContextItems = row.expandedContextItems
+    }
+
+    public init(pending: AgentChatPendingAssistantPresentation) {
+        self.id = "process-\(pending.id)"
+        self.turnNumber = pending.turnNumber
+        self.state = .running
+        self.summary = pending.processingSummary
+        self.title = "Turn \(pending.turnNumber) processing…"
+        self.currentRequest = nil
+        self.promptSnapshotText = nil
+        self.citationIDs = []
+        self.expandedContextItems = []
+    }
+}
+
+public struct AgentChatTurnTimelineItem: Sendable, Equatable, Identifiable {
+    public var id: String
+    public var message: AgentChatMessagePresentation?
+    public var process: AgentChatTurnProcessPresentation?
+
+    public var kindLabel: String {
+        process == nil ? "message" : "process"
+    }
+
+    public static func message(_ message: AgentChatMessagePresentation) -> AgentChatTurnTimelineItem {
+        AgentChatTurnTimelineItem(id: message.id, message: message, process: nil)
+    }
+
+    public static func process(_ process: AgentChatTurnProcessPresentation) -> AgentChatTurnTimelineItem {
+        AgentChatTurnTimelineItem(id: process.id, message: nil, process: process)
+    }
+
+    public static func items(messages: [AgentMessage], lastContext: AgentContext?, isSubmitting: Bool) -> [AgentChatTurnTimelineItem] {
+        let rows = AgentChatMessagePresentation.rows(messages: messages, lastContext: lastContext)
+        var items: [AgentChatTurnTimelineItem] = []
+        for row in rows {
+            if row.message.role == .assistant {
+                items.append(.process(AgentChatTurnProcessPresentation(completedAssistant: row)))
+            }
+            items.append(.message(row))
+        }
+        if isSubmitting {
+            items.append(.process(AgentChatTurnProcessPresentation(pending: AgentChatPendingAssistantPresentation(messages: messages))))
+        }
+        return items
+    }
+}
+
 public struct AgentChatPendingAssistantPresentation: Sendable, Equatable, Identifiable {
     public var id: String
     public var turnNumber: Int
