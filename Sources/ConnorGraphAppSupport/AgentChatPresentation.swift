@@ -10,22 +10,22 @@ public struct AgentChatSessionPresentation: Sendable, Equatable, Identifiable {
 
     public init(session: AgentSession, now: Date = Date()) {
         self.id = session.id
-        self.title = session.title.isEmpty ? "New Chat" : session.title
+        self.title = session.title.isEmpty || session.title == "New Chat" ? "新对话" : session.title
         self.relativeUpdatedTime = Self.relativeTime(from: session.updatedAt, to: now)
     }
 
     private static func relativeTime(from date: Date, to now: Date) -> String {
         let seconds = max(0, Int(now.timeIntervalSince(date)))
-        if seconds < 60 { return "now" }
+        if seconds < 60 { return "刚刚" }
         let minutes = seconds / 60
-        if minutes < 60 { return "\(minutes)m" }
+        if minutes < 60 { return "\(minutes) 分钟" }
         let hours = minutes / 60
-        if hours < 24 { return "\(hours)h" }
+        if hours < 24 { return "\(hours) 小时" }
         let days = hours / 24
-        if days < 7 { return "\(days)d" }
+        if days < 7 { return "\(days) 天" }
         let weeks = days / 7
-        if weeks < 5 { return "\(weeks)w" }
-        return "\(days)d"
+        if weeks < 5 { return "\(weeks) 周" }
+        return "\(days) 天"
     }
 }
 
@@ -49,8 +49,8 @@ public struct AgentChatTurnProcessPresentation: Sendable, Equatable, Identifiabl
         self.id = "process-\(row.id)"
         self.turnNumber = row.turnNumber
         self.state = .completed
-        self.summary = row.turnMetadataSummary ?? "Turn \(row.turnNumber) · completed"
-        self.title = "Turn \(row.turnNumber) processing details"
+        self.summary = row.turnMetadataSummary ?? "第 \(row.turnNumber) 轮 · 已完成"
+        self.title = "第 \(row.turnNumber) 轮处理详情"
         self.currentRequest = row.currentRequest
         self.promptSnapshotText = row.promptSnapshotText
         self.citationIDs = row.citationIDs
@@ -62,7 +62,7 @@ public struct AgentChatTurnProcessPresentation: Sendable, Equatable, Identifiabl
         self.turnNumber = pending.turnNumber
         self.state = .running
         self.summary = pending.processingSummary
-        self.title = "Turn \(pending.turnNumber) processing…"
+        self.title = "第 \(pending.turnNumber) 轮处理中…"
         self.currentRequest = nil
         self.promptSnapshotText = nil
         self.citationIDs = []
@@ -112,8 +112,8 @@ public struct AgentChatPendingAssistantPresentation: Sendable, Equatable, Identi
     public init(messages: [AgentMessage]) {
         self.id = "pending-assistant"
         self.turnNumber = Self.pendingTurnNumber(messages: messages)
-        self.title = "Assistant is thinking…"
-        self.processingSummary = "Preparing graph context and prompt…"
+        self.title = "助手正在思考…"
+        self.processingSummary = "正在准备图谱上下文和提示词…"
     }
 
     private static func pendingTurnNumber(messages: [AgentMessage]) -> Int {
@@ -205,22 +205,22 @@ public struct AgentChatMessagePresentation: Sendable, Equatable, Identifiable {
     }
 
     public static func turnMetadataSummary(turnNumber: Int, inspection: AgentPromptInspectionSnapshot) -> String {
-        "Turn \(turnNumber) · summary \(inspection.includesSummary ? "included" : "not included") · recent \(inspection.recentMessageCount) · ~\(inspection.estimatedPromptTokenCount) tokens · \(budgetStatusText(inspection.promptBudgetStatus))"
+        "第 \(turnNumber) 轮 · 摘要\(inspection.includesSummary ? "已包含" : "未包含") · 近期消息 \(inspection.recentMessageCount) 条 · 约 \(inspection.estimatedPromptTokenCount) tokens · \(budgetStatusText(inspection.promptBudgetStatus))"
     }
 
     public static func budgetStatusText(_ status: AgentPromptBudgetStatus) -> String {
         switch status {
-        case .safe: return "safe"
-        case .warning: return "warning"
-        case .over: return "over"
+        case .safe: return "安全"
+        case .warning: return "警告"
+        case .over: return "超限"
         }
     }
 
     private static func makeRoleLabel(for role: AgentRole) -> String {
         switch role {
-        case .user: return "User"
-        case .assistant: return "Assistant"
-        case .system: return "System"
+        case .user: return "用户"
+        case .assistant: return "助手"
+        case .system: return "系统"
         }
     }
 }

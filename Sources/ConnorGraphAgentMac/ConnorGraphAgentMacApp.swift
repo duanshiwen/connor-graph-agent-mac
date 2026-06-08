@@ -16,13 +16,13 @@ struct ConnorGraphAgentMacApp: App {
 }
 
 enum SidebarItem: String, CaseIterable, Identifiable {
-    case graphNodes = "Graph Nodes"
-    case search = "Search"
-    case observeLog = "Observe Log"
-    case agentChat = "Agent Chat"
-    case promotionQueue = "Promotion Queue"
-    case importKnowledge = "Import"
-    case llmSettings = "LLM Settings"
+    case graphNodes = "图谱节点"
+    case search = "搜索"
+    case observeLog = "观察日志"
+    case agentChat = "智能体聊天"
+    case promotionQueue = "提升队列"
+    case importKnowledge = "导入"
+    case llmSettings = "模型设置"
 
     var id: String { rawValue }
 }
@@ -30,9 +30,9 @@ enum SidebarItem: String, CaseIterable, Identifiable {
 @MainActor
 final class AppViewModel: ObservableObject {
     @Published var selection: SidebarItem? = .agentChat
-    @Published var query: String = "memory"
+    @Published var query: String = "记忆"
     @Published var searchResults: [GraphSearchResult] = []
-    @Published var chatInput: String = "memory"
+    @Published var chatInput: String = "记忆"
     @Published var transcript: [AgentMessage] = []
     @Published var lastContext: AgentContext?
     @Published var lastPromptInspection: AgentChatPromptInspection?
@@ -76,9 +76,9 @@ final class AppViewModel: ObservableObject {
     var latestChatSummaryContextMessage: String {
         guard let freshness = latestChatSummaryFreshness else { return "" }
         if freshness.isFresh {
-            return "Summary is up to date and will be included in the next answer."
+            return "会话摘要已是最新，将包含在下一次回答中。"
         }
-        return "Summary is stale: \(freshness.uncoveredMessageCount) messages are not covered, so it will not be included in the next answer."
+        return "会话摘要已过期：还有 \(freshness.uncoveredMessageCount) 条消息未覆盖，因此不会包含在下一次回答中。"
     }
 
     var latestChatSummaryRefreshState: AgentSessionSummaryRefreshState {
@@ -146,7 +146,7 @@ final class AppViewModel: ObservableObject {
             return viewModel
         } catch {
             let viewModel = AppViewModel.demo()
-            viewModel.errorMessage = "Fell back to demo data: \(error)"
+            viewModel.errorMessage = "已回退到演示数据：\(error)"
             return viewModel
         }
     }
@@ -255,7 +255,7 @@ final class AppViewModel: ObservableObject {
             try llmSettingsRepository.save(settings: settings, apiKey: apiKey.isEmpty ? nil : apiKey)
             loadLLMSettings()
             chatController = Self.makeChatController(searchIndex: searchIndex, settingsRepository: llmSettingsRepository, session: chatController.agent.session)
-            llmSettingsMessage = "LLM settings saved."
+            llmSettingsMessage = "模型设置已保存。"
             llmHealthCheckMessage = nil
             errorMessage = nil
         } catch {
@@ -268,7 +268,7 @@ final class AppViewModel: ObservableObject {
             try llmSettingsRepository.clearAPIKey()
             loadLLMSettings()
             chatController = Self.makeChatController(searchIndex: searchIndex, settingsRepository: llmSettingsRepository, session: chatController.agent.session)
-            llmSettingsMessage = "API key cleared."
+            llmSettingsMessage = "API Key 已清除。"
             llmHealthCheckMessage = nil
             errorMessage = nil
         } catch {
@@ -364,13 +364,13 @@ final class AppViewModel: ObservableObject {
 
     func promote(_ entry: ObserveLogEntry) {
         guard let promotionRepository, let repository else {
-            errorMessage = "Promotion queue is not available."
+            errorMessage = "提升队列不可用。"
             return
         }
         do {
             let result = try promotionRepository.promote(entry)
             let snapshot = try repository.loadSnapshot()
-            lastPromotionResultSummary = "Promoted \(entry.id): \(result.nodes.count) nodes, \(result.edges.count) edges"
+            lastPromotionResultSummary = "已提升 \(entry.id)：\(result.nodes.count) 个节点，\(result.edges.count) 条关系"
             apply(snapshot: snapshot)
             errorMessage = nil
         } catch {
@@ -382,7 +382,7 @@ final class AppViewModel: ObservableObject {
         do {
             _ = try promotionRepository?.dismiss(entry)
             reloadPromotionCandidates()
-            lastPromotionResultSummary = "Dismissed \(entry.id)"
+            lastPromotionResultSummary = "已忽略 \(entry.id)"
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -393,7 +393,7 @@ final class AppViewModel: ObservableObject {
         do {
             _ = try promotionRepository?.pin(entry)
             reloadPromotionCandidates()
-            lastPromotionResultSummary = "Pinned \(entry.id) for 30 days"
+            lastPromotionResultSummary = "已置顶 \(entry.id) 30 天"
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -411,7 +411,7 @@ final class AppViewModel: ObservableObject {
 
     func importReadOnlyKnowledge() async {
         guard let repository else {
-            errorMessage = "SQLite repository is not available."
+            errorMessage = "SQLite 仓库不可用。"
             return
         }
         let trimmedPath = importPath.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -526,7 +526,7 @@ struct GraphNodesView: View {
 
     var body: some View {
         List {
-            Section("Nodes") {
+            Section("节点") {
                 ForEach(nodes) { node in
                     VStack(alignment: .leading) {
                         Text(node.title).font(.headline)
@@ -535,7 +535,7 @@ struct GraphNodesView: View {
                     }
                 }
             }
-            Section("Edges") {
+            Section("关系") {
                 ForEach(edges) { edge in
                     VStack(alignment: .leading) {
                         Text(edge.relation.rawValue).font(.headline)
@@ -545,7 +545,7 @@ struct GraphNodesView: View {
                 }
             }
         }
-        .navigationTitle("Graph Nodes")
+        .navigationTitle("图谱节点")
     }
 }
 
@@ -555,10 +555,10 @@ struct SearchView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                TextField("Search graph and observe log", text: $viewModel.query)
+                TextField("搜索图谱和观察日志", text: $viewModel.query)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { viewModel.runSearch() }
-                Button("Search") { viewModel.runSearch() }
+                Button("搜索") { viewModel.runSearch() }
             }
             List(viewModel.searchResults) { result in
                 VStack(alignment: .leading, spacing: 4) {
@@ -569,7 +569,7 @@ struct SearchView: View {
             }
         }
         .padding()
-        .navigationTitle("Search")
+        .navigationTitle("搜索")
     }
 }
 
@@ -583,12 +583,12 @@ struct ObserveLogView: View {
                 Text("\(entry.kind.rawValue) · \(entry.status.rawValue)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text("Expires: \(entry.expiresAt.formatted())")
+                Text("过期时间：\(entry.expiresAt.formatted())")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
         }
-        .navigationTitle("Observe Log")
+        .navigationTitle("观察日志")
     }
 }
 
@@ -598,14 +598,14 @@ struct PromotionQueueView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Button("Refresh") { viewModel.reloadPromotionCandidates() }
+                Button("刷新") { viewModel.reloadPromotionCandidates() }
                 if let summary = viewModel.lastPromotionResultSummary {
                     Text(summary).font(.caption).foregroundStyle(.secondary)
                 }
             }
 
             if viewModel.promotionCandidates.isEmpty {
-                Text("No active promotion candidates.")
+                Text("暂无可提升候选项。")
                     .foregroundStyle(.secondary)
                 Spacer()
             } else {
@@ -622,18 +622,18 @@ struct PromotionQueueView: View {
                         }
                         HStack(spacing: 12) {
                             if let workObjectID = entry.workObjectID {
-                                Text("Work Object: \(workObjectID)")
+                                Text("工作对象：\(workObjectID)")
                             }
-                            Text("Importance: \(entry.importance, format: .number.precision(.fractionLength(2)))")
-                            Text("Confidence: \(entry.confidence, format: .number.precision(.fractionLength(2)))")
-                            Text("Expires: \(entry.expiresAt.formatted())")
+                            Text("重要性：\(entry.importance, format: .number.precision(.fractionLength(2)))")
+                            Text("置信度：\(entry.confidence, format: .number.precision(.fractionLength(2)))")
+                            Text("过期时间：\(entry.expiresAt.formatted())")
                         }
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         HStack {
-                            Button("Promote") { viewModel.promote(entry) }
-                            Button("Dismiss") { viewModel.dismissPromotionCandidate(entry) }
-                            Button("Pin 30 days") { viewModel.pinPromotionCandidate(entry) }
+                            Button("提升") { viewModel.promote(entry) }
+                            Button("忽略") { viewModel.dismissPromotionCandidate(entry) }
+                            Button("置顶 30 天") { viewModel.pinPromotionCandidate(entry) }
                         }
                     }
                     .padding(.vertical, 6)
@@ -645,7 +645,7 @@ struct PromotionQueueView: View {
             }
         }
         .padding()
-        .navigationTitle("Promotion Queue")
+        .navigationTitle("提升队列")
         .onAppear { viewModel.reloadPromotionCandidates() }
     }
 }
@@ -655,39 +655,39 @@ struct LLMSettingsView: View {
 
     var body: some View {
         Form {
-            Picker("Provider", selection: $viewModel.llmProviderMode) {
-                Text("Stub").tag(AppLLMProviderMode.stub)
-                Text("OpenAI Compatible").tag(AppLLMProviderMode.openAICompatible)
+            Picker("模型提供方", selection: $viewModel.llmProviderMode) {
+                Text("模拟模式").tag(AppLLMProviderMode.stub)
+                Text("OpenAI 兼容").tag(AppLLMProviderMode.openAICompatible)
             }
             .pickerStyle(.segmented)
 
             TextField("Base URL", text: $viewModel.llmBaseURLString)
                 .textFieldStyle(.roundedBorder)
-            TextField("Model", text: $viewModel.llmModel)
+            TextField("模型", text: $viewModel.llmModel)
                 .textFieldStyle(.roundedBorder)
             SecureField("API Key", text: $viewModel.llmAPIKeyInput)
                 .textFieldStyle(.roundedBorder)
 
             HStack {
-                Button("Save Settings") { viewModel.saveLLMSettings() }
-                Button("Clear API Key") { viewModel.clearLLMAPIKey() }
-                Button("Reload") { viewModel.loadLLMSettings() }
-                Button(viewModel.isTestingLLMConnection ? "Testing…" : "Test Connection") {
+                Button("保存设置") { viewModel.saveLLMSettings() }
+                Button("清除 API Key") { viewModel.clearLLMAPIKey() }
+                Button("重新加载") { viewModel.loadLLMSettings() }
+                Button(viewModel.isTestingLLMConnection ? "测试中…" : "测试连接") {
                     Task { await viewModel.testLLMConnection() }
                 }
                 .disabled(viewModel.isTestingLLMConnection)
             }
 
-            Text(viewModel.llmHasAPIKey ? "API key: stored in Keychain" : "API key: not stored")
+            Text(viewModel.llmHasAPIKey ? "API Key：已存入钥匙串" : "API Key：尚未保存")
                 .foregroundStyle(viewModel.llmHasAPIKey ? .green : .secondary)
 
             GroupBox {
                 VStack(alignment: .leading, spacing: 6) {
-                    Label("Security: API keys are saved to macOS Keychain", systemImage: "lock.shield")
+                    Label("安全提示：API Key 会保存到 macOS 钥匙串", systemImage: "lock.shield")
                         .font(.caption.weight(.semibold))
-                    Text("For your safety, Connor Graph Agent stores the API key in macOS Keychain instead of writing it in plain text to app settings or project files.")
-                    Text("When macOS asks for Keychain access, choose “Always Allow” for this signed app build to avoid repeated prompts.")
-                    Text("If the prompt still appears after every Xcode rebuild, open the app target’s Signing & Capabilities tab and confirm Team is set to 诗闻 段 (Personal Team).")
+                    Text("为保证安全，Connor Graph Agent 会将 API Key 存入 macOS 钥匙串，而不是以明文写入应用设置或项目文件。")
+                    Text("当 macOS 请求钥匙串访问权限时，请为当前已签名的应用构建选择“始终允许”，以避免重复弹窗。")
+                    Text("如果每次 Xcode 重新构建后仍然弹窗，请打开 app target 的 Signing & Capabilities，并确认 Team 设置为 诗闻 段 (Personal Team)。")
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -705,7 +705,7 @@ struct LLMSettingsView: View {
             }
         }
         .padding()
-        .navigationTitle("LLM Settings")
+        .navigationTitle("模型设置")
     }
 }
 
@@ -715,25 +715,25 @@ struct ImportKnowledgeView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let databasePath = viewModel.databasePath {
-                Text("Database: \(databasePath)")
+                Text("数据库：\(databasePath)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            TextField("Knowledge repository path", text: $viewModel.importPath)
+            TextField("知识库路径", text: $viewModel.importPath)
                 .textFieldStyle(.roundedBorder)
-            Button(viewModel.isImporting ? "Importing…" : "Import Read-only") {
+            Button(viewModel.isImporting ? "导入中…" : "只读导入") {
                 Task { await viewModel.importReadOnlyKnowledge() }
             }
             .disabled(viewModel.isImporting || viewModel.importPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
             if let report = viewModel.lastImportReport {
-                Section("Last Import Report") {
+                Section("最近一次导入报告") {
                     Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 8) {
-                        GridRow { Text("Scanned files"); Text("\(report.scannedFiles)") }
-                        GridRow { Text("Imported nodes"); Text("\(report.importedNodes)") }
-                        GridRow { Text("Imported edges"); Text("\(report.importedEdges)") }
-                        GridRow { Text("Skipped files"); Text("\(report.skippedFiles)") }
-                        GridRow { Text("Warnings"); Text("\(report.warnings.count)") }
+                        GridRow { Text("扫描文件数"); Text("\(report.scannedFiles)") }
+                        GridRow { Text("导入节点数"); Text("\(report.importedNodes)") }
+                        GridRow { Text("导入关系数"); Text("\(report.importedEdges)") }
+                        GridRow { Text("跳过文件数"); Text("\(report.skippedFiles)") }
+                        GridRow { Text("警告数"); Text("\(report.warnings.count)") }
                     }
                     .font(.subheadline)
                 }
@@ -749,12 +749,12 @@ struct ImportKnowledgeView: View {
                     Spacer()
                 }
             } else {
-                Text("Import scans Markdown read-only and writes graph nodes/edges into the local SQLite store.")
+                Text("导入会以只读方式扫描 Markdown，并将图谱节点和关系写入本地 SQLite 存储。")
                     .foregroundStyle(.secondary)
                 Spacer()
             }
         }
         .padding()
-        .navigationTitle("Import")
+        .navigationTitle("导入")
     }
 }
