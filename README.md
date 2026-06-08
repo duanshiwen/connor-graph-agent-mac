@@ -6,7 +6,7 @@ This project is a runnable Agent client, not a Markdown knowledge-base manager. 
 
 ## Status
 
-Current MVP status: **Phase 16 chat session persistence build**.
+Current MVP status: **Phase 17 LLM provider health check build**.
 
 Implemented layers:
 
@@ -25,6 +25,7 @@ Implemented layers:
 - Promotion Queue Review UI for promote / dismiss / pin memory candidates.
 - LLM Settings UI with macOS Keychain-backed API key storage.
 - SQLite-backed Agent Chat session and message persistence.
+- LLM provider health check / test connection for Stub and OpenAI-compatible modes.
 
 ## Product principle
 
@@ -102,7 +103,7 @@ Current SwiftUI pages:
 - **Agent Chat** — ask the graph-backed agent using the selected LLM provider, with sessions and messages persisted to SQLite.
 - **Promotion Queue** — review active memory candidates and promote / dismiss / pin them.
 - **Import** — read-only import of a legacy Markdown knowledge repository into SQLite.
-- **LLM Settings** — configure Stub vs OpenAI-compatible mode, base URL, model and Keychain API key.
+- **LLM Settings** — configure Stub vs OpenAI-compatible mode, base URL, model, Keychain API key and provider test connection.
 
 ## Test and build
 
@@ -114,7 +115,7 @@ swift build
 Current acceptance baseline:
 
 ```text
-75 tests passing
+81 tests passing
 Build complete
 ```
 
@@ -144,6 +145,7 @@ Notes:
 - `StubLLMProvider` remains the default for tests and local demo UI.
 - The provider sends graph context through `AgentContext.renderedText`.
 - `LLMResponse.citations` preserves graph source IDs from the context assembler.
+- Provider health checks use a minimal `chat/completions` request, which validates base URL, API key, model and response parsing without depending on provider-specific model-list endpoints.
 
 ## LLM Settings and Keychain
 
@@ -153,6 +155,7 @@ The SwiftUI **LLM Settings** page supports:
 - Base URL, defaulting to `https://api.openai.com/v1`
 - Model, defaulting to `gpt-4o-mini`
 - API key save / clear
+- Test Connection for Stub and OpenAI-compatible providers
 
 Secret storage:
 
@@ -168,7 +171,7 @@ Non-secret settings are stored outside SQLite:
 - base URL
 - model
 
-The API key is never stored in SQLite, README, fixtures or committed source. If OpenAI-compatible mode is selected without a stored key, chat returns a clear missing API key error.
+The API key is never stored in SQLite, README, fixtures or committed source. If OpenAI-compatible mode is selected without a stored key, chat and Test Connection return a clear missing API key error.
 
 ## App database
 
@@ -310,22 +313,21 @@ Known limitations:
 
 - SwiftUI app seeds demo graph data only when the Application Support SQLite database is empty.
 - Chat sessions are persisted to SQLite, but the UI does not yet support editing, deleting, branching or summarizing conversations.
-- App UI exposes basic LLM configuration, but does not yet include model testing, provider health checks or multi-profile management.
+- App UI exposes provider connection testing, but does not yet include model listing, latency metrics or multi-profile management.
 - Legacy importer uses frontmatter and path heuristics; it does not yet run LLM-based entity extraction.
 - Search is currently in-memory lexical matching, not embedding / hybrid search.
 - Promotion Queue Review UI is available, but does not yet include advanced filtering, conflict resolution or diff previews.
 - No Graphiti sidecar adapter yet.
-- Keychain-backed LLM settings are available, but real provider connection testing is not yet exposed in the UI.
 
 ## Roadmap after MVP
 
 Recommended next phases:
 
-1. Add provider health checks / test connection for LLM Settings.
-2. Add chat session compaction / summary.
-3. Add hybrid retrieval: lexical + embedding + graph neighborhood.
-4. Add Graphiti adapter for temporal fact extraction, deduplication and invalidation.
-5. Add human-readable export projections for graph slices.
+1. Add chat session compaction / summary.
+2. Add hybrid retrieval: lexical + embedding + graph neighborhood.
+3. Add Graphiti adapter for temporal fact extraction, deduplication and invalidation.
+4. Add human-readable export projections for graph slices.
+5. Add model listing / multi-profile provider management.
 
 ## Development discipline
 
