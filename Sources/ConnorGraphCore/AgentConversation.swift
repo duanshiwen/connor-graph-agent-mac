@@ -6,6 +6,25 @@ public enum AgentRole: String, Codable, Sendable, Equatable {
     case system
 }
 
+public struct AgentPromptInspectionSnapshot: Codable, Sendable, Equatable {
+    public var includesSummary: Bool
+    public var recentMessageCount: Int
+    public var currentRequest: String
+    public var renderedPrompt: String?
+
+    public init(
+        includesSummary: Bool,
+        recentMessageCount: Int,
+        currentRequest: String,
+        renderedPrompt: String? = nil
+    ) {
+        self.includesSummary = includesSummary
+        self.recentMessageCount = recentMessageCount
+        self.currentRequest = currentRequest
+        self.renderedPrompt = renderedPrompt
+    }
+}
+
 public struct AgentMessage: Codable, Sendable, Equatable, Identifiable {
     public let id: String
     public var role: AgentRole
@@ -13,6 +32,7 @@ public struct AgentMessage: Codable, Sendable, Equatable, Identifiable {
     public var createdAt: Date
     public var citations: [String]
     public var contextSnapshot: String?
+    public var promptInspection: AgentPromptInspectionSnapshot?
 
     public init(
         id: String = UUID().uuidString,
@@ -28,6 +48,25 @@ public struct AgentMessage: Codable, Sendable, Equatable, Identifiable {
         self.createdAt = createdAt
         self.citations = citations
         self.contextSnapshot = contextSnapshot
+        self.promptInspection = nil
+    }
+
+    public init(
+        id: String = UUID().uuidString,
+        role: AgentRole,
+        content: String,
+        createdAt: Date = Date(),
+        citations: [String] = [],
+        contextSnapshot: String? = nil,
+        promptInspection: AgentPromptInspectionSnapshot?
+    ) {
+        self.id = id
+        self.role = role
+        self.content = content
+        self.createdAt = createdAt
+        self.citations = citations
+        self.contextSnapshot = contextSnapshot
+        self.promptInspection = promptInspection
     }
 }
 
@@ -113,8 +152,19 @@ public struct AgentSession: Codable, Sendable, Equatable, Identifiable {
     }
 
     @discardableResult
-    public mutating func appendAssistantMessage(_ content: String, citations: [String] = [], contextSnapshot: String? = nil) -> AgentMessage {
-        let message = AgentMessage(role: .assistant, content: content, citations: citations, contextSnapshot: contextSnapshot)
+    public mutating func appendAssistantMessage(
+        _ content: String,
+        citations: [String] = [],
+        contextSnapshot: String? = nil,
+        promptInspection: AgentPromptInspectionSnapshot? = nil
+    ) -> AgentMessage {
+        let message = AgentMessage(
+            role: .assistant,
+            content: content,
+            citations: citations,
+            contextSnapshot: contextSnapshot,
+            promptInspection: promptInspection
+        )
         messages.append(message)
         updatedAt = message.createdAt
         return message
