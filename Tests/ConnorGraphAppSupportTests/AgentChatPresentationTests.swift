@@ -55,7 +55,44 @@ import ConnorGraphAppSupport
     #expect(items.map(\.kindLabel) == ["message", "process", "message"])
     #expect(items[1].process?.turnNumber == 1)
     #expect(items[1].process?.state == .completed)
-    #expect(items[1].process?.summary == "第 1 轮 · 摘要未包含 · 近期消息 2 条 · 约 30 tokens · 安全")
+    #expect(items[1].process?.summary == "第 1 轮 · 本轮提示词：摘要未包含 · 对话上下文 2 条 · 完整历史 1 条 · 约 30 tokens · 安全")
+}
+
+@Test func agentChatTurnTimelineCarriesFullConversationHistoryForEachProcess() {
+    let firstSnapshot = AgentPromptInspectionSnapshot(
+        includesSummary: false,
+        recentMessageCount: 0,
+        currentRequest: "你好",
+        renderedPrompt: "你好",
+        renderedPromptCharacterCount: 8,
+        estimatedPromptTokenCount: 2,
+        promptBudgetStatus: .safe
+    )
+    let secondSnapshot = AgentPromptInspectionSnapshot(
+        includesSummary: false,
+        recentMessageCount: 2,
+        currentRequest: "我们会说些什么呢？",
+        renderedPrompt: "Prompt",
+        renderedPromptCharacterCount: 144,
+        estimatedPromptTokenCount: 36,
+        promptBudgetStatus: .safe
+    )
+    let messages = [
+        AgentMessage(id: "user-1", role: .user, content: "你好"),
+        AgentMessage(id: "assistant-1", role: .assistant, content: "你好！", promptInspection: firstSnapshot),
+        AgentMessage(id: "user-2", role: .user, content: "我们会说些什么呢？"),
+        AgentMessage(id: "assistant-2", role: .assistant, content: "我们可以聊图谱。", promptInspection: secondSnapshot)
+    ]
+
+    let items = AgentChatTurnTimelineItem.items(messages: messages, lastContext: nil, isSubmitting: false)
+    let processes = items.compactMap(\.process)
+
+    #expect(items.map(\.id) == ["user-1", "process-assistant-1", "assistant-1", "user-2", "process-assistant-2", "assistant-2"])
+    #expect(processes[0].fullConversationMessageCount == 1)
+    #expect(processes[0].conversationHistory.map(\.message.content) == ["你好"])
+    #expect(processes[1].fullConversationMessageCount == 3)
+    #expect(processes[1].conversationHistory.map(\.message.content) == ["你好", "你好！", "我们会说些什么呢？"])
+    #expect(processes[1].summary == "第 2 轮 · 本轮提示词：摘要未包含 · 对话上下文 2 条 · 完整历史 3 条 · 约 36 tokens · 安全")
 }
 
 @Test func agentChatTurnTimelinePlacesPendingProcessAfterOpenUserTurn() {
@@ -83,7 +120,7 @@ import ConnorGraphAppSupport
 
     let row = AgentChatMessagePresentation(message: message, turnNumber: 3, isLatestAssistantMessage: true, lastContext: nil)
 
-    #expect(row.turnMetadataSummary == "第 3 轮 · 摘要已包含 · 近期消息 4 条 · 约 100 tokens · 安全")
+    #expect(row.turnMetadataSummary == "第 3 轮 · 本轮提示词：摘要已包含 · 对话上下文 4 条 · 约 100 tokens · 安全")
     #expect(row.promptSnapshotText == "Rendered prompt")
     #expect(row.currentRequest == "What changed?")
 }
