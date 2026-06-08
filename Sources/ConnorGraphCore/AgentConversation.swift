@@ -11,17 +11,23 @@ public struct AgentPromptInspectionSnapshot: Codable, Sendable, Equatable {
     public var recentMessageCount: Int
     public var currentRequest: String
     public var renderedPrompt: String?
+    public var renderedPromptCharacterCount: Int
+    public var estimatedPromptTokenCount: Int
 
     public init(
         includesSummary: Bool,
         recentMessageCount: Int,
         currentRequest: String,
-        renderedPrompt: String? = nil
+        renderedPrompt: String? = nil,
+        renderedPromptCharacterCount: Int = 0,
+        estimatedPromptTokenCount: Int = 0
     ) {
         self.includesSummary = includesSummary
         self.recentMessageCount = recentMessageCount
         self.currentRequest = currentRequest
         self.renderedPrompt = renderedPrompt
+        self.renderedPromptCharacterCount = renderedPromptCharacterCount
+        self.estimatedPromptTokenCount = estimatedPromptTokenCount
     }
 }
 

@@ -66,3 +66,19 @@ import ConnorGraphAgent
     #expect(snapshot.renderedPrompt?.contains("abc123") == false)
     #expect(snapshot.renderedPrompt?.contains("user@example.com") == false)
 }
+
+@Test func promptInspectionSnapshotPolicyCarriesOriginalPromptBudgetWhenPromptIsOmitted() {
+    let inspection = AgentChatPromptInspection(
+        includesSummary: false,
+        recentMessageCount: 1,
+        currentRequest: "What next?",
+        renderedPrompt: "abcdefghij"
+    )
+    let policy = AgentPromptInspectionSnapshotPolicy(includeRenderedPrompt: false)
+
+    let snapshot = policy.snapshot(for: inspection)
+
+    #expect(snapshot.renderedPrompt == nil)
+    #expect(snapshot.renderedPromptCharacterCount == 10)
+    #expect(snapshot.estimatedPromptTokenCount == 3)
+}
