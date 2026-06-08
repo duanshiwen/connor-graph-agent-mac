@@ -57,6 +57,7 @@ final class AppViewModel: ObservableObject {
     @Published var selectedChatSessionID: String?
     @Published var latestChatSummary: AgentSessionSummary?
     @Published var isSummarizingChatSession: Bool = false
+    @Published var chatSummaryMessage: String?
 
     private var repository: AppGraphRepository?
     private var promotionRepository: AppPromotionQueueRepository?
@@ -76,6 +77,22 @@ final class AppViewModel: ObservableObject {
             return "Summary is up to date and will be included in the next answer."
         }
         return "Summary is stale: \(freshness.uncoveredMessageCount) messages are not covered, so it will not be included in the next answer."
+    }
+
+    var latestChatSummaryRefreshState: AgentSessionSummaryRefreshState {
+        AgentSessionSummaryRefreshState(
+            isSummarizing: isSummarizingChatSession,
+            hasTranscriptMessages: !transcript.isEmpty,
+            freshness: latestChatSummaryFreshness
+        )
+    }
+
+    var summarizeChatSessionButtonTitle: String {
+        latestChatSummaryRefreshState.buttonTitle
+    }
+
+    var canSummarizeSelectedChatSession: Bool {
+        latestChatSummaryRefreshState.canSubmit
     }
 
     init(
@@ -293,6 +310,7 @@ final class AppViewModel: ObservableObject {
             } else {
                 latestChatSummary = nil
             }
+            chatSummaryMessage = nil
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -307,6 +325,7 @@ final class AppViewModel: ObservableObject {
             chatController = Self.makeChatController(searchIndex: searchIndex, settingsRepository: llmSettingsRepository, session: session)
             transcript = []
             latestChatSummary = nil
+            chatSummaryMessage = nil
             reloadChatSessions()
             errorMessage = nil
         } catch {
@@ -322,6 +341,7 @@ final class AppViewModel: ObservableObject {
             chatController = Self.makeChatController(searchIndex: searchIndex, settingsRepository: llmSettingsRepository, session: session)
             transcript = session.messages
             latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: session.id)
+            chatSummaryMessage = nil
             lastContext = nil
             errorMessage = nil
         } catch {
@@ -446,6 +466,7 @@ final class AppViewModel: ObservableObject {
             let summarizer = AgentSessionSummarizer(provider: provider)
             let summary = try await chatSessionRepository.summarizeSession(id: selectedChatSessionID, using: summarizer)
             latestChatSummary = summary
+            chatSummaryMessage = latestChatSummaryRefreshState.successMessage
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -729,10 +750,10 @@ struct AgentChatView: View {
                 }
                 .frame(maxWidth: 320)
                 Button("Reload") { viewModel.reloadChatSessions() }
-                Button(viewModel.isSummarizingChatSession ? "Summarizing…" : "Summarize Session") {
+                Button(viewModel.summarizeChatSessionButtonTitle) {
                     Task { await viewModel.summarizeSelectedChatSession() }
                 }
-                .disabled(viewModel.isSummarizingChatSession || viewModel.transcript.isEmpty)
+                .disabled(!viewModel.canSummarizeSelectedChatSession)
                 Spacer()
             }
 
@@ -748,6 +769,11 @@ struct AgentChatView: View {
                     Text(viewModel.latestChatSummaryContextMessage)
                         .font(.caption)
                         .foregroundColor(viewModel.latestChatSummaryFreshness?.isFresh == true ? .secondary : .orange)
+                    if let message = viewModel.chatSummaryMessage {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(10)
