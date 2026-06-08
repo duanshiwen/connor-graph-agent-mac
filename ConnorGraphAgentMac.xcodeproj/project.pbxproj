@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		A00000000000000000000001 /* ConnorGraphAgentMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000002 /* ConnorGraphAgentMacApp.swift */; };
+		A0000000000000000000002C /* AgentChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000002D /* AgentChatView.swift */; };
 		A00000000000000000000003 /* ConnorGraphCore in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000004 /* ConnorGraphCore */; };
 		A00000000000000000000005 /* ConnorGraphMemory in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000006 /* ConnorGraphMemory */; };
 		A00000000000000000000007 /* ConnorGraphStore in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000008 /* ConnorGraphStore */; };
@@ -20,6 +21,7 @@
 /* Begin PBXFileReference section */
 		A00000000000000000000011 /* ConnorGraphAgentMacApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ConnorGraphAgentMacApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A00000000000000000000002 /* ConnorGraphAgentMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ConnorGraphAgentMacApp.swift; sourceTree = "<group>"; };
+		A0000000000000000000002D /* AgentChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AgentChatView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -44,6 +46,7 @@
 			isa = PBXGroup;
 			children = (
 				A00000000000000000000002 /* ConnorGraphAgentMacApp.swift */,
+				A0000000000000000000002D /* AgentChatView.swift */,
 				A00000000000000000000014 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -126,6 +129,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A00000000000000000000001 /* ConnorGraphAgentMacApp.swift in Sources */,
+				A0000000000000000000002C /* AgentChatView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
