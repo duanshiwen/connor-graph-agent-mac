@@ -82,7 +82,42 @@ import ConnorGraphSearch
     #expect(hit.ownerID == fact.id)
     #expect(hit.metadata["mmr_status"] == "unavailable")
     #expect(hit.metadata["mmr_embedding_status"] == "missing")
+    #expect(hit.metadata["mmr_skip_reason"] == "missing_query_embedding")
     #expect(hit.metadata["graph_reranking_strategies"] == "graphiti_local,mmr")
+}
+
+@Test func sqliteHybridSearchMarksMMRUnavailableWhenCandidateEmbeddingsAreMissing() async throws {
+    let store = try SQLiteGraphStore(path: temporaryMMRDatabaseURL().path)
+    try store.migrate()
+
+    let episode = GraphEpisode(id: "episode-mmr-no-candidates", groupID: "default", sourceType: .chatMessage, name: "MMR no candidates", content: "memory", sourceDescription: "chat")
+    let source = GraphNodeV2(id: "node-source-mmr-no-candidates", groupID: "default", type: .entity, canonicalName: "source", title: "Source")
+    let target = GraphNodeV2(id: "node-target-mmr-no-candidates", groupID: "default", type: .entity, canonicalName: "target", title: "Target")
+    let fact = GraphFact(id: "fact-mmr-no-candidates", groupID: "default", sourceNodeID: source.id, targetNodeID: target.id, relation: .mentions, fact: "Graphiti memory local search without candidate embeddings.")
+
+    try store.upsert(episode: episode)
+    try store.upsert(nodeV2: source)
+    try store.upsert(nodeV2: target)
+    try store.upsert(fact: fact, sourceEpisodeIDs: [episode.id])
+    try store.processPendingFTSIndexTasks(limit: 20)
+
+    let service = SQLiteGraphHybridSearchService(store: store)
+    let response = try await service.search(query: GraphSearchQuery(
+        text: "Graphiti memory local search without candidate embeddings",
+        groupID: "default",
+        includeNodes: false,
+        includeFacts: true,
+        includeEpisodes: false,
+        limit: 1,
+        embeddingModel: "test-mmr",
+        queryEmbedding: [1.0, 0.0],
+        reranking: GraphRerankingConfig(strategies: [.graphitiLocal, .maximalMarginalRelevance], mmrLambda: 0.5)
+    ))
+
+    let hit = try #require(response.hits.first)
+    #expect(hit.metadata["mmr_status"] == "unavailable")
+    #expect(hit.metadata["mmr_embedding_status"] == "missing")
+    #expect(hit.metadata["mmr_skip_reason"] == "missing_candidate_embeddings")
 }
 
 private func temporaryMMRDatabaseURL() -> URL {
