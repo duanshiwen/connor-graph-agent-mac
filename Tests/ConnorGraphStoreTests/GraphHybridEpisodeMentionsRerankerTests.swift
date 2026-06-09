@@ -56,6 +56,7 @@ import ConnorGraphSearch
     #expect(hit.metadata["episode_mentions_count"] == "1")
     #expect(hit.metadata["episode_mentions_scope"] == "selected_episodes")
     #expect(hit.metadata["episode_mentions_boost"] == "0.002500")
+    #expect(hit.metadata["episode_mentions_status"] == "applied")
     #expect(hit.metadata["graph_ranking_signals"]?.contains("episode_mentions") == true)
     #expect(hit.metadata["graph_reranking_strategies"] == "graphiti_local,episode_mentions")
 }
@@ -98,7 +99,41 @@ import ConnorGraphSearch
     let hit = try #require(response.hits.first)
     #expect(hit.metadata["episode_mentions_count"] == "1")
     #expect(hit.metadata["episode_mentions_boost"] == "0.002500")
+    #expect(hit.metadata["episode_mentions_status"] == "applied")
     #expect(hit.metadata["graph_ranking_signals"]?.contains("episode_mentions") == true)
+}
+
+@Test func sqliteHybridSearchMarksEpisodeMentionsWithoutMatchesAsSkipped() async throws {
+    let store = try SQLiteGraphStore(path: temporaryEpisodeMentionsDatabaseURL().path)
+    try store.migrate()
+
+    let episode = GraphEpisode(id: "episode-no-mentions", groupID: "default", sourceType: .chatMessage, name: "No mentions", content: "No mentions", sourceDescription: "chat")
+    let unmentioned = GraphNodeV2(id: "node-no-mention", groupID: "default", type: .entity, canonicalName: "unmentioned", title: "Unmentioned", summary: "Graphiti memory topic")
+
+    try store.upsert(episode: episode)
+    try store.upsert(nodeV2: unmentioned)
+    try store.processPendingFTSIndexTasks(limit: 20)
+
+    let service = SQLiteGraphHybridSearchService(store: store)
+    let response = try await service.search(query: GraphSearchQuery(
+        text: "Graphiti memory topic",
+        groupID: "default",
+        includeNodes: true,
+        includeFacts: false,
+        includeEpisodes: false,
+        limit: 1,
+        reranking: GraphRerankingConfig(
+            strategies: [.graphitiLocal, .episodeMentions],
+            episodeMentionEpisodeIDs: [episode.id]
+        )
+    ))
+
+    let hit = try #require(response.hits.first)
+    #expect(hit.metadata["episode_mentions_count"] == "0")
+    #expect(hit.metadata["episode_mentions_scope"] == "selected_episodes")
+    #expect(hit.metadata["episode_mentions_boost"] == "0.000000")
+    #expect(hit.metadata["episode_mentions_status"] == "skipped")
+    #expect(hit.metadata["episode_mentions_skip_reason"] == "no_mentions")
 }
 
 private func temporaryEpisodeMentionsDatabaseURL() -> URL {
