@@ -20,7 +20,7 @@ public struct ObserveLogRecorder: Sendable, Equatable {
 
 public struct AgentContextBuilder: Sendable {
     private var hybridSearchService: any GraphHybridSearchService
-    private var groupID: String
+    public private(set) var groupID: String
     private var limit: Int
 
     public init(
@@ -234,4 +234,59 @@ public struct GraphAgent<Provider: LLMProvider>: Sendable {
             promptInspection: promptContext.inspection
         )
     }
+
+    public func chat(_ prompt: String, sessionSummary: AgentSessionSummary? = nil) -> AsyncThrowingStream<AgentEvent, Error> {
+        let request = AgentChatRequest(
+            sessionID: session.id,
+            groupID: contextBuilder.groupIdentifier,
+            userMessage: prompt,
+            sessionSummary: sessionSummary
+        )
+        return chat(request)
+    }
+
+    public func chat(_ request: AgentChatRequest) -> AsyncThrowingStream<AgentEvent, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                var run = AgentRun(
+                    id: request.runID,
+                    sessionID: request.sessionID,
+                    groupID: request.groupID,
+                    status: .running,
+                    model: String(describing: Provider.self),
+                    metadata: ["runtime": "graph-agent"]
+                )
+                continuation.yield(.runStarted(AgentRunStartedEvent(run: run)))
+                do {
+                    let response = try await ask(request.userMessage, sessionSummary: request.sessionSummary)
+                    continuation.yield(.textComplete(AgentTextCompleteEvent(
+                        runID: run.id,
+                        sessionID: run.sessionID,
+                        text: response.answer.text,
+                        citations: response.answer.citations
+                    )))
+                    if let assistantMessage = response.session.messages.last, assistantMessage.role == .assistant {
+                        continuation.yield(.assistantMessageCreated(assistantMessage))
+                    }
+                    run.status = .completed
+                    run.completedAt = Date()
+                    continuation.yield(.runCompleted(AgentRunCompletedEvent(run: run)))
+                    continuation.finish()
+                } catch {
+                    run.status = .failed
+                    run.completedAt = Date()
+                    continuation.yield(.runFailed(AgentRunFailure(
+                        runID: run.id,
+                        sessionID: run.sessionID,
+                        message: String(describing: error)
+                    )))
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+    }
+}
+
+public extension AgentContextBuilder {
+    var groupIdentifier: String { groupID }
 }
