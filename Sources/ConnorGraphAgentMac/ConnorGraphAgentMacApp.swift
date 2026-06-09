@@ -21,6 +21,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case observeLog = "观察日志"
     case agentChat = "智能体聊天"
     case promotionQueue = "提升队列"
+    case graphWriteCandidates = "写入候选"
     case llmSettings = "模型设置"
 
     var id: String { rawValue }
@@ -42,7 +43,9 @@ final class AppViewModel: ObservableObject {
     @Published var observeLogEntries: [ObserveLogEntry]
     @Published var databasePath: String?
     @Published var promotionCandidates: [ObserveLogEntry] = []
+    @Published var graphWriteCandidates: [GraphWriteCandidate] = []
     @Published var lastPromotionResultSummary: String?
+    @Published var lastGraphWriteCandidateResultSummary: String?
     @Published var llmProviderMode: AppLLMProviderMode = .stub
     @Published var llmBaseURLString: String = AppLLMSettings.default.baseURLString
     @Published var llmModel: String = AppLLMSettings.default.model
@@ -61,6 +64,7 @@ final class AppViewModel: ObservableObject {
 
     private var repository: AppGraphRepository?
     private var promotionRepository: AppPromotionQueueRepository?
+    private var graphWriteCandidateRepository: AppGraphWriteCandidateRepository?
     private var chatSessionRepository: AppChatSessionRepository?
     private var llmSettingsRepository: AppLLMSettingsRepository
     private var llmProviderHealthChecker: AppLLMProviderHealthChecker
@@ -113,6 +117,7 @@ final class AppViewModel: ObservableObject {
         self.repository = repository
         if let repository {
             self.promotionRepository = AppPromotionQueueRepository(store: repository.store)
+            self.graphWriteCandidateRepository = AppGraphWriteCandidateRepository(store: repository.store)
             self.chatSessionRepository = AppChatSessionRepository(store: repository.store)
             self.agentRuntimeFactory = AppGraphAgentRuntimeFactory(store: repository.store, settingsRepository: llmSettingsRepository)
             self.hybridSearchService = SQLiteGraphHybridSearchService(store: repository.store)
@@ -149,6 +154,7 @@ final class AppViewModel: ObservableObject {
                 databasePath: paths.databaseURL.path
             )
             viewModel.reloadPromotionCandidates()
+            viewModel.reloadGraphWriteCandidates()
             return viewModel
         } catch {
             let viewModel = AppViewModel.demo()
@@ -263,6 +269,7 @@ final class AppViewModel: ObservableObject {
         loopChatController = agentRuntimeFactory?.makeAgentLoopChatController(session: chatController.agent.session)
         Task { await runSearch() }
         reloadPromotionCandidates()
+        reloadGraphWriteCandidates()
     }
 
     func loadLLMSettings() {
@@ -443,6 +450,54 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func reloadGraphWriteCandidates() {
+        do {
+            graphWriteCandidates = try graphWriteCandidateRepository?.loadCandidates() ?? []
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func approveGraphWriteCandidate(_ candidate: GraphWriteCandidate) {
+        do {
+            _ = try graphWriteCandidateRepository?.approve(candidate)
+            reloadGraphWriteCandidates()
+            lastGraphWriteCandidateResultSummary = "已批准候选 \(candidate.id)"
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func rejectGraphWriteCandidate(_ candidate: GraphWriteCandidate) {
+        do {
+            _ = try graphWriteCandidateRepository?.reject(candidate, reason: "Rejected by reviewer")
+            reloadGraphWriteCandidates()
+            lastGraphWriteCandidateResultSummary = "已拒绝候选 \(candidate.id)"
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func commitGraphWriteCandidate(_ candidate: GraphWriteCandidate) {
+        guard let graphWriteCandidateRepository, let repository else {
+            errorMessage = "写入候选仓储不可用。"
+            return
+        }
+        do {
+            let result = try graphWriteCandidateRepository.commit(candidate)
+            let snapshot = try repository.loadSnapshot()
+            apply(snapshot: snapshot)
+            reloadGraphWriteCandidates()
+            lastGraphWriteCandidateResultSummary = "已提交候选 \(candidate.id)：节点 +\(result.createdNodeIDs.count)，事实 +\(result.createdFactIDs.count)，更新事实 \(result.updatedFactIDs.count)，附加证据 \(result.attachedEvidenceFactIDs.count)"
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
     func runSearch() async {
         guard let hybridSearchService else {
             searchResults = []
@@ -554,6 +609,8 @@ struct AppShellView: View {
                     AgentChatView(viewModel: viewModel)
                 case .promotionQueue:
                     PromotionQueueView(viewModel: viewModel)
+                case .graphWriteCandidates:
+                    GraphWriteCandidateReviewView(viewModel: viewModel)
                 case .llmSettings:
                     LLMSettingsView(viewModel: viewModel)
                 }
@@ -701,6 +758,112 @@ struct PromotionQueueView: View {
         .padding()
         .navigationTitle("提升队列")
         .onAppear { viewModel.reloadPromotionCandidates() }
+    }
+}
+
+struct GraphWriteCandidateReviewView: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Button("刷新") { viewModel.reloadGraphWriteCandidates() }
+                if let summary = viewModel.lastGraphWriteCandidateResultSummary {
+                    Text(summary).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("propose → validate → review → commit → audit")
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+
+            if viewModel.graphWriteCandidates.isEmpty {
+                Text("暂无图谱写入候选。Agent 只能创建候选，不会直接污染长期图谱。")
+                    .foregroundStyle(.secondary)
+                Spacer()
+            } else {
+                List(viewModel.graphWriteCandidates) { candidate in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(candidate.kind.rawValue)
+                                .font(.headline)
+                            Text(candidate.status.rawValue)
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(statusColor(candidate.status).opacity(0.15), in: Capsule())
+                                .foregroundStyle(statusColor(candidate.status))
+                            Spacer()
+                            Text(candidate.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Text(candidate.rationale)
+                            .font(.subheadline)
+                            .textSelection(.enabled)
+
+                        HStack(spacing: 12) {
+                            Label("confidence \(candidate.confidence, specifier: "%.2f")", systemImage: "gauge.medium")
+                            Label("run \(candidate.proposedByRunID)", systemImage: "play.circle")
+                            if let toolCallID = candidate.proposedByToolCallID {
+                                Label("tool \(toolCallID)", systemImage: "wrench.and.screwdriver")
+                            }
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                        DisclosureGroup("候选 payload JSON") {
+                            Text(candidate.payloadJSON)
+                                .font(.caption.monospaced())
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(8)
+                                .background(.quaternary.opacity(0.16), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        }
+
+                        if !candidate.validationErrors.isEmpty {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("验证/审阅记录")
+                                    .font(.caption.weight(.semibold))
+                                ForEach(candidate.validationErrors, id: \.self) { error in
+                                    Text("• \(error)")
+                                        .font(.caption)
+                                        .foregroundStyle(.orange)
+                                }
+                            }
+                        }
+
+                        HStack {
+                            Button("批准") { viewModel.approveGraphWriteCandidate(candidate) }
+                                .disabled(candidate.status == .approved || candidate.status == .committed || candidate.status == .rejected)
+                            Button("提交") { viewModel.commitGraphWriteCandidate(candidate) }
+                                .disabled(candidate.status == .committed || candidate.status == .rejected)
+                            Button("拒绝", role: .destructive) { viewModel.rejectGraphWriteCandidate(candidate) }
+                                .disabled(candidate.status == .committed || candidate.status == .rejected)
+                        }
+                    }
+                    .padding(.vertical, 8)
+                }
+            }
+
+            if let error = viewModel.errorMessage {
+                Text(error).foregroundStyle(.red)
+            }
+        }
+        .padding()
+        .navigationTitle("写入候选")
+        .onAppear { viewModel.reloadGraphWriteCandidates() }
+    }
+
+    private func statusColor(_ status: GraphWriteCandidateStatus) -> Color {
+        switch status {
+        case .pendingValidation, .pendingReview: return .orange
+        case .validationFailed, .rejected: return .red
+        case .approved: return .blue
+        case .committed: return .green
+        case .superseded: return .secondary
+        }
     }
 }
 
