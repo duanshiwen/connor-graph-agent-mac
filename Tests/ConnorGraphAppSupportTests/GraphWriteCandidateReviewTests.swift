@@ -58,7 +58,8 @@ import ConnorGraphStore
     )
     try store.upsert(graphWriteCandidate: candidate)
 
-    let result = try await repository.commitGoverned(candidate)
+    let approved = try await repository.approveGoverned(candidate)
+    let result = try await repository.commitGoverned(approved)
 
     #expect(result.createdNodeIDs == ["node-governed"])
     let auditEvents = try store.agentAuditEvents(runID: "run-governed")
@@ -81,8 +82,9 @@ import ConnorGraphStore
         payloadJSON: #"{"id":"node-denied","nodeType":"entity","canonicalName":"Denied Node","title":"Denied Node"}"#
     )
 
+    let approved = try await repository.approveGoverned(candidate)
     do {
-        _ = try await repository.commitGoverned(candidate)
+        _ = try await repository.commitGoverned(approved)
         Issue.record("Expected read-only policy to deny graph write commit")
     } catch GraphWriteCandidateCommitError.permissionDenied {
         #expect(try store.graphNodeV2(id: "node-denied") == nil)
@@ -91,4 +93,28 @@ import ConnorGraphStore
         #expect(auditEvents.map(\.eventType).contains(.graphWriteCommitFailed))
         #expect(auditEvents.first { $0.eventType == .permissionDecision }?.decision?.outcome == .denied)
     }
+}
+
+@Test func graphWriteCandidateValidationFailsMissingReferencedNodesBeforeCommit() async throws {
+    let store = try SQLiteGraphStore(path: ":memory:")
+    try store.migrate()
+    let repository = AppGraphWriteCandidateRepository(store: store, permissionMode: .trustedWrite)
+    let candidate = GraphWriteCandidate(
+        groupID: "default",
+        kind: .createFact,
+        proposedByRunID: "run-validation",
+        rationale: "Create fact with missing endpoints",
+        confidence: 0.9,
+        payloadJSON: #"{"sourceNodeID":"missing-source","targetNodeID":"missing-target","relation":"RELATED_TO","fact":"Missing source relates to missing target."}"#
+    )
+    try store.upsert(graphWriteCandidate: candidate)
+
+    let validated = try await repository.validateGoverned(candidate)
+
+    #expect(validated.validation.isValid == false)
+    #expect(try store.graphWriteCandidate(id: candidate.id)?.status == .validationFailed)
+    #expect(try store.graphWriteCandidate(id: candidate.id)?.validationErrors.contains { $0.contains("missing source node") } == true)
+    let auditEvents = try store.agentAuditEvents(runID: "run-validation")
+    #expect(auditEvents.map(\.eventType).contains(.graphWriteValidationStarted))
+    #expect(auditEvents.map(\.eventType).contains(.graphWriteValidationFailed))
 }

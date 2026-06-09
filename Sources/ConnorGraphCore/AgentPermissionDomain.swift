@@ -85,6 +85,9 @@ public enum AgentAuditEventType: String, Codable, Sendable, Equatable {
     case toolFailed
     case graphWriteCandidateApproved
     case graphWriteCandidateRejected
+    case graphWriteValidationStarted
+    case graphWriteValidationFinished
+    case graphWriteValidationFailed
     case graphWriteCommitStarted
     case graphWriteCommitFinished
     case graphWriteCommitFailed
