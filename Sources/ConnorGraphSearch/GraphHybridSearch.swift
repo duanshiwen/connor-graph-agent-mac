@@ -12,6 +12,7 @@ public struct GraphSearchQuery: Sendable, Equatable {
     public var statusFilter: Set<GraphTemporalStatus>
     public var embeddingModel: String?
     public var queryEmbedding: [Double]?
+    public var centerNodeIDs: [String]
 
     public init(
         text: String,
@@ -23,7 +24,8 @@ public struct GraphSearchQuery: Sendable, Equatable {
         limit: Int = 20,
         statusFilter: Set<GraphTemporalStatus> = [.active],
         embeddingModel: String? = nil,
-        queryEmbedding: [Double]? = nil
+        queryEmbedding: [Double]? = nil,
+        centerNodeIDs: [String] = []
     ) {
         self.text = text
         self.groupID = groupID
@@ -35,6 +37,7 @@ public struct GraphSearchQuery: Sendable, Equatable {
         self.statusFilter = statusFilter
         self.embeddingModel = embeddingModel
         self.queryEmbedding = queryEmbedding
+        self.centerNodeIDs = centerNodeIDs
     }
 }
 
