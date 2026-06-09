@@ -60,7 +60,51 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
             }
         }
 
-        return GraphSearchResponse(hits: Array(fusion.rankedHits().prefix(query.limit)))
+        let rankedHits = graphBoostedHits(fusion.rankedHits(), queryText: query.text)
+        return GraphSearchResponse(hits: Array(rankedHits.prefix(query.limit)))
+    }
+
+    private func graphBoostedHits(_ hits: [GraphSearchHit], queryText: String) -> [GraphSearchHit] {
+        hits.map { hit in
+            var boostedHit = hit
+            let baseScore = hit.score
+            let boost = graphBoost(for: hit, queryText: queryText)
+            boostedHit.score = baseScore + boost.value
+            boostedHit.metadata["base_rrf_score"] = formattedScore(baseScore)
+            boostedHit.metadata["graph_boost"] = formattedScore(boost.value)
+            boostedHit.metadata["final_score"] = formattedScore(boostedHit.score)
+            if boost.value > 0 {
+                boostedHit.metadata["graph_ranking"] = "boosted"
+                boostedHit.metadata["graph_boost_reason"] = boost.reason
+            } else {
+                boostedHit.metadata["graph_ranking"] = "rrf_only"
+                boostedHit.metadata.removeValue(forKey: "graph_boost_reason")
+            }
+            return boostedHit
+        }.sorted { lhs, rhs in
+            if lhs.score == rhs.score {
+                if lhs.ownerType.rawValue == rhs.ownerType.rawValue { return lhs.ownerID < rhs.ownerID }
+                return lhs.ownerType.rawValue < rhs.ownerType.rawValue
+            }
+            return lhs.score > rhs.score
+        }
+    }
+
+    private func graphBoost(for hit: GraphSearchHit, queryText: String) -> (value: Double, reason: String?) {
+        switch hit.metadata["graph_context"] {
+        case "fact_endpoints":
+            let endpointTitles = [hit.metadata["source_node_title"], hit.metadata["target_node_title"]].compactMap { $0 }
+            if endpointTitles.contains(where: { queryText.localizedCaseInsensitiveContains($0) }) {
+                return (0.002, "endpoint_title_query_match")
+            }
+            return (0.0, nil)
+        default:
+            return (0.0, nil)
+        }
+    }
+
+    private func formattedScore(_ score: Double) -> String {
+        String(format: "%.6f", score)
     }
 
     private struct RRFFusion {
