@@ -241,7 +241,14 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
             }
         }
         let topK = max(0, min(query.reranking.crossEncoderTopK ?? query.limit, hits.count))
-        guard topK > 0 else { return hits }
+        guard topK > 0 else {
+            return hits.map { hit in
+                var updated = hit
+                updated.metadata["cross_encoder_status"] = "skipped"
+                updated.metadata["cross_encoder_skip_reason"] = "top_k_zero"
+                return updated
+            }
+        }
         let scoringHits = Array(hits.prefix(topK))
         let candidates = scoringHits.map { hit in
             GraphCrossEncoderCandidate(ownerType: hit.ownerType, ownerID: hit.ownerID, title: hit.title, text: hit.text, metadata: hit.metadata)
@@ -253,6 +260,7 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
             let score = scoresByID[hit.id] ?? 0
             updated.score = score
             updated.metadata["cross_encoder_score"] = formattedScore(score)
+            updated.metadata["cross_encoder_status"] = "reranked"
             updated.metadata["cross_encoder_reranked"] = "true"
             updated.metadata["final_score"] = formattedScore(score)
             return updated
@@ -263,7 +271,13 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
             }
             return lhs.score > rhs.score
         }
-        return rerankedTop + Array(hits.dropFirst(topK))
+        let skipped = hits.dropFirst(topK).map { hit in
+            var updated = hit
+            updated.metadata["cross_encoder_status"] = "skipped"
+            updated.metadata["cross_encoder_skip_reason"] = "outside_top_k"
+            return updated
+        }
+        return rerankedTop + skipped
     }
 
     private func strategyList(_ strategies: [GraphRerankerStrategy]) -> String {
