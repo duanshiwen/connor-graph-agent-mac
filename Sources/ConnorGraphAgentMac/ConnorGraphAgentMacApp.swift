@@ -66,6 +66,7 @@ final class AppViewModel: ObservableObject {
     private var chatSessionRepository: AppChatSessionRepository?
     private var llmSettingsRepository: AppLLMSettingsRepository
     private var llmProviderHealthChecker: AppLLMProviderHealthChecker
+    private var agentRuntimeFactory: AppGraphAgentRuntimeFactory?
     private var searchIndex: InMemoryGraphSearchIndex
     private var chatController: AgentChatController<AnyLLMProvider>
 
@@ -112,12 +113,13 @@ final class AppViewModel: ObservableObject {
         if let repository {
             self.promotionRepository = AppPromotionQueueRepository(store: repository.store)
             self.chatSessionRepository = AppChatSessionRepository(store: repository.store)
+            self.agentRuntimeFactory = AppGraphAgentRuntimeFactory(store: repository.store, settingsRepository: llmSettingsRepository)
         }
         self.llmSettingsRepository = llmSettingsRepository
         self.llmProviderHealthChecker = AppLLMProviderHealthChecker(settingsRepository: llmSettingsRepository)
         self.databasePath = databasePath
         self.searchIndex = InMemoryGraphSearchIndex(nodes: nodes, edges: edges, observeLogEntries: observeLogEntries)
-        self.chatController = Self.makeChatController(searchIndex: searchIndex, settingsRepository: llmSettingsRepository)
+        self.chatController = Self.makeChatController(runtimeFactory: agentRuntimeFactory, searchIndex: searchIndex, settingsRepository: llmSettingsRepository)
         self.searchResults = (try? searchIndex.search(query: query, options: .init(includeNeighborhood: true))) ?? []
         loadLLMSettings()
         reloadChatSessions()
@@ -185,10 +187,14 @@ final class AppViewModel: ObservableObject {
     }
 
     private static func makeChatController(
+        runtimeFactory: AppGraphAgentRuntimeFactory?,
         searchIndex: InMemoryGraphSearchIndex,
         settingsRepository: AppLLMSettingsRepository,
         session: AgentSession = AgentSession(id: "app-session")
     ) -> AgentChatController<AnyLLMProvider> {
+        if let runtimeFactory {
+            return runtimeFactory.makeChatController(session: session)
+        }
         let provider = Self.makeLLMProvider(settingsRepository: settingsRepository)
         return AgentChatController(
             agent: GraphAgent(
@@ -223,7 +229,7 @@ final class AppViewModel: ObservableObject {
         edges = snapshot.edges
         observeLogEntries = snapshot.observeLogEntries
         searchIndex = InMemoryGraphSearchIndex(nodes: snapshot.nodes, edges: snapshot.edges, observeLogEntries: snapshot.observeLogEntries)
-        chatController = Self.makeChatController(searchIndex: searchIndex, settingsRepository: llmSettingsRepository, session: chatController.agent.session)
+        chatController = Self.makeChatController(runtimeFactory: agentRuntimeFactory, searchIndex: searchIndex, settingsRepository: llmSettingsRepository, session: chatController.agent.session)
         runSearch()
         reloadPromotionCandidates()
     }
@@ -254,7 +260,7 @@ final class AppViewModel: ObservableObject {
             let apiKey = llmAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
             try llmSettingsRepository.save(settings: settings, apiKey: apiKey.isEmpty ? nil : apiKey)
             loadLLMSettings()
-            chatController = Self.makeChatController(searchIndex: searchIndex, settingsRepository: llmSettingsRepository, session: chatController.agent.session)
+            chatController = Self.makeChatController(runtimeFactory: agentRuntimeFactory, searchIndex: searchIndex, settingsRepository: llmSettingsRepository, session: chatController.agent.session)
             llmSettingsMessage = "模型设置已保存。"
             llmHealthCheckMessage = nil
             errorMessage = nil
@@ -267,7 +273,7 @@ final class AppViewModel: ObservableObject {
         do {
             try llmSettingsRepository.clearAPIKey()
             loadLLMSettings()
-            chatController = Self.makeChatController(searchIndex: searchIndex, settingsRepository: llmSettingsRepository, session: chatController.agent.session)
+            chatController = Self.makeChatController(runtimeFactory: agentRuntimeFactory, searchIndex: searchIndex, settingsRepository: llmSettingsRepository, session: chatController.agent.session)
             llmSettingsMessage = "API Key 已清除。"
             llmHealthCheckMessage = nil
             errorMessage = nil
@@ -306,7 +312,7 @@ final class AppViewModel: ObservableObject {
             let selectedID = selectedChatSessionID ?? sessions.first?.id
             selectedChatSessionID = selectedID
             if let selectedID, let session = try chatSessionRepository.loadSession(id: selectedID) {
-                chatController = Self.makeChatController(searchIndex: searchIndex, settingsRepository: llmSettingsRepository, session: session)
+                chatController = Self.makeChatController(runtimeFactory: agentRuntimeFactory, searchIndex: searchIndex, settingsRepository: llmSettingsRepository, session: session)
                 transcript = session.messages
                 latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: selectedID)
             } else {
@@ -324,7 +330,7 @@ final class AppViewModel: ObservableObject {
         do {
             let session = try chatSessionRepository.createSession()
             selectedChatSessionID = session.id
-            chatController = Self.makeChatController(searchIndex: searchIndex, settingsRepository: llmSettingsRepository, session: session)
+            chatController = Self.makeChatController(runtimeFactory: agentRuntimeFactory, searchIndex: searchIndex, settingsRepository: llmSettingsRepository, session: session)
             transcript = []
             latestChatSummary = nil
             chatSummaryMessage = nil
@@ -341,7 +347,7 @@ final class AppViewModel: ObservableObject {
         do {
             guard let session = try chatSessionRepository.loadSession(id: sessionID) else { return }
             selectedChatSessionID = session.id
-            chatController = Self.makeChatController(searchIndex: searchIndex, settingsRepository: llmSettingsRepository, session: session)
+            chatController = Self.makeChatController(runtimeFactory: agentRuntimeFactory, searchIndex: searchIndex, settingsRepository: llmSettingsRepository, session: session)
             transcript = session.messages
             latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: session.id)
             chatSummaryMessage = nil
