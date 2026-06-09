@@ -84,9 +84,34 @@ public struct AgentContextBuilder: Sendable {
         switch hit.ownerType {
         case .node:
             let type = hit.metadata["type"] ?? "node"
-            return "Node[\(type)] \(hit.title): \(hit.text)"
+            var lines = ["Node[\(type)] \(hit.title): \(hit.text)"]
+            if hit.metadata["graph_context"] == "adjacent_facts" {
+                if let adjacentFactIDs = hit.metadata["adjacent_fact_ids"], !adjacentFactIDs.isEmpty {
+                    lines.append("Adjacent facts: \(adjacentFactIDs)")
+                }
+                if let adjacentRelations = hit.metadata["adjacent_fact_relations"], !adjacentRelations.isEmpty {
+                    lines.append("Adjacent relations: \(adjacentRelations)")
+                }
+                if let adjacentNodeIDs = hit.metadata["adjacent_node_ids"], !adjacentNodeIDs.isEmpty {
+                    lines.append("Adjacent node ids: \(adjacentNodeIDs)")
+                }
+            }
+            return lines.joined(separator: "\n")
         case .fact:
-            return "Fact[\(hit.title)] \(hit.text)"
+            var lines = ["Fact[\(hit.title)] \(hit.text)"]
+            if hit.metadata["graph_context"] == "fact_endpoints" {
+                let sourceTitle = hit.metadata["source_node_title"]
+                let sourceType = hit.metadata["source_node_type"]
+                let targetTitle = hit.metadata["target_node_title"]
+                let targetType = hit.metadata["target_node_type"]
+                if let sourceTitle, let sourceType, let targetTitle, let targetType {
+                    lines.append("Graph endpoints: \(sourceTitle)(\(sourceType)) -> \(targetTitle)(\(targetType))")
+                }
+                if let nodeIDs = hit.metadata["graph_context_node_ids"], !nodeIDs.isEmpty {
+                    lines.append("Graph node ids: \(nodeIDs)")
+                }
+            }
+            return lines.joined(separator: "\n")
         case .episode:
             let sourceType = hit.metadata["source_type"] ?? "episode"
             return "Episode[\(sourceType)] \(hit.title): \(hit.text)"
