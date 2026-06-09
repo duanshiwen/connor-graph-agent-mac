@@ -4,9 +4,11 @@ import ConnorGraphSearch
 
 public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable {
     public var store: SQLiteGraphStore
+    public var embeddingProvider: (any EmbeddingProvider)?
 
-    public init(store: SQLiteGraphStore) {
+    public init(store: SQLiteGraphStore, embeddingProvider: (any EmbeddingProvider)? = nil) {
         self.store = store
+        self.embeddingProvider = embeddingProvider
     }
 
     public func search(query: GraphSearchQuery) async throws -> GraphSearchResponse {
@@ -45,16 +47,16 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
             }
         }
 
-        if let embeddingModel = query.embeddingModel, let queryEmbedding = query.queryEmbedding {
+        if let semanticQuery = try await semanticQuery(for: query) {
             let ownerTypes = includedOwnerTypes(query)
             let semanticResults = try store.searchEmbeddings(
-                queryVector: queryEmbedding,
+                queryVector: semanticQuery.vector,
                 groupID: query.groupID,
-                embeddingModel: embeddingModel,
+                embeddingModel: semanticQuery.model,
                 ownerTypes: ownerTypes,
                 limit: perScopeLimit
             )
-            for result in semanticResults {
+            for result in semanticResults where result.score > 0 {
                 switch result.embedding.ownerType {
                 case .fact:
                     guard query.includeFacts, let fact = try store.graphFact(id: result.embedding.ownerID), includes(fact.status, in: query.statusFilter), isTemporallyValid(fact, at: query.referenceTime) else { continue }
@@ -77,6 +79,26 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
             return lhs.score > rhs.score
         }
         return GraphSearchResponse(hits: Array(ranked.prefix(query.limit)))
+    }
+
+    private struct SemanticQuery: Sendable {
+        var model: String
+        var vector: [Double]
+    }
+
+    private func semanticQuery(for query: GraphSearchQuery) async throws -> SemanticQuery? {
+        if let embeddingModel = query.embeddingModel, let queryEmbedding = query.queryEmbedding {
+            return SemanticQuery(model: embeddingModel, vector: queryEmbedding)
+        }
+        guard let embeddingProvider else { return nil }
+        if let requestedModel = query.embeddingModel, requestedModel != embeddingProvider.model {
+            return nil
+        }
+        let vector = try await embeddingProvider.embedding(for: query.text)
+        guard vector.count == embeddingProvider.dimensions else {
+            throw SQLiteGraphStoreError.decodeFailed("query embedding dimensions mismatch for \(embeddingProvider.model)")
+        }
+        return SemanticQuery(model: embeddingProvider.model, vector: vector)
     }
 
     private func includedOwnerTypes(_ query: GraphSearchQuery) -> Set<GraphIndexOwnerType> {
