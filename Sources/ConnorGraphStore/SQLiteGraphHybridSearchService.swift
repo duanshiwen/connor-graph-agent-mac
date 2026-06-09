@@ -73,7 +73,7 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
     private func graphRerankedHits(_ hits: [GraphSearchHit], query: GraphSearchQuery) async throws -> [GraphSearchHit] {
         var rankedHits = hits
         if query.reranking.strategies.contains(.graphitiLocal) {
-            rankedHits = GraphitiLocalReranker().rerank(rankedHits, query: query)
+            rankedHits = try GraphitiLocalReranker(traversalStore: SQLiteGraphTraversalStore(store: store)).rerank(rankedHits, query: query)
         } else {
             rankedHits = rankedHits.map { hit in
                 var updated = hit
@@ -275,11 +275,13 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
     }
 
     private struct GraphitiLocalReranker: Sendable {
-        func rerank(_ hits: [GraphSearchHit], query: GraphSearchQuery) -> [GraphSearchHit] {
-            hits.map { hit in
+        var traversalStore: SQLiteGraphTraversalStore
+
+        func rerank(_ hits: [GraphSearchHit], query: GraphSearchQuery) throws -> [GraphSearchHit] {
+            try hits.map { hit in
                 var rerankedHit = hit
                 let baseScore = hit.score
-                let signals = signals(for: hit, query: query)
+                let signals = try signals(for: hit, query: query)
                 let boost = signals.reduce(0.0) { $0 + $1.boost }
                 let signalReasons = signals.map(\.reason)
                 rerankedHit.score = baseScore + boost
@@ -308,13 +310,18 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
             }
         }
 
-        private func signals(for hit: GraphSearchHit, query: GraphSearchQuery) -> [GraphRankingSignal] {
+        private func signals(for hit: GraphSearchHit, query: GraphSearchQuery) throws -> [GraphRankingSignal] {
             var signals: [GraphRankingSignal] = []
 
             if hit.ownerType == .node, query.centerNodeIDs.contains(hit.ownerID) {
                 signals.append(GraphRankingSignal(reason: "center_node_exact_match", boost: 0.004))
-            } else if isOneHopFromCenter(hit, centerNodeIDs: query.centerNodeIDs) {
+            }
+            let distances = try centerDistances(for: hit, query: query)
+            if distances.contains(1) {
                 signals.append(GraphRankingSignal(reason: "center_node_1_hop_match", boost: 0.003))
+            }
+            if distances.contains(2) {
+                signals.append(GraphRankingSignal(reason: "center_node_2_hop_match", boost: 0.0015))
             }
 
             if hit.metadata["graph_context"] == "fact_endpoints" {
@@ -332,18 +339,32 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
             return signals
         }
 
-        private func isOneHopFromCenter(_ hit: GraphSearchHit, centerNodeIDs: [String]) -> Bool {
-            guard !centerNodeIDs.isEmpty else { return false }
+        private func centerDistances(for hit: GraphSearchHit, query: GraphSearchQuery) throws -> Set<Int> {
+            guard !query.centerNodeIDs.isEmpty else { return [] }
+            let candidateNodeIDs: [String]
             switch hit.ownerType {
             case .fact:
-                return [hit.metadata["source_node_id"], hit.metadata["target_node_id"]]
-                    .compactMap { $0 }
-                    .contains { centerNodeIDs.contains($0) }
+                candidateNodeIDs = [hit.metadata["source_node_id"], hit.metadata["target_node_id"]].compactMap { $0 }
+                if candidateNodeIDs.contains(where: { query.centerNodeIDs.contains($0) }) {
+                    return [1]
+                }
             case .node:
-                return nodeIDs(from: hit.metadata["adjacent_node_ids"]).contains { centerNodeIDs.contains($0) }
+                candidateNodeIDs = [hit.ownerID] + nodeIDs(from: hit.metadata["adjacent_node_ids"])
             case .episode:
-                return false
+                candidateNodeIDs = []
             }
+            guard !candidateNodeIDs.isEmpty else { return [] }
+            let distances = try traversalStore.shortestHopDistances(
+                from: query.centerNodeIDs,
+                to: candidateNodeIDs,
+                groupID: query.groupID,
+                maxDepth: 2
+            )
+            let positiveDistances = Set(distances.values.filter { $0 > 0 })
+            if hit.ownerType == .fact {
+                return Set(positiveDistances.filter { $0 == 2 })
+            }
+            return positiveDistances
         }
 
         private func adjacentRelations(in hit: GraphSearchHit) -> [String] {
