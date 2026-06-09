@@ -21,7 +21,6 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case observeLog = "观察日志"
     case agentChat = "智能体聊天"
     case promotionQueue = "提升队列"
-    case importKnowledge = "导入"
     case llmSettings = "模型设置"
 
     var id: String { rawValue }
@@ -37,12 +36,10 @@ final class AppViewModel: ObservableObject {
     @Published var lastContext: AgentContext?
     @Published var lastPromptInspection: AgentChatPromptInspection?
     @Published var errorMessage: String?
-    @Published var nodes: [GraphNode]
-    @Published var edges: [SemanticEdge]
+    @Published var graphNodes: [GraphNodeV2]
+    @Published var graphFacts: [GraphFact]
+    @Published var graphEpisodes: [GraphEpisode]
     @Published var observeLogEntries: [ObserveLogEntry]
-    @Published var importPath: String = "/Users/duanshiwen/notes/intelligence-repository"
-    @Published var isImporting: Bool = false
-    @Published var lastImportReport: AppImportReport?
     @Published var databasePath: String?
     @Published var promotionCandidates: [ObserveLogEntry] = []
     @Published var lastPromotionResultSummary: String?
@@ -99,15 +96,17 @@ final class AppViewModel: ObservableObject {
     }
 
     init(
-        nodes: [GraphNode],
-        edges: [SemanticEdge],
+        graphNodes: [GraphNodeV2],
+        graphFacts: [GraphFact],
+        graphEpisodes: [GraphEpisode] = [],
         observeLogEntries: [ObserveLogEntry],
         repository: AppGraphRepository? = nil,
         databasePath: String? = nil,
         llmSettingsRepository: AppLLMSettingsRepository = AppLLMSettingsRepository()
     ) {
-        self.nodes = nodes
-        self.edges = edges
+        self.graphNodes = graphNodes
+        self.graphFacts = graphFacts
+        self.graphEpisodes = graphEpisodes
         self.observeLogEntries = observeLogEntries
         self.repository = repository
         if let repository {
@@ -130,16 +129,18 @@ final class AppViewModel: ObservableObject {
             let paths = try AppStoragePaths.live()
             let repository = try AppGraphRepository.bootstrap(paths: paths)
             var snapshot = try repository.loadSnapshot()
-            if snapshot.nodes.isEmpty {
+            if snapshot.graphNodes.isEmpty {
                 let demo = demoSnapshot()
-                for node in demo.nodes { try repository.store.upsert(node: node) }
-                for edge in demo.edges { try repository.store.upsert(edge: edge) }
+                for node in demo.graphNodes { try repository.store.upsert(nodeV2: node) }
+                for fact in demo.graphFacts { try repository.store.upsert(fact: fact) }
+                for episode in demo.graphEpisodes { try repository.store.upsert(episode: episode) }
                 for entry in demo.observeLogEntries { try repository.store.upsert(observeLogEntry: entry) }
                 snapshot = try repository.loadSnapshot()
             }
             let viewModel = AppViewModel(
-                nodes: snapshot.nodes,
-                edges: snapshot.edges,
+                graphNodes: snapshot.graphNodes,
+                graphFacts: snapshot.graphFacts,
+                graphEpisodes: snapshot.graphEpisodes,
                 observeLogEntries: snapshot.observeLogEntries,
                 repository: repository,
                 databasePath: paths.databaseURL.path
@@ -155,35 +156,62 @@ final class AppViewModel: ObservableObject {
 
     static func demo() -> AppViewModel {
         let snapshot = demoSnapshot()
-        return AppViewModel(nodes: snapshot.nodes, edges: snapshot.edges, observeLogEntries: snapshot.observeLogEntries)
+        return AppViewModel(graphNodes: snapshot.graphNodes, graphFacts: snapshot.graphFacts, graphEpisodes: snapshot.graphEpisodes, observeLogEntries: snapshot.observeLogEntries)
     }
 
     private static func demoSnapshot() -> GraphStoreSnapshot {
-        let workObject = GraphNode.workObject(
+        let workObject = GraphNodeV2(
             id: "work-object-agent-os",
+            groupID: "default",
+            stableKey: "work_object:agent-os",
+            type: .workObject,
+            canonicalName: "Agent OS",
             title: "Agent OS",
             summary: "A local-first operating system for graph-backed agents."
         )
-        let question = GraphNode.question(
+        let question = GraphNodeV2(
             id: "question-memory",
+            groupID: "default",
+            stableKey: "question:memory",
+            type: .question,
+            canonicalName: "How should memory work?",
             title: "How should memory work?",
             summary: "Agent memory should be grounded in graph context."
         )
-        let answer = GraphNode.answer(
+        let answer = GraphNodeV2(
             id: "answer-graph-memory",
+            groupID: "default",
+            stableKey: "answer:graph-memory",
+            type: .answer,
+            canonicalName: "Use graph-backed context",
             title: "Use graph-backed context",
             summary: "Use a local graph store as the runtime knowledge source of truth."
         )
-        let edge = SemanticEdge.answeredBy(questionID: question.id, answerID: answer.id)
+        let fact = GraphFact(
+            id: "fact-question-memory-answered-by-answer-graph-memory",
+            groupID: "default",
+            sourceNodeID: question.id,
+            targetNodeID: answer.id,
+            relation: .answeredBy,
+            fact: "question-memory is answered by answer-graph-memory"
+        )
+        let episode = GraphEpisode(
+            id: "episode-demo",
+            groupID: "default",
+            sourceType: .system,
+            name: "Demo seed",
+            content: "Graph store is runtime knowledge source of truth.",
+            sourceDescription: "Built-in demo seed"
+        )
         let observe = ObserveLogEntry(
             id: "observe-demo",
             kind: .insight,
             source: .agent,
-            content: "Recent insight: Markdown is only a legacy import source; graph store is the runtime knowledge layer.",
+            content: "Recent insight: graph store is the runtime knowledge layer.",
             normalizedSummary: "Graph store is runtime knowledge source of truth",
             workObjectID: workObject.id
         )
-        return GraphStoreSnapshot(nodes: [workObject, question, answer], edges: [edge], observeLogEntries: [observe])
+        return GraphStoreSnapshot(graphNodes: [workObject, question, answer], graphFacts: [fact], graphEpisodes: [episode], observeLogEntries: [observe])
     }
 
     private static func makeChatController(
@@ -224,8 +252,9 @@ final class AppViewModel: ObservableObject {
     }
 
     private func apply(snapshot: GraphStoreSnapshot) {
-        nodes = snapshot.nodes
-        edges = snapshot.edges
+        graphNodes = snapshot.graphNodes
+        graphFacts = snapshot.graphFacts
+        graphEpisodes = snapshot.graphEpisodes
         observeLogEntries = snapshot.observeLogEntries
         chatController = Self.makeChatController(runtimeFactory: agentRuntimeFactory, settingsRepository: llmSettingsRepository, session: chatController.agent.session)
         Task { await runSearch() }
@@ -374,7 +403,7 @@ final class AppViewModel: ObservableObject {
         do {
             let result = try promotionRepository.promote(entry)
             let snapshot = try repository.loadSnapshot()
-            lastPromotionResultSummary = "已提升 \(entry.id)：\(result.nodes.count) 个节点，\(result.edges.count) 条关系"
+            lastPromotionResultSummary = "已提升 \(entry.id)：\(result.graphNodes.count) 个节点，\(result.graphFacts.count) 条事实"
             apply(snapshot: snapshot)
             errorMessage = nil
         } catch {
@@ -413,29 +442,6 @@ final class AppViewModel: ObservableObject {
         do {
             let response = try await hybridSearchService.search(query: GraphSearchQuery(text: query, groupID: "default"))
             searchResults = response.hits
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func importReadOnlyKnowledge() async {
-        guard let repository else {
-            errorMessage = "SQLite 仓库不可用。"
-            return
-        }
-        let trimmedPath = importPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedPath.isEmpty else { return }
-        isImporting = true
-        defer { isImporting = false }
-        do {
-            let directory = URL(fileURLWithPath: trimmedPath, isDirectory: true)
-            let report = try await Task.detached(priority: .userInitiated) {
-                try repository.importReadOnlyKnowledge(from: directory)
-            }.value
-            let snapshot = try repository.loadSnapshot()
-            lastImportReport = report
-            apply(snapshot: snapshot)
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -510,7 +516,7 @@ struct AppShellView: View {
             Group {
                 switch viewModel.selection ?? .agentChat {
                 case .graphNodes:
-                    GraphNodesView(nodes: viewModel.nodes, edges: viewModel.edges)
+                    GraphNodesView(nodes: viewModel.graphNodes, facts: viewModel.graphFacts, episodes: viewModel.graphEpisodes)
                 case .search:
                     SearchView(viewModel: viewModel)
                 case .observeLog:
@@ -519,8 +525,6 @@ struct AppShellView: View {
                     AgentChatView(viewModel: viewModel)
                 case .promotionQueue:
                     PromotionQueueView(viewModel: viewModel)
-                case .importKnowledge:
-                    ImportKnowledgeView(viewModel: viewModel)
                 case .llmSettings:
                     LLMSettingsView(viewModel: viewModel)
                 }
@@ -531,8 +535,9 @@ struct AppShellView: View {
 }
 
 struct GraphNodesView: View {
-    let nodes: [GraphNode]
-    let edges: [SemanticEdge]
+    let nodes: [GraphNodeV2]
+    let facts: [GraphFact]
+    let episodes: [GraphEpisode]
 
     var body: some View {
         List {
@@ -540,22 +545,31 @@ struct GraphNodesView: View {
                 ForEach(nodes) { node in
                     VStack(alignment: .leading) {
                         Text(node.title).font(.headline)
-                        Text(node.type.rawValue).font(.caption).foregroundStyle(.secondary)
+                        Text("\(node.type.rawValue) · \(node.status.rawValue)").font(.caption).foregroundStyle(.secondary)
                         if !node.summary.isEmpty { Text(node.summary).font(.subheadline) }
                     }
                 }
             }
-            Section("关系") {
-                ForEach(edges) { edge in
+            Section("事实") {
+                ForEach(facts) { fact in
                     VStack(alignment: .leading) {
-                        Text(edge.relation.rawValue).font(.headline)
-                        Text("\(edge.sourceNodeID) → \(edge.targetNodeID)").font(.caption).foregroundStyle(.secondary)
-                        Text(edge.fact).font(.subheadline)
+                        Text(fact.relation.rawValue).font(.headline)
+                        Text("\(fact.sourceNodeID) → \(fact.targetNodeID)").font(.caption).foregroundStyle(.secondary)
+                        Text(fact.fact).font(.subheadline)
+                    }
+                }
+            }
+            Section("Episodes") {
+                ForEach(episodes) { episode in
+                    VStack(alignment: .leading) {
+                        Text(episode.name).font(.headline)
+                        Text("\(episode.sourceType.rawValue) · \(episode.status.rawValue)").font(.caption).foregroundStyle(.secondary)
+                        Text(episode.content).font(.subheadline).lineLimit(3)
                     }
                 }
             }
         }
-        .navigationTitle("图谱节点")
+        .navigationTitle("图谱")
     }
 }
 
@@ -717,55 +731,5 @@ struct LLMSettingsView: View {
         }
         .padding()
         .navigationTitle("模型设置")
-    }
-}
-
-struct ImportKnowledgeView: View {
-    @ObservedObject var viewModel: AppViewModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if let databasePath = viewModel.databasePath {
-                Text("数据库：\(databasePath)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            TextField("知识库路径", text: $viewModel.importPath)
-                .textFieldStyle(.roundedBorder)
-            Button(viewModel.isImporting ? "导入中…" : "只读导入") {
-                Task { await viewModel.importReadOnlyKnowledge() }
-            }
-            .disabled(viewModel.isImporting || viewModel.importPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-            if let report = viewModel.lastImportReport {
-                Section("最近一次导入报告") {
-                    Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 8) {
-                        GridRow { Text("扫描文件数"); Text("\(report.scannedFiles)") }
-                        GridRow { Text("导入节点数"); Text("\(report.importedNodes)") }
-                        GridRow { Text("导入关系数"); Text("\(report.importedEdges)") }
-                        GridRow { Text("跳过文件数"); Text("\(report.skippedFiles)") }
-                        GridRow { Text("警告数"); Text("\(report.warnings.count)") }
-                    }
-                    .font(.subheadline)
-                }
-
-                if !report.warnings.isEmpty {
-                    List(report.warnings.prefix(20)) { warning in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(warning.path).font(.caption).foregroundStyle(.secondary)
-                            Text(warning.message).font(.subheadline)
-                        }
-                    }
-                } else {
-                    Spacer()
-                }
-            } else {
-                Text("导入会以只读方式扫描 Markdown，并将图谱节点和关系写入本地 SQLite 存储。")
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
-        }
-        .padding()
-        .navigationTitle("导入")
     }
 }

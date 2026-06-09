@@ -61,10 +61,10 @@ private func makePromotionStore() throws -> SQLiteGraphStore {
     #expect(loaded.expiresAt == pinned.expiresAt)
 }
 
-@Test func appPromotionQueuePromotesCandidateFactIntoDraftEdge() throws {
+@Test func appPromotionQueuePromotesCandidateFactIntoDraftGraphFact() throws {
     let store = try makePromotionStore()
-    let source = GraphNode.workObject(id: "work-object-agent-os", title: "Agent OS")
-    let target = GraphNode.answer(id: "answer-graph-memory", title: "Graph Memory")
+    let source = GraphNodeV2(id: "work-object-agent-os", groupID: "default", type: .workObject, canonicalName: "Agent OS", title: "Agent OS")
+    let target = GraphNodeV2(id: "answer-graph-memory", groupID: "default", type: .answer, canonicalName: "Graph Memory", title: "Graph Memory")
     let entry = ObserveLogEntry(
         id: "obs-fact",
         kind: .candidateFact,
@@ -72,18 +72,18 @@ private func makePromotionStore() throws -> SQLiteGraphStore {
         content: "Agent OS uses graph memory.",
         relatedNodeIDs: [source.id, target.id]
     )
-    try store.upsert(node: source)
-    try store.upsert(node: target)
+    try store.upsert(nodeV2: source)
+    try store.upsert(nodeV2: target)
     try store.upsert(observeLogEntry: entry)
 
     let repository = AppPromotionQueueRepository(store: store)
     let result = try repository.promote(entry)
     let promotedEntry = try #require(try store.observeLogEntry(id: entry.id))
-    let edge = try #require(try store.edge(id: result.edges[0].id))
+    let fact = try #require(try store.graphFact(id: result.graphFacts[0].id))
 
-    #expect(result.edges.count == 1)
-    #expect(edge.sourceNodeID == source.id)
-    #expect(edge.targetNodeID == target.id)
+    #expect(result.graphFacts.count == 1)
+    #expect(fact.sourceNodeID == source.id)
+    #expect(fact.targetNodeID == target.id)
     #expect(promotedEntry.status == .promoted)
-    #expect(promotedEntry.promotedNodeID == edge.id)
+    #expect(promotedEntry.promotedNodeID == fact.id)
 }
