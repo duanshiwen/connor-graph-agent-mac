@@ -1512,6 +1512,37 @@ public final class SQLiteGraphStore: @unchecked Sendable {
         }
     }
 
+    public func graphWriteCandidates(groupID: String? = nil, status: GraphWriteCandidateStatus? = nil, limit: Int = 100) throws -> [GraphWriteCandidate] {
+        var sql = """
+        SELECT id, group_id, kind, proposed_by_run_id, proposed_by_tool_call_id, rationale, confidence, payload_json,
+               source_episode_ids_json, related_node_ids_json, related_fact_ids_json, status, validation_errors_json, created_at, updated_at
+        FROM graph_write_candidates
+        """
+        var clauses: [String] = []
+        if groupID != nil { clauses.append("group_id = ?") }
+        if status != nil { clauses.append("status = ?") }
+        if !clauses.isEmpty { sql += " WHERE " + clauses.joined(separator: " AND ") }
+        sql += " ORDER BY created_at DESC LIMIT ?;"
+
+        return try withStatement(sql) { statement in
+            var index: Int32 = 1
+            if let groupID {
+                try bind(groupID, at: index, in: statement)
+                index += 1
+            }
+            if let status {
+                try bind(status.rawValue, at: index, in: statement)
+                index += 1
+            }
+            sqlite3_bind_int(statement, index, Int32(limit))
+            var candidates: [GraphWriteCandidate] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                candidates.append(try decodeGraphWriteCandidate(statement))
+            }
+            return candidates
+        }
+    }
+
     public func upsert(chatSession session: AgentSession) throws {
         let sql = """
         INSERT INTO chat_sessions
