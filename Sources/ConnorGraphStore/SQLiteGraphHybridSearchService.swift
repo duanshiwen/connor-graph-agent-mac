@@ -2,6 +2,35 @@ import Foundation
 import ConnorGraphCore
 import ConnorGraphSearch
 
+private enum RerankingMetadataKey {
+    static let baseRRFScore = "base_rrf_score"
+    static let crossEncoderReranked = "cross_encoder_reranked"
+    static let crossEncoderScore = "cross_encoder_score"
+    static let crossEncoderSkipReason = "cross_encoder_skip_reason"
+    static let crossEncoderStatus = "cross_encoder_status"
+    static let episodeMentionsBoost = "episode_mentions_boost"
+    static let episodeMentionsCount = "episode_mentions_count"
+    static let episodeMentionsScope = "episode_mentions_scope"
+    static let episodeMentionsSkipReason = "episode_mentions_skip_reason"
+    static let episodeMentionsStatus = "episode_mentions_status"
+    static let finalScore = "final_score"
+    static let graphBoost = "graph_boost"
+    static let graphBoostReason = "graph_boost_reason"
+    static let graphitiLocalSkipReason = "graphiti_local_skip_reason"
+    static let graphitiLocalStatus = "graphiti_local_status"
+    static let graphRanking = "graph_ranking"
+    static let graphRankingSignals = "graph_ranking_signals"
+    static let graphRankingSignalScores = "graph_ranking_signal_scores"
+    static let graphReranker = "graph_reranker"
+    static let graphRerankingStrategies = "graph_reranking_strategies"
+    static let mmrEmbeddingStatus = "mmr_embedding_status"
+    static let mmrLambda = "mmr_lambda"
+    static let mmrRank = "mmr_rank"
+    static let mmrScore = "mmr_score"
+    static let mmrSkipReason = "mmr_skip_reason"
+    static let mmrStatus = "mmr_status"
+}
+
 public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable {
     public var store: SQLiteGraphStore
     public var embeddingProvider: (any EmbeddingProvider)?
@@ -80,16 +109,16 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
         } else {
             rankedHits = rankedHits.map { hit in
                 var updated = hit
-                updated.metadata["graph_ranking"] = "rrf_only"
-                updated.metadata["base_rrf_score"] = formattedScore(hit.score)
-                updated.metadata["graph_boost"] = "0.000000"
-                updated.metadata["final_score"] = formattedScore(hit.score)
+                updated.metadata[RerankingMetadataKey.graphRanking] = "rrf_only"
+                updated.metadata[RerankingMetadataKey.baseRRFScore] = formattedScore(hit.score)
+                updated.metadata[RerankingMetadataKey.graphBoost] = "0.000000"
+                updated.metadata[RerankingMetadataKey.finalScore] = formattedScore(hit.score)
                 return updated
             }
         }
         rankedHits = rankedHits.map { hit in
             var updated = hit
-            updated.metadata["graph_reranking_strategies"] = strategyList(canonicalRerankingStrategies(from: query.reranking.strategies))
+            updated.metadata[RerankingMetadataKey.graphRerankingStrategies] = strategyList(canonicalRerankingStrategies(from: query.reranking.strategies))
             return updated
         }
         if query.reranking.strategies.contains(.episodeMentions) {
@@ -112,24 +141,24 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
             var updated = hit
             let count = episodeMentionCount(for: hit, mentionCounts: mentionCounts)
             let boost = min(Double(count) * 0.0025, 0.0100)
-            updated.metadata["episode_mentions_count"] = String(count)
-            updated.metadata["episode_mentions_scope"] = scope
-            updated.metadata["episode_mentions_boost"] = formattedScore(boost)
+            updated.metadata[RerankingMetadataKey.episodeMentionsCount] = String(count)
+            updated.metadata[RerankingMetadataKey.episodeMentionsScope] = scope
+            updated.metadata[RerankingMetadataKey.episodeMentionsBoost] = formattedScore(boost)
             guard boost > 0 else {
-                updated.metadata["episode_mentions_status"] = "skipped"
-                updated.metadata["episode_mentions_skip_reason"] = "no_mentions"
+                updated.metadata[RerankingMetadataKey.episodeMentionsStatus] = "skipped"
+                updated.metadata[RerankingMetadataKey.episodeMentionsSkipReason] = "no_mentions"
                 return updated
             }
-            updated.metadata["episode_mentions_status"] = "applied"
-            updated.metadata.removeValue(forKey: "episode_mentions_skip_reason")
+            updated.metadata[RerankingMetadataKey.episodeMentionsStatus] = "applied"
+            updated.metadata.removeValue(forKey: RerankingMetadataKey.episodeMentionsSkipReason)
             updated.score += boost
-            updated.metadata["graph_ranking"] = "boosted"
-            appendMetadataToken("episode_mentions", key: "graph_boost_reason", hit: &updated)
-            appendMetadataToken("episode_mentions", key: "graph_ranking_signals", hit: &updated)
+            updated.metadata[RerankingMetadataKey.graphRanking] = "boosted"
+            appendMetadataToken("episode_mentions", key: RerankingMetadataKey.graphBoostReason, hit: &updated)
+            appendMetadataToken("episode_mentions", key: RerankingMetadataKey.graphRankingSignals, hit: &updated)
             appendSignalScore("episode_mentions", score: boost, hit: &updated)
-            let existingBoost = Double(updated.metadata["graph_boost"] ?? "0") ?? 0
-            updated.metadata["graph_boost"] = formattedScore(existingBoost + boost)
-            updated.metadata["final_score"] = formattedScore(updated.score)
+            let existingBoost = Double(updated.metadata[RerankingMetadataKey.graphBoost] ?? "0") ?? 0
+            updated.metadata[RerankingMetadataKey.graphBoost] = formattedScore(existingBoost + boost)
+            updated.metadata[RerankingMetadataKey.finalScore] = formattedScore(updated.score)
             return updated
         }.sorted { lhs, rhs in
             if lhs.score == rhs.score {
@@ -161,10 +190,10 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
 
     private func appendSignalScore(_ reason: String, score: Double, hit: inout GraphSearchHit) {
         let token = "\(reason):\(formattedScore(score))"
-        var tokens = hit.metadata["graph_ranking_signal_scores"]?.split(separator: ",").map(String.init) ?? []
+        var tokens = hit.metadata[RerankingMetadataKey.graphRankingSignalScores]?.split(separator: ",").map(String.init) ?? []
         tokens.removeAll { $0.hasPrefix("\(reason):") }
         tokens.append(token)
-        hit.metadata["graph_ranking_signal_scores"] = tokens.joined(separator: ",")
+        hit.metadata[RerankingMetadataKey.graphRankingSignalScores] = tokens.joined(separator: ",")
     }
 
     private func mmrRerankedHits(_ hits: [GraphSearchHit], query: GraphSearchQuery) throws -> [GraphSearchHit] {
@@ -201,14 +230,14 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
             }.first!
             var updated = best.hit
             let rank = selected.count + 1
-            updated.metadata["mmr_score"] = formattedScore(best.score)
-            updated.metadata["mmr_lambda"] = formattedScore(lambda)
-            updated.metadata["mmr_rank"] = String(rank)
-            updated.metadata["mmr_status"] = "reranked"
+            updated.metadata[RerankingMetadataKey.mmrScore] = formattedScore(best.score)
+            updated.metadata[RerankingMetadataKey.mmrLambda] = formattedScore(lambda)
+            updated.metadata[RerankingMetadataKey.mmrRank] = String(rank)
+            updated.metadata[RerankingMetadataKey.mmrStatus] = "reranked"
             if embeddingsByID[updated.id] == nil {
-                updated.metadata["mmr_embedding_status"] = "missing"
+                updated.metadata[RerankingMetadataKey.mmrEmbeddingStatus] = "missing"
             } else {
-                updated.metadata["mmr_embedding_status"] = "available"
+                updated.metadata[RerankingMetadataKey.mmrEmbeddingStatus] = "available"
             }
             selected.append(updated)
             remaining.remove(at: best.index)
@@ -219,9 +248,9 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
     private func markMMRUnavailable(_ hits: [GraphSearchHit], skipReason: String) -> [GraphSearchHit] {
         hits.map { hit in
             var updated = hit
-            updated.metadata["mmr_status"] = "unavailable"
-            updated.metadata["mmr_embedding_status"] = "missing"
-            updated.metadata["mmr_skip_reason"] = skipReason
+            updated.metadata[RerankingMetadataKey.mmrStatus] = "unavailable"
+            updated.metadata[RerankingMetadataKey.mmrEmbeddingStatus] = "missing"
+            updated.metadata[RerankingMetadataKey.mmrSkipReason] = skipReason
             return updated
         }
     }
@@ -242,7 +271,7 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
         guard let crossEncoderReranker else {
             return hits.map { hit in
                 var updated = hit
-                updated.metadata["cross_encoder_status"] = "unavailable"
+                updated.metadata[RerankingMetadataKey.crossEncoderStatus] = "unavailable"
                 return updated
             }
         }
@@ -250,8 +279,8 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
         guard topK > 0 else {
             return hits.map { hit in
                 var updated = hit
-                updated.metadata["cross_encoder_status"] = "skipped"
-                updated.metadata["cross_encoder_skip_reason"] = "top_k_zero"
+                updated.metadata[RerankingMetadataKey.crossEncoderStatus] = "skipped"
+                updated.metadata[RerankingMetadataKey.crossEncoderSkipReason] = "top_k_zero"
                 return updated
             }
         }
@@ -265,10 +294,10 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
             var updated = hit
             let score = scoresByID[hit.id] ?? 0
             updated.score = score
-            updated.metadata["cross_encoder_score"] = formattedScore(score)
-            updated.metadata["cross_encoder_status"] = "reranked"
-            updated.metadata["cross_encoder_reranked"] = "true"
-            updated.metadata["final_score"] = formattedScore(score)
+            updated.metadata[RerankingMetadataKey.crossEncoderScore] = formattedScore(score)
+            updated.metadata[RerankingMetadataKey.crossEncoderStatus] = "reranked"
+            updated.metadata[RerankingMetadataKey.crossEncoderReranked] = "true"
+            updated.metadata[RerankingMetadataKey.finalScore] = formattedScore(score)
             return updated
         }.sorted { lhs, rhs in
             if lhs.score == rhs.score {
@@ -279,8 +308,8 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
         }
         let skipped = hits.dropFirst(topK).map { hit in
             var updated = hit
-            updated.metadata["cross_encoder_status"] = "skipped"
-            updated.metadata["cross_encoder_skip_reason"] = "outside_top_k"
+            updated.metadata[RerankingMetadataKey.crossEncoderStatus] = "skipped"
+            updated.metadata[RerankingMetadataKey.crossEncoderSkipReason] = "outside_top_k"
             return updated
         }
         return rerankedTop + skipped
@@ -311,24 +340,24 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
                 let boost = signals.reduce(0.0) { $0 + $1.boost }
                 let signalReasons = signals.map(\.reason)
                 rerankedHit.score = baseScore + boost
-                rerankedHit.metadata["graph_reranker"] = "graphiti_local"
-                rerankedHit.metadata["base_rrf_score"] = formattedScore(baseScore)
-                rerankedHit.metadata["graph_boost"] = formattedScore(boost)
-                rerankedHit.metadata["final_score"] = formattedScore(rerankedHit.score)
+                rerankedHit.metadata[RerankingMetadataKey.graphReranker] = "graphiti_local"
+                rerankedHit.metadata[RerankingMetadataKey.baseRRFScore] = formattedScore(baseScore)
+                rerankedHit.metadata[RerankingMetadataKey.graphBoost] = formattedScore(boost)
+                rerankedHit.metadata[RerankingMetadataKey.finalScore] = formattedScore(rerankedHit.score)
                 if boost > 0 {
-                    rerankedHit.metadata["graph_ranking"] = "boosted"
-                    rerankedHit.metadata["graphiti_local_status"] = "applied"
-                    rerankedHit.metadata.removeValue(forKey: "graphiti_local_skip_reason")
-                    rerankedHit.metadata["graph_boost_reason"] = signalReasons.joined(separator: ",")
-                    rerankedHit.metadata["graph_ranking_signals"] = signalReasons.joined(separator: ",")
-                    rerankedHit.metadata["graph_ranking_signal_scores"] = formattedSignalScores(signals)
+                    rerankedHit.metadata[RerankingMetadataKey.graphRanking] = "boosted"
+                    rerankedHit.metadata[RerankingMetadataKey.graphitiLocalStatus] = "applied"
+                    rerankedHit.metadata.removeValue(forKey: RerankingMetadataKey.graphitiLocalSkipReason)
+                    rerankedHit.metadata[RerankingMetadataKey.graphBoostReason] = signalReasons.joined(separator: ",")
+                    rerankedHit.metadata[RerankingMetadataKey.graphRankingSignals] = signalReasons.joined(separator: ",")
+                    rerankedHit.metadata[RerankingMetadataKey.graphRankingSignalScores] = formattedSignalScores(signals)
                 } else {
-                    rerankedHit.metadata["graph_ranking"] = "rrf_only"
-                    rerankedHit.metadata["graphiti_local_status"] = "skipped"
-                    rerankedHit.metadata["graphiti_local_skip_reason"] = "no_graph_signals"
-                    rerankedHit.metadata.removeValue(forKey: "graph_boost_reason")
-                    rerankedHit.metadata.removeValue(forKey: "graph_ranking_signals")
-                    rerankedHit.metadata.removeValue(forKey: "graph_ranking_signal_scores")
+                    rerankedHit.metadata[RerankingMetadataKey.graphRanking] = "rrf_only"
+                    rerankedHit.metadata[RerankingMetadataKey.graphitiLocalStatus] = "skipped"
+                    rerankedHit.metadata[RerankingMetadataKey.graphitiLocalSkipReason] = "no_graph_signals"
+                    rerankedHit.metadata.removeValue(forKey: RerankingMetadataKey.graphBoostReason)
+                    rerankedHit.metadata.removeValue(forKey: RerankingMetadataKey.graphRankingSignals)
+                    rerankedHit.metadata.removeValue(forKey: RerankingMetadataKey.graphRankingSignalScores)
                 }
                 return rerankedHit
             }.sorted { lhs, rhs in
