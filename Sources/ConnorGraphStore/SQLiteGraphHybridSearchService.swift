@@ -317,11 +317,15 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
                 rerankedHit.metadata["final_score"] = formattedScore(rerankedHit.score)
                 if boost > 0 {
                     rerankedHit.metadata["graph_ranking"] = "boosted"
+                    rerankedHit.metadata["graphiti_local_status"] = "applied"
+                    rerankedHit.metadata.removeValue(forKey: "graphiti_local_skip_reason")
                     rerankedHit.metadata["graph_boost_reason"] = signalReasons.joined(separator: ",")
                     rerankedHit.metadata["graph_ranking_signals"] = signalReasons.joined(separator: ",")
                     rerankedHit.metadata["graph_ranking_signal_scores"] = formattedSignalScores(signals)
                 } else {
                     rerankedHit.metadata["graph_ranking"] = "rrf_only"
+                    rerankedHit.metadata["graphiti_local_status"] = "skipped"
+                    rerankedHit.metadata["graphiti_local_skip_reason"] = "no_graph_signals"
                     rerankedHit.metadata.removeValue(forKey: "graph_boost_reason")
                     rerankedHit.metadata.removeValue(forKey: "graph_ranking_signals")
                     rerankedHit.metadata.removeValue(forKey: "graph_ranking_signal_scores")
