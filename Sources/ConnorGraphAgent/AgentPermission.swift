@@ -72,16 +72,16 @@ public actor AgentPolicyEngine: Sendable {
             }
         case .askToWrite:
             switch capability {
-            case .readGraph, .readSession, .modelCall, .proposeGraphWrite:
+            case .readGraph, .readSession, .modelCall, .proposeGraphWrite, .externalNetwork:
                 return .approved
-            case .commitGraphWrite, .invalidateGraphFact, .deleteGraphObject, .externalNetwork, .costlyModelCall:
+            case .commitGraphWrite, .invalidateGraphFact, .deleteGraphObject, .costlyModelCall:
                 return .needsApproval
             }
         case .trustedWrite:
             switch capability {
-            case .readGraph, .readSession, .modelCall, .proposeGraphWrite, .commitGraphWrite:
+            case .readGraph, .readSession, .modelCall, .proposeGraphWrite, .commitGraphWrite, .externalNetwork:
                 return .approved
-            case .invalidateGraphFact, .deleteGraphObject, .externalNetwork, .costlyModelCall:
+            case .invalidateGraphFact, .deleteGraphObject, .costlyModelCall:
                 return .needsApproval
             }
         }

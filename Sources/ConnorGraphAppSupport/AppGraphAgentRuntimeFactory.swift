@@ -53,6 +53,9 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         registry.register(GraphSearchTool(searchService: searchService))
         registry.register(GraphIngestEpisodeTool(repository: store))
         registry.register(GraphProposeWriteTool(repository: store))
+        registry.register(BrowserFetchTool())
+        registry.register(SearchEngineMCPTool())
+        registry.register(SearchEngineMCPWebFetchTool())
         var effectiveConfiguration = configuration
         effectiveConfiguration.permissionMode = permissionMode
         return AgentLoopController(
