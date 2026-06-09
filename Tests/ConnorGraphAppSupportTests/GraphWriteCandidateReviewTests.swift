@@ -43,3 +43,52 @@ import ConnorGraphStore
         _ = try service.commit(candidate, store: store)
     }
 }
+
+@Test func governedGraphWriteCandidateCommitRecordsPermissionAndAuditTrail() async throws {
+    let store = try SQLiteGraphStore(path: ":memory:")
+    try store.migrate()
+    let repository = AppGraphWriteCandidateRepository(store: store, permissionMode: .trustedWrite)
+    let candidate = GraphWriteCandidate(
+        groupID: "default",
+        kind: .createNode,
+        proposedByRunID: "run-governed",
+        rationale: "Create governed node",
+        confidence: 0.95,
+        payloadJSON: #"{"id":"node-governed","nodeType":"entity","canonicalName":"Governed Node","title":"Governed Node"}"#
+    )
+    try store.upsert(graphWriteCandidate: candidate)
+
+    let result = try await repository.commitGoverned(candidate)
+
+    #expect(result.createdNodeIDs == ["node-governed"])
+    let auditEvents = try store.agentAuditEvents(runID: "run-governed")
+    #expect(auditEvents.map(\.eventType).contains(.permissionDecision))
+    #expect(auditEvents.map(\.eventType).contains(.graphWriteCommitStarted))
+    #expect(auditEvents.map(\.eventType).contains(.graphWriteCommitFinished))
+    #expect(auditEvents.first { $0.eventType == .permissionDecision }?.decision?.outcome == .approved)
+}
+
+@Test func governedGraphWriteCandidateCommitDeniesReadOnlyPolicy() async throws {
+    let store = try SQLiteGraphStore(path: ":memory:")
+    try store.migrate()
+    let repository = AppGraphWriteCandidateRepository(store: store, permissionMode: .readOnly)
+    let candidate = GraphWriteCandidate(
+        groupID: "default",
+        kind: .createNode,
+        proposedByRunID: "run-read-only",
+        rationale: "Should not commit in read-only mode",
+        confidence: 0.8,
+        payloadJSON: #"{"id":"node-denied","nodeType":"entity","canonicalName":"Denied Node","title":"Denied Node"}"#
+    )
+
+    do {
+        _ = try await repository.commitGoverned(candidate)
+        Issue.record("Expected read-only policy to deny graph write commit")
+    } catch GraphWriteCandidateCommitError.permissionDenied {
+        #expect(try store.graphNodeV2(id: "node-denied") == nil)
+        let auditEvents = try store.agentAuditEvents(runID: "run-read-only")
+        #expect(auditEvents.map(\.eventType).contains(.permissionDecision))
+        #expect(auditEvents.map(\.eventType).contains(.graphWriteCommitFailed))
+        #expect(auditEvents.first { $0.eventType == .permissionDecision }?.decision?.outcome == .denied)
+    }
+}
