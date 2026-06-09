@@ -459,39 +459,39 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    func approveGraphWriteCandidate(_ candidate: GraphWriteCandidate) {
+    func approveGraphWriteCandidate(_ candidate: GraphWriteCandidate) async {
         do {
-            _ = try graphWriteCandidateRepository?.approve(candidate)
+            _ = try await graphWriteCandidateRepository?.approveGoverned(candidate)
             reloadGraphWriteCandidates()
-            lastGraphWriteCandidateResultSummary = "已批准候选 \(candidate.id)"
+            lastGraphWriteCandidateResultSummary = "已批准候选 \(candidate.id)，并写入审计日志"
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
         }
     }
 
-    func rejectGraphWriteCandidate(_ candidate: GraphWriteCandidate) {
+    func rejectGraphWriteCandidate(_ candidate: GraphWriteCandidate) async {
         do {
-            _ = try graphWriteCandidateRepository?.reject(candidate, reason: "Rejected by reviewer")
+            _ = try await graphWriteCandidateRepository?.rejectGoverned(candidate, reason: "Rejected by reviewer")
             reloadGraphWriteCandidates()
-            lastGraphWriteCandidateResultSummary = "已拒绝候选 \(candidate.id)"
+            lastGraphWriteCandidateResultSummary = "已拒绝候选 \(candidate.id)，并写入审计日志"
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
         }
     }
 
-    func commitGraphWriteCandidate(_ candidate: GraphWriteCandidate) {
+    func commitGraphWriteCandidate(_ candidate: GraphWriteCandidate) async {
         guard let graphWriteCandidateRepository, let repository else {
             errorMessage = "写入候选仓储不可用。"
             return
         }
         do {
-            let result = try graphWriteCandidateRepository.commit(candidate)
+            let result = try await graphWriteCandidateRepository.commitGoverned(candidate)
             let snapshot = try repository.loadSnapshot()
             apply(snapshot: snapshot)
             reloadGraphWriteCandidates()
-            lastGraphWriteCandidateResultSummary = "已提交候选 \(candidate.id)：节点 +\(result.createdNodeIDs.count)，事实 +\(result.createdFactIDs.count)，更新事实 \(result.updatedFactIDs.count)，附加证据 \(result.attachedEvidenceFactIDs.count)"
+            lastGraphWriteCandidateResultSummary = "已通过权限治理提交候选 \(candidate.id)：节点 +\(result.createdNodeIDs.count)，事实 +\(result.createdFactIDs.count)，更新事实 \(result.updatedFactIDs.count)，附加证据 \(result.attachedEvidenceFactIDs.count)"
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -835,11 +835,11 @@ struct GraphWriteCandidateReviewView: View {
                         }
 
                         HStack {
-                            Button("批准") { viewModel.approveGraphWriteCandidate(candidate) }
+                            Button("批准") { Task { await viewModel.approveGraphWriteCandidate(candidate) } }
                                 .disabled(candidate.status == .approved || candidate.status == .committed || candidate.status == .rejected)
-                            Button("提交") { viewModel.commitGraphWriteCandidate(candidate) }
+                            Button("治理提交") { Task { await viewModel.commitGraphWriteCandidate(candidate) } }
                                 .disabled(candidate.status == .committed || candidate.status == .rejected)
-                            Button("拒绝", role: .destructive) { viewModel.rejectGraphWriteCandidate(candidate) }
+                            Button("拒绝", role: .destructive) { Task { await viewModel.rejectGraphWriteCandidate(candidate) } }
                                 .disabled(candidate.status == .committed || candidate.status == .rejected)
                         }
                     }
