@@ -14,7 +14,6 @@
 		A00000000000000000000007 /* ConnorGraphStore in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000008 /* ConnorGraphStore */; };
 		A00000000000000000000009 /* ConnorGraphSearch in Frameworks */ = {isa = PBXBuildFile; productRef = A0000000000000000000000A /* ConnorGraphSearch */; };
 		A0000000000000000000000B /* ConnorGraphAgent in Frameworks */ = {isa = PBXBuildFile; productRef = A0000000000000000000000C /* ConnorGraphAgent */; };
-		A0000000000000000000000D /* ConnorGraphImport in Frameworks */ = {isa = PBXBuildFile; productRef = A0000000000000000000000E /* ConnorGraphImport */; };
 		A0000000000000000000000F /* ConnorGraphAppSupport in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000010 /* ConnorGraphAppSupport */; };
 /* End PBXBuildFile section */
 
@@ -34,7 +33,6 @@
 				A00000000000000000000007 /* ConnorGraphStore in Frameworks */,
 				A00000000000000000000009 /* ConnorGraphSearch in Frameworks */,
 				A0000000000000000000000B /* ConnorGraphAgent in Frameworks */,
-				A0000000000000000000000D /* ConnorGraphImport in Frameworks */,
 				A0000000000000000000000F /* ConnorGraphAppSupport in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -80,7 +78,6 @@
 				A00000000000000000000008 /* ConnorGraphStore */,
 				A0000000000000000000000A /* ConnorGraphSearch */,
 				A0000000000000000000000C /* ConnorGraphAgent */,
-				A0000000000000000000000E /* ConnorGraphImport */,
 				A00000000000000000000010 /* ConnorGraphAppSupport */,
 			);
 			productName = ConnorGraphAgentMacApp;
@@ -362,11 +359,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A0000000000000000000001A /* XCLocalSwiftPackageReference \"connor-graph-agent-mac\" */;
 			productName = ConnorGraphAgent;
-		};
-		A0000000000000000000000E /* ConnorGraphImport */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = A0000000000000000000001A /* XCLocalSwiftPackageReference \"connor-graph-agent-mac\" */;
-			productName = ConnorGraphImport;
 		};
 		A00000000000000000000010 /* ConnorGraphAppSupport */ = {
 			isa = XCSwiftPackageProductDependency;

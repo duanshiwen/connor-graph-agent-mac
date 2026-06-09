@@ -64,34 +64,6 @@ public final class SQLiteGraphStore: @unchecked Sendable {
         );
         """)
         try execute("""
-        CREATE TABLE IF NOT EXISTS graph_nodes (
-            id TEXT PRIMARY KEY,
-            type TEXT NOT NULL,
-            title TEXT NOT NULL,
-            summary TEXT NOT NULL,
-            source_path TEXT,
-            status TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            valid_at TEXT,
-            metadata_json TEXT NOT NULL
-        );
-        """)
-        try execute("""
-        CREATE TABLE IF NOT EXISTS semantic_edges (
-            id TEXT PRIMARY KEY,
-            source_node_id TEXT NOT NULL,
-            target_node_id TEXT NOT NULL,
-            relation TEXT NOT NULL,
-            fact TEXT NOT NULL,
-            confidence REAL NOT NULL,
-            created_at TEXT NOT NULL,
-            valid_at TEXT,
-            invalid_at TEXT,
-            source_episode_id TEXT,
-            metadata_json TEXT NOT NULL
-        );
-        """)
-        try execute("""
         CREATE TABLE IF NOT EXISTS observe_log_entries (
             id TEXT PRIMARY KEY,
             timestamp TEXT NOT NULL,
@@ -111,11 +83,6 @@ public final class SQLiteGraphStore: @unchecked Sendable {
             metadata_json TEXT NOT NULL
         );
         """)
-        try execute("CREATE INDEX IF NOT EXISTS idx_graph_nodes_type ON graph_nodes(type);")
-        try execute("CREATE INDEX IF NOT EXISTS idx_graph_nodes_status ON graph_nodes(status);")
-        try execute("CREATE INDEX IF NOT EXISTS idx_semantic_edges_source ON semantic_edges(source_node_id);")
-        try execute("CREATE INDEX IF NOT EXISTS idx_semantic_edges_target ON semantic_edges(target_node_id);")
-        try execute("CREATE INDEX IF NOT EXISTS idx_semantic_edges_relation ON semantic_edges(relation);")
         try execute("""
         CREATE TABLE IF NOT EXISTS chat_sessions (
             id TEXT PRIMARY KEY,
@@ -1137,83 +1104,6 @@ public final class SQLiteGraphStore: @unchecked Sendable {
         return try ids.compactMap { try graphEpisode(id: $0) }
     }
 
-    public func upsert(node: GraphNode) throws {
-        let sql = """
-        INSERT OR REPLACE INTO graph_nodes
-        (id, type, title, summary, source_path, status, created_at, valid_at, metadata_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-        """
-        try withStatement(sql) { statement in
-            try bind(node.id, at: 1, in: statement)
-            try bind(node.type.rawValue, at: 2, in: statement)
-            try bind(node.title, at: 3, in: statement)
-            try bind(node.summary, at: 4, in: statement)
-            try bind(node.sourcePath, at: 5, in: statement)
-            try bind(node.status.rawValue, at: 6, in: statement)
-            try bind(iso(node.createdAt), at: 7, in: statement)
-            try bind(node.validAt.map(iso), at: 8, in: statement)
-            try bind(jsonString(node.metadata), at: 9, in: statement)
-            try stepDone(statement)
-        }
-    }
-
-    public func node(id: String) throws -> GraphNode? {
-        let sql = "SELECT id, type, title, summary, source_path, status, created_at, valid_at, metadata_json FROM graph_nodes WHERE id = ? LIMIT 1;"
-        return try withStatement(sql) { statement in
-            try bind(id, at: 1, in: statement)
-            guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
-            return try decodeNode(statement)
-        }
-    }
-
-    public func upsert(edge: SemanticEdge) throws {
-        let sql = """
-        INSERT OR REPLACE INTO semantic_edges
-        (id, source_node_id, target_node_id, relation, fact, confidence, created_at, valid_at, invalid_at, source_episode_id, metadata_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-        """
-        try withStatement(sql) { statement in
-            try bind(edge.id, at: 1, in: statement)
-            try bind(edge.sourceNodeID, at: 2, in: statement)
-            try bind(edge.targetNodeID, at: 3, in: statement)
-            try bind(edge.relation.rawValue, at: 4, in: statement)
-            try bind(edge.fact, at: 5, in: statement)
-            sqlite3_bind_double(statement, 6, edge.confidence)
-            try bind(iso(edge.createdAt), at: 7, in: statement)
-            try bind(edge.validAt.map(iso), at: 8, in: statement)
-            try bind(edge.invalidAt.map(iso), at: 9, in: statement)
-            try bind(edge.sourceEpisodeID, at: 10, in: statement)
-            try bind(jsonString(edge.metadata), at: 11, in: statement)
-            try stepDone(statement)
-        }
-    }
-
-    public func edge(id: String) throws -> SemanticEdge? {
-        let sql = """
-        SELECT id, source_node_id, target_node_id, relation, fact, confidence, created_at, valid_at, invalid_at, source_episode_id, metadata_json
-        FROM semantic_edges WHERE id = ? LIMIT 1;
-        """
-        return try withStatement(sql) { statement in
-            try bind(id, at: 1, in: statement)
-            guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
-            return try decodeEdge(statement)
-        }
-    }
-
-    public func neighborhoodEdges(nodeID: String) throws -> [SemanticEdge] {
-        let sql = """
-        SELECT id, source_node_id, target_node_id, relation, fact, confidence, created_at, valid_at, invalid_at, source_episode_id, metadata_json
-        FROM semantic_edges
-        WHERE source_node_id = ? OR target_node_id = ?
-        ORDER BY id ASC;
-        """
-        return try withStatement(sql) { statement in
-            try bind(nodeID, at: 1, in: statement)
-            try bind(nodeID, at: 2, in: statement)
-            return try collectEdges(statement)
-        }
-    }
-
     public func upsert(observeLogEntry entry: ObserveLogEntry) throws {
         let sql = """
         INSERT OR REPLACE INTO observe_log_entries
@@ -1272,33 +1162,60 @@ public final class SQLiteGraphStore: @unchecked Sendable {
         }
     }
 
-    public func allNodes(limit: Int = 1_000) throws -> [GraphNode] {
+    public func allGraphNodes(groupID: String = "default", limit: Int = 1_000) throws -> [GraphNodeV2] {
         let sql = """
-        SELECT id, type, title, summary, source_path, status, created_at, valid_at, metadata_json
-        FROM graph_nodes
-        ORDER BY id ASC
+        SELECT id, group_id, stable_key, type, canonical_name, title, summary, labels_json, attributes_json, status, confidence, created_at, updated_at, valid_from, valid_until, superseded_by_node_id, metadata_json
+        FROM graph_nodes_v2
+        WHERE group_id = ?
+        ORDER BY updated_at DESC, id ASC
         LIMIT ?;
         """
         return try withStatement(sql) { statement in
-            sqlite3_bind_int(statement, 1, Int32(limit))
-            var nodes: [GraphNode] = []
+            try bind(groupID, at: 1, in: statement)
+            sqlite3_bind_int(statement, 2, Int32(limit))
+            var nodes: [GraphNodeV2] = []
             while sqlite3_step(statement) == SQLITE_ROW {
-                nodes.append(try decodeNode(statement))
+                nodes.append(try decodeGraphNodeV2(statement))
             }
             return nodes
         }
     }
 
-    public func allEdges(limit: Int = 2_000) throws -> [SemanticEdge] {
+    public func allGraphFacts(groupID: String = "default", limit: Int = 2_000) throws -> [GraphFact] {
         let sql = """
-        SELECT id, source_node_id, target_node_id, relation, fact, confidence, created_at, valid_at, invalid_at, source_episode_id, metadata_json
-        FROM semantic_edges
-        ORDER BY id ASC
+        SELECT id, group_id, source_node_id, target_node_id, relation, fact, confidence, status, created_at, updated_at, valid_at, invalid_at, expired_at, reference_time, invalidated_by_fact_id, attributes_json, metadata_json
+        FROM graph_facts
+        WHERE group_id = ?
+        ORDER BY updated_at DESC, id ASC
         LIMIT ?;
         """
         return try withStatement(sql) { statement in
-            sqlite3_bind_int(statement, 1, Int32(limit))
-            return try collectEdges(statement)
+            try bind(groupID, at: 1, in: statement)
+            sqlite3_bind_int(statement, 2, Int32(limit))
+            var facts: [GraphFact] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                facts.append(try decodeGraphFact(statement))
+            }
+            return facts
+        }
+    }
+
+    public func allGraphEpisodes(groupID: String = "default", limit: Int = 1_000) throws -> [GraphEpisode] {
+        let sql = """
+        SELECT id, group_id, source_type, source_id, name, content, source_description, occurred_at, ingested_at, session_id, work_object_id, status, metadata_json
+        FROM graph_episodes
+        WHERE group_id = ?
+        ORDER BY occurred_at DESC, id ASC
+        LIMIT ?;
+        """
+        return try withStatement(sql) { statement in
+            try bind(groupID, at: 1, in: statement)
+            sqlite3_bind_int(statement, 2, Int32(limit))
+            var episodes: [GraphEpisode] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                episodes.append(try decodeGraphEpisode(statement))
+            }
+            return episodes
         }
     }
 
@@ -1472,13 +1389,16 @@ public final class SQLiteGraphStore: @unchecked Sendable {
     }
 
     public func snapshot(
-        nodeLimit: Int = 1_000,
-        edgeLimit: Int = 2_000,
+        groupID: String = "default",
+        graphNodeLimit: Int = 1_000,
+        graphFactLimit: Int = 2_000,
+        graphEpisodeLimit: Int = 1_000,
         observeLogLimit: Int = 500
     ) throws -> GraphStoreSnapshot {
         GraphStoreSnapshot(
-            nodes: try allNodes(limit: nodeLimit),
-            edges: try allEdges(limit: edgeLimit),
+            graphNodes: try allGraphNodes(groupID: groupID, limit: graphNodeLimit),
+            graphFacts: try allGraphFacts(groupID: groupID, limit: graphFactLimit),
+            graphEpisodes: try allGraphEpisodes(groupID: groupID, limit: graphEpisodeLimit),
             observeLogEntries: try recentObserveLogEntries(limit: observeLogLimit)
         )
     }
@@ -2004,71 +1924,6 @@ public final class SQLiteGraphStore: @unchecked Sendable {
             createdAt: createdAt,
             updatedAt: updatedAt
         )
-    }
-
-    private func decodeNode(_ statement: OpaquePointer?) throws -> GraphNode {
-        guard
-            let id = text(statement, 0),
-            let typeRaw = text(statement, 1),
-            let type = NodeType(rawValue: typeRaw),
-            let title = text(statement, 2),
-            let summary = text(statement, 3),
-            let statusRaw = text(statement, 5),
-            let status = NodeStatus(rawValue: statusRaw),
-            let createdRaw = text(statement, 6),
-            let createdAt = date(createdRaw),
-            let metadataRaw = text(statement, 8)
-        else {
-            throw SQLiteGraphStoreError.decodeFailed("graph_nodes row")
-        }
-        return GraphNode(
-            id: id,
-            type: type,
-            title: title,
-            summary: summary,
-            sourcePath: text(statement, 4),
-            status: status,
-            createdAt: createdAt,
-            validAt: text(statement, 7).flatMap(date),
-            metadata: try json([String: String].self, from: metadataRaw)
-        )
-    }
-
-    private func decodeEdge(_ statement: OpaquePointer?) throws -> SemanticEdge {
-        guard
-            let id = text(statement, 0),
-            let source = text(statement, 1),
-            let target = text(statement, 2),
-            let relationRaw = text(statement, 3),
-            let relation = RelationType(rawValue: relationRaw),
-            let fact = text(statement, 4),
-            let createdRaw = text(statement, 6),
-            let createdAt = date(createdRaw),
-            let metadataRaw = text(statement, 10)
-        else {
-            throw SQLiteGraphStoreError.decodeFailed("semantic_edges row")
-        }
-        return SemanticEdge(
-            id: id,
-            sourceNodeID: source,
-            targetNodeID: target,
-            relation: relation,
-            fact: fact,
-            confidence: sqlite3_column_double(statement, 5),
-            createdAt: createdAt,
-            validAt: text(statement, 7).flatMap(date),
-            invalidAt: text(statement, 8).flatMap(date),
-            sourceEpisodeID: text(statement, 9),
-            metadata: try json([String: String].self, from: metadataRaw)
-        )
-    }
-
-    private func collectEdges(_ statement: OpaquePointer?) throws -> [SemanticEdge] {
-        var edges: [SemanticEdge] = []
-        while sqlite3_step(statement) == SQLITE_ROW {
-            edges.append(try decodeEdge(statement))
-        }
-        return edges
     }
 
     private func decodeChatSession(_ statement: OpaquePointer?, includeMessages: Bool) throws -> AgentSession {

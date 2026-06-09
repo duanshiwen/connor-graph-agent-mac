@@ -30,56 +30,30 @@ private func temporaryDirectory(_ name: String = UUID().uuidString) throws -> UR
 
     #expect(FileManager.default.fileExists(atPath: paths.applicationSupportDirectory.path))
     #expect(FileManager.default.fileExists(atPath: paths.databaseURL.path))
-    #expect(tables.contains("graph_nodes"))
-    #expect(tables.contains("semantic_edges"))
+    #expect(tables.contains("graph_episodes"))
+    #expect(tables.contains("graph_nodes_v2"))
+    #expect(tables.contains("graph_facts"))
     #expect(tables.contains("observe_log_entries"))
 }
 
-@Test func appGraphRepositoryLoadsSnapshotFromSQLiteStore() throws {
+@Test func appGraphRepositoryLoadsTemporalGraphSnapshotFromSQLiteStore() throws {
     let base = try temporaryDirectory()
     let paths = AppStoragePaths.resolving(applicationSupportBaseDirectory: base)
     let repository = try AppGraphRepository.bootstrap(paths: paths)
-    let node = GraphNode.workObject(id: "work-object-agent-os", title: "Agent OS", summary: "Graph-backed runtime")
-    let answer = GraphNode.answer(id: "answer-runtime", title: "Use SQLite", summary: "Persist graph data locally")
-    let edge = SemanticEdge.answeredBy(questionID: node.id, answerID: answer.id)
+    let question = GraphNodeV2(id: "question-memory", groupID: "default", type: .question, canonicalName: "How should memory work?", title: "How should memory work?")
+    let answer = GraphNodeV2(id: "answer-runtime", groupID: "default", type: .answer, canonicalName: "Use SQLite", title: "Use SQLite")
+    let fact = GraphFact(id: "fact-memory-runtime", groupID: "default", sourceNodeID: question.id, targetNodeID: answer.id, relation: .answeredBy, fact: "Memory question is answered by SQLite runtime")
+    let episode = GraphEpisode(id: "episode-runtime", groupID: "default", sourceType: .manual, name: "Runtime graph", content: "SQLite is the runtime graph source of truth.", sourceDescription: "test")
 
-    try repository.store.upsert(node: node)
-    try repository.store.upsert(node: answer)
-    try repository.store.upsert(edge: edge)
+    try repository.store.upsert(nodeV2: question)
+    try repository.store.upsert(nodeV2: answer)
+    try repository.store.upsert(fact: fact)
+    try repository.store.upsert(episode: episode)
 
     let snapshot = try repository.loadSnapshot()
 
-    #expect(snapshot.nodes.map(\.id).contains(node.id))
-    #expect(snapshot.nodes.map(\.id).contains(answer.id))
-    #expect(snapshot.edges.map(\.id).contains(edge.id))
-}
-
-@Test func appGraphRepositoryImportsMarkdownDirectoryIntoSQLiteStore() throws {
-    let base = try temporaryDirectory()
-    let paths = AppStoragePaths.resolving(applicationSupportBaseDirectory: base)
-    let repository = try AppGraphRepository.bootstrap(paths: paths)
-    let knowledgeRoot = try temporaryDirectory("knowledge-root")
-    let markdown = """
-    ---
-    title: Runtime Graph Store
-    category: internal/projects
-    summary: The SwiftUI app should use SQLite as the runtime graph source of truth.
-    tags:
-    - graph-store
-    related:
-    - docs/app.md
-    ---
-
-    # Runtime Graph Store
-
-    The app imports Markdown as a legacy source, then searches graph nodes from SQLite.
-    """
-    try markdown.write(to: knowledgeRoot.appendingPathComponent("runtime-graph-store.md"), atomically: true, encoding: .utf8)
-
-    let report = try repository.importKnowledgeDirectory(knowledgeRoot)
-    let snapshot = try repository.loadSnapshot()
-
-    #expect(report.scannedFiles == 1)
-    #expect(report.importedNodes > 0)
-    #expect(snapshot.nodes.contains { $0.sourcePath == "runtime-graph-store.md" })
+    #expect(snapshot.graphNodes.map(\.id).contains(question.id))
+    #expect(snapshot.graphNodes.map(\.id).contains(answer.id))
+    #expect(snapshot.graphFacts.map(\.id).contains(fact.id))
+    #expect(snapshot.graphEpisodes.map(\.id).contains(episode.id))
 }
