@@ -6,17 +6,20 @@ import ConnorGraphStore
 public struct AppGraphWriteCandidateRepository: @unchecked Sendable {
     public let store: SQLiteGraphStore
     public var committer: GraphWriteCandidateCommitService
+    public var validator: GraphWriteCandidateValidator
     private let auditLog: any AgentAuditLog
     private let policyEngine: AgentPolicyEngine
 
     public init(
         store: SQLiteGraphStore,
         committer: GraphWriteCandidateCommitService = GraphWriteCandidateCommitService(),
+        validator: GraphWriteCandidateValidator = GraphWriteCandidateValidator(),
         permissionMode: AgentPermissionMode = .trustedWrite,
         auditLog: (any AgentAuditLog)? = nil
     ) {
         self.store = store
         self.committer = committer
+        self.validator = validator
         let resolvedAuditLog = auditLog ?? SQLiteAgentAuditLog(store: store)
         self.auditLog = resolvedAuditLog
         self.policyEngine = AgentPolicyEngine(permissionMode: permissionMode, auditLog: resolvedAuditLog)
@@ -37,7 +40,11 @@ public struct AppGraphWriteCandidateRepository: @unchecked Sendable {
 
     @discardableResult
     public func approveGoverned(_ candidate: GraphWriteCandidate, actor: String = "human-reviewer") async throws -> GraphWriteCandidate {
-        let updated = try approve(candidate)
+        let validated = try await validateGoverned(candidate, actor: actor)
+        guard validated.validation.isValid else {
+            throw GraphWriteCandidateCommitError.validationFailed(validated.validation.errors)
+        }
+        let updated = try approve(validated.candidate)
         await auditLog.record(AgentAuditEvent(
             runID: candidate.proposedByRunID,
             sessionID: candidate.groupID,
@@ -87,7 +94,54 @@ public struct AppGraphWriteCandidateRepository: @unchecked Sendable {
     }
 
     @discardableResult
+    public func validateGoverned(_ candidate: GraphWriteCandidate, actor: String = "agent-runtime") async throws -> (candidate: GraphWriteCandidate, validation: GraphWriteCandidateValidationResult) {
+        await auditLog.record(AgentAuditEvent(
+            runID: candidate.proposedByRunID,
+            sessionID: candidate.groupID,
+            eventType: .graphWriteValidationStarted,
+            actor: actor,
+            capability: .commitGraphWrite,
+            payloadJSON: auditPayload(candidate: candidate)
+        ))
+        let validation = validator.validate(candidate, store: store)
+        var updated = candidate
+        updated.validationErrors = validation.errors
+        updated.updatedAt = Date()
+        if validation.isValid {
+            if updated.status == .pendingValidation || updated.status == .validationFailed {
+                updated.status = .pendingReview
+            }
+            try store.upsert(graphWriteCandidate: updated)
+            await auditLog.record(AgentAuditEvent(
+                runID: candidate.proposedByRunID,
+                sessionID: candidate.groupID,
+                eventType: .graphWriteValidationFinished,
+                actor: actor,
+                capability: .commitGraphWrite,
+                payloadJSON: auditPayload(candidate: updated, extra: ["result": "valid"])
+            ))
+        } else {
+            updated.status = .validationFailed
+            try store.upsert(graphWriteCandidate: updated)
+            await auditLog.record(AgentAuditEvent(
+                runID: candidate.proposedByRunID,
+                sessionID: candidate.groupID,
+                eventType: .graphWriteValidationFailed,
+                actor: actor,
+                capability: .commitGraphWrite,
+                payloadJSON: auditPayload(candidate: updated, extra: ["errors": validation.errors.joined(separator: " | ")])
+            ))
+        }
+        return (updated, validation)
+    }
+
+    @discardableResult
     public func commitGoverned(_ candidate: GraphWriteCandidate, actor: String = "human-reviewer") async throws -> GraphWriteCandidateCommitResult {
+        let validated = try await validateGoverned(candidate, actor: actor)
+        guard validated.validation.isValid else {
+            throw GraphWriteCandidateCommitError.validationFailed(validated.validation.errors)
+        }
+        let candidate = validated.candidate
         let payload = auditPayload(candidate: candidate)
         let decision = await policyEngine.evaluate(
             capability: .commitGraphWrite,
@@ -119,9 +173,11 @@ public struct AppGraphWriteCandidateRepository: @unchecked Sendable {
             payloadJSON: payload
         ))
         do {
-            let approved = candidate.status == .approved ? candidate : try approve(candidate)
-            let result = try committer.commit(approved, store: store)
-            var updated = approved
+            guard candidate.status == .approved else {
+                throw GraphWriteCandidateCommitError.notApproved(candidate.id)
+            }
+            let result = try committer.commit(candidate, store: store)
+            var updated = candidate
             updated.status = .committed
             updated.updatedAt = Date()
             try store.upsert(graphWriteCandidate: updated)
@@ -186,6 +242,131 @@ public struct GraphWriteCandidateCommitResult: Sendable, Equatable {
         self.createdFactIDs = createdFactIDs
         self.updatedFactIDs = updatedFactIDs
         self.attachedEvidenceFactIDs = attachedEvidenceFactIDs
+    }
+}
+
+public struct GraphWriteCandidateValidationResult: Sendable, Equatable {
+    public var errors: [String]
+    public var warnings: [String]
+
+    public var isValid: Bool { errors.isEmpty }
+
+    public init(errors: [String] = [], warnings: [String] = []) {
+        self.errors = errors
+        self.warnings = warnings
+    }
+}
+
+public struct GraphWriteCandidateValidator: Sendable {
+    private let decoder: JSONDecoder
+
+    public init() {
+        self.decoder = JSONDecoder()
+        self.decoder.dateDecodingStrategy = .iso8601
+    }
+
+    public func validate(_ candidate: GraphWriteCandidate, store: SQLiteGraphStore) -> GraphWriteCandidateValidationResult {
+        var errors: [String] = []
+        var warnings: [String] = []
+
+        if candidate.rationale.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            errors.append("rationale is required")
+        }
+        if !(0...1).contains(candidate.confidence) {
+            errors.append("confidence must be between 0 and 1")
+        }
+        if candidate.payloadJSON.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            errors.append("payloadJSON is required")
+        }
+
+        do {
+            switch candidate.kind {
+            case .createNode:
+                let payload = try decoder.decode(CreateNodePayload.self, from: Data(candidate.payloadJSON.utf8))
+                validateNonEmpty(payload.canonicalName, field: "canonicalName", errors: &errors)
+                validateNonEmpty(payload.title, field: "title", errors: &errors)
+                if let confidence = payload.confidence, !(0...1).contains(confidence) {
+                    errors.append("payload.confidence must be between 0 and 1")
+                }
+                if let id = payload.id, let existing = try store.graphNodeV2(id: id) {
+                    errors.append("node id already exists: \(existing.id)")
+                }
+
+            case .createFact:
+                let payload = try decoder.decode(CreateFactPayload.self, from: Data(candidate.payloadJSON.utf8))
+                validateNonEmpty(payload.sourceNodeID, field: "sourceNodeID", errors: &errors)
+                validateNonEmpty(payload.targetNodeID, field: "targetNodeID", errors: &errors)
+                validateNonEmpty(payload.fact, field: "fact", errors: &errors)
+                if payload.sourceNodeID == payload.targetNodeID {
+                    warnings.append("sourceNodeID and targetNodeID are identical; verify self-relation is intentional")
+                }
+                if let confidence = payload.confidence, !(0...1).contains(confidence) {
+                    errors.append("payload.confidence must be between 0 and 1")
+                }
+                if let source = try store.graphNodeV2(id: payload.sourceNodeID) {
+                    if source.groupID != candidate.groupID { errors.append("source node belongs to another group: \(payload.sourceNodeID)") }
+                } else {
+                    errors.append("missing source node: \(payload.sourceNodeID)")
+                }
+                if let target = try store.graphNodeV2(id: payload.targetNodeID) {
+                    if target.groupID != candidate.groupID { errors.append("target node belongs to another group: \(payload.targetNodeID)") }
+                } else {
+                    errors.append("missing target node: \(payload.targetNodeID)")
+                }
+                if let id = payload.id, try store.graphFact(id: id) != nil {
+                    errors.append("fact id already exists: \(id)")
+                }
+                try validateEpisodeIDs(candidate.sourceEpisodeIDs + payload.sourceEpisodeIDs, store: store, errors: &errors)
+
+            case .invalidateFact:
+                let payload = try decoder.decode(InvalidateFactPayload.self, from: Data(candidate.payloadJSON.utf8))
+                validateNonEmpty(payload.factID, field: "factID", errors: &errors)
+                if let fact = try store.graphFact(id: payload.factID) {
+                    if fact.groupID != candidate.groupID { errors.append("fact belongs to another group: \(payload.factID)") }
+                    if fact.status != .active { warnings.append("fact is not active: \(payload.factID)") }
+                } else {
+                    errors.append("missing fact: \(payload.factID)")
+                }
+                if let invalidatedByFactID = payload.invalidatedByFactID, try store.graphFact(id: invalidatedByFactID) == nil {
+                    errors.append("missing invalidatedByFactID: \(invalidatedByFactID)")
+                }
+
+            case .attachEvidence:
+                let payload = try decoder.decode(AttachEvidencePayload.self, from: Data(candidate.payloadJSON.utf8))
+                validateNonEmpty(payload.factID, field: "factID", errors: &errors)
+                if let fact = try store.graphFact(id: payload.factID) {
+                    if fact.groupID != candidate.groupID { errors.append("fact belongs to another group: \(payload.factID)") }
+                } else {
+                    errors.append("missing fact: \(payload.factID)")
+                }
+                let episodeIDs = candidate.sourceEpisodeIDs + payload.episodeIDs
+                if episodeIDs.isEmpty { errors.append("at least one episodeID is required") }
+                try validateEpisodeIDs(episodeIDs, store: store, errors: &errors)
+
+            case .updateNode, .updateFact, .createMention:
+                errors.append("unsupported candidate kind for validation/commit: \(candidate.kind.rawValue)")
+            }
+        } catch let decodingError as DecodingError {
+            errors.append("invalid payload schema: \(decodingError)")
+        } catch {
+            errors.append("validation failed: \(error)")
+        }
+
+        return GraphWriteCandidateValidationResult(errors: errors, warnings: warnings)
+    }
+
+    private func validateNonEmpty(_ value: String, field: String, errors: inout [String]) {
+        if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            errors.append("\(field) is required")
+        }
+    }
+
+    private func validateEpisodeIDs(_ episodeIDs: [String], store: SQLiteGraphStore, errors: inout [String]) throws {
+        for episodeID in Set(episodeIDs) where !episodeID.isEmpty {
+            if try store.graphEpisode(id: episodeID) == nil {
+                errors.append("missing source episode: \(episodeID)")
+            }
+        }
     }
 }
 
@@ -267,6 +448,7 @@ public struct GraphWriteCandidateCommitService: Sendable {
 public enum GraphWriteCandidateCommitError: Error, Sendable, Equatable, CustomStringConvertible {
     case notApproved(String)
     case permissionDenied(String)
+    case validationFailed([String])
     case unsupportedCandidateKind(GraphWriteCandidateKind)
     case missingNode(String)
     case missingFact(String)
@@ -275,6 +457,7 @@ public enum GraphWriteCandidateCommitError: Error, Sendable, Equatable, CustomSt
         switch self {
         case .notApproved(let id): return "Candidate must be approved before commit: \(id)"
         case .permissionDenied(let reason): return "Permission denied for graph write commit: \(reason)"
+        case .validationFailed(let errors): return "Graph write candidate validation failed: \(errors.joined(separator: "; "))"
         case .unsupportedCandidateKind(let kind): return "Unsupported candidate kind for commit: \(kind.rawValue)"
         case .missingNode(let id): return "Missing graph node: \(id)"
         case .missingFact(let id): return "Missing graph fact: \(id)"
