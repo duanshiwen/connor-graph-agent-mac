@@ -11,30 +11,65 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
 
     public func search(query: GraphSearchQuery) async throws -> GraphSearchResponse {
         let perScopeLimit = max(query.limit, 1)
-        var hits: [GraphSearchHit] = []
+        var hitsByID: [String: GraphSearchHit] = [:]
+
+        func merge(_ hit: GraphSearchHit) {
+            if var existing = hitsByID[hit.id] {
+                existing.score = max(existing.score, hit.score)
+                existing.retrievalMethod = existing.retrievalMethod == hit.retrievalMethod ? existing.retrievalMethod : "hybrid"
+                existing.sourceEpisodeIDs = Array(Set(existing.sourceEpisodeIDs + hit.sourceEpisodeIDs)).sorted()
+                hitsByID[hit.id] = existing
+            } else {
+                hitsByID[hit.id] = hit
+            }
+        }
 
         if query.includeFacts {
             let facts = try store.searchFactFTS(query: query.text, groupID: query.groupID, limit: perScopeLimit)
             for (index, fact) in facts.enumerated() where includes(fact.status, in: query.statusFilter) && isTemporallyValid(fact, at: query.referenceTime) {
-                hits.append(try factHit(fact, rank: index))
+                merge(try factHit(fact, rank: index, retrievalMethod: "fts", explicitScore: score(forRank: index)))
             }
         }
 
         if query.includeNodes {
             let nodes = try store.searchNodeFTS(query: query.text, groupID: query.groupID, limit: perScopeLimit)
             for (index, node) in nodes.enumerated() where includes(node.status, in: query.statusFilter) && isTemporallyValid(node, at: query.referenceTime) {
-                hits.append(nodeHit(node, rank: index))
+                merge(nodeHit(node, rank: index, retrievalMethod: "fts", explicitScore: score(forRank: index)))
             }
         }
 
         if query.includeEpisodes {
             let episodes = try store.searchEpisodeFTS(query: query.text, groupID: query.groupID, limit: perScopeLimit)
             for (index, episode) in episodes.enumerated() where includes(episode.status, in: query.statusFilter) {
-                hits.append(episodeHit(episode, rank: index))
+                merge(episodeHit(episode, rank: index, retrievalMethod: "fts", explicitScore: score(forRank: index)))
             }
         }
 
-        let ranked = hits.sorted { lhs, rhs in
+        if let embeddingModel = query.embeddingModel, let queryEmbedding = query.queryEmbedding {
+            let ownerTypes = includedOwnerTypes(query)
+            let semanticResults = try store.searchEmbeddings(
+                queryVector: queryEmbedding,
+                groupID: query.groupID,
+                embeddingModel: embeddingModel,
+                ownerTypes: ownerTypes,
+                limit: perScopeLimit
+            )
+            for result in semanticResults {
+                switch result.embedding.ownerType {
+                case .fact:
+                    guard query.includeFacts, let fact = try store.graphFact(id: result.embedding.ownerID), includes(fact.status, in: query.statusFilter), isTemporallyValid(fact, at: query.referenceTime) else { continue }
+                    merge(try factHit(fact, rank: 0, retrievalMethod: "semantic", explicitScore: result.score))
+                case .node:
+                    guard query.includeNodes, let node = try store.graphNodeV2(id: result.embedding.ownerID), includes(node.status, in: query.statusFilter), isTemporallyValid(node, at: query.referenceTime) else { continue }
+                    merge(nodeHit(node, rank: 0, retrievalMethod: "semantic", explicitScore: result.score))
+                case .episode:
+                    guard query.includeEpisodes, let episode = try store.graphEpisode(id: result.embedding.ownerID), includes(episode.status, in: query.statusFilter) else { continue }
+                    merge(episodeHit(episode, rank: 0, retrievalMethod: "semantic", explicitScore: result.score))
+                }
+            }
+        }
+
+        let ranked = hitsByID.values.sorted { lhs, rhs in
             if lhs.score == rhs.score {
                 if lhs.ownerType.rawValue == rhs.ownerType.rawValue { return lhs.ownerID < rhs.ownerID }
                 return lhs.ownerType.rawValue < rhs.ownerType.rawValue
@@ -42,6 +77,14 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
             return lhs.score > rhs.score
         }
         return GraphSearchResponse(hits: Array(ranked.prefix(query.limit)))
+    }
+
+    private func includedOwnerTypes(_ query: GraphSearchQuery) -> Set<GraphIndexOwnerType> {
+        var ownerTypes: Set<GraphIndexOwnerType> = []
+        if query.includeFacts { ownerTypes.insert(.fact) }
+        if query.includeNodes { ownerTypes.insert(.node) }
+        if query.includeEpisodes { ownerTypes.insert(.episode) }
+        return ownerTypes
     }
 
     private func includes(_ status: GraphTemporalStatus, in filter: Set<GraphTemporalStatus>) -> Bool {
@@ -63,14 +106,14 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
         return true
     }
 
-    private func factHit(_ fact: GraphFact, rank: Int) throws -> GraphSearchHit {
+    private func factHit(_ fact: GraphFact, rank: Int, retrievalMethod: String = "fts", explicitScore: Double? = nil) throws -> GraphSearchHit {
         GraphSearchHit(
             ownerType: .fact,
             ownerID: fact.id,
             title: fact.relation.rawValue,
             text: fact.fact,
-            score: score(forRank: rank),
-            retrievalMethod: "fts",
+            score: explicitScore ?? score(forRank: rank),
+            retrievalMethod: retrievalMethod,
             sourceEpisodeIDs: try store.sourceEpisodeIDs(factID: fact.id),
             metadata: [
                 "group_id": fact.groupID,
@@ -82,14 +125,14 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
         )
     }
 
-    private func nodeHit(_ node: GraphNodeV2, rank: Int) -> GraphSearchHit {
+    private func nodeHit(_ node: GraphNodeV2, rank: Int, retrievalMethod: String = "fts", explicitScore: Double? = nil) -> GraphSearchHit {
         GraphSearchHit(
             ownerType: .node,
             ownerID: node.id,
             title: node.title,
             text: node.summary.isEmpty ? node.canonicalName : node.summary,
-            score: score(forRank: rank),
-            retrievalMethod: "fts",
+            score: explicitScore ?? score(forRank: rank),
+            retrievalMethod: retrievalMethod,
             metadata: [
                 "group_id": node.groupID,
                 "type": node.type.rawValue,
@@ -99,14 +142,14 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
         )
     }
 
-    private func episodeHit(_ episode: GraphEpisode, rank: Int) -> GraphSearchHit {
+    private func episodeHit(_ episode: GraphEpisode, rank: Int, retrievalMethod: String = "fts", explicitScore: Double? = nil) -> GraphSearchHit {
         GraphSearchHit(
             ownerType: .episode,
             ownerID: episode.id,
             title: episode.name,
             text: episode.content,
-            score: score(forRank: rank),
-            retrievalMethod: "fts",
+            score: explicitScore ?? score(forRank: rank),
+            retrievalMethod: retrievalMethod,
             sourceEpisodeIDs: [episode.id],
             metadata: [
                 "group_id": episode.groupID,

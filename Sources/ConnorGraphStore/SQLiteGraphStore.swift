@@ -619,6 +619,80 @@ public final class SQLiteGraphStore: @unchecked Sendable {
         }
     }
 
+    public func upsert(embedding: GraphEmbedding) throws {
+        guard embedding.vectorNorm > 0 else {
+            throw SQLiteGraphStoreError.decodeFailed("graph_embeddings vector_norm must be positive")
+        }
+        let sql = """
+        INSERT OR REPLACE INTO graph_embeddings
+        (id, group_id, owner_type, owner_id, embedding_model, dimensions, vector_blob, vector_norm, content_hash, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        """
+        let vectorData = try vectorBlob(embedding.vector)
+        try withStatement(sql) { statement in
+            try bind(embedding.id, at: 1, in: statement)
+            try bind(embedding.groupID, at: 2, in: statement)
+            try bind(embedding.ownerType.rawValue, at: 3, in: statement)
+            try bind(embedding.ownerID, at: 4, in: statement)
+            try bind(embedding.embeddingModel, at: 5, in: statement)
+            sqlite3_bind_int(statement, 6, Int32(embedding.vector.count))
+            try bind(vectorData, at: 7, in: statement)
+            sqlite3_bind_double(statement, 8, embedding.vectorNorm)
+            try bind(embedding.contentHash, at: 9, in: statement)
+            try bind(iso(embedding.createdAt), at: 10, in: statement)
+            try stepDone(statement)
+        }
+    }
+
+    public func graphEmbedding(id: String) throws -> GraphEmbedding? {
+        let sql = """
+        SELECT id, group_id, owner_type, owner_id, embedding_model, dimensions, vector_blob, vector_norm, content_hash, created_at
+        FROM graph_embeddings
+        WHERE id = ?;
+        """
+        return try withStatement(sql) { statement in
+            try bind(id, at: 1, in: statement)
+            guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+            return try decodeGraphEmbedding(statement)
+        }
+    }
+
+    public func searchEmbeddings(
+        queryVector: [Double],
+        groupID: String,
+        embeddingModel: String,
+        ownerTypes: Set<GraphIndexOwnerType> = Set(GraphIndexOwnerType.allCases),
+        limit: Int
+    ) throws -> [GraphEmbeddingSearchResult] {
+        guard !queryVector.isEmpty, limit > 0 else { return [] }
+        let queryNorm = GraphEmbedding.norm(queryVector)
+        guard queryNorm > 0 else { return [] }
+        let sql = """
+        SELECT id, group_id, owner_type, owner_id, embedding_model, dimensions, vector_blob, vector_norm, content_hash, created_at
+        FROM graph_embeddings
+        WHERE group_id = ? AND embedding_model = ? AND dimensions = ?;
+        """
+        var results: [GraphEmbeddingSearchResult] = []
+        try withStatement(sql) { statement in
+            try bind(groupID, at: 1, in: statement)
+            try bind(embeddingModel, at: 2, in: statement)
+            sqlite3_bind_int(statement, 3, Int32(queryVector.count))
+            while sqlite3_step(statement) == SQLITE_ROW {
+                let embedding = try decodeGraphEmbedding(statement)
+                guard ownerTypes.isEmpty || ownerTypes.contains(embedding.ownerType), embedding.vectorNorm > 0 else { continue }
+                let dotProduct = zip(queryVector, embedding.vector).reduce(0.0) { partial, pair in
+                    partial + pair.0 * pair.1
+                }
+                let score = dotProduct / (queryNorm * embedding.vectorNorm)
+                results.append(GraphEmbeddingSearchResult(embedding: embedding, score: score))
+            }
+        }
+        return Array(results.sorted { lhs, rhs in
+            if lhs.score == rhs.score { return lhs.embedding.id < rhs.embedding.id }
+            return lhs.score > rhs.score
+        }.prefix(limit))
+    }
+
     public func upsert(costBudget budget: GraphCostBudget) throws {
         let sql = """
         INSERT OR REPLACE INTO graph_cost_budgets
@@ -1446,6 +1520,42 @@ public final class SQLiteGraphStore: @unchecked Sendable {
         }
     }
 
+    private func bind(_ value: Data, at index: Int32, in statement: OpaquePointer?) throws {
+        let result = value.withUnsafeBytes { buffer in
+            sqlite3_bind_blob(statement, index, buffer.baseAddress, Int32(value.count), SQLITE_TRANSIENT)
+        }
+        guard result == SQLITE_OK else {
+            throw SQLiteGraphStoreError.bindFailed(Self.message(db))
+        }
+    }
+
+    private func vectorBlob(_ vector: [Double]) throws -> Data {
+        var data = Data()
+        data.reserveCapacity(vector.count * MemoryLayout<Double>.size)
+        for value in vector {
+            var littleEndian = value.bitPattern.littleEndian
+            withUnsafeBytes(of: &littleEndian) { data.append(contentsOf: $0) }
+        }
+        return data
+    }
+
+    private func vector(_ statement: OpaquePointer?, _ column: Int32, dimensions: Int) throws -> [Double] {
+        guard let bytes = sqlite3_column_blob(statement, column) else {
+            throw SQLiteGraphStoreError.decodeFailed("graph_embeddings vector_blob")
+        }
+        let byteCount = Int(sqlite3_column_bytes(statement, column))
+        guard byteCount == dimensions * MemoryLayout<Double>.size else {
+            throw SQLiteGraphStoreError.decodeFailed("graph_embeddings vector_blob dimensions")
+        }
+        let data = Data(bytes: bytes, count: byteCount)
+        return stride(from: 0, to: byteCount, by: MemoryLayout<Double>.size).map { offset in
+            let bits = data.withUnsafeBytes { rawBuffer in
+                rawBuffer.loadUnaligned(fromByteOffset: offset, as: UInt64.self)
+            }
+            return Double(bitPattern: UInt64(littleEndian: bits))
+        }
+    }
+
     private func optionalInt(_ statement: OpaquePointer?, _ column: Int32) -> Int? {
         guard sqlite3_column_type(statement, column) != SQLITE_NULL else { return nil }
         return Int(sqlite3_column_int(statement, column))
@@ -1567,6 +1677,33 @@ public final class SQLiteGraphStore: @unchecked Sendable {
             invalidatedByFactID: text(statement, 14),
             attributes: try json([String: String].self, from: attributesRaw),
             metadata: try json([String: String].self, from: metadataRaw)
+        )
+    }
+
+    private func decodeGraphEmbedding(_ statement: OpaquePointer?) throws -> GraphEmbedding {
+        guard
+            let id = text(statement, 0),
+            let groupID = text(statement, 1),
+            let ownerTypeRaw = text(statement, 2),
+            let ownerType = GraphIndexOwnerType(rawValue: ownerTypeRaw),
+            let ownerID = text(statement, 3),
+            let embeddingModel = text(statement, 4),
+            let contentHash = text(statement, 8),
+            let createdRaw = text(statement, 9),
+            let createdAt = date(createdRaw)
+        else {
+            throw SQLiteGraphStoreError.decodeFailed("graph_embeddings row")
+        }
+        let dimensions = Int(sqlite3_column_int(statement, 5))
+        return GraphEmbedding(
+            id: id,
+            groupID: groupID,
+            ownerType: ownerType,
+            ownerID: ownerID,
+            embeddingModel: embeddingModel,
+            vector: try vector(statement, 6, dimensions: dimensions),
+            contentHash: contentHash,
+            createdAt: createdAt
         )
     }
 
