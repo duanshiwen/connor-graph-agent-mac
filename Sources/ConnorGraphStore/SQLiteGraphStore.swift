@@ -1,7 +1,9 @@
 import Foundation
+import CryptoKit
 import SQLite3
 import ConnorGraphCore
 import ConnorGraphMemory
+import ConnorGraphSearch
 
 public enum SQLiteGraphStoreError: Error, Equatable, CustomStringConvertible {
     case openFailed(String)
@@ -494,6 +496,7 @@ public final class SQLiteGraphStore: @unchecked Sendable {
             try stepDone(statement)
         }
         try scheduleFTSIndex(ownerType: .episode, ownerID: episode.id, groupID: episode.groupID)
+        try scheduleEmbeddingIndex(ownerType: .episode, ownerID: episode.id, groupID: episode.groupID)
     }
 
     public func graphEpisode(id: String) throws -> GraphEpisode? {
@@ -535,6 +538,7 @@ public final class SQLiteGraphStore: @unchecked Sendable {
             try stepDone(statement)
         }
         try scheduleFTSIndex(ownerType: .node, ownerID: node.id, groupID: node.groupID)
+        try scheduleEmbeddingIndex(ownerType: .node, ownerID: node.id, groupID: node.groupID)
     }
 
     public func graphNodeV2(id: String) throws -> GraphNodeV2? {
@@ -579,6 +583,7 @@ public final class SQLiteGraphStore: @unchecked Sendable {
             try upsertFactSource(factID: fact.id, episodeID: episodeID, groupID: fact.groupID)
         }
         try scheduleFTSIndex(ownerType: .fact, ownerID: fact.id, groupID: fact.groupID)
+        try scheduleEmbeddingIndex(ownerType: .fact, ownerID: fact.id, groupID: fact.groupID)
     }
 
     public func graphFact(id: String) throws -> GraphFact? {
@@ -617,6 +622,80 @@ public final class SQLiteGraphStore: @unchecked Sendable {
             try bind(iso(Date()), at: 4, in: statement)
             try stepDone(statement)
         }
+    }
+
+    public func upsert(embedding: GraphEmbedding) throws {
+        guard embedding.vectorNorm > 0 else {
+            throw SQLiteGraphStoreError.decodeFailed("graph_embeddings vector_norm must be positive")
+        }
+        let sql = """
+        INSERT OR REPLACE INTO graph_embeddings
+        (id, group_id, owner_type, owner_id, embedding_model, dimensions, vector_blob, vector_norm, content_hash, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        """
+        let vectorData = try vectorBlob(embedding.vector)
+        try withStatement(sql) { statement in
+            try bind(embedding.id, at: 1, in: statement)
+            try bind(embedding.groupID, at: 2, in: statement)
+            try bind(embedding.ownerType.rawValue, at: 3, in: statement)
+            try bind(embedding.ownerID, at: 4, in: statement)
+            try bind(embedding.embeddingModel, at: 5, in: statement)
+            sqlite3_bind_int(statement, 6, Int32(embedding.vector.count))
+            try bind(vectorData, at: 7, in: statement)
+            sqlite3_bind_double(statement, 8, embedding.vectorNorm)
+            try bind(embedding.contentHash, at: 9, in: statement)
+            try bind(iso(embedding.createdAt), at: 10, in: statement)
+            try stepDone(statement)
+        }
+    }
+
+    public func graphEmbedding(id: String) throws -> GraphEmbedding? {
+        let sql = """
+        SELECT id, group_id, owner_type, owner_id, embedding_model, dimensions, vector_blob, vector_norm, content_hash, created_at
+        FROM graph_embeddings
+        WHERE id = ?;
+        """
+        return try withStatement(sql) { statement in
+            try bind(id, at: 1, in: statement)
+            guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+            return try decodeGraphEmbedding(statement)
+        }
+    }
+
+    public func searchEmbeddings(
+        queryVector: [Double],
+        groupID: String,
+        embeddingModel: String,
+        ownerTypes: Set<GraphIndexOwnerType> = Set(GraphIndexOwnerType.allCases),
+        limit: Int
+    ) throws -> [GraphEmbeddingSearchResult] {
+        guard !queryVector.isEmpty, limit > 0 else { return [] }
+        let queryNorm = GraphEmbedding.norm(queryVector)
+        guard queryNorm > 0 else { return [] }
+        let sql = """
+        SELECT id, group_id, owner_type, owner_id, embedding_model, dimensions, vector_blob, vector_norm, content_hash, created_at
+        FROM graph_embeddings
+        WHERE group_id = ? AND embedding_model = ? AND dimensions = ?;
+        """
+        var results: [GraphEmbeddingSearchResult] = []
+        try withStatement(sql) { statement in
+            try bind(groupID, at: 1, in: statement)
+            try bind(embeddingModel, at: 2, in: statement)
+            sqlite3_bind_int(statement, 3, Int32(queryVector.count))
+            while sqlite3_step(statement) == SQLITE_ROW {
+                let embedding = try decodeGraphEmbedding(statement)
+                guard ownerTypes.isEmpty || ownerTypes.contains(embedding.ownerType), embedding.vectorNorm > 0 else { continue }
+                let dotProduct = zip(queryVector, embedding.vector).reduce(0.0) { partial, pair in
+                    partial + pair.0 * pair.1
+                }
+                let score = dotProduct / (queryNorm * embedding.vectorNorm)
+                results.append(GraphEmbeddingSearchResult(embedding: embedding, score: score))
+            }
+        }
+        return Array(results.sorted { lhs, rhs in
+            if lhs.score == rhs.score { return lhs.embedding.id < rhs.embedding.id }
+            return lhs.score > rhs.score
+        }.prefix(limit))
     }
 
     public func upsert(costBudget budget: GraphCostBudget) throws {
@@ -879,6 +958,35 @@ public final class SQLiteGraphStore: @unchecked Sendable {
             try markIndexTaskSucceeded(task.id)
         }
     }
+
+    public func processPendingEmbeddingIndexTasks(provider: EmbeddingProvider, limit: Int) async throws -> Int {
+        let tasks = try pendingIndexTasks(limit: limit).filter { $0.taskType == .embeddingUpsert }
+        var processed = 0
+        for task in tasks {
+            guard let content = try embeddingContent(ownerType: task.ownerType, ownerID: task.ownerID) else {
+                try markIndexTaskSucceeded(task.id)
+                continue
+            }
+            let vector = try await provider.embedding(for: content)
+            guard vector.count == provider.dimensions else {
+                throw SQLiteGraphStoreError.decodeFailed("embedding dimensions mismatch for \(task.ownerType.rawValue):\(task.ownerID)")
+            }
+            let embedding = GraphEmbedding(
+                id: embeddingID(model: provider.model, ownerType: task.ownerType, ownerID: task.ownerID),
+                groupID: task.groupID,
+                ownerType: task.ownerType,
+                ownerID: task.ownerID,
+                embeddingModel: provider.model,
+                vector: vector,
+                contentHash: contentHash(content)
+            )
+            try upsert(embedding: embedding)
+            try markIndexTaskSucceeded(task.id)
+            processed += 1
+        }
+        return processed
+    }
+
 
     public func searchNodeFTS(query: String, groupID: String, limit: Int) throws -> [GraphNodeV2] {
         let sql = """
@@ -1259,9 +1367,13 @@ public final class SQLiteGraphStore: @unchecked Sendable {
         )
     }
 
-    private func scheduleFTSIndex(ownerType: GraphIndexOwnerType, ownerID: String, groupID: String) throws {
+    private func scheduleEmbeddingIndex(ownerType: GraphIndexOwnerType, ownerID: String, groupID: String) throws {
+        try scheduleIndexTask(taskType: .embeddingUpsert, ownerType: ownerType, ownerID: ownerID, groupID: groupID)
+    }
+
+    private func scheduleIndexTask(taskType: GraphIndexTaskType, ownerType: GraphIndexOwnerType, ownerID: String, groupID: String) throws {
         let now = Date()
-        let taskID = "fts-\(ownerType.rawValue)-\(ownerID)"
+        let taskID = "\(taskType.rawValue)-\(ownerType.rawValue)-\(ownerID)"
         let sql = """
         INSERT INTO graph_index_tasks
         (id, group_id, owner_type, owner_id, task_type, status, attempt_count, next_run_at, error_message, created_at, updated_at)
@@ -1269,21 +1381,63 @@ public final class SQLiteGraphStore: @unchecked Sendable {
         ON CONFLICT(id) DO UPDATE SET
             status = excluded.status,
             next_run_at = excluded.next_run_at,
-            updated_at = excluded.updated_at,
-            error_message = NULL;
+            error_message = NULL,
+            updated_at = excluded.updated_at;
         """
         try withStatement(sql) { statement in
             try bind(taskID, at: 1, in: statement)
             try bind(groupID, at: 2, in: statement)
             try bind(ownerType.rawValue, at: 3, in: statement)
             try bind(ownerID, at: 4, in: statement)
-            try bind(GraphIndexTaskType.ftsUpsert.rawValue, at: 5, in: statement)
+            try bind(taskType.rawValue, at: 5, in: statement)
             try bind(GraphJobStatus.queued.rawValue, at: 6, in: statement)
             try bind(iso(now), at: 7, in: statement)
             try bind(iso(now), at: 8, in: statement)
             try bind(iso(now), at: 9, in: statement)
             try stepDone(statement)
         }
+    }
+
+    private func embeddingContent(ownerType: GraphIndexOwnerType, ownerID: String) throws -> String? {
+        switch ownerType {
+        case .episode:
+            guard let episode = try graphEpisode(id: ownerID) else { return nil }
+            return [episode.name, episode.content, episode.sourceDescription]
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+        case .node:
+            guard let node = try graphNodeV2(id: ownerID) else { return nil }
+            let labels = node.labels.joined(separator: " ")
+            let attributes = node.attributes
+                .sorted { $0.key < $1.key }
+                .map { "\($0.key): \($0.value)" }
+                .joined(separator: "\n")
+            return [node.title, node.canonicalName, node.summary, labels, attributes]
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+        case .fact:
+            guard let fact = try graphFact(id: ownerID) else { return nil }
+            let attributes = fact.attributes
+                .sorted { $0.key < $1.key }
+                .map { "\($0.key): \($0.value)" }
+                .joined(separator: "\n")
+            return [fact.relation.rawValue, fact.fact, attributes]
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+        }
+    }
+
+    private func embeddingID(model: String, ownerType: GraphIndexOwnerType, ownerID: String) -> String {
+        "embedding:\(model):\(ownerType.rawValue):\(ownerID)"
+    }
+
+    private func contentHash(_ content: String) -> String {
+        let digest = SHA256.hash(data: Data(content.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func scheduleFTSIndex(ownerType: GraphIndexOwnerType, ownerID: String, groupID: String) throws {
+        try scheduleIndexTask(taskType: .ftsUpsert, ownerType: ownerType, ownerID: ownerID, groupID: groupID)
     }
 
     private func markIndexTaskSucceeded(_ id: String) throws {
@@ -1446,6 +1600,42 @@ public final class SQLiteGraphStore: @unchecked Sendable {
         }
     }
 
+    private func bind(_ value: Data, at index: Int32, in statement: OpaquePointer?) throws {
+        let result = value.withUnsafeBytes { buffer in
+            sqlite3_bind_blob(statement, index, buffer.baseAddress, Int32(value.count), SQLITE_TRANSIENT)
+        }
+        guard result == SQLITE_OK else {
+            throw SQLiteGraphStoreError.bindFailed(Self.message(db))
+        }
+    }
+
+    private func vectorBlob(_ vector: [Double]) throws -> Data {
+        var data = Data()
+        data.reserveCapacity(vector.count * MemoryLayout<Double>.size)
+        for value in vector {
+            var littleEndian = value.bitPattern.littleEndian
+            withUnsafeBytes(of: &littleEndian) { data.append(contentsOf: $0) }
+        }
+        return data
+    }
+
+    private func vector(_ statement: OpaquePointer?, _ column: Int32, dimensions: Int) throws -> [Double] {
+        guard let bytes = sqlite3_column_blob(statement, column) else {
+            throw SQLiteGraphStoreError.decodeFailed("graph_embeddings vector_blob")
+        }
+        let byteCount = Int(sqlite3_column_bytes(statement, column))
+        guard byteCount == dimensions * MemoryLayout<Double>.size else {
+            throw SQLiteGraphStoreError.decodeFailed("graph_embeddings vector_blob dimensions")
+        }
+        let data = Data(bytes: bytes, count: byteCount)
+        return stride(from: 0, to: byteCount, by: MemoryLayout<Double>.size).map { offset in
+            let bits = data.withUnsafeBytes { rawBuffer in
+                rawBuffer.loadUnaligned(fromByteOffset: offset, as: UInt64.self)
+            }
+            return Double(bitPattern: UInt64(littleEndian: bits))
+        }
+    }
+
     private func optionalInt(_ statement: OpaquePointer?, _ column: Int32) -> Int? {
         guard sqlite3_column_type(statement, column) != SQLITE_NULL else { return nil }
         return Int(sqlite3_column_int(statement, column))
@@ -1567,6 +1757,33 @@ public final class SQLiteGraphStore: @unchecked Sendable {
             invalidatedByFactID: text(statement, 14),
             attributes: try json([String: String].self, from: attributesRaw),
             metadata: try json([String: String].self, from: metadataRaw)
+        )
+    }
+
+    private func decodeGraphEmbedding(_ statement: OpaquePointer?) throws -> GraphEmbedding {
+        guard
+            let id = text(statement, 0),
+            let groupID = text(statement, 1),
+            let ownerTypeRaw = text(statement, 2),
+            let ownerType = GraphIndexOwnerType(rawValue: ownerTypeRaw),
+            let ownerID = text(statement, 3),
+            let embeddingModel = text(statement, 4),
+            let contentHash = text(statement, 8),
+            let createdRaw = text(statement, 9),
+            let createdAt = date(createdRaw)
+        else {
+            throw SQLiteGraphStoreError.decodeFailed("graph_embeddings row")
+        }
+        let dimensions = Int(sqlite3_column_int(statement, 5))
+        return GraphEmbedding(
+            id: id,
+            groupID: groupID,
+            ownerType: ownerType,
+            ownerID: ownerID,
+            embeddingModel: embeddingModel,
+            vector: try vector(statement, 6, dimensions: dimensions),
+            contentHash: contentHash,
+            createdAt: createdAt
         )
     }
 
