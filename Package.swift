@@ -21,7 +21,7 @@ let package = Package(
         .target(name: "ConnorGraphMemory", dependencies: ["ConnorGraphCore"]),
         .target(
             name: "ConnorGraphStore",
-            dependencies: ["ConnorGraphCore", "ConnorGraphMemory"],
+            dependencies: ["ConnorGraphCore", "ConnorGraphMemory", "ConnorGraphSearch"],
             linkerSettings: [.linkedLibrary("sqlite3")]
         ),
         .target(name: "ConnorGraphSearch", dependencies: ["ConnorGraphCore", "ConnorGraphMemory"]),
