@@ -628,3 +628,9 @@ SQLiteGraphHybridSearchService
 3. 设计新的 ingestion pipeline，但不要复活 legacy Markdown import：入口应直接产生 `GraphEpisode` / `GraphNodeV2` / `GraphFact`。
 4. 为 temporal graph 加 schema/version health check，启动时明确展示当前图模型版本。
 5. 为 Promotion Queue 增加人工审核 UI 的 richer diff：候选 observe log → 将要写入的 node/fact。
+
+---
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE](./LICENSE) for details.
