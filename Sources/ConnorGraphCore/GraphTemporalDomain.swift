@@ -192,6 +192,53 @@ public enum GraphIndexTaskType: String, Codable, Sendable, CaseIterable, Equatab
     case rebuild
 }
 
+public struct GraphEmbedding: Sendable, Equatable, Identifiable {
+    public var id: String
+    public var groupID: String
+    public var ownerType: GraphIndexOwnerType
+    public var ownerID: String
+    public var embeddingModel: String
+    public var vector: [Double]
+    public var vectorNorm: Double
+    public var contentHash: String
+    public var createdAt: Date
+
+    public init(
+        id: String,
+        groupID: String,
+        ownerType: GraphIndexOwnerType,
+        ownerID: String,
+        embeddingModel: String,
+        vector: [Double],
+        contentHash: String,
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.groupID = groupID
+        self.ownerType = ownerType
+        self.ownerID = ownerID
+        self.embeddingModel = embeddingModel
+        self.vector = vector
+        self.vectorNorm = Self.norm(vector)
+        self.contentHash = contentHash
+        self.createdAt = createdAt
+    }
+
+    public static func norm(_ vector: [Double]) -> Double {
+        sqrt(vector.reduce(0.0) { $0 + ($1 * $1) })
+    }
+}
+
+public struct GraphEmbeddingSearchResult: Sendable, Equatable {
+    public var embedding: GraphEmbedding
+    public var score: Double
+
+    public init(embedding: GraphEmbedding, score: Double) {
+        self.embedding = embedding
+        self.score = score
+    }
+}
+
 public enum GraphJobStatus: String, Codable, Sendable, CaseIterable, Equatable {
     case queued
     case running

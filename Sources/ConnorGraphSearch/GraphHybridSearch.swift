@@ -10,6 +10,8 @@ public struct GraphSearchQuery: Sendable, Equatable {
     public var includeEpisodes: Bool
     public var limit: Int
     public var statusFilter: Set<GraphTemporalStatus>
+    public var embeddingModel: String?
+    public var queryEmbedding: [Double]?
 
     public init(
         text: String,
@@ -19,7 +21,9 @@ public struct GraphSearchQuery: Sendable, Equatable {
         includeFacts: Bool = true,
         includeEpisodes: Bool = true,
         limit: Int = 20,
-        statusFilter: Set<GraphTemporalStatus> = [.active]
+        statusFilter: Set<GraphTemporalStatus> = [.active],
+        embeddingModel: String? = nil,
+        queryEmbedding: [Double]? = nil
     ) {
         self.text = text
         self.groupID = groupID
@@ -29,6 +33,8 @@ public struct GraphSearchQuery: Sendable, Equatable {
         self.includeEpisodes = includeEpisodes
         self.limit = limit
         self.statusFilter = statusFilter
+        self.embeddingModel = embeddingModel
+        self.queryEmbedding = queryEmbedding
     }
 }
 
