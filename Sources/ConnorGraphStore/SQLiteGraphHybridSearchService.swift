@@ -25,7 +25,7 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
         if query.includeNodes {
             let nodes = try store.searchNodeFTS(query: query.text, groupID: query.groupID, limit: perScopeLimit)
             for (index, node) in nodes.enumerated() where includes(node.status, in: query.statusFilter) && isTemporallyValid(node, at: query.referenceTime) {
-                fusion.add(nodeHit(node, rank: index), method: "fts", rank: index + 1)
+                fusion.add(try nodeHit(node, rank: index), method: "fts", rank: index + 1)
             }
         }
 
@@ -52,7 +52,7 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
                     fusion.add(try factHit(fact, rank: index, retrievalMethod: "semantic", explicitScore: result.score), method: "semantic", rank: index + 1)
                 case .node:
                     guard query.includeNodes, let node = try store.graphNodeV2(id: result.embedding.ownerID), includes(node.status, in: query.statusFilter), isTemporallyValid(node, at: query.referenceTime) else { continue }
-                    fusion.add(nodeHit(node, rank: index, retrievalMethod: "semantic", explicitScore: result.score), method: "semantic", rank: index + 1)
+                    fusion.add(try nodeHit(node, rank: index, retrievalMethod: "semantic", explicitScore: result.score), method: "semantic", rank: index + 1)
                 case .episode:
                     guard query.includeEpisodes, let episode = try store.graphEpisode(id: result.embedding.ownerID), includes(episode.status, in: query.statusFilter) else { continue }
                     fusion.add(episodeHit(episode, rank: index, retrievalMethod: "semantic", explicitScore: result.score), method: "semantic", rank: index + 1)
@@ -60,7 +60,51 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
             }
         }
 
-        return GraphSearchResponse(hits: Array(fusion.rankedHits().prefix(query.limit)))
+        let rankedHits = graphBoostedHits(fusion.rankedHits(), queryText: query.text)
+        return GraphSearchResponse(hits: Array(rankedHits.prefix(query.limit)))
+    }
+
+    private func graphBoostedHits(_ hits: [GraphSearchHit], queryText: String) -> [GraphSearchHit] {
+        hits.map { hit in
+            var boostedHit = hit
+            let baseScore = hit.score
+            let boost = graphBoost(for: hit, queryText: queryText)
+            boostedHit.score = baseScore + boost.value
+            boostedHit.metadata["base_rrf_score"] = formattedScore(baseScore)
+            boostedHit.metadata["graph_boost"] = formattedScore(boost.value)
+            boostedHit.metadata["final_score"] = formattedScore(boostedHit.score)
+            if boost.value > 0 {
+                boostedHit.metadata["graph_ranking"] = "boosted"
+                boostedHit.metadata["graph_boost_reason"] = boost.reason
+            } else {
+                boostedHit.metadata["graph_ranking"] = "rrf_only"
+                boostedHit.metadata.removeValue(forKey: "graph_boost_reason")
+            }
+            return boostedHit
+        }.sorted { lhs, rhs in
+            if lhs.score == rhs.score {
+                if lhs.ownerType.rawValue == rhs.ownerType.rawValue { return lhs.ownerID < rhs.ownerID }
+                return lhs.ownerType.rawValue < rhs.ownerType.rawValue
+            }
+            return lhs.score > rhs.score
+        }
+    }
+
+    private func graphBoost(for hit: GraphSearchHit, queryText: String) -> (value: Double, reason: String?) {
+        switch hit.metadata["graph_context"] {
+        case "fact_endpoints":
+            let endpointTitles = [hit.metadata["source_node_title"], hit.metadata["target_node_title"]].compactMap { $0 }
+            if endpointTitles.contains(where: { queryText.localizedCaseInsensitiveContains($0) }) {
+                return (0.002, "endpoint_title_query_match")
+            }
+            return (0.0, nil)
+        default:
+            return (0.0, nil)
+        }
+    }
+
+    private func formattedScore(_ score: Double) -> String {
+        String(format: "%.6f", score)
     }
 
     private struct RRFFusion {
@@ -157,7 +201,22 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
     }
 
     private func factHit(_ fact: GraphFact, rank: Int, retrievalMethod: String = "fts", explicitScore: Double? = nil) throws -> GraphSearchHit {
-        GraphSearchHit(
+        var metadata = [
+            "group_id": fact.groupID,
+            "relation": fact.relation.rawValue,
+            "status": fact.status.rawValue,
+            "source_node_id": fact.sourceNodeID,
+            "target_node_id": fact.targetNodeID
+        ]
+        if let sourceNode = try store.graphNodeV2(id: fact.sourceNodeID), let targetNode = try store.graphNodeV2(id: fact.targetNodeID) {
+            metadata["graph_context"] = "fact_endpoints"
+            metadata["source_node_title"] = sourceNode.title
+            metadata["source_node_type"] = sourceNode.type.rawValue
+            metadata["target_node_title"] = targetNode.title
+            metadata["target_node_type"] = targetNode.type.rawValue
+            metadata["graph_context_node_ids"] = [sourceNode.id, targetNode.id].joined(separator: ",")
+        }
+        return GraphSearchHit(
             ownerType: .fact,
             ownerID: fact.id,
             title: fact.relation.rawValue,
@@ -165,30 +224,35 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
             score: explicitScore ?? score(forRank: rank),
             retrievalMethod: retrievalMethod,
             sourceEpisodeIDs: try store.sourceEpisodeIDs(factID: fact.id),
-            metadata: [
-                "group_id": fact.groupID,
-                "relation": fact.relation.rawValue,
-                "status": fact.status.rawValue,
-                "source_node_id": fact.sourceNodeID,
-                "target_node_id": fact.targetNodeID
-            ]
+            metadata: metadata
         )
     }
 
-    private func nodeHit(_ node: GraphNodeV2, rank: Int, retrievalMethod: String = "fts", explicitScore: Double? = nil) -> GraphSearchHit {
-        GraphSearchHit(
+    private func nodeHit(_ node: GraphNodeV2, rank: Int, retrievalMethod: String = "fts", explicitScore: Double? = nil) throws -> GraphSearchHit {
+        var metadata = [
+            "group_id": node.groupID,
+            "type": node.type.rawValue,
+            "status": node.status.rawValue,
+            "canonical_name": node.canonicalName
+        ]
+        let adjacentFacts = try store.adjacentFacts(nodeID: node.id, groupID: node.groupID)
+        if !adjacentFacts.isEmpty {
+            metadata["graph_context"] = "adjacent_facts"
+            metadata["adjacent_fact_ids"] = adjacentFacts.map(\.id).joined(separator: ",")
+            metadata["adjacent_fact_relations"] = adjacentFacts.map { $0.relation.rawValue }.joined(separator: ",")
+            let adjacentNodeIDs = adjacentFacts.map { fact in
+                fact.sourceNodeID == node.id ? fact.targetNodeID : fact.sourceNodeID
+            }
+            metadata["adjacent_node_ids"] = Array(Set(adjacentNodeIDs)).sorted().joined(separator: ",")
+        }
+        return GraphSearchHit(
             ownerType: .node,
             ownerID: node.id,
             title: node.title,
             text: node.summary.isEmpty ? node.canonicalName : node.summary,
             score: explicitScore ?? score(forRank: rank),
             retrievalMethod: retrievalMethod,
-            metadata: [
-                "group_id": node.groupID,
-                "type": node.type.rawValue,
-                "status": node.status.rawValue,
-                "canonical_name": node.canonicalName
-            ]
+            metadata: metadata
         )
     }
 
