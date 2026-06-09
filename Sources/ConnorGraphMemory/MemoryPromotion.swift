@@ -8,19 +8,23 @@ public enum MemoryPromotionError: Error, Equatable, Sendable {
 }
 
 public struct MemoryPromotionResult: Sendable, Equatable {
-    public var nodes: [GraphNode]
-    public var edges: [SemanticEdge]
+    public var graphNodes: [GraphNodeV2]
+    public var graphFacts: [GraphFact]
     public var promotedEntry: ObserveLogEntry
 
-    public init(nodes: [GraphNode], edges: [SemanticEdge], promotedEntry: ObserveLogEntry) {
-        self.nodes = nodes
-        self.edges = edges
+    public init(graphNodes: [GraphNodeV2], graphFacts: [GraphFact], promotedEntry: ObserveLogEntry) {
+        self.graphNodes = graphNodes
+        self.graphFacts = graphFacts
         self.promotedEntry = promotedEntry
     }
 }
 
 public struct MemoryPromotionService: Sendable, Equatable {
-    public init() {}
+    public var groupID: String
+
+    public init(groupID: String = "default") {
+        self.groupID = groupID
+    }
 
     public func promoteCandidateFact(_ entry: ObserveLogEntry) throws -> MemoryPromotionResult {
         guard entry.kind == .candidateFact else {
@@ -32,17 +36,20 @@ public struct MemoryPromotionService: Sendable, Equatable {
 
         let sourceID = entry.relatedNodeIDs[0]
         let targetID = entry.relatedNodeIDs[1]
-        let edge = SemanticEdge(
-            id: "edge-promoted-\(entry.id)",
+        let fact = GraphFact(
+            id: "fact-promoted-\(entry.id)",
+            groupID: groupID,
             sourceNodeID: sourceID,
             targetNodeID: targetID,
             relation: .relatedTo,
             fact: entry.content,
             confidence: entry.confidence,
-            metadata: ["promoted_from": entry.id, "promotion_kind": entry.kind.rawValue]
+            status: .draft,
+            attributes: ["promotion_kind": entry.kind.rawValue],
+            metadata: ["promoted_from": entry.id]
         )
 
-        return MemoryPromotionResult(nodes: [], edges: [edge], promotedEntry: entry.promoted(toNodeID: edge.id))
+        return MemoryPromotionResult(graphNodes: [], graphFacts: [fact], promotedEntry: entry.promoted(toNodeID: fact.id))
     }
 
     public func promoteDecisionHint(_ entry: ObserveLogEntry) throws -> MemoryPromotionResult {
@@ -50,28 +57,34 @@ public struct MemoryPromotionService: Sendable, Equatable {
             throw MemoryPromotionError.unsupportedKind(expected: .decisionHint, actual: entry.kind)
         }
 
-        let node = GraphNode(
+        let node = GraphNodeV2(
             id: "decision-\(slug(entry.content))",
+            groupID: groupID,
+            stableKey: "decision:\(slug(entry.content))",
             type: .decision,
+            canonicalName: entry.content,
             title: entry.content,
             summary: entry.normalizedSummary,
             status: .draft,
+            confidence: entry.confidence,
             metadata: ["promoted_from": entry.id, "promotion_kind": entry.kind.rawValue]
         )
-        var edges: [SemanticEdge] = []
+        var facts: [GraphFact] = []
         if let workObjectID = entry.workObjectID {
-            edges.append(SemanticEdge(
-                id: "edge-\(node.id)-belongs-to-\(workObjectID)",
+            facts.append(GraphFact(
+                id: "fact-\(node.id)-belongs-to-\(workObjectID)",
+                groupID: groupID,
                 sourceNodeID: node.id,
                 targetNodeID: workObjectID,
                 relation: .belongsTo,
                 fact: "\(node.title) belongs to \(workObjectID)",
                 confidence: entry.confidence,
+                status: .draft,
                 metadata: ["promoted_from": entry.id]
             ))
         }
 
-        return MemoryPromotionResult(nodes: [node], edges: edges, promotedEntry: entry.promoted(toNodeID: node.id))
+        return MemoryPromotionResult(graphNodes: [node], graphFacts: facts, promotedEntry: entry.promoted(toNodeID: node.id))
     }
 
     public func promoteUserPreference(_ entry: ObserveLogEntry) throws -> MemoryPromotionResult {
@@ -82,25 +95,31 @@ public struct MemoryPromotionService: Sendable, Equatable {
             throw MemoryPromotionError.missingPersonNode
         }
 
-        let node = GraphNode(
+        let node = GraphNodeV2(
             id: "preference-\(slug(entry.content))",
+            groupID: groupID,
+            stableKey: "preference:\(slug(entry.content))",
             type: .preference,
+            canonicalName: entry.content,
             title: entry.content,
             summary: entry.normalizedSummary,
             status: .draft,
+            confidence: entry.confidence,
             metadata: ["promoted_from": entry.id, "promotion_kind": entry.kind.rawValue]
         )
-        let edge = SemanticEdge(
-            id: "edge-\(personID)-has-preference-\(node.id)",
+        let fact = GraphFact(
+            id: "fact-\(personID)-has-preference-\(node.id)",
+            groupID: groupID,
             sourceNodeID: personID,
             targetNodeID: node.id,
             relation: .hasPreference,
             fact: entry.content,
             confidence: entry.confidence,
+            status: .draft,
             metadata: ["promoted_from": entry.id]
         )
 
-        return MemoryPromotionResult(nodes: [node], edges: [edge], promotedEntry: entry.promoted(toNodeID: node.id))
+        return MemoryPromotionResult(graphNodes: [node], graphFacts: [fact], promotedEntry: entry.promoted(toNodeID: node.id))
     }
 
     public func dismiss(_ entry: ObserveLogEntry) -> ObserveLogEntry {

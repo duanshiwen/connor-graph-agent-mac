@@ -30,11 +30,11 @@ public struct AppPromotionQueueRepository: @unchecked Sendable {
             throw MemoryPromotionError.unsupportedKind(expected: .candidateFact, actual: entry.kind)
         }
 
-        for node in result.nodes {
-            try store.upsert(node: node)
+        for node in result.graphNodes {
+            try store.upsert(nodeV2: node)
         }
-        for edge in result.edges {
-            try store.upsert(edge: edge)
+        for fact in result.graphFacts {
+            try store.upsert(fact: fact)
         }
         try store.update(observeLogEntry: result.promotedEntry)
         return result

@@ -3,13 +3,20 @@ import ConnorGraphCore
 import ConnorGraphMemory
 
 public struct GraphStoreSnapshot: Sendable, Equatable {
-    public var nodes: [GraphNode]
-    public var edges: [SemanticEdge]
+    public var graphNodes: [GraphNodeV2]
+    public var graphFacts: [GraphFact]
+    public var graphEpisodes: [GraphEpisode]
     public var observeLogEntries: [ObserveLogEntry]
 
-    public init(nodes: [GraphNode], edges: [SemanticEdge], observeLogEntries: [ObserveLogEntry]) {
-        self.nodes = nodes
-        self.edges = edges
+    public init(
+        graphNodes: [GraphNodeV2],
+        graphFacts: [GraphFact],
+        graphEpisodes: [GraphEpisode] = [],
+        observeLogEntries: [ObserveLogEntry]
+    ) {
+        self.graphNodes = graphNodes
+        self.graphFacts = graphFacts
+        self.graphEpisodes = graphEpisodes
         self.observeLogEntries = observeLogEntries
     }
 }

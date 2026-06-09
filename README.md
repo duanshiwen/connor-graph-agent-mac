@@ -1,6 +1,6 @@
 # Connor Graph Agent Mac
 
-Connor Graph Agent Mac 是一个面向 macOS 的本地优先图谱知识 Agent 客户端。它不是 Markdown 知识库管理器，而是一个可运行的 Agent 应用原型：运行时知识源以本地 SQLite 图数据库为准，Markdown 只作为历史资料导入、证据快照或导出投影格式。
+Connor Graph Agent Mac 是一个面向 macOS 的本地优先图谱知识 Agent 客户端。它不是 Markdown 知识库管理器，而是一个可运行的 Agent 应用原型：运行时知识源以本地 SQLite temporal graph 为准；Markdown 导入链路和早期简单图模型已移除。
 
 当前项目同时包含：
 
@@ -25,8 +25,7 @@ remove-in-memory-search
 - macOS SwiftUI 应用外壳。
 - 图谱核心领域模型。
 - SQLite 本地图存储。
-- GraphNode / SemanticEdge / GraphFact / GraphEpisode / ObserveLogEntry 等运行时模型。
-- 历史 Markdown 知识库只读导入。
+- GraphNodeV2V2 / GraphFact / GraphEpisode / ObserveLogEntry 等 temporal graph 运行时模型。
 - SQLite-backed hybrid graph search 与上下文组装。
 - Agent runtime 与 hybrid search 图上下文注入。
 - Agent Chat 会话与消息持久化。
@@ -59,7 +58,6 @@ remove-in-memory-search
 
 Markdown 可以作为：
 
-- 历史知识库导入源；
 - 人类可读导出投影；
 - 证据或来源快照；
 - 跨系统互操作格式。
@@ -68,8 +66,8 @@ Markdown 可以作为：
 
 ```text
 SQLiteGraphStore
-  ├─ GraphNode / GraphNodeV2
-  ├─ SemanticEdge
+  ├─ GraphNodeV2V2
+  ├─ GraphFact
   ├─ GraphFact
   ├─ GraphEpisode
   ├─ GraphEmbedding
@@ -81,13 +79,13 @@ SQLiteGraphStore
 历史知识库中的概念会映射为图原生结构：
 
 ```text
-Question Ledger       → GraphNode(type: .question)
-Answer Cache          → GraphNode(type: .answer)
-Work Object           → GraphNode(type: .workObject)
-Decision              → GraphNode(type: .decision)
-SOP / Runbook         → GraphNode(type: .procedure)
-Person Profile        → GraphNode(type: .person)
-User Preference       → GraphNode(type: .preference)
+Question Ledger       → GraphNodeV2(type: .question)
+Answer Cache          → GraphNodeV2(type: .answer)
+Work Object           → GraphNodeV2(type: .workObject)
+Decision              → GraphNodeV2(type: .decision)
+SOP / Runbook         → GraphNodeV2(type: .procedure)
+Person Profile        → GraphNodeV2(type: .person)
+User Preference       → GraphNodeV2(type: .preference)
 实体、项目、业务对象等 → typed graph nodes + semantic edges
 ```
 
@@ -102,7 +100,7 @@ User Preference       → GraphNode(type: .preference)
 - 测试使用 Stub provider、hybrid search test doubles 与本地 SQLite，保证确定性。
 - 外部模型能力通过 adapter 扩展，不成为基础搜索可用性的前提。
 
-这意味着即使没有网络、没有 API key、没有外部向量服务，应用仍然可以启动、导入、搜索、聊天测试和运行大部分本地功能。
+这意味着即使没有网络、没有 API key、没有外部向量服务，应用仍然可以启动、搜索、聊天测试和运行大部分本地功能。
 
 ---
 
@@ -156,7 +154,7 @@ graphiti_local
 → cross_encoder
 ```
 
-这个顺序会写入 metadata。调用方只消费统一的 `GraphSearchHit`，不再处理旧的 `GraphSearchResult` / `SemanticEdge` / `ObserveLogEntry` 混合枚举结果：
+这个顺序会写入 metadata。调用方只消费统一的 `GraphSearchHit`，不再处理旧的 `GraphSearchResult` / `GraphFact` / `ObserveLogEntry` 混合枚举结果：
 
 ```text
 graph_reranking_strategies = graphiti_local,episode_mentions,mmr,cross_encoder
@@ -175,7 +173,6 @@ graph_reranking_strategies = graphiti_local,episode_mentions,mmr,cross_encoder
 │   ├── ConnorGraphCore
 │   ├── ConnorGraphMemory
 │   ├── ConnorGraphStore
-│   ├── ConnorGraphImport
 │   ├── ConnorGraphSearch
 │   ├── ConnorGraphAgent
 │   ├── ConnorGraphAppSupport
@@ -184,7 +181,6 @@ graph_reranking_strategies = graphiti_local,episode_mentions,mmr,cross_encoder
     ├── ConnorGraphCoreTests
     ├── ConnorGraphMemoryTests
     ├── ConnorGraphStoreTests
-    ├── ConnorGraphImportTests
     ├── ConnorGraphSearchTests
     ├── ConnorGraphAgentTests
     └── ConnorGraphAppSupportTests
@@ -216,11 +212,11 @@ Sources/ConnorGraphCore/GraphTemporalDomain.swift
 关键概念：
 
 ```text
-GraphNode
 GraphNodeV2
+GraphNodeV2V2
 GraphFact
 GraphEpisode
-SemanticEdge
+GraphFact
 GraphTemporalStatus
 AgentSession
 AgentMessage
@@ -267,9 +263,9 @@ search
 Promotion 行为：
 
 ```text
-candidateFact  → SemanticEdge draft
-decisionHint   → Decision GraphNode draft + optional BELONGS_TO edge
-userPreference → Preference GraphNode draft + HAS_PREFERENCE edge
+candidateFact  → GraphFact draft
+decisionHint   → Decision GraphNodeV2 draft + optional BELONGS_TO edge
+userPreference → Preference GraphNodeV2 draft + HAS_PREFERENCE edge
 ```
 
 ---
@@ -281,8 +277,7 @@ SQLite 持久化与本地 hybrid graph search 运行时核心。
 主要职责：
 
 - SQLite schema migration。
-- GraphNode / GraphNodeV2 / GraphFact / GraphEpisode 持久化。
-- SemanticEdge 持久化。
+- GraphNodeV2V2 / GraphFact / GraphEpisode 持久化。
 - Observe Log 持久化。
 - Promotion Queue 状态持久化。
 - ChatSession / ChatMessage 持久化。
@@ -304,9 +299,7 @@ Sources/ConnorGraphStore/GraphStoreSnapshot.swift
 
 ```text
 schema_migrations
-graph_nodes
 graph_nodes_v2
-semantic_edges
 graph_facts
 graph_fact_sources
 graph_episodes
@@ -372,38 +365,6 @@ public static let canonicalExecutionOrder: [GraphRerankerStrategy] = [
     .maximalMarginalRelevance,
     .crossEncoder
 ]
-```
-
----
-
-### `ConnorGraphImport`
-
-历史 Markdown 知识库只读导入层。
-
-主要职责：
-
-- 扫描 Markdown 文件。
-- 解析 frontmatter。
-- 将历史知识条目映射为图节点和语义边。
-- 不修改源 Markdown 仓库。
-
-代表文件：
-
-```text
-Sources/ConnorGraphImport/LegacyKnowledgeDirectoryImporter.swift
-Sources/ConnorGraphImport/LegacyMarkdownImport.swift
-```
-
-导入报告：
-
-```swift
-LegacyDirectoryImportReport(
-    scannedFiles: Int,
-    importedNodes: Int,
-    importedEdges: Int,
-    skippedFiles: Int,
-    warnings: [LegacyImportWarning]
-)
 ```
 
 ---
@@ -498,7 +459,6 @@ Search            通过 SQLite-backed hybrid search 查询 ranked GraphSearchHi
 Observe Log       查看短期记忆条目
 Agent Chat        使用 hybrid graph context 进行 Agent 对话，会话与消息持久化到 SQLite
 Promotion Queue   审核、提升、忽略、置顶记忆候选
-Import            只读导入历史 Markdown 知识库
 LLM Settings      配置 Stub / OpenAI-compatible provider 与 API key
 ```
 
@@ -628,42 +588,6 @@ model
 ```
 
 API key 不写入 SQLite、README、测试 fixture 或源码。
-
----
-
-## 历史 Markdown 知识库只读导入
-
-SwiftUI 入口：
-
-```text
-Import 页面
-→ 输入 Markdown repository 路径
-→ 点击 Import Read-only
-→ 查看 scanned files / imported nodes / imported edges / skipped files / warnings
-```
-
-示例路径：
-
-```text
-/Users/duanshiwen/notes/intelligence-repository
-```
-
-程序化入口：
-
-```swift
-let store = try SQLiteGraphStore(path: "graph.sqlite")
-try store.migrate()
-
-let report = try LegacyKnowledgeDirectoryImporter(store: store)
-    .importDirectory(URL(fileURLWithPath: "/path/to/intelligence-repository"))
-```
-
-真实仓库 smoke test 是 opt-in：
-
-```bash
-CONNOR_REAL_REPO_IMPORT_PATH=/Users/duanshiwen/notes/intelligence-repository \
-  swift test --filter realIntelligenceRepositoryReadOnlyImportSmoke
-```
 
 ---
 
@@ -961,7 +885,6 @@ private enum RerankingMetadataKey { ... }
 Tests/ConnorGraphCoreTests
 Tests/ConnorGraphMemoryTests
 Tests/ConnorGraphStoreTests
-Tests/ConnorGraphImportTests
 Tests/ConnorGraphSearchTests
 Tests/ConnorGraphAgentTests
 Tests/ConnorGraphAppSupportTests
