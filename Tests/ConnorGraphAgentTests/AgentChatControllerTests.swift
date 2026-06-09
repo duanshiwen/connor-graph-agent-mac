@@ -1,5 +1,4 @@
 import Testing
-import ConnorGraphCore
 import ConnorGraphSearch
 import ConnorGraphAgent
 
@@ -21,11 +20,11 @@ private struct ControllerCapturingProvider: LLMProvider, Sendable {
 }
 
 @Test func agentChatControllerSubmitsPromptAndStoresTranscript() async throws {
-    let node = GraphNode.question(id: "question-memory", title: "How should memory work?", summary: "Use graph-backed context")
-    let index = InMemoryGraphSearchIndex(nodes: [node], edges: [], observeLogEntries: [])
     let agent = GraphAgent(
         session: AgentSession(id: "session-ui"),
-        contextBuilder: AgentContextBuilder(searchIndex: index, assembler: ContextAssembler()),
+        contextBuilder: AgentContextBuilder(hybridSearchService: TestHybridSearchService(hits: [
+            GraphSearchHit(ownerType: .node, ownerID: "question-memory", title: "How should memory work?", text: "Use graph-backed context", score: 1.0, retrievalMethod: "test")
+        ]), groupID: "default"),
         llmProvider: StubLLMProvider()
     )
     var controller = AgentChatController(agent: agent)
@@ -41,10 +40,7 @@ private struct ControllerCapturingProvider: LLMProvider, Sendable {
     let recorder = ControllerPromptRecorder()
     let agent = GraphAgent(
         session: AgentSession(id: "session-ui"),
-        contextBuilder: AgentContextBuilder(
-            searchIndex: InMemoryGraphSearchIndex(nodes: [], edges: [], observeLogEntries: []),
-            assembler: ContextAssembler()
-        ),
+        contextBuilder: AgentContextBuilder(hybridSearchService: TestHybridSearchService(), groupID: "default"),
         llmProvider: ControllerCapturingProvider(recorder: recorder)
     )
     var controller = AgentChatController(agent: agent)

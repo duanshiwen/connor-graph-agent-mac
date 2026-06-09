@@ -2,14 +2,13 @@ import Foundation
 import Testing
 import ConnorGraphCore
 import ConnorGraphMemory
-import ConnorGraphSearch
 import ConnorGraphStore
 
 private func temporarySnapshotDatabaseURL(_ name: String = UUID().uuidString) -> URL {
     FileManager.default.temporaryDirectory.appendingPathComponent("\(name).sqlite")
 }
 
-@Test func graphStoreCanLoadSnapshotForSearchIndex() throws {
+@Test func graphStoreCanLoadSnapshot() throws {
     let store = try SQLiteGraphStore(path: temporarySnapshotDatabaseURL().path)
     try store.migrate()
     let node = GraphNode.workObject(id: "work-object-agent-os", title: "Agent OS", summary: "Graph-backed SwiftUI runtime")
@@ -29,15 +28,9 @@ private func temporarySnapshotDatabaseURL(_ name: String = UUID().uuidString) ->
     try store.upsert(observeLogEntry: observe)
 
     let snapshot = try store.snapshot()
-    let index = InMemoryGraphSearchIndex(
-        nodes: snapshot.nodes,
-        edges: snapshot.edges,
-        observeLogEntries: snapshot.observeLogEntries
-    )
-    let results = try index.search(query: "Application Support SQLite")
 
     #expect(snapshot.nodes.map(\.id).contains(node.id))
+    #expect(snapshot.nodes.map(\.id).contains(answer.id))
     #expect(snapshot.edges.map(\.id).contains(edge.id))
     #expect(snapshot.observeLogEntries.map(\.id).contains(observe.id))
-    #expect(results.contains { $0.id == "node:\(answer.id)" })
 }
