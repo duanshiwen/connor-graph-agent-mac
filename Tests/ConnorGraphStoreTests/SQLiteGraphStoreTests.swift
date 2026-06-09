@@ -8,27 +8,36 @@ private func temporaryDatabaseURL(_ name: String = UUID().uuidString) -> URL {
     FileManager.default.temporaryDirectory.appendingPathComponent("\(name).sqlite")
 }
 
-@Test func schemaMigratorCreatesRequiredTables() throws {
+@Test func schemaMigratorCreatesRequiredTemporalGraphTables() throws {
     let store = try SQLiteGraphStore(path: temporaryDatabaseURL().path)
     try store.migrate()
 
     let tables = try store.tableNames()
 
     #expect(tables.contains("schema_migrations"))
-    #expect(tables.contains("graph_nodes"))
-    #expect(tables.contains("semantic_edges"))
+    #expect(tables.contains("graph_episodes"))
+    #expect(tables.contains("graph_nodes_v2"))
+    #expect(tables.contains("graph_facts"))
     #expect(tables.contains("observe_log_entries"))
     #expect(tables.contains("chat_sessions"))
     #expect(tables.contains("chat_messages"))
 }
 
-@Test func graphStoreSavesAndLoadsGraphNode() throws {
+@Test func graphStoreSavesAndLoadsGraphNodeV2() throws {
     let store = try SQLiteGraphStore(path: temporaryDatabaseURL().path)
     try store.migrate()
-    let node = GraphNode.workObject(id: "work-object-agent-os", title: "Agent OS", summary: "Graph-backed agent OS")
+    let node = GraphNodeV2(
+        id: "work-object-agent-os",
+        groupID: "default",
+        stableKey: "work_object:agent-os",
+        type: .workObject,
+        canonicalName: "Agent OS",
+        title: "Agent OS",
+        summary: "Graph-backed agent OS"
+    )
 
-    try store.upsert(node: node)
-    let loadedNode = try store.node(id: node.id)
+    try store.upsert(nodeV2: node)
+    let loadedNode = try store.graphNodeV2(id: node.id)
     let loaded = try #require(loadedNode)
 
     #expect(loaded.id == node.id)
@@ -37,22 +46,27 @@ private func temporaryDatabaseURL(_ name: String = UUID().uuidString) -> URL {
     #expect(loaded.summary == "Graph-backed agent OS")
 }
 
-@Test func graphStoreSavesAndLoadsSemanticEdge() throws {
+@Test func graphStoreSavesAndLoadsGraphFact() throws {
     let store = try SQLiteGraphStore(path: temporaryDatabaseURL().path)
     try store.migrate()
-    let edge = SemanticEdge(
-        id: "edge-q-a",
-        sourceNodeID: "question-1",
-        targetNodeID: "answer-1",
+    let source = GraphNodeV2(id: "question-1", groupID: "default", type: .question, canonicalName: "Question", title: "Question")
+    let target = GraphNodeV2(id: "answer-1", groupID: "default", type: .answer, canonicalName: "Answer", title: "Answer")
+    let fact = GraphFact(
+        id: "fact-q-a",
+        groupID: "default",
+        sourceNodeID: source.id,
+        targetNodeID: target.id,
         relation: .answeredBy,
         fact: "Question is answered by answer"
     )
 
-    try store.upsert(edge: edge)
-    let loadedEdge = try store.edge(id: edge.id)
-    let loaded = try #require(loadedEdge)
+    try store.upsert(nodeV2: source)
+    try store.upsert(nodeV2: target)
+    try store.upsert(fact: fact)
+    let loadedFact = try store.graphFact(id: fact.id)
+    let loaded = try #require(loadedFact)
 
-    #expect(loaded.id == edge.id)
+    #expect(loaded.id == fact.id)
     #expect(loaded.sourceNodeID == "question-1")
     #expect(loaded.targetNodeID == "answer-1")
     #expect(loaded.relation == .answeredBy)
@@ -83,20 +97,20 @@ private func temporaryDatabaseURL(_ name: String = UUID().uuidString) -> URL {
     #expect(active.map(\.id).contains(entry.id))
 }
 
-@Test func graphStoreQueriesNeighborhoodEdges() throws {
+@Test func graphStoreQueriesAdjacentFacts() throws {
     let store = try SQLiteGraphStore(path: temporaryDatabaseURL().path)
     try store.migrate()
-    let q = GraphNode.question(id: "question-1", title: "How should memory work?")
-    let a = GraphNode.answer(id: "answer-1", title: "Use graph-backed memory")
-    let edge = SemanticEdge.answeredBy(questionID: q.id, answerID: a.id)
+    let q = GraphNodeV2(id: "question-1", groupID: "default", type: .question, canonicalName: "How should memory work?", title: "How should memory work?")
+    let a = GraphNodeV2(id: "answer-1", groupID: "default", type: .answer, canonicalName: "Use graph-backed memory", title: "Use graph-backed memory")
+    let fact = GraphFact(id: "fact-q-a", groupID: "default", sourceNodeID: q.id, targetNodeID: a.id, relation: .answeredBy, fact: "question-1 is answered by answer-1")
 
-    try store.upsert(node: q)
-    try store.upsert(node: a)
-    try store.upsert(edge: edge)
+    try store.upsert(nodeV2: q)
+    try store.upsert(nodeV2: a)
+    try store.upsert(fact: fact)
 
-    let questionEdges = try store.neighborhoodEdges(nodeID: q.id)
-    let answerEdges = try store.neighborhoodEdges(nodeID: a.id)
+    let questionFacts = try store.adjacentFacts(nodeID: q.id, groupID: "default")
+    let answerFacts = try store.adjacentFacts(nodeID: a.id, groupID: "default")
 
-    #expect(questionEdges.map(\.id) == [edge.id])
-    #expect(answerEdges.map(\.id) == [edge.id])
+    #expect(questionFacts.map(\.id) == [fact.id])
+    #expect(answerFacts.map(\.id) == [fact.id])
 }
