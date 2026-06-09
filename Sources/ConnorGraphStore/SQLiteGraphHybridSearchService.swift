@@ -115,7 +115,13 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
             updated.metadata["episode_mentions_count"] = String(count)
             updated.metadata["episode_mentions_scope"] = scope
             updated.metadata["episode_mentions_boost"] = formattedScore(boost)
-            guard boost > 0 else { return updated }
+            guard boost > 0 else {
+                updated.metadata["episode_mentions_status"] = "skipped"
+                updated.metadata["episode_mentions_skip_reason"] = "no_mentions"
+                return updated
+            }
+            updated.metadata["episode_mentions_status"] = "applied"
+            updated.metadata.removeValue(forKey: "episode_mentions_skip_reason")
             updated.score += boost
             updated.metadata["graph_ranking"] = "boosted"
             appendMetadataToken("episode_mentions", key: "graph_boost_reason", hit: &updated)
