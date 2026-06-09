@@ -19,48 +19,23 @@ public struct ObserveLogRecorder: Sendable, Equatable {
 }
 
 public struct AgentContextBuilder: Sendable {
-    private enum Backend: Sendable {
-        case inMemory(InMemoryGraphSearchIndex, ContextAssembler, GraphSearchOptions)
-        case hybrid(any GraphHybridSearchService, groupID: String, limit: Int)
-    }
-
-    private var backend: Backend
-
-    public init(
-        searchIndex: InMemoryGraphSearchIndex,
-        assembler: ContextAssembler,
-        searchOptions: GraphSearchOptions = .init(includeNeighborhood: true)
-    ) {
-        self.backend = .inMemory(searchIndex, assembler, searchOptions)
-    }
+    private var hybridSearchService: any GraphHybridSearchService
+    private var groupID: String
+    private var limit: Int
 
     public init(
         hybridSearchService: any GraphHybridSearchService,
         groupID: String,
         limit: Int = 20
     ) {
-        self.backend = .hybrid(hybridSearchService, groupID: groupID, limit: limit)
+        self.hybridSearchService = hybridSearchService
+        self.groupID = groupID
+        self.limit = limit
     }
 
     public func context(for query: String) async throws -> AgentContext {
-        switch backend {
-        case .inMemory(let searchIndex, let assembler, let searchOptions):
-            let results = try searchIndex.search(query: query, options: searchOptions)
-            return assembler.assemble(query: query, results: results)
-        case .hybrid(let service, let groupID, let limit):
-            let response = try await service.search(query: GraphSearchQuery(text: query, groupID: groupID, limit: limit))
-            return AgentContext(query: query, items: response.hits.map(contextItem))
-        }
-    }
-
-    public func context(for query: String) throws -> AgentContext {
-        switch backend {
-        case .inMemory(let searchIndex, let assembler, let searchOptions):
-            let results = try searchIndex.search(query: query, options: searchOptions)
-            return assembler.assemble(query: query, results: results)
-        case .hybrid:
-            throw AgentContextBuilderError.asyncContextRequired
-        }
+        let response = try await hybridSearchService.search(query: GraphSearchQuery(text: query, groupID: groupID, limit: limit))
+        return AgentContext(query: query, items: response.hits.map(contextItem))
     }
 
     private func contextItem(_ hit: GraphSearchHit) -> AgentContextItem {

@@ -2,24 +2,17 @@ import Foundation
 import ConnorGraphCore
 import ConnorGraphMemory
 import ConnorGraphStore
-import ConnorGraphSearch
 import ConnorGraphImport
 
 public struct AppGraphState: Sendable, Equatable {
     public var nodes: [GraphNode]
     public var edges: [SemanticEdge]
     public var observeLogEntries: [ObserveLogEntry]
-    public var searchIndex: InMemoryGraphSearchIndex
 
     public init(snapshot: GraphStoreSnapshot) {
         self.nodes = snapshot.nodes
         self.edges = snapshot.edges
         self.observeLogEntries = snapshot.observeLogEntries
-        self.searchIndex = InMemoryGraphSearchIndex(
-            nodes: snapshot.nodes,
-            edges: snapshot.edges,
-            observeLogEntries: snapshot.observeLogEntries
-        )
     }
 
     public static func == (lhs: AppGraphState, rhs: AppGraphState) -> Bool {

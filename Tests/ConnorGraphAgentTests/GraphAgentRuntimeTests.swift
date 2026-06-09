@@ -92,12 +92,12 @@ import ConnorGraphAgent
     #expect(entry.content == "Remember this insight")
 }
 
-@Test func agentContextBuilderCallsSearchAndAssembler() throws {
-    let node = GraphNode.workObject(id: "work-object-agent-os", title: "Agent OS", summary: "Graph-backed agent system")
-    let searchIndex = InMemoryGraphSearchIndex(nodes: [node], edges: [], observeLogEntries: [])
-    let builder = AgentContextBuilder(searchIndex: searchIndex, assembler: ContextAssembler())
+@Test func agentContextBuilderUsesHybridSearch() async throws {
+    let builder = AgentContextBuilder(hybridSearchService: TestHybridSearchService(hits: [
+        GraphSearchHit(ownerType: .node, ownerID: "work-object-agent-os", title: "Agent OS", text: "Graph-backed agent system", score: 1.0, retrievalMethod: "test", metadata: ["type": "work_object"])
+    ]), groupID: "default")
 
-    let context = try builder.context(for: "graph backed")
+    let context = try await builder.context(for: "graph backed")
 
     #expect(context.query == "graph backed")
     #expect(context.items.map(\.sourceID) == ["node:work-object-agent-os"])
@@ -119,13 +119,12 @@ import ConnorGraphAgent
 }
 
 @Test func graphAgentAskReturnsAnswerAndCitedContext() async throws {
-    let question = GraphNode.question(id: "question-memory", title: "How should memory work?")
-    let answer = GraphNode.answer(id: "answer-graph", title: "Use graph-backed context", summary: "Use a graph store as runtime knowledge.")
-    let edge = SemanticEdge.answeredBy(questionID: question.id, answerID: answer.id)
-    let searchIndex = InMemoryGraphSearchIndex(nodes: [question, answer], edges: [edge], observeLogEntries: [])
     let agent = GraphAgent(
         session: AgentSession(id: "session-1"),
-        contextBuilder: AgentContextBuilder(searchIndex: searchIndex, assembler: ContextAssembler()),
+        contextBuilder: AgentContextBuilder(hybridSearchService: TestHybridSearchService(hits: [
+            GraphSearchHit(ownerType: .node, ownerID: "question-memory", title: "How should memory work?", text: "", score: 1.0, retrievalMethod: "test"),
+            GraphSearchHit(ownerType: .node, ownerID: "answer-graph", title: "Use graph-backed context", text: "Use a graph store as runtime knowledge.", score: 0.8, retrievalMethod: "test")
+        ]), groupID: "default"),
         llmProvider: StubLLMProvider()
     )
 
@@ -167,7 +166,7 @@ private struct RuntimeCapturingProvider: LLMProvider, Sendable {
     )
     let agent = GraphAgent(
         session: session,
-        contextBuilder: AgentContextBuilder(searchIndex: InMemoryGraphSearchIndex(nodes: [], edges: [], observeLogEntries: []), assembler: ContextAssembler()),
+        contextBuilder: AgentContextBuilder(hybridSearchService: TestHybridSearchService(), groupID: "default"),
         llmProvider: RuntimeCapturingProvider(recorder: recorder),
         recentMessageLimit: 1
     )
@@ -201,7 +200,7 @@ private struct RuntimeCapturingProvider: LLMProvider, Sendable {
     )
     let agent = GraphAgent(
         session: session,
-        contextBuilder: AgentContextBuilder(searchIndex: InMemoryGraphSearchIndex(nodes: [], edges: [], observeLogEntries: []), assembler: ContextAssembler()),
+        contextBuilder: AgentContextBuilder(hybridSearchService: TestHybridSearchService(), groupID: "default"),
         llmProvider: RuntimeCapturingProvider(recorder: recorder),
         recentMessageLimit: 1
     )
@@ -221,7 +220,7 @@ private struct RuntimeCapturingProvider: LLMProvider, Sendable {
     let recorder = RuntimePromptRecorder()
     let agent = GraphAgent(
         session: AgentSession(id: "session-1"),
-        contextBuilder: AgentContextBuilder(searchIndex: InMemoryGraphSearchIndex(nodes: [], edges: [], observeLogEntries: []), assembler: ContextAssembler()),
+        contextBuilder: AgentContextBuilder(hybridSearchService: TestHybridSearchService(), groupID: "default"),
         llmProvider: RuntimeCapturingProvider(recorder: recorder),
         promptInspectionSnapshotPolicy: AgentPromptInspectionSnapshotPolicy(includeRenderedPrompt: false)
     )
@@ -248,7 +247,7 @@ private struct RuntimeCapturingProvider: LLMProvider, Sendable {
     )
     let agent = GraphAgent(
         session: session,
-        contextBuilder: AgentContextBuilder(searchIndex: InMemoryGraphSearchIndex(nodes: [], edges: [], observeLogEntries: []), assembler: ContextAssembler()),
+        contextBuilder: AgentContextBuilder(hybridSearchService: TestHybridSearchService(), groupID: "default"),
         llmProvider: RuntimeCapturingProvider(recorder: recorder),
         recentMessageLimit: 2
     )
@@ -270,7 +269,7 @@ private struct RuntimeCapturingProvider: LLMProvider, Sendable {
     let recorder = RuntimePromptRecorder()
     let agent = GraphAgent(
         session: AgentSession(id: "session-1"),
-        contextBuilder: AgentContextBuilder(searchIndex: InMemoryGraphSearchIndex(nodes: [], edges: [], observeLogEntries: []), assembler: ContextAssembler()),
+        contextBuilder: AgentContextBuilder(hybridSearchService: TestHybridSearchService(), groupID: "default"),
         llmProvider: RuntimeCapturingProvider(recorder: recorder)
     )
     let summary = AgentSessionSummary(
