@@ -683,6 +683,22 @@ public final class SQLiteGraphStore: @unchecked Sendable {
         }
     }
 
+    public func graphEmbedding(ownerType: GraphIndexOwnerType, ownerID: String, embeddingModel: String) throws -> GraphEmbedding? {
+        let sql = """
+        SELECT id, group_id, owner_type, owner_id, embedding_model, dimensions, vector_blob, vector_norm, content_hash, created_at
+        FROM graph_embeddings
+        WHERE owner_type = ? AND owner_id = ? AND embedding_model = ?
+        LIMIT 1;
+        """
+        return try withStatement(sql) { statement in
+            try bind(ownerType.rawValue, at: 1, in: statement)
+            try bind(ownerID, at: 2, in: statement)
+            try bind(embeddingModel, at: 3, in: statement)
+            guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+            return try decodeGraphEmbedding(statement)
+        }
+    }
+
     public func searchEmbeddings(
         queryVector: [Double],
         groupID: String,
