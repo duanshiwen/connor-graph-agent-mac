@@ -31,7 +31,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
 final class AppViewModel: ObservableObject {
     @Published var selection: SidebarItem? = .agentChat
     @Published var query: String = "记忆"
-    @Published var searchResults: [GraphSearchResult] = []
+    @Published var searchResults: [GraphSearchHit] = []
     @Published var chatInput: String = "记忆"
     @Published var transcript: [AgentMessage] = []
     @Published var lastContext: AgentContext?
@@ -67,7 +67,7 @@ final class AppViewModel: ObservableObject {
     private var llmSettingsRepository: AppLLMSettingsRepository
     private var llmProviderHealthChecker: AppLLMProviderHealthChecker
     private var agentRuntimeFactory: AppGraphAgentRuntimeFactory?
-    private var searchIndex: InMemoryGraphSearchIndex
+    private var hybridSearchService: (any GraphHybridSearchService)?
     private var chatController: AgentChatController<AnyLLMProvider>
 
     var latestChatSummaryFreshness: AgentSessionSummaryFreshness? {
@@ -114,13 +114,13 @@ final class AppViewModel: ObservableObject {
             self.promotionRepository = AppPromotionQueueRepository(store: repository.store)
             self.chatSessionRepository = AppChatSessionRepository(store: repository.store)
             self.agentRuntimeFactory = AppGraphAgentRuntimeFactory(store: repository.store, settingsRepository: llmSettingsRepository)
+            self.hybridSearchService = SQLiteGraphHybridSearchService(store: repository.store)
         }
         self.llmSettingsRepository = llmSettingsRepository
         self.llmProviderHealthChecker = AppLLMProviderHealthChecker(settingsRepository: llmSettingsRepository)
         self.databasePath = databasePath
-        self.searchIndex = InMemoryGraphSearchIndex(nodes: nodes, edges: edges, observeLogEntries: observeLogEntries)
-        self.chatController = Self.makeChatController(runtimeFactory: agentRuntimeFactory, searchIndex: searchIndex, settingsRepository: llmSettingsRepository)
-        self.searchResults = (try? searchIndex.search(query: query, options: .init(includeNeighborhood: true))) ?? []
+        self.chatController = Self.makeChatController(runtimeFactory: agentRuntimeFactory, settingsRepository: llmSettingsRepository)
+        self.searchResults = []
         loadLLMSettings()
         reloadChatSessions()
     }
@@ -188,7 +188,6 @@ final class AppViewModel: ObservableObject {
 
     private static func makeChatController(
         runtimeFactory: AppGraphAgentRuntimeFactory?,
-        searchIndex: InMemoryGraphSearchIndex,
         settingsRepository: AppLLMSettingsRepository,
         session: AgentSession = AgentSession(id: "app-session")
     ) -> AgentChatController<AnyLLMProvider> {
@@ -199,7 +198,7 @@ final class AppViewModel: ObservableObject {
         return AgentChatController(
             agent: GraphAgent(
                 session: session,
-                contextBuilder: AgentContextBuilder(searchIndex: searchIndex, assembler: ContextAssembler()),
+                contextBuilder: AgentContextBuilder(hybridSearchService: EmptyGraphHybridSearchService(), groupID: "default"),
                 llmProvider: provider
             )
         )
@@ -228,9 +227,8 @@ final class AppViewModel: ObservableObject {
         nodes = snapshot.nodes
         edges = snapshot.edges
         observeLogEntries = snapshot.observeLogEntries
-        searchIndex = InMemoryGraphSearchIndex(nodes: snapshot.nodes, edges: snapshot.edges, observeLogEntries: snapshot.observeLogEntries)
-        chatController = Self.makeChatController(runtimeFactory: agentRuntimeFactory, searchIndex: searchIndex, settingsRepository: llmSettingsRepository, session: chatController.agent.session)
-        runSearch()
+        chatController = Self.makeChatController(runtimeFactory: agentRuntimeFactory, settingsRepository: llmSettingsRepository, session: chatController.agent.session)
+        Task { await runSearch() }
         reloadPromotionCandidates()
     }
 
@@ -260,7 +258,7 @@ final class AppViewModel: ObservableObject {
             let apiKey = llmAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
             try llmSettingsRepository.save(settings: settings, apiKey: apiKey.isEmpty ? nil : apiKey)
             loadLLMSettings()
-            chatController = Self.makeChatController(runtimeFactory: agentRuntimeFactory, searchIndex: searchIndex, settingsRepository: llmSettingsRepository, session: chatController.agent.session)
+            chatController = Self.makeChatController(runtimeFactory: agentRuntimeFactory, settingsRepository: llmSettingsRepository, session: chatController.agent.session)
             llmSettingsMessage = "模型设置已保存。"
             llmHealthCheckMessage = nil
             errorMessage = nil
@@ -273,7 +271,7 @@ final class AppViewModel: ObservableObject {
         do {
             try llmSettingsRepository.clearAPIKey()
             loadLLMSettings()
-            chatController = Self.makeChatController(runtimeFactory: agentRuntimeFactory, searchIndex: searchIndex, settingsRepository: llmSettingsRepository, session: chatController.agent.session)
+            chatController = Self.makeChatController(runtimeFactory: agentRuntimeFactory, settingsRepository: llmSettingsRepository, session: chatController.agent.session)
             llmSettingsMessage = "API Key 已清除。"
             llmHealthCheckMessage = nil
             errorMessage = nil
@@ -312,7 +310,7 @@ final class AppViewModel: ObservableObject {
             let selectedID = selectedChatSessionID ?? sessions.first?.id
             selectedChatSessionID = selectedID
             if let selectedID, let session = try chatSessionRepository.loadSession(id: selectedID) {
-                chatController = Self.makeChatController(runtimeFactory: agentRuntimeFactory, searchIndex: searchIndex, settingsRepository: llmSettingsRepository, session: session)
+                chatController = Self.makeChatController(runtimeFactory: agentRuntimeFactory, settingsRepository: llmSettingsRepository, session: session)
                 transcript = session.messages
                 latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: selectedID)
             } else {
@@ -330,7 +328,7 @@ final class AppViewModel: ObservableObject {
         do {
             let session = try chatSessionRepository.createSession()
             selectedChatSessionID = session.id
-            chatController = Self.makeChatController(runtimeFactory: agentRuntimeFactory, searchIndex: searchIndex, settingsRepository: llmSettingsRepository, session: session)
+            chatController = Self.makeChatController(runtimeFactory: agentRuntimeFactory, settingsRepository: llmSettingsRepository, session: session)
             transcript = []
             latestChatSummary = nil
             chatSummaryMessage = nil
@@ -347,7 +345,7 @@ final class AppViewModel: ObservableObject {
         do {
             guard let session = try chatSessionRepository.loadSession(id: sessionID) else { return }
             selectedChatSessionID = session.id
-            chatController = Self.makeChatController(runtimeFactory: agentRuntimeFactory, searchIndex: searchIndex, settingsRepository: llmSettingsRepository, session: session)
+            chatController = Self.makeChatController(runtimeFactory: agentRuntimeFactory, settingsRepository: llmSettingsRepository, session: session)
             transcript = session.messages
             latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: session.id)
             chatSummaryMessage = nil
@@ -406,9 +404,15 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    func runSearch() {
+    func runSearch() async {
+        guard let hybridSearchService else {
+            searchResults = []
+            errorMessage = "SQLite hybrid search is unavailable."
+            return
+        }
         do {
-            searchResults = try searchIndex.search(query: query, options: .init(includeNeighborhood: true))
+            let response = try await hybridSearchService.search(query: GraphSearchQuery(text: query, groupID: "default"))
+            searchResults = response.hits
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -563,14 +567,15 @@ struct SearchView: View {
             HStack {
                 TextField("搜索图谱和观察日志", text: $viewModel.query)
                     .textFieldStyle(.roundedBorder)
-                    .onSubmit { viewModel.runSearch() }
-                Button("搜索") { viewModel.runSearch() }
+                    .onSubmit { Task { await viewModel.runSearch() } }
+                Button("搜索") { Task { await viewModel.runSearch() } }
             }
             List(viewModel.searchResults) { result in
                 VStack(alignment: .leading, spacing: 4) {
                     Text(result.id).font(.headline)
-                    Text(result.kind.rawValue).font(.caption).foregroundStyle(.secondary)
-                    Text(result.reason).font(.subheadline)
+                    Text(result.ownerType.rawValue).font(.caption).foregroundStyle(.secondary)
+                    Text(result.retrievalMethod).font(.subheadline)
+                    Text(result.text).font(.caption).foregroundStyle(.secondary)
                 }
             }
         }
