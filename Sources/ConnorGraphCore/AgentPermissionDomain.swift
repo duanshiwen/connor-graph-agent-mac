@@ -83,6 +83,11 @@ public enum AgentAuditEventType: String, Codable, Sendable, Equatable {
     case toolStarted
     case toolFinished
     case toolFailed
+    case graphWriteCandidateApproved
+    case graphWriteCandidateRejected
+    case graphWriteCommitStarted
+    case graphWriteCommitFinished
+    case graphWriteCommitFailed
 }
 
 public struct AgentAuditEvent: Codable, Sendable, Equatable, Identifiable {

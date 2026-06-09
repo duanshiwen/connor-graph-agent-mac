@@ -1,14 +1,25 @@
 import Foundation
+import ConnorGraphAgent
 import ConnorGraphCore
 import ConnorGraphStore
 
 public struct AppGraphWriteCandidateRepository: @unchecked Sendable {
     public let store: SQLiteGraphStore
     public var committer: GraphWriteCandidateCommitService
+    private let auditLog: any AgentAuditLog
+    private let policyEngine: AgentPolicyEngine
 
-    public init(store: SQLiteGraphStore, committer: GraphWriteCandidateCommitService = GraphWriteCandidateCommitService()) {
+    public init(
+        store: SQLiteGraphStore,
+        committer: GraphWriteCandidateCommitService = GraphWriteCandidateCommitService(),
+        permissionMode: AgentPermissionMode = .trustedWrite,
+        auditLog: (any AgentAuditLog)? = nil
+    ) {
         self.store = store
         self.committer = committer
+        let resolvedAuditLog = auditLog ?? SQLiteAgentAuditLog(store: store)
+        self.auditLog = resolvedAuditLog
+        self.policyEngine = AgentPolicyEngine(permissionMode: permissionMode, auditLog: resolvedAuditLog)
     }
 
     public func loadCandidates(status: GraphWriteCandidateStatus? = nil, limit: Int = 100) throws -> [GraphWriteCandidate] {
@@ -25,6 +36,20 @@ public struct AppGraphWriteCandidateRepository: @unchecked Sendable {
     }
 
     @discardableResult
+    public func approveGoverned(_ candidate: GraphWriteCandidate, actor: String = "human-reviewer") async throws -> GraphWriteCandidate {
+        let updated = try approve(candidate)
+        await auditLog.record(AgentAuditEvent(
+            runID: candidate.proposedByRunID,
+            sessionID: candidate.groupID,
+            eventType: .graphWriteCandidateApproved,
+            actor: actor,
+            capability: .commitGraphWrite,
+            payloadJSON: auditPayload(candidate: updated)
+        ))
+        return updated
+    }
+
+    @discardableResult
     public func reject(_ candidate: GraphWriteCandidate, reason: String? = nil) throws -> GraphWriteCandidate {
         var updated = candidate
         updated.status = .rejected
@@ -37,6 +62,20 @@ public struct AppGraphWriteCandidateRepository: @unchecked Sendable {
     }
 
     @discardableResult
+    public func rejectGoverned(_ candidate: GraphWriteCandidate, reason: String? = nil, actor: String = "human-reviewer") async throws -> GraphWriteCandidate {
+        let updated = try reject(candidate, reason: reason)
+        await auditLog.record(AgentAuditEvent(
+            runID: candidate.proposedByRunID,
+            sessionID: candidate.groupID,
+            eventType: .graphWriteCandidateRejected,
+            actor: actor,
+            capability: .commitGraphWrite,
+            payloadJSON: auditPayload(candidate: updated, extra: ["reason": reason ?? ""])
+        ))
+        return updated
+    }
+
+    @discardableResult
     public func commit(_ candidate: GraphWriteCandidate) throws -> GraphWriteCandidateCommitResult {
         let approved = candidate.status == .approved ? candidate : try approve(candidate)
         let result = try committer.commit(approved, store: store)
@@ -45,6 +84,92 @@ public struct AppGraphWriteCandidateRepository: @unchecked Sendable {
         updated.updatedAt = Date()
         try store.upsert(graphWriteCandidate: updated)
         return result
+    }
+
+    @discardableResult
+    public func commitGoverned(_ candidate: GraphWriteCandidate, actor: String = "human-reviewer") async throws -> GraphWriteCandidateCommitResult {
+        let payload = auditPayload(candidate: candidate)
+        let decision = await policyEngine.evaluate(
+            capability: .commitGraphWrite,
+            runID: candidate.proposedByRunID,
+            sessionID: candidate.groupID,
+            toolName: "graph_write_candidate_commit",
+            payloadJSON: payload
+        )
+        guard decision.outcome != .denied else {
+            await auditLog.record(AgentAuditEvent(
+                runID: candidate.proposedByRunID,
+                sessionID: candidate.groupID,
+                eventType: .graphWriteCommitFailed,
+                actor: actor,
+                capability: .commitGraphWrite,
+                decision: decision,
+                payloadJSON: auditPayload(candidate: candidate, extra: ["error": GraphWriteCandidateCommitError.permissionDenied(decision.reason).description])
+            ))
+            throw GraphWriteCandidateCommitError.permissionDenied(decision.reason)
+        }
+
+        await auditLog.record(AgentAuditEvent(
+            runID: candidate.proposedByRunID,
+            sessionID: candidate.groupID,
+            eventType: .graphWriteCommitStarted,
+            actor: actor,
+            capability: .commitGraphWrite,
+            decision: decision,
+            payloadJSON: payload
+        ))
+        do {
+            let approved = candidate.status == .approved ? candidate : try approve(candidate)
+            let result = try committer.commit(approved, store: store)
+            var updated = approved
+            updated.status = .committed
+            updated.updatedAt = Date()
+            try store.upsert(graphWriteCandidate: updated)
+            await auditLog.record(AgentAuditEvent(
+                runID: candidate.proposedByRunID,
+                sessionID: candidate.groupID,
+                eventType: .graphWriteCommitFinished,
+                actor: actor,
+                capability: .commitGraphWrite,
+                decision: decision,
+                payloadJSON: auditPayload(candidate: updated, result: result)
+            ))
+            return result
+        } catch {
+            await auditLog.record(AgentAuditEvent(
+                runID: candidate.proposedByRunID,
+                sessionID: candidate.groupID,
+                eventType: .graphWriteCommitFailed,
+                actor: actor,
+                capability: .commitGraphWrite,
+                decision: decision,
+                payloadJSON: auditPayload(candidate: candidate, extra: ["error": String(describing: error)])
+            ))
+            throw error
+        }
+    }
+
+    private func auditPayload(candidate: GraphWriteCandidate, result: GraphWriteCandidateCommitResult? = nil, extra: [String: String] = [:]) -> String {
+        var payload: [String: Any] = [
+            "candidateID": candidate.id,
+            "groupID": candidate.groupID,
+            "kind": candidate.kind.rawValue,
+            "status": candidate.status.rawValue,
+            "proposedByRunID": candidate.proposedByRunID,
+            "confidence": candidate.confidence
+        ]
+        if let result {
+            payload["createdNodeIDs"] = result.createdNodeIDs
+            payload["createdFactIDs"] = result.createdFactIDs
+            payload["updatedFactIDs"] = result.updatedFactIDs
+            payload["attachedEvidenceFactIDs"] = result.attachedEvidenceFactIDs
+        }
+        extra.forEach { payload[$0.key] = $0.value }
+        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+              let string = String(data: data, encoding: .utf8) else {
+            return "{}"
+        }
+        return string
     }
 }
 
@@ -141,6 +266,7 @@ public struct GraphWriteCandidateCommitService: Sendable {
 
 public enum GraphWriteCandidateCommitError: Error, Sendable, Equatable, CustomStringConvertible {
     case notApproved(String)
+    case permissionDenied(String)
     case unsupportedCandidateKind(GraphWriteCandidateKind)
     case missingNode(String)
     case missingFact(String)
@@ -148,6 +274,7 @@ public enum GraphWriteCandidateCommitError: Error, Sendable, Equatable, CustomSt
     public var description: String {
         switch self {
         case .notApproved(let id): return "Candidate must be approved before commit: \(id)"
+        case .permissionDenied(let reason): return "Permission denied for graph write commit: \(reason)"
         case .unsupportedCandidateKind(let kind): return "Unsupported candidate kind for commit: \(kind.rawValue)"
         case .missingNode(let id): return "Missing graph node: \(id)"
         case .missingFact(let id): return "Missing graph fact: \(id)"
