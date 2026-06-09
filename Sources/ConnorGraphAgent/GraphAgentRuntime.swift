@@ -19,24 +19,83 @@ public struct ObserveLogRecorder: Sendable, Equatable {
 }
 
 public struct AgentContextBuilder: Sendable {
-    public var searchIndex: InMemoryGraphSearchIndex
-    public var assembler: ContextAssembler
-    public var searchOptions: GraphSearchOptions
+    private enum Backend: Sendable {
+        case inMemory(InMemoryGraphSearchIndex, ContextAssembler, GraphSearchOptions)
+        case hybrid(any GraphHybridSearchService, groupID: String, limit: Int)
+    }
+
+    private var backend: Backend
 
     public init(
         searchIndex: InMemoryGraphSearchIndex,
         assembler: ContextAssembler,
         searchOptions: GraphSearchOptions = .init(includeNeighborhood: true)
     ) {
-        self.searchIndex = searchIndex
-        self.assembler = assembler
-        self.searchOptions = searchOptions
+        self.backend = .inMemory(searchIndex, assembler, searchOptions)
+    }
+
+    public init(
+        hybridSearchService: any GraphHybridSearchService,
+        groupID: String,
+        limit: Int = 20
+    ) {
+        self.backend = .hybrid(hybridSearchService, groupID: groupID, limit: limit)
+    }
+
+    public func context(for query: String) async throws -> AgentContext {
+        switch backend {
+        case .inMemory(let searchIndex, let assembler, let searchOptions):
+            let results = try searchIndex.search(query: query, options: searchOptions)
+            return assembler.assemble(query: query, results: results)
+        case .hybrid(let service, let groupID, let limit):
+            let response = try await service.search(query: GraphSearchQuery(text: query, groupID: groupID, limit: limit))
+            return AgentContext(query: query, items: response.hits.map(contextItem))
+        }
     }
 
     public func context(for query: String) throws -> AgentContext {
-        let results = try searchIndex.search(query: query, options: searchOptions)
-        return assembler.assemble(query: query, results: results)
+        switch backend {
+        case .inMemory(let searchIndex, let assembler, let searchOptions):
+            let results = try searchIndex.search(query: query, options: searchOptions)
+            return assembler.assemble(query: query, results: results)
+        case .hybrid:
+            throw AgentContextBuilderError.asyncContextRequired
+        }
     }
+
+    private func contextItem(_ hit: GraphSearchHit) -> AgentContextItem {
+        AgentContextItem(
+            sourceID: hit.id,
+            kind: resultKind(for: hit.ownerType),
+            content: renderedContent(for: hit),
+            reason: "matched via \(hit.retrievalMethod)"
+        )
+    }
+
+    private func resultKind(for ownerType: GraphIndexOwnerType) -> GraphSearchResultKind {
+        switch ownerType {
+        case .node: .node
+        case .fact: .edge
+        case .episode: .observeLog
+        }
+    }
+
+    private func renderedContent(for hit: GraphSearchHit) -> String {
+        switch hit.ownerType {
+        case .node:
+            let type = hit.metadata["type"] ?? "node"
+            return "Node[\(type)] \(hit.title): \(hit.text)"
+        case .fact:
+            return "Fact[\(hit.title)] \(hit.text)"
+        case .episode:
+            let sourceType = hit.metadata["source_type"] ?? "episode"
+            return "Episode[\(sourceType)] \(hit.title): \(hit.text)"
+        }
+    }
+}
+
+public enum AgentContextBuilderError: Error, Sendable, Equatable {
+    case asyncContextRequired
 }
 
 public struct LLMResponse: Sendable, Equatable {
@@ -153,7 +212,7 @@ public struct GraphAgent<Provider: LLMProvider>: Sendable {
         var updatedSession = session
         let userMessage = updatedSession.appendUserMessage(prompt)
         let observeEntry = observeLogRecorder.entry(for: userMessage, sessionID: updatedSession.id)
-        let context = try contextBuilder.context(for: prompt)
+        let context = try await contextBuilder.context(for: prompt)
         let promptContext = AgentChatPromptContext(
             userPrompt: prompt,
             sessionSummary: sessionSummary,
