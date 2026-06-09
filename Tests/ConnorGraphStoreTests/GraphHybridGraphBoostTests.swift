@@ -37,6 +37,7 @@ import ConnorGraphSearch
     #expect(boostedHit.metadata["graph_ranking"] == "boosted")
     #expect(boostedHit.metadata["graph_boost"] == "0.002000")
     #expect(boostedHit.metadata["graph_boost_reason"] == "endpoint_title_query_match")
+    #expect(boostedHit.metadata["graph_ranking_signals"] == "endpoint_title_query_match")
     #expect(boostedHit.metadata["base_rrf_score"] != nil)
     #expect(boostedHit.metadata["final_score"] != nil)
     #expect((Double(boostedHit.metadata["final_score"] ?? "0") ?? 0) > (Double(boostedHit.metadata["base_rrf_score"] ?? "0") ?? 0))
@@ -72,7 +73,46 @@ import ConnorGraphSearch
     #expect(hit.metadata["graph_ranking"] == "rrf_only")
     #expect(hit.metadata["graph_boost"] == "0.000000")
     #expect(hit.metadata["graph_boost_reason"] == nil)
+    #expect(hit.metadata["graph_ranking_signals"] == nil)
     #expect(hit.metadata["base_rrf_score"] == hit.metadata["final_score"])
+}
+
+@Test func sqliteHybridSearchAppliesAdjacentRelationGraphSignalForNodeHits() async throws {
+    let store = try SQLiteGraphStore(path: temporaryGraphBoostDatabaseURL().path)
+    try store.migrate()
+
+    let episode = GraphEpisode(id: "episode-adjacent-relation-boost", groupID: "default", sourceType: .chatMessage, name: "Adjacent relation boost episode", content: "memory", sourceDescription: "chat")
+    let shiwen = GraphNodeV2(id: "node-shiwen-adjacent-boost", groupID: "default", type: .person, canonicalName: "shiwen", title: "诗闻")
+    let agentOS = GraphNodeV2(id: "node-agent-adjacent-boost", groupID: "default", type: .workObject, canonicalName: "agent-os", title: "Agent OS", summary: "Agent OS WORKS_ON 本地优先 Agent 操作系统。")
+    let worksOnFact = GraphFact(id: "fact-adjacent-works-on-boost", groupID: "default", sourceNodeID: shiwen.id, targetNodeID: agentOS.id, relation: .worksOn, fact: "诗闻正在设计 Agent OS。")
+
+    try store.upsert(episode: episode)
+    try store.upsert(nodeV2: shiwen)
+    try store.upsert(nodeV2: agentOS)
+    try store.upsert(fact: worksOnFact, sourceEpisodeIDs: [episode.id])
+    try store.processPendingFTSIndexTasks(limit: 20)
+
+    let service = SQLiteGraphHybridSearchService(store: store)
+    let response = try await service.search(query: GraphSearchQuery(
+        text: "Agent OS WORKS_ON",
+        groupID: "default",
+        includeNodes: true,
+        includeFacts: false,
+        includeEpisodes: false,
+        limit: 1
+    ))
+
+    let hit = try #require(response.hits.first)
+    #expect(hit.ownerID == agentOS.id)
+    #expect(hit.metadata["graph_context"] == "adjacent_facts")
+    #expect(hit.metadata["adjacent_fact_relations"] == "WORKS_ON")
+    #expect(hit.metadata["graph_ranking"] == "boosted")
+    #expect(hit.metadata["graph_boost"] == "0.001000")
+    #expect(hit.metadata["graph_boost_reason"] == "adjacent_relation_query_match")
+    #expect(hit.metadata["graph_ranking_signals"] == "adjacent_relation_query_match")
+    #expect(hit.metadata["base_rrf_score"] != nil)
+    #expect(hit.metadata["final_score"] != nil)
+    #expect((Double(hit.metadata["final_score"] ?? "0") ?? 0) > (Double(hit.metadata["base_rrf_score"] ?? "0") ?? 0))
 }
 
 private func temporaryGraphBoostDatabaseURL() -> URL {
