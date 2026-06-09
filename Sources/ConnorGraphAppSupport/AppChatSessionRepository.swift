@@ -43,6 +43,16 @@ public struct AppChatSessionRepository: Sendable {
         return try store.chatSession(id: response.session.id) ?? response.session
     }
 
+    @discardableResult
+    public func saveSession(_ session: AgentSession, previousMessageCount: Int = 0) throws -> AgentSession {
+        try store.upsert(chatSession: session)
+        let newMessages = session.messages.dropFirst(previousMessageCount)
+        for message in newMessages {
+            try store.append(chatMessage: message, sessionID: session.id)
+        }
+        return try store.chatSession(id: session.id) ?? session
+    }
+
     public func loadLatestSummary(sessionID: String) throws -> AgentSessionSummary? {
         try store.latestChatSessionSummary(sessionID: sessionID)
     }
