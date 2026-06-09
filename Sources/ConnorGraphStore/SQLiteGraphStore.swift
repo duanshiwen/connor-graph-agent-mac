@@ -610,6 +610,27 @@ public final class SQLiteGraphStore: @unchecked Sendable {
         }
     }
 
+    public func adjacentFacts(nodeID: String, groupID: String, limit: Int = 8) throws -> [GraphFact] {
+        let sql = """
+        SELECT id, group_id, source_node_id, target_node_id, relation, fact, confidence, status, created_at, updated_at, valid_at, invalid_at, expired_at, reference_time, invalidated_by_fact_id, attributes_json, metadata_json
+        FROM graph_facts
+        WHERE group_id = ? AND (source_node_id = ? OR target_node_id = ?)
+        ORDER BY id ASC
+        LIMIT ?;
+        """
+        return try withStatement(sql) { statement in
+            try bind(groupID, at: 1, in: statement)
+            try bind(nodeID, at: 2, in: statement)
+            try bind(nodeID, at: 3, in: statement)
+            sqlite3_bind_int(statement, 4, Int32(max(limit, 0)))
+            var facts: [GraphFact] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                facts.append(try decodeGraphFact(statement))
+            }
+            return facts
+        }
+    }
+
     private func upsertFactSource(factID: String, episodeID: String, groupID: String) throws {
         let sql = """
         INSERT OR REPLACE INTO graph_fact_sources (fact_id, episode_id, group_id, created_at)
