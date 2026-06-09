@@ -29,6 +29,31 @@ public struct AppGraphWriteCandidateRepository: @unchecked Sendable {
         try store.graphWriteCandidates(status: status, limit: limit)
     }
 
+    public func loadAuditTimeline(for candidate: GraphWriteCandidate) throws -> [GraphWriteCandidateAuditPresentation] {
+        try store.agentAuditEvents(runID: candidate.proposedByRunID)
+            .filter { event in
+                guard let payload = try? Self.payloadDictionary(from: event.payloadJSON) else { return false }
+                return payload["candidateID"] as? String == candidate.id
+            }
+            .map(GraphWriteCandidateAuditPresentation.init(event:))
+    }
+
+    public func loadAuditTimelines(for candidates: [GraphWriteCandidate]) throws -> [String: [GraphWriteCandidateAuditPresentation]] {
+        var grouped: [String: [GraphWriteCandidateAuditPresentation]] = [:]
+        for candidate in candidates {
+            grouped[candidate.id] = try loadAuditTimeline(for: candidate)
+        }
+        return grouped
+    }
+
+    private static func payloadDictionary(from json: String) throws -> [String: Any] {
+        guard let data = json.data(using: .utf8),
+              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return [:]
+        }
+        return object
+    }
+
     @discardableResult
     public func approve(_ candidate: GraphWriteCandidate) throws -> GraphWriteCandidate {
         var updated = candidate
@@ -226,6 +251,96 @@ public struct AppGraphWriteCandidateRepository: @unchecked Sendable {
             return "{}"
         }
         return string
+    }
+}
+
+public enum GraphWriteCandidateAuditSeverity: String, Sendable, Equatable {
+    case info
+    case success
+    case warning
+    case error
+}
+
+public struct GraphWriteCandidateAuditPresentation: Sendable, Equatable, Identifiable {
+    public var id: String
+    public var title: String
+    public var detail: String
+    public var actor: String
+    public var severity: GraphWriteCandidateAuditSeverity
+    public var createdAt: Date
+
+    public init(id: String, title: String, detail: String, actor: String, severity: GraphWriteCandidateAuditSeverity, createdAt: Date) {
+        self.id = id
+        self.title = title
+        self.detail = detail
+        self.actor = actor
+        self.severity = severity
+        self.createdAt = createdAt
+    }
+
+    public init(event: AgentAuditEvent) {
+        self.id = event.id
+        self.actor = event.actor
+        self.createdAt = event.createdAt
+        switch event.eventType {
+        case .permissionDecision:
+            self.title = "Permission decision"
+            let outcome = event.decision?.outcome.rawValue ?? "unknown"
+            self.detail = "\(event.capability?.rawValue ?? "capability") → \(outcome). \(event.decision?.reason ?? "")"
+            self.severity = event.decision?.outcome == .denied ? .error : (event.decision?.outcome == .needsApproval ? .warning : .success)
+        case .graphWriteCandidateApproved:
+            self.title = "Candidate approved"
+            self.detail = "Human reviewer approved this candidate."
+            self.severity = .success
+        case .graphWriteCandidateRejected:
+            self.title = "Candidate rejected"
+            self.detail = Self.payloadValue("reason", from: event.payloadJSON) ?? "Human reviewer rejected this candidate."
+            self.severity = .error
+        case .graphWriteValidationStarted:
+            self.title = "Validation started"
+            self.detail = "Typed schema and graph integrity checks started."
+            self.severity = .info
+        case .graphWriteValidationFinished:
+            self.title = "Validation passed"
+            self.detail = "Candidate is valid and ready for review."
+            self.severity = .success
+        case .graphWriteValidationFailed:
+            self.title = "Validation failed"
+            self.detail = Self.payloadValue("errors", from: event.payloadJSON) ?? "Validation failed."
+            self.severity = .error
+        case .graphWriteCommitStarted:
+            self.title = "Commit started"
+            self.detail = "Durable graph mutation started after permission governance."
+            self.severity = .info
+        case .graphWriteCommitFinished:
+            self.title = "Commit finished"
+            self.detail = Self.commitSummary(from: event.payloadJSON)
+            self.severity = .success
+        case .graphWriteCommitFailed:
+            self.title = "Commit failed"
+            self.detail = Self.payloadValue("error", from: event.payloadJSON) ?? "Commit failed."
+            self.severity = .error
+        case .toolStarted, .toolFinished, .toolFailed:
+            self.title = event.eventType.rawValue
+            self.detail = event.toolName ?? event.payloadJSON
+            self.severity = event.eventType == .toolFailed ? .error : .info
+        }
+    }
+
+    private static func payloadValue(_ key: String, from json: String) -> String? {
+        guard let data = json.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return object[key] as? String
+    }
+
+    private static func commitSummary(from json: String) -> String {
+        guard let data = json.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return "Commit finished." }
+        let createdNodes = object["createdNodeIDs"] as? [String] ?? []
+        let createdFacts = object["createdFactIDs"] as? [String] ?? []
+        let updatedFacts = object["updatedFactIDs"] as? [String] ?? []
+        let attachedEvidence = object["attachedEvidenceFactIDs"] as? [String] ?? []
+        return "nodes +\(createdNodes.count), facts +\(createdFacts.count), updated facts \(updatedFacts.count), evidence links \(attachedEvidence.count)"
     }
 }
 
