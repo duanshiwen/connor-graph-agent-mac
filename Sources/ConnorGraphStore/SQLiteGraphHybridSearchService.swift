@@ -5,10 +5,16 @@ import ConnorGraphSearch
 public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable {
     public var store: SQLiteGraphStore
     public var embeddingProvider: (any EmbeddingProvider)?
+    public var crossEncoderReranker: (any GraphCrossEncoderReranker)?
 
-    public init(store: SQLiteGraphStore, embeddingProvider: (any EmbeddingProvider)? = nil) {
+    public init(
+        store: SQLiteGraphStore,
+        embeddingProvider: (any EmbeddingProvider)? = nil,
+        crossEncoderReranker: (any GraphCrossEncoderReranker)? = nil
+    ) {
         self.store = store
         self.embeddingProvider = embeddingProvider
+        self.crossEncoderReranker = crossEncoderReranker
     }
 
     public func search(query: GraphSearchQuery) async throws -> GraphSearchResponse {
@@ -60,12 +66,207 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
             }
         }
 
-        let rankedHits = graphRerankedHits(fusion.rankedHits(), query: query)
+        let rankedHits = try await graphRerankedHits(fusion.rankedHits(), query: query)
         return GraphSearchResponse(hits: Array(rankedHits.prefix(query.limit)))
     }
 
-    private func graphRerankedHits(_ hits: [GraphSearchHit], query: GraphSearchQuery) -> [GraphSearchHit] {
-        GraphitiLocalReranker().rerank(hits, query: query)
+    private func graphRerankedHits(_ hits: [GraphSearchHit], query: GraphSearchQuery) async throws -> [GraphSearchHit] {
+        var rankedHits = hits
+        if query.reranking.strategies.contains(.graphitiLocal) {
+            rankedHits = try GraphitiLocalReranker(traversalStore: SQLiteGraphTraversalStore(store: store)).rerank(rankedHits, query: query)
+        } else {
+            rankedHits = rankedHits.map { hit in
+                var updated = hit
+                updated.metadata["graph_ranking"] = "rrf_only"
+                updated.metadata["base_rrf_score"] = formattedScore(hit.score)
+                updated.metadata["graph_boost"] = "0.000000"
+                updated.metadata["final_score"] = formattedScore(hit.score)
+                return updated
+            }
+        }
+        rankedHits = rankedHits.map { hit in
+            var updated = hit
+            updated.metadata["graph_reranking_strategies"] = strategyList(query.reranking.strategies)
+            return updated
+        }
+        if query.reranking.strategies.contains(.episodeMentions) {
+            rankedHits = try episodeMentionsRerankedHits(rankedHits, query: query)
+        }
+        if query.reranking.strategies.contains(.maximalMarginalRelevance) {
+            rankedHits = try mmrRerankedHits(rankedHits, query: query)
+        }
+        if query.reranking.strategies.contains(.crossEncoder) {
+            rankedHits = try await crossEncoderRerankedHits(rankedHits, query: query)
+        }
+        return rankedHits
+    }
+
+    private func episodeMentionsRerankedHits(_ hits: [GraphSearchHit], query: GraphSearchQuery) throws -> [GraphSearchHit] {
+        guard !hits.isEmpty else { return hits }
+        let mentionCounts = try store.mentionCounts(groupID: query.groupID, episodeIDs: query.reranking.episodeMentionEpisodeIDs)
+        let scope = query.reranking.episodeMentionEpisodeIDs.isEmpty ? "group" : "selected_episodes"
+        return hits.map { hit in
+            var updated = hit
+            let count = episodeMentionCount(for: hit, mentionCounts: mentionCounts)
+            let boost = min(Double(count) * 0.0025, 0.0100)
+            updated.metadata["episode_mentions_count"] = String(count)
+            updated.metadata["episode_mentions_scope"] = scope
+            updated.metadata["episode_mentions_boost"] = formattedScore(boost)
+            guard boost > 0 else { return updated }
+            updated.score += boost
+            updated.metadata["graph_ranking"] = "boosted"
+            appendMetadataToken("episode_mentions", key: "graph_boost_reason", hit: &updated)
+            appendMetadataToken("episode_mentions", key: "graph_ranking_signals", hit: &updated)
+            appendSignalScore("episode_mentions", score: boost, hit: &updated)
+            let existingBoost = Double(updated.metadata["graph_boost"] ?? "0") ?? 0
+            updated.metadata["graph_boost"] = formattedScore(existingBoost + boost)
+            updated.metadata["final_score"] = formattedScore(updated.score)
+            return updated
+        }.sorted { lhs, rhs in
+            if lhs.score == rhs.score {
+                if lhs.ownerType.rawValue == rhs.ownerType.rawValue { return lhs.ownerID < rhs.ownerID }
+                return lhs.ownerType.rawValue < rhs.ownerType.rawValue
+            }
+            return lhs.score > rhs.score
+        }
+    }
+
+    private func episodeMentionCount(for hit: GraphSearchHit, mentionCounts: [String: Int]) -> Int {
+        switch hit.ownerType {
+        case .node:
+            return mentionCounts[hit.ownerID] ?? 0
+        case .fact:
+            let source = hit.metadata["source_node_id"].flatMap { mentionCounts[$0] } ?? 0
+            let target = hit.metadata["target_node_id"].flatMap { mentionCounts[$0] } ?? 0
+            return source + target
+        case .episode:
+            return hit.sourceEpisodeIDs.reduce(0) { $0 + (mentionCounts[$1] ?? 0) }
+        }
+    }
+
+    private func appendMetadataToken(_ token: String, key: String, hit: inout GraphSearchHit) {
+        var tokens = hit.metadata[key]?.split(separator: ",").map(String.init) ?? []
+        if !tokens.contains(token) { tokens.append(token) }
+        hit.metadata[key] = tokens.joined(separator: ",")
+    }
+
+    private func appendSignalScore(_ reason: String, score: Double, hit: inout GraphSearchHit) {
+        let token = "\(reason):\(formattedScore(score))"
+        var tokens = hit.metadata["graph_ranking_signal_scores"]?.split(separator: ",").map(String.init) ?? []
+        tokens.removeAll { $0.hasPrefix("\(reason):") }
+        tokens.append(token)
+        hit.metadata["graph_ranking_signal_scores"] = tokens.joined(separator: ",")
+    }
+
+    private func mmrRerankedHits(_ hits: [GraphSearchHit], query: GraphSearchQuery) throws -> [GraphSearchHit] {
+        guard !hits.isEmpty else { return hits }
+        guard let embeddingModel = query.embeddingModel, let queryEmbedding = query.queryEmbedding, GraphEmbedding.norm(queryEmbedding) > 0 else {
+            return hits.map { hit in
+                var updated = hit
+                updated.metadata["mmr_status"] = "unavailable"
+                updated.metadata["mmr_embedding_status"] = "missing"
+                return updated
+            }
+        }
+        var embeddingsByID: [String: GraphEmbedding] = [:]
+        for hit in hits {
+            if let embedding = try store.graphEmbedding(ownerType: hit.ownerType, ownerID: hit.ownerID, embeddingModel: embeddingModel) {
+                embeddingsByID[hit.id] = embedding
+            }
+        }
+        guard !embeddingsByID.isEmpty else {
+            return hits.map { hit in
+                var updated = hit
+                updated.metadata["mmr_status"] = "unavailable"
+                updated.metadata["mmr_embedding_status"] = "missing"
+                return updated
+            }
+        }
+
+        let lambda = min(1.0, max(0.0, query.reranking.mmrLambda))
+        let queryNorm = GraphEmbedding.norm(queryEmbedding)
+        var remaining = hits
+        var selected: [GraphSearchHit] = []
+        var selectedScores: [String: Double] = [:]
+
+        while !remaining.isEmpty {
+            let best = remaining.enumerated().map { index, hit -> (index: Int, hit: GraphSearchHit, score: Double) in
+                let relevance = embeddingsByID[hit.id].map { cosine(queryEmbedding, queryNorm: queryNorm, embedding: $0) } ?? normalizedScore(hit.score, among: hits)
+                let diversityPenalty = selected.compactMap { selectedHit -> Double? in
+                    guard let candidateEmbedding = embeddingsByID[hit.id], let selectedEmbedding = embeddingsByID[selectedHit.id] else { return nil }
+                    return cosine(candidateEmbedding.vector, queryNorm: candidateEmbedding.vectorNorm, embedding: selectedEmbedding)
+                }.max() ?? 0
+                return (index, hit, (lambda * relevance) - ((1 - lambda) * diversityPenalty))
+            }.sorted { lhs, rhs in
+                if lhs.score == rhs.score { return lhs.hit.ownerID < rhs.hit.ownerID }
+                return lhs.score > rhs.score
+            }.first!
+            var updated = best.hit
+            let rank = selected.count + 1
+            updated.metadata["mmr_score"] = formattedScore(best.score)
+            updated.metadata["mmr_lambda"] = formattedScore(lambda)
+            updated.metadata["mmr_rank"] = String(rank)
+            updated.metadata["mmr_status"] = "reranked"
+            if embeddingsByID[updated.id] == nil {
+                updated.metadata["mmr_embedding_status"] = "missing"
+            } else {
+                updated.metadata["mmr_embedding_status"] = "available"
+            }
+            selectedScores[updated.id] = best.score
+            selected.append(updated)
+            remaining.remove(at: best.index)
+        }
+        return selected
+    }
+
+    private func normalizedScore(_ score: Double, among hits: [GraphSearchHit]) -> Double {
+        let maxScore = hits.map(\.score).max() ?? 0
+        guard maxScore > 0 else { return 0 }
+        return score / maxScore
+    }
+
+    private func cosine(_ vector: [Double], queryNorm: Double, embedding: GraphEmbedding) -> Double {
+        guard queryNorm > 0, embedding.vectorNorm > 0, vector.count == embedding.vector.count else { return 0 }
+        let dotProduct = zip(vector, embedding.vector).reduce(0.0) { $0 + $1.0 * $1.1 }
+        return dotProduct / (queryNorm * embedding.vectorNorm)
+    }
+
+    private func crossEncoderRerankedHits(_ hits: [GraphSearchHit], query: GraphSearchQuery) async throws -> [GraphSearchHit] {
+        guard let crossEncoderReranker else {
+            return hits.map { hit in
+                var updated = hit
+                updated.metadata["cross_encoder_status"] = "unavailable"
+                return updated
+            }
+        }
+        let topK = max(0, min(query.reranking.crossEncoderTopK ?? query.limit, hits.count))
+        guard topK > 0 else { return hits }
+        let scoringHits = Array(hits.prefix(topK))
+        let candidates = scoringHits.map { hit in
+            GraphCrossEncoderCandidate(ownerType: hit.ownerType, ownerID: hit.ownerID, title: hit.title, text: hit.text, metadata: hit.metadata)
+        }
+        let scores = try await crossEncoderReranker.scores(query: query.text, candidates: candidates)
+        let scoresByID = Dictionary(uniqueKeysWithValues: scores.map { ("\($0.ownerType.rawValue):\($0.ownerID)", $0.score) })
+        let rerankedTop = scoringHits.map { hit in
+            var updated = hit
+            let score = scoresByID[hit.id] ?? 0
+            updated.score = score
+            updated.metadata["cross_encoder_score"] = formattedScore(score)
+            updated.metadata["cross_encoder_reranked"] = "true"
+            updated.metadata["final_score"] = formattedScore(score)
+            return updated
+        }.sorted { lhs, rhs in
+            if lhs.score == rhs.score {
+                if lhs.ownerType.rawValue == rhs.ownerType.rawValue { return lhs.ownerID < rhs.ownerID }
+                return lhs.ownerType.rawValue < rhs.ownerType.rawValue
+            }
+            return lhs.score > rhs.score
+        }
+        return rerankedTop + Array(hits.dropFirst(topK))
+    }
+
+    private func strategyList(_ strategies: [GraphRerankerStrategy]) -> String {
+        strategies.map(\.rawValue).joined(separator: ",")
     }
 
     private struct GraphRankingSignal: Sendable, Equatable {
@@ -74,11 +275,13 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
     }
 
     private struct GraphitiLocalReranker: Sendable {
-        func rerank(_ hits: [GraphSearchHit], query: GraphSearchQuery) -> [GraphSearchHit] {
-            hits.map { hit in
+        var traversalStore: SQLiteGraphTraversalStore
+
+        func rerank(_ hits: [GraphSearchHit], query: GraphSearchQuery) throws -> [GraphSearchHit] {
+            try hits.map { hit in
                 var rerankedHit = hit
                 let baseScore = hit.score
-                let signals = signals(for: hit, query: query)
+                let signals = try signals(for: hit, query: query)
                 let boost = signals.reduce(0.0) { $0 + $1.boost }
                 let signalReasons = signals.map(\.reason)
                 rerankedHit.score = baseScore + boost
@@ -107,13 +310,18 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
             }
         }
 
-        private func signals(for hit: GraphSearchHit, query: GraphSearchQuery) -> [GraphRankingSignal] {
+        private func signals(for hit: GraphSearchHit, query: GraphSearchQuery) throws -> [GraphRankingSignal] {
             var signals: [GraphRankingSignal] = []
 
             if hit.ownerType == .node, query.centerNodeIDs.contains(hit.ownerID) {
                 signals.append(GraphRankingSignal(reason: "center_node_exact_match", boost: 0.004))
-            } else if isOneHopFromCenter(hit, centerNodeIDs: query.centerNodeIDs) {
+            }
+            let distances = try centerDistances(for: hit, query: query)
+            if distances.contains(1) {
                 signals.append(GraphRankingSignal(reason: "center_node_1_hop_match", boost: 0.003))
+            }
+            if distances.contains(2) {
+                signals.append(GraphRankingSignal(reason: "center_node_2_hop_match", boost: 0.0015))
             }
 
             if hit.metadata["graph_context"] == "fact_endpoints" {
@@ -131,18 +339,32 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
             return signals
         }
 
-        private func isOneHopFromCenter(_ hit: GraphSearchHit, centerNodeIDs: [String]) -> Bool {
-            guard !centerNodeIDs.isEmpty else { return false }
+        private func centerDistances(for hit: GraphSearchHit, query: GraphSearchQuery) throws -> Set<Int> {
+            guard !query.centerNodeIDs.isEmpty else { return [] }
+            let candidateNodeIDs: [String]
             switch hit.ownerType {
             case .fact:
-                return [hit.metadata["source_node_id"], hit.metadata["target_node_id"]]
-                    .compactMap { $0 }
-                    .contains { centerNodeIDs.contains($0) }
+                candidateNodeIDs = [hit.metadata["source_node_id"], hit.metadata["target_node_id"]].compactMap { $0 }
+                if candidateNodeIDs.contains(where: { query.centerNodeIDs.contains($0) }) {
+                    return [1]
+                }
             case .node:
-                return nodeIDs(from: hit.metadata["adjacent_node_ids"]).contains { centerNodeIDs.contains($0) }
+                candidateNodeIDs = [hit.ownerID] + nodeIDs(from: hit.metadata["adjacent_node_ids"])
             case .episode:
-                return false
+                candidateNodeIDs = []
             }
+            guard !candidateNodeIDs.isEmpty else { return [] }
+            let distances = try traversalStore.shortestHopDistances(
+                from: query.centerNodeIDs,
+                to: candidateNodeIDs,
+                groupID: query.groupID,
+                maxDepth: 2
+            )
+            let positiveDistances = Set(distances.values.filter { $0 > 0 })
+            if hit.ownerType == .fact {
+                return Set(positiveDistances.filter { $0 == 2 })
+            }
+            return positiveDistances
         }
 
         private func adjacentRelations(in hit: GraphSearchHit) -> [String] {
