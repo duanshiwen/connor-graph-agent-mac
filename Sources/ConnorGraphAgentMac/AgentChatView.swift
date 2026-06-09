@@ -15,8 +15,14 @@ struct AgentChatView: View {
 
             Divider()
 
-            AgentChatConversationView(viewModel: viewModel)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            Group {
+                if viewModel.isBrowserVisible {
+                    BrowserWorkspaceView(viewModel: viewModel)
+                } else {
+                    AgentChatConversationView(viewModel: viewModel)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .navigationTitle("智能体聊天")
         .onAppear { viewModel.reloadChatSessions() }
@@ -695,6 +701,15 @@ private struct AgentChatComposerView: View {
                             .stroke(Color.accentColor.opacity(0.65), lineWidth: 1)
                     )
                     .onSubmit { Task { await viewModel.submitChat() } }
+
+                Button(action: { viewModel.isBrowserVisible = true }) {
+                    Image(systemName: "safari")
+                        .font(.headline)
+                        .frame(width: 30, height: 30)
+                }
+                .buttonStyle(.bordered)
+                .clipShape(Circle())
+                .help("打开内嵌浏览器")
 
                 Button(action: { Task { await viewModel.submitChat() } }) {
                     Image(systemName: "arrow.up")

@@ -1,0 +1,257 @@
+import Foundation
+import ConnorGraphCore
+
+public struct BrowserFetchTool: AgentTool {
+    public let name = "browser_fetch"
+    public let description = "Fetch a web page URL and return a lightweight text/HTML snapshot for the agent. Use this when you need to read a known URL directly before reasoning or creating graph evidence."
+    public let permission: AgentPermissionCapability = .externalNetwork
+    public let inputSchema = AgentToolInputSchema.object(properties: [
+        "url": .string(description: "The absolute http/https URL to fetch."),
+        "max_chars": .integer(description: "Maximum number of characters to return. Defaults to 12000, capped at 50000."),
+        "user_agent": .string(description: "Optional User-Agent header. Defaults to ConnorGraphAgent/1.0.")
+    ], required: ["url"])
+
+    public init() {}
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        guard let urlString = arguments.string("url"), let url = URL(string: urlString), ["http", "https"].contains(url.scheme?.lowercased()) else {
+            throw AgentToolError.invalidArguments("browser_fetch requires an absolute http/https url")
+        }
+        let maxChars = min(max(arguments.int("max_chars") ?? 12_000, 1_000), 50_000)
+        let userAgent = arguments.string("user_agent") ?? "ConnorGraphAgent/1.0 (+https://local-agent)"
+
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 30
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5", forHTTPHeaderField: "Accept")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+        let mimeType = response.mimeType ?? "unknown"
+        let raw = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) ?? ""
+        let extracted = Self.extractReadableText(from: raw)
+        let truncated = String(extracted.prefix(maxChars))
+        let wasTruncated = extracted.count > maxChars
+
+        let json = Self.encodeJSONObject([
+            "url": url.absoluteString,
+            "statusCode": statusCode,
+            "mimeType": mimeType,
+            "contentLength": data.count,
+            "returnedCharacters": truncated.count,
+            "truncated": wasTruncated,
+            "text": truncated
+        ])
+
+        return AgentToolResult(
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: "Fetched \(url.absoluteString) [status=\(statusCode), mime=\(mimeType)]\n\n\(truncated)\(wasTruncated ? "\n\n[truncated]" : "")",
+            contentJSON: json,
+            citations: [url.absoluteString]
+        )
+    }
+
+    private static func extractReadableText(from html: String) -> String {
+        var text = html
+        text = text.replacingOccurrences(of: #"(?is)<script[^>]*>.*?</script>"#, with: " ", options: .regularExpression)
+        text = text.replacingOccurrences(of: #"(?is)<style[^>]*>.*?</style>"#, with: " ", options: .regularExpression)
+        text = text.replacingOccurrences(of: #"(?is)<noscript[^>]*>.*?</noscript>"#, with: " ", options: .regularExpression)
+        text = text.replacingOccurrences(of: #"(?i)<br\s*/?>"#, with: "\n", options: .regularExpression)
+        text = text.replacingOccurrences(of: #"(?i)</(p|div|section|article|header|footer|li|h[1-6]|tr)>"#, with: "\n", options: .regularExpression)
+        text = text.replacingOccurrences(of: #"(?is)<[^>]+>"#, with: " ", options: .regularExpression)
+        let entities: [(String, String)] = [
+            ("&nbsp;", " "), ("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"),
+            ("&quot;", "\""), ("&#39;", "'"), ("&apos;", "'")
+        ]
+        for (entity, replacement) in entities {
+            text = text.replacingOccurrences(of: entity, with: replacement)
+        }
+        text = text.replacingOccurrences(of: #"[ \t\f\r]+"#, with: " ", options: .regularExpression)
+        text = text.replacingOccurrences(of: #"\n\s*\n\s*\n+"#, with: "\n\n", options: .regularExpression)
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    fileprivate static func encodeJSONObject(_ object: [String: Any]) -> String? {
+        guard JSONSerialization.isValidJSONObject(object),
+              let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
+              let string = String(data: data, encoding: .utf8) else { return nil }
+        return string
+    }
+}
+
+public struct SearchEngineMCPConfiguration: Sendable, Equatable {
+    public var pythonExecutable: String
+    public var sourceDirectory: String
+    public var timeoutSeconds: TimeInterval
+
+    public init(
+        pythonExecutable: String = ProcessInfo.processInfo.environment["CONNOR_SEARCH_ENGINE_MCP_PYTHON"] ?? "/Users/duanshiwen/.craft-agent/workspaces/shiwens-knowledge-base/sources/search-engine-mcp/venv_new/bin/python",
+        sourceDirectory: String = ProcessInfo.processInfo.environment["CONNOR_SEARCH_ENGINE_MCP_DIR"] ?? "/Users/duanshiwen/.craft-agent/workspaces/shiwens-knowledge-base/sources/search-engine-mcp",
+        timeoutSeconds: TimeInterval = 90
+    ) {
+        self.pythonExecutable = pythonExecutable
+        self.sourceDirectory = sourceDirectory
+        self.timeoutSeconds = timeoutSeconds
+    }
+}
+
+public struct SearchEngineMCPTool: AgentTool {
+    public let name = "web_search"
+    public let description = "Search the web through the configured search-engine-mcp source. Use this for current information, external grounding, Wikipedia/Wikidata lookup, and discovery before fetching a page."
+    public let permission: AgentPermissionCapability = .externalNetwork
+    public let inputSchema = AgentToolInputSchema.object(properties: [
+        "query": .string(description: "Search query keywords."),
+        "engine": .string(description: "Search engine: duckduckgo, bing, google, yahoo, or baidu. Defaults to duckduckgo."),
+        "max_results": .integer(description: "Maximum number of results, 1-10. Defaults to 5.")
+    ], required: ["query"])
+
+    private let configuration: SearchEngineMCPConfiguration
+
+    public init(configuration: SearchEngineMCPConfiguration = SearchEngineMCPConfiguration()) {
+        self.configuration = configuration
+    }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        guard let query = arguments.string("query"), !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw AgentToolError.invalidArguments("web_search requires query")
+        }
+        let engine = arguments.string("engine") ?? "duckduckgo"
+        let maxResults = min(max(arguments.int("max_results") ?? 5, 1), 10)
+        let payload: [String: Any] = ["query": query, "engine": engine, "max_results": maxResults]
+        let text = try await SearchEngineMCPSubprocess.call(tool: "search", arguments: payload, configuration: configuration)
+        return AgentToolResult(
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: text,
+            contentJSON: BrowserFetchTool.encodeJSONObject(["query": query, "engine": engine, "maxResults": maxResults, "text": text]),
+            citations: Self.extractURLs(from: text)
+        )
+    }
+
+    private static func extractURLs(from text: String) -> [String] {
+        guard let regex = try? NSRegularExpression(pattern: #"https?://[^\s)]+"#) else { return [] }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        var seen = Set<String>()
+        return regex.matches(in: text, range: range).compactMap { match in
+            guard let swiftRange = Range(match.range, in: text) else { return nil }
+            let url = String(text[swiftRange]).trimmingCharacters(in: CharacterSet(charactersIn: ".,;"))
+            guard seen.insert(url).inserted else { return nil }
+            return url
+        }
+    }
+}
+
+public struct SearchEngineMCPWebFetchTool: AgentTool {
+    public let name = "web_fetch"
+    public let description = "Fetch and extract a web page through search-engine-mcp. Prefer this over browser_fetch when you want cleaned Markdown/text, tables, and optional JavaScript rendering."
+    public let permission: AgentPermissionCapability = .externalNetwork
+    public let inputSchema = AgentToolInputSchema.object(properties: [
+        "url": .string(description: "The absolute URL to fetch."),
+        "extract_mode": .string(description: "markdown or text. Defaults to markdown."),
+        "render_mode": .string(description: "auto, http, or js. Defaults to auto."),
+        "wait_until": .string(description: "load, domcontentloaded, networkidle, or commit. Defaults to networkidle."),
+        "timeout_ms": .integer(description: "Timeout in milliseconds. Defaults to 720000.")
+    ], required: ["url"])
+
+    private let configuration: SearchEngineMCPConfiguration
+
+    public init(configuration: SearchEngineMCPConfiguration = SearchEngineMCPConfiguration()) {
+        self.configuration = configuration
+    }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        guard let url = arguments.string("url"), !url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw AgentToolError.invalidArguments("web_fetch requires url")
+        }
+        let payload: [String: Any] = [
+            "url": url,
+            "extract_mode": arguments.string("extract_mode") ?? "markdown",
+            "render_mode": arguments.string("render_mode") ?? "auto",
+            "wait_until": arguments.string("wait_until") ?? "networkidle",
+            "timeout_ms": arguments.int("timeout_ms") ?? 720_000
+        ]
+        let text = try await SearchEngineMCPSubprocess.call(tool: "web_fetch", arguments: payload, configuration: configuration)
+        return AgentToolResult(
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: text,
+            contentJSON: BrowserFetchTool.encodeJSONObject(["url": url, "text": text]),
+            citations: [url]
+        )
+    }
+}
+
+enum SearchEngineMCPSubprocess {
+    static func call(tool: String, arguments: [String: Any], configuration: SearchEngineMCPConfiguration) async throws -> String {
+        guard JSONSerialization.isValidJSONObject(arguments),
+              let jsonData = try? JSONSerialization.data(withJSONObject: arguments),
+              let json = String(data: jsonData, encoding: .utf8) else {
+            throw AgentToolError.invalidArguments("Arguments must be JSON serializable")
+        }
+
+        return try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                do {
+                    let result = try run(tool: tool, argumentsJSON: json, configuration: configuration)
+                    continuation.resume(returning: result)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    private static func run(tool: String, argumentsJSON json: String, configuration: SearchEngineMCPConfiguration) throws -> String {
+        let script = """
+import asyncio, json, sys
+from src.server import handle_call_tool
+
+async def main():
+    tool = sys.argv[1]
+    args = json.loads(sys.argv[2])
+    result = await handle_call_tool(tool, args)
+    print("\\n".join(getattr(item, "text", str(item)) for item in result))
+
+asyncio.run(main())
+"""
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: configuration.pythonExecutable)
+        process.arguments = ["-c", script, tool, json]
+        process.currentDirectoryURL = URL(fileURLWithPath: configuration.sourceDirectory)
+
+        var environment = ProcessInfo.processInfo.environment
+        let existingPythonPath = environment["PYTHONPATH"]
+        environment["PYTHONPATH"] = [configuration.sourceDirectory, existingPythonPath].compactMap { $0 }.joined(separator: ":")
+        process.environment = environment
+
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+
+        try process.run()
+        let deadline = Date().addingTimeInterval(configuration.timeoutSeconds)
+        while process.isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        if process.isRunning {
+            process.terminate()
+            throw AgentToolError.invalidArguments("search-engine-mcp call timed out after \(Int(configuration.timeoutSeconds))s")
+        }
+
+        let outputData = stdout.fileHandleForReading.readDataToEndOfFile()
+        let errorData = stderr.fileHandleForReading.readDataToEndOfFile()
+        let output = String(data: outputData, encoding: .utf8) ?? ""
+        let errorOutput = String(data: errorData, encoding: .utf8) ?? ""
+
+        guard process.terminationStatus == 0 else {
+            throw AgentToolError.invalidArguments("search-engine-mcp failed: \(errorOutput.isEmpty ? output : errorOutput)")
+        }
+        if output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !errorOutput.isEmpty {
+            return errorOutput
+        }
+        return output.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}

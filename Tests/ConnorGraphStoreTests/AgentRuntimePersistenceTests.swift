@@ -20,7 +20,8 @@ import ConnorGraphStore
     run.completedAt = Date()
     try store.upsert(agentRun: run)
 
-    let loaded = try #require(store.agentRun(id: run.id))
+    let loadedRun = try store.agentRun(id: run.id)
+    let loaded = try #require(loadedRun)
     #expect(loaded.status == .completed)
     #expect(loaded.model == "test-model")
     #expect(loaded.metadata["purpose"] == "test")
@@ -44,7 +45,8 @@ import ConnorGraphStore
     )
     try store.upsert(graphWriteCandidate: candidate)
 
-    let loaded = try #require(store.graphWriteCandidate(id: candidate.id))
+    let loadedCandidate = try store.graphWriteCandidate(id: candidate.id)
+    let loaded = try #require(loadedCandidate)
     #expect(loaded.status == .pendingValidation)
     #expect(loaded.sourceEpisodeIDs == ["episode-1"])
     #expect(loaded.relatedNodeIDs == ["node-a", "node-b"])
