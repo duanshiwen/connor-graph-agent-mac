@@ -89,10 +89,86 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
             updated.metadata["graph_reranking_strategies"] = strategyList(query.reranking.strategies)
             return updated
         }
+        if query.reranking.strategies.contains(.maximalMarginalRelevance) {
+            rankedHits = try mmrRerankedHits(rankedHits, query: query)
+        }
         if query.reranking.strategies.contains(.crossEncoder) {
             rankedHits = try await crossEncoderRerankedHits(rankedHits, query: query)
         }
         return rankedHits
+    }
+
+    private func mmrRerankedHits(_ hits: [GraphSearchHit], query: GraphSearchQuery) throws -> [GraphSearchHit] {
+        guard !hits.isEmpty else { return hits }
+        guard let embeddingModel = query.embeddingModel, let queryEmbedding = query.queryEmbedding, GraphEmbedding.norm(queryEmbedding) > 0 else {
+            return hits.map { hit in
+                var updated = hit
+                updated.metadata["mmr_status"] = "unavailable"
+                updated.metadata["mmr_embedding_status"] = "missing"
+                return updated
+            }
+        }
+        var embeddingsByID: [String: GraphEmbedding] = [:]
+        for hit in hits {
+            if let embedding = try store.graphEmbedding(ownerType: hit.ownerType, ownerID: hit.ownerID, embeddingModel: embeddingModel) {
+                embeddingsByID[hit.id] = embedding
+            }
+        }
+        guard !embeddingsByID.isEmpty else {
+            return hits.map { hit in
+                var updated = hit
+                updated.metadata["mmr_status"] = "unavailable"
+                updated.metadata["mmr_embedding_status"] = "missing"
+                return updated
+            }
+        }
+
+        let lambda = min(1.0, max(0.0, query.reranking.mmrLambda))
+        let queryNorm = GraphEmbedding.norm(queryEmbedding)
+        var remaining = hits
+        var selected: [GraphSearchHit] = []
+        var selectedScores: [String: Double] = [:]
+
+        while !remaining.isEmpty {
+            let best = remaining.enumerated().map { index, hit -> (index: Int, hit: GraphSearchHit, score: Double) in
+                let relevance = embeddingsByID[hit.id].map { cosine(queryEmbedding, queryNorm: queryNorm, embedding: $0) } ?? normalizedScore(hit.score, among: hits)
+                let diversityPenalty = selected.compactMap { selectedHit -> Double? in
+                    guard let candidateEmbedding = embeddingsByID[hit.id], let selectedEmbedding = embeddingsByID[selectedHit.id] else { return nil }
+                    return cosine(candidateEmbedding.vector, queryNorm: candidateEmbedding.vectorNorm, embedding: selectedEmbedding)
+                }.max() ?? 0
+                return (index, hit, (lambda * relevance) - ((1 - lambda) * diversityPenalty))
+            }.sorted { lhs, rhs in
+                if lhs.score == rhs.score { return lhs.hit.ownerID < rhs.hit.ownerID }
+                return lhs.score > rhs.score
+            }.first!
+            var updated = best.hit
+            let rank = selected.count + 1
+            updated.metadata["mmr_score"] = formattedScore(best.score)
+            updated.metadata["mmr_lambda"] = formattedScore(lambda)
+            updated.metadata["mmr_rank"] = String(rank)
+            updated.metadata["mmr_status"] = "reranked"
+            if embeddingsByID[updated.id] == nil {
+                updated.metadata["mmr_embedding_status"] = "missing"
+            } else {
+                updated.metadata["mmr_embedding_status"] = "available"
+            }
+            selectedScores[updated.id] = best.score
+            selected.append(updated)
+            remaining.remove(at: best.index)
+        }
+        return selected
+    }
+
+    private func normalizedScore(_ score: Double, among hits: [GraphSearchHit]) -> Double {
+        let maxScore = hits.map(\.score).max() ?? 0
+        guard maxScore > 0 else { return 0 }
+        return score / maxScore
+    }
+
+    private func cosine(_ vector: [Double], queryNorm: Double, embedding: GraphEmbedding) -> Double {
+        guard queryNorm > 0, embedding.vectorNorm > 0, vector.count == embedding.vector.count else { return 0 }
+        let dotProduct = zip(vector, embedding.vector).reduce(0.0) { $0 + $1.0 * $1.1 }
+        return dotProduct / (queryNorm * embedding.vectorNorm)
     }
 
     private func crossEncoderRerankedHits(_ hits: [GraphSearchHit], query: GraphSearchQuery) async throws -> [GraphSearchHit] {
