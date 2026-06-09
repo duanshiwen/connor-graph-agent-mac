@@ -459,6 +459,17 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func validateGraphWriteCandidate(_ candidate: GraphWriteCandidate) async {
+        do {
+            guard let result = try await graphWriteCandidateRepository?.validateGoverned(candidate) else { return }
+            reloadGraphWriteCandidates()
+            lastGraphWriteCandidateResultSummary = result.validation.isValid ? "候选 \(candidate.id) 验证通过，进入待审阅" : "候选 \(candidate.id) 验证失败：\(result.validation.errors.joined(separator: "; "))"
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
     func approveGraphWriteCandidate(_ candidate: GraphWriteCandidate) async {
         do {
             _ = try await graphWriteCandidateRepository?.approveGoverned(candidate)
@@ -835,10 +846,12 @@ struct GraphWriteCandidateReviewView: View {
                         }
 
                         HStack {
+                            Button("验证") { Task { await viewModel.validateGraphWriteCandidate(candidate) } }
+                                .disabled(candidate.status == .committed || candidate.status == .rejected)
                             Button("批准") { Task { await viewModel.approveGraphWriteCandidate(candidate) } }
                                 .disabled(candidate.status == .approved || candidate.status == .committed || candidate.status == .rejected)
                             Button("治理提交") { Task { await viewModel.commitGraphWriteCandidate(candidate) } }
-                                .disabled(candidate.status == .committed || candidate.status == .rejected)
+                                .disabled(candidate.status != .approved)
                             Button("拒绝", role: .destructive) { Task { await viewModel.rejectGraphWriteCandidate(candidate) } }
                                 .disabled(candidate.status == .committed || candidate.status == .rejected)
                         }
