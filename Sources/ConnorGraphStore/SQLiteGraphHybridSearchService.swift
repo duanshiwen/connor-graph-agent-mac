@@ -5,10 +5,16 @@ import ConnorGraphSearch
 public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable {
     public var store: SQLiteGraphStore
     public var embeddingProvider: (any EmbeddingProvider)?
+    public var crossEncoderReranker: (any GraphCrossEncoderReranker)?
 
-    public init(store: SQLiteGraphStore, embeddingProvider: (any EmbeddingProvider)? = nil) {
+    public init(
+        store: SQLiteGraphStore,
+        embeddingProvider: (any EmbeddingProvider)? = nil,
+        crossEncoderReranker: (any GraphCrossEncoderReranker)? = nil
+    ) {
         self.store = store
         self.embeddingProvider = embeddingProvider
+        self.crossEncoderReranker = crossEncoderReranker
     }
 
     public func search(query: GraphSearchQuery) async throws -> GraphSearchResponse {
@@ -60,12 +66,71 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
             }
         }
 
-        let rankedHits = graphRerankedHits(fusion.rankedHits(), query: query)
+        let rankedHits = try await graphRerankedHits(fusion.rankedHits(), query: query)
         return GraphSearchResponse(hits: Array(rankedHits.prefix(query.limit)))
     }
 
-    private func graphRerankedHits(_ hits: [GraphSearchHit], query: GraphSearchQuery) -> [GraphSearchHit] {
-        GraphitiLocalReranker().rerank(hits, query: query)
+    private func graphRerankedHits(_ hits: [GraphSearchHit], query: GraphSearchQuery) async throws -> [GraphSearchHit] {
+        var rankedHits = hits
+        if query.reranking.strategies.contains(.graphitiLocal) {
+            rankedHits = GraphitiLocalReranker().rerank(rankedHits, query: query)
+        } else {
+            rankedHits = rankedHits.map { hit in
+                var updated = hit
+                updated.metadata["graph_ranking"] = "rrf_only"
+                updated.metadata["base_rrf_score"] = formattedScore(hit.score)
+                updated.metadata["graph_boost"] = "0.000000"
+                updated.metadata["final_score"] = formattedScore(hit.score)
+                return updated
+            }
+        }
+        rankedHits = rankedHits.map { hit in
+            var updated = hit
+            updated.metadata["graph_reranking_strategies"] = strategyList(query.reranking.strategies)
+            return updated
+        }
+        if query.reranking.strategies.contains(.crossEncoder) {
+            rankedHits = try await crossEncoderRerankedHits(rankedHits, query: query)
+        }
+        return rankedHits
+    }
+
+    private func crossEncoderRerankedHits(_ hits: [GraphSearchHit], query: GraphSearchQuery) async throws -> [GraphSearchHit] {
+        guard let crossEncoderReranker else {
+            return hits.map { hit in
+                var updated = hit
+                updated.metadata["cross_encoder_status"] = "unavailable"
+                return updated
+            }
+        }
+        let topK = max(0, min(query.reranking.crossEncoderTopK ?? query.limit, hits.count))
+        guard topK > 0 else { return hits }
+        let scoringHits = Array(hits.prefix(topK))
+        let candidates = scoringHits.map { hit in
+            GraphCrossEncoderCandidate(ownerType: hit.ownerType, ownerID: hit.ownerID, title: hit.title, text: hit.text, metadata: hit.metadata)
+        }
+        let scores = try await crossEncoderReranker.scores(query: query.text, candidates: candidates)
+        let scoresByID = Dictionary(uniqueKeysWithValues: scores.map { ("\($0.ownerType.rawValue):\($0.ownerID)", $0.score) })
+        let rerankedTop = scoringHits.map { hit in
+            var updated = hit
+            let score = scoresByID[hit.id] ?? 0
+            updated.score = score
+            updated.metadata["cross_encoder_score"] = formattedScore(score)
+            updated.metadata["cross_encoder_reranked"] = "true"
+            updated.metadata["final_score"] = formattedScore(score)
+            return updated
+        }.sorted { lhs, rhs in
+            if lhs.score == rhs.score {
+                if lhs.ownerType.rawValue == rhs.ownerType.rawValue { return lhs.ownerID < rhs.ownerID }
+                return lhs.ownerType.rawValue < rhs.ownerType.rawValue
+            }
+            return lhs.score > rhs.score
+        }
+        return rerankedTop + Array(hits.dropFirst(topK))
+    }
+
+    private func strategyList(_ strategies: [GraphRerankerStrategy]) -> String {
+        strategies.map(\.rawValue).joined(separator: ",")
     }
 
     private struct GraphRankingSignal: Sendable, Equatable {
