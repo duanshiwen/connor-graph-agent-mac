@@ -89,6 +89,9 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
             updated.metadata["graph_reranking_strategies"] = strategyList(query.reranking.strategies)
             return updated
         }
+        if query.reranking.strategies.contains(.episodeMentions) {
+            rankedHits = try episodeMentionsRerankedHits(rankedHits, query: query)
+        }
         if query.reranking.strategies.contains(.maximalMarginalRelevance) {
             rankedHits = try mmrRerankedHits(rankedHits, query: query)
         }
@@ -96,6 +99,63 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
             rankedHits = try await crossEncoderRerankedHits(rankedHits, query: query)
         }
         return rankedHits
+    }
+
+    private func episodeMentionsRerankedHits(_ hits: [GraphSearchHit], query: GraphSearchQuery) throws -> [GraphSearchHit] {
+        guard !hits.isEmpty else { return hits }
+        let mentionCounts = try store.mentionCounts(groupID: query.groupID, episodeIDs: query.reranking.episodeMentionEpisodeIDs)
+        let scope = query.reranking.episodeMentionEpisodeIDs.isEmpty ? "group" : "selected_episodes"
+        return hits.map { hit in
+            var updated = hit
+            let count = episodeMentionCount(for: hit, mentionCounts: mentionCounts)
+            let boost = min(Double(count) * 0.0025, 0.0100)
+            updated.metadata["episode_mentions_count"] = String(count)
+            updated.metadata["episode_mentions_scope"] = scope
+            updated.metadata["episode_mentions_boost"] = formattedScore(boost)
+            guard boost > 0 else { return updated }
+            updated.score += boost
+            updated.metadata["graph_ranking"] = "boosted"
+            appendMetadataToken("episode_mentions", key: "graph_boost_reason", hit: &updated)
+            appendMetadataToken("episode_mentions", key: "graph_ranking_signals", hit: &updated)
+            appendSignalScore("episode_mentions", score: boost, hit: &updated)
+            let existingBoost = Double(updated.metadata["graph_boost"] ?? "0") ?? 0
+            updated.metadata["graph_boost"] = formattedScore(existingBoost + boost)
+            updated.metadata["final_score"] = formattedScore(updated.score)
+            return updated
+        }.sorted { lhs, rhs in
+            if lhs.score == rhs.score {
+                if lhs.ownerType.rawValue == rhs.ownerType.rawValue { return lhs.ownerID < rhs.ownerID }
+                return lhs.ownerType.rawValue < rhs.ownerType.rawValue
+            }
+            return lhs.score > rhs.score
+        }
+    }
+
+    private func episodeMentionCount(for hit: GraphSearchHit, mentionCounts: [String: Int]) -> Int {
+        switch hit.ownerType {
+        case .node:
+            return mentionCounts[hit.ownerID] ?? 0
+        case .fact:
+            let source = hit.metadata["source_node_id"].flatMap { mentionCounts[$0] } ?? 0
+            let target = hit.metadata["target_node_id"].flatMap { mentionCounts[$0] } ?? 0
+            return source + target
+        case .episode:
+            return hit.sourceEpisodeIDs.reduce(0) { $0 + (mentionCounts[$1] ?? 0) }
+        }
+    }
+
+    private func appendMetadataToken(_ token: String, key: String, hit: inout GraphSearchHit) {
+        var tokens = hit.metadata[key]?.split(separator: ",").map(String.init) ?? []
+        if !tokens.contains(token) { tokens.append(token) }
+        hit.metadata[key] = tokens.joined(separator: ",")
+    }
+
+    private func appendSignalScore(_ reason: String, score: Double, hit: inout GraphSearchHit) {
+        let token = "\(reason):\(formattedScore(score))"
+        var tokens = hit.metadata["graph_ranking_signal_scores"]?.split(separator: ",").map(String.init) ?? []
+        tokens.removeAll { $0.hasPrefix("\(reason):") }
+        tokens.append(token)
+        hit.metadata["graph_ranking_signal_scores"] = tokens.joined(separator: ",")
     }
 
     private func mmrRerankedHits(_ hits: [GraphSearchHit], query: GraphSearchQuery) throws -> [GraphSearchHit] {
