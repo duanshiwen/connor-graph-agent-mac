@@ -1,0 +1,97 @@
+import Foundation
+import Testing
+import ConnorGraphCore
+import ConnorGraphSearch
+@testable import ConnorGraphStore
+
+@Test func sqliteHybridSearchKeepsLocalFirstWhenCrossEncoderAdapterIsMissing() async throws {
+    let store = try SQLiteGraphStore(path: temporaryCrossEncoderDatabaseURL().path)
+    try store.migrate()
+
+    let episode = GraphEpisode(id: "episode-cross-missing", groupID: "default", sourceType: .chatMessage, name: "Cross encoder missing", content: "memory", sourceDescription: "chat")
+    let shiwen = GraphNodeV2(id: "node-shiwen-cross-missing", groupID: "default", type: .person, canonicalName: "shiwen", title: "诗闻")
+    let agentOS = GraphNodeV2(id: "node-agent-cross-missing", groupID: "default", type: .workObject, canonicalName: "agent-os", title: "Agent OS")
+    let fact = GraphFact(id: "fact-cross-missing", groupID: "default", sourceNodeID: shiwen.id, targetNodeID: agentOS.id, relation: .worksOn, fact: "诗闻正在设计长期记忆系统。")
+
+    try store.upsert(episode: episode)
+    try store.upsert(nodeV2: shiwen)
+    try store.upsert(nodeV2: agentOS)
+    try store.upsert(fact: fact, sourceEpisodeIDs: [episode.id])
+    try store.processPendingFTSIndexTasks(limit: 20)
+
+    let service = SQLiteGraphHybridSearchService(store: store)
+    let response = try await service.search(query: GraphSearchQuery(
+        text: "长期记忆",
+        groupID: "default",
+        includeNodes: false,
+        includeFacts: true,
+        includeEpisodes: false,
+        limit: 1,
+        centerNodeIDs: [agentOS.id],
+        reranking: GraphRerankingConfig(strategies: [.graphitiLocal, .crossEncoder])
+    ))
+
+    let hit = try #require(response.hits.first)
+    #expect(hit.ownerID == fact.id)
+    #expect(hit.metadata["graph_reranker"] == "graphiti_local")
+    #expect(hit.metadata["graph_ranking"] == "boosted")
+    #expect(hit.metadata["cross_encoder_status"] == "unavailable")
+    #expect(hit.metadata["graph_reranking_strategies"] == "graphiti_local,cross_encoder")
+}
+
+@Test func sqliteHybridSearchAppliesInjectedCrossEncoderScores() async throws {
+    let store = try SQLiteGraphStore(path: temporaryCrossEncoderDatabaseURL().path)
+    try store.migrate()
+
+    let episode = GraphEpisode(id: "episode-cross-applied", groupID: "default", sourceType: .chatMessage, name: "Cross encoder applied", content: "memory", sourceDescription: "chat")
+    let shiwen = GraphNodeV2(id: "node-shiwen-cross-applied", groupID: "default", type: .person, canonicalName: "shiwen", title: "诗闻")
+    let firstTarget = GraphNodeV2(id: "node-first-cross-applied", groupID: "default", type: .entity, canonicalName: "first", title: "First")
+    let secondTarget = GraphNodeV2(id: "node-second-cross-applied", groupID: "default", type: .entity, canonicalName: "second", title: "Second")
+    let firstFact = GraphFact(id: "fact-first-cross-applied", groupID: "default", sourceNodeID: shiwen.id, targetNodeID: firstTarget.id, relation: .mentions, fact: "Graphiti reranking memory candidate one.")
+    let secondFact = GraphFact(id: "fact-second-cross-applied", groupID: "default", sourceNodeID: shiwen.id, targetNodeID: secondTarget.id, relation: .mentions, fact: "Graphiti reranking memory candidate two.")
+
+    try store.upsert(episode: episode)
+    try store.upsert(nodeV2: shiwen)
+    try store.upsert(nodeV2: firstTarget)
+    try store.upsert(nodeV2: secondTarget)
+    try store.upsert(fact: firstFact, sourceEpisodeIDs: [episode.id])
+    try store.upsert(fact: secondFact, sourceEpisodeIDs: [episode.id])
+    try store.processPendingFTSIndexTasks(limit: 20)
+
+    let reranker = StaticCrossEncoderReranker(scoresByOwnerID: [
+        firstFact.id: 0.10,
+        secondFact.id: 0.95
+    ])
+    let service = SQLiteGraphHybridSearchService(store: store, crossEncoderReranker: reranker)
+    let response = try await service.search(query: GraphSearchQuery(
+        text: "Graphiti reranking memory candidate",
+        groupID: "default",
+        includeNodes: false,
+        includeFacts: true,
+        includeEpisodes: false,
+        limit: 2,
+        reranking: GraphRerankingConfig(strategies: [.graphitiLocal, .crossEncoder], crossEncoderTopK: 2)
+    ))
+
+    #expect(response.hits.map(\.ownerID) == [secondFact.id, firstFact.id])
+    let topHit = try #require(response.hits.first)
+    #expect(topHit.metadata["cross_encoder_score"] == "0.950000")
+    #expect(topHit.metadata["cross_encoder_reranked"] == "true")
+    #expect(topHit.metadata["graph_reranking_strategies"] == "graphiti_local,cross_encoder")
+}
+
+private struct StaticCrossEncoderReranker: GraphCrossEncoderReranker {
+    var scoresByOwnerID: [String: Double]
+
+    func scores(query: String, candidates: [GraphCrossEncoderCandidate]) async throws -> [GraphCrossEncoderScore] {
+        candidates.map { candidate in
+            GraphCrossEncoderScore(ownerType: candidate.ownerType, ownerID: candidate.ownerID, score: scoresByOwnerID[candidate.ownerID] ?? 0)
+        }
+    }
+}
+
+private func temporaryCrossEncoderDatabaseURL() -> URL {
+    FileManager.default.temporaryDirectory
+        .appendingPathComponent("connor-graph-cross-encoder-\(UUID().uuidString)")
+        .appendingPathExtension("sqlite")
+}
