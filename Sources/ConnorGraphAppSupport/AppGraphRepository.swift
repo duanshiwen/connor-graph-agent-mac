@@ -2,32 +2,39 @@ import Foundation
 import ConnorGraphCore
 import ConnorGraphMemory
 import ConnorGraphStore
-import ConnorGraphImport
 
 public struct AppGraphState: Sendable, Equatable {
-    public var nodes: [GraphNode]
-    public var edges: [SemanticEdge]
+    public var graphNodes: [GraphNodeV2]
+    public var graphFacts: [GraphFact]
+    public var graphEpisodes: [GraphEpisode]
     public var observeLogEntries: [ObserveLogEntry]
 
     public init(snapshot: GraphStoreSnapshot) {
-        self.nodes = snapshot.nodes
-        self.edges = snapshot.edges
+        self.graphNodes = snapshot.graphNodes
+        self.graphFacts = snapshot.graphFacts
+        self.graphEpisodes = snapshot.graphEpisodes
         self.observeLogEntries = snapshot.observeLogEntries
-    }
-
-    public static func == (lhs: AppGraphState, rhs: AppGraphState) -> Bool {
-        lhs.nodes == rhs.nodes &&
-        lhs.edges == rhs.edges &&
-        lhs.observeLogEntries == rhs.observeLogEntries
     }
 }
 
 public struct AppGraphRepository: @unchecked Sendable {
     public let store: SQLiteGraphStore
+    public var graphNodeLimit: Int
+    public var graphFactLimit: Int
+    public var graphEpisodeLimit: Int
     public var observeLogLimit: Int
 
-    public init(store: SQLiteGraphStore, observeLogLimit: Int = 200) {
+    public init(
+        store: SQLiteGraphStore,
+        graphNodeLimit: Int = 1_000,
+        graphFactLimit: Int = 2_000,
+        graphEpisodeLimit: Int = 1_000,
+        observeLogLimit: Int = 200
+    ) {
         self.store = store
+        self.graphNodeLimit = graphNodeLimit
+        self.graphFactLimit = graphFactLimit
+        self.graphEpisodeLimit = graphEpisodeLimit
         self.observeLogLimit = observeLogLimit
     }
 
@@ -41,26 +48,15 @@ public struct AppGraphRepository: @unchecked Sendable {
     }
 
     public func loadSnapshot() throws -> GraphStoreSnapshot {
-        try store.snapshot(observeLogLimit: observeLogLimit)
+        try store.snapshot(
+            graphNodeLimit: graphNodeLimit,
+            graphFactLimit: graphFactLimit,
+            graphEpisodeLimit: graphEpisodeLimit,
+            observeLogLimit: observeLogLimit
+        )
     }
 
     public func loadState() throws -> AppGraphState {
         try AppGraphState(snapshot: loadSnapshot())
-    }
-
-    @discardableResult
-    public func importKnowledgeDirectory(_ root: URL) throws -> LegacyDirectoryImportReport {
-        let importer = LegacyKnowledgeDirectoryImporter(store: store)
-        return try importer.importDirectory(root)
-    }
-
-    @discardableResult
-    public func importLegacyKnowledge(from directory: URL) throws -> LegacyDirectoryImportReport {
-        try importKnowledgeDirectory(directory)
-    }
-
-    @discardableResult
-    public func importReadOnlyKnowledge(from directory: URL) throws -> AppImportReport {
-        AppImportReport(try importKnowledgeDirectory(directory))
     }
 }
