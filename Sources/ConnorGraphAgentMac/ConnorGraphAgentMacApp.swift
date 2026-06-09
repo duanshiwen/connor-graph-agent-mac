@@ -57,6 +57,7 @@ final class AppViewModel: ObservableObject {
     @Published var isSummarizingChatSession: Bool = false
     @Published var chatSummaryMessage: String?
     @Published var isSubmittingChat: Bool = false
+    @Published var agentEventTimeline: [AgentEventPresentation] = []
 
     private var repository: AppGraphRepository?
     private var promotionRepository: AppPromotionQueueRepository?
@@ -66,6 +67,7 @@ final class AppViewModel: ObservableObject {
     private var agentRuntimeFactory: AppGraphAgentRuntimeFactory?
     private var hybridSearchService: (any GraphHybridSearchService)?
     private var chatController: AgentChatController<AnyLLMProvider>
+    private var loopChatController: AgentLoopChatController<AnyAgentModelProvider>?
 
     var latestChatSummaryFreshness: AgentSessionSummaryFreshness? {
         latestChatSummary?.freshness(for: chatController.agent.session)
@@ -119,6 +121,7 @@ final class AppViewModel: ObservableObject {
         self.llmProviderHealthChecker = AppLLMProviderHealthChecker(settingsRepository: llmSettingsRepository)
         self.databasePath = databasePath
         self.chatController = Self.makeChatController(runtimeFactory: agentRuntimeFactory, settingsRepository: llmSettingsRepository)
+        self.loopChatController = agentRuntimeFactory?.makeAgentLoopChatController(session: chatController.agent.session)
         self.searchResults = []
         loadLLMSettings()
         reloadChatSessions()
@@ -257,6 +260,7 @@ final class AppViewModel: ObservableObject {
         graphEpisodes = snapshot.graphEpisodes
         observeLogEntries = snapshot.observeLogEntries
         chatController = Self.makeChatController(runtimeFactory: agentRuntimeFactory, settingsRepository: llmSettingsRepository, session: chatController.agent.session)
+        loopChatController = agentRuntimeFactory?.makeAgentLoopChatController(session: chatController.agent.session)
         Task { await runSearch() }
         reloadPromotionCandidates()
     }
@@ -340,7 +344,9 @@ final class AppViewModel: ObservableObject {
             selectedChatSessionID = selectedID
             if let selectedID, let session = try chatSessionRepository.loadSession(id: selectedID) {
                 chatController = Self.makeChatController(runtimeFactory: agentRuntimeFactory, settingsRepository: llmSettingsRepository, session: session)
+                loopChatController = agentRuntimeFactory?.makeAgentLoopChatController(session: session)
                 transcript = session.messages
+                agentEventTimeline = []
                 latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: selectedID)
             } else {
                 latestChatSummary = nil
@@ -358,7 +364,9 @@ final class AppViewModel: ObservableObject {
             let session = try chatSessionRepository.createSession()
             selectedChatSessionID = session.id
             chatController = Self.makeChatController(runtimeFactory: agentRuntimeFactory, settingsRepository: llmSettingsRepository, session: session)
+            loopChatController = agentRuntimeFactory?.makeAgentLoopChatController(session: session)
             transcript = []
+            agentEventTimeline = []
             latestChatSummary = nil
             chatSummaryMessage = nil
             lastPromptInspection = nil
@@ -375,7 +383,9 @@ final class AppViewModel: ObservableObject {
             guard let session = try chatSessionRepository.loadSession(id: sessionID) else { return }
             selectedChatSessionID = session.id
             chatController = Self.makeChatController(runtimeFactory: agentRuntimeFactory, settingsRepository: llmSettingsRepository, session: session)
+            loopChatController = agentRuntimeFactory?.makeAgentLoopChatController(session: session)
             transcript = session.messages
+            agentEventTimeline = []
             latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: session.id)
             chatSummaryMessage = nil
             lastContext = nil
@@ -460,25 +470,44 @@ final class AppViewModel: ObservableObject {
         lastPromptInspection = nil
         defer { isSubmittingChat = false }
         do {
-            var controller = chatController
-            let previousMessageCount = controller.transcript.count
-            let sessionSummary: AgentSessionSummary?
-            if let chatSessionRepository, let selectedChatSessionID {
-                let candidateSummary = try chatSessionRepository.loadLatestSummary(sessionID: selectedChatSessionID)
-                sessionSummary = AgentSessionSummaryPolicy().summaryForContext(candidateSummary, session: controller.agent.session)
+            if var loopController = loopChatController {
+                let previousMessageCount = loopController.transcript.count
+                let response = try await loopController.submit(prompt)
+                if let chatSessionRepository {
+                    _ = try chatSessionRepository.saveSession(response.session, previousMessageCount: previousMessageCount)
+                }
+                loopChatController = loopController
+                transcript = loopController.transcript
+                agentEventTimeline = loopController.eventPresentations
+                selectedChatSessionID = response.session.id
+                chatController = Self.makeChatController(runtimeFactory: agentRuntimeFactory, settingsRepository: llmSettingsRepository, session: response.session)
+                if let chatSessionRepository {
+                    chatSessions = try chatSessionRepository.loadRecentSessions()
+                    latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: response.session.id)
+                }
+                lastContext = nil
+                lastPromptInspection = nil
             } else {
-                sessionSummary = nil
+                var controller = chatController
+                let previousMessageCount = controller.transcript.count
+                let sessionSummary: AgentSessionSummary?
+                if let chatSessionRepository, let selectedChatSessionID {
+                    let candidateSummary = try chatSessionRepository.loadLatestSummary(sessionID: selectedChatSessionID)
+                    sessionSummary = AgentSessionSummaryPolicy().summaryForContext(candidateSummary, session: controller.agent.session)
+                } else {
+                    sessionSummary = nil
+                }
+                let response = try await controller.submit(prompt, sessionSummary: sessionSummary)
+                if let chatSessionRepository {
+                    _ = try chatSessionRepository.saveTurn(previousMessageCount: previousMessageCount, response: response)
+                }
+                chatController = controller
+                transcript = controller.transcript
+                selectedChatSessionID = response.session.id
+                if chatSessionRepository != nil { reloadChatSessions() }
+                lastContext = response.context
+                lastPromptInspection = response.promptInspection
             }
-            let response = try await controller.submit(prompt, sessionSummary: sessionSummary)
-            if let chatSessionRepository {
-                _ = try chatSessionRepository.saveTurn(previousMessageCount: previousMessageCount, response: response)
-            }
-            chatController = controller
-            transcript = controller.transcript
-            selectedChatSessionID = response.session.id
-            if chatSessionRepository != nil { reloadChatSessions() }
-            lastContext = response.context
-            lastPromptInspection = response.promptInspection
             errorMessage = nil
         } catch {
             transcript = optimisticTranscript + [optimisticUserMessage]

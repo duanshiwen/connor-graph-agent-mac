@@ -126,6 +126,12 @@ private struct AgentChatConversationView: View {
                 .padding(.horizontal, 18)
                 .padding(.vertical, 12)
 
+            if !viewModel.agentEventTimeline.isEmpty {
+                AgentEventTimelineView(events: viewModel.agentEventTimeline)
+                    .padding(.horizontal, 18)
+                    .padding(.bottom, 10)
+            }
+
             Divider()
 
             ScrollViewReader { proxy in
@@ -220,6 +226,67 @@ private struct AgentChatConversationHeader: View {
                 .padding(10)
                 .background(.quaternary.opacity(0.20), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
+        }
+    }
+}
+
+private struct AgentEventTimelineView: View {
+    var events: [AgentEventPresentation]
+
+    var body: some View {
+        DisclosureGroup {
+            ScrollView(.horizontal, showsIndicators: true) {
+                HStack(alignment: .top, spacing: 10) {
+                    ForEach(events) { event in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(spacing: 6) {
+                                Image(systemName: icon(for: event.severity))
+                                    .foregroundStyle(color(for: event.severity))
+                                Text(event.title)
+                                    .font(.caption.weight(.semibold))
+                                    .lineLimit(1)
+                            }
+                            Text(event.detail)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(3)
+                                .frame(width: 220, alignment: .leading)
+                            Text(event.kind)
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding(10)
+                        .frame(width: 250, alignment: .leading)
+                        .background(.quaternary.opacity(0.16), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .stroke(color(for: event.severity).opacity(0.28), lineWidth: 1)
+                        )
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        } label: {
+            Label("Agent 运行时间线（\(events.count) 个事件）", systemImage: "point.3.connected.trianglepath.dotted")
+                .font(.caption.weight(.semibold))
+        }
+    }
+
+    private func icon(for severity: AgentEventPresentationSeverity) -> String {
+        switch severity {
+        case .info: return "circle"
+        case .success: return "checkmark.circle.fill"
+        case .warning: return "exclamationmark.triangle.fill"
+        case .error: return "xmark.octagon.fill"
+        }
+    }
+
+    private func color(for severity: AgentEventPresentationSeverity) -> Color {
+        switch severity {
+        case .info: return .secondary
+        case .success: return .green
+        case .warning: return .orange
+        case .error: return .red
         }
     }
 }

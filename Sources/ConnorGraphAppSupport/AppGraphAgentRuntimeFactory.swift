@@ -32,6 +32,18 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         )
     }
 
+    public func makeAgentLoopChatController(
+        session: AgentSession = AgentSession(id: "app-session"),
+        permissionMode: AgentPermissionMode = .askToWrite,
+        configuration: AgentLoopConfiguration = AgentLoopConfiguration()
+    ) -> AgentLoopChatController<AnyAgentModelProvider> {
+        AgentLoopChatController(
+            loopController: makeAgentLoopController(permissionMode: permissionMode, configuration: configuration),
+            session: session,
+            groupID: groupID
+        )
+    }
+
     public func makeAgentLoopController(
         permissionMode: AgentPermissionMode = .askToWrite,
         configuration: AgentLoopConfiguration = AgentLoopConfiguration()
