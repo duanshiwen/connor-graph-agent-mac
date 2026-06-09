@@ -44,6 +44,7 @@ final class AppViewModel: ObservableObject {
     @Published var databasePath: String?
     @Published var promotionCandidates: [ObserveLogEntry] = []
     @Published var graphWriteCandidates: [GraphWriteCandidate] = []
+    @Published var graphWriteCandidateAudits: [String: [GraphWriteCandidateAuditPresentation]] = [:]
     @Published var lastPromotionResultSummary: String?
     @Published var lastGraphWriteCandidateResultSummary: String?
     @Published var llmProviderMode: AppLLMProviderMode = .stub
@@ -452,7 +453,9 @@ final class AppViewModel: ObservableObject {
 
     func reloadGraphWriteCandidates() {
         do {
-            graphWriteCandidates = try graphWriteCandidateRepository?.loadCandidates() ?? []
+            let candidates = try graphWriteCandidateRepository?.loadCandidates() ?? []
+            graphWriteCandidates = candidates
+            graphWriteCandidateAudits = try graphWriteCandidateRepository?.loadAuditTimelines(for: candidates) ?? [:]
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -845,6 +848,43 @@ struct GraphWriteCandidateReviewView: View {
                             }
                         }
 
+                        let auditItems = viewModel.graphWriteCandidateAudits[candidate.id] ?? []
+                        DisclosureGroup("审计时间线（\(auditItems.count)）") {
+                            if auditItems.isEmpty {
+                                Text("暂无审计事件。执行验证、批准、治理提交或拒绝后会生成审计轨迹。")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    ForEach(auditItems) { item in
+                                        HStack(alignment: .top, spacing: 8) {
+                                            Circle()
+                                                .fill(auditColor(item.severity))
+                                                .frame(width: 8, height: 8)
+                                                .padding(.top, 5)
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                HStack(alignment: .firstTextBaseline) {
+                                                    Text(item.title)
+                                                        .font(.caption.weight(.semibold))
+                                                    Text(item.createdAt.formatted(date: .omitted, time: .standard))
+                                                        .font(.caption2)
+                                                        .foregroundStyle(.secondary)
+                                                    Text(item.actor)
+                                                        .font(.caption2.monospaced())
+                                                        .foregroundStyle(.secondary)
+                                                }
+                                                Text(item.detail)
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                                    .textSelection(.enabled)
+                                            }
+                                        }
+                                    }
+                                }
+                                .padding(.vertical, 4)
+                            }
+                        }
+
                         HStack {
                             Button("验证") { Task { await viewModel.validateGraphWriteCandidate(candidate) } }
                                 .disabled(candidate.status == .committed || candidate.status == .rejected)
@@ -876,6 +916,15 @@ struct GraphWriteCandidateReviewView: View {
         case .approved: return .blue
         case .committed: return .green
         case .superseded: return .secondary
+        }
+    }
+
+    private func auditColor(_ severity: GraphWriteCandidateAuditSeverity) -> Color {
+        switch severity {
+        case .info: return .blue
+        case .success: return .green
+        case .warning: return .orange
+        case .error: return .red
         }
     }
 }

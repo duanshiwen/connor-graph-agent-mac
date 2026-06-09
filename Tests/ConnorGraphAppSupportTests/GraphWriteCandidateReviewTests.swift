@@ -118,3 +118,27 @@ import ConnorGraphStore
     #expect(auditEvents.map(\.eventType).contains(.graphWriteValidationStarted))
     #expect(auditEvents.map(\.eventType).contains(.graphWriteValidationFailed))
 }
+
+@Test func graphWriteCandidateAuditTimelineFiltersEventsByCandidateID() async throws {
+    let store = try SQLiteGraphStore(path: ":memory:")
+    try store.migrate()
+    let repository = AppGraphWriteCandidateRepository(store: store, permissionMode: .trustedWrite)
+    let candidate = GraphWriteCandidate(
+        groupID: "default",
+        kind: .createNode,
+        proposedByRunID: "run-audit-timeline",
+        rationale: "Create audited node",
+        confidence: 0.9,
+        payloadJSON: #"{"id":"node-audit","nodeType":"entity","canonicalName":"Audited Node","title":"Audited Node"}"#
+    )
+
+    let approved = try await repository.approveGoverned(candidate)
+    _ = try await repository.commitGoverned(approved)
+
+    let timeline = try repository.loadAuditTimeline(for: candidate)
+    #expect(timeline.map(\.title).contains("Validation started"))
+    #expect(timeline.map(\.title).contains("Candidate approved"))
+    #expect(timeline.map(\.title).contains("Permission decision"))
+    #expect(timeline.map(\.title).contains("Commit finished"))
+    #expect(timeline.first { $0.title == "Commit finished" }?.severity == .success)
+}
