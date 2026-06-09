@@ -164,12 +164,7 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
     private func mmrRerankedHits(_ hits: [GraphSearchHit], query: GraphSearchQuery) throws -> [GraphSearchHit] {
         guard !hits.isEmpty else { return hits }
         guard let embeddingModel = query.embeddingModel, let queryEmbedding = query.queryEmbedding, GraphEmbedding.norm(queryEmbedding) > 0 else {
-            return hits.map { hit in
-                var updated = hit
-                updated.metadata["mmr_status"] = "unavailable"
-                updated.metadata["mmr_embedding_status"] = "missing"
-                return updated
-            }
+            return markMMRUnavailable(hits, skipReason: "missing_query_embedding")
         }
         var embeddingsByID: [String: GraphEmbedding] = [:]
         for hit in hits {
@@ -178,12 +173,7 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
             }
         }
         guard !embeddingsByID.isEmpty else {
-            return hits.map { hit in
-                var updated = hit
-                updated.metadata["mmr_status"] = "unavailable"
-                updated.metadata["mmr_embedding_status"] = "missing"
-                return updated
-            }
+            return markMMRUnavailable(hits, skipReason: "missing_candidate_embeddings")
         }
 
         let lambda = min(1.0, max(0.0, query.reranking.mmrLambda))
@@ -218,6 +208,16 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
             remaining.remove(at: best.index)
         }
         return selected
+    }
+
+    private func markMMRUnavailable(_ hits: [GraphSearchHit], skipReason: String) -> [GraphSearchHit] {
+        hits.map { hit in
+            var updated = hit
+            updated.metadata["mmr_status"] = "unavailable"
+            updated.metadata["mmr_embedding_status"] = "missing"
+            updated.metadata["mmr_skip_reason"] = skipReason
+            return updated
+        }
     }
 
     private func normalizedScore(_ score: Double, among hits: [GraphSearchHit]) -> Double {
