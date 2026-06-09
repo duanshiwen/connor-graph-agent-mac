@@ -1,6 +1,64 @@
 import Foundation
 import ConnorGraphCore
 
+public enum GraphRerankerStrategy: String, Sendable, Codable, Equatable {
+    case graphitiLocal = "graphiti_local"
+    case maximalMarginalRelevance = "mmr"
+    case episodeMentions = "episode_mentions"
+    case crossEncoder = "cross_encoder"
+}
+
+public struct GraphRerankingConfig: Sendable, Codable, Equatable {
+    public var strategies: [GraphRerankerStrategy]
+    public var mmrLambda: Double
+    public var crossEncoderTopK: Int?
+    public var episodeMentionEpisodeIDs: [String]
+
+    public init(
+        strategies: [GraphRerankerStrategy] = [.graphitiLocal],
+        mmrLambda: Double = 0.5,
+        crossEncoderTopK: Int? = nil,
+        episodeMentionEpisodeIDs: [String] = []
+    ) {
+        self.strategies = strategies
+        self.mmrLambda = mmrLambda
+        self.crossEncoderTopK = crossEncoderTopK
+        self.episodeMentionEpisodeIDs = episodeMentionEpisodeIDs
+    }
+}
+
+public struct GraphCrossEncoderCandidate: Sendable, Equatable {
+    public var ownerType: GraphIndexOwnerType
+    public var ownerID: String
+    public var title: String
+    public var text: String
+    public var metadata: [String: String]
+
+    public init(ownerType: GraphIndexOwnerType, ownerID: String, title: String, text: String, metadata: [String: String] = [:]) {
+        self.ownerType = ownerType
+        self.ownerID = ownerID
+        self.title = title
+        self.text = text
+        self.metadata = metadata
+    }
+}
+
+public struct GraphCrossEncoderScore: Sendable, Equatable {
+    public var ownerType: GraphIndexOwnerType
+    public var ownerID: String
+    public var score: Double
+
+    public init(ownerType: GraphIndexOwnerType, ownerID: String, score: Double) {
+        self.ownerType = ownerType
+        self.ownerID = ownerID
+        self.score = score
+    }
+}
+
+public protocol GraphCrossEncoderReranker: Sendable {
+    func scores(query: String, candidates: [GraphCrossEncoderCandidate]) async throws -> [GraphCrossEncoderScore]
+}
+
 public struct GraphSearchQuery: Sendable, Equatable {
     public var text: String
     public var groupID: String
@@ -13,6 +71,7 @@ public struct GraphSearchQuery: Sendable, Equatable {
     public var embeddingModel: String?
     public var queryEmbedding: [Double]?
     public var centerNodeIDs: [String]
+    public var reranking: GraphRerankingConfig
 
     public init(
         text: String,
@@ -25,7 +84,8 @@ public struct GraphSearchQuery: Sendable, Equatable {
         statusFilter: Set<GraphTemporalStatus> = [.active],
         embeddingModel: String? = nil,
         queryEmbedding: [Double]? = nil,
-        centerNodeIDs: [String] = []
+        centerNodeIDs: [String] = [],
+        reranking: GraphRerankingConfig = GraphRerankingConfig()
     ) {
         self.text = text
         self.groupID = groupID
@@ -38,6 +98,7 @@ public struct GraphSearchQuery: Sendable, Equatable {
         self.embeddingModel = embeddingModel
         self.queryEmbedding = queryEmbedding
         self.centerNodeIDs = centerNodeIDs
+        self.reranking = reranking
     }
 }
 
