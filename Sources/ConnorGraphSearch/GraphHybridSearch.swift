@@ -6,6 +6,13 @@ public enum GraphRerankerStrategy: String, Sendable, Codable, Equatable {
     case maximalMarginalRelevance = "mmr"
     case episodeMentions = "episode_mentions"
     case crossEncoder = "cross_encoder"
+
+    public static let canonicalExecutionOrder: [GraphRerankerStrategy] = [
+        .graphitiLocal,
+        .episodeMentions,
+        .maximalMarginalRelevance,
+        .crossEncoder
+    ]
 }
 
 public struct GraphRerankingConfig: Sendable, Codable, Equatable {

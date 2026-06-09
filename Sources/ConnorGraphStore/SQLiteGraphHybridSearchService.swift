@@ -71,6 +71,9 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
     }
 
     private func graphRerankedHits(_ hits: [GraphSearchHit], query: GraphSearchQuery) async throws -> [GraphSearchHit] {
+        // The reranking pipeline intentionally uses a canonical execution order for deterministic
+        // local-first behavior: topology boosts, episode mention boosts, MMR diversity, then
+        // optional cross-encoder precision reranking.
         var rankedHits = hits
         if query.reranking.strategies.contains(.graphitiLocal) {
             rankedHits = try GraphitiLocalReranker(traversalStore: SQLiteGraphTraversalStore(store: store)).rerank(rankedHits, query: query)
@@ -86,7 +89,7 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
         }
         rankedHits = rankedHits.map { hit in
             var updated = hit
-            updated.metadata["graph_reranking_strategies"] = strategyList(query.reranking.strategies)
+            updated.metadata["graph_reranking_strategies"] = strategyList(canonicalRerankingStrategies(from: query.reranking.strategies))
             return updated
         }
         if query.reranking.strategies.contains(.episodeMentions) {
@@ -187,7 +190,6 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
         let queryNorm = GraphEmbedding.norm(queryEmbedding)
         var remaining = hits
         var selected: [GraphSearchHit] = []
-        var selectedScores: [String: Double] = [:]
 
         while !remaining.isEmpty {
             let best = remaining.enumerated().map { index, hit -> (index: Int, hit: GraphSearchHit, score: Double) in
@@ -212,7 +214,6 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
             } else {
                 updated.metadata["mmr_embedding_status"] = "available"
             }
-            selectedScores[updated.id] = best.score
             selected.append(updated)
             remaining.remove(at: best.index)
         }
@@ -267,6 +268,11 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
 
     private func strategyList(_ strategies: [GraphRerankerStrategy]) -> String {
         strategies.map(\.rawValue).joined(separator: ",")
+    }
+
+    private func canonicalRerankingStrategies(from requestedStrategies: [GraphRerankerStrategy]) -> [GraphRerankerStrategy] {
+        let requested = Set(requestedStrategies)
+        return GraphRerankerStrategy.canonicalExecutionOrder.filter { requested.contains($0) }
     }
 
     private struct GraphRankingSignal: Sendable, Equatable {

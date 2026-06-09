@@ -80,6 +80,36 @@ import ConnorGraphSearch
     #expect(topHit.metadata["graph_reranking_strategies"] == "graphiti_local,cross_encoder")
 }
 
+@Test func sqliteHybridSearchRecordsCanonicalRerankingStrategyOrder() async throws {
+    let store = try SQLiteGraphStore(path: temporaryCrossEncoderDatabaseURL().path)
+    try store.migrate()
+
+    let episode = GraphEpisode(id: "episode-strategy-order", groupID: "default", sourceType: .chatMessage, name: "Strategy order", content: "memory", sourceDescription: "chat")
+    let source = GraphNodeV2(id: "node-source-strategy-order", groupID: "default", type: .entity, canonicalName: "source", title: "Source")
+    let target = GraphNodeV2(id: "node-target-strategy-order", groupID: "default", type: .entity, canonicalName: "target", title: "Target")
+    let fact = GraphFact(id: "fact-strategy-order", groupID: "default", sourceNodeID: source.id, targetNodeID: target.id, relation: .mentions, fact: "Graphiti canonical strategy ordering memory.")
+
+    try store.upsert(episode: episode)
+    try store.upsert(nodeV2: source)
+    try store.upsert(nodeV2: target)
+    try store.upsert(fact: fact, sourceEpisodeIDs: [episode.id])
+    try store.processPendingFTSIndexTasks(limit: 20)
+
+    let service = SQLiteGraphHybridSearchService(store: store)
+    let response = try await service.search(query: GraphSearchQuery(
+        text: "Graphiti canonical strategy ordering memory",
+        groupID: "default",
+        includeNodes: false,
+        includeFacts: true,
+        includeEpisodes: false,
+        limit: 1,
+        reranking: GraphRerankingConfig(strategies: [.crossEncoder, .maximalMarginalRelevance, .graphitiLocal, .episodeMentions])
+    ))
+
+    let hit = try #require(response.hits.first)
+    #expect(hit.metadata["graph_reranking_strategies"] == "graphiti_local,episode_mentions,mmr,cross_encoder")
+}
+
 private struct StaticCrossEncoderReranker: GraphCrossEncoderReranker {
     var scoresByOwnerID: [String: Double]
 
