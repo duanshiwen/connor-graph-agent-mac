@@ -190,6 +190,45 @@ import ConnorGraphSearch
     #expect(hit.metadata["graph_ranking_signal_scores"] == "center_node_exact_match:0.004000")
 }
 
+@Test func sqliteHybridSearchUsesTraversalDistanceForCenterNodeReranking() async throws {
+    let store = try SQLiteGraphStore(path: temporaryGraphBoostDatabaseURL().path)
+    try store.migrate()
+
+    let episode = GraphEpisode(id: "episode-center-two-hop", groupID: "default", sourceType: .chatMessage, name: "Center two hop", content: "memory", sourceDescription: "chat")
+    let center = GraphNodeV2(id: "node-center-two-hop", groupID: "default", type: .entity, canonicalName: "center", title: "Center")
+    let middle = GraphNodeV2(id: "node-middle-two-hop", groupID: "default", type: .entity, canonicalName: "middle", title: "Middle")
+    let far = GraphNodeV2(id: "node-far-two-hop", groupID: "default", type: .entity, canonicalName: "far", title: "Far")
+    let unrelated = GraphNodeV2(id: "node-unrelated-two-hop", groupID: "default", type: .entity, canonicalName: "unrelated", title: "Unrelated")
+    let centerToMiddle = GraphFact(id: "fact-center-middle-two-hop", groupID: "default", sourceNodeID: center.id, targetNodeID: middle.id, relation: .mentions, fact: "Center mentions middle.")
+    let middleToFar = GraphFact(id: "fact-middle-far-two-hop", groupID: "default", sourceNodeID: middle.id, targetNodeID: far.id, relation: .mentions, fact: "Graphiti local traversal memory.")
+    let unrelatedFact = GraphFact(id: "fact-unrelated-two-hop", groupID: "default", sourceNodeID: center.id, targetNodeID: unrelated.id, relation: .mentions, fact: "Graphiti local traversal memory.")
+
+    try store.upsert(episode: episode)
+    try store.upsert(nodeV2: center)
+    try store.upsert(nodeV2: middle)
+    try store.upsert(nodeV2: far)
+    try store.upsert(nodeV2: unrelated)
+    try store.upsert(fact: centerToMiddle, sourceEpisodeIDs: [episode.id])
+    try store.upsert(fact: unrelatedFact, sourceEpisodeIDs: [episode.id])
+    try store.upsert(fact: middleToFar, sourceEpisodeIDs: [episode.id])
+    try store.processPendingFTSIndexTasks(limit: 20)
+
+    let service = SQLiteGraphHybridSearchService(store: store)
+    let response = try await service.search(query: GraphSearchQuery(
+        text: "Graphiti local traversal memory",
+        groupID: "default",
+        includeNodes: false,
+        includeFacts: true,
+        includeEpisodes: false,
+        limit: 2,
+        centerNodeIDs: [center.id]
+    ))
+
+    let twoHopHit = try #require(response.hits.first { $0.ownerID == middleToFar.id })
+    #expect(twoHopHit.metadata["graph_ranking_signals"]?.contains("center_node_2_hop_match") == true)
+    #expect(twoHopHit.metadata["graph_ranking_signal_scores"]?.contains("center_node_2_hop_match:0.001500") == true)
+}
+
 private func temporaryGraphBoostDatabaseURL() -> URL {
     FileManager.default.temporaryDirectory
         .appendingPathComponent("connor-graph-boost-\(UUID().uuidString)")
