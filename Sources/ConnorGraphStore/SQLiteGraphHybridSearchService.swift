@@ -13,37 +13,26 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
 
     public func search(query: GraphSearchQuery) async throws -> GraphSearchResponse {
         let perScopeLimit = max(query.limit, 1)
-        var hitsByID: [String: GraphSearchHit] = [:]
-
-        func merge(_ hit: GraphSearchHit) {
-            if var existing = hitsByID[hit.id] {
-                existing.score = max(existing.score, hit.score)
-                existing.retrievalMethod = existing.retrievalMethod == hit.retrievalMethod ? existing.retrievalMethod : "hybrid"
-                existing.sourceEpisodeIDs = Array(Set(existing.sourceEpisodeIDs + hit.sourceEpisodeIDs)).sorted()
-                hitsByID[hit.id] = existing
-            } else {
-                hitsByID[hit.id] = hit
-            }
-        }
+        var fusion = RRFFusion(k: 60.0)
 
         if query.includeFacts {
             let facts = try store.searchFactFTS(query: query.text, groupID: query.groupID, limit: perScopeLimit)
             for (index, fact) in facts.enumerated() where includes(fact.status, in: query.statusFilter) && isTemporallyValid(fact, at: query.referenceTime) {
-                merge(try factHit(fact, rank: index, retrievalMethod: "fts", explicitScore: score(forRank: index)))
+                fusion.add(try factHit(fact, rank: index), method: "fts", rank: index + 1)
             }
         }
 
         if query.includeNodes {
             let nodes = try store.searchNodeFTS(query: query.text, groupID: query.groupID, limit: perScopeLimit)
             for (index, node) in nodes.enumerated() where includes(node.status, in: query.statusFilter) && isTemporallyValid(node, at: query.referenceTime) {
-                merge(nodeHit(node, rank: index, retrievalMethod: "fts", explicitScore: score(forRank: index)))
+                fusion.add(nodeHit(node, rank: index), method: "fts", rank: index + 1)
             }
         }
 
         if query.includeEpisodes {
             let episodes = try store.searchEpisodeFTS(query: query.text, groupID: query.groupID, limit: perScopeLimit)
             for (index, episode) in episodes.enumerated() where includes(episode.status, in: query.statusFilter) {
-                merge(episodeHit(episode, rank: index, retrievalMethod: "fts", explicitScore: score(forRank: index)))
+                fusion.add(episodeHit(episode, rank: index), method: "fts", rank: index + 1)
             }
         }
 
@@ -56,29 +45,68 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
                 ownerTypes: ownerTypes,
                 limit: perScopeLimit
             )
-            for result in semanticResults where result.score > 0 {
+            for (index, result) in semanticResults.enumerated() where result.score > 0 {
                 switch result.embedding.ownerType {
                 case .fact:
                     guard query.includeFacts, let fact = try store.graphFact(id: result.embedding.ownerID), includes(fact.status, in: query.statusFilter), isTemporallyValid(fact, at: query.referenceTime) else { continue }
-                    merge(try factHit(fact, rank: 0, retrievalMethod: "semantic", explicitScore: result.score))
+                    fusion.add(try factHit(fact, rank: index, retrievalMethod: "semantic", explicitScore: result.score), method: "semantic", rank: index + 1)
                 case .node:
                     guard query.includeNodes, let node = try store.graphNodeV2(id: result.embedding.ownerID), includes(node.status, in: query.statusFilter), isTemporallyValid(node, at: query.referenceTime) else { continue }
-                    merge(nodeHit(node, rank: 0, retrievalMethod: "semantic", explicitScore: result.score))
+                    fusion.add(nodeHit(node, rank: index, retrievalMethod: "semantic", explicitScore: result.score), method: "semantic", rank: index + 1)
                 case .episode:
                     guard query.includeEpisodes, let episode = try store.graphEpisode(id: result.embedding.ownerID), includes(episode.status, in: query.statusFilter) else { continue }
-                    merge(episodeHit(episode, rank: 0, retrievalMethod: "semantic", explicitScore: result.score))
+                    fusion.add(episodeHit(episode, rank: index, retrievalMethod: "semantic", explicitScore: result.score), method: "semantic", rank: index + 1)
                 }
             }
         }
 
-        let ranked = hitsByID.values.sorted { lhs, rhs in
-            if lhs.score == rhs.score {
-                if lhs.ownerType.rawValue == rhs.ownerType.rawValue { return lhs.ownerID < rhs.ownerID }
-                return lhs.ownerType.rawValue < rhs.ownerType.rawValue
-            }
-            return lhs.score > rhs.score
+        return GraphSearchResponse(hits: Array(fusion.rankedHits().prefix(query.limit)))
+    }
+
+    private struct RRFFusion {
+        struct Accumulator {
+            var hit: GraphSearchHit
+            var methods: Set<String>
+            var ranks: [String: Int]
+            var score: Double
         }
-        return GraphSearchResponse(hits: Array(ranked.prefix(query.limit)))
+
+        var k: Double
+        var hitsByID: [String: Accumulator] = [:]
+
+        mutating func add(_ hit: GraphSearchHit, method: String, rank: Int) {
+            let contribution = 1.0 / (k + Double(rank))
+            if var existing = hitsByID[hit.id] {
+                existing.methods.insert(method)
+                existing.ranks[method] = min(existing.ranks[method] ?? rank, rank)
+                existing.score += contribution
+                existing.hit.sourceEpisodeIDs = Array(Set(existing.hit.sourceEpisodeIDs + hit.sourceEpisodeIDs)).sorted()
+                existing.hit.metadata.merge(hit.metadata) { current, _ in current }
+                hitsByID[hit.id] = existing
+            } else {
+                hitsByID[hit.id] = Accumulator(hit: hit, methods: [method], ranks: [method: rank], score: contribution)
+            }
+        }
+
+        func rankedHits() -> [GraphSearchHit] {
+            hitsByID.values.map { accumulator in
+                var hit = accumulator.hit
+                let orderedMethods = ["fts", "semantic"].filter { accumulator.methods.contains($0) }
+                hit.retrievalMethod = orderedMethods.count > 1 ? "hybrid" : (orderedMethods.first ?? hit.retrievalMethod)
+                hit.score = accumulator.score
+                hit.metadata["fusion"] = "rrf"
+                hit.metadata["retrieval_methods"] = orderedMethods.joined(separator: ",")
+                if let ftsRank = accumulator.ranks["fts"] { hit.metadata["rrf_fts_rank"] = String(ftsRank) }
+                if let semanticRank = accumulator.ranks["semantic"] { hit.metadata["rrf_semantic_rank"] = String(semanticRank) }
+                return hit
+            }.sorted { lhs, rhs in
+                if lhs.score == rhs.score {
+                    if lhs.ownerType.rawValue == rhs.ownerType.rawValue { return lhs.ownerID < rhs.ownerID }
+                    return lhs.ownerType.rawValue < rhs.ownerType.rawValue
+                }
+                return lhs.score > rhs.score
+            }
+        }
     }
 
     private struct SemanticQuery: Sendable {
