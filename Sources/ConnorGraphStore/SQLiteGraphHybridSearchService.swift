@@ -65,20 +65,25 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
     }
 
     private func graphBoostedHits(_ hits: [GraphSearchHit], queryText: String) -> [GraphSearchHit] {
-        hits.map { hit in
+        let rankingPolicy = GraphRankingPolicy()
+        return hits.map { hit in
             var boostedHit = hit
             let baseScore = hit.score
-            let boost = graphBoost(for: hit, queryText: queryText)
-            boostedHit.score = baseScore + boost.value
+            let signals = rankingPolicy.signals(for: hit, queryText: queryText)
+            let boost = signals.reduce(0.0) { $0 + $1.boost }
+            let signalReasons = signals.map(\.reason)
+            boostedHit.score = baseScore + boost
             boostedHit.metadata["base_rrf_score"] = formattedScore(baseScore)
-            boostedHit.metadata["graph_boost"] = formattedScore(boost.value)
+            boostedHit.metadata["graph_boost"] = formattedScore(boost)
             boostedHit.metadata["final_score"] = formattedScore(boostedHit.score)
-            if boost.value > 0 {
+            if boost > 0 {
                 boostedHit.metadata["graph_ranking"] = "boosted"
-                boostedHit.metadata["graph_boost_reason"] = boost.reason
+                boostedHit.metadata["graph_boost_reason"] = signalReasons.joined(separator: ",")
+                boostedHit.metadata["graph_ranking_signals"] = signalReasons.joined(separator: ",")
             } else {
                 boostedHit.metadata["graph_ranking"] = "rrf_only"
                 boostedHit.metadata.removeValue(forKey: "graph_boost_reason")
+                boostedHit.metadata.removeValue(forKey: "graph_ranking_signals")
             }
             return boostedHit
         }.sorted { lhs, rhs in
@@ -90,16 +95,39 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
         }
     }
 
-    private func graphBoost(for hit: GraphSearchHit, queryText: String) -> (value: Double, reason: String?) {
-        switch hit.metadata["graph_context"] {
-        case "fact_endpoints":
-            let endpointTitles = [hit.metadata["source_node_title"], hit.metadata["target_node_title"]].compactMap { $0 }
-            if endpointTitles.contains(where: { queryText.localizedCaseInsensitiveContains($0) }) {
-                return (0.002, "endpoint_title_query_match")
+    private struct GraphRankingSignal: Sendable, Equatable {
+        var reason: String
+        var boost: Double
+    }
+
+    private struct GraphRankingPolicy: Sendable {
+        func signals(for hit: GraphSearchHit, queryText: String) -> [GraphRankingSignal] {
+            var signals: [GraphRankingSignal] = []
+
+            if hit.metadata["graph_context"] == "fact_endpoints" {
+                let endpointTitles = [hit.metadata["source_node_title"], hit.metadata["target_node_title"]].compactMap { $0 }
+                if endpointTitles.contains(where: { queryText.localizedCaseInsensitiveContains($0) }) {
+                    signals.append(GraphRankingSignal(reason: "endpoint_title_query_match", boost: 0.002))
+                }
             }
-            return (0.0, nil)
-        default:
-            return (0.0, nil)
+
+            if hit.metadata["graph_context"] == "adjacent_facts",
+               adjacentRelations(in: hit).contains(where: { queryContainsRelation($0, queryText: queryText) }) {
+                signals.append(GraphRankingSignal(reason: "adjacent_relation_query_match", boost: 0.001))
+            }
+
+            return signals
+        }
+
+        private func adjacentRelations(in hit: GraphSearchHit) -> [String] {
+            hit.metadata["adjacent_fact_relations"]?
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty } ?? []
+        }
+
+        private func queryContainsRelation(_ relation: String, queryText: String) -> Bool {
+            queryText.localizedCaseInsensitiveContains(relation)
         }
     }
 
