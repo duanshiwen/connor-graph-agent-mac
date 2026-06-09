@@ -645,6 +645,85 @@ public final class SQLiteGraphStore: @unchecked Sendable {
         }
     }
 
+    public func upsertMention(
+        episodeID: String,
+        nodeID: String,
+        groupID: String,
+        confidence: Double = 1.0,
+        metadata: [String: String] = [:]
+    ) throws {
+        let mentionID = "mention:\(episodeID):\(nodeID)"
+        let sql = """
+        INSERT INTO graph_mentions
+        (id, group_id, episode_id, node_id, created_at, confidence, metadata_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(episode_id, node_id) DO UPDATE SET
+            group_id = excluded.group_id,
+            confidence = excluded.confidence,
+            metadata_json = excluded.metadata_json;
+        """
+        try withStatement(sql) { statement in
+            try bind(mentionID, at: 1, in: statement)
+            try bind(groupID, at: 2, in: statement)
+            try bind(episodeID, at: 3, in: statement)
+            try bind(nodeID, at: 4, in: statement)
+            try bind(iso(Date()), at: 5, in: statement)
+            sqlite3_bind_double(statement, 6, confidence)
+            try bind(jsonString(metadata), at: 7, in: statement)
+            try stepDone(statement)
+        }
+    }
+
+    public func mentionCounts(groupID: String, episodeIDs: [String] = []) throws -> [String: Int] {
+        let episodeFilter = episodeIDs.isEmpty ? "" : " AND episode_id IN (\(placeholders(episodeIDs.count)))"
+        let sql = """
+        SELECT node_id, COUNT(*)
+        FROM graph_mentions
+        WHERE group_id = ?\(episodeFilter)
+        GROUP BY node_id;
+        """
+        return try withStatement(sql) { statement in
+            try bind(groupID, at: 1, in: statement)
+            for (index, episodeID) in episodeIDs.enumerated() {
+                try bind(episodeID, at: Int32(index + 2), in: statement)
+            }
+            var counts: [String: Int] = [:]
+            while sqlite3_step(statement) == SQLITE_ROW {
+                guard let nodeID = text(statement, 0) else { continue }
+                counts[nodeID] = Int(sqlite3_column_int(statement, 1))
+            }
+            return counts
+        }
+    }
+
+    public func episodeIDsMentioning(nodeIDs: [String], groupID: String, limit: Int) throws -> [String] {
+        guard !nodeIDs.isEmpty, limit > 0 else { return [] }
+        let sql = """
+        SELECT episode_id, COUNT(*) AS mention_count
+        FROM graph_mentions
+        WHERE group_id = ? AND node_id IN (\(placeholders(nodeIDs.count)))
+        GROUP BY episode_id
+        ORDER BY episode_id ASC
+        LIMIT ?;
+        """
+        return try withStatement(sql) { statement in
+            try bind(groupID, at: 1, in: statement)
+            for (index, nodeID) in nodeIDs.enumerated() {
+                try bind(nodeID, at: Int32(index + 2), in: statement)
+            }
+            sqlite3_bind_int(statement, Int32(nodeIDs.count + 2), Int32(limit))
+            var episodeIDs: [String] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                if let episodeID = text(statement, 0) { episodeIDs.append(episodeID) }
+            }
+            return episodeIDs
+        }
+    }
+
+    private func placeholders(_ count: Int) -> String {
+        Array(repeating: "?", count: count).joined(separator: ",")
+    }
+
     public func upsert(embedding: GraphEmbedding) throws {
         guard embedding.vectorNorm > 0 else {
             throw SQLiteGraphStoreError.decodeFailed("graph_embeddings vector_norm must be positive")
