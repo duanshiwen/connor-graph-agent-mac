@@ -3,7 +3,7 @@ import Testing
 import ConnorGraphCore
 import ConnorGraphMemory
 
-@Test func candidateFactPromotesToSemanticEdgeDraft() throws {
+@Test func candidateFactPromotesToGraphFactDraft() throws {
     let entry = ObserveLogEntry(
         id: "obs-fact",
         kind: .candidateFact,
@@ -15,15 +15,16 @@ import ConnorGraphMemory
 
     let result = try MemoryPromotionService().promoteCandidateFact(entry)
 
-    #expect(result.nodes.isEmpty)
-    #expect(result.edges.count == 1)
-    #expect(result.edges[0].sourceNodeID == "work-object-agent-os")
-    #expect(result.edges[0].targetNodeID == "entity-graph-memory")
-    #expect(result.edges[0].relation == .relatedTo)
-    #expect(result.edges[0].fact == "Agent OS uses graph-backed memory.")
-    #expect(result.edges[0].confidence == 0.8)
+    #expect(result.graphNodes.isEmpty)
+    #expect(result.graphFacts.count == 1)
+    #expect(result.graphFacts[0].sourceNodeID == "work-object-agent-os")
+    #expect(result.graphFacts[0].targetNodeID == "entity-graph-memory")
+    #expect(result.graphFacts[0].relation == .relatedTo)
+    #expect(result.graphFacts[0].fact == "Agent OS uses graph-backed memory.")
+    #expect(result.graphFacts[0].confidence == 0.8)
+    #expect(result.graphFacts[0].status == .draft)
     #expect(result.promotedEntry.status == .promoted)
-    #expect(result.promotedEntry.promotedNodeID == result.edges[0].id)
+    #expect(result.promotedEntry.promotedNodeID == result.graphFacts[0].id)
 }
 
 @Test func decisionHintPromotesToDecisionNodeDraft() throws {
@@ -37,13 +38,13 @@ import ConnorGraphMemory
 
     let result = try MemoryPromotionService().promoteDecisionHint(entry)
 
-    #expect(result.nodes.count == 1)
-    #expect(result.nodes[0].type == .decision)
-    #expect(result.nodes[0].status == .draft)
-    #expect(result.nodes[0].title == "Use SwiftUI for the native macOS client.")
-    #expect(result.edges.contains { $0.sourceNodeID == result.nodes[0].id && $0.targetNodeID == "work-object-agent-os" && $0.relation == .belongsTo })
+    #expect(result.graphNodes.count == 1)
+    #expect(result.graphNodes[0].type == .decision)
+    #expect(result.graphNodes[0].status == .draft)
+    #expect(result.graphNodes[0].title == "Use SwiftUI for the native macOS client.")
+    #expect(result.graphFacts.contains { $0.sourceNodeID == result.graphNodes[0].id && $0.targetNodeID == "work-object-agent-os" && $0.relation == .belongsTo })
     #expect(result.promotedEntry.status == .promoted)
-    #expect(result.promotedEntry.promotedNodeID == result.nodes[0].id)
+    #expect(result.promotedEntry.promotedNodeID == result.graphNodes[0].id)
 }
 
 @Test func userPreferencePromotesToPersonPreferenceFact() throws {
@@ -58,14 +59,14 @@ import ConnorGraphMemory
 
     let result = try MemoryPromotionService().promoteUserPreference(entry)
 
-    #expect(result.nodes.count == 1)
-    #expect(result.nodes[0].type == .preference)
-    #expect(result.nodes[0].status == .draft)
-    #expect(result.edges.count == 1)
-    #expect(result.edges[0].sourceNodeID == "person-shiwen")
-    #expect(result.edges[0].targetNodeID == result.nodes[0].id)
-    #expect(result.edges[0].relation == .hasPreference)
-    #expect(result.edges[0].confidence == 0.9)
+    #expect(result.graphNodes.count == 1)
+    #expect(result.graphNodes[0].type == .preference)
+    #expect(result.graphNodes[0].status == .draft)
+    #expect(result.graphFacts.count == 1)
+    #expect(result.graphFacts[0].sourceNodeID == "person-shiwen")
+    #expect(result.graphFacts[0].targetNodeID == result.graphNodes[0].id)
+    #expect(result.graphFacts[0].relation == .hasPreference)
+    #expect(result.graphFacts[0].confidence == 0.9)
 }
 
 @Test func promotionRejectsWrongObserveLogKind() throws {
