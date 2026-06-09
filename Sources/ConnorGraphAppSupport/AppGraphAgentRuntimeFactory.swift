@@ -32,6 +32,45 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         )
     }
 
+    public func makeAgentLoopController(
+        permissionMode: AgentPermissionMode = .askToWrite,
+        configuration: AgentLoopConfiguration = AgentLoopConfiguration()
+    ) -> AgentLoopController<AnyAgentModelProvider> {
+        let searchService = SQLiteGraphHybridSearchService(store: store)
+        var registry = AgentToolRegistry()
+        registry.register(GraphSearchTool(searchService: searchService))
+        registry.register(GraphIngestEpisodeTool(repository: store))
+        registry.register(GraphProposeWriteTool(repository: store))
+        var effectiveConfiguration = configuration
+        effectiveConfiguration.permissionMode = permissionMode
+        return AgentLoopController(
+            modelProvider: makeAgentModelProvider(),
+            toolRegistry: registry,
+            configuration: effectiveConfiguration,
+            auditLog: SQLiteAgentAuditLog(store: store),
+            eventRecorder: AgentEventRecorder(repository: store)
+        )
+    }
+
+    public func makeAgentModelProvider() -> AnyAgentModelProvider {
+        do {
+            let settings = try settingsRepository.loadSettings()
+            switch settings.providerMode {
+            case .stub:
+                return AnyAgentModelProvider(StubAgentModelProvider())
+            case .openAICompatible:
+                guard let config = try settingsRepository.openAICompatibleConfig() else {
+                    return AnyAgentModelProvider(modelID: "missing-openai-compatible-config") { _ in
+                        throw OpenAICompatibleProviderError.missingAPIKey
+                    }
+                }
+                return AnyAgentModelProvider(OpenAICompatibleProvider(config: config))
+            }
+        } catch {
+            return AnyAgentModelProvider(modelID: "settings-error") { _ in throw error }
+        }
+    }
+
     public func makeLLMProvider() -> AnyLLMProvider {
         do {
             let settings = try settingsRepository.loadSettings()

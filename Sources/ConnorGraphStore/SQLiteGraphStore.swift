@@ -126,11 +126,86 @@ public final class SQLiteGraphStore: @unchecked Sendable {
         try execute("CREATE INDEX IF NOT EXISTS idx_chat_session_summaries_session_updated_at ON chat_session_summaries(session_id, updated_at);")
 
         try migrateGraphitiGradeV2Schema()
+        try migrateAgentRuntimeSchema()
 
         try execute("""
         INSERT OR IGNORE INTO schema_migrations(version, applied_at)
         VALUES (1, \(quote(iso(Date()))));
         """)
+    }
+
+    private func migrateAgentRuntimeSchema() throws {
+        try execute("""
+        CREATE TABLE IF NOT EXISTS agent_runs (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            group_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            completed_at TEXT,
+            model TEXT,
+            metadata_json TEXT NOT NULL
+        );
+        """)
+        try execute("CREATE INDEX IF NOT EXISTS idx_agent_runs_session_started ON agent_runs(session_id, started_at DESC);")
+        try execute("CREATE INDEX IF NOT EXISTS idx_agent_runs_group_started ON agent_runs(group_id, started_at DESC);")
+        try execute("CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(status);")
+
+        try execute("""
+        CREATE TABLE IF NOT EXISTS agent_events (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            sequence INTEGER,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+        );
+        """)
+        try execute("CREATE INDEX IF NOT EXISTS idx_agent_events_run_sequence ON agent_events(run_id, sequence, created_at);")
+        try execute("CREATE INDEX IF NOT EXISTS idx_agent_events_session_created ON agent_events(session_id, created_at);")
+
+        try execute("""
+        CREATE TABLE IF NOT EXISTS agent_audit_events (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            actor TEXT NOT NULL,
+            capability TEXT,
+            tool_name TEXT,
+            decision_json TEXT,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+        );
+        """)
+        try execute("CREATE INDEX IF NOT EXISTS idx_agent_audit_events_run_created ON agent_audit_events(run_id, created_at);")
+        try execute("CREATE INDEX IF NOT EXISTS idx_agent_audit_events_session_created ON agent_audit_events(session_id, created_at);")
+        try execute("CREATE INDEX IF NOT EXISTS idx_agent_audit_events_tool ON agent_audit_events(tool_name, created_at);")
+
+        try execute("""
+        CREATE TABLE IF NOT EXISTS graph_write_candidates (
+            id TEXT PRIMARY KEY,
+            group_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            proposed_by_run_id TEXT NOT NULL,
+            proposed_by_tool_call_id TEXT,
+            rationale TEXT NOT NULL,
+            confidence REAL NOT NULL,
+            payload_json TEXT NOT NULL,
+            source_episode_ids_json TEXT NOT NULL,
+            related_node_ids_json TEXT NOT NULL,
+            related_fact_ids_json TEXT NOT NULL,
+            status TEXT NOT NULL,
+            validation_errors_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """)
+        try execute("CREATE INDEX IF NOT EXISTS idx_graph_write_candidates_group_status ON graph_write_candidates(group_id, status, created_at DESC);")
+        try execute("CREATE INDEX IF NOT EXISTS idx_graph_write_candidates_run ON graph_write_candidates(proposed_by_run_id);")
     }
 
     private func migrateGraphitiGradeV2Schema() throws {
@@ -1266,6 +1341,177 @@ public final class SQLiteGraphStore: @unchecked Sendable {
         try recentObserveLogEntries(limit: limit)
     }
 
+    public func upsert(agentRun run: AgentRun) throws {
+        let sql = """
+        INSERT INTO agent_runs
+        (id, session_id, group_id, status, started_at, completed_at, model, metadata_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            session_id = excluded.session_id,
+            group_id = excluded.group_id,
+            status = excluded.status,
+            started_at = excluded.started_at,
+            completed_at = excluded.completed_at,
+            model = excluded.model,
+            metadata_json = excluded.metadata_json;
+        """
+        try withStatement(sql) { statement in
+            try bind(run.id, at: 1, in: statement)
+            try bind(run.sessionID, at: 2, in: statement)
+            try bind(run.groupID, at: 3, in: statement)
+            try bind(run.status.rawValue, at: 4, in: statement)
+            try bind(iso(run.startedAt), at: 5, in: statement)
+            try bind(run.completedAt.map(iso), at: 6, in: statement)
+            try bind(run.model, at: 7, in: statement)
+            try bind(jsonString(run.metadata), at: 8, in: statement)
+            try stepDone(statement)
+        }
+    }
+
+    public func agentRun(id: String) throws -> AgentRun? {
+        let sql = """
+        SELECT id, session_id, group_id, status, started_at, completed_at, model, metadata_json
+        FROM agent_runs
+        WHERE id = ?
+        LIMIT 1;
+        """
+        return try withStatement(sql) { statement in
+            try bind(id, at: 1, in: statement)
+            guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+            return try decodeAgentRun(statement)
+        }
+    }
+
+    public func append(agentEvent event: PersistedAgentEvent) throws {
+        let sql = """
+        INSERT OR REPLACE INTO agent_events
+        (id, run_id, session_id, kind, payload_json, sequence, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?);
+        """
+        try withStatement(sql) { statement in
+            try bind(event.id, at: 1, in: statement)
+            try bind(event.runID, at: 2, in: statement)
+            try bind(event.sessionID, at: 3, in: statement)
+            try bind(event.kind.rawValue, at: 4, in: statement)
+            try bind(event.payloadJSON, at: 5, in: statement)
+            bindIntOrNull(event.sequence, at: 6, in: statement)
+            try bind(iso(event.createdAt), at: 7, in: statement)
+            try stepDone(statement)
+        }
+    }
+
+    public func agentEvents(runID: String) throws -> [PersistedAgentEvent] {
+        let sql = """
+        SELECT id, run_id, session_id, kind, payload_json, sequence, created_at
+        FROM agent_events
+        WHERE run_id = ?
+        ORDER BY COALESCE(sequence, 9223372036854775807), created_at ASC;
+        """
+        return try withStatement(sql) { statement in
+            try bind(runID, at: 1, in: statement)
+            var events: [PersistedAgentEvent] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                events.append(try decodePersistedAgentEvent(statement))
+            }
+            return events
+        }
+    }
+
+    public func recordSync(_ event: AgentAuditEvent) throws {
+        let sql = """
+        INSERT OR REPLACE INTO agent_audit_events
+        (id, run_id, session_id, event_type, actor, capability, tool_name, decision_json, payload_json, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        """
+        try withStatement(sql) { statement in
+            try bind(event.id, at: 1, in: statement)
+            try bind(event.runID, at: 2, in: statement)
+            try bind(event.sessionID, at: 3, in: statement)
+            try bind(event.eventType.rawValue, at: 4, in: statement)
+            try bind(event.actor, at: 5, in: statement)
+            try bind(event.capability?.rawValue, at: 6, in: statement)
+            try bind(event.toolName, at: 7, in: statement)
+            try bind(event.decision.map(jsonString), at: 8, in: statement)
+            try bind(event.payloadJSON, at: 9, in: statement)
+            try bind(iso(event.createdAt), at: 10, in: statement)
+            try stepDone(statement)
+        }
+    }
+
+    public func agentAuditEvents(runID: String) throws -> [AgentAuditEvent] {
+        let sql = """
+        SELECT id, run_id, session_id, event_type, actor, capability, tool_name, decision_json, payload_json, created_at
+        FROM agent_audit_events
+        WHERE run_id = ?
+        ORDER BY created_at ASC;
+        """
+        return try withStatement(sql) { statement in
+            try bind(runID, at: 1, in: statement)
+            var events: [AgentAuditEvent] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                events.append(try decodeAgentAuditEvent(statement))
+            }
+            return events
+        }
+    }
+
+    public func upsert(graphWriteCandidate candidate: GraphWriteCandidate) throws {
+        let sql = """
+        INSERT INTO graph_write_candidates
+        (id, group_id, kind, proposed_by_run_id, proposed_by_tool_call_id, rationale, confidence, payload_json,
+         source_episode_ids_json, related_node_ids_json, related_fact_ids_json, status, validation_errors_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            group_id = excluded.group_id,
+            kind = excluded.kind,
+            proposed_by_run_id = excluded.proposed_by_run_id,
+            proposed_by_tool_call_id = excluded.proposed_by_tool_call_id,
+            rationale = excluded.rationale,
+            confidence = excluded.confidence,
+            payload_json = excluded.payload_json,
+            source_episode_ids_json = excluded.source_episode_ids_json,
+            related_node_ids_json = excluded.related_node_ids_json,
+            related_fact_ids_json = excluded.related_fact_ids_json,
+            status = excluded.status,
+            validation_errors_json = excluded.validation_errors_json,
+            created_at = excluded.created_at,
+            updated_at = excluded.updated_at;
+        """
+        try withStatement(sql) { statement in
+            try bind(candidate.id, at: 1, in: statement)
+            try bind(candidate.groupID, at: 2, in: statement)
+            try bind(candidate.kind.rawValue, at: 3, in: statement)
+            try bind(candidate.proposedByRunID, at: 4, in: statement)
+            try bind(candidate.proposedByToolCallID, at: 5, in: statement)
+            try bind(candidate.rationale, at: 6, in: statement)
+            sqlite3_bind_double(statement, 7, candidate.confidence)
+            try bind(candidate.payloadJSON, at: 8, in: statement)
+            try bind(jsonString(candidate.sourceEpisodeIDs), at: 9, in: statement)
+            try bind(jsonString(candidate.relatedNodeIDs), at: 10, in: statement)
+            try bind(jsonString(candidate.relatedFactIDs), at: 11, in: statement)
+            try bind(candidate.status.rawValue, at: 12, in: statement)
+            try bind(jsonString(candidate.validationErrors), at: 13, in: statement)
+            try bind(iso(candidate.createdAt), at: 14, in: statement)
+            try bind(iso(candidate.updatedAt), at: 15, in: statement)
+            try stepDone(statement)
+        }
+    }
+
+    public func graphWriteCandidate(id: String) throws -> GraphWriteCandidate? {
+        let sql = """
+        SELECT id, group_id, kind, proposed_by_run_id, proposed_by_tool_call_id, rationale, confidence, payload_json,
+               source_episode_ids_json, related_node_ids_json, related_fact_ids_json, status, validation_errors_json, created_at, updated_at
+        FROM graph_write_candidates
+        WHERE id = ?
+        LIMIT 1;
+        """
+        return try withStatement(sql) { statement in
+            try bind(id, at: 1, in: statement)
+            guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+            return try decodeGraphWriteCandidate(statement)
+        }
+    }
+
     public func upsert(chatSession session: AgentSession) throws {
         let sql = """
         INSERT INTO chat_sessions
@@ -1675,6 +1921,131 @@ public final class SQLiteGraphStore: @unchecked Sendable {
     private func optionalInt(_ statement: OpaquePointer?, _ column: Int32) -> Int? {
         guard sqlite3_column_type(statement, column) != SQLITE_NULL else { return nil }
         return Int(sqlite3_column_int(statement, column))
+    }
+
+    private func decodeAgentRun(_ statement: OpaquePointer?) throws -> AgentRun {
+        guard
+            let id = text(statement, 0),
+            let sessionID = text(statement, 1),
+            let groupID = text(statement, 2),
+            let statusRaw = text(statement, 3),
+            let status = AgentRunStatus(rawValue: statusRaw),
+            let startedRaw = text(statement, 4),
+            let startedAt = date(startedRaw),
+            let metadataRaw = text(statement, 7)
+        else {
+            throw SQLiteGraphStoreError.decodeFailed("agent_runs row")
+        }
+        return AgentRun(
+            id: id,
+            sessionID: sessionID,
+            groupID: groupID,
+            status: status,
+            startedAt: startedAt,
+            completedAt: text(statement, 5).flatMap(date),
+            model: text(statement, 6),
+            metadata: try json([String: String].self, from: metadataRaw)
+        )
+    }
+
+    private func decodePersistedAgentEvent(_ statement: OpaquePointer?) throws -> PersistedAgentEvent {
+        guard
+            let id = text(statement, 0),
+            let runID = text(statement, 1),
+            let sessionID = text(statement, 2),
+            let kindRaw = text(statement, 3),
+            let kind = AgentEventKind(rawValue: kindRaw),
+            let payloadJSON = text(statement, 4),
+            let createdRaw = text(statement, 6),
+            let createdAt = date(createdRaw)
+        else {
+            throw SQLiteGraphStoreError.decodeFailed("agent_events row")
+        }
+        return PersistedAgentEvent(
+            id: id,
+            runID: runID,
+            sessionID: sessionID,
+            kind: kind,
+            payloadJSON: payloadJSON,
+            sequence: optionalInt(statement, 5),
+            createdAt: createdAt
+        )
+    }
+
+    private func decodeAgentAuditEvent(_ statement: OpaquePointer?) throws -> AgentAuditEvent {
+        guard
+            let id = text(statement, 0),
+            let runID = text(statement, 1),
+            let sessionID = text(statement, 2),
+            let eventTypeRaw = text(statement, 3),
+            let eventType = AgentAuditEventType(rawValue: eventTypeRaw),
+            let actor = text(statement, 4),
+            let payloadJSON = text(statement, 8),
+            let createdRaw = text(statement, 9),
+            let createdAt = date(createdRaw)
+        else {
+            throw SQLiteGraphStoreError.decodeFailed("agent_audit_events row")
+        }
+        let capability = text(statement, 5).flatMap(AgentPermissionCapability.init(rawValue:))
+        let decision: AgentPermissionDecision?
+        if let decisionRaw = text(statement, 7) {
+            decision = try json(AgentPermissionDecision.self, from: decisionRaw)
+        } else {
+            decision = nil
+        }
+        return AgentAuditEvent(
+            id: id,
+            runID: runID,
+            sessionID: sessionID,
+            eventType: eventType,
+            actor: actor,
+            capability: capability,
+            toolName: text(statement, 6),
+            decision: decision,
+            payloadJSON: payloadJSON,
+            createdAt: createdAt
+        )
+    }
+
+    private func decodeGraphWriteCandidate(_ statement: OpaquePointer?) throws -> GraphWriteCandidate {
+        guard
+            let id = text(statement, 0),
+            let groupID = text(statement, 1),
+            let kindRaw = text(statement, 2),
+            let kind = GraphWriteCandidateKind(rawValue: kindRaw),
+            let proposedByRunID = text(statement, 3),
+            let rationale = text(statement, 5),
+            let payloadJSON = text(statement, 7),
+            let sourceEpisodeIDsRaw = text(statement, 8),
+            let relatedNodeIDsRaw = text(statement, 9),
+            let relatedFactIDsRaw = text(statement, 10),
+            let statusRaw = text(statement, 11),
+            let status = GraphWriteCandidateStatus(rawValue: statusRaw),
+            let validationErrorsRaw = text(statement, 12),
+            let createdRaw = text(statement, 13),
+            let createdAt = date(createdRaw),
+            let updatedRaw = text(statement, 14),
+            let updatedAt = date(updatedRaw)
+        else {
+            throw SQLiteGraphStoreError.decodeFailed("graph_write_candidates row")
+        }
+        return GraphWriteCandidate(
+            id: id,
+            groupID: groupID,
+            kind: kind,
+            proposedByRunID: proposedByRunID,
+            proposedByToolCallID: text(statement, 4),
+            rationale: rationale,
+            confidence: sqlite3_column_double(statement, 6),
+            payloadJSON: payloadJSON,
+            sourceEpisodeIDs: try json([String].self, from: sourceEpisodeIDsRaw),
+            relatedNodeIDs: try json([String].self, from: relatedNodeIDsRaw),
+            relatedFactIDs: try json([String].self, from: relatedFactIDsRaw),
+            status: status,
+            validationErrors: try json([String].self, from: validationErrorsRaw),
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        )
     }
 
     private func decodeGraphEpisode(_ statement: OpaquePointer?) throws -> GraphEpisode {

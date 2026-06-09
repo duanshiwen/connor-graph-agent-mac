@@ -1,0 +1,151 @@
+import Foundation
+
+public enum AgentRunStatus: String, Codable, Sendable, Equatable {
+    case pending
+    case running
+    case completed
+    case failed
+    case cancelled
+}
+
+public struct AgentRun: Codable, Sendable, Equatable, Identifiable {
+    public var id: String
+    public var sessionID: String
+    public var groupID: String
+    public var status: AgentRunStatus
+    public var startedAt: Date
+    public var completedAt: Date?
+    public var model: String?
+    public var metadata: [String: String]
+
+    public init(
+        id: String = UUID().uuidString,
+        sessionID: String,
+        groupID: String,
+        status: AgentRunStatus = .pending,
+        startedAt: Date = Date(),
+        completedAt: Date? = nil,
+        model: String? = nil,
+        metadata: [String: String] = [:]
+    ) {
+        self.id = id
+        self.sessionID = sessionID
+        self.groupID = groupID
+        self.status = status
+        self.startedAt = startedAt
+        self.completedAt = completedAt
+        self.model = model
+        self.metadata = metadata
+    }
+}
+
+public enum AgentEventKind: String, Codable, Sendable, Equatable {
+    case runStarted
+    case textDelta
+    case textComplete
+    case assistantMessageCreated
+    case toolRequested
+    case toolApproved
+    case toolStarted
+    case toolFinished
+    case toolFailed
+    case permissionRequested
+    case permissionResolved
+    case budgetWarning
+    case runFailed
+    case runCompleted
+}
+
+public struct PersistedAgentEvent: Codable, Sendable, Equatable, Identifiable {
+    public var id: String
+    public var runID: String
+    public var sessionID: String
+    public var kind: AgentEventKind
+    public var payloadJSON: String
+    public var sequence: Int?
+    public var createdAt: Date
+
+    public init(
+        id: String = UUID().uuidString,
+        runID: String,
+        sessionID: String,
+        kind: AgentEventKind,
+        payloadJSON: String,
+        sequence: Int? = nil,
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.runID = runID
+        self.sessionID = sessionID
+        self.kind = kind
+        self.payloadJSON = payloadJSON
+        self.sequence = sequence
+        self.createdAt = createdAt
+    }
+}
+
+public struct AgentRunStartedEvent: Codable, Sendable, Equatable {
+    public var run: AgentRun
+
+    public init(run: AgentRun) {
+        self.run = run
+    }
+}
+
+public struct AgentTextDeltaEvent: Codable, Sendable, Equatable {
+    public var runID: String
+    public var sessionID: String
+    public var text: String
+
+    public init(runID: String, sessionID: String, text: String) {
+        self.runID = runID
+        self.sessionID = sessionID
+        self.text = text
+    }
+}
+
+public struct AgentTextCompleteEvent: Codable, Sendable, Equatable {
+    public var runID: String
+    public var sessionID: String
+    public var text: String
+    public var citations: [String]
+
+    public init(runID: String, sessionID: String, text: String, citations: [String] = []) {
+        self.runID = runID
+        self.sessionID = sessionID
+        self.text = text
+        self.citations = citations
+    }
+}
+
+public struct AgentRunCompletedEvent: Codable, Sendable, Equatable {
+    public var run: AgentRun
+
+    public init(run: AgentRun) {
+        self.run = run
+    }
+}
+
+public struct AgentRunFailure: Codable, Sendable, Equatable {
+    public var runID: String
+    public var sessionID: String
+    public var message: String
+
+    public init(runID: String, sessionID: String, message: String) {
+        self.runID = runID
+        self.sessionID = sessionID
+        self.message = message
+    }
+}
+
+public struct AgentBudgetWarning: Codable, Sendable, Equatable {
+    public var runID: String
+    public var sessionID: String
+    public var message: String
+
+    public init(runID: String, sessionID: String, message: String) {
+        self.runID = runID
+        self.sessionID = sessionID
+        self.message = message
+    }
+}
