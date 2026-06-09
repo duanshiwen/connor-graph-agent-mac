@@ -3,6 +3,7 @@ import Foundation
 public enum GraphEpisodeSourceType: String, Codable, Sendable, CaseIterable, Equatable {
     case chatMessage = "chat_message"
     case observeLog = "observe_log"
+    case webPage = "web_page"
     case file
     case manual
     case system

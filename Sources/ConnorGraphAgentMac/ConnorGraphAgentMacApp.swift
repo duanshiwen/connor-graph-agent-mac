@@ -62,6 +62,7 @@ final class AppViewModel: ObservableObject {
     @Published var chatSummaryMessage: String?
     @Published var isSubmittingChat: Bool = false
     @Published var agentEventTimeline: [AgentEventPresentation] = []
+    @Published var isBrowserVisible: Bool = false
 
     private var repository: AppGraphRepository?
     private var promotionRepository: AppPromotionQueueRepository?
@@ -527,10 +528,39 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func saveBrowserSelectionAsEpisode(_ selection: BrowserSelectionContext) async {
+        guard let repository else {
+            errorMessage = "当前没有可用的图谱仓储，无法保存网页证据。"
+            return
+        }
+        do {
+            let draft = BrowserGraphEvidenceBuilder().makeEpisodeDraft(
+                selection: selection,
+                groupID: "default",
+                sessionID: selectedChatSessionID
+            )
+            try repository.store.upsert(episode: draft.episode)
+            let snapshot = try repository.loadSnapshot()
+            graphNodes = snapshot.graphNodes
+            graphFacts = snapshot.graphFacts
+            graphEpisodes = snapshot.graphEpisodes
+            observeLogEntries = snapshot.observeLogEntries
+            errorMessage = nil
+            lastPromotionResultSummary = "已保存网页证据：\(draft.episode.name)"
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
     func submitChat() async {
         let prompt = chatInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        await submitChat(prompt: prompt, clearComposer: true)
+    }
+
+    func submitChat(prompt rawPrompt: String, clearComposer: Bool = false) async {
+        let prompt = rawPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty, !isSubmittingChat else { return }
-        chatInput = ""
+        if clearComposer { chatInput = "" }
         isSubmittingChat = true
         let optimisticTranscript = transcript
         let optimisticUserMessage = AgentMessage(role: .user, content: prompt)
