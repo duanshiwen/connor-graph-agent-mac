@@ -34,7 +34,7 @@ public struct AgentContextBuilder: Sendable {
     }
 
     public func context(for query: String) async throws -> AgentContext {
-        let response = try await hybridSearchService.search(query: GraphSearchQuery(text: query, groupID: groupID, limit: limit))
+        let response = try await hybridSearchService.search(query: GraphSearchQuery(text: query, graphID: groupID, limit: limit))
         return AgentContext(query: query, items: response.hits.map(contextItem))
     }
 
@@ -49,42 +49,21 @@ public struct AgentContextBuilder: Sendable {
 
     private func resultKind(for ownerType: GraphIndexOwnerType) -> GraphSearchResultKind {
         switch ownerType {
-        case .node: .node
-        case .fact: .edge
+        case .entity: .node
+        case .statement: .edge
         case .episode: .observeLog
         }
     }
 
     private func renderedContent(for hit: GraphSearchHit) -> String {
         switch hit.ownerType {
-        case .node:
-            let type = hit.metadata["type"] ?? "node"
-            var lines = ["Node[\(type)] \(hit.title): \(hit.text)"]
-            if hit.metadata["graph_context"] == "adjacent_facts" {
-                if let adjacentFactIDs = hit.metadata["adjacent_fact_ids"], !adjacentFactIDs.isEmpty {
-                    lines.append("Adjacent facts: \(adjacentFactIDs)")
-                }
-                if let adjacentRelations = hit.metadata["adjacent_fact_relations"], !adjacentRelations.isEmpty {
-                    lines.append("Adjacent relations: \(adjacentRelations)")
-                }
-                if let adjacentNodeIDs = hit.metadata["adjacent_node_ids"], !adjacentNodeIDs.isEmpty {
-                    lines.append("Adjacent node ids: \(adjacentNodeIDs)")
-                }
-            }
-            return lines.joined(separator: "\n")
-        case .fact:
-            var lines = ["Fact[\(hit.title)] \(hit.text)"]
-            if hit.metadata["graph_context"] == "fact_endpoints" {
-                let sourceTitle = hit.metadata["source_node_title"]
-                let sourceType = hit.metadata["source_node_type"]
-                let targetTitle = hit.metadata["target_node_title"]
-                let targetType = hit.metadata["target_node_type"]
-                if let sourceTitle, let sourceType, let targetTitle, let targetType {
-                    lines.append("Graph endpoints: \(sourceTitle)(\(sourceType)) -> \(targetTitle)(\(targetType))")
-                }
-                if let nodeIDs = hit.metadata["graph_context_node_ids"], !nodeIDs.isEmpty {
-                    lines.append("Graph node ids: \(nodeIDs)")
-                }
+        case .entity:
+            let type = hit.metadata["entity_kind"] ?? "entity"
+            return "Entity[\(type)] \(hit.title): \(hit.text)"
+        case .statement:
+            var lines = ["Statement[\(hit.title)] \(hit.text)"]
+            if let path = hit.metadata["inference_path"], !path.isEmpty {
+                lines.append("Inference path: \(path)")
             }
             return lines.joined(separator: "\n")
         case .episode:

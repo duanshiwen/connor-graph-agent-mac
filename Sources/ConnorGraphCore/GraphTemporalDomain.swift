@@ -1,188 +1,8 @@
 import Foundation
 
-public enum GraphEpisodeSourceType: String, Codable, Sendable, CaseIterable, Equatable {
-    case chatMessage = "chat_message"
-    case observeLog = "observe_log"
-    case webPage = "web_page"
-    case file
-    case manual
-    case system
-}
-
-public enum GraphTemporalStatus: String, Codable, Sendable, CaseIterable, Equatable {
-    case active
-    case draft
-    case archived
-    case superseded
-    case dismissed
-    case invalidated
-}
-
-public struct GraphEpisode: Codable, Sendable, Equatable, Identifiable {
-    public let id: String
-    public var groupID: String
-    public var sourceType: GraphEpisodeSourceType
-    public var sourceID: String?
-    public var name: String
-    public var content: String
-    public var sourceDescription: String
-    public var occurredAt: Date
-    public var ingestedAt: Date
-    public var sessionID: String?
-    public var workObjectID: String?
-    public var status: GraphTemporalStatus
-    public var metadata: [String: String]
-
-    public init(
-        id: String,
-        groupID: String,
-        sourceType: GraphEpisodeSourceType,
-        sourceID: String? = nil,
-        name: String,
-        content: String,
-        sourceDescription: String,
-        occurredAt: Date = Date(),
-        ingestedAt: Date = Date(),
-        sessionID: String? = nil,
-        workObjectID: String? = nil,
-        status: GraphTemporalStatus = .active,
-        metadata: [String: String] = [:]
-    ) {
-        self.id = id
-        self.groupID = groupID
-        self.sourceType = sourceType
-        self.sourceID = sourceID
-        self.name = name
-        self.content = content
-        self.sourceDescription = sourceDescription
-        self.occurredAt = occurredAt
-        self.ingestedAt = ingestedAt
-        self.sessionID = sessionID
-        self.workObjectID = workObjectID
-        self.status = status
-        self.metadata = metadata
-    }
-}
-
-public struct GraphNodeV2: Codable, Sendable, Equatable, Identifiable {
-    public let id: String
-    public var groupID: String
-    public var stableKey: String?
-    public var type: NodeType
-    public var canonicalName: String
-    public var title: String
-    public var summary: String
-    public var labels: [String]
-    public var attributes: [String: String]
-    public var status: GraphTemporalStatus
-    public var confidence: Double
-    public var createdAt: Date
-    public var updatedAt: Date
-    public var validFrom: Date?
-    public var validUntil: Date?
-    public var supersededByNodeID: String?
-    public var metadata: [String: String]
-
-    public init(
-        id: String,
-        groupID: String,
-        stableKey: String? = nil,
-        type: NodeType,
-        canonicalName: String,
-        title: String,
-        summary: String = "",
-        labels: [String] = [],
-        attributes: [String: String] = [:],
-        status: GraphTemporalStatus = .active,
-        confidence: Double = 1.0,
-        createdAt: Date = Date(),
-        updatedAt: Date = Date(),
-        validFrom: Date? = nil,
-        validUntil: Date? = nil,
-        supersededByNodeID: String? = nil,
-        metadata: [String: String] = [:]
-    ) {
-        self.id = id
-        self.groupID = groupID
-        self.stableKey = stableKey
-        self.type = type
-        self.canonicalName = canonicalName
-        self.title = title
-        self.summary = summary
-        self.labels = labels
-        self.attributes = attributes
-        self.status = status
-        self.confidence = confidence
-        self.createdAt = createdAt
-        self.updatedAt = updatedAt
-        self.validFrom = validFrom
-        self.validUntil = validUntil
-        self.supersededByNodeID = supersededByNodeID
-        self.metadata = metadata
-    }
-}
-
-public struct GraphFact: Codable, Sendable, Equatable, Identifiable {
-    public let id: String
-    public var groupID: String
-    public var sourceNodeID: String
-    public var targetNodeID: String
-    public var relation: RelationType
-    public var fact: String
-    public var confidence: Double
-    public var status: GraphTemporalStatus
-    public var createdAt: Date
-    public var updatedAt: Date
-    public var validAt: Date?
-    public var invalidAt: Date?
-    public var expiredAt: Date?
-    public var referenceTime: Date?
-    public var invalidatedByFactID: String?
-    public var attributes: [String: String]
-    public var metadata: [String: String]
-
-    public init(
-        id: String,
-        groupID: String,
-        sourceNodeID: String,
-        targetNodeID: String,
-        relation: RelationType,
-        fact: String,
-        confidence: Double = 1.0,
-        status: GraphTemporalStatus = .active,
-        createdAt: Date = Date(),
-        updatedAt: Date = Date(),
-        validAt: Date? = nil,
-        invalidAt: Date? = nil,
-        expiredAt: Date? = nil,
-        referenceTime: Date? = nil,
-        invalidatedByFactID: String? = nil,
-        attributes: [String: String] = [:],
-        metadata: [String: String] = [:]
-    ) {
-        self.id = id
-        self.groupID = groupID
-        self.sourceNodeID = sourceNodeID
-        self.targetNodeID = targetNodeID
-        self.relation = relation
-        self.fact = fact
-        self.confidence = confidence
-        self.status = status
-        self.createdAt = createdAt
-        self.updatedAt = updatedAt
-        self.validAt = validAt
-        self.invalidAt = invalidAt
-        self.expiredAt = expiredAt
-        self.referenceTime = referenceTime
-        self.invalidatedByFactID = invalidatedByFactID
-        self.attributes = attributes
-        self.metadata = metadata
-    }
-}
-
 public enum GraphIndexOwnerType: String, Codable, Sendable, CaseIterable, Equatable {
-    case node
-    case fact
+    case entity
+    case statement
     case episode
 }
 
@@ -195,7 +15,7 @@ public enum GraphIndexTaskType: String, Codable, Sendable, CaseIterable, Equatab
 
 public struct GraphEmbedding: Sendable, Equatable, Identifiable {
     public var id: String
-    public var groupID: String
+    public var graphID: String
     public var ownerType: GraphIndexOwnerType
     public var ownerID: String
     public var embeddingModel: String
@@ -206,7 +26,7 @@ public struct GraphEmbedding: Sendable, Equatable, Identifiable {
 
     public init(
         id: String,
-        groupID: String,
+        graphID: String,
         ownerType: GraphIndexOwnerType,
         ownerID: String,
         embeddingModel: String,
@@ -215,7 +35,7 @@ public struct GraphEmbedding: Sendable, Equatable, Identifiable {
         createdAt: Date = Date()
     ) {
         self.id = id
-        self.groupID = groupID
+        self.graphID = graphID
         self.ownerType = ownerType
         self.ownerID = ownerID
         self.embeddingModel = embeddingModel
@@ -317,7 +137,7 @@ public enum GraphJobType: String, Codable, Sendable, CaseIterable, Equatable {
 
 public struct GraphJob: Codable, Sendable, Equatable, Identifiable {
     public let id: String
-    public var groupID: String
+    public var graphID: String
     public var type: GraphJobType
     public var status: GraphJobStatus
     public var priority: Int
@@ -337,7 +157,7 @@ public struct GraphJob: Codable, Sendable, Equatable, Identifiable {
 
     public init(
         id: String,
-        groupID: String,
+        graphID: String,
         type: GraphJobType,
         status: GraphJobStatus = .queued,
         priority: Int = 0,
@@ -356,7 +176,7 @@ public struct GraphJob: Codable, Sendable, Equatable, Identifiable {
         metadata: [String: String] = [:]
     ) {
         self.id = id
-        self.groupID = groupID
+        self.graphID = graphID
         self.type = type
         self.status = status
         self.priority = priority
@@ -378,7 +198,7 @@ public struct GraphJob: Codable, Sendable, Equatable, Identifiable {
 
 public struct GraphIndexTask: Codable, Sendable, Equatable, Identifiable {
     public let id: String
-    public var groupID: String
+    public var graphID: String
     public var ownerType: GraphIndexOwnerType
     public var ownerID: String
     public var taskType: GraphIndexTaskType
@@ -391,7 +211,7 @@ public struct GraphIndexTask: Codable, Sendable, Equatable, Identifiable {
 
     public init(
         id: String,
-        groupID: String,
+        graphID: String,
         ownerType: GraphIndexOwnerType,
         ownerID: String,
         taskType: GraphIndexTaskType = .ftsUpsert,
@@ -403,7 +223,7 @@ public struct GraphIndexTask: Codable, Sendable, Equatable, Identifiable {
         updatedAt: Date = Date()
     ) {
         self.id = id
-        self.groupID = groupID
+        self.graphID = graphID
         self.ownerType = ownerType
         self.ownerID = ownerID
         self.taskType = taskType

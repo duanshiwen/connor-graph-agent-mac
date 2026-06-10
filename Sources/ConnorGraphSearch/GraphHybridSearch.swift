@@ -68,43 +68,43 @@ public protocol GraphCrossEncoderReranker: Sendable {
 
 public struct GraphSearchQuery: Sendable, Equatable {
     public var text: String
-    public var groupID: String
+    public var graphID: String
     public var referenceTime: Date?
-    public var includeNodes: Bool
-    public var includeFacts: Bool
+    public var includeEntities: Bool
+    public var includeStatements: Bool
     public var includeEpisodes: Bool
     public var limit: Int
-    public var statusFilter: Set<GraphTemporalStatus>
+    public var beliefStatusFilter: Set<GraphBeliefStatus>
     public var embeddingModel: String?
     public var queryEmbedding: [Double]?
-    public var centerNodeIDs: [String]
+    public var centerEntityIDs: [String]
     public var reranking: GraphRerankingConfig
 
     public init(
         text: String,
-        groupID: String,
+        graphID: String,
         referenceTime: Date? = nil,
-        includeNodes: Bool = true,
-        includeFacts: Bool = true,
+        includeEntities: Bool = true,
+        includeStatements: Bool = true,
         includeEpisodes: Bool = true,
         limit: Int = 20,
-        statusFilter: Set<GraphTemporalStatus> = [.active],
+        beliefStatusFilter: Set<GraphBeliefStatus> = [.active],
         embeddingModel: String? = nil,
         queryEmbedding: [Double]? = nil,
-        centerNodeIDs: [String] = [],
+        centerEntityIDs: [String] = [],
         reranking: GraphRerankingConfig = GraphRerankingConfig()
     ) {
         self.text = text
-        self.groupID = groupID
+        self.graphID = graphID
         self.referenceTime = referenceTime
-        self.includeNodes = includeNodes
-        self.includeFacts = includeFacts
+        self.includeEntities = includeEntities
+        self.includeStatements = includeStatements
         self.includeEpisodes = includeEpisodes
         self.limit = limit
-        self.statusFilter = statusFilter
+        self.beliefStatusFilter = beliefStatusFilter
         self.embeddingModel = embeddingModel
         self.queryEmbedding = queryEmbedding
-        self.centerNodeIDs = centerNodeIDs
+        self.centerEntityIDs = centerEntityIDs
         self.reranking = reranking
     }
 }

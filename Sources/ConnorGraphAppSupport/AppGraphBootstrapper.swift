@@ -8,13 +8,14 @@ public struct AppGraphBootstrapper: Sendable {
         self.paths = paths
     }
 
-    public func bootstrapStore() throws -> SQLiteGraphStore {
+    public func bootstrapStore() throws -> SQLiteGraphKernelStore {
         try FileManager.default.createDirectory(
             at: paths.applicationSupportDirectory,
             withIntermediateDirectories: true
         )
-        let store = try SQLiteGraphStore(path: paths.databaseURL.path)
+        let store = try SQLiteGraphKernelStore(path: paths.databaseURL.path)
         try store.migrate()
+        try store.seedBaseOntology(graphID: "default")
         return store
     }
 }

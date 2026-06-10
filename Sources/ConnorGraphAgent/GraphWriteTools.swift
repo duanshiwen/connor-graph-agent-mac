@@ -4,7 +4,7 @@ import ConnorGraphMemory
 
 public struct GraphIngestEpisodeTool: AgentTool {
     public let name = "graph_ingest_episode"
-    public let description = "Ingest an observed episode into the graph evidence layer and observe log. This does not directly create or mutate nodes/facts."
+    public let description = "Ingest an observed episode into the graph evidence layer and observe log. This does not directly create or mutate entities/statements."
     public let permission: AgentPermissionCapability = .proposeGraphWrite
     public let inputSchema = AgentToolInputSchema.object(properties: [
         "name": .string(description: "Episode name."),
@@ -27,12 +27,12 @@ public struct GraphIngestEpisodeTool: AgentTool {
         guard let content = arguments.string("content"), !content.isEmpty else { throw AgentToolError.invalidArguments("content is required") }
         guard let sourceDescription = arguments.string("sourceDescription"), !sourceDescription.isEmpty else { throw AgentToolError.invalidArguments("sourceDescription is required") }
 
-        let episode = GraphEpisode(
+        let episode = GraphEpisodeV3(
             id: UUID().uuidString,
-            groupID: context.groupID,
+            graphID: context.groupID,
             sourceType: .chatMessage,
             sourceID: arguments.string("sourceID"),
-            name: name,
+            title: name,
             content: content,
             sourceDescription: sourceDescription,
             sessionID: context.sessionID,
@@ -59,7 +59,7 @@ public struct GraphIngestEpisodeTool: AgentTool {
         return AgentToolResult(
             toolCallID: context.toolCallID,
             toolName: name,
-            contentText: "Ingested evidence episode \(episode.id). No graph facts were committed.",
+            contentText: "Ingested evidence episode \(episode.id). No graph statements were committed.",
             contentJSON: json,
             citations: [episode.id, observe.id]
         )
@@ -73,7 +73,7 @@ public struct GraphIngestEpisodeTool: AgentTool {
 
 public struct GraphProposeWriteTool: AgentTool {
     public let name = "graph_propose_write"
-    public let description = "Create a reviewed graph write candidate. It never commits graph nodes/facts directly."
+    public let description = "Create a reviewed graph write candidate. It never commits graph entities/statements directly."
     public let permission: AgentPermissionCapability = .proposeGraphWrite
     public let inputSchema = AgentToolInputSchema.object(properties: [
         "kind": .string(description: "Candidate kind: createNode, updateNode, createFact, updateFact, invalidateFact, attachEvidence, createMention."),
