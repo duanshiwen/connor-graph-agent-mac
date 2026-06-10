@@ -816,6 +816,7 @@ Index refreshes
   - confidence；
   - policy reason trace。
 - 当前已持久化：job/source、outcome、admission action/reasons、extracted/committed counts、anomaly count、error message、metadata。
+- LLM-backed extraction trace metadata 已接入：provider、model、prompt version、token usage、latency、finish reason、raw response id/raw JSON、normalized JSON。
 - UI 目标是 Memory Inspector / Change Log，而不是让用户逐条处理队列。
 
 商用验收标准：
