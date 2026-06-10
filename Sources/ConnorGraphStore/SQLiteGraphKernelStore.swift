@@ -769,6 +769,13 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         """)
     }
 
+    public func agentAuditEvents(runID: String, limit: Int = 100) throws -> [AgentAuditEvent] {
+        try query(sql: """
+        SELECT id, run_id, session_id, event_type, actor, capability, tool_name, decision, payload_json, created_at
+        FROM agent_audit_events WHERE run_id = \(quote(runID)) ORDER BY created_at ASC LIMIT \(limit)
+        """).map(decodeAuditEvent)
+    }
+
     private func upsertEpisodeFTS(_ episode: GraphEpisodeV3) throws {
         try execute("DELETE FROM graph_episodes_fts WHERE episode_id = \(quote(episode.id));")
         try execute("""
@@ -800,6 +807,21 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         let personal = ["email", "message", "conversation_thread", "contact", "calendar_event", "reminder", "task", "commitment", "preference", "habit", "goal", "address", "home", "family_member", "bill", "subscription", "health_record", "device", "account", "credential_reference", "purchase", "travel_plan", "meal", "exercise"].map { ($0, $0.replacingOccurrences(of: "_", with: " "), 1, "personal-life", GraphEntityKind.classNode) }
         let knowledge = ["question", "answer", "decision", "sop", "runbook", "work_object", "project", "milestone", "issue", "repository", "code_module", "design_doc", "research_note", "source_document", "claim", "argument", "constraint", "risk", "requirement"].map { ($0, $0.replacingOccurrences(of: "_", with: " "), 2, "knowledge-project", GraphEntityKind.classNode) }
         return general + personal + knowledge
+    }
+
+    private func decodeAuditEvent(_ row: [String]) throws -> AgentAuditEvent {
+        AgentAuditEvent(
+            id: row[0],
+            runID: row[1],
+            sessionID: row[2],
+            eventType: AgentAuditEventType(rawValue: row[3]) ?? .toolFailed,
+            actor: row[4],
+            capability: nilIfEmpty(row[5]).flatMap(AgentPermissionCapability.init(rawValue:)),
+            toolName: nilIfEmpty(row[6]),
+            decision: try nilIfEmpty(row[7]).map { try decode(AgentPermissionDecision.self, $0) },
+            payloadJSON: row[8],
+            createdAt: try date(row[9])
+        )
     }
 
     private func decodeEpisode(_ row: [String]) throws -> GraphEpisodeV3 {

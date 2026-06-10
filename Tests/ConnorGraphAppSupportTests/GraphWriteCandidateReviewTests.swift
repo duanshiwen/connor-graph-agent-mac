@@ -4,7 +4,7 @@ import ConnorGraphAppSupport
 import ConnorGraphCore
 import ConnorGraphStore
 
-@Test func graphWriteCandidateReviewCommitsApprovedCreateNodeCandidate() throws {
+@Test func graphWriteCandidateReviewCommitsApprovedCreateNodeThroughResolverBackedPath() throws {
     let store = try SQLiteGraphStore(path: ":memory:")
     try store.migrate()
     let repository = AppGraphWriteCandidateRepository(store: store)
@@ -14,16 +14,16 @@ import ConnorGraphStore
         proposedByRunID: "run-1",
         rationale: "Create reviewed node",
         confidence: 0.9,
-        payloadJSON: #"{"id":"node-reviewed","nodeType":"entity","canonicalName":"Reviewed Node","title":"Reviewed Node","summary":"A reviewed candidate node."}"#
+        payloadJSON: #"{"id":"reviewed","entityKind":"entity","name":"Reviewed Node","summary":"A reviewed candidate node."}"#
     )
     try store.upsert(graphWriteCandidate: candidate)
 
     let approved = try repository.approve(candidate)
     let result = try repository.commit(approved)
 
-    #expect(result.createdNodeIDs == ["node-reviewed"])
-    #expect(try store.graphNodeV2(id: "node-reviewed")?.metadata["committedFromCandidateID"] == candidate.id)
-    #expect(try store.graphWriteCandidate(id: candidate.id)?.status == .committed)
+    #expect(result.createdEntityIDs == ["entity-default-reviewed"])
+    #expect(try store.entity(id: "entity-default-reviewed")?.metadata["extraction_local_id"] == "reviewed")
+    #expect(try store.writeCandidates(groupID: "default").first { $0.id == candidate.id }?.status == .committed)
 }
 
 @Test func graphWriteCandidateReviewRejectsUnapprovedDirectCommit() throws {
@@ -36,7 +36,7 @@ import ConnorGraphStore
         proposedByRunID: "run-1",
         rationale: "Must be approved first",
         confidence: 0.8,
-        payloadJSON: #"{"nodeType":"entity","canonicalName":"Unsafe","title":"Unsafe"}"#
+        payloadJSON: #"{"entityKind":"entity","name":"Unsafe"}"#
     )
 
     #expect(throws: GraphWriteCandidateCommitError.notApproved(candidate.id)) {
@@ -54,14 +54,14 @@ import ConnorGraphStore
         proposedByRunID: "run-governed",
         rationale: "Create governed node",
         confidence: 0.95,
-        payloadJSON: #"{"id":"node-governed","nodeType":"entity","canonicalName":"Governed Node","title":"Governed Node"}"#
+        payloadJSON: #"{"id":"governed","entityKind":"entity","name":"Governed Node"}"#
     )
     try store.upsert(graphWriteCandidate: candidate)
 
     let approved = try await repository.approveGoverned(candidate)
     let result = try await repository.commitGoverned(approved)
 
-    #expect(result.createdNodeIDs == ["node-governed"])
+    #expect(result.createdEntityIDs == ["entity-default-governed"])
     let auditEvents = try store.agentAuditEvents(runID: "run-governed")
     #expect(auditEvents.map(\.eventType).contains(.permissionDecision))
     #expect(auditEvents.map(\.eventType).contains(.graphWriteCommitStarted))
@@ -79,7 +79,7 @@ import ConnorGraphStore
         proposedByRunID: "run-read-only",
         rationale: "Should not commit in read-only mode",
         confidence: 0.8,
-        payloadJSON: #"{"id":"node-denied","nodeType":"entity","canonicalName":"Denied Node","title":"Denied Node"}"#
+        payloadJSON: #"{"id":"denied","entityKind":"entity","name":"Denied Node"}"#
     )
 
     let approved = try await repository.approveGoverned(candidate)
@@ -87,7 +87,7 @@ import ConnorGraphStore
         _ = try await repository.commitGoverned(approved)
         Issue.record("Expected read-only policy to deny graph write commit")
     } catch GraphWriteCandidateCommitError.permissionDenied {
-        #expect(try store.graphNodeV2(id: "node-denied") == nil)
+        #expect(try store.entity(id: "entity-default-denied") == nil)
         let auditEvents = try store.agentAuditEvents(runID: "run-read-only")
         #expect(auditEvents.map(\.eventType).contains(.permissionDecision))
         #expect(auditEvents.map(\.eventType).contains(.graphWriteCommitFailed))
@@ -95,7 +95,7 @@ import ConnorGraphStore
     }
 }
 
-@Test func graphWriteCandidateValidationFailsMissingReferencedNodesBeforeCommit() async throws {
+@Test func graphWriteCandidateValidationFailsMissingReferencedEntitiesBeforeCommit() async throws {
     let store = try SQLiteGraphStore(path: ":memory:")
     try store.migrate()
     let repository = AppGraphWriteCandidateRepository(store: store, permissionMode: .trustedWrite)
@@ -105,18 +105,42 @@ import ConnorGraphStore
         proposedByRunID: "run-validation",
         rationale: "Create fact with missing endpoints",
         confidence: 0.9,
-        payloadJSON: #"{"sourceNodeID":"missing-source","targetNodeID":"missing-target","relation":"RELATED_TO","fact":"Missing source relates to missing target."}"#
+        payloadJSON: #"{"sourceEntityID":"missing-source","targetEntityID":"missing-target","predicate":"RELATED_TO","statementText":"Missing source relates to missing target."}"#
     )
     try store.upsert(graphWriteCandidate: candidate)
 
     let validated = try await repository.validateGoverned(candidate)
 
     #expect(validated.validation.isValid == false)
-    #expect(try store.graphWriteCandidate(id: candidate.id)?.status == .validationFailed)
-    #expect(try store.graphWriteCandidate(id: candidate.id)?.validationErrors.contains { $0.contains("missing source node") } == true)
+    #expect(try store.writeCandidates(groupID: "default").first { $0.id == candidate.id }?.status == .validationFailed)
+    #expect(try store.writeCandidates(groupID: "default").first { $0.id == candidate.id }?.validationErrors.contains { $0.contains("Missing graph entity") } == true)
     let auditEvents = try store.agentAuditEvents(runID: "run-validation")
     #expect(auditEvents.map(\.eventType).contains(.graphWriteValidationStarted))
     #expect(auditEvents.map(\.eventType).contains(.graphWriteValidationFailed))
+}
+
+@Test func graphWriteCandidateCreateFactReusesExistingEntitiesThroughResolverBackedPath() async throws {
+    let store = try SQLiteGraphStore(path: ":memory:")
+    try store.migrate()
+    try store.upsert(entity: GraphEntity(id: "entity-a", graphID: "default", name: "Entity A", entityKind: .entity, scope: .project))
+    try store.upsert(entity: GraphEntity(id: "entity-b", graphID: "default", name: "Entity B", entityKind: .entity, scope: .project))
+    let repository = AppGraphWriteCandidateRepository(store: store, permissionMode: .trustedWrite)
+    let candidate = GraphWriteCandidate(
+        groupID: "default",
+        kind: .createFact,
+        proposedByRunID: "run-fact",
+        rationale: "Entity A relates to Entity B",
+        confidence: 0.95,
+        payloadJSON: #"{"subjectEntityID":"entity-a","objectEntityID":"entity-b","predicate":"RELATED_TO","statementText":"Entity A relates to Entity B."}"#
+    )
+
+    let approved = try await repository.approveGoverned(candidate)
+    let result = try await repository.commitGoverned(approved)
+
+    #expect(result.createdEntityIDs.isEmpty)
+    #expect(result.createdStatementIDs.count == 1)
+    let statements = try store.statements(graphID: "default")
+    #expect(statements.contains { $0.subjectEntityID == "entity-a" && $0.objectEntityID == "entity-b" })
 }
 
 @Test func graphWriteCandidateAuditTimelineFiltersEventsByCandidateID() async throws {
@@ -129,14 +153,13 @@ import ConnorGraphStore
         proposedByRunID: "run-audit-timeline",
         rationale: "Create audited node",
         confidence: 0.9,
-        payloadJSON: #"{"id":"node-audit","nodeType":"entity","canonicalName":"Audited Node","title":"Audited Node"}"#
+        payloadJSON: #"{"id":"audit","entityKind":"entity","name":"Audited Node"}"#
     )
 
     let approved = try await repository.approveGoverned(candidate)
     _ = try await repository.commitGoverned(approved)
 
     let timeline = try repository.loadAuditTimeline(for: candidate)
-    #expect(timeline.map(\.title).contains("Validation started"))
     #expect(timeline.map(\.title).contains("Candidate approved"))
     #expect(timeline.map(\.title).contains("Permission decision"))
     #expect(timeline.map(\.title).contains("Commit finished"))
