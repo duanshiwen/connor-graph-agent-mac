@@ -110,8 +110,16 @@ temporal graph-only
 
 以下能力已经有模型、接口或框架，但还不是可商用完成态：
 
-- `GraphExtractorProvider` 已定义，但默认实现仍是 `StubGraphExtractor`。
-- 后台 extraction job pipeline 已存在，但真实 LLM-backed extraction 尚未接入。
+- `GraphExtractorProvider` 已定义，`StubGraphExtractor` 保留为测试 double / fallback。
+- 已新增 production-oriented extraction 基础设施：
+  - `GraphStructuredExtractionOutput`；
+  - `GraphExtractionDecoder`；
+  - `GraphExtractionPromptBuilder`；
+  - `LLMGraphExtractor`；
+  - `AnyGraphExtractorProvider`；
+  - `AppGraphBackgroundJobRunner` 的 LLM settings 接线。
+- 后台 extraction job pipeline 已可选择 LLM-backed extractor，并已接入 `GraphWriteAdmissionPolicy`：默认系统自动准入，高风险/低置信/缺证据时 hold 或 ask，而不是要求用户逐条审核。
+- 已新增 `GraphExtractionTrace` / `graph_extraction_traces`，持久化 extraction/admission 结果摘要，并在 macOS App 中提供“记忆准入”诊断视图。
 - `GraphBackgroundJobRunner` 已支持多类 job，但以下 worker 仍未实现：
   - `groundingCheck`
   - `confidenceDecay`
@@ -220,11 +228,11 @@ graph LR
     Observe --> Extraction[Background Extraction LLM]
     Ingestion --> Extraction
 
-    Extraction --> Resolver[Entity Resolution]
+    Extraction --> Gate[Write Admission Gate]
+    Gate --> Resolver[Entity Resolution]
     Resolver --> Constraints[Constraint Validation]
-    Constraints --> Candidate[Graph Write Candidate]
-    Candidate --> Review[Review / Policy / Auto-Commit]
-    Review --> Graph[(SQLite Temporal Graph)]
+    Constraints --> Decision[Auto-Commit / Hold / Ask]
+    Decision --> Graph[(SQLite Temporal Graph)]
 
     Graph --> Index[FTS / Embedding / Graph Index]
     Index --> GraphRead
@@ -244,8 +252,8 @@ graph TD
     Statement -->|objectEntityID| EntityB[GraphEntity]
     Statement -->|justifications| Justification[GraphJustification]
     Observe[ObserveLogEntry] -->|promote / extract| Episode
-    Candidate[GraphWriteCandidate] -->|review / commit| EntityA
-    Candidate -->|review / commit| Statement
+    Admission[GraphWriteAdmissionPolicy] -->|auto-commit / hold / ask| EntityA
+    Admission -->|auto-commit / hold / ask| Statement
     Job[GraphJobV3] -->|background process| Episode
     Job -->|background process| Statement
 ```
@@ -278,8 +286,8 @@ observe
 → extract
 → resolve
 → validate
-→ write candidate
-→ review / commit
+→ write admission gate
+→ auto-commit / hold / ask when needed
 → index
 → retrieve
 → self-heal
@@ -321,8 +329,8 @@ Evidence Episode
 → Extraction Draft
 → Entity Resolution
 → Constraint Validation
-→ Graph Write Candidate
-→ Policy / Review / Auto-Commit
+→ Write Admission Gate
+→ Auto-Commit / Hold / Ask When Needed
 → Index Refresh
 ```
 
@@ -788,33 +796,45 @@ Index refreshes
 - 所有自动 merge 都有 reason trace；
 - 高风险 merge 必须进入 review。
 
-### A3. Graph Write Candidate Review
+### A3. Graph Write Admission Gate
 
 交付物：
 
-- Rich diff UI：展示候选写入前后的图谱变化。
-- Review actions：
-  - accept；
-  - reject；
-  - edit；
-  - merge；
-  - defer；
-  - mark as duplicate；
-  - mark as unsafe。
-- 每个 candidate 展示：
+- 系统级准入策略，而不是默认用户手动审核。
+- Admission actions：
+  - `autoCommit`：高置信、有证据、低风险事实自动进入 truth graph；
+  - `hold`：低置信、缺证据、潜在重复或需后台进一步处理的事实暂停；
+  - `askUser`：只有敏感、冲突、高影响、长期偏好等必要场景才询问用户；
+  - `discard`：空结果、无价值或明确不应保留的结果直接丢弃。
+- 每个 admission decision 保留或计划保留：
   - evidence episode；
   - evidence span；
   - extraction rationale；
   - resolver result；
   - constraint validation result；
   - contradiction warning；
-  - confidence。
+  - confidence；
+  - policy reason trace。
+- 当前已持久化：job/source、outcome、admission action/reasons、extracted/committed counts、anomaly count、error message、metadata。
+- LLM-backed extraction trace metadata 已接入：provider、model、prompt version、token usage、latency、finish reason、raw response id。
+- `graph_extraction_trace_payloads` 已用于保存 prompt、raw response、normalized JSON 和 decoder error payload，避免主 trace metadata 膨胀。
+- Decoder failure 已可持久化 LLM response metadata 和 decoder diagnostics。
+- 已新增 `GraphExtractionReplayService`，支持从 stored payload 重新 decode，并以 append-only dry-run trace 方式重跑 admission。
+- Entity resolution plan 已进入 extraction 主路径：worker 在 admission 前计算 matched/create/potential-duplicate 计划，policy 使用该计划决策，并把 resolution 计数写入 trace metadata。
+- Conflict preview 已进入 extraction admission 主路径：worker/replay 在写入前用 existing active statements 预检直接冲突，policy 对冲突写入返回 `ask_user`，并把 conflict count/preview 写入 trace metadata。
+- Admission hold diagnostics queue 已实现：`hold` / `ask_user` 会生成系统自愈队列项，推荐 replay、grounding、merge、inspect evidence 或必要时 ask user；该队列不是默认用户逐条审核。
+- Memory Inspector / Change Log 初版已实现：extraction commit/hold/ask/discard/failure 会写入 `graph_memory_change_log`，App 新增“记忆变更”页面展示 changed entities/statements/anomalies、source trace 和 summary。
+- Episode FTS retrieval 已实现：`graph_episodes_fts` 会随 `graph_episodes_v3` upsert 更新，`SQLiteGraphHybridSearchService` 已按 `includeEpisodes` 返回 episode hits。
+- Hybrid graph retrieval fusion 初版已实现：statement/entity/episode FTS hits 会用 weighted RRF 风格分数融合，并扩展 graph neighborhood statements 与 source episodes，hit metadata 会记录 `fusion_methods` 和 graph context。
+- UI 目标是 Memory Inspector / Change Log，而不是让用户逐条处理队列。
 
 商用验收标准：
 
-- 用户能理解“系统准备记住什么”；
-- 用户能修改候选事实再提交；
-- 所有 review 决策进入 audit log；
+- 普通高置信记忆自动维护，不制造用户审核疲劳；
+- 用户能理解“系统记住了什么、为什么记住、何时使用”；
+- 用户可以撤销、修改、禁用或导出记忆；
+- ask user 只发生在冲突、敏感、高影响或用户明确要求确认的场景；
+- 所有 admission 决策进入 audit log；
 - 可按 session、source、work object 回溯。
 
 ### A4. Complete Hybrid Retrieval
@@ -1329,10 +1349,10 @@ memory dashboard
 
 优先级最高的具体工程任务：
 
-1. 新增 `LLMGraphExtractor`，并保留 `StubGraphExtractor` 作为测试 double。
-2. 新增 extraction JSON schema 与 prompt builder。
-3. 将 `AppGraphBackgroundJobRunner` 支持根据 LLM settings 选择真实 extractor。
-4. 为 `GraphExtractionWorker` 增加 extraction trace / raw response / validation failure 记录。
+1. ✅ 新增 `LLMGraphExtractor`，并保留 `StubGraphExtractor` 作为测试 double。
+2. ✅ 新增 extraction JSON schema、decoder 与 prompt builder。
+3. ✅ 将 `AppGraphBackgroundJobRunner` 支持根据 LLM settings 选择真实 extractor，并在不可用时 fallback 到 stub。
+4. 部分完成：`GraphExtractionWorker` 已增加 result-level entity/statement count 和 error message；raw response / validation failure 持久化 trace 仍需后续 schema 支持。
 5. 将 `SQLiteGraphEntityResolver` 接入 optimistic write 主路径。
 6. 补 `graph_episodes_v3` FTS 表和 episode search API。
 7. 扩展 `SQLiteGraphHybridSearchService`，支持 entity + statement + episode 三类结果。

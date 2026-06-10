@@ -109,11 +109,13 @@ public struct GraphExtractionDraft: Codable, Sendable, Equatable {
     public var source: GraphExtractionSource
     public var entities: [GraphExtractedEntityDraft]
     public var statements: [GraphExtractedStatementDraft]
+    public var metadata: [String: String]
 
-    public init(source: GraphExtractionSource, entities: [GraphExtractedEntityDraft] = [], statements: [GraphExtractedStatementDraft] = []) {
+    public init(source: GraphExtractionSource, entities: [GraphExtractedEntityDraft] = [], statements: [GraphExtractedStatementDraft] = [], metadata: [String: String] = [:]) {
         self.source = source
         self.entities = entities
         self.statements = statements
+        self.metadata = metadata
     }
 
     public func toOptimisticWriteBatch(now: Date = Date()) throws -> GraphOptimisticWriteBatch {
@@ -135,6 +137,8 @@ public struct GraphExtractionDraft: Codable, Sendable, Equatable {
 
         var entityByLocalID: [String: GraphEntity] = [:]
         let graphEntities = entities.map { draft in
+            var metadata = draft.metadata
+            metadata["extraction_local_id"] = draft.localID
             let entity = GraphEntity(
                 id: stableID(prefix: "entity", graphID: source.graphID, localID: draft.localID),
                 graphID: source.graphID,
@@ -147,7 +151,7 @@ public struct GraphExtractionDraft: Codable, Sendable, Equatable {
                 confidence: draft.confidence,
                 createdAt: now,
                 updatedAt: now,
-                metadata: draft.metadata
+                metadata: metadata
             )
             entityByLocalID[draft.localID] = entity
             return entity

@@ -20,6 +20,7 @@ private func temporaryKernelDatabaseURL(_ name: String = UUID().uuidString) -> U
     #expect(tables.contains("graph_anomalies"))
     #expect(tables.contains("graph_entities_fts"))
     #expect(tables.contains("graph_statements_fts"))
+    #expect(tables.contains("graph_episodes_fts"))
 }
 
 @Test func graphKernelStoreRoundTripsEntityStatementAndEpisode() throws {
@@ -77,6 +78,7 @@ private func temporaryKernelDatabaseURL(_ name: String = UUID().uuidString) -> U
     #expect(try store.statement(id: statement.id)?.beliefStatus == .active)
     #expect(try store.searchEntitiesFTS(query: "Shiwen", graphID: "default", limit: 10).map(\.id) == [person.id])
     #expect(try store.searchStatementsFTS(query: "structured", graphID: "default", limit: 10).map(\.id) == [statement.id])
+    #expect(try store.searchEpisodesFTS(query: "plans", graphID: "default", limit: 10).map(\.id) == [episode.id])
 }
 
 @Test func graphKernelStoreSeedsPersonalKnowledgeAndProjectOntology() throws {

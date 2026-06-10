@@ -57,6 +57,9 @@ public struct GraphExtractionJobPayload: Sendable, Equatable {
 
 public enum GraphExtractionWorkerAction: String, Sendable, Equatable {
     case committed
+    case held
+    case askUser = "ask_user"
+    case discarded
     case failed
     case skipped
 }
@@ -66,11 +69,27 @@ public struct GraphExtractionWorkerResult: Sendable, Equatable, Identifiable {
     public var jobID: String
     public var action: GraphExtractionWorkerAction
     public var writeResult: GraphOptimisticWriteResult
+    public var extractedEntityCount: Int
+    public var extractedStatementCount: Int
+    public var errorMessage: String?
+    public var admissionDecision: GraphWriteAdmissionDecision?
 
-    public init(jobID: String, action: GraphExtractionWorkerAction, writeResult: GraphOptimisticWriteResult = GraphOptimisticWriteResult()) {
+    public init(
+        jobID: String,
+        action: GraphExtractionWorkerAction,
+        writeResult: GraphOptimisticWriteResult = GraphOptimisticWriteResult(),
+        extractedEntityCount: Int = 0,
+        extractedStatementCount: Int = 0,
+        errorMessage: String? = nil,
+        admissionDecision: GraphWriteAdmissionDecision? = nil
+    ) {
         self.jobID = jobID
         self.action = action
         self.writeResult = writeResult
+        self.extractedEntityCount = extractedEntityCount
+        self.extractedStatementCount = extractedStatementCount
+        self.errorMessage = errorMessage
+        self.admissionDecision = admissionDecision
     }
 }
 
@@ -88,11 +107,18 @@ public struct GraphExtractionWorker<Extractor: GraphExtractorProvider>: Sendable
     public var store: SQLiteGraphKernelStore
     public var extractor: Extractor
     public var optimisticWriter: GraphOptimisticWriteService
+    public var admissionPolicy: GraphWriteAdmissionPolicy
 
-    public init(store: SQLiteGraphKernelStore, extractor: Extractor, optimisticWriter: GraphOptimisticWriteService? = nil) {
+    public init(
+        store: SQLiteGraphKernelStore,
+        extractor: Extractor,
+        optimisticWriter: GraphOptimisticWriteService? = nil,
+        admissionPolicy: GraphWriteAdmissionPolicy = GraphWriteAdmissionPolicy()
+    ) {
         self.store = store
         self.extractor = extractor
         self.optimisticWriter = optimisticWriter ?? GraphOptimisticWriteService(store: store)
+        self.admissionPolicy = admissionPolicy
     }
 
     public func runNext(graphID: String, now: Date = Date()) async throws -> GraphExtractionWorkerResult? {
@@ -105,15 +131,273 @@ public struct GraphExtractionWorker<Extractor: GraphExtractorProvider>: Sendable
     public func run(job: GraphJobV3, now: Date = Date()) async throws -> GraphExtractionWorkerResult {
         do {
             let payload = try GraphExtractionJobPayload(dictionary: job.payload)
-            let draft = try await extractor.extract(from: payload.source)
-            let batch = try draft.toOptimisticWriteBatch(now: now)
-            let writeResult = try optimisticWriter.commit(batch)
-            try mark(job: job, status: .succeeded, now: now)
-            return GraphExtractionWorkerResult(jobID: job.id, action: .committed, writeResult: writeResult)
+            let extractedDraft = try await extractor.extract(from: payload.source)
+            let resolutionPlan = try GraphEntityResolutionPlanner(resolver: optimisticWriter.resolver).plan(for: extractedDraft)
+            let conflictPreview = try GraphExtractionConflictPreflight(store: store, detector: optimisticWriter.contradictionDetector)
+                .preview(draft: extractedDraft, resolutionPlan: resolutionPlan, now: now)
+            let draft = extractedDraft
+                .withEntityResolutionPlanMetadata(resolutionPlan)
+                .withConflictPreviewMetadata(conflictPreview)
+            let admission = try admissionPolicy.decide(draft: draft, resolutionPlan: resolutionPlan, conflictPreview: conflictPreview)
+            switch admission.action {
+            case .autoCommit:
+                let batch = try draft.toOptimisticWriteBatch(now: now)
+                let writeResult = try optimisticWriter.commit(batch)
+                let traceID = try appendTrace(job: job, source: payload.source, draft: draft, outcome: .committed, admission: admission, writeResult: writeResult, now: now)
+                try appendMemoryChangeLog(traceID: traceID, job: job, source: payload.source, action: .extractionCommitted, admission: admission, writeResult: writeResult, draft: draft, now: now)
+                try mark(job: job, status: .succeeded, now: now)
+                return GraphExtractionWorkerResult(
+                    jobID: job.id,
+                    action: .committed,
+                    writeResult: writeResult,
+                    extractedEntityCount: draft.entities.count,
+                    extractedStatementCount: draft.statements.count,
+                    admissionDecision: admission
+                )
+            case .hold:
+                let traceID = try appendTrace(job: job, source: payload.source, draft: draft, outcome: .held, admission: admission, errorMessage: admission.message, now: now)
+                try enqueueAdmissionHoldDiagnostics(traceID: traceID, job: job, source: payload.source, admission: admission, draft: draft, now: now)
+                try appendMemoryChangeLog(traceID: traceID, job: job, source: payload.source, action: .extractionHeld, admission: admission, draft: draft, now: now)
+                try mark(job: job, status: .paused, now: now, errorCode: "admission_hold", errorMessage: admission.message)
+                return GraphExtractionWorkerResult(
+                    jobID: job.id,
+                    action: .held,
+                    extractedEntityCount: draft.entities.count,
+                    extractedStatementCount: draft.statements.count,
+                    errorMessage: admission.message,
+                    admissionDecision: admission
+                )
+            case .askUser:
+                let traceID = try appendTrace(job: job, source: payload.source, draft: draft, outcome: .askUser, admission: admission, errorMessage: admission.message, now: now)
+                try enqueueAdmissionHoldDiagnostics(traceID: traceID, job: job, source: payload.source, admission: admission, draft: draft, now: now)
+                try appendMemoryChangeLog(traceID: traceID, job: job, source: payload.source, action: .extractionAskUser, admission: admission, draft: draft, now: now)
+                try mark(job: job, status: .paused, now: now, errorCode: "admission_ask_user", errorMessage: admission.message)
+                return GraphExtractionWorkerResult(
+                    jobID: job.id,
+                    action: .askUser,
+                    extractedEntityCount: draft.entities.count,
+                    extractedStatementCount: draft.statements.count,
+                    errorMessage: admission.message,
+                    admissionDecision: admission
+                )
+            case .discard:
+                let traceID = try appendTrace(job: job, source: payload.source, draft: draft, outcome: .discarded, admission: admission, errorMessage: admission.message, now: now)
+                try appendMemoryChangeLog(traceID: traceID, job: job, source: payload.source, action: .extractionDiscarded, admission: admission, draft: draft, now: now)
+                try mark(job: job, status: .succeeded, now: now, errorCode: "admission_discard", errorMessage: admission.message)
+                return GraphExtractionWorkerResult(
+                    jobID: job.id,
+                    action: .discarded,
+                    extractedEntityCount: draft.entities.count,
+                    extractedStatementCount: draft.statements.count,
+                    errorMessage: admission.message,
+                    admissionDecision: admission
+                )
+            }
+        } catch let failure as GraphExtractionAttemptFailure {
+            let message = failure.description
+            let traceID = try appendFailureTrace(
+                job: job,
+                source: failure.source,
+                errorMessage: message,
+                metadata: failure.traceMetadata,
+                now: now
+            )
+            try appendFailureChangeLog(traceID: traceID, job: job, source: failure.source, errorMessage: message, now: now)
+            try mark(job: job, status: .failed, now: now, errorCode: "extraction_failed", errorMessage: message)
+            return GraphExtractionWorkerResult(jobID: job.id, action: .failed, errorMessage: message)
         } catch {
-            try mark(job: job, status: .failed, now: now, errorCode: "extraction_failed", errorMessage: String(describing: error))
-            return GraphExtractionWorkerResult(jobID: job.id, action: .failed)
+            let message = String(describing: error)
+            let traceID = try appendFailureTrace(job: job, errorMessage: message, now: now)
+            try appendFailureChangeLog(traceID: traceID, job: job, source: nil, errorMessage: message, now: now)
+            try mark(job: job, status: .failed, now: now, errorCode: "extraction_failed", errorMessage: message)
+            return GraphExtractionWorkerResult(jobID: job.id, action: .failed, errorMessage: message)
         }
+    }
+
+    @discardableResult
+    private func appendTrace(
+        job: GraphJobV3,
+        source: GraphExtractionSource,
+        draft: GraphExtractionDraft,
+        outcome: GraphExtractionTraceOutcome,
+        admission: GraphWriteAdmissionDecision,
+        writeResult: GraphOptimisticWriteResult = GraphOptimisticWriteResult(),
+        errorMessage: String? = nil,
+        now: Date
+    ) throws -> String {
+        let traceID = "trace-\(job.id)-\(outcome.rawValue)-\(Int(now.timeIntervalSince1970 * 1000))"
+        var split = splitTracePayloadMetadata(draft.metadata)
+        split.metadata["admission_message"] = admission.message
+        try store.appendExtractionTrace(GraphExtractionTrace(
+            id: traceID,
+            jobID: job.id,
+            graphID: job.graphID,
+            sourceID: source.id,
+            sourceType: source.sourceType,
+            outcome: outcome,
+            admissionAction: admission.action,
+            admissionReasons: admission.reasons,
+            extractedEntityCount: draft.entities.count,
+            extractedStatementCount: draft.statements.count,
+            committedEntityCount: writeResult.committedEntityIDs.count,
+            committedStatementCount: writeResult.committedStatementIDs.count,
+            anomalyCount: writeResult.anomalyIDs.count,
+            errorMessage: errorMessage,
+            createdAt: now,
+            metadata: split.metadata
+        ))
+        if let payload = split.payload(traceID, now) {
+            try store.appendExtractionTracePayload(payload)
+        }
+        return traceID
+    }
+
+    private func enqueueAdmissionHoldDiagnostics(
+        traceID: String,
+        job: GraphJobV3,
+        source: GraphExtractionSource,
+        admission: GraphWriteAdmissionDecision,
+        draft: GraphExtractionDraft,
+        now: Date
+    ) throws {
+        let actions = GraphAdmissionHoldQueuePlanner().recommendedActions(for: admission.reasons)
+        let item = GraphAdmissionHoldQueueItem(
+            id: "hold-\(traceID)",
+            traceID: traceID,
+            jobID: job.id,
+            graphID: job.graphID,
+            sourceID: source.id,
+            sourceType: source.sourceType,
+            reasons: admission.reasons,
+            recommendedActions: actions,
+            message: admission.message,
+            createdAt: now,
+            metadata: [
+                "extracted_entity_count": String(draft.entities.count),
+                "extracted_statement_count": String(draft.statements.count),
+                "system_queue": "true",
+                "user_review_required_by_default": "false"
+            ]
+        )
+        try store.upsertAdmissionHoldQueueItem(item)
+    }
+
+    @discardableResult
+    private func appendFailureTrace(
+        job: GraphJobV3,
+        source: GraphExtractionSource? = nil,
+        errorMessage: String,
+        metadata: [String: String] = [:],
+        now: Date
+    ) throws -> String {
+        let traceID = "trace-\(job.id)-failed-\(Int(now.timeIntervalSince1970 * 1000))"
+        let sourceType = source?.sourceType ?? job.payload["source_type"].flatMap(GraphExtractionSourceType.init(rawValue:)) ?? .manual
+        let split = splitTracePayloadMetadata(metadata)
+        try store.appendExtractionTrace(GraphExtractionTrace(
+            id: traceID,
+            jobID: job.id,
+            graphID: job.graphID,
+            sourceID: source?.id ?? job.payload["source_id"] ?? "unknown",
+            sourceType: sourceType,
+            outcome: .failed,
+            errorMessage: errorMessage,
+            createdAt: now,
+            metadata: split.metadata
+        ))
+        if let payload = split.payload(traceID, now) {
+            try store.appendExtractionTracePayload(payload)
+        }
+        return traceID
+    }
+
+    private func appendMemoryChangeLog(
+        traceID: String,
+        job: GraphJobV3,
+        source: GraphExtractionSource,
+        action: GraphMemoryChangeLogAction,
+        admission: GraphWriteAdmissionDecision,
+        writeResult: GraphOptimisticWriteResult = GraphOptimisticWriteResult(),
+        draft: GraphExtractionDraft,
+        now: Date
+    ) throws {
+        let summary = "\(action.rawValue): \(draft.entities.count) entities, \(draft.statements.count) statements, admission=\(admission.action.rawValue)"
+        try store.appendMemoryChangeLogEntry(GraphMemoryChangeLogEntry(
+            id: "change-\(traceID)",
+            graphID: job.graphID,
+            action: action,
+            traceID: traceID,
+            jobID: job.id,
+            sourceID: source.id,
+            sourceType: source.sourceType,
+            entityIDs: writeResult.committedEntityIDs + Array(writeResult.resolvedEntityIDs.values),
+            statementIDs: writeResult.committedStatementIDs,
+            anomalyIDs: writeResult.anomalyIDs,
+            summary: summary,
+            createdAt: now,
+            metadata: [
+                "admission_action": admission.action.rawValue,
+                "admission_reasons": admission.reasons.map(\.rawValue).joined(separator: ","),
+                "extracted_entity_count": String(draft.entities.count),
+                "extracted_statement_count": String(draft.statements.count)
+            ]
+        ))
+    }
+
+    private func appendFailureChangeLog(
+        traceID: String,
+        job: GraphJobV3,
+        source: GraphExtractionSource?,
+        errorMessage: String,
+        now: Date
+    ) throws {
+        try store.appendMemoryChangeLogEntry(GraphMemoryChangeLogEntry(
+            id: "change-\(traceID)",
+            graphID: job.graphID,
+            action: .extractionFailed,
+            traceID: traceID,
+            jobID: job.id,
+            sourceID: source?.id ?? job.payload["source_id"],
+            sourceType: source?.sourceType ?? job.payload["source_type"].flatMap(GraphExtractionSourceType.init(rawValue:)),
+            summary: "extraction_failed: \(errorMessage)",
+            createdAt: now,
+            metadata: ["error_message": errorMessage]
+        ))
+    }
+
+    private func splitTracePayloadMetadata(_ metadata: [String: String]) -> (
+        metadata: [String: String],
+        payload: (_ traceID: String, _ now: Date) -> GraphExtractionTracePayload?
+    ) {
+        let payloadKeys: Set<String> = [
+            "prompt_text",
+            "raw_response_json",
+            "normalized_json",
+            "decoder_error_kind",
+            "decoder_error_message"
+        ]
+        let lightMetadata = metadata.filter { !payloadKeys.contains($0.key) && !$0.key.hasPrefix("payload.") }
+        let payloadMetadata = metadata
+            .filter { key, _ in key.hasPrefix("payload.") }
+            .reduce(into: [String: String]()) { partial, item in
+                partial[String(item.key.dropFirst("payload.".count))] = item.value
+            }
+        let hasPayload = payloadKeys.contains { metadata[$0] != nil }
+        return (
+            metadata: lightMetadata,
+            payload: { traceID, now in
+                guard hasPayload else { return nil }
+                return GraphExtractionTracePayload(
+                    traceID: traceID,
+                    promptText: metadata["prompt_text"],
+                    rawResponseJSON: metadata["raw_response_json"],
+                    normalizedJSON: metadata["normalized_json"],
+                    decoderErrorKind: metadata["decoder_error_kind"],
+                    decoderErrorMessage: metadata["decoder_error_message"],
+                    createdAt: now,
+                    metadata: payloadMetadata
+                )
+            }
+        )
     }
 
     private func mark(job: GraphJobV3, status: GraphJobV3Status, now: Date, errorCode: String? = nil, errorMessage: String? = nil) throws {
