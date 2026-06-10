@@ -27,8 +27,10 @@ public struct GraphIngestEpisodeTool: AgentTool {
         guard let content = arguments.string("content"), !content.isEmpty else { throw AgentToolError.invalidArguments("content is required") }
         guard let sourceDescription = arguments.string("sourceDescription"), !sourceDescription.isEmpty else { throw AgentToolError.invalidArguments("sourceDescription is required") }
 
+        let observeID = UUID().uuidString
+        let episodeID = "episode-\(observeID)"
         let episode = GraphEpisodeV3(
-            id: UUID().uuidString,
+            id: episodeID,
             graphID: context.groupID,
             sourceType: .chatMessage,
             sourceID: arguments.string("sourceID"),
@@ -41,7 +43,7 @@ public struct GraphIngestEpisodeTool: AgentTool {
         )
         try repository.upsert(episode: episode)
         let observe = ObserveLogEntry(
-            id: UUID().uuidString,
+            id: observeID,
             kind: .observation,
             source: .tool,
             content: content,

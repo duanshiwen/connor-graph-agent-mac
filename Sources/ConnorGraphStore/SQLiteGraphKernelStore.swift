@@ -298,6 +298,29 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         try query(sql: "SELECT id, graph_id, type, status, priority, payload_json, attempt_count, max_attempts, created_at, updated_at, next_run_at, started_at, finished_at, error_code, error_message, metadata_json FROM graph_jobs_v3 WHERE graph_id = \(quote(graphID)) AND status = \(quote(GraphJobV3Status.queued.rawValue)) AND next_run_at <= \(quote(iso(date))) ORDER BY priority DESC, next_run_at ASC LIMIT \(limit)").map(decodeJob)
     }
 
+    @discardableResult
+    public func enqueueExtractionJob(
+        graphID: String,
+        source: GraphExtractionSource,
+        priority: Int = 5,
+        now: Date = Date()
+    ) throws -> String {
+        let jobID = "job-extraction-\(source.id)"
+        let payload = GraphExtractionJobPayload(source: source).dictionary
+        try upsert(job: GraphJobV3(
+            id: jobID,
+            graphID: graphID,
+            type: .extraction,
+            status: .queued,
+            priority: priority,
+            payload: payload,
+            createdAt: now,
+            updatedAt: now,
+            nextRunAt: now
+        ))
+        return jobID
+    }
+
     public func seedBaseOntology(graphID: String) throws {
         let specs: [(String, String, Int, String, GraphEntityKind)] = Self.baseOntologySpecs()
         for (classID, displayName, layer, domain, _) in specs {
