@@ -85,11 +85,12 @@ temporal graph-only
 - Agent prompt inspection / prompt budget 估算。
 - Agent session summary 策略与刷新状态。
 - Observe Log 短期记忆与 Promotion Queue。
-- Memory Staging 领域模型：
+- Memory Staging / Ingestion 领域模型：
   - `ConversationTurnBundle`；
   - `MemoryStagingBuffer`；
   - distillation trigger policy；
-  - `MemoryDistillationResult` / candidate / source ref / trace。
+  - `MemoryDistillationResult` / candidate / source ref / trace；
+  - `MemoryIngestionService`，支持 message / artifact 增量摄入、message id 去重、open bundle 合并与触发原因计算。
 - 图谱候选写入模型：`GraphWriteCandidate`。
 - Agent 图谱读写工具：
   - `graph_search`
@@ -1430,11 +1431,13 @@ memory dashboard
 5. ✅ 将 entity resolution plan、conflict preview、admission policy 接入 extraction 主路径。
 6. ✅ 补 `graph_episodes_v3` FTS 表和 episode search API。
 7. ✅ 扩展 `SQLiteGraphHybridSearchService`，支持 entity + statement + episode 三类结果、graph neighborhood expansion、source episode expansion 和初版融合。
-8. 🔜 新增统一 `MemoryIngestionService`：message / browser / file / source artifact 先进入 `ConversationTurnBundle` / `MemoryStagingBuffer`，再经 distillation 生成 episode candidates 与 extraction job。
-9. 🔜 将 App 主 Chat 的空搜索 fallback 替换为真实 `SQLiteGraphHybridSearchService`，确保回答能使用已提交图谱记忆。
-10. 🔜 收敛 `GraphAgent` simple ask path 与 `AgentLoopController` tool-calling path，形成单一主 runtime。
-11. 🔜 让所有 manual candidate / extraction commit / future source write 强制经过统一 entity resolver。
-12. 🔜 为 admission hold queue 增加 approve / reject / rerun / inspect evidence 动作闭环。
+8. ✅ 新增纯领域层 `MemoryIngestionService`：message / browser / file / source artifact 可先进入 `ConversationTurnBundle` / `MemoryStagingBuffer`。
+9. 🔜 为 `MemoryIngestionService` 增加 SQLite staging buffer repository，并接入 App 主 Chat / AgentLoop 写入路径。
+10. 🔜 新增 distillation worker：从 staging buffer 生成 episode candidates 与 extraction job。
+11. 🔜 将 App 主 Chat 的空搜索 fallback 替换为真实 `SQLiteGraphHybridSearchService`，确保回答能使用已提交图谱记忆。
+12. 🔜 收敛 `GraphAgent` simple ask path 与 `AgentLoopController` tool-calling path，形成单一主 runtime。
+13. 🔜 让所有 manual candidate / extraction commit / future source write 强制经过统一 entity resolver。
+14. 🔜 为 admission hold queue 增加 approve / reject / rerun / inspect evidence 动作闭环。
 13. 🔜 实现 `groundingCheck` worker 的最小可用版本。
 14. 🔜 实现 schema/version health check，启动时展示图模型版本。
 
