@@ -22,6 +22,8 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case agentChat = "智能体聊天"
     case promotionQueue = "提升队列"
     case graphWriteCandidates = "写入候选"
+    case memoryChangeLog = "记忆变更"
+    case extractionDiagnostics = "记忆准入"
     case llmSettings = "模型设置"
 
     var id: String { rawValue }
@@ -45,6 +47,9 @@ final class AppViewModel: ObservableObject {
     @Published var promotionCandidates: [ObserveLogEntry] = []
     @Published var graphWriteCandidates: [GraphWriteCandidate] = []
     @Published var graphWriteCandidateAudits: [String: [GraphWriteCandidateAuditPresentation]] = [:]
+    @Published var graphExtractionTraces: [AppGraphExtractionTracePresentation] = []
+    @Published var admissionHoldQueueItems: [AppGraphAdmissionHoldQueuePresentation] = []
+    @Published var memoryChangeLogEntries: [AppGraphMemoryChangeLogPresentation] = []
     @Published var lastPromotionResultSummary: String?
     @Published var lastGraphWriteCandidateResultSummary: String?
     @Published var llmProviderMode: AppLLMProviderMode = .stub
@@ -67,6 +72,9 @@ final class AppViewModel: ObservableObject {
     private var repository: AppGraphRepository?
     private var promotionRepository: AppPromotionQueueRepository?
     private var graphWriteCandidateRepository: AppGraphWriteCandidateRepository?
+    private var graphExtractionTraceRepository: AppGraphExtractionTraceRepository?
+    private var admissionHoldQueueRepository: AppGraphAdmissionHoldQueueRepository?
+    private var memoryChangeLogRepository: AppGraphMemoryChangeLogRepository?
     private var chatSessionRepository: AppChatSessionRepository?
     private var llmSettingsRepository: AppLLMSettingsRepository
     private var llmProviderHealthChecker: AppLLMProviderHealthChecker
@@ -121,10 +129,13 @@ final class AppViewModel: ObservableObject {
         if let repository {
             self.promotionRepository = AppPromotionQueueRepository(store: repository.store)
             self.graphWriteCandidateRepository = AppGraphWriteCandidateRepository(store: repository.store)
+            self.graphExtractionTraceRepository = AppGraphExtractionTraceRepository(store: repository.store)
+            self.admissionHoldQueueRepository = AppGraphAdmissionHoldQueueRepository(store: repository.store)
+            self.memoryChangeLogRepository = AppGraphMemoryChangeLogRepository(store: repository.store)
             self.chatSessionRepository = AppChatSessionRepository(store: repository.store)
             self.agentRuntimeFactory = AppGraphAgentRuntimeFactory(store: repository.store, settingsRepository: llmSettingsRepository)
             self.hybridSearchService = SQLiteGraphHybridSearchService(store: repository.store)
-            self.backgroundJobRunner = AppGraphBackgroundJobRunner(store: repository.store)
+            self.backgroundJobRunner = AppGraphBackgroundJobRunner(store: repository.store, settingsRepository: llmSettingsRepository)
         }
         self.llmSettingsRepository = llmSettingsRepository
         self.llmProviderHealthChecker = AppLLMProviderHealthChecker(settingsRepository: llmSettingsRepository)
@@ -134,6 +145,8 @@ final class AppViewModel: ObservableObject {
         self.searchResults = []
         loadLLMSettings()
         reloadChatSessions()
+        reloadGraphExtractionTraces()
+        reloadMemoryChangeLog()
     }
 
     static func live() -> AppViewModel {
@@ -286,7 +299,15 @@ final class AppViewModel: ObservableObject {
         do {
             _ = try await backgroundJobRunner.runAvailable(limit: 20)
             let snapshot = try repository.loadSnapshot()
-            await MainActor.run { apply(snapshot: snapshot) }
+            let traces = try graphExtractionTraceRepository?.loadRecentTraces() ?? []
+            let holdItems = try admissionHoldQueueRepository?.loadOpenItems() ?? []
+            let changeLog = try memoryChangeLogRepository?.loadRecentEntries() ?? []
+            await MainActor.run {
+                apply(snapshot: snapshot)
+                graphExtractionTraces = traces
+                admissionHoldQueueItems = holdItems
+                memoryChangeLogEntries = changeLog
+            }
         } catch {
             await MainActor.run { errorMessage = String(describing: error) }
         }
@@ -475,6 +496,25 @@ final class AppViewModel: ObservableObject {
             let candidates = try graphWriteCandidateRepository?.loadCandidates() ?? []
             graphWriteCandidates = candidates
             graphWriteCandidateAudits = try graphWriteCandidateRepository?.loadAuditTimelines(for: candidates) ?? [:]
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func reloadGraphExtractionTraces() {
+        do {
+            graphExtractionTraces = try graphExtractionTraceRepository?.loadRecentTraces() ?? []
+            admissionHoldQueueItems = try admissionHoldQueueRepository?.loadOpenItems() ?? []
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func reloadMemoryChangeLog() {
+        do {
+            memoryChangeLogEntries = try memoryChangeLogRepository?.loadRecentEntries() ?? []
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -687,6 +727,10 @@ struct AppShellView: View {
                     PromotionQueueView(viewModel: viewModel)
                 case .graphWriteCandidates:
                     GraphWriteCandidateReviewView(viewModel: viewModel)
+                case .memoryChangeLog:
+                    MemoryChangeLogView(viewModel: viewModel)
+                case .extractionDiagnostics:
+                    GraphExtractionDiagnosticsView(viewModel: viewModel)
                 case .llmSettings:
                     LLMSettingsView(viewModel: viewModel)
                 }
@@ -987,6 +1031,194 @@ struct GraphWriteCandidateReviewView: View {
         case .success: return .green
         case .warning: return .orange
         case .error: return .red
+        }
+    }
+}
+
+struct MemoryChangeLogView: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Button("刷新") { viewModel.reloadMemoryChangeLog() }
+                Spacer()
+                Text("what changed · why · source trace · reversible later")
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+
+            if viewModel.memoryChangeLogEntries.isEmpty {
+                Text("暂无记忆变更记录。后台 extraction/admission 运行后会在这里形成可审计 change log。")
+                    .foregroundStyle(.secondary)
+                Spacer()
+            } else {
+                List(viewModel.memoryChangeLogEntries) { entry in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(entry.title)
+                                .font(.headline)
+                            Text(entry.action.rawValue)
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(changeLogColor(entry.action).opacity(0.15), in: Capsule())
+                                .foregroundStyle(changeLogColor(entry.action))
+                            Spacer()
+                            Text(entry.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Text(entry.detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                    .padding(.vertical, 6)
+                }
+            }
+
+            if let error = viewModel.errorMessage {
+                Text(error).foregroundStyle(.red)
+            }
+        }
+        .padding()
+        .navigationTitle("记忆变更")
+        .onAppear { viewModel.reloadMemoryChangeLog() }
+    }
+
+    private func changeLogColor(_ action: GraphMemoryChangeLogAction) -> Color {
+        switch action {
+        case .extractionCommitted: return .green
+        case .extractionHeld, .extractionAskUser: return .orange
+        case .extractionDiscarded: return .secondary
+        case .extractionFailed: return .red
+        case .replayDryRun: return .blue
+        case .manualInvalidation: return .purple
+        }
+    }
+}
+
+struct GraphExtractionDiagnosticsView: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Button("刷新") { viewModel.reloadGraphExtractionTraces() }
+                Spacer()
+                Text("extract → validate → admit → auto-commit / hold / ask")
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+
+            if !viewModel.admissionHoldQueueItems.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("系统待诊断队列")
+                        .font(.headline)
+                    Text("这些是后台自愈队列，不是默认用户逐条审核。系统可用于 replay、grounding、merge 或必要时询问用户。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    ForEach(viewModel.admissionHoldQueueItems) { item in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(item.title)
+                                    .font(.subheadline.weight(.semibold))
+                                Spacer()
+                                Text(item.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text(item.detail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                        .padding(8)
+                        .background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+                }
+                Divider()
+            }
+
+            if viewModel.graphExtractionTraces.isEmpty {
+                Text("暂无记忆准入轨迹。后台 extraction job 运行后会记录 auto-commit、hold、ask 或 failed 的原因。")
+                    .foregroundStyle(.secondary)
+                Spacer()
+            } else {
+                List(viewModel.graphExtractionTraces) { trace in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(trace.title)
+                                .font(.headline)
+                            Text(trace.admissionAction?.rawValue ?? "no admission")
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(traceOutcomeColor(trace.outcome).opacity(0.15), in: Capsule())
+                                .foregroundStyle(traceOutcomeColor(trace.outcome))
+                            Spacer()
+                            Text(trace.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Text(trace.detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+
+                        if let payloadText = tracePayloadText(trace) {
+                            DisclosureGroup("trace payload") {
+                                Text(payloadText)
+                                    .font(.caption.monospaced())
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(8)
+                                    .background(.quaternary.opacity(0.16), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            }
+                        }
+                    }
+                    .padding(.vertical, 6)
+                }
+            }
+
+            if let error = viewModel.errorMessage {
+                Text(error).foregroundStyle(.red)
+            }
+        }
+        .padding()
+        .navigationTitle("记忆准入")
+        .onAppear { viewModel.reloadGraphExtractionTraces() }
+    }
+
+    private func tracePayloadText(_ trace: AppGraphExtractionTracePresentation) -> String? {
+        var sections: [String] = []
+        if let decoderErrorKind = trace.decoderErrorKind {
+            sections.append("decoder_error_kind:\n\(decoderErrorKind)")
+        }
+        if let decoderErrorMessage = trace.decoderErrorMessage {
+            sections.append("decoder_error_message:\n\(decoderErrorMessage)")
+        }
+        if let normalizedJSON = trace.normalizedJSON {
+            sections.append("normalized_json:\n\(normalizedJSON)")
+        }
+        if let rawResponseJSON = trace.rawResponseJSON {
+            sections.append("raw_response_json:\n\(rawResponseJSON)")
+        }
+        if let promptText = trace.promptText {
+            sections.append("prompt_text:\n\(promptText)")
+        }
+        guard !sections.isEmpty else { return nil }
+        return sections.joined(separator: "\n\n---\n\n")
+    }
+
+    private func traceOutcomeColor(_ outcome: GraphExtractionTraceOutcome) -> Color {
+        switch outcome {
+        case .committed: return .green
+        case .held: return .orange
+        case .askUser: return .blue
+        case .discarded: return .secondary
+        case .failed: return .red
         }
     }
 }
