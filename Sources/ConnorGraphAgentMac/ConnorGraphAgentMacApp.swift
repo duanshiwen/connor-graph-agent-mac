@@ -124,7 +124,7 @@ final class AppViewModel: ObservableObject {
             self.chatSessionRepository = AppChatSessionRepository(store: repository.store)
             self.agentRuntimeFactory = AppGraphAgentRuntimeFactory(store: repository.store, settingsRepository: llmSettingsRepository)
             self.hybridSearchService = SQLiteGraphHybridSearchService(store: repository.store)
-            self.backgroundJobRunner = AppGraphBackgroundJobRunner(store: repository.store)
+            self.backgroundJobRunner = AppGraphBackgroundJobRunner(store: repository.store, settingsRepository: llmSettingsRepository)
         }
         self.llmSettingsRepository = llmSettingsRepository
         self.llmProviderHealthChecker = AppLLMProviderHealthChecker(settingsRepository: llmSettingsRepository)
