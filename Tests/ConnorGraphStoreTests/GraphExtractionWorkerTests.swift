@@ -47,6 +47,11 @@ private struct StubGraphExtractor: GraphExtractorProvider {
     #expect(result?.writeResult.committedStatementIDs.count == 1)
     #expect(try store.episode(id: "episode-email-1") != nil)
     #expect(try store.statements(graphID: "default", predicate: .prefers).count == 1)
+    let traces = try store.extractionTraces(jobID: "job-extract-1")
+    #expect(traces.count == 1)
+    #expect(traces[0].outcome == .committed)
+    #expect(traces[0].admissionAction == .autoCommit)
+    #expect(traces[0].committedStatementCount == 1)
     #expect(try store.runnableJobs(graphID: "default", at: now).contains { $0.id == "job-extract-1" } == false)
 }
 
@@ -80,6 +85,11 @@ private struct StubGraphExtractor: GraphExtractorProvider {
     #expect(result?.admissionDecision?.reasons.contains(.lowStatementConfidence) == true)
     #expect(result?.writeResult.committedStatementIDs.isEmpty == true)
     #expect(try store.statements(graphID: "default", predicate: .prefers).isEmpty)
+    let traces = try store.extractionTraces(jobID: "job-extract-low-confidence")
+    #expect(traces.count == 1)
+    #expect(traces[0].outcome == .held)
+    #expect(traces[0].admissionAction == .hold)
+    #expect(traces[0].admissionReasons.contains(.lowStatementConfidence))
     #expect(try store.runnableJobs(graphID: "default", at: now).contains { $0.id == "job-extract-low-confidence" } == false)
 }
 
@@ -94,4 +104,8 @@ private struct StubGraphExtractor: GraphExtractorProvider {
 
     #expect(result?.action == .failed)
     #expect(result?.errorMessage?.contains("invalidPayload") == true)
+    let traces = try store.extractionTraces(jobID: "bad-job")
+    #expect(traces.count == 1)
+    #expect(traces[0].outcome == .failed)
+    #expect(traces[0].errorMessage?.contains("invalidPayload") == true)
 }
