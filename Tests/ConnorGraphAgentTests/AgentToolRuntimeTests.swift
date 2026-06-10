@@ -64,7 +64,7 @@ private struct EchoTool: AgentTool {
 
 @Test func graphSearchToolReturnsStructuredHitsWithCitations() async throws {
     let search = TestHybridSearchService(hits: [
-        GraphSearchHit(ownerType: .node, ownerID: "node-memory", title: "Memory", text: "Graph memory", score: 1.0, retrievalMethod: "test")
+        GraphSearchHit(ownerType: .entity, ownerID: "node-memory", title: "Memory", text: "Graph memory", score: 1.0, retrievalMethod: "test")
     ])
     let tool = GraphSearchTool(searchService: search)
     let audit = InMemoryAgentAuditLog()
@@ -84,7 +84,7 @@ private struct EchoTool: AgentTool {
     )
 
     #expect(result.toolName == "graph_search")
-    #expect(result.citations == ["node:node-memory"])
+    #expect(result.citations == ["entity:node-memory"])
     #expect(result.contentText.contains("Memory"))
     #expect(result.contentJSON?.contains("node-memory") == true)
 }

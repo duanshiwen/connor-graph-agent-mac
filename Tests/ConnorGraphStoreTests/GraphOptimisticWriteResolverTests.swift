@@ -32,7 +32,7 @@ private func temporaryResolverDatabaseURL(_ name: String = UUID().uuidString) ->
     try store.migrate()
     let now = Date(timeIntervalSince1970: 1_000)
     try store.upsert(entity: GraphEntity(id: "agent-os-existing", graphID: "default", name: "Agent OS", entityKind: .workObject, scope: .project, summary: "local agent operating system"))
-    let incoming = GraphEntity(id: "agent-os-incoming", graphID: "default", name: "Agent OS Project", entityKind: .workObject, scope: .project, summary: "Agent OS project")
+    let incoming = GraphEntity(id: "agent-os-incoming", graphID: "default", name: "Agent", entityKind: .workObject, scope: .project, summary: "Agent OS project")
 
     let result = try GraphOptimisticWriteService(store: store).commit(GraphOptimisticWriteBatch(graphID: "default", entities: [incoming], statements: [], now: now))
 

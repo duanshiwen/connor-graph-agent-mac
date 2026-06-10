@@ -5,7 +5,7 @@ import ConnorGraphCore
 import ConnorGraphStore
 
 @Test func graphWriteCandidateReviewCommitsApprovedCreateNodeThroughResolverBackedPath() throws {
-    let store = try SQLiteGraphStore(path: ":memory:")
+    let store = try SQLiteGraphKernelStore(path: ":memory:")
     try store.migrate()
     let repository = AppGraphWriteCandidateRepository(store: store)
     let candidate = GraphWriteCandidate(
@@ -27,7 +27,7 @@ import ConnorGraphStore
 }
 
 @Test func graphWriteCandidateReviewRejectsUnapprovedDirectCommit() throws {
-    let store = try SQLiteGraphStore(path: ":memory:")
+    let store = try SQLiteGraphKernelStore(path: ":memory:")
     try store.migrate()
     let service = GraphWriteCandidateCommitService()
     let candidate = GraphWriteCandidate(
@@ -45,7 +45,7 @@ import ConnorGraphStore
 }
 
 @Test func governedGraphWriteCandidateCommitRecordsPermissionAndAuditTrail() async throws {
-    let store = try SQLiteGraphStore(path: ":memory:")
+    let store = try SQLiteGraphKernelStore(path: ":memory:")
     try store.migrate()
     let repository = AppGraphWriteCandidateRepository(store: store, permissionMode: .trustedWrite)
     let candidate = GraphWriteCandidate(
@@ -70,7 +70,7 @@ import ConnorGraphStore
 }
 
 @Test func governedGraphWriteCandidateCommitDeniesReadOnlyPolicy() async throws {
-    let store = try SQLiteGraphStore(path: ":memory:")
+    let store = try SQLiteGraphKernelStore(path: ":memory:")
     try store.migrate()
     let repository = AppGraphWriteCandidateRepository(store: store, permissionMode: .readOnly)
     let candidate = GraphWriteCandidate(
@@ -96,7 +96,7 @@ import ConnorGraphStore
 }
 
 @Test func graphWriteCandidateValidationFailsMissingReferencedEntitiesBeforeCommit() async throws {
-    let store = try SQLiteGraphStore(path: ":memory:")
+    let store = try SQLiteGraphKernelStore(path: ":memory:")
     try store.migrate()
     let repository = AppGraphWriteCandidateRepository(store: store, permissionMode: .trustedWrite)
     let candidate = GraphWriteCandidate(
@@ -120,7 +120,7 @@ import ConnorGraphStore
 }
 
 @Test func graphWriteCandidateCreateFactReusesExistingEntitiesThroughResolverBackedPath() async throws {
-    let store = try SQLiteGraphStore(path: ":memory:")
+    let store = try SQLiteGraphKernelStore(path: ":memory:")
     try store.migrate()
     try store.upsert(entity: GraphEntity(id: "entity-a", graphID: "default", name: "Entity A", entityKind: .entity, scope: .project))
     try store.upsert(entity: GraphEntity(id: "entity-b", graphID: "default", name: "Entity B", entityKind: .entity, scope: .project))
@@ -144,7 +144,7 @@ import ConnorGraphStore
 }
 
 @Test func graphWriteCandidateAuditTimelineFiltersEventsByCandidateID() async throws {
-    let store = try SQLiteGraphStore(path: ":memory:")
+    let store = try SQLiteGraphKernelStore(path: ":memory:")
     try store.migrate()
     let repository = AppGraphWriteCandidateRepository(store: store, permissionMode: .trustedWrite)
     let candidate = GraphWriteCandidate(

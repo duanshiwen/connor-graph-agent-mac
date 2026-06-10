@@ -40,12 +40,12 @@ private struct GroundingRunnerStubExtractor: GraphExtractorProvider {
         nextRunAt: now
     ))
 
-    let result = try GraphGroundingCheckWorker(store: store).run(job: try #require(store.job(id: "job-grounding-grounded")), now: now)
+    let result = try GraphGroundingCheckWorker(store: store).run(job: try #require(try store.job(id: "job-grounding-grounded")), now: now)
 
     #expect(result.action == .verified)
     #expect(result.anomalyID == nil)
     #expect(try store.job(id: "job-grounding-grounded")?.status == .succeeded)
-    let statement = try #require(store.statement(id: "statement-grounded"))
+    let statement = try #require(try store.statement(id: "statement-grounded"))
     #expect(statement.metadata["grounding_status"] == "verified")
     #expect(statement.metadata["grounding_reason"] == "has_evidence_span_justification")
 }
@@ -74,15 +74,15 @@ private struct GroundingRunnerStubExtractor: GraphExtractorProvider {
         nextRunAt: now
     ))
 
-    let result = try GraphGroundingCheckWorker(store: store).run(job: try #require(store.job(id: "job-grounding-ungrounded")), now: now)
+    let result = try GraphGroundingCheckWorker(store: store).run(job: try #require(try store.job(id: "job-grounding-ungrounded")), now: now)
 
     #expect(result.action == .flagged)
     #expect(result.anomalyID == "anomaly-grounding-statement-ungrounded")
     #expect(try store.job(id: "job-grounding-ungrounded")?.status == .succeeded)
-    let statement = try #require(store.statement(id: "statement-ungrounded"))
+    let statement = try #require(try store.statement(id: "statement-ungrounded"))
     #expect(statement.metadata["grounding_status"] == "needs_review")
     #expect(statement.metadata["grounding_anomaly_id"] == "anomaly-grounding-statement-ungrounded")
-    let anomaly = try #require(store.anomaly(id: "anomaly-grounding-statement-ungrounded"))
+    let anomaly = try #require(try store.anomaly(id: "anomaly-grounding-statement-ungrounded"))
     #expect(anomaly.anomalyType == .commonSenseViolation)
     #expect(anomaly.metadata["anomaly_subtype"] == "ungrounded_statement")
     #expect(try store.job(id: "job-anomaly-resolution-anomaly-grounding-statement-ungrounded")?.type == .anomalyResolution)

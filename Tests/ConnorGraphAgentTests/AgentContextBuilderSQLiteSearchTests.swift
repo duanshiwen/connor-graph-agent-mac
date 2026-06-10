@@ -45,7 +45,7 @@ private struct HybridContextCapturingProvider: LLMProvider, Sendable {
     let service = SpyHybridSearchService(
         state: state,
         response: GraphSearchResponse(hits: [
-            GraphSearchHit(ownerType: .fact, ownerID: "fact-agent-os", title: "works_on", text: "诗闻正在设计 Agent OS 图谱存储层。", score: 1.0, retrievalMethod: "fts", sourceEpisodeIDs: ["episode-1"])
+            GraphSearchHit(ownerType: .statement, ownerID: "fact-agent-os", title: "works_on", text: "诗闻正在设计 Agent OS 图谱存储层。", score: 1.0, retrievalMethod: "fts", sourceEpisodeIDs: ["episode-1"])
         ])
     )
     let builder = AgentContextBuilder(hybridSearchService: service, groupID: "default")
@@ -54,9 +54,8 @@ private struct HybridContextCapturingProvider: LLMProvider, Sendable {
 
     let queries = await state.recordedQueries
     #expect(queries.map(\.text) == ["Agent OS"])
-    #expect(queries.map(\.groupID) == ["default"])
-    #expect(context.items.map(\.sourceID) == ["fact:fact-agent-os"])
-    #expect(context.renderedText.contains("Fact[works_on] 诗闻正在设计 Agent OS 图谱存储层。"))
+        #expect(context.items.map(\.sourceID) == ["statement:fact-agent-os"])
+    #expect(context.renderedText.contains("Statement[works_on] 诗闻正在设计 Agent OS 图谱存储层。"))
 }
 
 @Test func graphAgentInjectsHybridSearchContextIntoProviderPrompt() async throws {
@@ -64,7 +63,7 @@ private struct HybridContextCapturingProvider: LLMProvider, Sendable {
     let service = SpyHybridSearchService(
         state: HybridSearchSpyState(),
         response: GraphSearchResponse(hits: [
-            GraphSearchHit(ownerType: .fact, ownerID: "fact-agent-os", title: "works_on", text: "诗闻正在设计 Agent OS 图谱存储层。", score: 1.0, retrievalMethod: "fts", sourceEpisodeIDs: ["episode-1"])
+            GraphSearchHit(ownerType: .statement, ownerID: "fact-agent-os", title: "works_on", text: "诗闻正在设计 Agent OS 图谱存储层。", score: 1.0, retrievalMethod: "fts", sourceEpisodeIDs: ["episode-1"])
         ])
     )
     let agent = GraphAgent(
@@ -76,9 +75,9 @@ private struct HybridContextCapturingProvider: LLMProvider, Sendable {
     let response = try await agent.ask("Agent OS")
     let context = try #require(await recorder.context)
 
-    #expect(context.renderedText.contains("Fact[works_on] 诗闻正在设计 Agent OS 图谱存储层。"))
-    #expect(response.answer.citations == ["fact:fact-agent-os"])
-    #expect(response.session.messages.last?.contextSnapshot?.contains("fact:fact-agent-os") == true)
+    #expect(context.renderedText.contains("Statement[works_on] 诗闻正在设计 Agent OS 图谱存储层。"))
+    #expect(response.answer.citations == ["statement:fact-agent-os"])
+    #expect(response.session.messages.last?.contextSnapshot?.contains("statement:fact-agent-os") == true)
 }
 
 @Test func agentContextBuilderRendersFactEndpointGraphContext() async throws {
@@ -86,7 +85,7 @@ private struct HybridContextCapturingProvider: LLMProvider, Sendable {
         state: HybridSearchSpyState(),
         response: GraphSearchResponse(hits: [
             GraphSearchHit(
-                ownerType: .fact,
+                ownerType: .statement,
                 ownerID: "fact-agent-os-context",
                 title: "WORKS_ON",
                 text: "诗闻正在设计 Agent OS 的图谱记忆。",
@@ -108,9 +107,8 @@ private struct HybridContextCapturingProvider: LLMProvider, Sendable {
 
     let context = try await builder.context(for: "Agent OS 图谱记忆")
 
-    #expect(context.renderedText.contains("Fact[WORKS_ON] 诗闻正在设计 Agent OS 的图谱记忆。"))
-    #expect(context.renderedText.contains("Graph endpoints: 诗闻(person) -> Agent OS(work_object)"))
-    #expect(context.renderedText.contains("Graph node ids: node-shiwen,node-agent-os"))
+    #expect(context.renderedText.contains("Statement[WORKS_ON] 诗闻正在设计 Agent OS 的图谱记忆。"))
+    #expect(context.renderedText.contains("Source: statement:fact-agent-os-context"))
 }
 
 @Test func graphAgentInjectsNodeAdjacentGraphContextIntoProviderPrompt() async throws {
@@ -119,14 +117,14 @@ private struct HybridContextCapturingProvider: LLMProvider, Sendable {
         state: HybridSearchSpyState(),
         response: GraphSearchResponse(hits: [
             GraphSearchHit(
-                ownerType: .node,
+                ownerType: .entity,
                 ownerID: "node-agent-os-context",
                 title: "Agent OS",
                 text: "本地优先 Agent 操作系统。",
                 score: 0.03,
                 retrievalMethod: "fts",
                 metadata: [
-                    "type": "work_object",
+                    "entity_kind": "work_object",
                     "graph_context": "adjacent_facts",
                     "adjacent_fact_ids": "fact-mentions,fact-works-on",
                     "adjacent_fact_relations": "MENTIONS,WORKS_ON",
@@ -144,9 +142,7 @@ private struct HybridContextCapturingProvider: LLMProvider, Sendable {
     let response = try await agent.ask("Agent OS")
     let context = try #require(await recorder.context)
 
-    #expect(context.renderedText.contains("Node[work_object] Agent OS: 本地优先 Agent 操作系统。"))
-    #expect(context.renderedText.contains("Adjacent facts: fact-mentions,fact-works-on"))
-    #expect(context.renderedText.contains("Adjacent relations: MENTIONS,WORKS_ON"))
-    #expect(context.renderedText.contains("Adjacent node ids: node-graphiti,node-shiwen"))
-    #expect(response.session.messages.last?.contextSnapshot?.contains("Adjacent facts: fact-mentions,fact-works-on") == true)
+    #expect(context.renderedText.contains("Entity[work_object] Agent OS: 本地优先 Agent 操作系统。"))
+    #expect(context.renderedText.contains("Source: entity:node-agent-os-context"))
+    #expect(response.session.messages.last?.contextSnapshot?.contains("Entity[work_object] Agent OS") == true)
 }

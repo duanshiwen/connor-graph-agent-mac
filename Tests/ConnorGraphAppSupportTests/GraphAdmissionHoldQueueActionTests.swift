@@ -19,7 +19,7 @@ private func temporaryAdmissionHoldDatabaseURL(_ name: String = UUID().uuidStrin
 
     #expect(result.jobID == "job-1")
     #expect(result.status == .queued)
-    let job = try #require(store.job(id: "job-1"))
+    let job = try #require(try store.job(id: "job-1"))
     #expect(job.status == .queued)
     #expect(job.nextRunAt == now)
     #expect(job.errorCode == nil)
@@ -36,10 +36,10 @@ private func temporaryAdmissionHoldDatabaseURL(_ name: String = UUID().uuidStrin
 
     try repository.reject("hold-1", now: now)
 
-    let item = try #require(store.admissionHoldQueueItem(id: "hold-1"))
+    let item = try #require(try store.admissionHoldQueueItem(id: "hold-1"))
     #expect(item.status == .dismissed)
     #expect(item.resolvedAt == now)
-    let job = try #require(store.job(id: "job-1"))
+    let job = try #require(try store.job(id: "job-1"))
     #expect(job.status == .cancelled)
     #expect(job.errorCode == "admission_hold_rejected")
 }

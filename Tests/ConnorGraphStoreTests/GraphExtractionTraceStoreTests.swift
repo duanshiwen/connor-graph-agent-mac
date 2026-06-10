@@ -109,7 +109,7 @@ private func temporaryExtractionTraceDatabaseURL(_ name: String = UUID().uuidStr
 
     let resolvedAt = Date(timeIntervalSince1970: 4_000)
     try store.updateAdmissionHoldQueueItemStatus(id: "hold-1", status: .resolved, resolvedAt: resolvedAt, now: resolvedAt)
-    let resolved = try #require(store.admissionHoldQueueItem(id: "hold-1"))
+    let resolved = try #require(try store.admissionHoldQueueItem(id: "hold-1"))
     #expect(resolved.status == .resolved)
     #expect(resolved.resolvedAt == resolvedAt)
     #expect(try store.admissionHoldQueueItems(graphID: "default", status: .open).isEmpty)
