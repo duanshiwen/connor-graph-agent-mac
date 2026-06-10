@@ -1339,6 +1339,8 @@ Admission hold queue 现在具备最小可用动作闭环：可检查 trace payl
 
 `groundingCheck` job 现在有最小可用 worker：对 active statements 做确定性 grounding 检查，statement 如果包含 source episode、evidence span justification、external grounding justification 或 evidence metadata 则标记 verified；否则生成 `ungrounded_statement` anomaly，并排入 anomaly resolution job 供后续自愈/人工审查。
 
+启动时现在会执行 schema/version health check：SQLite `PRAGMA user_version` 标记当前图模型 schema 版本，并检查核心 graph/job/audit/FTS 表与关键索引是否存在；App 顶部会展示图模型版本、健康状态、数据库路径，并支持手动刷新。
+
 ### 2. Production Extraction Loop
 
 ```text
@@ -1454,7 +1456,7 @@ memory dashboard
 16. ✅ 让所有 manual candidate / extraction commit / future source write 强制经过统一 entity resolver。
 17. ✅ 为 admission hold queue 增加 approve / reject / rerun / inspect evidence 动作闭环。
 18. ✅ 实现 `groundingCheck` worker 的最小可用版本。
-19. 🔜 实现 schema/version health check，启动时展示图模型版本。
+19. ✅ 实现 schema/version health check，启动时展示图模型版本。
 
 ---
 
