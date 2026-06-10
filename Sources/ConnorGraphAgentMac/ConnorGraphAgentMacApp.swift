@@ -22,6 +22,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case agentChat = "智能体聊天"
     case promotionQueue = "提升队列"
     case graphWriteCandidates = "写入候选"
+    case extractionDiagnostics = "记忆准入"
     case llmSettings = "模型设置"
 
     var id: String { rawValue }
@@ -45,6 +46,7 @@ final class AppViewModel: ObservableObject {
     @Published var promotionCandidates: [ObserveLogEntry] = []
     @Published var graphWriteCandidates: [GraphWriteCandidate] = []
     @Published var graphWriteCandidateAudits: [String: [GraphWriteCandidateAuditPresentation]] = [:]
+    @Published var graphExtractionTraces: [AppGraphExtractionTracePresentation] = []
     @Published var lastPromotionResultSummary: String?
     @Published var lastGraphWriteCandidateResultSummary: String?
     @Published var llmProviderMode: AppLLMProviderMode = .stub
@@ -67,6 +69,7 @@ final class AppViewModel: ObservableObject {
     private var repository: AppGraphRepository?
     private var promotionRepository: AppPromotionQueueRepository?
     private var graphWriteCandidateRepository: AppGraphWriteCandidateRepository?
+    private var graphExtractionTraceRepository: AppGraphExtractionTraceRepository?
     private var chatSessionRepository: AppChatSessionRepository?
     private var llmSettingsRepository: AppLLMSettingsRepository
     private var llmProviderHealthChecker: AppLLMProviderHealthChecker
@@ -121,6 +124,7 @@ final class AppViewModel: ObservableObject {
         if let repository {
             self.promotionRepository = AppPromotionQueueRepository(store: repository.store)
             self.graphWriteCandidateRepository = AppGraphWriteCandidateRepository(store: repository.store)
+            self.graphExtractionTraceRepository = AppGraphExtractionTraceRepository(store: repository.store)
             self.chatSessionRepository = AppChatSessionRepository(store: repository.store)
             self.agentRuntimeFactory = AppGraphAgentRuntimeFactory(store: repository.store, settingsRepository: llmSettingsRepository)
             self.hybridSearchService = SQLiteGraphHybridSearchService(store: repository.store)
@@ -134,6 +138,7 @@ final class AppViewModel: ObservableObject {
         self.searchResults = []
         loadLLMSettings()
         reloadChatSessions()
+        reloadGraphExtractionTraces()
     }
 
     static func live() -> AppViewModel {
@@ -286,7 +291,11 @@ final class AppViewModel: ObservableObject {
         do {
             _ = try await backgroundJobRunner.runAvailable(limit: 20)
             let snapshot = try repository.loadSnapshot()
-            await MainActor.run { apply(snapshot: snapshot) }
+            let traces = try graphExtractionTraceRepository?.loadRecentTraces() ?? []
+            await MainActor.run {
+                apply(snapshot: snapshot)
+                graphExtractionTraces = traces
+            }
         } catch {
             await MainActor.run { errorMessage = String(describing: error) }
         }
@@ -475,6 +484,15 @@ final class AppViewModel: ObservableObject {
             let candidates = try graphWriteCandidateRepository?.loadCandidates() ?? []
             graphWriteCandidates = candidates
             graphWriteCandidateAudits = try graphWriteCandidateRepository?.loadAuditTimelines(for: candidates) ?? [:]
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func reloadGraphExtractionTraces() {
+        do {
+            graphExtractionTraces = try graphExtractionTraceRepository?.loadRecentTraces() ?? []
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -687,6 +705,8 @@ struct AppShellView: View {
                     PromotionQueueView(viewModel: viewModel)
                 case .graphWriteCandidates:
                     GraphWriteCandidateReviewView(viewModel: viewModel)
+                case .extractionDiagnostics:
+                    GraphExtractionDiagnosticsView(viewModel: viewModel)
                 case .llmSettings:
                     LLMSettingsView(viewModel: viewModel)
                 }
@@ -987,6 +1007,69 @@ struct GraphWriteCandidateReviewView: View {
         case .success: return .green
         case .warning: return .orange
         case .error: return .red
+        }
+    }
+}
+
+struct GraphExtractionDiagnosticsView: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Button("刷新") { viewModel.reloadGraphExtractionTraces() }
+                Spacer()
+                Text("extract → validate → admit → auto-commit / hold / ask")
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+
+            if viewModel.graphExtractionTraces.isEmpty {
+                Text("暂无记忆准入轨迹。后台 extraction job 运行后会记录 auto-commit、hold、ask 或 failed 的原因。")
+                    .foregroundStyle(.secondary)
+                Spacer()
+            } else {
+                List(viewModel.graphExtractionTraces) { trace in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(trace.title)
+                                .font(.headline)
+                            Text(trace.admissionAction?.rawValue ?? "no admission")
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(traceOutcomeColor(trace.outcome).opacity(0.15), in: Capsule())
+                                .foregroundStyle(traceOutcomeColor(trace.outcome))
+                            Spacer()
+                            Text(trace.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Text(trace.detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                    .padding(.vertical, 6)
+                }
+            }
+
+            if let error = viewModel.errorMessage {
+                Text(error).foregroundStyle(.red)
+            }
+        }
+        .padding()
+        .navigationTitle("记忆准入")
+        .onAppear { viewModel.reloadGraphExtractionTraces() }
+    }
+
+    private func traceOutcomeColor(_ outcome: GraphExtractionTraceOutcome) -> Color {
+        switch outcome {
+        case .committed: return .green
+        case .held: return .orange
+        case .askUser: return .blue
+        case .discarded: return .secondary
+        case .failed: return .red
         }
     }
 }
