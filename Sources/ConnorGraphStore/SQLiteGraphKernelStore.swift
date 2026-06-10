@@ -169,6 +169,79 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         """)
         try execute("CREATE INDEX IF NOT EXISTS idx_graph_jobs_v3_runnable ON graph_jobs_v3(graph_id, status, next_run_at, priority DESC);")
         try execute("""
+        CREATE TABLE IF NOT EXISTS graph_extraction_traces (
+            id TEXT PRIMARY KEY,
+            job_id TEXT NOT NULL,
+            graph_id TEXT NOT NULL,
+            source_id TEXT NOT NULL,
+            source_type TEXT NOT NULL,
+            outcome TEXT NOT NULL,
+            admission_action TEXT,
+            admission_reasons_json TEXT NOT NULL,
+            extracted_entity_count INTEGER NOT NULL,
+            extracted_statement_count INTEGER NOT NULL,
+            committed_entity_count INTEGER NOT NULL,
+            committed_statement_count INTEGER NOT NULL,
+            anomaly_count INTEGER NOT NULL,
+            error_message TEXT,
+            created_at TEXT NOT NULL,
+            metadata_json TEXT NOT NULL
+        );
+        """)
+        try execute("CREATE INDEX IF NOT EXISTS idx_graph_extraction_traces_job ON graph_extraction_traces(job_id, created_at DESC);")
+        try execute("CREATE INDEX IF NOT EXISTS idx_graph_extraction_traces_source ON graph_extraction_traces(graph_id, source_id, created_at DESC);")
+        try execute("""
+        CREATE TABLE IF NOT EXISTS graph_extraction_trace_payloads (
+            trace_id TEXT PRIMARY KEY,
+            prompt_text TEXT,
+            raw_response_json TEXT,
+            normalized_json TEXT,
+            decoder_error_kind TEXT,
+            decoder_error_message TEXT,
+            created_at TEXT NOT NULL,
+            metadata_json TEXT NOT NULL
+        );
+        """)
+        try execute("""
+        CREATE TABLE IF NOT EXISTS graph_admission_hold_queue (
+            id TEXT PRIMARY KEY,
+            trace_id TEXT NOT NULL,
+            job_id TEXT NOT NULL,
+            graph_id TEXT NOT NULL,
+            source_id TEXT NOT NULL,
+            source_type TEXT NOT NULL,
+            status TEXT NOT NULL,
+            reasons_json TEXT NOT NULL,
+            recommended_actions_json TEXT NOT NULL,
+            message TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            resolved_at TEXT,
+            metadata_json TEXT NOT NULL
+        );
+        """)
+        try execute("CREATE INDEX IF NOT EXISTS idx_graph_admission_hold_queue_status ON graph_admission_hold_queue(graph_id, status, created_at DESC);")
+        try execute("CREATE INDEX IF NOT EXISTS idx_graph_admission_hold_queue_trace ON graph_admission_hold_queue(trace_id);")
+        try execute("""
+        CREATE TABLE IF NOT EXISTS graph_memory_change_log (
+            id TEXT PRIMARY KEY,
+            graph_id TEXT NOT NULL,
+            action TEXT NOT NULL,
+            trace_id TEXT,
+            job_id TEXT,
+            source_id TEXT,
+            source_type TEXT,
+            entity_ids_json TEXT NOT NULL,
+            statement_ids_json TEXT NOT NULL,
+            anomaly_ids_json TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            metadata_json TEXT NOT NULL
+        );
+        """)
+        try execute("CREATE INDEX IF NOT EXISTS idx_graph_memory_change_log_graph ON graph_memory_change_log(graph_id, created_at DESC);")
+        try execute("CREATE INDEX IF NOT EXISTS idx_graph_memory_change_log_trace ON graph_memory_change_log(trace_id);")
+        try execute("""
         CREATE VIRTUAL TABLE IF NOT EXISTS graph_entities_fts USING fts5(
             entity_id UNINDEXED,
             graph_id UNINDEXED,
@@ -188,6 +261,17 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
             statement_text,
             subject_name,
             object_name,
+            tokenize = 'unicode61 remove_diacritics 2'
+        );
+        """)
+        try execute("""
+        CREATE VIRTUAL TABLE IF NOT EXISTS graph_episodes_fts USING fts5(
+            episode_id UNINDEXED,
+            graph_id UNINDEXED,
+            source_type UNINDEXED,
+            title,
+            content,
+            source_description,
             tokenize = 'unicode61 remove_diacritics 2'
         );
         """)
@@ -275,6 +359,7 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         (id, graph_id, source_type, source_id, title, content, source_description, occurred_at, ingested_at, session_id, work_object_id, status, metadata_json)
         VALUES (\(quote(episode.id)), \(quote(episode.graphID)), \(quote(episode.sourceType.rawValue)), \(quote(episode.sourceID)), \(quote(episode.title)), \(quote(episode.content)), \(quote(episode.sourceDescription)), \(quote(iso(episode.occurredAt))), \(quote(iso(episode.ingestedAt))), \(quote(episode.sessionID)), \(quote(episode.workObjectID)), \(quote(episode.status.rawValue)), \(quote(json(episode.metadata))))
         """)
+        try upsertEpisodeFTS(episode)
     }
 
     public func episode(id: String) throws -> GraphEpisodeV3? {
@@ -374,6 +459,103 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         try query(sql: "SELECT id, graph_id, type, status, priority, payload_json, attempt_count, max_attempts, created_at, updated_at, next_run_at, started_at, finished_at, error_code, error_message, metadata_json FROM graph_jobs_v3 WHERE graph_id = \(quote(graphID)) AND status = \(quote(GraphJobV3Status.queued.rawValue)) AND next_run_at <= \(quote(iso(date))) ORDER BY priority DESC, next_run_at ASC LIMIT \(limit)").map(decodeJob)
     }
 
+    public func job(id: String) throws -> GraphJobV3? {
+        try query(sql: "SELECT id, graph_id, type, status, priority, payload_json, attempt_count, max_attempts, created_at, updated_at, next_run_at, started_at, finished_at, error_code, error_message, metadata_json FROM graph_jobs_v3 WHERE id = \(quote(id)) LIMIT 1").map(decodeJob).first
+    }
+
+    public func appendExtractionTrace(_ trace: GraphExtractionTrace) throws {
+        try execute("""
+        INSERT INTO graph_extraction_traces
+        (id, job_id, graph_id, source_id, source_type, outcome, admission_action, admission_reasons_json, extracted_entity_count, extracted_statement_count, committed_entity_count, committed_statement_count, anomaly_count, error_message, created_at, metadata_json)
+        VALUES (\(quote(trace.id)), \(quote(trace.jobID)), \(quote(trace.graphID)), \(quote(trace.sourceID)), \(quote(trace.sourceType.rawValue)), \(quote(trace.outcome.rawValue)), \(quote(trace.admissionAction?.rawValue)), \(quote(json(trace.admissionReasons.map(\.rawValue)))), \(trace.extractedEntityCount), \(trace.extractedStatementCount), \(trace.committedEntityCount), \(trace.committedStatementCount), \(trace.anomalyCount), \(quote(trace.errorMessage)), \(quote(iso(trace.createdAt))), \(quote(json(trace.metadata))))
+        """)
+    }
+
+    public func extractionTraces(jobID: String, limit: Int = 20) throws -> [GraphExtractionTrace] {
+        try query(sql: """
+        SELECT id, job_id, graph_id, source_id, source_type, outcome, admission_action, admission_reasons_json, extracted_entity_count, extracted_statement_count, committed_entity_count, committed_statement_count, anomaly_count, error_message, created_at, metadata_json
+        FROM graph_extraction_traces WHERE job_id = \(quote(jobID)) ORDER BY created_at DESC LIMIT \(limit)
+        """).map(decodeExtractionTrace)
+    }
+
+    public func extractionTrace(id: String) throws -> GraphExtractionTrace? {
+        try query(sql: """
+        SELECT id, job_id, graph_id, source_id, source_type, outcome, admission_action, admission_reasons_json, extracted_entity_count, extracted_statement_count, committed_entity_count, committed_statement_count, anomaly_count, error_message, created_at, metadata_json
+        FROM graph_extraction_traces WHERE id = \(quote(id)) LIMIT 1
+        """).map(decodeExtractionTrace).first
+    }
+
+    public func extractionTraces(graphID: String, sourceID: String? = nil, limit: Int = 100) throws -> [GraphExtractionTrace] {
+        var conditions = ["graph_id = \(quote(graphID))"]
+        if let sourceID { conditions.append("source_id = \(quote(sourceID))") }
+        return try query(sql: """
+        SELECT id, job_id, graph_id, source_id, source_type, outcome, admission_action, admission_reasons_json, extracted_entity_count, extracted_statement_count, committed_entity_count, committed_statement_count, anomaly_count, error_message, created_at, metadata_json
+        FROM graph_extraction_traces WHERE \(conditions.joined(separator: " AND ")) ORDER BY created_at DESC LIMIT \(limit)
+        """).map(decodeExtractionTrace)
+    }
+
+    public func appendExtractionTracePayload(_ payload: GraphExtractionTracePayload) throws {
+        try execute("""
+        INSERT OR REPLACE INTO graph_extraction_trace_payloads
+        (trace_id, prompt_text, raw_response_json, normalized_json, decoder_error_kind, decoder_error_message, created_at, metadata_json)
+        VALUES (\(quote(payload.traceID)), \(quote(payload.promptText)), \(quote(payload.rawResponseJSON)), \(quote(payload.normalizedJSON)), \(quote(payload.decoderErrorKind)), \(quote(payload.decoderErrorMessage)), \(quote(iso(payload.createdAt))), \(quote(json(payload.metadata))))
+        """)
+    }
+
+    public func extractionTracePayload(traceID: String) throws -> GraphExtractionTracePayload? {
+        try query(sql: """
+        SELECT trace_id, prompt_text, raw_response_json, normalized_json, decoder_error_kind, decoder_error_message, created_at, metadata_json
+        FROM graph_extraction_trace_payloads WHERE trace_id = \(quote(traceID)) LIMIT 1
+        """).map(decodeExtractionTracePayload).first
+    }
+
+    public func upsertAdmissionHoldQueueItem(_ item: GraphAdmissionHoldQueueItem) throws {
+        try execute("""
+        INSERT OR REPLACE INTO graph_admission_hold_queue
+        (id, trace_id, job_id, graph_id, source_id, source_type, status, reasons_json, recommended_actions_json, message, created_at, updated_at, resolved_at, metadata_json)
+        VALUES (\(quote(item.id)), \(quote(item.traceID)), \(quote(item.jobID)), \(quote(item.graphID)), \(quote(item.sourceID)), \(quote(item.sourceType.rawValue)), \(quote(item.status.rawValue)), \(quote(json(item.reasons.map(\.rawValue)))), \(quote(json(item.recommendedActions.map(\.rawValue)))), \(quote(item.message)), \(quote(iso(item.createdAt))), \(quote(iso(item.updatedAt))), \(quote(item.resolvedAt.map(iso))), \(quote(json(item.metadata))))
+        """)
+    }
+
+    public func admissionHoldQueueItems(graphID: String, status: GraphAdmissionHoldQueueStatus? = nil, limit: Int = 100) throws -> [GraphAdmissionHoldQueueItem] {
+        var conditions = ["graph_id = \(quote(graphID))"]
+        if let status { conditions.append("status = \(quote(status.rawValue))") }
+        return try query(sql: """
+        SELECT id, trace_id, job_id, graph_id, source_id, source_type, status, reasons_json, recommended_actions_json, message, created_at, updated_at, resolved_at, metadata_json
+        FROM graph_admission_hold_queue WHERE \(conditions.joined(separator: " AND ")) ORDER BY created_at DESC LIMIT \(limit)
+        """).map(decodeAdmissionHoldQueueItem)
+    }
+
+    public func admissionHoldQueueItem(id: String) throws -> GraphAdmissionHoldQueueItem? {
+        try query(sql: """
+        SELECT id, trace_id, job_id, graph_id, source_id, source_type, status, reasons_json, recommended_actions_json, message, created_at, updated_at, resolved_at, metadata_json
+        FROM graph_admission_hold_queue WHERE id = \(quote(id)) LIMIT 1
+        """).map(decodeAdmissionHoldQueueItem).first
+    }
+
+    public func updateAdmissionHoldQueueItemStatus(id: String, status: GraphAdmissionHoldQueueStatus, resolvedAt: Date? = nil, now: Date = Date()) throws {
+        try execute("""
+        UPDATE graph_admission_hold_queue
+        SET status = \(quote(status.rawValue)), updated_at = \(quote(iso(now))), resolved_at = \(quote(resolvedAt.map(iso)))
+        WHERE id = \(quote(id))
+        """)
+    }
+
+    public func appendMemoryChangeLogEntry(_ entry: GraphMemoryChangeLogEntry) throws {
+        try execute("""
+        INSERT INTO graph_memory_change_log
+        (id, graph_id, action, trace_id, job_id, source_id, source_type, entity_ids_json, statement_ids_json, anomaly_ids_json, summary, created_at, metadata_json)
+        VALUES (\(quote(entry.id)), \(quote(entry.graphID)), \(quote(entry.action.rawValue)), \(quote(entry.traceID)), \(quote(entry.jobID)), \(quote(entry.sourceID)), \(quote(entry.sourceType?.rawValue)), \(quote(json(entry.entityIDs))), \(quote(json(entry.statementIDs))), \(quote(json(entry.anomalyIDs))), \(quote(entry.summary)), \(quote(iso(entry.createdAt))), \(quote(json(entry.metadata))))
+        """)
+    }
+
+    public func memoryChangeLogEntries(graphID: String, limit: Int = 100) throws -> [GraphMemoryChangeLogEntry] {
+        try query(sql: """
+        SELECT id, graph_id, action, trace_id, job_id, source_id, source_type, entity_ids_json, statement_ids_json, anomaly_ids_json, summary, created_at, metadata_json
+        FROM graph_memory_change_log WHERE graph_id = \(quote(graphID)) ORDER BY created_at DESC LIMIT \(limit)
+        """).map(decodeMemoryChangeLogEntry)
+    }
+
     @discardableResult
     public func enqueueExtractionJob(
         graphID: String,
@@ -434,6 +616,11 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
     public func searchStatementsFTS(query text: String, graphID: String, limit: Int) throws -> [GraphStatement] {
         let ids = try query(sql: "SELECT statement_id FROM graph_statements_fts WHERE graph_statements_fts MATCH \(quote(text)) AND graph_id = \(quote(graphID)) LIMIT \(limit)").compactMap { $0.first }
         return try ids.compactMap { try statement(id: $0) }
+    }
+
+    public func searchEpisodesFTS(query text: String, graphID: String, limit: Int) throws -> [GraphEpisodeV3] {
+        let ids = try query(sql: "SELECT episode_id FROM graph_episodes_fts WHERE graph_episodes_fts MATCH \(quote(text)) AND graph_id = \(quote(graphID)) LIMIT \(limit)").compactMap { $0.first }
+        return try ids.compactMap { try episode(id: $0) }
     }
 
     // MARK: - Graph Write Candidates
@@ -526,6 +713,14 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         """)
     }
 
+    private func upsertEpisodeFTS(_ episode: GraphEpisodeV3) throws {
+        try execute("DELETE FROM graph_episodes_fts WHERE episode_id = \(quote(episode.id));")
+        try execute("""
+        INSERT INTO graph_episodes_fts(episode_id, graph_id, source_type, title, content, source_description)
+        VALUES (\(quote(episode.id)), \(quote(episode.graphID)), \(quote(episode.sourceType.rawValue)), \(quote(episode.title)), \(quote(episode.content)), \(quote(episode.sourceDescription)))
+        """)
+    }
+
     private func upsertEntityFTS(_ entity: GraphEntity) throws {
         try execute("DELETE FROM graph_entities_fts WHERE entity_id = \(quote(entity.id));")
         try execute("""
@@ -578,6 +773,80 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
     private func decodeAnomaly(_ row: [String]) throws -> GraphAnomaly {
         GraphAnomaly(
             id: row[0], graphID: row[1], anomalyType: GraphAnomalyType(rawValue: row[2]) ?? .commonSenseViolation, statementID: row[3], relatedStatementIDs: try decode([String].self, row[4]), severity: GraphAnomalySeverity(rawValue: row[5]) ?? .medium, status: GraphAnomalyStatus(rawValue: row[6]) ?? .open, detectedAt: try date(row[7]), resolvedAt: try optionalDate(row[8]), resolution: try decode([String: String].self, row[9]), metadata: try decode([String: String].self, row[10])
+        )
+    }
+
+    private func decodeMemoryChangeLogEntry(_ row: [String]) throws -> GraphMemoryChangeLogEntry {
+        GraphMemoryChangeLogEntry(
+            id: row[0],
+            graphID: row[1],
+            action: GraphMemoryChangeLogAction(rawValue: row[2]) ?? .extractionFailed,
+            traceID: nilIfEmpty(row[3]),
+            jobID: nilIfEmpty(row[4]),
+            sourceID: nilIfEmpty(row[5]),
+            sourceType: nilIfEmpty(row[6]).flatMap(GraphExtractionSourceType.init(rawValue:)),
+            entityIDs: try decode([String].self, row[7]),
+            statementIDs: try decode([String].self, row[8]),
+            anomalyIDs: try decode([String].self, row[9]),
+            summary: row[10],
+            createdAt: try date(row[11]),
+            metadata: try decode([String: String].self, row[12])
+        )
+    }
+
+    private func decodeAdmissionHoldQueueItem(_ row: [String]) throws -> GraphAdmissionHoldQueueItem {
+        let reasons = try decode([String].self, row[7]).compactMap(GraphWriteAdmissionReason.init(rawValue:))
+        let actions = try decode([String].self, row[8]).compactMap(GraphAdmissionHoldRecommendedAction.init(rawValue:))
+        return GraphAdmissionHoldQueueItem(
+            id: row[0],
+            traceID: row[1],
+            jobID: row[2],
+            graphID: row[3],
+            sourceID: row[4],
+            sourceType: GraphExtractionSourceType(rawValue: row[5]) ?? .manual,
+            status: GraphAdmissionHoldQueueStatus(rawValue: row[6]) ?? .open,
+            reasons: reasons,
+            recommendedActions: actions,
+            message: row[9],
+            createdAt: try date(row[10]),
+            updatedAt: try date(row[11]),
+            resolvedAt: try optionalDate(row[12]),
+            metadata: try decode([String: String].self, row[13])
+        )
+    }
+
+    private func decodeExtractionTracePayload(_ row: [String]) throws -> GraphExtractionTracePayload {
+        GraphExtractionTracePayload(
+            traceID: row[0],
+            promptText: nilIfEmpty(row[1]),
+            rawResponseJSON: nilIfEmpty(row[2]),
+            normalizedJSON: nilIfEmpty(row[3]),
+            decoderErrorKind: nilIfEmpty(row[4]),
+            decoderErrorMessage: nilIfEmpty(row[5]),
+            createdAt: try date(row[6]),
+            metadata: try decode([String: String].self, row[7])
+        )
+    }
+
+    private func decodeExtractionTrace(_ row: [String]) throws -> GraphExtractionTrace {
+        let reasonRawValues = try decode([String].self, row[7])
+        return GraphExtractionTrace(
+            id: row[0],
+            jobID: row[1],
+            graphID: row[2],
+            sourceID: row[3],
+            sourceType: GraphExtractionSourceType(rawValue: row[4]) ?? .manual,
+            outcome: GraphExtractionTraceOutcome(rawValue: row[5]) ?? .failed,
+            admissionAction: nilIfEmpty(row[6]).flatMap(GraphWriteAdmissionDecisionAction.init(rawValue:)),
+            admissionReasons: reasonRawValues.compactMap(GraphWriteAdmissionReason.init(rawValue:)),
+            extractedEntityCount: Int(row[8]) ?? 0,
+            extractedStatementCount: Int(row[9]) ?? 0,
+            committedEntityCount: Int(row[10]) ?? 0,
+            committedStatementCount: Int(row[11]) ?? 0,
+            anomalyCount: Int(row[12]) ?? 0,
+            errorMessage: nilIfEmpty(row[13]),
+            createdAt: try date(row[14]),
+            metadata: try decode([String: String].self, row[15])
         )
     }
 
