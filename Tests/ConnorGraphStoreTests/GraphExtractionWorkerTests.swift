@@ -42,6 +42,8 @@ private struct StubGraphExtractor: GraphExtractorProvider {
     let result = try await GraphExtractionWorker(store: store, extractor: StubGraphExtractor(draft: draft)).runNext(graphID: "default", now: now)
 
     #expect(result?.jobID == "job-extract-1")
+    #expect(result?.extractedEntityCount == 2)
+    #expect(result?.extractedStatementCount == 1)
     #expect(result?.writeResult.committedStatementIDs.count == 1)
     #expect(try store.episode(id: "episode-email-1") != nil)
     #expect(try store.statements(graphID: "default", predicate: .prefers).count == 1)
@@ -58,4 +60,5 @@ private struct StubGraphExtractor: GraphExtractorProvider {
     let result = try await GraphExtractionWorker(store: store, extractor: StubGraphExtractor(draft: GraphExtractionDraft(source: emptySource))).runNext(graphID: "default", now: now)
 
     #expect(result?.action == .failed)
+    #expect(result?.errorMessage?.contains("invalidPayload") == true)
 }
