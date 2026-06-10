@@ -33,8 +33,11 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
             hits += entities.enumerated().map { index, entity in entityHit(entity, rank: index + 1) }
         }
 
-        // Episode FTS will be added once graph_episodes_v3 gets a dedicated FTS table.
-        // For now, v3 search is intentionally scoped to entities/statements.
+        if query.includeEpisodes {
+            let episodes = try store.searchEpisodesFTS(query: query.text, graphID: query.graphID, limit: perScopeLimit)
+                .filter { includes($0.status, in: query.beliefStatusFilter) }
+            hits += episodes.enumerated().map { index, episode in episodeHit(episode, rank: index + 1) }
+        }
 
         let deduped = dedupe(hits)
             .sorted { lhs, rhs in
@@ -46,6 +49,10 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
 
     private func includes(_ status: GraphBeliefStatus, in filter: Set<GraphBeliefStatus>) -> Bool {
         filter.isEmpty || filter.contains(status)
+    }
+
+    private func includes(_ status: GraphEntityStatus, in filter: Set<GraphBeliefStatus>) -> Bool {
+        filter.isEmpty || filter.contains(.active) && status == .active
     }
 
     private func isTemporallyValid(_ statement: GraphStatement, at referenceTime: Date?) -> Bool {
@@ -88,6 +95,25 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
             retrievalMethod: "fts_v3",
             sourceEpisodeIDs: statement.sourceEpisodeIDs,
             metadata: metadata
+        )
+    }
+
+    private func episodeHit(_ episode: GraphEpisodeV3, rank: Int) -> GraphSearchHit {
+        GraphSearchHit(
+            ownerType: .episode,
+            ownerID: episode.id,
+            title: episode.title,
+            text: episode.content.isEmpty ? episode.sourceDescription : episode.content,
+            score: score(forRank: rank),
+            retrievalMethod: "episode_fts_v3",
+            sourceEpisodeIDs: [episode.id],
+            metadata: [
+                "graph_id": episode.graphID,
+                "source_type": episode.sourceType.rawValue,
+                "source_id": episode.sourceID ?? "",
+                "source_description": episode.sourceDescription,
+                "status": episode.status.rawValue
+            ]
         )
     }
 
