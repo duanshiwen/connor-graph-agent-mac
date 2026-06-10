@@ -94,3 +94,22 @@ private func admissionDraft(
     #expect(decision.action == .askUser)
     #expect(decision.reasons.contains(.sensitivePersonalMemory))
 }
+
+@Test func admissionPolicyUsesPrecomputedEntityResolutionPlan() throws {
+    let plan = GraphEntityResolutionPlan(entries: [
+        GraphEntityResolutionPlanEntry(
+            localID: "person",
+            name: "诗闻",
+            entityKind: .personObject,
+            scope: .personal,
+            action: .potentialDuplicate,
+            matchedEntityID: "entity-existing-shiwen",
+            reason: .fts
+        )
+    ])
+
+    let decision = try GraphWriteAdmissionPolicy().decide(draft: admissionDraft(), resolutionPlan: plan)
+
+    #expect(decision.action == .hold)
+    #expect(decision.reasons.contains(.potentialDuplicateEntity))
+}

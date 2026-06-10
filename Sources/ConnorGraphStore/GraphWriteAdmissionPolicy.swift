@@ -51,6 +51,11 @@ public struct GraphWriteAdmissionPolicy: Sendable {
     }
 
     public func decide(draft: GraphExtractionDraft, resolver: SQLiteGraphEntityResolver? = nil) throws -> GraphWriteAdmissionDecision {
+        let resolutionPlan = try resolver.map { try GraphEntityResolutionPlanner(resolver: $0).plan(for: draft) }
+        return try decide(draft: draft, resolutionPlan: resolutionPlan)
+    }
+
+    public func decide(draft: GraphExtractionDraft, resolutionPlan: GraphEntityResolutionPlan?) throws -> GraphWriteAdmissionDecision {
         guard !draft.entities.isEmpty || !draft.statements.isEmpty else {
             return GraphWriteAdmissionDecision(action: .discard, reasons: [.emptyDraft], message: "Extraction produced no graph candidates.")
         }
@@ -65,12 +70,10 @@ public struct GraphWriteAdmissionPolicy: Sendable {
             if askUserForSensitivePersonalMemory, entity.scope == .personal, isSensitive(entity: entity) {
                 askReasons.append(.sensitivePersonalMemory)
             }
-            if let resolver {
-                let resolution = try resolver.resolve(name: entity.name, entityKind: entity.entityKind, scope: entity.scope, graphID: draft.source.graphID)
-                if case .potentialDuplicate = resolution {
-                    holdReasons.append(.potentialDuplicateEntity)
-                }
-            }
+        }
+
+        if resolutionPlan?.hasPotentialDuplicates == true {
+            holdReasons.append(.potentialDuplicateEntity)
         }
 
         for statement in draft.statements {

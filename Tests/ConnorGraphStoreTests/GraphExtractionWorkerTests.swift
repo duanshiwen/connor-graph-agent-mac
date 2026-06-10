@@ -70,6 +70,8 @@ private struct FailingDiagnosticGraphExtractor: GraphExtractorProvider {
     #expect(traces[0].metadata["llm_model_id"] == "fake-model")
     #expect(traces[0].metadata["prompt_tokens"] == "12")
     #expect(traces[0].metadata["latency_ms"] == "34")
+    #expect(traces[0].metadata["entity_resolution_create_count"] == "2")
+    #expect(traces[0].metadata["entity_resolution_matched_count"] == "0")
     #expect(try store.runnableJobs(graphID: "default", at: now).contains { $0.id == "job-extract-1" } == false)
 }
 
