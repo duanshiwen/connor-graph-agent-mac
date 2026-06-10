@@ -143,7 +143,8 @@ public struct GraphExtractionWorker<Extractor: GraphExtractorProvider>: Sendable
             case .autoCommit:
                 let batch = try draft.toOptimisticWriteBatch(now: now)
                 let writeResult = try optimisticWriter.commit(batch)
-                try appendTrace(job: job, source: payload.source, draft: draft, outcome: .committed, admission: admission, writeResult: writeResult, now: now)
+                let traceID = try appendTrace(job: job, source: payload.source, draft: draft, outcome: .committed, admission: admission, writeResult: writeResult, now: now)
+                try appendMemoryChangeLog(traceID: traceID, job: job, source: payload.source, action: .extractionCommitted, admission: admission, writeResult: writeResult, draft: draft, now: now)
                 try mark(job: job, status: .succeeded, now: now)
                 return GraphExtractionWorkerResult(
                     jobID: job.id,
@@ -156,6 +157,7 @@ public struct GraphExtractionWorker<Extractor: GraphExtractorProvider>: Sendable
             case .hold:
                 let traceID = try appendTrace(job: job, source: payload.source, draft: draft, outcome: .held, admission: admission, errorMessage: admission.message, now: now)
                 try enqueueAdmissionHoldDiagnostics(traceID: traceID, job: job, source: payload.source, admission: admission, draft: draft, now: now)
+                try appendMemoryChangeLog(traceID: traceID, job: job, source: payload.source, action: .extractionHeld, admission: admission, draft: draft, now: now)
                 try mark(job: job, status: .paused, now: now, errorCode: "admission_hold", errorMessage: admission.message)
                 return GraphExtractionWorkerResult(
                     jobID: job.id,
@@ -168,6 +170,7 @@ public struct GraphExtractionWorker<Extractor: GraphExtractorProvider>: Sendable
             case .askUser:
                 let traceID = try appendTrace(job: job, source: payload.source, draft: draft, outcome: .askUser, admission: admission, errorMessage: admission.message, now: now)
                 try enqueueAdmissionHoldDiagnostics(traceID: traceID, job: job, source: payload.source, admission: admission, draft: draft, now: now)
+                try appendMemoryChangeLog(traceID: traceID, job: job, source: payload.source, action: .extractionAskUser, admission: admission, draft: draft, now: now)
                 try mark(job: job, status: .paused, now: now, errorCode: "admission_ask_user", errorMessage: admission.message)
                 return GraphExtractionWorkerResult(
                     jobID: job.id,
@@ -178,7 +181,8 @@ public struct GraphExtractionWorker<Extractor: GraphExtractorProvider>: Sendable
                     admissionDecision: admission
                 )
             case .discard:
-                try appendTrace(job: job, source: payload.source, draft: draft, outcome: .discarded, admission: admission, errorMessage: admission.message, now: now)
+                let traceID = try appendTrace(job: job, source: payload.source, draft: draft, outcome: .discarded, admission: admission, errorMessage: admission.message, now: now)
+                try appendMemoryChangeLog(traceID: traceID, job: job, source: payload.source, action: .extractionDiscarded, admission: admission, draft: draft, now: now)
                 try mark(job: job, status: .succeeded, now: now, errorCode: "admission_discard", errorMessage: admission.message)
                 return GraphExtractionWorkerResult(
                     jobID: job.id,
@@ -191,18 +195,20 @@ public struct GraphExtractionWorker<Extractor: GraphExtractorProvider>: Sendable
             }
         } catch let failure as GraphExtractionAttemptFailure {
             let message = failure.description
-            try appendFailureTrace(
+            let traceID = try appendFailureTrace(
                 job: job,
                 source: failure.source,
                 errorMessage: message,
                 metadata: failure.traceMetadata,
                 now: now
             )
+            try appendFailureChangeLog(traceID: traceID, job: job, source: failure.source, errorMessage: message, now: now)
             try mark(job: job, status: .failed, now: now, errorCode: "extraction_failed", errorMessage: message)
             return GraphExtractionWorkerResult(jobID: job.id, action: .failed, errorMessage: message)
         } catch {
             let message = String(describing: error)
-            try appendFailureTrace(job: job, errorMessage: message, now: now)
+            let traceID = try appendFailureTrace(job: job, errorMessage: message, now: now)
+            try appendFailureChangeLog(traceID: traceID, job: job, source: nil, errorMessage: message, now: now)
             try mark(job: job, status: .failed, now: now, errorCode: "extraction_failed", errorMessage: message)
             return GraphExtractionWorkerResult(jobID: job.id, action: .failed, errorMessage: message)
         }
@@ -276,13 +282,14 @@ public struct GraphExtractionWorker<Extractor: GraphExtractorProvider>: Sendable
         try store.upsertAdmissionHoldQueueItem(item)
     }
 
+    @discardableResult
     private func appendFailureTrace(
         job: GraphJobV3,
         source: GraphExtractionSource? = nil,
         errorMessage: String,
         metadata: [String: String] = [:],
         now: Date
-    ) throws {
+    ) throws -> String {
         let traceID = "trace-\(job.id)-failed-\(Int(now.timeIntervalSince1970 * 1000))"
         let sourceType = source?.sourceType ?? job.payload["source_type"].flatMap(GraphExtractionSourceType.init(rawValue:)) ?? .manual
         let split = splitTracePayloadMetadata(metadata)
@@ -300,6 +307,61 @@ public struct GraphExtractionWorker<Extractor: GraphExtractorProvider>: Sendable
         if let payload = split.payload(traceID, now) {
             try store.appendExtractionTracePayload(payload)
         }
+        return traceID
+    }
+
+    private func appendMemoryChangeLog(
+        traceID: String,
+        job: GraphJobV3,
+        source: GraphExtractionSource,
+        action: GraphMemoryChangeLogAction,
+        admission: GraphWriteAdmissionDecision,
+        writeResult: GraphOptimisticWriteResult = GraphOptimisticWriteResult(),
+        draft: GraphExtractionDraft,
+        now: Date
+    ) throws {
+        let summary = "\(action.rawValue): \(draft.entities.count) entities, \(draft.statements.count) statements, admission=\(admission.action.rawValue)"
+        try store.appendMemoryChangeLogEntry(GraphMemoryChangeLogEntry(
+            id: "change-\(traceID)",
+            graphID: job.graphID,
+            action: action,
+            traceID: traceID,
+            jobID: job.id,
+            sourceID: source.id,
+            sourceType: source.sourceType,
+            entityIDs: writeResult.committedEntityIDs + Array(writeResult.resolvedEntityIDs.values),
+            statementIDs: writeResult.committedStatementIDs,
+            anomalyIDs: writeResult.anomalyIDs,
+            summary: summary,
+            createdAt: now,
+            metadata: [
+                "admission_action": admission.action.rawValue,
+                "admission_reasons": admission.reasons.map(\.rawValue).joined(separator: ","),
+                "extracted_entity_count": String(draft.entities.count),
+                "extracted_statement_count": String(draft.statements.count)
+            ]
+        ))
+    }
+
+    private func appendFailureChangeLog(
+        traceID: String,
+        job: GraphJobV3,
+        source: GraphExtractionSource?,
+        errorMessage: String,
+        now: Date
+    ) throws {
+        try store.appendMemoryChangeLogEntry(GraphMemoryChangeLogEntry(
+            id: "change-\(traceID)",
+            graphID: job.graphID,
+            action: .extractionFailed,
+            traceID: traceID,
+            jobID: job.id,
+            sourceID: source?.id ?? job.payload["source_id"],
+            sourceType: source?.sourceType ?? job.payload["source_type"].flatMap(GraphExtractionSourceType.init(rawValue:)),
+            summary: "extraction_failed: \(errorMessage)",
+            createdAt: now,
+            metadata: ["error_message": errorMessage]
+        ))
     }
 
     private func splitTracePayloadMetadata(_ metadata: [String: String]) -> (

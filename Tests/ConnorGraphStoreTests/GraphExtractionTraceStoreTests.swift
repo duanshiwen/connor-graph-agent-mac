@@ -60,6 +60,30 @@ private func temporaryExtractionTraceDatabaseURL(_ name: String = UUID().uuidStr
     #expect(try store.extractionTracePayload(traceID: "missing") == nil)
 }
 
+@Test func memoryChangeLogPersistsAndLoadsRecentEntries() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryExtractionTraceDatabaseURL().path)
+    try store.migrate()
+    let now = Date(timeIntervalSince1970: 2_500)
+    let entry = GraphMemoryChangeLogEntry(
+        id: "change-1",
+        graphID: "default",
+        action: .extractionCommitted,
+        traceID: "trace-1",
+        jobID: "job-1",
+        sourceID: "source-1",
+        sourceType: .chat,
+        entityIDs: ["entity-1"],
+        statementIDs: ["statement-1"],
+        summary: "committed test",
+        createdAt: now,
+        metadata: ["admission_action": "auto_commit"]
+    )
+
+    try store.appendMemoryChangeLogEntry(entry)
+
+    #expect(try store.memoryChangeLogEntries(graphID: "default") == [entry])
+}
+
 @Test func admissionHoldQueuePersistsLoadsAndUpdatesStatus() throws {
     let store = try SQLiteGraphKernelStore(path: temporaryExtractionTraceDatabaseURL().path)
     try store.migrate()

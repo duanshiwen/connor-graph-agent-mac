@@ -223,6 +223,25 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         try execute("CREATE INDEX IF NOT EXISTS idx_graph_admission_hold_queue_status ON graph_admission_hold_queue(graph_id, status, created_at DESC);")
         try execute("CREATE INDEX IF NOT EXISTS idx_graph_admission_hold_queue_trace ON graph_admission_hold_queue(trace_id);")
         try execute("""
+        CREATE TABLE IF NOT EXISTS graph_memory_change_log (
+            id TEXT PRIMARY KEY,
+            graph_id TEXT NOT NULL,
+            action TEXT NOT NULL,
+            trace_id TEXT,
+            job_id TEXT,
+            source_id TEXT,
+            source_type TEXT,
+            entity_ids_json TEXT NOT NULL,
+            statement_ids_json TEXT NOT NULL,
+            anomaly_ids_json TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            metadata_json TEXT NOT NULL
+        );
+        """)
+        try execute("CREATE INDEX IF NOT EXISTS idx_graph_memory_change_log_graph ON graph_memory_change_log(graph_id, created_at DESC);")
+        try execute("CREATE INDEX IF NOT EXISTS idx_graph_memory_change_log_trace ON graph_memory_change_log(trace_id);")
+        try execute("""
         CREATE VIRTUAL TABLE IF NOT EXISTS graph_entities_fts USING fts5(
             entity_id UNINDEXED,
             graph_id UNINDEXED,
@@ -510,6 +529,21 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         """)
     }
 
+    public func appendMemoryChangeLogEntry(_ entry: GraphMemoryChangeLogEntry) throws {
+        try execute("""
+        INSERT INTO graph_memory_change_log
+        (id, graph_id, action, trace_id, job_id, source_id, source_type, entity_ids_json, statement_ids_json, anomaly_ids_json, summary, created_at, metadata_json)
+        VALUES (\(quote(entry.id)), \(quote(entry.graphID)), \(quote(entry.action.rawValue)), \(quote(entry.traceID)), \(quote(entry.jobID)), \(quote(entry.sourceID)), \(quote(entry.sourceType?.rawValue)), \(quote(json(entry.entityIDs))), \(quote(json(entry.statementIDs))), \(quote(json(entry.anomalyIDs))), \(quote(entry.summary)), \(quote(iso(entry.createdAt))), \(quote(json(entry.metadata))))
+        """)
+    }
+
+    public func memoryChangeLogEntries(graphID: String, limit: Int = 100) throws -> [GraphMemoryChangeLogEntry] {
+        try query(sql: """
+        SELECT id, graph_id, action, trace_id, job_id, source_id, source_type, entity_ids_json, statement_ids_json, anomaly_ids_json, summary, created_at, metadata_json
+        FROM graph_memory_change_log WHERE graph_id = \(quote(graphID)) ORDER BY created_at DESC LIMIT \(limit)
+        """).map(decodeMemoryChangeLogEntry)
+    }
+
     @discardableResult
     public func enqueueExtractionJob(
         graphID: String,
@@ -714,6 +748,24 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
     private func decodeAnomaly(_ row: [String]) throws -> GraphAnomaly {
         GraphAnomaly(
             id: row[0], graphID: row[1], anomalyType: GraphAnomalyType(rawValue: row[2]) ?? .commonSenseViolation, statementID: row[3], relatedStatementIDs: try decode([String].self, row[4]), severity: GraphAnomalySeverity(rawValue: row[5]) ?? .medium, status: GraphAnomalyStatus(rawValue: row[6]) ?? .open, detectedAt: try date(row[7]), resolvedAt: try optionalDate(row[8]), resolution: try decode([String: String].self, row[9]), metadata: try decode([String: String].self, row[10])
+        )
+    }
+
+    private func decodeMemoryChangeLogEntry(_ row: [String]) throws -> GraphMemoryChangeLogEntry {
+        GraphMemoryChangeLogEntry(
+            id: row[0],
+            graphID: row[1],
+            action: GraphMemoryChangeLogAction(rawValue: row[2]) ?? .extractionFailed,
+            traceID: nilIfEmpty(row[3]),
+            jobID: nilIfEmpty(row[4]),
+            sourceID: nilIfEmpty(row[5]),
+            sourceType: nilIfEmpty(row[6]).flatMap(GraphExtractionSourceType.init(rawValue:)),
+            entityIDs: try decode([String].self, row[7]),
+            statementIDs: try decode([String].self, row[8]),
+            anomalyIDs: try decode([String].self, row[9]),
+            summary: row[10],
+            createdAt: try date(row[11]),
+            metadata: try decode([String: String].self, row[12])
         )
     }
 
