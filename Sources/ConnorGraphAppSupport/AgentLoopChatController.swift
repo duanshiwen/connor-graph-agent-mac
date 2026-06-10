@@ -71,7 +71,11 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
                 events.append(event)
                 eventPresentations.append(presentation)
                 if case .textComplete(let payload) = event {
-                    assistantMessage = session.appendAssistantMessage(payload.text, citations: payload.citations)
+                    assistantMessage = session.appendAssistantMessage(
+                        payload.text,
+                        citations: payload.citations,
+                        contextSnapshot: payload.contextSnapshot
+                    )
                     transcript = session.messages
                     if let assistantMessage {
                         try persistMemoryStagingAfterAssistantMessage(assistantMessage)
