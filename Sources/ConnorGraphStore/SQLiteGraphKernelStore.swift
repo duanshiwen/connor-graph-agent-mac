@@ -169,6 +169,28 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         """)
         try execute("CREATE INDEX IF NOT EXISTS idx_graph_jobs_v3_runnable ON graph_jobs_v3(graph_id, status, next_run_at, priority DESC);")
         try execute("""
+        CREATE TABLE IF NOT EXISTS graph_extraction_traces (
+            id TEXT PRIMARY KEY,
+            job_id TEXT NOT NULL,
+            graph_id TEXT NOT NULL,
+            source_id TEXT NOT NULL,
+            source_type TEXT NOT NULL,
+            outcome TEXT NOT NULL,
+            admission_action TEXT,
+            admission_reasons_json TEXT NOT NULL,
+            extracted_entity_count INTEGER NOT NULL,
+            extracted_statement_count INTEGER NOT NULL,
+            committed_entity_count INTEGER NOT NULL,
+            committed_statement_count INTEGER NOT NULL,
+            anomaly_count INTEGER NOT NULL,
+            error_message TEXT,
+            created_at TEXT NOT NULL,
+            metadata_json TEXT NOT NULL
+        );
+        """)
+        try execute("CREATE INDEX IF NOT EXISTS idx_graph_extraction_traces_job ON graph_extraction_traces(job_id, created_at DESC);")
+        try execute("CREATE INDEX IF NOT EXISTS idx_graph_extraction_traces_source ON graph_extraction_traces(graph_id, source_id, created_at DESC);")
+        try execute("""
         CREATE VIRTUAL TABLE IF NOT EXISTS graph_entities_fts USING fts5(
             entity_id UNINDEXED,
             graph_id UNINDEXED,
@@ -372,6 +394,30 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
 
     public func runnableJobs(graphID: String, at date: Date, limit: Int = 10) throws -> [GraphJobV3] {
         try query(sql: "SELECT id, graph_id, type, status, priority, payload_json, attempt_count, max_attempts, created_at, updated_at, next_run_at, started_at, finished_at, error_code, error_message, metadata_json FROM graph_jobs_v3 WHERE graph_id = \(quote(graphID)) AND status = \(quote(GraphJobV3Status.queued.rawValue)) AND next_run_at <= \(quote(iso(date))) ORDER BY priority DESC, next_run_at ASC LIMIT \(limit)").map(decodeJob)
+    }
+
+    public func appendExtractionTrace(_ trace: GraphExtractionTrace) throws {
+        try execute("""
+        INSERT INTO graph_extraction_traces
+        (id, job_id, graph_id, source_id, source_type, outcome, admission_action, admission_reasons_json, extracted_entity_count, extracted_statement_count, committed_entity_count, committed_statement_count, anomaly_count, error_message, created_at, metadata_json)
+        VALUES (\(quote(trace.id)), \(quote(trace.jobID)), \(quote(trace.graphID)), \(quote(trace.sourceID)), \(quote(trace.sourceType.rawValue)), \(quote(trace.outcome.rawValue)), \(quote(trace.admissionAction?.rawValue)), \(quote(json(trace.admissionReasons.map(\.rawValue)))), \(trace.extractedEntityCount), \(trace.extractedStatementCount), \(trace.committedEntityCount), \(trace.committedStatementCount), \(trace.anomalyCount), \(quote(trace.errorMessage)), \(quote(iso(trace.createdAt))), \(quote(json(trace.metadata))))
+        """)
+    }
+
+    public func extractionTraces(jobID: String, limit: Int = 20) throws -> [GraphExtractionTrace] {
+        try query(sql: """
+        SELECT id, job_id, graph_id, source_id, source_type, outcome, admission_action, admission_reasons_json, extracted_entity_count, extracted_statement_count, committed_entity_count, committed_statement_count, anomaly_count, error_message, created_at, metadata_json
+        FROM graph_extraction_traces WHERE job_id = \(quote(jobID)) ORDER BY created_at DESC LIMIT \(limit)
+        """).map(decodeExtractionTrace)
+    }
+
+    public func extractionTraces(graphID: String, sourceID: String? = nil, limit: Int = 100) throws -> [GraphExtractionTrace] {
+        var conditions = ["graph_id = \(quote(graphID))"]
+        if let sourceID { conditions.append("source_id = \(quote(sourceID))") }
+        return try query(sql: """
+        SELECT id, job_id, graph_id, source_id, source_type, outcome, admission_action, admission_reasons_json, extracted_entity_count, extracted_statement_count, committed_entity_count, committed_statement_count, anomaly_count, error_message, created_at, metadata_json
+        FROM graph_extraction_traces WHERE \(conditions.joined(separator: " AND ")) ORDER BY created_at DESC LIMIT \(limit)
+        """).map(decodeExtractionTrace)
     }
 
     @discardableResult
@@ -578,6 +624,28 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
     private func decodeAnomaly(_ row: [String]) throws -> GraphAnomaly {
         GraphAnomaly(
             id: row[0], graphID: row[1], anomalyType: GraphAnomalyType(rawValue: row[2]) ?? .commonSenseViolation, statementID: row[3], relatedStatementIDs: try decode([String].self, row[4]), severity: GraphAnomalySeverity(rawValue: row[5]) ?? .medium, status: GraphAnomalyStatus(rawValue: row[6]) ?? .open, detectedAt: try date(row[7]), resolvedAt: try optionalDate(row[8]), resolution: try decode([String: String].self, row[9]), metadata: try decode([String: String].self, row[10])
+        )
+    }
+
+    private func decodeExtractionTrace(_ row: [String]) throws -> GraphExtractionTrace {
+        let reasonRawValues = try decode([String].self, row[7])
+        return GraphExtractionTrace(
+            id: row[0],
+            jobID: row[1],
+            graphID: row[2],
+            sourceID: row[3],
+            sourceType: GraphExtractionSourceType(rawValue: row[4]) ?? .manual,
+            outcome: GraphExtractionTraceOutcome(rawValue: row[5]) ?? .failed,
+            admissionAction: nilIfEmpty(row[6]).flatMap(GraphWriteAdmissionDecisionAction.init(rawValue:)),
+            admissionReasons: reasonRawValues.compactMap(GraphWriteAdmissionReason.init(rawValue:)),
+            extractedEntityCount: Int(row[8]) ?? 0,
+            extractedStatementCount: Int(row[9]) ?? 0,
+            committedEntityCount: Int(row[10]) ?? 0,
+            committedStatementCount: Int(row[11]) ?? 0,
+            anomalyCount: Int(row[12]) ?? 0,
+            errorMessage: nilIfEmpty(row[13]),
+            createdAt: try date(row[14]),
+            metadata: try decode([String: String].self, row[15])
         )
     }
 
