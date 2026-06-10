@@ -137,6 +137,7 @@ public struct GraphExtractionWorker<Extractor: GraphExtractorProvider>: Sendable
             case .autoCommit:
                 let batch = try draft.toOptimisticWriteBatch(now: now)
                 let writeResult = try optimisticWriter.commit(batch)
+                try appendTrace(job: job, source: payload.source, draft: draft, outcome: .committed, admission: admission, writeResult: writeResult, now: now)
                 try mark(job: job, status: .succeeded, now: now)
                 return GraphExtractionWorkerResult(
                     jobID: job.id,
@@ -147,6 +148,7 @@ public struct GraphExtractionWorker<Extractor: GraphExtractorProvider>: Sendable
                     admissionDecision: admission
                 )
             case .hold:
+                try appendTrace(job: job, source: payload.source, draft: draft, outcome: .held, admission: admission, errorMessage: admission.message, now: now)
                 try mark(job: job, status: .paused, now: now, errorCode: "admission_hold", errorMessage: admission.message)
                 return GraphExtractionWorkerResult(
                     jobID: job.id,
@@ -157,6 +159,7 @@ public struct GraphExtractionWorker<Extractor: GraphExtractorProvider>: Sendable
                     admissionDecision: admission
                 )
             case .askUser:
+                try appendTrace(job: job, source: payload.source, draft: draft, outcome: .askUser, admission: admission, errorMessage: admission.message, now: now)
                 try mark(job: job, status: .paused, now: now, errorCode: "admission_ask_user", errorMessage: admission.message)
                 return GraphExtractionWorkerResult(
                     jobID: job.id,
@@ -167,6 +170,7 @@ public struct GraphExtractionWorker<Extractor: GraphExtractorProvider>: Sendable
                     admissionDecision: admission
                 )
             case .discard:
+                try appendTrace(job: job, source: payload.source, draft: draft, outcome: .discarded, admission: admission, errorMessage: admission.message, now: now)
                 try mark(job: job, status: .succeeded, now: now, errorCode: "admission_discard", errorMessage: admission.message)
                 return GraphExtractionWorkerResult(
                     jobID: job.id,
@@ -179,9 +183,54 @@ public struct GraphExtractionWorker<Extractor: GraphExtractorProvider>: Sendable
             }
         } catch {
             let message = String(describing: error)
+            try appendFailureTrace(job: job, errorMessage: message, now: now)
             try mark(job: job, status: .failed, now: now, errorCode: "extraction_failed", errorMessage: message)
             return GraphExtractionWorkerResult(jobID: job.id, action: .failed, errorMessage: message)
         }
+    }
+
+    private func appendTrace(
+        job: GraphJobV3,
+        source: GraphExtractionSource,
+        draft: GraphExtractionDraft,
+        outcome: GraphExtractionTraceOutcome,
+        admission: GraphWriteAdmissionDecision,
+        writeResult: GraphOptimisticWriteResult = GraphOptimisticWriteResult(),
+        errorMessage: String? = nil,
+        now: Date
+    ) throws {
+        try store.appendExtractionTrace(GraphExtractionTrace(
+            id: "trace-\(job.id)-\(outcome.rawValue)-\(Int(now.timeIntervalSince1970 * 1000))",
+            jobID: job.id,
+            graphID: job.graphID,
+            sourceID: source.id,
+            sourceType: source.sourceType,
+            outcome: outcome,
+            admissionAction: admission.action,
+            admissionReasons: admission.reasons,
+            extractedEntityCount: draft.entities.count,
+            extractedStatementCount: draft.statements.count,
+            committedEntityCount: writeResult.committedEntityIDs.count,
+            committedStatementCount: writeResult.committedStatementIDs.count,
+            anomalyCount: writeResult.anomalyIDs.count,
+            errorMessage: errorMessage,
+            createdAt: now,
+            metadata: ["admission_message": admission.message]
+        ))
+    }
+
+    private func appendFailureTrace(job: GraphJobV3, errorMessage: String, now: Date) throws {
+        let sourceType = job.payload["source_type"].flatMap(GraphExtractionSourceType.init(rawValue:)) ?? .manual
+        try store.appendExtractionTrace(GraphExtractionTrace(
+            id: "trace-\(job.id)-failed-\(Int(now.timeIntervalSince1970 * 1000))",
+            jobID: job.id,
+            graphID: job.graphID,
+            sourceID: job.payload["source_id"] ?? "unknown",
+            sourceType: sourceType,
+            outcome: .failed,
+            errorMessage: errorMessage,
+            createdAt: now
+        ))
     }
 
     private func mark(job: GraphJobV3, status: GraphJobV3Status, now: Date, errorCode: String? = nil, errorMessage: String? = nil) throws {
