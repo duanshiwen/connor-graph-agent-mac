@@ -46,6 +46,13 @@ public struct GraphExtractionDecoder: Sendable {
         }
     }
 
+    public func normalizedJSONCandidate(from rawText: String) -> (json: String, warnings: [String])? {
+        let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let normalized = normalizeJSON(from: trimmed)
+        return (json: normalized.0, warnings: normalized.1)
+    }
+
     public func decode(_ rawText: String) throws -> GraphExtractionDecodingResult {
         let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw GraphExtractionDecodingError.emptyResponse }
