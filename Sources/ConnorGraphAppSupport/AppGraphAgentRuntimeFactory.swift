@@ -4,12 +4,12 @@ import ConnorGraphCore
 import ConnorGraphStore
 
 public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
-    public var store: SQLiteGraphStore
+    public var store: SQLiteGraphKernelStore
     public var settingsRepository: AppLLMSettingsRepository
     public var groupID: String
 
     public init(
-        store: SQLiteGraphStore,
+        store: SQLiteGraphKernelStore,
         settingsRepository: AppLLMSettingsRepository,
         groupID: String = "default"
     ) {

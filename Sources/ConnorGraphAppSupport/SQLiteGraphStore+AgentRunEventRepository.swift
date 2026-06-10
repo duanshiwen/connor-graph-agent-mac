@@ -1,5 +1,3 @@
 import Foundation
-import ConnorGraphAgent
-import ConnorGraphStore
 
-extension SQLiteGraphStore: AgentRunEventRepository {}
+// Removed during V3 cutover. SQLiteGraphKernelStore+AppRepositories now provides runtime repository conformance.

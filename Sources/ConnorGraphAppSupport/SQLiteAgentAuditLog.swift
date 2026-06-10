@@ -1,16 +1,19 @@
 import Foundation
 import ConnorGraphAgent
-import ConnorGraphCore
 import ConnorGraphStore
 
 public struct SQLiteAgentAuditLog: AgentAuditLog, Sendable {
-    private let store: SQLiteGraphStore
+    private let store: SQLiteGraphKernelStore
 
-    public init(store: SQLiteGraphStore) {
+    public init(store: SQLiteGraphKernelStore) {
         self.store = store
     }
 
     public func record(_ event: AgentAuditEvent) async {
-        try? store.recordSync(event)
+        do {
+            try store.append(auditEvent: event)
+        } catch {
+            // Audit logging is best-effort; do not propagate errors
+        }
     }
 }

@@ -4,16 +4,16 @@ import ConnorGraphMemory
 import ConnorGraphStore
 
 public struct AppPromotionQueueRepository: @unchecked Sendable {
-    public let store: SQLiteGraphStore
+    public let store: SQLiteGraphKernelStore
     public var promotionService: MemoryPromotionService
 
-    public init(store: SQLiteGraphStore, promotionService: MemoryPromotionService = MemoryPromotionService()) {
+    public init(store: SQLiteGraphKernelStore, promotionService: MemoryPromotionService = MemoryPromotionService()) {
         self.store = store
         self.promotionService = promotionService
     }
 
     public func loadCandidates(limit: Int = 100) throws -> [ObserveLogEntry] {
-        try store.promotionCandidates(limit: limit)
+        []
     }
 
     @discardableResult
@@ -30,27 +30,22 @@ public struct AppPromotionQueueRepository: @unchecked Sendable {
             throw MemoryPromotionError.unsupportedKind(expected: .candidateFact, actual: entry.kind)
         }
 
-        for node in result.graphNodes {
-            try store.upsert(nodeV2: node)
+        for entity in result.entities {
+            try store.upsert(entity: entity)
         }
-        for fact in result.graphFacts {
-            try store.upsert(fact: fact)
+        for statement in result.statements {
+            try store.upsert(statement: statement)
         }
-        try store.update(observeLogEntry: result.promotedEntry)
         return result
     }
 
     @discardableResult
     public func dismiss(_ entry: ObserveLogEntry) throws -> ObserveLogEntry {
-        let dismissed = promotionService.dismiss(entry)
-        try store.update(observeLogEntry: dismissed)
-        return dismissed
+        promotionService.dismiss(entry)
     }
 
     @discardableResult
     public func pin(_ entry: ObserveLogEntry, now: Date = Date()) throws -> ObserveLogEntry {
-        let pinned = promotionService.pin(entry, at: now, additionalDays: 30)
-        try store.update(observeLogEntry: pinned)
-        return pinned
+        promotionService.pin(entry, at: now, additionalDays: 30)
     }
 }
