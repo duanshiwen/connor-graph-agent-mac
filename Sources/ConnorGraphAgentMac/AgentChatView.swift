@@ -377,7 +377,9 @@ private struct AgentChatTurnProcessRow: View {
                         .font(.caption.weight(.semibold))
                     if process.state == .running {
                         ProgressView()
-                            .scaleEffect(0.55)
+                            .controlSize(.small)
+                            .frame(width: 14, height: 14)
+                            .fixedSize()
                     }
                     Spacer(minLength: 0)
                 }
@@ -513,7 +515,9 @@ private struct AgentChatPendingAssistantRow: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                     ProgressView()
-                        .scaleEffect(0.55)
+                        .controlSize(.small)
+                        .frame(width: 14, height: 14)
+                        .fixedSize()
                     Text(pending.title)
                         .font(.caption)
                         .foregroundStyle(.secondary)
