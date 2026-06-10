@@ -210,10 +210,11 @@ public struct GraphExtractionWorker<Extractor: GraphExtractorProvider>: Sendable
         errorMessage: String? = nil,
         now: Date
     ) throws {
-        var metadata = draft.metadata
-        metadata["admission_message"] = admission.message
+        let traceID = "trace-\(job.id)-\(outcome.rawValue)-\(Int(now.timeIntervalSince1970 * 1000))"
+        var split = splitTracePayloadMetadata(draft.metadata)
+        split.metadata["admission_message"] = admission.message
         try store.appendExtractionTrace(GraphExtractionTrace(
-            id: "trace-\(job.id)-\(outcome.rawValue)-\(Int(now.timeIntervalSince1970 * 1000))",
+            id: traceID,
             jobID: job.id,
             graphID: job.graphID,
             sourceID: source.id,
@@ -228,8 +229,11 @@ public struct GraphExtractionWorker<Extractor: GraphExtractorProvider>: Sendable
             anomalyCount: writeResult.anomalyIDs.count,
             errorMessage: errorMessage,
             createdAt: now,
-            metadata: metadata
+            metadata: split.metadata
         ))
+        if let payload = split.payload(traceID, now) {
+            try store.appendExtractionTracePayload(payload)
+        }
     }
 
     private func appendFailureTrace(
@@ -239,9 +243,11 @@ public struct GraphExtractionWorker<Extractor: GraphExtractorProvider>: Sendable
         metadata: [String: String] = [:],
         now: Date
     ) throws {
+        let traceID = "trace-\(job.id)-failed-\(Int(now.timeIntervalSince1970 * 1000))"
         let sourceType = source?.sourceType ?? job.payload["source_type"].flatMap(GraphExtractionSourceType.init(rawValue:)) ?? .manual
+        let split = splitTracePayloadMetadata(metadata)
         try store.appendExtractionTrace(GraphExtractionTrace(
-            id: "trace-\(job.id)-failed-\(Int(now.timeIntervalSince1970 * 1000))",
+            id: traceID,
             jobID: job.id,
             graphID: job.graphID,
             sourceID: source?.id ?? job.payload["source_id"] ?? "unknown",
@@ -249,8 +255,47 @@ public struct GraphExtractionWorker<Extractor: GraphExtractorProvider>: Sendable
             outcome: .failed,
             errorMessage: errorMessage,
             createdAt: now,
-            metadata: metadata
+            metadata: split.metadata
         ))
+        if let payload = split.payload(traceID, now) {
+            try store.appendExtractionTracePayload(payload)
+        }
+    }
+
+    private func splitTracePayloadMetadata(_ metadata: [String: String]) -> (
+        metadata: [String: String],
+        payload: (_ traceID: String, _ now: Date) -> GraphExtractionTracePayload?
+    ) {
+        let payloadKeys: Set<String> = [
+            "prompt_text",
+            "raw_response_json",
+            "normalized_json",
+            "decoder_error_kind",
+            "decoder_error_message"
+        ]
+        let lightMetadata = metadata.filter { !payloadKeys.contains($0.key) && !$0.key.hasPrefix("payload.") }
+        let payloadMetadata = metadata
+            .filter { key, _ in key.hasPrefix("payload.") }
+            .reduce(into: [String: String]()) { partial, item in
+                partial[String(item.key.dropFirst("payload.".count))] = item.value
+            }
+        let hasPayload = payloadKeys.contains { metadata[$0] != nil }
+        return (
+            metadata: lightMetadata,
+            payload: { traceID, now in
+                guard hasPayload else { return nil }
+                return GraphExtractionTracePayload(
+                    traceID: traceID,
+                    promptText: metadata["prompt_text"],
+                    rawResponseJSON: metadata["raw_response_json"],
+                    normalizedJSON: metadata["normalized_json"],
+                    decoderErrorKind: metadata["decoder_error_kind"],
+                    decoderErrorMessage: metadata["decoder_error_message"],
+                    createdAt: now,
+                    metadata: payloadMetadata
+                )
+            }
+        )
     }
 
     private func mark(job: GraphJobV3, status: GraphJobV3Status, now: Date, errorCode: String? = nil, errorMessage: String? = nil) throws {

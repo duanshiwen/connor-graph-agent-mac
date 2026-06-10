@@ -126,9 +126,11 @@ public struct LLMGraphExtractor<Client: GraphExtractionLLMClient>: GraphExtracto
             decoded = try decoder.decode(response.text)
         } catch {
             let candidate = decoder.normalizedJSONCandidate(from: response.text)
+            var failureResponse = response
+            failureResponse.metadata["prompt_text"] = prompt
             throw GraphExtractionAttemptFailure(
                 source: source,
-                response: response,
+                response: failureResponse,
                 normalizedJSON: candidate?.json,
                 decoderWarnings: candidate?.warnings ?? [],
                 underlyingDescription: String(describing: error),
@@ -137,6 +139,7 @@ public struct LLMGraphExtractor<Client: GraphExtractionLLMClient>: GraphExtracto
         }
         var draft = try decoded.output.toDraft(source: source, requireStatementEvidence: decoder.requireStatementEvidence)
         var metadata = response.traceMetadata
+        metadata["prompt_text"] = prompt
         metadata["normalized_json"] = decoded.normalizedJSON
         if !decoded.warnings.isEmpty {
             metadata["decoder_warnings"] = decoded.warnings.joined(separator: ",")

@@ -1049,6 +1049,17 @@ struct GraphExtractionDiagnosticsView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
+
+                        if let payloadText = tracePayloadText(trace) {
+                            DisclosureGroup("trace payload") {
+                                Text(payloadText)
+                                    .font(.caption.monospaced())
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(8)
+                                    .background(.quaternary.opacity(0.16), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            }
+                        }
                     }
                     .padding(.vertical, 6)
                 }
@@ -1061,6 +1072,27 @@ struct GraphExtractionDiagnosticsView: View {
         .padding()
         .navigationTitle("记忆准入")
         .onAppear { viewModel.reloadGraphExtractionTraces() }
+    }
+
+    private func tracePayloadText(_ trace: AppGraphExtractionTracePresentation) -> String? {
+        var sections: [String] = []
+        if let decoderErrorKind = trace.decoderErrorKind {
+            sections.append("decoder_error_kind:\n\(decoderErrorKind)")
+        }
+        if let decoderErrorMessage = trace.decoderErrorMessage {
+            sections.append("decoder_error_message:\n\(decoderErrorMessage)")
+        }
+        if let normalizedJSON = trace.normalizedJSON {
+            sections.append("normalized_json:\n\(normalizedJSON)")
+        }
+        if let rawResponseJSON = trace.rawResponseJSON {
+            sections.append("raw_response_json:\n\(rawResponseJSON)")
+        }
+        if let promptText = trace.promptText {
+            sections.append("prompt_text:\n\(promptText)")
+        }
+        guard !sections.isEmpty else { return nil }
+        return sections.joined(separator: "\n\n---\n\n")
     }
 
     private func traceOutcomeColor(_ outcome: GraphExtractionTraceOutcome) -> Color {

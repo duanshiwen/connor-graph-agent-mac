@@ -38,3 +38,24 @@ private func temporaryExtractionTraceDatabaseURL(_ name: String = UUID().uuidStr
     #expect(byJob == [trace])
     #expect(bySource == [trace])
 }
+
+@Test func extractionTracePayloadPersistsAndLoadsByTraceID() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryExtractionTraceDatabaseURL().path)
+    try store.migrate()
+    let now = Date(timeIntervalSince1970: 2_000)
+    let payload = GraphExtractionTracePayload(
+        traceID: "trace-payload-1",
+        promptText: "extract this",
+        rawResponseJSON: "{\"id\":\"resp-1\"}",
+        normalizedJSON: "{\"entities\":[]}",
+        decoderErrorKind: "invalid_json",
+        decoderErrorMessage: "invalidJSON: test",
+        createdAt: now,
+        metadata: ["note": "test"]
+    )
+
+    try store.appendExtractionTracePayload(payload)
+
+    #expect(try store.extractionTracePayload(traceID: "trace-payload-1") == payload)
+    #expect(try store.extractionTracePayload(traceID: "missing") == nil)
+}
