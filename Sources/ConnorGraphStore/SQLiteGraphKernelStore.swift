@@ -23,7 +23,92 @@ public enum SQLiteGraphKernelStoreError: Error, Equatable, CustomStringConvertib
     }
 }
 
+public struct GraphSchemaHealthReport: Sendable, Equatable {
+    public enum Status: String, Sendable, Codable, Equatable {
+        case healthy
+        case warning
+        case migrationRequired = "migration_required"
+    }
+
+    public var expectedVersion: Int
+    public var actualVersion: Int
+    public var status: Status
+    public var missingTables: [String]
+    public var missingIndexes: [String]
+    public var checkedAt: Date
+
+    public init(
+        expectedVersion: Int,
+        actualVersion: Int,
+        status: Status,
+        missingTables: [String] = [],
+        missingIndexes: [String] = [],
+        checkedAt: Date = Date()
+    ) {
+        self.expectedVersion = expectedVersion
+        self.actualVersion = actualVersion
+        self.status = status
+        self.missingTables = missingTables
+        self.missingIndexes = missingIndexes
+        self.checkedAt = checkedAt
+    }
+
+    public var isHealthy: Bool { status == .healthy }
+
+    public var summary: String {
+        switch status {
+        case .healthy:
+            return "Graph schema v\(actualVersion) healthy"
+        case .warning:
+            let missing = (missingTables + missingIndexes).joined(separator: ", ")
+            return "Graph schema v\(actualVersion) warning: missing \(missing)"
+        case .migrationRequired:
+            return "Graph schema v\(actualVersion) requires migration to v\(expectedVersion)"
+        }
+    }
+}
+
 public final class SQLiteGraphKernelStore: @unchecked Sendable {
+    public static let currentSchemaVersion = 1
+
+    private static let requiredSchemaTables: Set<String> = [
+        "graph_episodes_v3",
+        "graph_entities",
+        "graph_statements",
+        "graph_ontology_classes",
+        "graph_anomalies",
+        "graph_jobs_v3",
+        "graph_extraction_traces",
+        "graph_extraction_trace_payloads",
+        "graph_admission_hold_queue",
+        "graph_memory_change_log",
+        "graph_write_candidates",
+        "agent_sessions",
+        "memory_staging_buffers",
+        "agent_runs",
+        "agent_events",
+        "agent_audit_events",
+        "graph_entities_fts",
+        "graph_statements_fts",
+        "graph_episodes_fts"
+    ]
+
+    private static let requiredSchemaIndexes: Set<String> = [
+        "idx_graph_entities_kind",
+        "idx_graph_statements_subject",
+        "idx_graph_statements_object",
+        "idx_graph_statements_predicate",
+        "idx_graph_anomalies_graph_status",
+        "idx_graph_jobs_v3_runnable",
+        "idx_graph_extraction_traces_job",
+        "idx_graph_admission_hold_queue_status",
+        "idx_graph_memory_change_log_graph",
+        "idx_graph_write_candidates_status",
+        "idx_agent_sessions_updated",
+        "idx_agent_events_run",
+        "idx_agent_audit_events_run"
+    ]
+
     private var db: OpaquePointer?
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
@@ -362,10 +447,43 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         );
         """)
         try execute("CREATE INDEX IF NOT EXISTS idx_agent_audit_events_run ON agent_audit_events(run_id);")
+        try execute("PRAGMA user_version = \(Self.currentSchemaVersion);")
+    }
+
+    public func schemaHealthReport(now: Date = Date()) throws -> GraphSchemaHealthReport {
+        let actualVersion = try schemaUserVersion()
+        let tables = try tableNames()
+        let indexes = try indexNames()
+        let missingTables = Self.requiredSchemaTables.subtracting(tables).sorted()
+        let missingIndexes = Self.requiredSchemaIndexes.subtracting(indexes).sorted()
+        let status: GraphSchemaHealthReport.Status
+        if actualVersion < Self.currentSchemaVersion {
+            status = .migrationRequired
+        } else if missingTables.isEmpty && missingIndexes.isEmpty {
+            status = .healthy
+        } else {
+            status = .warning
+        }
+        return GraphSchemaHealthReport(
+            expectedVersion: Self.currentSchemaVersion,
+            actualVersion: actualVersion,
+            status: status,
+            missingTables: missingTables,
+            missingIndexes: missingIndexes,
+            checkedAt: now
+        )
+    }
+
+    public func schemaUserVersion() throws -> Int {
+        Int(try queryStrings(sql: "PRAGMA user_version;").first ?? "0") ?? 0
     }
 
     public func tableNames() throws -> Set<String> {
         Set(try queryStrings(sql: "SELECT name FROM sqlite_master WHERE type = 'table';"))
+    }
+
+    public func indexNames() throws -> Set<String> {
+        Set(try queryStrings(sql: "SELECT name FROM sqlite_master WHERE type = 'index';"))
     }
 
     public func upsert(episode: GraphEpisodeV3) throws {

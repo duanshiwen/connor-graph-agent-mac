@@ -1205,12 +1205,28 @@ SourceArtifact
 
 交付物：
 
-- Schema version health check。
+- ✅ Schema version health check。
 - Migration audit。
 - Backup before migration。
 - Integrity check。
 - Corruption detection。
 - Repair tools。
+
+当前实现状态：
+
+- `SQLiteGraphKernelStore.currentSchemaVersion` 定义当前图模型 schema 版本。
+- `migrate()` 会写入 SQLite `PRAGMA user_version`，作为本地数据库 schema version 标记。
+- `schemaHealthReport()` 会检查：
+  - `user_version` 是否达到当前版本；
+  - 核心 graph / job / trace / audit / app integration 表是否存在；
+  - FTS 表是否存在；
+  - 关键索引是否存在。
+- App 启动后会加载 `GraphSchemaHealthReport`，并在顶部 banner 展示：
+  - 图模型版本；
+  - health status；
+  - 数据库路径；
+  - 手动刷新入口。
+- 当前 health check 只做轻量版本/结构检查；migration audit、backup before migration、SQLite integrity check、corruption detection 与 repair tools 仍属于后续商用可靠性增强。
 
 商用验收标准：
 
@@ -1339,6 +1355,8 @@ Admission hold queue 现在具备最小可用动作闭环：可检查 trace payl
 
 `groundingCheck` job 现在有最小可用 worker：对 active statements 做确定性 grounding 检查，statement 如果包含 source episode、evidence span justification、external grounding justification 或 evidence metadata 则标记 verified；否则生成 `ungrounded_statement` anomaly，并排入 anomaly resolution job 供后续自愈/人工审查。
 
+启动时现在会执行 schema/version health check：SQLite `PRAGMA user_version` 标记当前图模型 schema 版本，并检查核心 graph/job/audit/FTS 表与关键索引是否存在；App 顶部会展示图模型版本、健康状态、数据库路径，并支持手动刷新。
+
 ### 2. Production Extraction Loop
 
 ```text
@@ -1454,7 +1472,7 @@ memory dashboard
 16. ✅ 让所有 manual candidate / extraction commit / future source write 强制经过统一 entity resolver。
 17. ✅ 为 admission hold queue 增加 approve / reject / rerun / inspect evidence 动作闭环。
 18. ✅ 实现 `groundingCheck` worker 的最小可用版本。
-19. 🔜 实现 schema/version health check，启动时展示图模型版本。
+19. ✅ 实现 schema/version health check，启动时展示图模型版本。
 
 ---
 
