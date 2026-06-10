@@ -72,6 +72,7 @@ final class AppViewModel: ObservableObject {
     private var llmProviderHealthChecker: AppLLMProviderHealthChecker
     private var agentRuntimeFactory: AppGraphAgentRuntimeFactory?
     private var hybridSearchService: (any GraphHybridSearchService)?
+    private var backgroundJobRunner: AppGraphBackgroundJobRunner?
     private var chatController: AgentChatController<AnyLLMProvider>
     private var loopChatController: AgentLoopChatController<AnyAgentModelProvider>?
 
@@ -123,6 +124,7 @@ final class AppViewModel: ObservableObject {
             self.chatSessionRepository = AppChatSessionRepository(store: repository.store)
             self.agentRuntimeFactory = AppGraphAgentRuntimeFactory(store: repository.store, settingsRepository: llmSettingsRepository)
             self.hybridSearchService = SQLiteGraphHybridSearchService(store: repository.store)
+            self.backgroundJobRunner = AppGraphBackgroundJobRunner(store: repository.store)
         }
         self.llmSettingsRepository = llmSettingsRepository
         self.llmProviderHealthChecker = AppLLMProviderHealthChecker(settingsRepository: llmSettingsRepository)
@@ -277,6 +279,17 @@ final class AppViewModel: ObservableObject {
         Task { await runSearch() }
         reloadPromotionCandidates()
         reloadGraphWriteCandidates()
+    }
+
+    func runBackgroundJobs() async {
+        guard let backgroundJobRunner, let repository else { return }
+        do {
+            _ = try await backgroundJobRunner.runAvailable(limit: 20)
+            let snapshot = try repository.loadSnapshot()
+            await MainActor.run { apply(snapshot: snapshot) }
+        } catch {
+            await MainActor.run { errorMessage = String(describing: error) }
+        }
     }
 
     func loadLLMSettings() {
@@ -545,6 +558,18 @@ final class AppViewModel: ObservableObject {
                 sessionID: selectedChatSessionID
             )
             try repository.store.upsert(episode: draft.episode)
+            let source = GraphExtractionSource(
+                id: draft.episode.id,
+                graphID: draft.episode.graphID,
+                sourceType: .webpage,
+                title: draft.episode.title,
+                content: draft.episode.content,
+                occurredAt: draft.episode.occurredAt,
+                sessionID: draft.episode.sessionID,
+                workObjectID: draft.episode.workObjectID,
+                metadata: draft.episode.metadata
+            )
+            try repository.store.enqueueExtractionJob(graphID: source.graphID, source: source)
             let snapshot = try repository.loadSnapshot()
             entities = snapshot.entities
             statements = snapshot.statements
@@ -552,6 +577,7 @@ final class AppViewModel: ObservableObject {
             observeLogEntries = snapshot.observeLogEntries
             errorMessage = nil
             lastPromotionResultSummary = "已保存网页证据：\(draft.episode.title)"
+            Task { await runBackgroundJobs() }
         } catch {
             errorMessage = String(describing: error)
         }
@@ -613,6 +639,7 @@ final class AppViewModel: ObservableObject {
                 lastPromptInspection = response.promptInspection
             }
             errorMessage = nil
+            Task { await runBackgroundJobs() }
         } catch {
             transcript = optimisticTranscript + [optimisticUserMessage]
             errorMessage = String(describing: error)
