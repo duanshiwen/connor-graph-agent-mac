@@ -23,6 +23,28 @@ private func temporaryKernelDatabaseURL(_ name: String = UUID().uuidString) -> U
     #expect(tables.contains("graph_episodes_fts"))
 }
 
+@Test func graphKernelStoreReportsHealthySchemaAfterMigration() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryKernelDatabaseURL().path)
+    try store.migrate()
+
+    let report = try store.schemaHealthReport(now: Date(timeIntervalSince1970: 1_000))
+
+    #expect(report.expectedVersion == SQLiteGraphKernelStore.currentSchemaVersion)
+    #expect(report.actualVersion == SQLiteGraphKernelStore.currentSchemaVersion)
+    #expect(report.status == .healthy)
+    #expect(report.missingTables.isEmpty)
+    #expect(report.missingIndexes.isEmpty)
+}
+
+@Test func graphKernelStoreReportsMigrationRequiredBeforeMigration() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryKernelDatabaseURL().path)
+
+    let report = try store.schemaHealthReport(now: Date(timeIntervalSince1970: 1_000))
+
+    #expect(report.actualVersion == 0)
+    #expect(report.status == .migrationRequired)
+}
+
 @Test func graphKernelStoreRoundTripsEntityStatementAndEpisode() throws {
     let store = try SQLiteGraphKernelStore(path: temporaryKernelDatabaseURL().path)
     try store.migrate()
