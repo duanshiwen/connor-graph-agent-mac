@@ -37,36 +37,39 @@ public struct AppMemoryDistillationWorker: Sendable {
     public var stagingRepository: AppMemoryStagingBufferRepository
     public var distillationService: MemoryDistillationService
     public var graphID: String
+    public var llmDistill: (@Sendable (MemoryStagingBuffer, Date, [MemoryStagingTriggerReason]) async -> MemoryDistillationResult)?
 
     public init(
         store: SQLiteGraphKernelStore,
         graphID: String = "default",
-        distillationService: MemoryDistillationService = MemoryDistillationService()
+        distillationService: MemoryDistillationService = MemoryDistillationService(),
+        llmDistill: (@Sendable (MemoryStagingBuffer, Date, [MemoryStagingTriggerReason]) async -> MemoryDistillationResult)? = nil
     ) {
         self.store = store
         self.stagingRepository = AppMemoryStagingBufferRepository(store: store)
         self.distillationService = distillationService
         self.graphID = graphID
+        self.llmDistill = llmDistill
     }
 
-    public func runOnce(now: Date = Date()) throws -> AppMemoryDistillationRunResult? {
+    public func runOnce(now: Date = Date()) async throws -> AppMemoryDistillationRunResult? {
         guard let buffer = try stagingRepository.loadBuffers(status: .active, limit: 100)
             .first(where: { $0.pendingBundles.contains(where: { $0.status == .closed }) })
         else { return nil }
-        return try run(buffer: buffer, now: now)
+        return try await run(buffer: buffer, now: now)
     }
 
     @discardableResult
-    public func runAvailable(now: Date = Date(), limit: Int = 10) throws -> [AppMemoryDistillationRunResult] {
+    public func runAvailable(now: Date = Date(), limit: Int = 10) async throws -> [AppMemoryDistillationRunResult] {
         var results: [AppMemoryDistillationRunResult] = []
         while results.count < limit {
-            guard let result = try runOnce(now: now) else { break }
+            guard let result = try await runOnce(now: now) else { break }
             results.append(result)
         }
         return results
     }
 
-    public func run(buffer originalBuffer: MemoryStagingBuffer, now: Date = Date()) throws -> AppMemoryDistillationRunResult {
+    public func run(buffer originalBuffer: MemoryStagingBuffer, now: Date = Date()) async throws -> AppMemoryDistillationRunResult {
         let closedBundleCount = originalBuffer.pendingBundles.filter { $0.status == .closed }.count
         guard closedBundleCount > 0 else {
             return AppMemoryDistillationRunResult(
@@ -82,7 +85,12 @@ public struct AppMemoryDistillationWorker: Sendable {
         try stagingRepository.saveBuffer(buffer, updatedAt: now)
 
         let triggerReasons = buffer.triggerReasons(at: now)
-        let result = distillationService.distill(buffer: buffer, at: now, triggerReasons: triggerReasons)
+        let result: MemoryDistillationResult
+        if let llmDistill {
+            result = await llmDistill(buffer, now, triggerReasons)
+        } else {
+            result = distillationService.distill(buffer: buffer, at: now, triggerReasons: triggerReasons)
+        }
         let candidatesToEnqueue = result.proposedCandidates
         let jobIDs = try candidatesToEnqueue.map { candidate in
             try enqueueExtractionJob(for: candidate, result: result, now: now)

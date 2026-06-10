@@ -85,12 +85,21 @@ public struct MemoryDistillationService: Sendable {
         }
         let reasons = triggerReasons ?? buffer.triggerReasons(at: date)
         let inputText = closedBundles.map { renderBundle($0) }.joined(separator: "\n\n")
+        let outputText = (
+            episodeCandidates
+                + profileFactCandidates
+                + decisionCandidates
+                + projectFactCandidates
+                + preferenceCandidates
+                + unresolvedQuestions
+                + riskFlags
+        ).map(\.content).joined(separator: "\n\n")
         let trace = MemoryDistillationTrace(
             model: modelName,
             promptVersion: promptVersion,
             inputBundleCount: closedBundles.count,
             inputTokenEstimate: estimateTokens(inputText),
-            outputTokenEstimate: estimateTokens(episodeCandidates.map(\.content).joined(separator: "\n\n")),
+            outputTokenEstimate: estimateTokens(outputText),
             triggerReasons: reasons,
             createdAt: date,
             metadata: [

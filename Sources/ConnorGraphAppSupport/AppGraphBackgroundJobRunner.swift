@@ -1,6 +1,7 @@
 import Foundation
 import ConnorGraphAgent
 import ConnorGraphCore
+import ConnorGraphMemory
 import ConnorGraphSearch
 import ConnorGraphStore
 
@@ -71,12 +72,22 @@ public struct AppGraphBackgroundJobRunner: @unchecked Sendable {
 
     public init(store: SQLiteGraphKernelStore, graphID: String = "default", settingsRepository: AppLLMSettingsRepository) {
         let extractor = Self.makeExtractor(settingsRepository: settingsRepository)
-        self.init(store: store, graphID: graphID, extractor: extractor)
+        let memoryDistillationWorker = Self.makeMemoryDistillationWorker(
+            store: store,
+            graphID: graphID,
+            settingsRepository: settingsRepository
+        )
+        self.init(store: store, graphID: graphID, extractor: extractor, memoryDistillationWorker: memoryDistillationWorker)
     }
 
-    public init(store: SQLiteGraphKernelStore, graphID: String = "default", extractor: AnyGraphExtractorProvider) {
+    public init(
+        store: SQLiteGraphKernelStore,
+        graphID: String = "default",
+        extractor: AnyGraphExtractorProvider,
+        memoryDistillationWorker: AppMemoryDistillationWorker? = nil
+    ) {
         self.runner = GraphBackgroundJobRunner(store: store, extractor: extractor)
-        self.memoryDistillationWorker = AppMemoryDistillationWorker(store: store, graphID: graphID)
+        self.memoryDistillationWorker = memoryDistillationWorker ?? AppMemoryDistillationWorker(store: store, graphID: graphID)
         self.graphID = graphID
     }
 
@@ -84,7 +95,7 @@ public struct AppGraphBackgroundJobRunner: @unchecked Sendable {
     /// closed conversation bundles into extraction jobs so chat memory can flow
     /// through the existing extraction pipeline.
     public func runOnce(now: Date = Date()) async throws -> GraphBackgroundJobRunResult? {
-        _ = try memoryDistillationWorker.runOnce(now: now)
+        _ = try await memoryDistillationWorker.runOnce(now: now)
         return try await runner.runOnce(graphID: graphID, now: now)
     }
 
@@ -92,8 +103,28 @@ public struct AppGraphBackgroundJobRunner: @unchecked Sendable {
     /// and can enqueue extraction jobs that are processed in the same pass.
     @discardableResult
     public func runAvailable(now: Date = Date(), limit: Int = 10) async throws -> [GraphBackgroundJobRunResult] {
-        _ = try memoryDistillationWorker.runAvailable(now: now, limit: limit)
+        _ = try await memoryDistillationWorker.runAvailable(now: now, limit: limit)
         return try await runner.runAvailable(graphID: graphID, now: now, limit: limit)
+    }
+
+    private static func makeMemoryDistillationWorker(
+        store: SQLiteGraphKernelStore,
+        graphID: String,
+        settingsRepository: AppLLMSettingsRepository
+    ) -> AppMemoryDistillationWorker {
+        do {
+            guard let config = try settingsRepository.openAICompatibleConfig() else {
+                return AppMemoryDistillationWorker(store: store, graphID: graphID)
+            }
+            let provider = AnyAgentModelProvider(OpenAICompatibleProvider(config: config))
+            let client = AppLLMMemoryDistillationClient(provider: provider)
+            let distiller = AppLLMMemoryDistiller(client: client)
+            return AppMemoryDistillationWorker(store: store, graphID: graphID) { buffer, date, triggerReasons in
+                await distiller.distill(buffer: buffer, at: date, triggerReasons: triggerReasons)
+            }
+        } catch {
+            return AppMemoryDistillationWorker(store: store, graphID: graphID)
+        }
     }
 
     private static func makeExtractor(settingsRepository: AppLLMSettingsRepository) -> AnyGraphExtractorProvider {
