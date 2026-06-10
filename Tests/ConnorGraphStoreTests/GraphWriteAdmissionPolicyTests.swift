@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import ConnorGraphCore
+import ConnorGraphMemory
 import ConnorGraphStore
 
 private func admissionSource() -> GraphExtractionSource {
@@ -112,4 +113,25 @@ private func admissionDraft(
 
     #expect(decision.action == .hold)
     #expect(decision.reasons.contains(.potentialDuplicateEntity))
+}
+
+@Test func admissionPolicyAsksForStatementConflictPreview() throws {
+    let conflictPreview = GraphExtractionConflictPreview(conflicts: [
+        GraphStatementConflict(
+            incomingStatementID: "incoming",
+            existingStatementID: "existing",
+            type: .directContradiction,
+            severity: .high,
+            reason: "test"
+        )
+    ])
+
+    let decision = try GraphWriteAdmissionPolicy().decide(
+        draft: admissionDraft(),
+        resolutionPlan: nil,
+        conflictPreview: conflictPreview
+    )
+
+    #expect(decision.action == .askUser)
+    #expect(decision.reasons.contains(.statementConflict))
 }
