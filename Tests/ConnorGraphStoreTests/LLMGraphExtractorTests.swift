@@ -104,10 +104,20 @@ private let extractionResponse = """
     #expect(draft.metadata["normalized_json"] != nil)
 }
 
-@Test func llmGraphExtractorPropagatesDecoderErrors() async throws {
+@Test func llmGraphExtractorWrapsDecoderErrorsWithResponseDiagnostics() async throws {
     let extractor = LLMGraphExtractor(client: FakeExtractionLLMClient(response: "{ not-json"))
 
-    await #expect(throws: GraphExtractionDecodingError.self) {
+    await #expect(throws: GraphExtractionAttemptFailure.self) {
         try await extractor.extract(from: llmExtractorSource())
+    }
+
+    do {
+        _ = try await extractor.extract(from: llmExtractorSource())
+        Issue.record("Expected extraction failure")
+    } catch let failure as GraphExtractionAttemptFailure {
+        #expect(failure.decoderErrorKind == "invalid_json")
+        #expect(failure.normalizedJSON == "{ not-json")
+        #expect(failure.traceMetadata["llm_model_id"] == "fake-model")
+        #expect(failure.traceMetadata["decoder_error_kind"] == "invalid_json")
     }
 }

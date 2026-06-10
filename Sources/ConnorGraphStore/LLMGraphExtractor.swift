@@ -63,6 +63,46 @@ public protocol GraphExtractionLLMClient: Sendable {
     func completeExtraction(prompt: String) async throws -> GraphExtractionLLMResponse
 }
 
+public struct GraphExtractionAttemptFailure: Error, Sendable, Equatable, CustomStringConvertible {
+    public var source: GraphExtractionSource
+    public var response: GraphExtractionLLMResponse
+    public var normalizedJSON: String?
+    public var decoderWarnings: [String]
+    public var underlyingDescription: String
+    public var decoderErrorKind: String
+
+    public init(
+        source: GraphExtractionSource,
+        response: GraphExtractionLLMResponse,
+        normalizedJSON: String? = nil,
+        decoderWarnings: [String] = [],
+        underlyingDescription: String,
+        decoderErrorKind: String
+    ) {
+        self.source = source
+        self.response = response
+        self.normalizedJSON = normalizedJSON
+        self.decoderWarnings = decoderWarnings
+        self.underlyingDescription = underlyingDescription
+        self.decoderErrorKind = decoderErrorKind
+    }
+
+    public var description: String {
+        "graphExtractionAttemptFailure(\(decoderErrorKind)): \(underlyingDescription)"
+    }
+
+    public var traceMetadata: [String: String] {
+        var metadata = response.traceMetadata
+        metadata["decoder_error_kind"] = decoderErrorKind
+        metadata["decoder_error_message"] = underlyingDescription
+        metadata["normalized_json"] = normalizedJSON
+        if !decoderWarnings.isEmpty {
+            metadata["decoder_warnings"] = decoderWarnings.joined(separator: ",")
+        }
+        return metadata
+    }
+}
+
 public struct LLMGraphExtractor<Client: GraphExtractionLLMClient>: GraphExtractorProvider, Sendable {
     public var client: Client
     public var promptBuilder: GraphExtractionPromptBuilder
@@ -81,7 +121,20 @@ public struct LLMGraphExtractor<Client: GraphExtractionLLMClient>: GraphExtracto
     public func extract(from source: GraphExtractionSource) async throws -> GraphExtractionDraft {
         let prompt = promptBuilder.buildPrompt(for: source)
         let response = try await client.completeExtraction(prompt: prompt)
-        let decoded = try decoder.decode(response.text)
+        let decoded: GraphExtractionDecodingResult
+        do {
+            decoded = try decoder.decode(response.text)
+        } catch {
+            let candidate = decoder.normalizedJSONCandidate(from: response.text)
+            throw GraphExtractionAttemptFailure(
+                source: source,
+                response: response,
+                normalizedJSON: candidate?.json,
+                decoderWarnings: candidate?.warnings ?? [],
+                underlyingDescription: String(describing: error),
+                decoderErrorKind: Self.decoderErrorKind(error)
+            )
+        }
         var draft = try decoded.output.toDraft(source: source, requireStatementEvidence: decoder.requireStatementEvidence)
         var metadata = response.traceMetadata
         metadata["normalized_json"] = decoded.normalizedJSON
@@ -90,6 +143,17 @@ public struct LLMGraphExtractor<Client: GraphExtractionLLMClient>: GraphExtracto
         }
         draft.metadata = metadata
         return draft
+    }
+
+    private static func decoderErrorKind(_ error: Error) -> String {
+        guard let decodingError = error as? GraphExtractionDecodingError else {
+            return "unknown"
+        }
+        switch decodingError {
+        case .emptyResponse: return "empty_response"
+        case .invalidJSON: return "invalid_json"
+        case .schemaViolation: return "schema_violation"
+        }
     }
 }
 
