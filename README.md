@@ -825,6 +825,7 @@ Index refreshes
 - Admission hold diagnostics queue 已实现：`hold` / `ask_user` 会生成系统自愈队列项，推荐 replay、grounding、merge、inspect evidence 或必要时 ask user；该队列不是默认用户逐条审核。
 - Memory Inspector / Change Log 初版已实现：extraction commit/hold/ask/discard/failure 会写入 `graph_memory_change_log`，App 新增“记忆变更”页面展示 changed entities/statements/anomalies、source trace 和 summary。
 - Episode FTS retrieval 已实现：`graph_episodes_fts` 会随 `graph_episodes_v3` upsert 更新，`SQLiteGraphHybridSearchService` 已按 `includeEpisodes` 返回 episode hits。
+- Hybrid graph retrieval fusion 初版已实现：statement/entity/episode FTS hits 会用 weighted RRF 风格分数融合，并扩展 graph neighborhood statements 与 source episodes，hit metadata 会记录 `fusion_methods` 和 graph context。
 - UI 目标是 Memory Inspector / Change Log，而不是让用户逐条处理队列。
 
 商用验收标准：
