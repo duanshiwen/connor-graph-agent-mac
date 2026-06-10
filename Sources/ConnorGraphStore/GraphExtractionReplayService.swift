@@ -75,8 +75,11 @@ public struct GraphExtractionReplayService: @unchecked Sendable {
                 draft.metadata["decoder_warnings"] = decoded.warnings.joined(separator: ",")
             }
             let resolutionPlan = try GraphEntityResolutionPlanner(resolver: resolver).plan(for: draft)
-            draft = draft.withEntityResolutionPlanMetadata(resolutionPlan)
-            let decision = try admissionPolicy.decide(draft: draft, resolutionPlan: resolutionPlan)
+            let conflictPreview = try GraphExtractionConflictPreflight(store: store).preview(draft: draft, resolutionPlan: resolutionPlan, now: now)
+            draft = draft
+                .withEntityResolutionPlanMetadata(resolutionPlan)
+                .withConflictPreviewMetadata(conflictPreview)
+            let decision = try admissionPolicy.decide(draft: draft, resolutionPlan: resolutionPlan, conflictPreview: conflictPreview)
             let outcome = replayOutcome(for: decision.action)
             try store.appendExtractionTrace(GraphExtractionTrace(
                 id: replayTraceID,
@@ -99,7 +102,9 @@ public struct GraphExtractionReplayService: @unchecked Sendable {
                     "replayed_from_trace_id": traceID,
                     "admission_message": decision.message,
                     "dry_run": "true"
-                ].merging(resolutionPlan.traceMetadata) { current, _ in current }
+                ]
+                .merging(resolutionPlan.traceMetadata) { current, _ in current }
+                .merging(conflictPreview.traceMetadata) { current, _ in current }
             ))
             try store.appendExtractionTracePayload(GraphExtractionTracePayload(
                 traceID: replayTraceID,

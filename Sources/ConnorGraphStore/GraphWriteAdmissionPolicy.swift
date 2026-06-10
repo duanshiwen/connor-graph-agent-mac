@@ -14,6 +14,7 @@ public enum GraphWriteAdmissionReason: String, Codable, Sendable, Equatable {
     case lowStatementConfidence = "low_statement_confidence"
     case missingStatementEvidence = "missing_statement_evidence"
     case potentialDuplicateEntity = "potential_duplicate_entity"
+    case statementConflict = "statement_conflict"
     case sensitivePersonalMemory = "sensitive_personal_memory"
     case highConfidenceEvidenceBacked = "high_confidence_evidence_backed"
 }
@@ -52,10 +53,14 @@ public struct GraphWriteAdmissionPolicy: Sendable {
 
     public func decide(draft: GraphExtractionDraft, resolver: SQLiteGraphEntityResolver? = nil) throws -> GraphWriteAdmissionDecision {
         let resolutionPlan = try resolver.map { try GraphEntityResolutionPlanner(resolver: $0).plan(for: draft) }
-        return try decide(draft: draft, resolutionPlan: resolutionPlan)
+        return try decide(draft: draft, resolutionPlan: resolutionPlan, conflictPreview: nil)
     }
 
-    public func decide(draft: GraphExtractionDraft, resolutionPlan: GraphEntityResolutionPlan?) throws -> GraphWriteAdmissionDecision {
+    public func decide(
+        draft: GraphExtractionDraft,
+        resolutionPlan: GraphEntityResolutionPlan?,
+        conflictPreview: GraphExtractionConflictPreview? = nil
+    ) throws -> GraphWriteAdmissionDecision {
         guard !draft.entities.isEmpty || !draft.statements.isEmpty else {
             return GraphWriteAdmissionDecision(action: .discard, reasons: [.emptyDraft], message: "Extraction produced no graph candidates.")
         }
@@ -75,6 +80,9 @@ public struct GraphWriteAdmissionPolicy: Sendable {
         if resolutionPlan?.hasPotentialDuplicates == true {
             holdReasons.append(.potentialDuplicateEntity)
         }
+        if conflictPreview?.hasConflicts == true {
+            askReasons.append(.statementConflict)
+        }
 
         for statement in draft.statements {
             if statement.confidence < minimumAutoCommitStatementConfidence {
@@ -90,7 +98,9 @@ public struct GraphWriteAdmissionPolicy: Sendable {
             return GraphWriteAdmissionDecision(
                 action: .askUser,
                 reasons: uniqueAskReasons,
-                message: "Candidate graph write affects sensitive personal memory and should ask the user only when needed."
+                message: uniqueAskReasons.contains(.statementConflict)
+                    ? "Candidate graph write conflicts with active memory and requires user or system resolution."
+                    : "Candidate graph write affects sensitive personal memory and should ask the user only when needed."
             )
         }
 

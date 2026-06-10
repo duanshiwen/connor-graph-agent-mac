@@ -137,6 +137,8 @@ public struct GraphExtractionDraft: Codable, Sendable, Equatable {
 
         var entityByLocalID: [String: GraphEntity] = [:]
         let graphEntities = entities.map { draft in
+            var metadata = draft.metadata
+            metadata["extraction_local_id"] = draft.localID
             let entity = GraphEntity(
                 id: stableID(prefix: "entity", graphID: source.graphID, localID: draft.localID),
                 graphID: source.graphID,
@@ -149,7 +151,7 @@ public struct GraphExtractionDraft: Codable, Sendable, Equatable {
                 confidence: draft.confidence,
                 createdAt: now,
                 updatedAt: now,
-                metadata: draft.metadata
+                metadata: metadata
             )
             entityByLocalID[draft.localID] = entity
             return entity

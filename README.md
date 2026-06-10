@@ -821,6 +821,7 @@ Index refreshes
 - Decoder failure 已可持久化 LLM response metadata 和 decoder diagnostics。
 - 已新增 `GraphExtractionReplayService`，支持从 stored payload 重新 decode，并以 append-only dry-run trace 方式重跑 admission。
 - Entity resolution plan 已进入 extraction 主路径：worker 在 admission 前计算 matched/create/potential-duplicate 计划，policy 使用该计划决策，并把 resolution 计数写入 trace metadata。
+- Conflict preview 已进入 extraction admission 主路径：worker/replay 在写入前用 existing active statements 预检直接冲突，policy 对冲突写入返回 `ask_user`，并把 conflict count/preview 写入 trace metadata。
 - UI 目标是 Memory Inspector / Change Log，而不是让用户逐条处理队列。
 
 商用验收标准：
