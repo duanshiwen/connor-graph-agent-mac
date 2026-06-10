@@ -23,7 +23,7 @@ private struct ControllerCapturingProvider: LLMProvider, Sendable {
     let agent = GraphAgent(
         session: AgentSession(id: "session-ui"),
         contextBuilder: AgentContextBuilder(hybridSearchService: TestHybridSearchService(hits: [
-            GraphSearchHit(ownerType: .node, ownerID: "question-memory", title: "How should memory work?", text: "Use graph-backed context", score: 1.0, retrievalMethod: "test")
+            GraphSearchHit(ownerType: .entity, ownerID: "question-memory", title: "How should memory work?", text: "Use graph-backed context", score: 1.0, retrievalMethod: "test")
         ]), groupID: "default"),
         llmProvider: StubLLMProvider()
     )
@@ -31,9 +31,9 @@ private struct ControllerCapturingProvider: LLMProvider, Sendable {
 
     let response = try await controller.submit("memory")
 
-    #expect(response.answer.citations == ["node:question-memory"])
+    #expect(response.answer.citations == ["entity:question-memory"])
     #expect(controller.transcript.map(\.role) == [.user, .assistant])
-    #expect(controller.lastContext?.items.map(\.sourceID) == ["node:question-memory"])
+    #expect(controller.lastContext?.items.map(\.sourceID) == ["entity:question-memory"])
 }
 
 @Test func agentChatControllerSubmitsPromptWithSessionSummary() async throws {

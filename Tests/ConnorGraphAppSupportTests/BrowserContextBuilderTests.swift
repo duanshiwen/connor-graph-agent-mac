@@ -65,7 +65,7 @@ struct BrowserContextBuilderTests {
 
         #expect(draft.episode.sourceType == .webPage)
         #expect(draft.episode.sourceID == "https://example.com/article")
-        #expect(draft.episode.name == "Example Article")
+        #expect(draft.episode.title == "Example Article")
         #expect(draft.episode.sessionID == "session-1")
         #expect(draft.episode.content.contains("Selected evidence."))
         #expect(draft.episode.content.contains("https://example.com/image.png"))
