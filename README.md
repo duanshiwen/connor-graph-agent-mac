@@ -1337,6 +1337,8 @@ Manual/reviewed `GraphWriteCandidate` 提交也已改为 resolver-backed path：
 
 Admission hold queue 现在具备最小可用动作闭环：可检查 trace payload 中的 evidence spans，可将 paused extraction job 重新排队，可 dismiss hold item，也可人工批准一次 held draft 并仍通过 resolver-backed optimistic writer 提交。
 
+`groundingCheck` job 现在有最小可用 worker：对 active statements 做确定性 grounding 检查，statement 如果包含 source episode、evidence span justification、external grounding justification 或 evidence metadata 则标记 verified；否则生成 `ungrounded_statement` anomaly，并排入 anomaly resolution job 供后续自愈/人工审查。
+
 ### 2. Production Extraction Loop
 
 ```text
@@ -1451,7 +1453,7 @@ memory dashboard
 15. ✅ 收敛 `GraphAgent` simple ask path 与 `AgentLoopController` tool-calling path，形成单一主 runtime。
 16. ✅ 让所有 manual candidate / extraction commit / future source write 强制经过统一 entity resolver。
 17. ✅ 为 admission hold queue 增加 approve / reject / rerun / inspect evidence 动作闭环。
-18. 🔜 实现 `groundingCheck` worker 的最小可用版本。
+18. ✅ 实现 `groundingCheck` worker 的最小可用版本。
 19. 🔜 实现 schema/version health check，启动时展示图模型版本。
 
 ---
