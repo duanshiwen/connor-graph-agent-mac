@@ -131,7 +131,8 @@ temporal graph-only
   - graph neighborhood expansion；
   - source episode expansion；
   - weighted rank-style fusion；
-  - hit metadata 中记录 fusion 与 graph context。
+  - hit metadata 中记录 fusion 与 graph context；
+  - App 主 `AgentLoopController` 首轮模型调用前会通过 `AgentContextBuilder` + `SQLiteGraphHybridSearchService` 注入相关长期图谱记忆，并将命中 source IDs 作为 response citations 返回。
 - SwiftPM `swift build` 通过。
 
 ### 已有但仍需补齐的能力
@@ -1440,7 +1441,7 @@ memory dashboard
 11. ✅ 新增 distillation worker：从 staging buffer 生成 episode candidates 与 extraction job。
 12. ✅ 为 memory distillation 增加 deterministic quality gate，区分 episode、preference、decision、project fact 等 candidate。
 13. ✅ 增加 LLM-backed distiller，实现比关键词分类更可靠的长期记忆选择，并保留 deterministic fallback。
-14. 🔜 将 App 主 Chat 的空搜索 fallback 替换为真实 `SQLiteGraphHybridSearchService`，确保回答能使用已提交图谱记忆。
+14. ✅ 将 App 主 Chat 的空搜索 fallback 替换为真实 `SQLiteGraphHybridSearchService`，确保回答能使用已提交图谱记忆。
 15. 🔜 收敛 `GraphAgent` simple ask path 与 `AgentLoopController` tool-calling path，形成单一主 runtime。
 16. 🔜 让所有 manual candidate / extraction commit / future source write 强制经过统一 entity resolver。
 17. 🔜 为 admission hold queue 增加 approve / reject / rerun / inspect evidence 动作闭环。
