@@ -824,6 +824,7 @@ Index refreshes
 - Conflict preview 已进入 extraction admission 主路径：worker/replay 在写入前用 existing active statements 预检直接冲突，policy 对冲突写入返回 `ask_user`，并把 conflict count/preview 写入 trace metadata。
 - Admission hold diagnostics queue 已实现：`hold` / `ask_user` 会生成系统自愈队列项，推荐 replay、grounding、merge、inspect evidence 或必要时 ask user；该队列不是默认用户逐条审核。
 - Memory Inspector / Change Log 初版已实现：extraction commit/hold/ask/discard/failure 会写入 `graph_memory_change_log`，App 新增“记忆变更”页面展示 changed entities/statements/anomalies、source trace 和 summary。
+- Episode FTS retrieval 已实现：`graph_episodes_fts` 会随 `graph_episodes_v3` upsert 更新，`SQLiteGraphHybridSearchService` 已按 `includeEpisodes` 返回 episode hits。
 - UI 目标是 Memory Inspector / Change Log，而不是让用户逐条处理队列。
 
 商用验收标准：
