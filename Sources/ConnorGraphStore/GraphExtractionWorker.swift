@@ -199,6 +199,8 @@ public struct GraphExtractionWorker<Extractor: GraphExtractorProvider>: Sendable
         errorMessage: String? = nil,
         now: Date
     ) throws {
+        var metadata = draft.metadata
+        metadata["admission_message"] = admission.message
         try store.appendExtractionTrace(GraphExtractionTrace(
             id: "trace-\(job.id)-\(outcome.rawValue)-\(Int(now.timeIntervalSince1970 * 1000))",
             jobID: job.id,
@@ -215,7 +217,7 @@ public struct GraphExtractionWorker<Extractor: GraphExtractorProvider>: Sendable
             anomalyCount: writeResult.anomalyIDs.count,
             errorMessage: errorMessage,
             createdAt: now,
-            metadata: ["admission_message": admission.message]
+            metadata: metadata
         ))
     }
 

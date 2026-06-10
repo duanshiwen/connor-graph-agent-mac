@@ -109,11 +109,13 @@ public struct GraphExtractionDraft: Codable, Sendable, Equatable {
     public var source: GraphExtractionSource
     public var entities: [GraphExtractedEntityDraft]
     public var statements: [GraphExtractedStatementDraft]
+    public var metadata: [String: String]
 
-    public init(source: GraphExtractionSource, entities: [GraphExtractedEntityDraft] = [], statements: [GraphExtractedStatementDraft] = []) {
+    public init(source: GraphExtractionSource, entities: [GraphExtractedEntityDraft] = [], statements: [GraphExtractedStatementDraft] = [], metadata: [String: String] = [:]) {
         self.source = source
         self.entities = entities
         self.statements = statements
+        self.metadata = metadata
     }
 
     public func toOptimisticWriteBatch(now: Date = Date()) throws -> GraphOptimisticWriteBatch {
