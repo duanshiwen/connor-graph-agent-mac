@@ -66,11 +66,24 @@ public struct GraphExtractionWorkerResult: Sendable, Equatable, Identifiable {
     public var jobID: String
     public var action: GraphExtractionWorkerAction
     public var writeResult: GraphOptimisticWriteResult
+    public var extractedEntityCount: Int
+    public var extractedStatementCount: Int
+    public var errorMessage: String?
 
-    public init(jobID: String, action: GraphExtractionWorkerAction, writeResult: GraphOptimisticWriteResult = GraphOptimisticWriteResult()) {
+    public init(
+        jobID: String,
+        action: GraphExtractionWorkerAction,
+        writeResult: GraphOptimisticWriteResult = GraphOptimisticWriteResult(),
+        extractedEntityCount: Int = 0,
+        extractedStatementCount: Int = 0,
+        errorMessage: String? = nil
+    ) {
         self.jobID = jobID
         self.action = action
         self.writeResult = writeResult
+        self.extractedEntityCount = extractedEntityCount
+        self.extractedStatementCount = extractedStatementCount
+        self.errorMessage = errorMessage
     }
 }
 
@@ -109,10 +122,17 @@ public struct GraphExtractionWorker<Extractor: GraphExtractorProvider>: Sendable
             let batch = try draft.toOptimisticWriteBatch(now: now)
             let writeResult = try optimisticWriter.commit(batch)
             try mark(job: job, status: .succeeded, now: now)
-            return GraphExtractionWorkerResult(jobID: job.id, action: .committed, writeResult: writeResult)
+            return GraphExtractionWorkerResult(
+                jobID: job.id,
+                action: .committed,
+                writeResult: writeResult,
+                extractedEntityCount: draft.entities.count,
+                extractedStatementCount: draft.statements.count
+            )
         } catch {
-            try mark(job: job, status: .failed, now: now, errorCode: "extraction_failed", errorMessage: String(describing: error))
-            return GraphExtractionWorkerResult(jobID: job.id, action: .failed)
+            let message = String(describing: error)
+            try mark(job: job, status: .failed, now: now, errorCode: "extraction_failed", errorMessage: message)
+            return GraphExtractionWorkerResult(jobID: job.id, action: .failed, errorMessage: message)
         }
     }
 
