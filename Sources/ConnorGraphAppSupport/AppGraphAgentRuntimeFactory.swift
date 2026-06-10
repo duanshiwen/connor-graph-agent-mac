@@ -18,6 +18,10 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         self.groupID = groupID
     }
 
+    /// Legacy simple ask runtime retained for compatibility and tests.
+    /// Product chat should use `makeAgentLoopChatController` so tool calling,
+    /// permissions, audit/events, memory staging, and graph retrieval evolve on one path.
+    @available(*, deprecated, message: "Use makeAgentLoopChatController for the main app chat runtime.")
     public func makeChatController(
         session: AgentSession = AgentSession(id: "app-session")
     ) -> AgentChatController<AnyLLMProvider> {
