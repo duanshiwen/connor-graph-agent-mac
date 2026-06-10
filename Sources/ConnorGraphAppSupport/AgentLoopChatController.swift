@@ -1,6 +1,7 @@
 import Foundation
 import ConnorGraphAgent
 import ConnorGraphCore
+import ConnorGraphMemory
 
 public struct AgentLoopChatResponse: Sendable, Equatable {
     public var session: AgentSession
@@ -25,8 +26,16 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
     public var groupID: String
 
     private let presenter: AgentEventPresenter
+    private let memoryIngestionService: MemoryIngestionService
+    private let memoryStagingRepository: AppMemoryStagingBufferRepository?
 
-    public init(loopController: AgentLoopController<Provider>, session: AgentSession = AgentSession(), groupID: String = "default") {
+    public init(
+        loopController: AgentLoopController<Provider>,
+        session: AgentSession = AgentSession(),
+        groupID: String = "default",
+        memoryStagingRepository: AppMemoryStagingBufferRepository? = nil,
+        memoryIngestionService: MemoryIngestionService = MemoryIngestionService()
+    ) {
         self.loopController = loopController
         self.session = session
         self.transcript = session.messages
@@ -34,12 +43,15 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
         self.eventPresentations = []
         self.groupID = groupID
         self.presenter = AgentEventPresenter()
+        self.memoryStagingRepository = memoryStagingRepository
+        self.memoryIngestionService = memoryIngestionService
     }
 
     @discardableResult
     public mutating func submit(_ prompt: String) async throws -> AgentLoopChatResponse {
         let userMessage = session.appendUserMessage(prompt)
         transcript = session.messages
+        try persistMemoryStagingAfterUserMessage(userMessage)
         let request = AgentChatRequest(
             sessionID: session.id,
             groupID: groupID,
@@ -61,6 +73,9 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
                 if case .textComplete(let payload) = event {
                     assistantMessage = session.appendAssistantMessage(payload.text, citations: payload.citations)
                     transcript = session.messages
+                    if let assistantMessage {
+                        try persistMemoryStagingAfterAssistantMessage(assistantMessage)
+                    }
                 }
             }
             return AgentLoopChatResponse(
@@ -76,5 +91,27 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
             }
             throw error
         }
+    }
+
+    private func persistMemoryStagingAfterUserMessage(_ message: AgentMessage) throws {
+        guard let memoryStagingRepository else { return }
+        let existingBuffer = try memoryStagingRepository.loadBuffer(sessionID: session.id)
+        let result = memoryIngestionService.ingestUserMessage(
+            message,
+            sessionID: session.id,
+            into: existingBuffer
+        )
+        try memoryStagingRepository.saveBuffer(result.buffer)
+    }
+
+    private func persistMemoryStagingAfterAssistantMessage(_ message: AgentMessage) throws {
+        guard let memoryStagingRepository else { return }
+        let existingBuffer = try memoryStagingRepository.loadBuffer(sessionID: session.id)
+        let result = memoryIngestionService.ingestAssistantMessage(
+            message,
+            sessionID: session.id,
+            into: existingBuffer ?? MemoryStagingBuffer(sessionID: session.id)
+        )
+        try memoryStagingRepository.saveBuffer(result.buffer)
     }
 }

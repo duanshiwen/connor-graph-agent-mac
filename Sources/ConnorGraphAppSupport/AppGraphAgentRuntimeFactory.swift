@@ -40,7 +40,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         AgentLoopChatController(
             loopController: makeAgentLoopController(permissionMode: permissionMode, configuration: configuration),
             session: session,
-            groupID: groupID
+            groupID: groupID,
+            memoryStagingRepository: AppMemoryStagingBufferRepository(store: store)
         )
     }
 
