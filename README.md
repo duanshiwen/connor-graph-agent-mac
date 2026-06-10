@@ -55,9 +55,13 @@ Connor Graph Agent Mac 的产品定位是：
 temporal graph-only
 + SQLite-backed graph store
 + graph-aware agent runtime
++ tool-calling agent loop foundation
++ background extraction/admission pipeline
 + SwiftUI Mac app prototype
 + production-oriented graph memory architecture in progress
 ```
+
+截至本轮源码扫描，项目已经不是普通 demo，而是一个 **Swift/macOS 本地优先的 temporal knowledge graph memory kernel + graph-aware agent prototype**。它的核心优势在于：本地 truth layer、时序事实、证据 episode、实体消歧、写入准入、抽取 trace、自愈框架和可审计记忆变更。下一阶段的重点不是继续堆更多图谱模型，而是打通“正常对话 → 自动观察 → 后台抽取 → 准入写入 → 下次回答可检索引用”的产品闭环。
 
 ### 已完成并验证
 
@@ -73,7 +77,7 @@ temporal graph-only
 - SQLite 本地图谱存储：`SQLiteGraphKernelStore` / `SQLiteGraphStore`。
 - 本地 SQLite schema migration。
 - 图谱实体、事实、episode、observe log、chat session、agent message、summary、prompt inspection 持久化。
-- SQLite-backed graph search 基础路径：entity FTS + statement FTS。
+- SQLite-backed graph search 基础路径：entity FTS + statement FTS + episode FTS。
 - 图谱时序过滤与 belief status 过滤。
 - SQLite 图遍历层，作为 Neo4j / FalkorDB 的本地替代基座。
 - Agent runtime 与 graph search 上下文注入。
@@ -104,6 +108,21 @@ temporal graph-only
   - index refresh；
   - anomaly resolution；
   - entity merge review。
+- Extraction/admission 主路径：
+  - `GraphExtractorProvider` 抽象；
+  - `LLMGraphExtractor` / `StubGraphExtractor`；
+  - `GraphExtractionPromptBuilder`；
+  - `GraphExtractionDecoder`；
+  - `GraphWriteAdmissionPolicy`；
+  - `GraphExtractionTrace`；
+  - `GraphAdmissionHoldQueue`；
+  - `GraphMemoryChangeLog`。
+- Hybrid retrieval 初版：
+  - statement/entity/episode FTS；
+  - graph neighborhood expansion；
+  - source episode expansion；
+  - weighted rank-style fusion；
+  - hit metadata 中记录 fusion 与 graph context。
 - SwiftPM `swift build` 通过。
 
 ### 已有但仍需补齐的能力
@@ -124,17 +143,18 @@ temporal graph-only
   - `groundingCheck`
   - `confidenceDecay`
   - `ontologyPromotion`
-- `SQLiteGraphHybridSearchService` 当前主要覆盖 entity / statement FTS；README 中所描述的完整 Graphiti-grade hybrid pipeline 是目标架构，仍需补齐：
-  - episode FTS；
+- `SQLiteGraphHybridSearchService` 已覆盖 entity / statement / episode FTS，并实现 graph neighborhood expansion、source episode expansion 和初版融合；完整 Graphiti-grade hybrid pipeline 仍需补齐：
   - embedding semantic retrieval；
-  - RRF fusion；
+  - 正式 RRF fusion 与 query planner；
   - graph topology reranking；
+  - entity linking / entity-centric retrieval；
   - episode mention boost；
   - MMR diversity reranking；
-  - optional cross-encoder reranking。
-- Entity resolver 与 entity merge review 已有基础，但尚未成为所有 extraction/write 的强制主路径。
+  - optional cross-encoder reranking；
+  - retrieval trace 可视化。
+- Entity resolver、entity resolution plan 与 entity merge review 已有基础，并已进入 extraction admission 主路径；下一步需要让所有 extraction/write/手动候选提交都强制经过统一 resolver。
 - Ontology / class promotion 的数据模型方向已具备，但缺少完整生命周期和 UI。
-- Permission model 已有 graph-specific capability，但缺少产品级审批 UI、pending approval queue 和 per-source/per-scope policy。
+- Permission model 已有 graph-specific capability，但缺少产品级审批 UI、pending approval queue、always-allow、per-source/per-scope policy，以及与 session mode 的完整联动。
 
 ### 当前测试说明
 
@@ -152,13 +172,15 @@ no such module 'Testing'
 
 本项目应参考但不复制 Craft Agents OSS。
 
-Craft Agents OSS 是成熟的通用 Agent 工作台：
+Craft Agents OSS 是成熟的通用 Agent 工作台，优势在 **Agent OS 产品外壳**：
 
 - Session / Workspace / Message / AgentEvent 抽象成熟；
-- Claude Agent SDK 与 Pi SDK 多后端接入成熟；
+- SessionManager 管 session，不直接绑定某个模型 SDK；
+- BaseAgent / AgentBackend 统一 Claude、Pi、Codex/Copilot 等后端；
 - MCP / REST / local source 系统成熟；
-- 权限模式、PreToolUse、配置校验、OAuth、Credential、自动化、消息网关、桌面 UI 都较完整；
-- 适合作为 Agent OS 产品外壳、会话系统、source 系统和权限治理的架构参考。
+- Source activation、guide 注入、OAuth、Credential、配置校验较完整；
+- 权限模式、PreToolUse、tool permission、API allowlist、危险命令检测成熟；
+- 自动化、消息网关、桌面 UI、远程/headless server 能力较完整。
 
 但 Craft Agents OSS 基本没有真正的知识图谱长期记忆层：
 
@@ -166,6 +188,7 @@ Craft Agents OSS 是成熟的通用 Agent 工作台：
 - 没有 entity resolution 主路径；
 - 没有 graph-backed memory；
 - 没有 bitemporal fact / justification / belief revision；
+- 没有 evidence episode → extraction → admission → commit 的记忆写入链路；
 - 没有 ontology promotion / graph self-healing；
 - 没有 graph-native context assembly。
 
@@ -179,9 +202,21 @@ Connor Graph Agent Mac = graph memory kernel / temporal knowledge layer / local-
 长期产品路线应是：
 
 ```text
-借鉴 Craft 的 Agent OS 外壳能力
+借鉴 Craft 的 Agent OS 外壳边界
 保留 Connor 的 graph memory kernel 作为差异化智能底座
+不要把 Connor 降级成 Craft 的一个普通 RAG/source 插件
 ```
+
+更具体地说：
+
+| 产品层 | 主要参考 | 说明 |
+| --- | --- | --- |
+| Session / Workspace / AgentEvent | Craft Agents OSS | 成熟的会话主权与事件流边界 |
+| Source / MCP / OAuth / Credential | Craft Agents OSS | Connor 需要补齐真实世界信息入口 |
+| Permission Runtime | Craft Agents OSS + Connor graph capability | Craft 的产品级权限 + Connor 的图谱写入权限 |
+| Graph Memory Kernel | Connor Graph Agent Mac | temporal KG、证据、准入、自愈是核心差异化 |
+| Retrieval / Context Assembly | Connor Graph Agent Mac | 需要 graph-native，而不是普通文本 RAG |
+| Model Adapter | 两者结合 | 多后端可替换，主对话模型与提取模型分离 |
 
 ---
 
@@ -1272,37 +1307,61 @@ SourceArtifact
 
 不要先做“炫酷 UI”或“更多 source”。先打穿商业产品最核心的可信记忆闭环。
 
-### 1. Production Extraction Loop
+### 1. Unify Chat Runtime and Graph Memory Loop
+
+```text
+user message
+→ agent loop
+→ graph_search when needed
+→ automatic episode ingestion
+→ extraction job enqueue
+→ background admission/commit
+→ next answer can retrieve committed memory
+```
+
+目标：把 `GraphAgent` 的 simple ask path、`AgentLoopController` 的 tool-calling path、以及后台 extraction/admission path 收敛成一条主产品链路。
+
+### 2. Production Extraction Loop
 
 ```text
 LLMGraphExtractor
 → structured extraction schema
 → evidence span
 → extraction job trace
+→ replay/dry-run
 → extraction golden tests
 ```
 
-### 2. Resolver + Candidate Write Loop
+目标：让后台提取稳定、可重放、可诊断，而不是一次性黑盒调用。
+
+### 3. Resolver + Admission + Commit Loop
 
 ```text
 entity resolution
+→ conflict preflight
 → constraint validation
-→ graph write candidate
-→ review UI
-→ audited commit
+→ admission decision
+→ auto-commit / hold / ask
+→ audited memory change log
 ```
 
-### 3. Retrieval Completion
+目标：普通高置信记忆自动维护，高风险/冲突/敏感记忆进入 hold 或 ask，不制造用户审核疲劳。
+
+### 4. Retrieval Completion
 
 ```text
-episode FTS
+entity / statement / episode FTS
 → semantic retrieval
-→ RRF
+→ entity linking
+→ RRF / fusion
+→ graph topology rerank
 → graph context assembly
 → answer explainability
 ```
 
-### 4. Self-Healing Workers
+目标：从“在图里搜文本”升级到“围绕实体、关系、证据和时间组织上下文”。
+
+### 5. Self-Healing Workers
 
 ```text
 grounding check
@@ -1311,7 +1370,9 @@ grounding check
 → ontology promotion
 ```
 
-### 5. Session / Agent Shell Upgrade
+目标：让图谱不仅会写入，还会随着新证据自我修正和演化。
+
+### 6. Session / Agent Shell Upgrade
 
 ```text
 session manager
@@ -1319,9 +1380,12 @@ session manager
 → abort/resume
 → source runtime
 → permission prompts
+→ model adapter
 ```
 
-### 6. Source System
+目标：借鉴 Craft Agents OSS 的产品外壳边界，但保持 Connor 的 graph memory kernel 为核心差异化。
+
+### 7. Source System
 
 ```text
 local files
@@ -1331,17 +1395,22 @@ local files
 → source-to-episode ingestion
 ```
 
-### 7. Commercial UI and Ops
+目标：让真实世界信息先进入 evidence episode，再进入 extraction/admission，而不是绕过图谱 truth layer。
+
+### 8. Commercial UI and Ops
 
 ```text
 memory dashboard
 → entity detail
 → statement detail
-→ review queue
+→ hold/review queue
+→ answer explanation
 → settings
 → diagnostics
 → backup/export
 ```
+
+目标：让用户理解、控制、信任系统的长期记忆。
 
 ---
 
@@ -1352,13 +1421,17 @@ memory dashboard
 1. ✅ 新增 `LLMGraphExtractor`，并保留 `StubGraphExtractor` 作为测试 double。
 2. ✅ 新增 extraction JSON schema、decoder 与 prompt builder。
 3. ✅ 将 `AppGraphBackgroundJobRunner` 支持根据 LLM settings 选择真实 extractor，并在不可用时 fallback 到 stub。
-4. 部分完成：`GraphExtractionWorker` 已增加 result-level entity/statement count 和 error message；raw response / validation failure 持久化 trace 仍需后续 schema 支持。
-5. 将 `SQLiteGraphEntityResolver` 接入 optimistic write 主路径。
-6. 补 `graph_episodes_v3` FTS 表和 episode search API。
-7. 扩展 `SQLiteGraphHybridSearchService`，支持 entity + statement + episode 三类结果。
-8. 为 graph write candidate 做 richer diff UI。
-9. 实现 `groundingCheck` worker 的最小可用版本。
-10. 实现 schema/version health check，启动时展示图模型版本。
+4. ✅ 将 raw response / normalized JSON / decoder failure 持久化到 extraction trace payload。
+5. ✅ 将 entity resolution plan、conflict preview、admission policy 接入 extraction 主路径。
+6. ✅ 补 `graph_episodes_v3` FTS 表和 episode search API。
+7. ✅ 扩展 `SQLiteGraphHybridSearchService`，支持 entity + statement + episode 三类结果、graph neighborhood expansion、source episode expansion 和初版融合。
+8. 🔜 新增统一 `MemoryIngestionService`：message / browser / file / source artifact 统一进入 Observe Log + Episode + extraction job。
+9. 🔜 将 App 主 Chat 的空搜索 fallback 替换为真实 `SQLiteGraphHybridSearchService`，确保回答能使用已提交图谱记忆。
+10. 🔜 收敛 `GraphAgent` simple ask path 与 `AgentLoopController` tool-calling path，形成单一主 runtime。
+11. 🔜 让所有 manual candidate / extraction commit / future source write 强制经过统一 entity resolver。
+12. 🔜 为 admission hold queue 增加 approve / reject / rerun / inspect evidence 动作闭环。
+13. 🔜 实现 `groundingCheck` worker 的最小可用版本。
+14. 🔜 实现 schema/version health check，启动时展示图模型版本。
 
 ---
 
