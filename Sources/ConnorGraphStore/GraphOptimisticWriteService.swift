@@ -2,22 +2,6 @@ import Foundation
 import ConnorGraphCore
 import ConnorGraphMemory
 
-public struct GraphOptimisticWriteBatch: Sendable, Equatable {
-    public var graphID: String
-    public var episode: GraphEpisodeV3?
-    public var entities: [GraphEntity]
-    public var statements: [GraphStatement]
-    public var now: Date
-
-    public init(graphID: String, episode: GraphEpisodeV3? = nil, entities: [GraphEntity] = [], statements: [GraphStatement] = [], now: Date = Date()) {
-        self.graphID = graphID
-        self.episode = episode
-        self.entities = entities
-        self.statements = statements
-        self.now = now
-    }
-}
-
 public struct GraphRejectedStatement: Sendable, Equatable, Identifiable {
     public var id: String { statement.id }
     public var statement: GraphStatement
