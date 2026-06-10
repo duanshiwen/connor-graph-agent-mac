@@ -16,14 +16,27 @@ public struct GraphRejectedStatement: Sendable, Equatable, Identifiable {
 public struct GraphOptimisticWriteResult: Sendable, Equatable {
     public var committedEpisodeID: String?
     public var committedEntityIDs: [String]
+    public var resolvedEntityIDs: [String: String]
+    public var potentialDuplicateEntityIDs: [String: String]
     public var committedStatementIDs: [String]
     public var rejectedStatements: [GraphRejectedStatement]
     public var anomalyIDs: [String]
     public var jobIDs: [String]
 
-    public init(committedEpisodeID: String? = nil, committedEntityIDs: [String] = [], committedStatementIDs: [String] = [], rejectedStatements: [GraphRejectedStatement] = [], anomalyIDs: [String] = [], jobIDs: [String] = []) {
+    public init(
+        committedEpisodeID: String? = nil,
+        committedEntityIDs: [String] = [],
+        resolvedEntityIDs: [String: String] = [:],
+        potentialDuplicateEntityIDs: [String: String] = [:],
+        committedStatementIDs: [String] = [],
+        rejectedStatements: [GraphRejectedStatement] = [],
+        anomalyIDs: [String] = [],
+        jobIDs: [String] = []
+    ) {
         self.committedEpisodeID = committedEpisodeID
         self.committedEntityIDs = committedEntityIDs
+        self.resolvedEntityIDs = resolvedEntityIDs
+        self.potentialDuplicateEntityIDs = potentialDuplicateEntityIDs
         self.committedStatementIDs = committedStatementIDs
         self.rejectedStatements = rejectedStatements
         self.anomalyIDs = anomalyIDs
@@ -35,15 +48,18 @@ public struct GraphOptimisticWriteService: Sendable {
     public var store: SQLiteGraphKernelStore
     public var validator: GraphConstraintValidator
     public var contradictionDetector: GraphContradictionDetector
+    public var resolver: SQLiteGraphEntityResolver
 
-    public init(store: SQLiteGraphKernelStore, validator: GraphConstraintValidator = GraphConstraintValidator(), contradictionDetector: GraphContradictionDetector = GraphContradictionDetector()) {
+    public init(store: SQLiteGraphKernelStore, validator: GraphConstraintValidator = GraphConstraintValidator(), contradictionDetector: GraphContradictionDetector = GraphContradictionDetector(), resolver: SQLiteGraphEntityResolver? = nil) {
         self.store = store
         self.validator = validator
         self.contradictionDetector = contradictionDetector
+        self.resolver = resolver ?? SQLiteGraphEntityResolver(store: store)
     }
 
     public func commit(_ batch: GraphOptimisticWriteBatch) throws -> GraphOptimisticWriteResult {
         var result = GraphOptimisticWriteResult()
+        var resolvedEntityIDByIncomingID: [String: String] = [:]
 
         if let episode = batch.episode {
             try store.upsert(episode: episode)
@@ -51,24 +67,41 @@ public struct GraphOptimisticWriteService: Sendable {
         }
 
         for entity in batch.entities {
-            try store.upsert(entity: entity)
-            result.committedEntityIDs.append(entity.id)
-            let jobID = try enqueueIndexRefresh(graphID: batch.graphID, ownerType: .entity, ownerID: entity.id, now: batch.now)
-            result.jobIDs.append(jobID)
+            let resolution = try resolver.resolve(name: entity.name, entityKind: entity.entityKind, scope: entity.scope, graphID: entity.graphID)
+            switch resolution {
+            case .matched(let existingID, _):
+                resolvedEntityIDByIncomingID[entity.id] = existingID
+                result.resolvedEntityIDs[entity.id] = existingID
+            case .create:
+                try store.upsert(entity: entity)
+                resolvedEntityIDByIncomingID[entity.id] = entity.id
+                result.committedEntityIDs.append(entity.id)
+                let jobID = try enqueueIndexRefresh(graphID: batch.graphID, ownerType: .entity, ownerID: entity.id, now: batch.now)
+                result.jobIDs.append(jobID)
+            case .potentialDuplicate(let existingID, _):
+                try store.upsert(entity: entity)
+                resolvedEntityIDByIncomingID[entity.id] = entity.id
+                result.committedEntityIDs.append(entity.id)
+                result.potentialDuplicateEntityIDs[entity.id] = existingID
+                let indexJobID = try enqueueIndexRefresh(graphID: batch.graphID, ownerType: .entity, ownerID: entity.id, now: batch.now)
+                result.jobIDs.append(indexJobID)
+                let mergeJobID = try enqueueEntityMergeReview(graphID: batch.graphID, incomingEntityID: entity.id, existingEntityID: existingID, now: batch.now)
+                result.jobIDs.append(mergeJobID)
+            }
         }
 
         for originalStatement in batch.statements {
-            let subject = try store.entity(id: originalStatement.subjectEntityID)
-            let object = try store.entity(id: originalStatement.objectEntityID)
-            let validation = validator.validate(statement: originalStatement, subject: subject, object: object)
+            var statement = rewriteStatement(originalStatement, entityIDMap: resolvedEntityIDByIncomingID)
+            let subject = try store.entity(id: statement.subjectEntityID)
+            let object = try store.entity(id: statement.objectEntityID)
+            let validation = validator.validate(statement: statement, subject: subject, object: object)
             if !validation.isValid {
-                result.rejectedStatements.append(GraphRejectedStatement(statement: originalStatement, errors: validation.errors))
+                result.rejectedStatements.append(GraphRejectedStatement(statement: statement, errors: validation.errors))
                 continue
             }
 
             let existing = try store.statements(graphID: batch.graphID, beliefStatus: .active)
-            let conflicts = contradictionDetector.detect(incoming: originalStatement, existingActiveStatements: existing)
-            var statement = originalStatement
+            let conflicts = contradictionDetector.detect(incoming: statement, existingActiveStatements: existing)
             if !conflicts.isEmpty {
                 statement.beliefStatus = .anomaly
                 statement.confidence = max(0.0, statement.confidence * 0.5)
@@ -101,6 +134,20 @@ public struct GraphOptimisticWriteService: Sendable {
         return result
     }
 
+    private func rewriteStatement(_ statement: GraphStatement, entityIDMap: [String: String]) -> GraphStatement {
+        var rewritten = statement
+        if let resolvedSubjectID = entityIDMap[statement.subjectEntityID] {
+            rewritten.subjectEntityID = resolvedSubjectID
+        }
+        if let resolvedObjectID = entityIDMap[statement.objectEntityID] {
+            rewritten.objectEntityID = resolvedObjectID
+        }
+        if rewritten.subjectEntityID != statement.subjectEntityID || rewritten.objectEntityID != statement.objectEntityID {
+            rewritten.metadata["entity_resolution"] = "rewritten"
+        }
+        return rewritten
+    }
+
     private func enqueueIndexRefresh(graphID: String, ownerType: GraphIndexOwnerType, ownerID: String, now: Date) throws -> String {
         let jobID = "job-index-\(ownerType.rawValue)-\(ownerID)"
         try store.upsert(job: GraphJobV3(
@@ -110,6 +157,22 @@ public struct GraphOptimisticWriteService: Sendable {
             status: .queued,
             priority: 1,
             payload: ["owner_type": ownerType.rawValue, "owner_id": ownerID],
+            createdAt: now,
+            updatedAt: now,
+            nextRunAt: now
+        ))
+        return jobID
+    }
+
+    private func enqueueEntityMergeReview(graphID: String, incomingEntityID: String, existingEntityID: String, now: Date) throws -> String {
+        let jobID = "job-entity-merge-review-\(incomingEntityID)-\(existingEntityID)"
+        try store.upsert(job: GraphJobV3(
+            id: jobID,
+            graphID: graphID,
+            type: .entityMergeReview,
+            status: .queued,
+            priority: 5,
+            payload: ["incoming_entity_id": incomingEntityID, "existing_entity_id": existingEntityID],
             createdAt: now,
             updatedAt: now,
             nextRunAt: now
