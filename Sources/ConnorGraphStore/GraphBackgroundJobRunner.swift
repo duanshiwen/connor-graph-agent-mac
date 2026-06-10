@@ -29,6 +29,7 @@ public struct GraphBackgroundJobRunner<Extractor: GraphExtractorProvider>: Senda
     public var indexRefreshWorker: GraphIndexRefreshWorker
     public var selfHealingService: GraphSelfHealingService
     public var entityMergeReviewWorker: GraphEntityMergeReviewWorker
+    public var groundingCheckWorker: GraphGroundingCheckWorker
 
     public init(store: SQLiteGraphKernelStore, extractor: Extractor) {
         self.store = store
@@ -36,6 +37,7 @@ public struct GraphBackgroundJobRunner<Extractor: GraphExtractorProvider>: Senda
         self.indexRefreshWorker = GraphIndexRefreshWorker(store: store)
         self.selfHealingService = GraphSelfHealingService(store: store)
         self.entityMergeReviewWorker = GraphEntityMergeReviewWorker(store: store)
+        self.groundingCheckWorker = GraphGroundingCheckWorker(store: store)
     }
 
     public init(
@@ -43,13 +45,15 @@ public struct GraphBackgroundJobRunner<Extractor: GraphExtractorProvider>: Senda
         extractionWorker: GraphExtractionWorker<Extractor>,
         indexRefreshWorker: GraphIndexRefreshWorker,
         selfHealingService: GraphSelfHealingService,
-        entityMergeReviewWorker: GraphEntityMergeReviewWorker
+        entityMergeReviewWorker: GraphEntityMergeReviewWorker,
+        groundingCheckWorker: GraphGroundingCheckWorker
     ) {
         self.store = store
         self.extractionWorker = extractionWorker
         self.indexRefreshWorker = indexRefreshWorker
         self.selfHealingService = selfHealingService
         self.entityMergeReviewWorker = entityMergeReviewWorker
+        self.groundingCheckWorker = groundingCheckWorker
     }
 
     public func runOnce(graphID: String, now: Date = Date()) async throws -> GraphBackgroundJobRunResult? {
@@ -104,7 +108,11 @@ public struct GraphBackgroundJobRunner<Extractor: GraphExtractorProvider>: Senda
             case .failed: outcome = .failed
             }
             return GraphBackgroundJobRunResult(jobID: job.id, jobType: job.type, outcome: outcome, message: result.message)
-        case .groundingCheck, .confidenceDecay, .ontologyPromotion:
+        case .groundingCheck:
+            let result = try groundingCheckWorker.run(job: job, now: now)
+            let outcome: GraphBackgroundJobOutcome = result.action == .failed ? .failed : .succeeded
+            return GraphBackgroundJobRunResult(jobID: job.id, jobType: job.type, outcome: outcome, message: result.message)
+        case .confidenceDecay, .ontologyPromotion:
             try pauseUnsupported(job: job, now: now)
             return GraphBackgroundJobRunResult(jobID: job.id, jobType: job.type, outcome: .paused, message: "Worker not implemented for \(job.type.rawValue)")
         }
