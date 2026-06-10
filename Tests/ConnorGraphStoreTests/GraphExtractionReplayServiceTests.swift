@@ -97,10 +97,10 @@ private let replayExtractionJSON = """
     #expect(result.originalTraceID == "trace-original-1")
     #expect(result.draft?.entities.count == 2)
     #expect(result.admissionDecision?.action == .autoCommit)
-    let replayTrace = try #require(store.extractionTrace(id: result.replayTraceID))
+    let replayTrace = try #require(try store.extractionTrace(id: result.replayTraceID))
     #expect(replayTrace.metadata["replayed_from_trace_id"] == "trace-original-1")
     #expect(replayTrace.metadata["dry_run"] == "true")
     #expect(replayTrace.extractedStatementCount == 1)
-    let replayPayload = try #require(store.extractionTracePayload(traceID: result.replayTraceID))
+    let replayPayload = try #require(try store.extractionTracePayload(traceID: result.replayTraceID))
     #expect(replayPayload.normalizedJSON?.contains("诗闻 prefers tea") == true)
 }
