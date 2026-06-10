@@ -816,7 +816,10 @@ Index refreshes
   - confidence；
   - policy reason trace。
 - 当前已持久化：job/source、outcome、admission action/reasons、extracted/committed counts、anomaly count、error message、metadata。
-- LLM-backed extraction trace metadata 已接入：provider、model、prompt version、token usage、latency、finish reason、raw response id/raw JSON、normalized JSON。
+- LLM-backed extraction trace metadata 已接入：provider、model、prompt version、token usage、latency、finish reason、raw response id。
+- `graph_extraction_trace_payloads` 已用于保存 prompt、raw response、normalized JSON 和 decoder error payload，避免主 trace metadata 膨胀。
+- Decoder failure 已可持久化 LLM response metadata 和 decoder diagnostics。
+- 已新增 `GraphExtractionReplayService`，支持从 stored payload 重新 decode，并以 append-only dry-run trace 方式重跑 admission。
 - UI 目标是 Memory Inspector / Change Log，而不是让用户逐条处理队列。
 
 商用验收标准：

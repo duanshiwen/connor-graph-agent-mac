@@ -408,6 +408,10 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         try query(sql: "SELECT id, graph_id, type, status, priority, payload_json, attempt_count, max_attempts, created_at, updated_at, next_run_at, started_at, finished_at, error_code, error_message, metadata_json FROM graph_jobs_v3 WHERE graph_id = \(quote(graphID)) AND status = \(quote(GraphJobV3Status.queued.rawValue)) AND next_run_at <= \(quote(iso(date))) ORDER BY priority DESC, next_run_at ASC LIMIT \(limit)").map(decodeJob)
     }
 
+    public func job(id: String) throws -> GraphJobV3? {
+        try query(sql: "SELECT id, graph_id, type, status, priority, payload_json, attempt_count, max_attempts, created_at, updated_at, next_run_at, started_at, finished_at, error_code, error_message, metadata_json FROM graph_jobs_v3 WHERE id = \(quote(id)) LIMIT 1").map(decodeJob).first
+    }
+
     public func appendExtractionTrace(_ trace: GraphExtractionTrace) throws {
         try execute("""
         INSERT INTO graph_extraction_traces
@@ -421,6 +425,13 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         SELECT id, job_id, graph_id, source_id, source_type, outcome, admission_action, admission_reasons_json, extracted_entity_count, extracted_statement_count, committed_entity_count, committed_statement_count, anomaly_count, error_message, created_at, metadata_json
         FROM graph_extraction_traces WHERE job_id = \(quote(jobID)) ORDER BY created_at DESC LIMIT \(limit)
         """).map(decodeExtractionTrace)
+    }
+
+    public func extractionTrace(id: String) throws -> GraphExtractionTrace? {
+        try query(sql: """
+        SELECT id, job_id, graph_id, source_id, source_type, outcome, admission_action, admission_reasons_json, extracted_entity_count, extracted_statement_count, committed_entity_count, committed_statement_count, anomaly_count, error_message, created_at, metadata_json
+        FROM graph_extraction_traces WHERE id = \(quote(id)) LIMIT 1
+        """).map(decodeExtractionTrace).first
     }
 
     public func extractionTraces(graphID: String, sourceID: String? = nil, limit: Int = 100) throws -> [GraphExtractionTrace] {
