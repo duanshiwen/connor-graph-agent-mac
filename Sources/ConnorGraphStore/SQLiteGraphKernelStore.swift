@@ -191,6 +191,78 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
             tokenize = 'unicode61 remove_diacritics 2'
         );
         """)
+
+        // App integration tables
+        try execute("""
+        CREATE TABLE IF NOT EXISTS graph_write_candidates (
+            id TEXT PRIMARY KEY,
+            group_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            proposed_by_run_id TEXT NOT NULL,
+            proposed_by_tool_call_id TEXT,
+            rationale TEXT NOT NULL,
+            confidence REAL NOT NULL,
+            payload_json TEXT NOT NULL,
+            source_episode_ids_json TEXT NOT NULL,
+            related_node_ids_json TEXT NOT NULL,
+            related_fact_ids_json TEXT NOT NULL,
+            status TEXT NOT NULL,
+            validation_errors_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """)
+        try execute("CREATE INDEX IF NOT EXISTS idx_graph_write_candidates_status ON graph_write_candidates(group_id, status);")
+        try execute("""
+        CREATE TABLE IF NOT EXISTS agent_sessions (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            messages_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """)
+        try execute("CREATE INDEX IF NOT EXISTS idx_agent_sessions_updated ON agent_sessions(updated_at DESC);")
+        try execute("""
+        CREATE TABLE IF NOT EXISTS agent_runs (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            group_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            completed_at TEXT,
+            model TEXT,
+            metadata_json TEXT NOT NULL
+        );
+        """)
+        try execute("CREATE INDEX IF NOT EXISTS idx_agent_runs_session ON agent_runs(session_id);")
+        try execute("""
+        CREATE TABLE IF NOT EXISTS agent_events (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            sequence INTEGER,
+            created_at TEXT NOT NULL
+        );
+        """)
+        try execute("CREATE INDEX IF NOT EXISTS idx_agent_events_run ON agent_events(run_id, sequence);")
+        try execute("""
+        CREATE TABLE IF NOT EXISTS agent_audit_events (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            actor TEXT NOT NULL,
+            capability TEXT,
+            tool_name TEXT,
+            decision TEXT,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        """)
+        try execute("CREATE INDEX IF NOT EXISTS idx_agent_audit_events_run ON agent_audit_events(run_id);")
     }
 
     public func tableNames() throws -> Set<String> {
@@ -362,6 +434,96 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
     public func searchStatementsFTS(query text: String, graphID: String, limit: Int) throws -> [GraphStatement] {
         let ids = try query(sql: "SELECT statement_id FROM graph_statements_fts WHERE graph_statements_fts MATCH \(quote(text)) AND graph_id = \(quote(graphID)) LIMIT \(limit)").compactMap { $0.first }
         return try ids.compactMap { try statement(id: $0) }
+    }
+
+    // MARK: - Graph Write Candidates
+
+    public func upsertWriteCandidate(_ candidate: GraphWriteCandidate) throws {
+        try execute("""
+        INSERT OR REPLACE INTO graph_write_candidates
+        (id, group_id, kind, proposed_by_run_id, proposed_by_tool_call_id, rationale, confidence, payload_json, source_episode_ids_json, related_node_ids_json, related_fact_ids_json, status, validation_errors_json, created_at, updated_at)
+        VALUES (\(quote(candidate.id)), \(quote(candidate.groupID)), \(quote(candidate.kind.rawValue)), \(quote(candidate.proposedByRunID)), \(quote(candidate.proposedByToolCallID)), \(quote(candidate.rationale)), \(candidate.confidence), \(quote(candidate.payloadJSON)), \(quote(json(candidate.sourceEpisodeIDs))), \(quote(json(candidate.relatedNodeIDs))), \(quote(json(candidate.relatedFactIDs))), \(quote(candidate.status.rawValue)), \(quote(json(candidate.validationErrors))), \(quote(iso(candidate.createdAt))), \(quote(iso(candidate.updatedAt))))
+        """)
+    }
+
+    public func writeCandidates(groupID: String, status: GraphWriteCandidateStatus? = nil, limit: Int = 100) throws -> [GraphWriteCandidate] {
+        var conditions = ["group_id = \(quote(groupID))"]
+        if let status { conditions.append("status = \(quote(status.rawValue))") }
+        return try query(sql: """
+        SELECT id, group_id, kind, proposed_by_run_id, proposed_by_tool_call_id, rationale, confidence, payload_json, source_episode_ids_json, related_node_ids_json, related_fact_ids_json, status, validation_errors_json, created_at, updated_at
+        FROM graph_write_candidates WHERE \(conditions.joined(separator: " AND ")) ORDER BY created_at DESC LIMIT \(limit)
+        """).map(decodeWriteCandidate)
+    }
+
+    private func decodeWriteCandidate(_ row: [String]) throws -> GraphWriteCandidate {
+        GraphWriteCandidate(
+            id: row[0], groupID: row[1], kind: GraphWriteCandidateKind(rawValue: row[2]) ?? .createNode,
+            proposedByRunID: row[3], proposedByToolCallID: nilIfEmpty(row[4]),
+            rationale: row[5], confidence: Double(row[6]) ?? 0, payloadJSON: row[7],
+            sourceEpisodeIDs: try decode([String].self, row[8]),
+            relatedNodeIDs: try decode([String].self, row[9]),
+            relatedFactIDs: try decode([String].self, row[10]),
+            status: GraphWriteCandidateStatus(rawValue: row[11]) ?? .pendingValidation,
+            validationErrors: try decode([String].self, row[12]),
+            createdAt: try date(row[13]), updatedAt: try date(row[14])
+        )
+    }
+
+    // MARK: - Agent Sessions
+
+    public func upsertSession(_ session: AgentSession) throws {
+        try execute("""
+        INSERT OR REPLACE INTO agent_sessions
+        (id, title, messages_json, created_at, updated_at)
+        VALUES (\(quote(session.id)), \(quote(session.title)), \(quote(json(session.messages))), \(quote(iso(session.createdAt))), \(quote(iso(session.updatedAt))))
+        """)
+    }
+
+    public func session(id: String) throws -> AgentSession? {
+        let rows = try query(sql: "SELECT id, title, messages_json, created_at, updated_at FROM agent_sessions WHERE id = \(quote(id))")
+        guard let row = rows.first else { return nil }
+        return try decodeSession(row)
+    }
+
+    public func recentSessions(limit: Int = 50) throws -> [AgentSession] {
+        try query(sql: "SELECT id, title, messages_json, created_at, updated_at FROM agent_sessions ORDER BY updated_at DESC LIMIT \(limit)").map(decodeSession)
+    }
+
+    private func decodeSession(_ row: [String]) throws -> AgentSession {
+        AgentSession(
+            id: row[0], title: row[1],
+            messages: try decode([AgentMessage].self, row[2]),
+            createdAt: try date(row[3]), updatedAt: try date(row[4])
+        )
+    }
+
+    // MARK: - Agent Runs & Events
+
+    public func upsert(run: AgentRun) throws {
+        try execute("""
+        INSERT OR REPLACE INTO agent_runs
+        (id, session_id, group_id, status, started_at, completed_at, model, metadata_json)
+        VALUES (\(quote(run.id)), \(quote(run.sessionID)), \(quote(run.groupID)), \(quote(run.status.rawValue)), \(quote(iso(run.startedAt))), \(quote(run.completedAt.map(iso))), \(quote(run.model)), \(quote(json(run.metadata))))
+        """)
+    }
+
+    public func append(event: PersistedAgentEvent) throws {
+        let seqStr = event.sequence.map(String.init) ?? "NULL"
+        try execute("""
+        INSERT INTO agent_events
+        (id, run_id, session_id, kind, payload_json, sequence, created_at)
+        VALUES (\(quote(event.id)), \(quote(event.runID)), \(quote(event.sessionID)), \(quote(event.kind.rawValue)), \(quote(event.payloadJSON)), \(seqStr), \(quote(iso(event.createdAt))))
+        """)
+    }
+
+    // MARK: - Agent Audit Events
+
+    public func append(auditEvent: AgentAuditEvent) throws {
+        try execute("""
+        INSERT INTO agent_audit_events
+        (id, run_id, session_id, event_type, actor, capability, tool_name, decision, payload_json, created_at)
+        VALUES (\(quote(auditEvent.id)), \(quote(auditEvent.runID)), \(quote(auditEvent.sessionID)), \(quote(auditEvent.eventType.rawValue)), \(quote(auditEvent.actor)), \(quote(auditEvent.capability?.rawValue)), \(quote(auditEvent.toolName)), \(quote(auditEvent.decision.map { json($0) })), \(quote(auditEvent.payloadJSON)), \(quote(iso(auditEvent.createdAt))))
+        """)
     }
 
     private func upsertEntityFTS(_ entity: GraphEntity) throws {

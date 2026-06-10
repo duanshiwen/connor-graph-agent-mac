@@ -10,6 +10,10 @@ public struct SQLiteAgentAuditLog: AgentAuditLog, Sendable {
     }
 
     public func record(_ event: AgentAuditEvent) async {
-        // Audit persistence will be reintroduced on the V3 app repository layer.
+        do {
+            try store.append(auditEvent: event)
+        } catch {
+            // Audit logging is best-effort; do not propagate errors
+        }
     }
 }

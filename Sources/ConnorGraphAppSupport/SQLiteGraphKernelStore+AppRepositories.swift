@@ -31,17 +31,18 @@ extension SQLiteGraphKernelStore: GraphRuntimeRepository {
     }
 
     public func upsert(graphWriteCandidate candidate: GraphWriteCandidate) throws {
-        // Reviewed candidate flow is being replaced by optimistic extraction/write pipeline.
-        // Kept as a no-op during V3 cutover so the tool surface compiles without V2 storage.
+        try upsertWriteCandidate(candidate)
     }
 }
 
 extension SQLiteGraphKernelStore: AgentRunEventRepository {
-    public func upsert(agentRun run: AgentRun) throws {}
-    public func append(agentEvent event: PersistedAgentEvent) throws {}
+    public func upsert(agentRun run: AgentRun) throws {
+        try upsert(run: run)
+    }
+
+    public func append(agentEvent event: PersistedAgentEvent) throws {
+        try append(event: event)
+    }
 }
 
-public struct NoopAgentAuditLog: AgentAuditLog, Sendable {
-    public init() {}
-    public func record(_ event: AgentAuditEvent) async {}
-}
+

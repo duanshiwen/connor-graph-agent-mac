@@ -10,11 +10,18 @@ public struct AppChatSessionRepository: Sendable {
         self.store = store
     }
 
-    public func loadRecentSessions(limit: Int = 50) throws -> [AgentSession] { [] }
-    public func loadSession(id: String) throws -> AgentSession? { nil }
+    public func loadRecentSessions(limit: Int = 50) throws -> [AgentSession] {
+        try store.recentSessions(limit: limit)
+    }
+
+    public func loadSession(id: String) throws -> AgentSession? {
+        try store.session(id: id)
+    }
 
     public func makeNewSession(title: String = "New Chat", now: Date = Date()) throws -> AgentSession {
-        AgentSession(id: UUID().uuidString, title: title, messages: [], createdAt: now, updatedAt: now)
+        let session = AgentSession(id: UUID().uuidString, title: title, messages: [], createdAt: now, updatedAt: now)
+        try store.upsertSession(session)
+        return session
     }
 
     public func createSession(title: String = "New Chat", now: Date = Date()) throws -> AgentSession {
@@ -23,12 +30,14 @@ public struct AppChatSessionRepository: Sendable {
 
     @discardableResult
     public func saveTurn(previousMessageCount: Int, response: GraphAgentAskResponse) throws -> AgentSession {
-        response.session
+        try store.upsertSession(response.session)
+        return response.session
     }
 
     @discardableResult
     public func saveSession(_ session: AgentSession, previousMessageCount: Int = 0) throws -> AgentSession {
-        session
+        try store.upsertSession(session)
+        return session
     }
 
     public func loadLatestSummary(sessionID: String) throws -> AgentSessionSummary? { nil }

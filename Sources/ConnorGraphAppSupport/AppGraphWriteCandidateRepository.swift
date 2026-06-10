@@ -18,7 +18,9 @@ public struct AppGraphWriteCandidateRepository: @unchecked Sendable {
         self.validator = validator
     }
 
-    public func loadCandidates(status: GraphWriteCandidateStatus? = nil, limit: Int = 100) throws -> [GraphWriteCandidate] { [] }
+    public func loadCandidates(status: GraphWriteCandidateStatus? = nil, limit: Int = 100) throws -> [GraphWriteCandidate] {
+        try store.writeCandidates(groupID: "default", status: status, limit: limit)
+    }
     public func loadAuditTimeline(for candidate: GraphWriteCandidate) throws -> [GraphWriteCandidateAuditPresentation] { [] }
     public func loadAuditTimelines(for candidates: [GraphWriteCandidate]) throws -> [String: [GraphWriteCandidateAuditPresentation]] { [:] }
 
