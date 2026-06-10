@@ -3,6 +3,17 @@ import Testing
 import ConnorGraphAgent
 import ConnorGraphSearch
 
+private actor CapturingFinalAnswerProvider: AgentModelProvider {
+    let modelID = "capturing-final"
+    let capabilities = AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false)
+    private(set) var lastRequest: AgentModelRequest?
+
+    func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
+        lastRequest = request
+        return AgentModelResponse(text: "Grounded final answer", usage: AgentModelUsage(promptTokens: 12, completionTokens: 4))
+    }
+}
+
 private actor ScriptedModelProvider: AgentModelProvider {
     let modelID = "scripted"
     let capabilities = AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false)
@@ -47,4 +58,43 @@ private actor ScriptedModelProvider: AgentModelProvider {
     #expect(events.map(\.kind).contains(.toolFinished))
     #expect(events.map(\.kind).contains(.textComplete))
     #expect(events.last?.kind == .runCompleted)
+}
+
+@Test func agentLoopInjectsInitialGraphContextIntoModelRequest() async throws {
+    let provider = CapturingFinalAnswerProvider()
+    let contextBuilder = AgentContextBuilder(
+        hybridSearchService: TestHybridSearchService(hits: [
+            GraphSearchHit(
+                ownerType: .episode,
+                ownerID: "episode-1",
+                title: "Preference memory",
+                text: "诗闻喜欢结构化推进。",
+                score: 1.0,
+                retrievalMethod: "test",
+                metadata: ["source_type": "chat"]
+            )
+        ]),
+        groupID: "default",
+        limit: 3
+    )
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: AgentToolRegistry(),
+        contextBuilder: contextBuilder
+    )
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(AgentChatRequest(sessionID: "session-context", userMessage: "我偏好什么方式推进？")) {
+        events.append(event)
+    }
+
+    let request = await provider.lastRequest
+    #expect(request?.messages.contains(where: { $0.role == .system && $0.content.contains("Relevant Graph Memory Context") }) == true)
+    #expect(request?.messages.contains(where: { $0.content.contains("诗闻喜欢结构化推进") }) == true)
+    let textComplete = events.compactMap { event -> AgentTextCompleteEvent? in
+        if case .textComplete(let payload) = event { return payload }
+        return nil
+    }.first
+    #expect(textComplete?.citations == ["episode:episode-1"])
+    #expect(textComplete?.contextSnapshot?.contains("诗闻喜欢结构化推进") == true)
 }
