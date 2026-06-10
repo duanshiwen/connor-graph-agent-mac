@@ -39,12 +39,12 @@ private func temporaryAppMemoryDistillationDatabaseURL(_ name: String = UUID().u
     let jobs = try store.runnableJobs(graphID: "default", at: now)
     #expect(jobs.count == 1)
     #expect(jobs[0].type == .extraction)
-    let payload = GraphExtractionJobPayload(dictionary: jobs[0].payload)
-    #expect(payload?.source.sessionID == "session-1")
-    #expect(payload?.source.sourceType == .chat)
-    #expect(payload?.source.content.contains("User: 诗闻喜欢结构化推进") == true)
-    #expect(payload?.source.metadata["memory_staging_buffer_id"] == "buffer-1")
-    #expect(payload?.source.metadata["memory_candidate_kind"] == MemoryDistillationCandidateKind.preference.rawValue)
+    let payload = try GraphExtractionJobPayload(dictionary: jobs[0].payload)
+    #expect(payload.source.sessionID == "session-1")
+    #expect(payload.source.sourceType == .chat)
+    #expect(payload.source.content.contains("User: 诗闻喜欢结构化推进") == true)
+    #expect(payload.source.metadata["memory_staging_buffer_id"] == "buffer-1")
+    #expect(payload.source.metadata["memory_candidate_kind"] == MemoryDistillationCandidateKind.preference.rawValue)
 }
 
 @Test func memoryDistillationWorkerDoesNotEnqueueRejectedCandidates() async throws {

@@ -4,12 +4,12 @@ import ConnorGraphSearch
 
 @Test func anyLLMProviderDelegatesCompletion() async throws {
     let provider = AnyLLMProvider { prompt, context in
-        LLMResponse(text: "prompt=\(prompt); context=\(context.query)", citations: ["node:1"])
+        LLMResponse(text: "prompt=\(prompt); context=\(context.query)", citations: ["entity:1"])
     }
     let context = AgentContext(query: "memory", items: [])
 
     let response = try await provider.complete(prompt: "hello", context: context)
 
     #expect(response.text == "prompt=hello; context=memory")
-    #expect(response.citations == ["node:1"])
+    #expect(response.citations == ["entity:1"])
 }

@@ -45,7 +45,7 @@ private actor ScriptedModelProvider: AgentModelProvider {
     ])
     var registry = AgentToolRegistry()
     registry.register(GraphSearchTool(searchService: TestHybridSearchService(hits: [
-        GraphSearchHit(ownerType: .node, ownerID: "node-memory", title: "Memory", text: "Graph memory", score: 1.0, retrievalMethod: "test")
+        GraphSearchHit(ownerType: .entity, ownerID: "node-memory", title: "Memory", text: "Graph memory", score: 1.0, retrievalMethod: "test")
     ])))
     let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
 

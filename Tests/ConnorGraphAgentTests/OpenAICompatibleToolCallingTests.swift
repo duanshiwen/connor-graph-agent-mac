@@ -14,7 +14,7 @@ private struct ToolCallingCapturingHTTPClient: AgentHTTPClient {
 }
 
 @Test func openAICompatibleProviderSendsToolDefinitionsAndParsesToolCalls() async throws {
-    let body = """
+    let body = #"""
     {
       "choices": [
         {
@@ -37,7 +37,7 @@ private struct ToolCallingCapturingHTTPClient: AgentHTTPClient {
       ],
       "usage": { "prompt_tokens": 12, "completion_tokens": 5, "total_tokens": 17 }
     }
-    """.data(using: .utf8)!
+    """#.data(using: .utf8)!
     let client = ToolCallingCapturingHTTPClient(responseBody: body)
     let provider = OpenAICompatibleProvider(
         config: OpenAICompatibleConfig(baseURL: URL(string: "https://llm.example.com/v1")!, apiKey: "test-key", model: "gpt-test"),

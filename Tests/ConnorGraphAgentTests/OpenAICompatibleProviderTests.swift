@@ -70,13 +70,13 @@ private struct CapturingHTTPClient: AgentHTTPClient {
     let provider = OpenAICompatibleProvider(config: config, httpClient: client)
     let context = AgentContext(
         query: "memory",
-        items: [AgentContextItem(sourceID: "node:memory", kind: .node, content: "Graph memory context", reason: "matched node")]
+        items: [AgentContextItem(sourceID: "entity:memory", kind: .node, content: "Graph memory context", reason: "matched node")]
     )
 
     let response = try await provider.complete(prompt: "How should memory work?", context: context)
 
     #expect(response.text == "Graph grounded answer.")
-    #expect(response.citations == ["node:memory"])
+    #expect(response.citations == ["entity:memory"])
     #expect(client.captured?.url.absoluteString == "https://llm.example.com/v1/chat/completions")
     #expect(client.captured?.method == "POST")
     #expect(client.captured?.headers["Authorization"] == "Bearer test-key")

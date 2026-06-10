@@ -26,7 +26,13 @@ private struct BackgroundRunnerStubExtractor: GraphExtractorProvider {
             GraphExtractedEntityDraft(localID: "shiwen", name: "诗闻", entityKind: .personObject, scope: .personal),
             GraphExtractedEntityDraft(localID: "tea", name: "tea", entityKind: .lifeObject, scope: .personal)
         ],
-        statements: [GraphExtractedStatementDraft(subjectLocalID: "shiwen", predicate: .prefers, objectLocalID: "tea", statementText: "诗闻 prefers tea")]
+        statements: [GraphExtractedStatementDraft(
+            subjectLocalID: "shiwen",
+            predicate: .prefers,
+            objectLocalID: "tea",
+            statementText: "诗闻 prefers tea",
+            metadata: ["evidence_text": "诗闻 prefers tea"]
+        )]
     )
     try store.upsert(job: GraphJobV3(id: "job-extraction", graphID: "default", type: .extraction, priority: 10, payload: GraphExtractionJobPayload(source: source).dictionary, createdAt: now, nextRunAt: now))
 

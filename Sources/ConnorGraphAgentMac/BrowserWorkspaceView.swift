@@ -35,10 +35,6 @@ struct BrowserWorkspaceView: View {
                         pageTitle = state.title
                         pageURL = state.url
                         if !state.url.isEmpty { addressText = state.url }
-                    },
-                    onSelectionChanged: { context in
-                        selectionContext = context
-                        showSelectionComposer = context.hasSelectionContext
                     }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -101,6 +97,12 @@ struct BrowserWorkspaceView: View {
             }
             .help("刷新")
 
+            Button(action: captureSelectionFromPage) {
+                Label("使用选择", systemImage: "selection.pin.in.out")
+            }
+            .disabled(webView == nil)
+            .help("读取当前网页选中的文本或图片，避免 WebKit 通过 XPC 自动传递复杂对象")
+
             TextField("输入网址或搜索词", text: $addressText)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { navigateFromAddressBar() }
@@ -130,6 +132,36 @@ struct BrowserWorkspaceView: View {
         guard let url = URL(string: urlString) else { return }
         webView?.load(URLRequest(url: url))
     }
+
+    private func captureSelectionFromPage() {
+        webView?.evaluateJavaScript(EmbeddedWebView.selectionCaptureScript) { result, error in
+            guard error == nil, let json = result as? String, let data = json.data(using: .utf8) else { return }
+            guard let payload = try? JSONDecoder().decode(BrowserSelectionPayload.self, from: data) else { return }
+            let page = BrowserPageContext(
+                url: payload.pageURL.isEmpty ? pageURL : payload.pageURL,
+                title: payload.pageTitle.isEmpty ? pageTitle : payload.pageTitle,
+                text: payload.pageText
+            )
+            let image = payload.imageURL.map { BrowserSelectedImageContext(url: $0, alt: payload.imageAlt) }
+            let context = BrowserSelectionContext(
+                page: page,
+                selectedText: payload.selectedText,
+                image: image
+            )
+            guard context.hasSelectionContext else { return }
+            selectionContext = context
+            showSelectionComposer = true
+        }
+    }
+}
+
+private struct BrowserSelectionPayload: Decodable {
+    var pageURL: String
+    var pageTitle: String
+    var pageText: String
+    var selectedText: String
+    var imageURL: String?
+    var imageAlt: String?
 }
 
 private struct BrowserSelectionComposer: View {
@@ -202,21 +234,13 @@ private struct EmbeddedWebView: NSViewRepresentable {
     var initialURLString: String
     var onWebViewCreated: (WKWebView) -> Void
     var onNavigationStateChanged: (WebNavigationState) -> Void
-    var onSelectionChanged: (BrowserSelectionContext) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(
-            onNavigationStateChanged: onNavigationStateChanged,
-            onSelectionChanged: onSelectionChanged
-        )
+        Coordinator(onNavigationStateChanged: onNavigationStateChanged)
     }
 
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
-        let userContentController = WKUserContentController()
-        userContentController.add(context.coordinator, name: "selectionBridge")
-        userContentController.addUserScript(WKUserScript(source: Self.selectionScript, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
-        configuration.userContentController = userContentController
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
@@ -233,11 +257,8 @@ private struct EmbeddedWebView: NSViewRepresentable {
 
     func updateNSView(_ nsView: WKWebView, context: Context) {}
 
-    static let selectionScript = """
+    static let selectionCaptureScript = """
     (function() {
-      if (window.__connorSelectionBridgeInstalled) { return; }
-      window.__connorSelectionBridgeInstalled = true;
-
       function absoluteURL(value) {
         try { return value ? new URL(value, document.baseURI).href : null; } catch (e) { return value || null; }
       }
@@ -250,49 +271,35 @@ private struct EmbeddedWebView: NSViewRepresentable {
         if (main && main.innerText) { candidates.push(main.innerText); }
         if (document.body && document.body.innerText) { candidates.push(document.body.innerText); }
         var text = candidates.find(function(value) { return value && value.trim().length > 0; }) || '';
-        return text.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim().slice(0, 60000);
+        return text.replace(/[ \\t]+/g, ' ').replace(/\\n{3,}/g, '\\n\\n').trim().slice(0, 60000);
       }
 
-      function sendSelection(payload) {
-        payload.pageURL = location.href || '';
-        payload.pageTitle = document.title || '';
-        payload.pageText = readablePageText();
-        window.webkit.messageHandlers.selectionBridge.postMessage(payload);
+      var selection = window.getSelection ? window.getSelection().toString() : '';
+      var active = document.activeElement;
+      var imageURL = null;
+      var imageAlt = null;
+      if (active && active.tagName && active.tagName.toLowerCase() === 'img') {
+        imageURL = absoluteURL(active.currentSrc || active.src);
+        imageAlt = active.alt || active.title || '';
       }
 
-      document.addEventListener('mouseup', function() {
-        setTimeout(function() {
-          var selection = window.getSelection ? window.getSelection().toString() : '';
-          if (selection && selection.trim().length > 0) {
-            sendSelection({ selectedText: selection.trim() });
-          }
-        }, 50);
-      }, true);
-
-      document.addEventListener('click', function(event) {
-        var target = event.target;
-        if (target && target.tagName && target.tagName.toLowerCase() === 'img') {
-          sendSelection({
-            selectedText: '',
-            imageURL: absoluteURL(target.currentSrc || target.src),
-            imageAlt: target.alt || target.title || ''
-          });
-        }
-      }, true);
+      return JSON.stringify({
+        pageURL: location.href || '',
+        pageTitle: document.title || '',
+        pageText: readablePageText(),
+        selectedText: (selection || '').trim(),
+        imageURL: imageURL,
+        imageAlt: imageAlt
+      });
     })();
     """
 
-    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
+    final class Coordinator: NSObject, WKNavigationDelegate {
         weak var webView: WKWebView?
         var onNavigationStateChanged: (WebNavigationState) -> Void
-        var onSelectionChanged: (BrowserSelectionContext) -> Void
 
-        init(
-            onNavigationStateChanged: @escaping (WebNavigationState) -> Void,
-            onSelectionChanged: @escaping (BrowserSelectionContext) -> Void
-        ) {
+        init(onNavigationStateChanged: @escaping (WebNavigationState) -> Void) {
             self.onNavigationStateChanged = onNavigationStateChanged
-            self.onSelectionChanged = onSelectionChanged
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -305,24 +312,6 @@ private struct EmbeddedWebView: NSViewRepresentable {
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
             publishNavigationState(webView)
-        }
-
-        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-            guard message.name == "selectionBridge", let body = message.body as? [String: Any] else { return }
-            let page = BrowserPageContext(
-                url: body["pageURL"] as? String ?? webView?.url?.absoluteString ?? "",
-                title: body["pageTitle"] as? String ?? webView?.title ?? "",
-                text: body["pageText"] as? String ?? ""
-            )
-            let imageURL = body["imageURL"] as? String
-            let image = imageURL.map { BrowserSelectedImageContext(url: $0, alt: body["imageAlt"] as? String) }
-            let context = BrowserSelectionContext(
-                page: page,
-                selectedText: body["selectedText"] as? String ?? "",
-                image: image
-            )
-            guard context.hasSelectionContext else { return }
-            DispatchQueue.main.async { self.onSelectionChanged(context) }
         }
 
         private func publishNavigationState(_ webView: WKWebView) {

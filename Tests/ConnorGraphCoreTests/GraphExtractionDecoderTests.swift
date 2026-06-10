@@ -69,7 +69,7 @@ private let validExtractionJSON = """
 @Test func extractionDecoderStripsMarkdownJSONFence() throws {
     let fenced = """
     ```json
-    \#(validExtractionJSON)
+    \(validExtractionJSON)
     ```
     """
 
