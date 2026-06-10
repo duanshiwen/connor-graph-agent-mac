@@ -264,6 +264,17 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
             tokenize = 'unicode61 remove_diacritics 2'
         );
         """)
+        try execute("""
+        CREATE VIRTUAL TABLE IF NOT EXISTS graph_episodes_fts USING fts5(
+            episode_id UNINDEXED,
+            graph_id UNINDEXED,
+            source_type UNINDEXED,
+            title,
+            content,
+            source_description,
+            tokenize = 'unicode61 remove_diacritics 2'
+        );
+        """)
 
         // App integration tables
         try execute("""
@@ -348,6 +359,7 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         (id, graph_id, source_type, source_id, title, content, source_description, occurred_at, ingested_at, session_id, work_object_id, status, metadata_json)
         VALUES (\(quote(episode.id)), \(quote(episode.graphID)), \(quote(episode.sourceType.rawValue)), \(quote(episode.sourceID)), \(quote(episode.title)), \(quote(episode.content)), \(quote(episode.sourceDescription)), \(quote(iso(episode.occurredAt))), \(quote(iso(episode.ingestedAt))), \(quote(episode.sessionID)), \(quote(episode.workObjectID)), \(quote(episode.status.rawValue)), \(quote(json(episode.metadata))))
         """)
+        try upsertEpisodeFTS(episode)
     }
 
     public func episode(id: String) throws -> GraphEpisodeV3? {
@@ -606,6 +618,11 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         return try ids.compactMap { try statement(id: $0) }
     }
 
+    public func searchEpisodesFTS(query text: String, graphID: String, limit: Int) throws -> [GraphEpisodeV3] {
+        let ids = try query(sql: "SELECT episode_id FROM graph_episodes_fts WHERE graph_episodes_fts MATCH \(quote(text)) AND graph_id = \(quote(graphID)) LIMIT \(limit)").compactMap { $0.first }
+        return try ids.compactMap { try episode(id: $0) }
+    }
+
     // MARK: - Graph Write Candidates
 
     public func upsertWriteCandidate(_ candidate: GraphWriteCandidate) throws {
@@ -693,6 +710,14 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         INSERT INTO agent_audit_events
         (id, run_id, session_id, event_type, actor, capability, tool_name, decision, payload_json, created_at)
         VALUES (\(quote(auditEvent.id)), \(quote(auditEvent.runID)), \(quote(auditEvent.sessionID)), \(quote(auditEvent.eventType.rawValue)), \(quote(auditEvent.actor)), \(quote(auditEvent.capability?.rawValue)), \(quote(auditEvent.toolName)), \(quote(auditEvent.decision.map { json($0) })), \(quote(auditEvent.payloadJSON)), \(quote(iso(auditEvent.createdAt))))
+        """)
+    }
+
+    private func upsertEpisodeFTS(_ episode: GraphEpisodeV3) throws {
+        try execute("DELETE FROM graph_episodes_fts WHERE episode_id = \(quote(episode.id));")
+        try execute("""
+        INSERT INTO graph_episodes_fts(episode_id, graph_id, source_type, title, content, source_description)
+        VALUES (\(quote(episode.id)), \(quote(episode.graphID)), \(quote(episode.sourceType.rawValue)), \(quote(episode.title)), \(quote(episode.content)), \(quote(episode.sourceDescription)))
         """)
     }
 
