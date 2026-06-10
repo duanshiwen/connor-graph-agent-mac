@@ -1335,6 +1335,8 @@ user message
 
 Manual/reviewed `GraphWriteCandidate` 提交也已改为 resolver-backed path：candidate payload 会先转成 `GraphExtractionDraft`，再经过 `GraphEntityResolutionPlanner`、conflict preflight、`GraphWriteAdmissionPolicy` 和 `GraphOptimisticWriteService`，避免绕过统一 entity resolver / admission / commit 机制。
 
+Admission hold queue 现在具备最小可用动作闭环：可检查 trace payload 中的 evidence spans，可将 paused extraction job 重新排队，可 dismiss hold item，也可人工批准一次 held draft 并仍通过 resolver-backed optimistic writer 提交。
+
 ### 2. Production Extraction Loop
 
 ```text
@@ -1448,7 +1450,7 @@ memory dashboard
 14. ✅ 将 App 主 Chat 的空搜索 fallback 替换为真实 `SQLiteGraphHybridSearchService`，确保回答能使用已提交图谱记忆。
 15. ✅ 收敛 `GraphAgent` simple ask path 与 `AgentLoopController` tool-calling path，形成单一主 runtime。
 16. ✅ 让所有 manual candidate / extraction commit / future source write 强制经过统一 entity resolver。
-17. 🔜 为 admission hold queue 增加 approve / reject / rerun / inspect evidence 动作闭环。
+17. ✅ 为 admission hold queue 增加 approve / reject / rerun / inspect evidence 动作闭环。
 18. 🔜 实现 `groundingCheck` worker 的最小可用版本。
 19. 🔜 实现 schema/version health check，启动时展示图模型版本。
 
