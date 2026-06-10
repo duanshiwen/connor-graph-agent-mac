@@ -93,7 +93,7 @@ temporal graph-only
   - `MemoryIngestionService`，支持 message / artifact 增量摄入、message id 去重、open bundle 合并与触发原因计算；
   - SQLite-backed `memory_staging_buffers` repository 与 AppSupport 包装器；
   - App `AgentLoopChatController` 写入路径接入：user message 进入 open bundle，assistant `textComplete` 关闭 bundle 并持久化；
-  - deterministic `MemoryDistillationService` + App worker，将 closed staging bundles 转为 chat `GraphExtractionSource` 并入队 existing extraction jobs。
+  - deterministic `MemoryDistillationService` + App worker，将 closed staging bundles 分类为 episode / preference / decision / project fact 等 candidates，经 quality gate 后转为 chat `GraphExtractionSource` 并入队 existing extraction jobs。
 - 图谱候选写入模型：`GraphWriteCandidate`。
 - Agent 图谱读写工具：
   - `graph_search`
@@ -1438,13 +1438,14 @@ memory dashboard
 9. ✅ 为 `MemoryIngestionService` 增加 SQLite staging buffer repository 与 AppSupport repository 包装器。
 10. ✅ 将 `MemoryIngestionService` + staging buffer repository 接入 App 主 Chat / AgentLoop 写入路径。
 11. ✅ 新增 distillation worker：从 staging buffer 生成 episode candidates 与 extraction job。
-12. 🔜 为 memory distillation 增加 LLM-backed distiller / quality gate，区分 episode、preference、decision、project fact。
-13. 🔜 将 App 主 Chat 的空搜索 fallback 替换为真实 `SQLiteGraphHybridSearchService`，确保回答能使用已提交图谱记忆。
-14. 🔜 收敛 `GraphAgent` simple ask path 与 `AgentLoopController` tool-calling path，形成单一主 runtime。
-15. 🔜 让所有 manual candidate / extraction commit / future source write 强制经过统一 entity resolver。
-16. 🔜 为 admission hold queue 增加 approve / reject / rerun / inspect evidence 动作闭环。
-17. 🔜 实现 `groundingCheck` worker 的最小可用版本。
-18. 🔜 实现 schema/version health check，启动时展示图模型版本。
+12. ✅ 为 memory distillation 增加 deterministic quality gate，区分 episode、preference、decision、project fact 等 candidate。
+13. 🔜 增加 LLM-backed distiller，实现比关键词分类更可靠的长期记忆选择。
+14. 🔜 将 App 主 Chat 的空搜索 fallback 替换为真实 `SQLiteGraphHybridSearchService`，确保回答能使用已提交图谱记忆。
+15. 🔜 收敛 `GraphAgent` simple ask path 与 `AgentLoopController` tool-calling path，形成单一主 runtime。
+16. 🔜 让所有 manual candidate / extraction commit / future source write 强制经过统一 entity resolver。
+17. 🔜 为 admission hold queue 增加 approve / reject / rerun / inspect evidence 动作闭环。
+18. 🔜 实现 `groundingCheck` worker 的最小可用版本。
+19. 🔜 实现 schema/version health check，启动时展示图模型版本。
 
 ---
 

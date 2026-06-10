@@ -32,6 +32,8 @@ private func temporaryAppMemoryDistillationDatabaseURL(_ name: String = UUID().u
     let drainedBuffer = try repository.loadBuffer(id: "buffer-1")
     #expect(drainedBuffer?.status == .drained)
     #expect(drainedBuffer?.pendingBundles.isEmpty == true)
+    #expect(drainedBuffer?.metadata["last_distillation_candidate_count"] == "1")
+    #expect(drainedBuffer?.metadata["last_distillation_preference_candidate_count"] == "1")
     #expect(drainedBuffer?.metadata["last_distillation_enqueued_job_count"] == "1")
 
     let jobs = try store.runnableJobs(graphID: "default", at: now)
@@ -42,6 +44,34 @@ private func temporaryAppMemoryDistillationDatabaseURL(_ name: String = UUID().u
     #expect(payload?.source.sourceType == .chat)
     #expect(payload?.source.content.contains("User: 诗闻喜欢结构化推进") == true)
     #expect(payload?.source.metadata["memory_staging_buffer_id"] == "buffer-1")
+    #expect(payload?.source.metadata["memory_candidate_kind"] == MemoryDistillationCandidateKind.preference.rawValue)
+}
+
+@Test func memoryDistillationWorkerDoesNotEnqueueRejectedCandidates() throws {
+    let now = Date(timeIntervalSince1970: 1_000)
+    let store = try SQLiteGraphKernelStore(path: temporaryAppMemoryDistillationDatabaseURL().path)
+    try store.migrate()
+    let repository = AppMemoryStagingBufferRepository(store: store)
+    let bundle = ConversationTurnBundle(
+        id: "bundle-low-value",
+        sessionID: "session-low-value",
+        userMessages: [ConversationTurnMessage(id: "user-low", role: .user, content: "好", createdAt: now)],
+        assistantMessage: ConversationTurnMessage(id: "assistant-low", role: .assistant, content: "好的", createdAt: now),
+        startedAt: now,
+        closedAt: now,
+        status: .closed
+    )
+    try repository.saveBuffer(MemoryStagingBuffer(id: "buffer-low-value", sessionID: "session-low-value", pendingBundles: [bundle]), updatedAt: now)
+
+    let result = try AppMemoryDistillationWorker(store: store).runOnce(now: now)
+
+    #expect(result?.outcome == .succeeded)
+    #expect(result?.enqueuedJobIDs.isEmpty == true)
+    #expect(try store.runnableJobs(graphID: "default", at: now).isEmpty)
+    let buffer = try repository.loadBuffer(id: "buffer-low-value")
+    #expect(buffer?.status == .drained)
+    #expect(buffer?.metadata["last_distillation_candidate_count"] == "0")
+    #expect(buffer?.metadata["last_distillation_discarded_item_count"] == "1")
 }
 
 @Test func memoryDistillationWorkerKeepsOpenBundlesWhenDrainingClosedBundles() throws {

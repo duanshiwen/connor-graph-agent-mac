@@ -83,7 +83,8 @@ public struct AppMemoryDistillationWorker: Sendable {
 
         let triggerReasons = buffer.triggerReasons(at: now)
         let result = distillationService.distill(buffer: buffer, at: now, triggerReasons: triggerReasons)
-        let jobIDs = try result.episodeCandidates.map { candidate in
+        let candidatesToEnqueue = result.proposedCandidates
+        let jobIDs = try candidatesToEnqueue.map { candidate in
             try enqueueExtractionJob(for: candidate, result: result, now: now)
         }
 
@@ -95,7 +96,12 @@ public struct AppMemoryDistillationWorker: Sendable {
         buffer.status = buffer.pendingBundles.isEmpty ? .drained : .active
         var metadata = buffer.metadata
         metadata["last_distillation_result_id"] = result.id
+        metadata["last_distillation_candidate_count"] = "\(result.proposedCandidates.count)"
         metadata["last_distillation_episode_candidate_count"] = "\(result.episodeCandidates.count)"
+        metadata["last_distillation_preference_candidate_count"] = "\(result.preferenceCandidates.count)"
+        metadata["last_distillation_decision_candidate_count"] = "\(result.decisionCandidates.count)"
+        metadata["last_distillation_project_fact_candidate_count"] = "\(result.projectFactCandidates.count)"
+        metadata["last_distillation_discarded_item_count"] = "\(result.discardedItems.count)"
         metadata["last_distillation_enqueued_job_count"] = "\(jobIDs.count)"
         buffer.metadata = metadata
         try stagingRepository.saveBuffer(buffer, updatedAt: now)
@@ -107,7 +113,7 @@ public struct AppMemoryDistillationWorker: Sendable {
             enqueuedJobIDs: jobIDs,
             discardedItemCount: result.discardedItems.count,
             outcome: .succeeded,
-            message: "Distilled \(closedBundleCount) closed bundles into \(jobIDs.count) extraction jobs."
+            message: "Distilled \(closedBundleCount) closed bundles into \(jobIDs.count) extraction jobs after quality gate."
         )
     }
 
@@ -120,7 +126,7 @@ public struct AppMemoryDistillationWorker: Sendable {
             id: "memory-distillation-\(candidate.id)",
             graphID: graphID,
             sourceType: .chat,
-            title: candidate.title.isEmpty ? "Memory distillation episode" : candidate.title,
+            title: candidate.title.isEmpty ? "Memory distillation \(candidate.kind.rawValue)" : candidate.title,
             content: candidate.content,
             occurredAt: result.createdAt,
             sessionID: result.sessionID,
