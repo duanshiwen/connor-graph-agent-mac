@@ -7,9 +7,19 @@ private struct FakeExtractionLLMClient: GraphExtractionLLMClient {
     var response: String
     var onPrompt: @Sendable (String) -> Void = { _ in }
 
-    func completeExtraction(prompt: String) async throws -> String {
+    func completeExtraction(prompt: String) async throws -> GraphExtractionLLMResponse {
         onPrompt(prompt)
-        return response
+        return GraphExtractionLLMResponse(
+            text: response,
+            provider: "fake",
+            modelID: "fake-model",
+            promptVersion: "test-prompt",
+            promptTokens: 10,
+            completionTokens: 20,
+            totalTokens: 30,
+            latencyMilliseconds: 42,
+            rawResponseID: "resp-test"
+        )
     }
 }
 
@@ -87,6 +97,11 @@ private let extractionResponse = """
     #expect(draft.entities.count == 2)
     #expect(draft.statements.count == 1)
     #expect(draft.statements[0].predicate == .prefers)
+    #expect(draft.metadata["llm_provider"] == "fake")
+    #expect(draft.metadata["llm_model_id"] == "fake-model")
+    #expect(draft.metadata["prompt_tokens"] == "10")
+    #expect(draft.metadata["latency_ms"] == "42")
+    #expect(draft.metadata["normalized_json"] != nil)
 }
 
 @Test func llmGraphExtractorPropagatesDecoderErrors() async throws {
