@@ -4,26 +4,26 @@ import ConnorGraphCore
 public enum MemoryPromotionError: Error, Equatable, Sendable {
     case unsupportedKind(expected: ObserveLogKind, actual: ObserveLogKind)
     case missingRelatedNodes(required: Int, actual: Int)
-    case missingPersonNode
+    case missingPersonEntity
 }
 
 public struct MemoryPromotionResult: Sendable, Equatable {
-    public var graphNodes: [GraphNodeV2]
-    public var graphFacts: [GraphFact]
+    public var entities: [GraphEntity]
+    public var statements: [GraphStatement]
     public var promotedEntry: ObserveLogEntry
 
-    public init(graphNodes: [GraphNodeV2], graphFacts: [GraphFact], promotedEntry: ObserveLogEntry) {
-        self.graphNodes = graphNodes
-        self.graphFacts = graphFacts
+    public init(entities: [GraphEntity], statements: [GraphStatement], promotedEntry: ObserveLogEntry) {
+        self.entities = entities
+        self.statements = statements
         self.promotedEntry = promotedEntry
     }
 }
 
 public struct MemoryPromotionService: Sendable, Equatable {
-    public var groupID: String
+    public var graphID: String
 
-    public init(groupID: String = "default") {
-        self.groupID = groupID
+    public init(graphID: String = "default") {
+        self.graphID = graphID
     }
 
     public func promoteCandidateFact(_ entry: ObserveLogEntry) throws -> MemoryPromotionResult {
@@ -36,20 +36,23 @@ public struct MemoryPromotionService: Sendable, Equatable {
 
         let sourceID = entry.relatedNodeIDs[0]
         let targetID = entry.relatedNodeIDs[1]
-        let fact = GraphFact(
-            id: "fact-promoted-\(entry.id)",
-            groupID: groupID,
-            sourceNodeID: sourceID,
-            targetNodeID: targetID,
-            relation: .relatedTo,
-            fact: entry.content,
+        let statement = GraphStatement(
+            id: "statement-promoted-\(entry.id)",
+            graphID: graphID,
+            subjectEntityID: sourceID,
+            predicate: .relatedTo,
+            objectEntityID: targetID,
+            statementText: entry.content,
+            validAt: entry.timestamp,
+            committedAt: entry.timestamp,
             confidence: entry.confidence,
-            status: .draft,
-            attributes: ["promotion_kind": entry.kind.rawValue],
-            metadata: ["promoted_from": entry.id]
+            beliefStatus: .active,
+            justifications: [GraphJustification(type: .extracted, source: entry.id, strength: entry.confidence)],
+            sourceEpisodeIDs: [entry.id],
+            metadata: ["promoted_from": entry.id, "promotion_kind": entry.kind.rawValue]
         )
 
-        return MemoryPromotionResult(graphNodes: [], graphFacts: [fact], promotedEntry: entry.promoted(toNodeID: fact.id))
+        return MemoryPromotionResult(entities: [], statements: [statement], promotedEntry: entry.promoted(toNodeID: statement.id))
     }
 
     public func promoteDecisionHint(_ entry: ObserveLogEntry) throws -> MemoryPromotionResult {
@@ -57,34 +60,41 @@ public struct MemoryPromotionService: Sendable, Equatable {
             throw MemoryPromotionError.unsupportedKind(expected: .decisionHint, actual: entry.kind)
         }
 
-        let node = GraphNodeV2(
+        let entity = GraphEntity(
             id: "decision-\(slug(entry.content))",
-            groupID: groupID,
-            stableKey: "decision:\(slug(entry.content))",
-            type: .decision,
-            canonicalName: entry.content,
-            title: entry.content,
+            graphID: graphID,
+            name: entry.content,
+            stableKey: "\(GraphScope.project.rawValue):\(GraphEntityKind.entity.rawValue):decision:\(slug(entry.content))",
+            entityKind: .entity,
+            scope: .project,
+            canonicalClassID: "decision",
             summary: entry.normalizedSummary,
-            status: .draft,
             confidence: entry.confidence,
+            status: .draft,
+            createdAt: entry.timestamp,
+            updatedAt: entry.timestamp,
             metadata: ["promoted_from": entry.id, "promotion_kind": entry.kind.rawValue]
         )
-        var facts: [GraphFact] = []
+        var statements: [GraphStatement] = []
         if let workObjectID = entry.workObjectID {
-            facts.append(GraphFact(
-                id: "fact-\(node.id)-belongs-to-\(workObjectID)",
-                groupID: groupID,
-                sourceNodeID: node.id,
-                targetNodeID: workObjectID,
-                relation: .belongsTo,
-                fact: "\(node.title) belongs to \(workObjectID)",
+            statements.append(GraphStatement(
+                id: "statement-\(entity.id)-part-of-\(workObjectID)",
+                graphID: graphID,
+                subjectEntityID: entity.id,
+                predicate: .partOf,
+                objectEntityID: workObjectID,
+                statementText: "\(entity.name) is part of \(workObjectID)",
+                validAt: entry.timestamp,
+                committedAt: entry.timestamp,
                 confidence: entry.confidence,
-                status: .draft,
+                beliefStatus: .active,
+                justifications: [GraphJustification(type: .extracted, source: entry.id, strength: entry.confidence)],
+                sourceEpisodeIDs: [entry.id],
                 metadata: ["promoted_from": entry.id]
             ))
         }
 
-        return MemoryPromotionResult(graphNodes: [node], graphFacts: facts, promotedEntry: entry.promoted(toNodeID: node.id))
+        return MemoryPromotionResult(entities: [entity], statements: statements, promotedEntry: entry.promoted(toNodeID: entity.id))
     }
 
     public func promoteUserPreference(_ entry: ObserveLogEntry) throws -> MemoryPromotionResult {
@@ -92,34 +102,41 @@ public struct MemoryPromotionService: Sendable, Equatable {
             throw MemoryPromotionError.unsupportedKind(expected: .userPreference, actual: entry.kind)
         }
         guard let personID = entry.relatedNodeIDs.first else {
-            throw MemoryPromotionError.missingPersonNode
+            throw MemoryPromotionError.missingPersonEntity
         }
 
-        let node = GraphNodeV2(
+        let entity = GraphEntity(
             id: "preference-\(slug(entry.content))",
-            groupID: groupID,
-            stableKey: "preference:\(slug(entry.content))",
-            type: .preference,
-            canonicalName: entry.content,
-            title: entry.content,
+            graphID: graphID,
+            name: entry.content,
+            stableKey: "\(GraphScope.personal.rawValue):\(GraphEntityKind.lifeObject.rawValue):preference:\(slug(entry.content))",
+            entityKind: .lifeObject,
+            scope: .personal,
+            canonicalClassID: "preference",
             summary: entry.normalizedSummary,
-            status: .draft,
             confidence: entry.confidence,
+            status: .draft,
+            createdAt: entry.timestamp,
+            updatedAt: entry.timestamp,
             metadata: ["promoted_from": entry.id, "promotion_kind": entry.kind.rawValue]
         )
-        let fact = GraphFact(
-            id: "fact-\(personID)-has-preference-\(node.id)",
-            groupID: groupID,
-            sourceNodeID: personID,
-            targetNodeID: node.id,
-            relation: .hasPreference,
-            fact: entry.content,
+        let statement = GraphStatement(
+            id: "statement-\(personID)-prefers-\(entity.id)",
+            graphID: graphID,
+            subjectEntityID: personID,
+            predicate: .prefers,
+            objectEntityID: entity.id,
+            statementText: entry.content,
+            validAt: entry.timestamp,
+            committedAt: entry.timestamp,
             confidence: entry.confidence,
-            status: .draft,
+            beliefStatus: .active,
+            justifications: [GraphJustification(type: .extracted, source: entry.id, strength: entry.confidence)],
+            sourceEpisodeIDs: [entry.id],
             metadata: ["promoted_from": entry.id]
         )
 
-        return MemoryPromotionResult(graphNodes: [node], graphFacts: [fact], promotedEntry: entry.promoted(toNodeID: node.id))
+        return MemoryPromotionResult(entities: [entity], statements: [statement], promotedEntry: entry.promoted(toNodeID: entity.id))
     }
 
     public func dismiss(_ entry: ObserveLogEntry) -> ObserveLogEntry {
@@ -137,19 +154,6 @@ public struct MemoryPromotionService: Sendable, Equatable {
     }
 
     private func slug(_ value: String) -> String {
-        let lower = value.lowercased()
-        var output = ""
-        for scalar in lower.unicodeScalars {
-            if CharacterSet.alphanumerics.contains(scalar) {
-                output.unicodeScalars.append(scalar)
-            } else {
-                output.append("-")
-            }
-        }
-        while output.contains("--") {
-            output = output.replacingOccurrences(of: "--", with: "-")
-        }
-        let trimmed = output.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
-        return String(trimmed.prefix(80))
+        GraphStableKeyBuilder.normalized(value).replacingOccurrences(of: "_", with: "-")
     }
 }

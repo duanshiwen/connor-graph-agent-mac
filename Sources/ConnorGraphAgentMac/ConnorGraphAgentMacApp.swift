@@ -16,7 +16,7 @@ struct ConnorGraphAgentMacApp: App {
 }
 
 enum SidebarItem: String, CaseIterable, Identifiable {
-    case graphNodes = "图谱节点"
+    case entities = "图谱节点"
     case search = "搜索"
     case observeLog = "观察日志"
     case agentChat = "智能体聊天"
@@ -37,9 +37,9 @@ final class AppViewModel: ObservableObject {
     @Published var lastContext: AgentContext?
     @Published var lastPromptInspection: AgentChatPromptInspection?
     @Published var errorMessage: String?
-    @Published var graphNodes: [GraphNodeV2]
-    @Published var graphFacts: [GraphFact]
-    @Published var graphEpisodes: [GraphEpisode]
+    @Published var entities: [GraphEntity]
+    @Published var statements: [GraphStatement]
+    @Published var episodes: [GraphEpisodeV3]
     @Published var observeLogEntries: [ObserveLogEntry]
     @Published var databasePath: String?
     @Published var promotionCandidates: [ObserveLogEntry] = []
@@ -104,17 +104,17 @@ final class AppViewModel: ObservableObject {
     }
 
     init(
-        graphNodes: [GraphNodeV2],
-        graphFacts: [GraphFact],
-        graphEpisodes: [GraphEpisode] = [],
+        entities: [GraphEntity],
+        statements: [GraphStatement],
+        episodes: [GraphEpisodeV3] = [],
         observeLogEntries: [ObserveLogEntry],
         repository: AppGraphRepository? = nil,
         databasePath: String? = nil,
         llmSettingsRepository: AppLLMSettingsRepository = AppLLMSettingsRepository()
     ) {
-        self.graphNodes = graphNodes
-        self.graphFacts = graphFacts
-        self.graphEpisodes = graphEpisodes
+        self.entities = entities
+        self.statements = statements
+        self.episodes = episodes
         self.observeLogEntries = observeLogEntries
         self.repository = repository
         if let repository {
@@ -139,18 +139,17 @@ final class AppViewModel: ObservableObject {
             let paths = try AppStoragePaths.live()
             let repository = try AppGraphRepository.bootstrap(paths: paths)
             var snapshot = try repository.loadSnapshot()
-            if snapshot.graphNodes.isEmpty {
+            if snapshot.entities.isEmpty {
                 let demo = demoSnapshot()
-                for node in demo.graphNodes { try repository.store.upsert(nodeV2: node) }
-                for fact in demo.graphFacts { try repository.store.upsert(fact: fact) }
-                for episode in demo.graphEpisodes { try repository.store.upsert(episode: episode) }
-                for entry in demo.observeLogEntries { try repository.store.upsert(observeLogEntry: entry) }
+                for entity in demo.entities { try repository.store.upsert(entity: entity) }
+                for statement in demo.statements { try repository.store.upsert(statement: statement) }
+                for episode in demo.episodes { try repository.store.upsert(episode: episode) }
                 snapshot = try repository.loadSnapshot()
             }
             let viewModel = AppViewModel(
-                graphNodes: snapshot.graphNodes,
-                graphFacts: snapshot.graphFacts,
-                graphEpisodes: snapshot.graphEpisodes,
+                entities: snapshot.entities,
+                statements: snapshot.statements,
+                episodes: snapshot.episodes,
                 observeLogEntries: snapshot.observeLogEntries,
                 repository: repository,
                 databasePath: paths.databaseURL.path
@@ -167,50 +166,56 @@ final class AppViewModel: ObservableObject {
 
     static func demo() -> AppViewModel {
         let snapshot = demoSnapshot()
-        return AppViewModel(graphNodes: snapshot.graphNodes, graphFacts: snapshot.graphFacts, graphEpisodes: snapshot.graphEpisodes, observeLogEntries: snapshot.observeLogEntries)
+        return AppViewModel(entities: snapshot.entities, statements: snapshot.statements, episodes: snapshot.episodes, observeLogEntries: snapshot.observeLogEntries)
     }
 
     private static func demoSnapshot() -> GraphStoreSnapshot {
-        let workObject = GraphNodeV2(
+        let workObject = GraphEntity(
             id: "work-object-agent-os",
-            groupID: "default",
-            stableKey: "work_object:agent-os",
-            type: .workObject,
-            canonicalName: "Agent OS",
-            title: "Agent OS",
+            graphID: "default",
+            name: "Agent OS",
+            stableKey: "project:work_object:agent-os",
+            entityKind: .workObject,
+            scope: .project,
+            canonicalClassID: "project",
             summary: "A local-first operating system for graph-backed agents."
         )
-        let question = GraphNodeV2(
+        let question = GraphEntity(
             id: "question-memory",
-            groupID: "default",
-            stableKey: "question:memory",
-            type: .question,
-            canonicalName: "How should memory work?",
-            title: "How should memory work?",
+            graphID: "default",
+            name: "How should memory work?",
+            stableKey: "project:entity:question-memory",
+            entityKind: .entity,
+            scope: .project,
+            canonicalClassID: "question",
             summary: "Agent memory should be grounded in graph context."
         )
-        let answer = GraphNodeV2(
+        let answer = GraphEntity(
             id: "answer-graph-memory",
-            groupID: "default",
-            stableKey: "answer:graph-memory",
-            type: .answer,
-            canonicalName: "Use graph-backed context",
-            title: "Use graph-backed context",
+            graphID: "default",
+            name: "Use graph-backed context",
+            stableKey: "project:entity:answer-graph-memory",
+            entityKind: .entity,
+            scope: .project,
+            canonicalClassID: "answer",
             summary: "Use a local graph store as the runtime knowledge source of truth."
         )
-        let fact = GraphFact(
-            id: "fact-question-memory-answered-by-answer-graph-memory",
-            groupID: "default",
-            sourceNodeID: question.id,
-            targetNodeID: answer.id,
-            relation: .answeredBy,
-            fact: "question-memory is answered by answer-graph-memory"
+        let fact = GraphStatement(
+            id: "statement-question-memory-answered-by-answer-graph-memory",
+            graphID: "default",
+            subjectEntityID: question.id,
+            predicate: .answeredBy,
+            objectEntityID: answer.id,
+            statementText: "question-memory is answered by answer-graph-memory",
+            validAt: Date(timeIntervalSince1970: 1_700_000_000),
+            justifications: [GraphJustification(type: .userStated, source: "demo", strength: 1.0)],
+            sourceEpisodeIDs: ["episode-demo"]
         )
-        let episode = GraphEpisode(
+        let episode = GraphEpisodeV3(
             id: "episode-demo",
-            groupID: "default",
+            graphID: "default",
             sourceType: .system,
-            name: "Demo seed",
+            title: "Demo seed",
             content: "Graph store is runtime knowledge source of truth.",
             sourceDescription: "Built-in demo seed"
         )
@@ -222,7 +227,7 @@ final class AppViewModel: ObservableObject {
             normalizedSummary: "Graph store is runtime knowledge source of truth",
             workObjectID: workObject.id
         )
-        return GraphStoreSnapshot(graphNodes: [workObject, question, answer], graphFacts: [fact], graphEpisodes: [episode], observeLogEntries: [observe])
+        return GraphStoreSnapshot(entities: [workObject, question, answer], statements: [fact], episodes: [episode], observeLogEntries: [observe])
     }
 
     private static func makeChatController(
@@ -263,9 +268,9 @@ final class AppViewModel: ObservableObject {
     }
 
     private func apply(snapshot: GraphStoreSnapshot) {
-        graphNodes = snapshot.graphNodes
-        graphFacts = snapshot.graphFacts
-        graphEpisodes = snapshot.graphEpisodes
+        entities = snapshot.entities
+        statements = snapshot.statements
+        episodes = snapshot.episodes
         observeLogEntries = snapshot.observeLogEntries
         chatController = Self.makeChatController(runtimeFactory: agentRuntimeFactory, settingsRepository: llmSettingsRepository, session: chatController.agent.session)
         loopChatController = agentRuntimeFactory?.makeAgentLoopChatController(session: chatController.agent.session)
@@ -422,7 +427,7 @@ final class AppViewModel: ObservableObject {
         do {
             let result = try promotionRepository.promote(entry)
             let snapshot = try repository.loadSnapshot()
-            lastPromotionResultSummary = "已提升 \(entry.id)：\(result.graphNodes.count) 个节点，\(result.graphFacts.count) 条事实"
+            lastPromotionResultSummary = "已提升 \(entry.id)：\(result.entities.count) 个节点，\(result.statements.count) 条事实"
             apply(snapshot: snapshot)
             errorMessage = nil
         } catch {
@@ -506,7 +511,7 @@ final class AppViewModel: ObservableObject {
             let snapshot = try repository.loadSnapshot()
             apply(snapshot: snapshot)
             reloadGraphWriteCandidates()
-            lastGraphWriteCandidateResultSummary = "已通过权限治理提交候选 \(candidate.id)：节点 +\(result.createdNodeIDs.count)，事实 +\(result.createdFactIDs.count)，更新事实 \(result.updatedFactIDs.count)，附加证据 \(result.attachedEvidenceFactIDs.count)"
+            lastGraphWriteCandidateResultSummary = "已通过权限治理提交候选 \(candidate.id)：实体 +\(result.createdEntityIDs.count)，陈述 +\(result.createdStatementIDs.count)，更新陈述 \(result.updatedStatementIDs.count)，附加证据 \(result.attachedEvidenceStatementIDs.count)"
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -520,7 +525,7 @@ final class AppViewModel: ObservableObject {
             return
         }
         do {
-            let response = try await hybridSearchService.search(query: GraphSearchQuery(text: query, groupID: "default"))
+            let response = try await hybridSearchService.search(query: GraphSearchQuery(text: query, graphID: "default"))
             searchResults = response.hits
             errorMessage = nil
         } catch {
@@ -541,12 +546,12 @@ final class AppViewModel: ObservableObject {
             )
             try repository.store.upsert(episode: draft.episode)
             let snapshot = try repository.loadSnapshot()
-            graphNodes = snapshot.graphNodes
-            graphFacts = snapshot.graphFacts
-            graphEpisodes = snapshot.graphEpisodes
+            entities = snapshot.entities
+            statements = snapshot.statements
+            episodes = snapshot.episodes
             observeLogEntries = snapshot.observeLogEntries
             errorMessage = nil
-            lastPromotionResultSummary = "已保存网页证据：\(draft.episode.name)"
+            lastPromotionResultSummary = "已保存网页证据：\(draft.episode.title)"
         } catch {
             errorMessage = String(describing: error)
         }
@@ -643,8 +648,8 @@ struct AppShellView: View {
         } detail: {
             Group {
                 switch viewModel.selection ?? .agentChat {
-                case .graphNodes:
-                    GraphNodesView(nodes: viewModel.graphNodes, facts: viewModel.graphFacts, episodes: viewModel.graphEpisodes)
+                case .entities:
+                    GraphEntitiesView(entities: viewModel.entities, statements: viewModel.statements, episodes: viewModel.episodes)
                 case .search:
                     SearchView(viewModel: viewModel)
                 case .observeLog:
@@ -664,35 +669,35 @@ struct AppShellView: View {
     }
 }
 
-struct GraphNodesView: View {
-    let nodes: [GraphNodeV2]
-    let facts: [GraphFact]
-    let episodes: [GraphEpisode]
+struct GraphEntitiesView: View {
+    let entities: [GraphEntity]
+    let statements: [GraphStatement]
+    let episodes: [GraphEpisodeV3]
 
     var body: some View {
         List {
-            Section("节点") {
-                ForEach(nodes) { node in
+            Section("实体") {
+                ForEach(entities) { entity in
                     VStack(alignment: .leading) {
-                        Text(node.title).font(.headline)
-                        Text("\(node.type.rawValue) · \(node.status.rawValue)").font(.caption).foregroundStyle(.secondary)
-                        if !node.summary.isEmpty { Text(node.summary).font(.subheadline) }
+                        Text(entity.name).font(.headline)
+                        Text("\(entity.entityKind.rawValue) · \(entity.status.rawValue)").font(.caption).foregroundStyle(.secondary)
+                        if !entity.summary.isEmpty { Text(entity.summary).font(.subheadline) }
                     }
                 }
             }
-            Section("事实") {
-                ForEach(facts) { fact in
+            Section("陈述") {
+                ForEach(statements) { statement in
                     VStack(alignment: .leading) {
-                        Text(fact.relation.rawValue).font(.headline)
-                        Text("\(fact.sourceNodeID) → \(fact.targetNodeID)").font(.caption).foregroundStyle(.secondary)
-                        Text(fact.fact).font(.subheadline)
+                        Text(statement.predicate.rawValue).font(.headline)
+                        Text("\(statement.subjectEntityID) → \(statement.objectEntityID)").font(.caption).foregroundStyle(.secondary)
+                        Text(statement.statementText).font(.subheadline)
                     }
                 }
             }
             Section("Episodes") {
                 ForEach(episodes) { episode in
                     VStack(alignment: .leading) {
-                        Text(episode.name).font(.headline)
+                        Text(episode.title).font(.headline)
                         Text("\(episode.sourceType.rawValue) · \(episode.status.rawValue)").font(.caption).foregroundStyle(.secondary)
                         Text(episode.content).font(.subheadline).lineLimit(3)
                     }
