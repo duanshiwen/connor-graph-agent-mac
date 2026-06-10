@@ -27,7 +27,7 @@ private struct StubGraphExtractor: GraphExtractorProvider {
             GraphExtractedEntityDraft(localID: "tea", name: "tea", entityKind: .lifeObject, scope: .personal)
         ],
         statements: [
-            GraphExtractedStatementDraft(subjectLocalID: "shiwen", predicate: .prefers, objectLocalID: "tea", statementText: "诗闻 prefers tea", confidence: 0.85)
+            GraphExtractedStatementDraft(subjectLocalID: "shiwen", predicate: .prefers, objectLocalID: "tea", statementText: "诗闻 prefers tea", confidence: 0.85, metadata: ["evidence_span_ids": "span-1"])
         ]
     )
     try store.upsert(job: GraphJobV3(
@@ -48,6 +48,39 @@ private struct StubGraphExtractor: GraphExtractorProvider {
     #expect(try store.episode(id: "episode-email-1") != nil)
     #expect(try store.statements(graphID: "default", predicate: .prefers).count == 1)
     #expect(try store.runnableJobs(graphID: "default", at: now).contains { $0.id == "job-extract-1" } == false)
+}
+
+@Test func extractionWorkerHoldsLowConfidenceDraftWithoutCommitting() async throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryExtractionWorkerDatabaseURL().path)
+    try store.migrate()
+    let now = Date(timeIntervalSince1970: 1_000)
+    let source = GraphExtractionSource(id: "email-2", graphID: "default", sourceType: .email, title: "Weak", content: "Maybe poetry likes oolong", occurredAt: now)
+    let draft = GraphExtractionDraft(
+        source: source,
+        entities: [
+            GraphExtractedEntityDraft(localID: "poetry", name: "poetry", entityKind: .personObject, scope: .personal),
+            GraphExtractedEntityDraft(localID: "oolong", name: "oolong", entityKind: .lifeObject, scope: .personal)
+        ],
+        statements: [
+            GraphExtractedStatementDraft(subjectLocalID: "poetry", predicate: .prefers, objectLocalID: "oolong", statementText: "Maybe poetry likes oolong", confidence: 0.4, metadata: ["evidence_span_ids": "span-1"])
+        ]
+    )
+    try store.upsert(job: GraphJobV3(
+        id: "job-extract-low-confidence",
+        graphID: "default",
+        type: .extraction,
+        payload: GraphExtractionJobPayload(source: source).dictionary,
+        createdAt: now,
+        nextRunAt: now
+    ))
+
+    let result = try await GraphExtractionWorker(store: store, extractor: StubGraphExtractor(draft: draft)).runNext(graphID: "default", now: now)
+
+    #expect(result?.action == .held)
+    #expect(result?.admissionDecision?.reasons.contains(.lowStatementConfidence) == true)
+    #expect(result?.writeResult.committedStatementIDs.isEmpty == true)
+    #expect(try store.statements(graphID: "default", predicate: .prefers).isEmpty)
+    #expect(try store.runnableJobs(graphID: "default", at: now).contains { $0.id == "job-extract-low-confidence" } == false)
 }
 
 @Test func extractionWorkerMarksJobFailedWhenPayloadIsInvalid() async throws {

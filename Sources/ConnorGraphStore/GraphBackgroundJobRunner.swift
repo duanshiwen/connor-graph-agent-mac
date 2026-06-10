@@ -72,7 +72,18 @@ public struct GraphBackgroundJobRunner<Extractor: GraphExtractorProvider>: Senda
         switch job.type {
         case .extraction:
             let result = try await extractionWorker.run(job: job, now: now)
-            return GraphBackgroundJobRunResult(jobID: job.id, jobType: job.type, outcome: result.action == .committed ? .succeeded : .failed)
+            let outcome: GraphBackgroundJobOutcome
+            switch result.action {
+            case .committed, .discarded:
+                outcome = .succeeded
+            case .held, .askUser:
+                outcome = .paused
+            case .failed:
+                outcome = .failed
+            case .skipped:
+                outcome = .skipped
+            }
+            return GraphBackgroundJobRunResult(jobID: job.id, jobType: job.type, outcome: outcome, message: result.admissionDecision?.message ?? result.errorMessage ?? "")
         case .indexRefresh:
             let result = try indexRefreshWorker.run(job: job, now: now)
             return GraphBackgroundJobRunResult(jobID: job.id, jobType: job.type, outcome: result.action == .refreshed ? .succeeded : .failed, message: result.message)
