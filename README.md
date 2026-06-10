@@ -91,7 +91,8 @@ temporal graph-only
   - distillation trigger policy；
   - `MemoryDistillationResult` / candidate / source ref / trace；
   - `MemoryIngestionService`，支持 message / artifact 增量摄入、message id 去重、open bundle 合并与触发原因计算；
-  - SQLite-backed `memory_staging_buffers` repository 与 AppSupport 包装器。
+  - SQLite-backed `memory_staging_buffers` repository 与 AppSupport 包装器；
+  - App `AgentLoopChatController` 写入路径接入：user message 进入 open bundle，assistant `textComplete` 关闭 bundle 并持久化。
 - 图谱候选写入模型：`GraphWriteCandidate`。
 - Agent 图谱读写工具：
   - `graph_search`
@@ -1434,7 +1435,7 @@ memory dashboard
 7. ✅ 扩展 `SQLiteGraphHybridSearchService`，支持 entity + statement + episode 三类结果、graph neighborhood expansion、source episode expansion 和初版融合。
 8. ✅ 新增纯领域层 `MemoryIngestionService`：message / browser / file / source artifact 可先进入 `ConversationTurnBundle` / `MemoryStagingBuffer`。
 9. ✅ 为 `MemoryIngestionService` 增加 SQLite staging buffer repository 与 AppSupport repository 包装器。
-10. 🔜 将 `MemoryIngestionService` + staging buffer repository 接入 App 主 Chat / AgentLoop 写入路径。
+10. ✅ 将 `MemoryIngestionService` + staging buffer repository 接入 App 主 Chat / AgentLoop 写入路径。
 11. 🔜 新增 distillation worker：从 staging buffer 生成 episode candidates 与 extraction job。
 12. 🔜 将 App 主 Chat 的空搜索 fallback 替换为真实 `SQLiteGraphHybridSearchService`，确保回答能使用已提交图谱记忆。
 13. 🔜 收敛 `GraphAgent` simple ask path 与 `AgentLoopController` tool-calling path，形成单一主 runtime。
