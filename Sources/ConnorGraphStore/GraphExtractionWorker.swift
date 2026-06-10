@@ -133,8 +133,12 @@ public struct GraphExtractionWorker<Extractor: GraphExtractorProvider>: Sendable
             let payload = try GraphExtractionJobPayload(dictionary: job.payload)
             let extractedDraft = try await extractor.extract(from: payload.source)
             let resolutionPlan = try GraphEntityResolutionPlanner(resolver: optimisticWriter.resolver).plan(for: extractedDraft)
-            let draft = extractedDraft.withEntityResolutionPlanMetadata(resolutionPlan)
-            let admission = try admissionPolicy.decide(draft: draft, resolutionPlan: resolutionPlan)
+            let conflictPreview = try GraphExtractionConflictPreflight(store: store, detector: optimisticWriter.contradictionDetector)
+                .preview(draft: extractedDraft, resolutionPlan: resolutionPlan, now: now)
+            let draft = extractedDraft
+                .withEntityResolutionPlanMetadata(resolutionPlan)
+                .withConflictPreviewMetadata(conflictPreview)
+            let admission = try admissionPolicy.decide(draft: draft, resolutionPlan: resolutionPlan, conflictPreview: conflictPreview)
             switch admission.action {
             case .autoCommit:
                 let batch = try draft.toOptimisticWriteBatch(now: now)
