@@ -52,6 +52,7 @@ final class AppViewModel: ObservableObject {
     @Published var memoryChangeLogEntries: [AppGraphMemoryChangeLogPresentation] = []
     @Published var lastPromotionResultSummary: String?
     @Published var lastGraphWriteCandidateResultSummary: String?
+    @Published var lastAdmissionHoldQueueActionSummary: String?
     @Published var llmProviderMode: AppLLMProviderMode = .stub
     @Published var llmBaseURLString: String = AppLLMSettings.default.baseURLString
     @Published var llmModel: String = AppLLMSettings.default.model
@@ -539,6 +540,57 @@ final class AppViewModel: ObservableObject {
     func reloadMemoryChangeLog() {
         do {
             memoryChangeLogEntries = try memoryChangeLogRepository?.loadRecentEntries() ?? []
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func approveAdmissionHoldQueueItem(_ item: AppGraphAdmissionHoldQueuePresentation) {
+        guard let admissionHoldQueueRepository, let repository else {
+            errorMessage = "准入诊断队列不可用。"
+            return
+        }
+        do {
+            let result = try admissionHoldQueueRepository.approveAndCommit(item.id)
+            let snapshot = try repository.loadSnapshot()
+            apply(snapshot: snapshot)
+            reloadGraphExtractionTraces()
+            reloadMemoryChangeLog()
+            lastAdmissionHoldQueueActionSummary = "已批准并提交 hold item \(item.id)：实体 +\(result.committedEntityIDs.count)，陈述 +\(result.committedStatementIDs.count)"
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func rejectAdmissionHoldQueueItem(_ item: AppGraphAdmissionHoldQueuePresentation) {
+        do {
+            try admissionHoldQueueRepository?.reject(item.id)
+            reloadGraphExtractionTraces()
+            lastAdmissionHoldQueueActionSummary = "已 dismiss hold item \(item.id)"
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func rerunAdmissionHoldQueueItem(_ item: AppGraphAdmissionHoldQueuePresentation) {
+        do {
+            guard let result = try admissionHoldQueueRepository?.rerunExtraction(item.id) else { return }
+            reloadGraphExtractionTraces()
+            lastAdmissionHoldQueueActionSummary = "已重新排队 extraction job \(result.jobID)：\(result.status.rawValue)"
+            errorMessage = nil
+            Task { await runBackgroundJobs() }
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func inspectAdmissionHoldQueueItemEvidence(_ item: AppGraphAdmissionHoldQueuePresentation) {
+        do {
+            guard let inspection = try admissionHoldQueueRepository?.inspectEvidence(item.id) else { return }
+            lastAdmissionHoldQueueActionSummary = inspection.summary
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -1143,8 +1195,16 @@ struct GraphExtractionDiagnosticsView: View {
                     Text("这些是后台自愈队列，不是默认用户逐条审核。系统可用于 replay、grounding、merge 或必要时询问用户。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    if let summary = viewModel.lastAdmissionHoldQueueActionSummary {
+                        Text(summary)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .padding(8)
+                            .background(.quaternary.opacity(0.16), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
                     ForEach(viewModel.admissionHoldQueueItems) { item in
-                        VStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment: .leading, spacing: 6) {
                             HStack {
                                 Text(item.title)
                                     .font(.subheadline.weight(.semibold))
@@ -1157,6 +1217,13 @@ struct GraphExtractionDiagnosticsView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .textSelection(.enabled)
+                            HStack(spacing: 8) {
+                                Button("检查证据") { viewModel.inspectAdmissionHoldQueueItemEvidence(item) }
+                                Button("重跑提取") { viewModel.rerunAdmissionHoldQueueItem(item) }
+                                Button("批准提交") { viewModel.approveAdmissionHoldQueueItem(item) }
+                                Button("Dismiss", role: .destructive) { viewModel.rejectAdmissionHoldQueueItem(item) }
+                            }
+                            .font(.caption)
                         }
                         .padding(8)
                         .background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
