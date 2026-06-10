@@ -27,7 +27,7 @@ private func temporaryEntityMergeDatabaseURL(_ name: String = UUID().uuidString)
     let result = try GraphEntityMergeReviewWorker(store: store).runNext(graphID: "default", now: now)
 
     #expect(result?.action == .merged)
-    let updatedIncoming = try #require(store.entity(id: incoming.id))
+    let updatedIncoming = try #require(try store.entity(id: incoming.id))
     #expect(updatedIncoming.status == .superseded)
     #expect(updatedIncoming.supersededByEntityID == existing.id)
     #expect(updatedIncoming.metadata["merge_review_action"] == GraphEntityMergeReviewAction.merged.rawValue)

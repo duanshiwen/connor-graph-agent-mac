@@ -7,8 +7,8 @@ private func temporaryChatDatabaseURL(_ name: String = UUID().uuidString) -> URL
     FileManager.default.temporaryDirectory.appendingPathComponent("\(name).sqlite")
 }
 
-@Test func graphStoreSavesAndLoadsChatSession() throws {
-    let store = try SQLiteGraphStore(path: temporaryChatDatabaseURL().path)
+@Test func graphKernelStoreSavesAndLoadsAgentSession() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryChatDatabaseURL().path)
     try store.migrate()
     let session = AgentSession(
         id: "session-1",
@@ -18,8 +18,8 @@ private func temporaryChatDatabaseURL(_ name: String = UUID().uuidString) -> URL
         updatedAt: Date(timeIntervalSince1970: 2_000)
     )
 
-    try store.upsert(chatSession: session)
-    let loaded = try #require(try store.chatSession(id: "session-1"))
+    try store.upsertSession(session)
+    let loaded = try #require(try store.session(id: "session-1"))
 
     #expect(loaded.id == "session-1")
     #expect(loaded.title == "Graph memory")
@@ -28,35 +28,31 @@ private func temporaryChatDatabaseURL(_ name: String = UUID().uuidString) -> URL
     #expect(loaded.messages.isEmpty)
 }
 
-@Test func graphStoreAppendsAndLoadsChatMessagesInOrder() throws {
-    let store = try SQLiteGraphStore(path: temporaryChatDatabaseURL().path)
+@Test func graphKernelStorePersistsAgentSessionMessagesInOrder() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryChatDatabaseURL().path)
     try store.migrate()
-    let session = AgentSession(id: "session-1", title: "Graph memory")
     let user = AgentMessage(id: "message-1", role: .user, content: "What is memory?", createdAt: Date(timeIntervalSince1970: 1_000))
     let assistant = AgentMessage(
         id: "message-2",
         role: .assistant,
         content: "Graph memory.",
         createdAt: Date(timeIntervalSince1970: 2_000),
-        citations: ["node:memory"],
-        contextSnapshot: "Node[work_object] Memory"
+        citations: ["entity:memory"],
+        contextSnapshot: "Entity[work_object] Memory"
     )
+    let session = AgentSession(id: "session-1", title: "Graph memory", messages: [user, assistant])
 
-    try store.upsert(chatSession: session)
-    try store.append(chatMessage: assistant, sessionID: session.id)
-    try store.append(chatMessage: user, sessionID: session.id)
+    try store.upsertSession(session)
 
-    let messages = try store.chatMessages(sessionID: session.id)
-
-    #expect(messages.map(\.id) == ["message-1", "message-2"])
-    #expect(messages[1].citations == ["node:memory"])
-    #expect(messages[1].contextSnapshot == "Node[work_object] Memory")
+    let loaded = try #require(try store.session(id: session.id))
+    #expect(loaded.messages.map(\.id) == ["message-1", "message-2"])
+    #expect(loaded.messages[1].citations == ["entity:memory"])
+    #expect(loaded.messages[1].contextSnapshot == "Entity[work_object] Memory")
 }
 
-@Test func graphStorePersistsPromptInspectionSnapshotOnChatMessage() throws {
-    let store = try SQLiteGraphStore(path: temporaryChatDatabaseURL().path)
+@Test func graphKernelStorePersistsPromptInspectionSnapshotOnAgentSessionMessage() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryChatDatabaseURL().path)
     try store.migrate()
-    let session = AgentSession(id: "session-1", title: "Graph memory")
     let snapshot = AgentPromptInspectionSnapshot(
         includesSummary: true,
         recentMessageCount: 2,
@@ -73,67 +69,34 @@ private func temporaryChatDatabaseURL(_ name: String = UUID().uuidString) -> URL
         createdAt: Date(timeIntervalSince1970: 1_000),
         promptInspection: snapshot
     )
+    let session = AgentSession(id: "session-1", title: "Graph memory", messages: [assistant])
 
-    try store.upsert(chatSession: session)
-    try store.append(chatMessage: assistant, sessionID: session.id)
+    try store.upsertSession(session)
 
-    let loaded = try #require(try store.chatMessages(sessionID: session.id).first)
-
+    let loaded = try #require(try store.session(id: session.id)?.messages.first)
     #expect(loaded.promptInspection == snapshot)
 }
 
-@Test func graphStoreLoadsRecentChatSessionsByUpdatedAt() throws {
-    let store = try SQLiteGraphStore(path: temporaryChatDatabaseURL().path)
+@Test func graphKernelStoreLoadsRecentAgentSessionsByUpdatedAt() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryChatDatabaseURL().path)
     try store.migrate()
     let old = AgentSession(id: "session-old", title: "Old", createdAt: Date(timeIntervalSince1970: 1_000), updatedAt: Date(timeIntervalSince1970: 1_000))
     let new = AgentSession(id: "session-new", title: "New", createdAt: Date(timeIntervalSince1970: 2_000), updatedAt: Date(timeIntervalSince1970: 3_000))
 
-    try store.upsert(chatSession: old)
-    try store.upsert(chatSession: new)
+    try store.upsertSession(old)
+    try store.upsertSession(new)
 
-    let sessions = try store.chatSessions(limit: 10)
+    let sessions = try store.recentSessions(limit: 10)
 
     #expect(sessions.map(\.id) == ["session-new", "session-old"])
     #expect(sessions.allSatisfy { $0.messages.isEmpty })
 }
 
-@Test func graphStoreMigratesChatSessionSummariesTable() throws {
-    let store = try SQLiteGraphStore(path: temporaryChatDatabaseURL().path)
+@Test func graphKernelStoreMigratesAgentSessionsTable() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryChatDatabaseURL().path)
     try store.migrate()
 
     let tables = try store.tableNames()
 
-    #expect(tables.contains("chat_session_summaries"))
-}
-
-@Test func graphStoreSavesAndLoadsLatestChatSessionSummary() throws {
-    let store = try SQLiteGraphStore(path: temporaryChatDatabaseURL().path)
-    try store.migrate()
-    let session = AgentSession(id: "session-1", title: "Graph memory")
-    let old = AgentSessionSummary(
-        id: "summary-old",
-        sessionID: "session-1",
-        content: "Old summary",
-        createdAt: Date(timeIntervalSince1970: 1_000),
-        updatedAt: Date(timeIntervalSince1970: 1_000),
-        sourceMessageCount: 2,
-        lastMessageID: "message-2"
-    )
-    let latest = AgentSessionSummary(
-        id: "summary-latest",
-        sessionID: "session-1",
-        content: "Latest summary",
-        createdAt: Date(timeIntervalSince1970: 2_000),
-        updatedAt: Date(timeIntervalSince1970: 3_000),
-        sourceMessageCount: 4,
-        lastMessageID: "message-4"
-    )
-
-    try store.upsert(chatSession: session)
-    try store.upsert(chatSessionSummary: old)
-    try store.upsert(chatSessionSummary: latest)
-
-    let loaded = try #require(try store.latestChatSessionSummary(sessionID: "session-1"))
-
-    #expect(loaded == latest)
+    #expect(tables.contains("agent_sessions"))
 }

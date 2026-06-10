@@ -4,10 +4,10 @@ import ConnorGraphCore
 import ConnorGraphStore
 
 @Test func storePersistsAgentAuditEvents() throws {
-    let store = try SQLiteGraphStore(path: ":memory:")
+    let store = try SQLiteGraphKernelStore(path: ":memory:")
     try store.migrate()
     let run = AgentRun(sessionID: "session-audit", groupID: "group-audit", status: .running)
-    try store.upsert(agentRun: run)
+    try store.upsert(run: run)
 
     let decision = AgentPermissionDecision(
         requestID: "request-1",
@@ -26,7 +26,7 @@ import ConnorGraphStore
         decision: decision,
         payloadJSON: "{}"
     )
-    try store.recordSync(event)
+    try store.append(auditEvent: event)
 
     let loaded = try store.agentAuditEvents(runID: run.id)
     #expect(loaded.count == 1)
