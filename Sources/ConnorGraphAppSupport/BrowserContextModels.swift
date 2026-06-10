@@ -108,9 +108,9 @@ public struct BrowserLLMContextBuilder: Sendable {
 }
 
 public struct BrowserEvidenceEpisodeDraft: Equatable, Sendable {
-    public var episode: GraphEpisode
+    public var episode: GraphEpisodeV3
 
-    public init(episode: GraphEpisode) {
+    public init(episode: GraphEpisodeV3) {
         self.episode = episode
     }
 }
@@ -124,12 +124,12 @@ public struct BrowserGraphEvidenceBuilder: Sendable {
 
     public func makeEpisodeDraft(selection: BrowserSelectionContext, groupID: String = "default", sessionID: String? = nil, workObjectID: String? = nil) -> BrowserEvidenceEpisodeDraft {
         let name = selection.page.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? fallbackName(from: selection.page.url) : selection.page.title
-        let episode = GraphEpisode(
+        let episode = GraphEpisodeV3(
             id: UUID().uuidString,
-            groupID: groupID,
+            graphID: groupID,
             sourceType: .webPage,
             sourceID: selection.page.url.isEmpty ? nil : selection.page.url,
-            name: name,
+            title: name,
             content: contextBuilder.makeContextMarkdown(selection: selection),
             sourceDescription: "Embedded browser web page selection",
             sessionID: sessionID,
