@@ -1,40 +1,24 @@
 import Foundation
 import Testing
 import ConnorGraphMemory
-import ConnorGraphStore
 
-private func temporaryPromotionDatabaseURL(_ name: String = UUID().uuidString) -> URL {
-    FileManager.default.temporaryDirectory.appendingPathComponent("\(name).sqlite")
+@Test func memoryPromotionDismissMarksEntryDismissedWithoutStoreCompatibilityLayer() throws {
+    let service = MemoryPromotionService()
+    let entry = ObserveLogEntry(id: "obs-dismiss", kind: .candidateFact, source: .agent, content: "Dismiss me")
+
+    let dismissed = service.dismiss(entry)
+
+    #expect(dismissed.status == .dismissed)
+    #expect(dismissed.id == entry.id)
 }
 
-@Test func graphStoreLoadsPromotionCandidates() throws {
-    let store = try SQLiteGraphStore(path: temporaryPromotionDatabaseURL().path)
-    try store.migrate()
-    let candidateFact = ObserveLogEntry(id: "obs-fact", kind: .candidateFact, source: .agent, content: "A fact", relatedNodeIDs: ["a", "b"])
-    let decisionHint = ObserveLogEntry(id: "obs-decision", kind: .decisionHint, source: .agent, content: "A decision")
-    let userPreference = ObserveLogEntry(id: "obs-pref", kind: .userPreference, source: .user, content: "A preference", relatedNodeIDs: ["person-shiwen"])
-    let insight = ObserveLogEntry(id: "obs-insight", kind: .insight, source: .agent, content: "Not promotable")
-    let dismissed = ObserveLogEntry(id: "obs-dismissed", kind: .candidateFact, source: .agent, content: "Dismissed", status: .dismissed)
+@Test func memoryPromotionPinExtendsExpiryWithoutStoreCompatibilityLayer() throws {
+    let service = MemoryPromotionService()
+    let now = Date(timeIntervalSince1970: 1_000)
+    let entry = ObserveLogEntry(id: "obs-pin", kind: .candidateFact, source: .agent, content: "Pin me", expiresAt: now)
 
-    for entry in [candidateFact, decisionHint, userPreference, insight, dismissed] {
-        try store.upsert(observeLogEntry: entry)
-    }
+    let pinned = service.pin(entry, at: now, additionalDays: 1)
 
-    let candidates = try store.promotionCandidates()
-
-    #expect(candidates.map(\.id) == ["obs-decision", "obs-fact", "obs-pref"])
-}
-
-@Test func graphStoreUpdatesObserveLogEntryStatus() throws {
-    let store = try SQLiteGraphStore(path: temporaryPromotionDatabaseURL().path)
-    try store.migrate()
-    var entry = ObserveLogEntry(id: "obs-update", kind: .candidateFact, source: .agent, content: "Update me", relatedNodeIDs: ["a", "b"])
-    try store.upsert(observeLogEntry: entry)
-
-    entry.status = .dismissed
-    try store.update(observeLogEntry: entry)
-
-    let loadedEntry = try store.observeLogEntry(id: entry.id)
-    let loaded = try #require(loadedEntry)
-    #expect(loaded.status == .dismissed)
+    #expect(pinned.status == entry.status)
+    #expect(pinned.expiresAt == Date(timeIntervalSince1970: 1_000 + 24 * 60 * 60))
 }

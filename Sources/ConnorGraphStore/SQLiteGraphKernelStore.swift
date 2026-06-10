@@ -742,18 +742,27 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
     }
 
     public func searchEntitiesFTS(query text: String, graphID: String, limit: Int) throws -> [GraphEntity] {
-        let ids = try query(sql: "SELECT entity_id FROM graph_entities_fts WHERE graph_entities_fts MATCH \(quote(text)) AND graph_id = \(quote(graphID)) LIMIT \(limit)").compactMap { $0.first }
+        let match = ftsMatchQuery(text)
+        let ids = try query(sql: "SELECT entity_id FROM graph_entities_fts WHERE graph_entities_fts MATCH \(quote(match)) AND graph_id = \(quote(graphID)) LIMIT \(limit)").compactMap { $0.first }
         return try ids.compactMap { try entity(id: $0) }
     }
 
     public func searchStatementsFTS(query text: String, graphID: String, limit: Int) throws -> [GraphStatement] {
-        let ids = try query(sql: "SELECT statement_id FROM graph_statements_fts WHERE graph_statements_fts MATCH \(quote(text)) AND graph_id = \(quote(graphID)) LIMIT \(limit)").compactMap { $0.first }
+        let match = ftsMatchQuery(text)
+        let ids = try query(sql: "SELECT statement_id FROM graph_statements_fts WHERE graph_statements_fts MATCH \(quote(match)) AND graph_id = \(quote(graphID)) LIMIT \(limit)").compactMap { $0.first }
         return try ids.compactMap { try statement(id: $0) }
     }
 
     public func searchEpisodesFTS(query text: String, graphID: String, limit: Int) throws -> [GraphEpisodeV3] {
-        let ids = try query(sql: "SELECT episode_id FROM graph_episodes_fts WHERE graph_episodes_fts MATCH \(quote(text)) AND graph_id = \(quote(graphID)) LIMIT \(limit)").compactMap { $0.first }
+        let match = ftsMatchQuery(text)
+        let ids = try query(sql: "SELECT episode_id FROM graph_episodes_fts WHERE graph_episodes_fts MATCH \(quote(match)) AND graph_id = \(quote(graphID)) LIMIT \(limit)").compactMap { $0.first }
         return try ids.compactMap { try episode(id: $0) }
+    }
+
+    private func ftsMatchQuery(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "\"\"" }
+        return "\"" + trimmed.replacingOccurrences(of: "\"", with: "\"\"") + "\""
     }
 
     // MARK: - Graph Write Candidates
@@ -877,6 +886,20 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         """)
     }
 
+    public func run(id: String) throws -> AgentRun? {
+        let rows = try query(sql: "SELECT id, session_id, group_id, status, started_at, completed_at, model, metadata_json FROM agent_runs WHERE id = \(quote(id)) LIMIT 1")
+        guard let row = rows.first else { return nil }
+        return try decodeAgentRun(row)
+    }
+
+    public func events(runID: String, limit: Int = 100) throws -> [PersistedAgentEvent] {
+        try query(sql: """
+        SELECT id, run_id, session_id, sequence, kind, payload_json, created_at
+        FROM agent_events WHERE run_id = \(quote(runID))
+        ORDER BY sequence ASC, created_at ASC LIMIT \(limit)
+        """).map(decodePersistedAgentEvent)
+    }
+
     // MARK: - Agent Audit Events
 
     public func append(auditEvent: AgentAuditEvent) throws {
@@ -925,6 +948,31 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         let personal = ["email", "message", "conversation_thread", "contact", "calendar_event", "reminder", "task", "commitment", "preference", "habit", "goal", "address", "home", "family_member", "bill", "subscription", "health_record", "device", "account", "credential_reference", "purchase", "travel_plan", "meal", "exercise"].map { ($0, $0.replacingOccurrences(of: "_", with: " "), 1, "personal-life", GraphEntityKind.classNode) }
         let knowledge = ["question", "answer", "decision", "sop", "runbook", "work_object", "project", "milestone", "issue", "repository", "code_module", "design_doc", "research_note", "source_document", "claim", "argument", "constraint", "risk", "requirement"].map { ($0, $0.replacingOccurrences(of: "_", with: " "), 2, "knowledge-project", GraphEntityKind.classNode) }
         return general + personal + knowledge
+    }
+
+    private func decodeAgentRun(_ row: [String]) throws -> AgentRun {
+        AgentRun(
+            id: row[0],
+            sessionID: row[1],
+            groupID: row[2],
+            status: AgentRunStatus(rawValue: row[3]) ?? .pending,
+            startedAt: try date(row[4]),
+            completedAt: try optionalDate(row[5]),
+            model: nilIfEmpty(row[6]),
+            metadata: try decode([String: String].self, row[7])
+        )
+    }
+
+    private func decodePersistedAgentEvent(_ row: [String]) throws -> PersistedAgentEvent {
+        PersistedAgentEvent(
+            id: row[0],
+            runID: row[1],
+            sessionID: row[2],
+            kind: AgentEventKind(rawValue: row[4]) ?? .runStarted,
+            payloadJSON: row[5],
+            sequence: Int(row[3]),
+            createdAt: try date(row[6])
+        )
     }
 
     private func decodeAuditEvent(_ row: [String]) throws -> AgentAuditEvent {

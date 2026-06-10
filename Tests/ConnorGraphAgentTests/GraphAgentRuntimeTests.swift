@@ -32,11 +32,11 @@ import ConnorGraphAgent
         role: .assistant,
         content: "Use graph memory.",
         createdAt: Date(timeIntervalSince1970: 1_000),
-        citations: ["node:memory"],
+        citations: ["entity:memory"],
         contextSnapshot: "Node[work_object] Memory"
     )
 
-    #expect(message.citations == ["node:memory"])
+    #expect(message.citations == ["entity:memory"])
     #expect(message.contextSnapshot == "Node[work_object] Memory")
 }
 
@@ -94,20 +94,20 @@ import ConnorGraphAgent
 
 @Test func agentContextBuilderUsesHybridSearch() async throws {
     let builder = AgentContextBuilder(hybridSearchService: TestHybridSearchService(hits: [
-        GraphSearchHit(ownerType: .node, ownerID: "work-object-agent-os", title: "Agent OS", text: "Graph-backed agent system", score: 1.0, retrievalMethod: "test", metadata: ["type": "work_object"])
+        GraphSearchHit(ownerType: .entity, ownerID: "work-object-agent-os", title: "Agent OS", text: "Graph-backed agent system", score: 1.0, retrievalMethod: "test", metadata: ["type": "work_object"])
     ]), groupID: "default")
 
     let context = try await builder.context(for: "graph backed")
 
     #expect(context.query == "graph backed")
-    #expect(context.items.map(\.sourceID) == ["node:work-object-agent-os"])
+    #expect(context.items.map(\.sourceID) == ["entity:work-object-agent-os"])
 }
 
 @Test func stubLLMProviderReturnsDeterministicAnswerWithCitations() async throws {
     let context = AgentContext(
         query: "How should memory work?",
         items: [
-            AgentContextItem(sourceID: "node:work-object-agent-os", kind: .node, content: "Node[work_object] Agent OS: Graph-backed memory", reason: "matched node")
+            AgentContextItem(sourceID: "entity:work-object-agent-os", kind: .node, content: "Node[work_object] Agent OS: Graph-backed memory", reason: "matched node")
         ]
     )
     let provider = StubLLMProvider()
@@ -115,15 +115,15 @@ import ConnorGraphAgent
     let response = try await provider.complete(prompt: "How should memory work?", context: context)
 
     #expect(response.text.contains("How should memory work?"))
-    #expect(response.citations == ["node:work-object-agent-os"])
+    #expect(response.citations == ["entity:work-object-agent-os"])
 }
 
 @Test func graphAgentAskReturnsAnswerAndCitedContext() async throws {
     let agent = GraphAgent(
         session: AgentSession(id: "session-1"),
         contextBuilder: AgentContextBuilder(hybridSearchService: TestHybridSearchService(hits: [
-            GraphSearchHit(ownerType: .node, ownerID: "question-memory", title: "How should memory work?", text: "", score: 1.0, retrievalMethod: "test"),
-            GraphSearchHit(ownerType: .node, ownerID: "answer-graph", title: "Use graph-backed context", text: "Use a graph store as runtime knowledge.", score: 0.8, retrievalMethod: "test")
+            GraphSearchHit(ownerType: .entity, ownerID: "question-memory", title: "How should memory work?", text: "", score: 1.0, retrievalMethod: "test"),
+            GraphSearchHit(ownerType: .entity, ownerID: "answer-graph", title: "Use graph-backed context", text: "Use a graph store as runtime knowledge.", score: 0.8, retrievalMethod: "test")
         ]), groupID: "default"),
         llmProvider: StubLLMProvider()
     )
@@ -131,8 +131,8 @@ import ConnorGraphAgent
     let response = try await agent.ask("memory")
 
     #expect(response.answer.text.contains("memory"))
-    #expect(response.context.items.contains { $0.sourceID == "node:question-memory" })
-    #expect(response.answer.citations.contains("node:question-memory"))
+    #expect(response.context.items.contains { $0.sourceID == "entity:question-memory" })
+    #expect(response.answer.citations.contains("entity:question-memory"))
     #expect(response.session.messages.map(\.role) == [.user, .assistant])
     #expect(response.observeLogEntries.count == 1)
     #expect(response.observeLogEntries[0].content == "memory")
