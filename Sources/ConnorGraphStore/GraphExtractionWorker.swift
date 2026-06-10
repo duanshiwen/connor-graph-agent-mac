@@ -131,8 +131,10 @@ public struct GraphExtractionWorker<Extractor: GraphExtractorProvider>: Sendable
     public func run(job: GraphJobV3, now: Date = Date()) async throws -> GraphExtractionWorkerResult {
         do {
             let payload = try GraphExtractionJobPayload(dictionary: job.payload)
-            let draft = try await extractor.extract(from: payload.source)
-            let admission = try admissionPolicy.decide(draft: draft, resolver: optimisticWriter.resolver)
+            let extractedDraft = try await extractor.extract(from: payload.source)
+            let resolutionPlan = try GraphEntityResolutionPlanner(resolver: optimisticWriter.resolver).plan(for: extractedDraft)
+            let draft = extractedDraft.withEntityResolutionPlanMetadata(resolutionPlan)
+            let admission = try admissionPolicy.decide(draft: draft, resolutionPlan: resolutionPlan)
             switch admission.action {
             case .autoCommit:
                 let batch = try draft.toOptimisticWriteBatch(now: now)
