@@ -43,6 +43,8 @@ Connor Graph Agent Mac 的产品定位是：
 1. **只保留一套图模型**：temporal graph 模型，不再维护早期简单节点边图。
 2. **只保留一条主检索路径**：App Search 与 Agent Context 均应走 `GraphHybridSearchService` / `SQLiteGraphHybridSearchService`。
 
+Phase 0 已冻结下一阶段产品架构方向，详见 [`docs/architecture/native-connor-agent-os.md`](docs/architecture/native-connor-agent-os.md)：Connor 是 macOS 原生 Graph-Native Agent OS；Craft Agents OSS 是成熟系统蓝本而不是 Electron 代码基底；产品不引入多 workspace；Session、权限、图谱记忆和审计状态由 Connor 自己持有；Claude Agent SDK 未来作为 sidecar backend 接入，而不是产品状态主权方。
+
 早期简单图模型、历史 Markdown 导入链路、基于数组扫描的内存搜索索引都已移除，不再保留兼容层。
 
 ---
