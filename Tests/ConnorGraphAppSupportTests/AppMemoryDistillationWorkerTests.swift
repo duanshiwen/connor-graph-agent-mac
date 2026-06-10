@@ -9,7 +9,7 @@ private func temporaryAppMemoryDistillationDatabaseURL(_ name: String = UUID().u
     FileManager.default.temporaryDirectory.appendingPathComponent("\(name).sqlite")
 }
 
-@Test func memoryDistillationWorkerEnqueuesExtractionJobAndDrainsBuffer() throws {
+@Test func memoryDistillationWorkerEnqueuesExtractionJobAndDrainsBuffer() async throws {
     let now = Date(timeIntervalSince1970: 1_000)
     let store = try SQLiteGraphKernelStore(path: temporaryAppMemoryDistillationDatabaseURL().path)
     try store.migrate()
@@ -25,7 +25,7 @@ private func temporaryAppMemoryDistillationDatabaseURL(_ name: String = UUID().u
     )
     try repository.saveBuffer(MemoryStagingBuffer(id: "buffer-1", sessionID: "session-1", pendingBundles: [bundle]), updatedAt: now)
 
-    let result = try AppMemoryDistillationWorker(store: store).runOnce(now: now)
+    let result = try await AppMemoryDistillationWorker(store: store).runOnce(now: now)
 
     #expect(result?.outcome == .succeeded)
     #expect(result?.enqueuedJobIDs.count == 1)
@@ -47,7 +47,7 @@ private func temporaryAppMemoryDistillationDatabaseURL(_ name: String = UUID().u
     #expect(payload?.source.metadata["memory_candidate_kind"] == MemoryDistillationCandidateKind.preference.rawValue)
 }
 
-@Test func memoryDistillationWorkerDoesNotEnqueueRejectedCandidates() throws {
+@Test func memoryDistillationWorkerDoesNotEnqueueRejectedCandidates() async throws {
     let now = Date(timeIntervalSince1970: 1_000)
     let store = try SQLiteGraphKernelStore(path: temporaryAppMemoryDistillationDatabaseURL().path)
     try store.migrate()
@@ -63,7 +63,7 @@ private func temporaryAppMemoryDistillationDatabaseURL(_ name: String = UUID().u
     )
     try repository.saveBuffer(MemoryStagingBuffer(id: "buffer-low-value", sessionID: "session-low-value", pendingBundles: [bundle]), updatedAt: now)
 
-    let result = try AppMemoryDistillationWorker(store: store).runOnce(now: now)
+    let result = try await AppMemoryDistillationWorker(store: store).runOnce(now: now)
 
     #expect(result?.outcome == .succeeded)
     #expect(result?.enqueuedJobIDs.isEmpty == true)
@@ -74,7 +74,7 @@ private func temporaryAppMemoryDistillationDatabaseURL(_ name: String = UUID().u
     #expect(buffer?.metadata["last_distillation_discarded_item_count"] == "1")
 }
 
-@Test func memoryDistillationWorkerKeepsOpenBundlesWhenDrainingClosedBundles() throws {
+@Test func memoryDistillationWorkerKeepsOpenBundlesWhenDrainingClosedBundles() async throws {
     let now = Date(timeIntervalSince1970: 1_000)
     let store = try SQLiteGraphKernelStore(path: temporaryAppMemoryDistillationDatabaseURL().path)
     try store.migrate()
@@ -97,7 +97,7 @@ private func temporaryAppMemoryDistillationDatabaseURL(_ name: String = UUID().u
     )
     try repository.saveBuffer(MemoryStagingBuffer(id: "buffer-mixed", sessionID: "session-mixed", pendingBundles: [closedBundle, openBundle]), updatedAt: now)
 
-    _ = try AppMemoryDistillationWorker(store: store).runOnce(now: now)
+    _ = try await AppMemoryDistillationWorker(store: store).runOnce(now: now)
 
     let buffer = try repository.loadBuffer(id: "buffer-mixed")
     #expect(buffer?.status == .active)
@@ -105,7 +105,7 @@ private func temporaryAppMemoryDistillationDatabaseURL(_ name: String = UUID().u
     #expect(try store.runnableJobs(graphID: "default", at: now).count == 1)
 }
 
-@Test func memoryDistillationWorkerSkipsWhenNoClosedBundlesExist() throws {
+@Test func memoryDistillationWorkerSkipsWhenNoClosedBundlesExist() async throws {
     let now = Date(timeIntervalSince1970: 1_000)
     let store = try SQLiteGraphKernelStore(path: temporaryAppMemoryDistillationDatabaseURL().path)
     try store.migrate()
@@ -118,7 +118,7 @@ private func temporaryAppMemoryDistillationDatabaseURL(_ name: String = UUID().u
     )
     try repository.saveBuffer(MemoryStagingBuffer(id: "buffer-open", sessionID: "session-open", pendingBundles: [openBundle]), updatedAt: now)
 
-    let result = try AppMemoryDistillationWorker(store: store).runOnce(now: now)
+    let result = try await AppMemoryDistillationWorker(store: store).runOnce(now: now)
 
     #expect(result == nil)
     #expect(try store.runnableJobs(graphID: "default", at: now).isEmpty)
