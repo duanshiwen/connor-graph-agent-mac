@@ -44,6 +44,7 @@ final class AppViewModel: ObservableObject {
     @Published var episodes: [GraphEpisodeV3]
     @Published var observeLogEntries: [ObserveLogEntry]
     @Published var databasePath: String?
+    @Published var schemaHealthReport: GraphSchemaHealthReport?
     @Published var promotionCandidates: [ObserveLogEntry] = []
     @Published var graphWriteCandidates: [GraphWriteCandidate] = []
     @Published var graphWriteCandidateAudits: [String: [GraphWriteCandidateAuditPresentation]] = [:]
@@ -157,6 +158,7 @@ final class AppViewModel: ObservableObject {
         self.searchResults = []
         loadLLMSettings()
         reloadChatSessions()
+        reloadSchemaHealthReport()
         reloadGraphExtractionTraces()
         reloadMemoryChangeLog()
     }
@@ -527,6 +529,22 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func reloadSchemaHealthReport() {
+        do {
+            schemaHealthReport = try repository?.store.schemaHealthReport()
+        } catch {
+            schemaHealthReport = GraphSchemaHealthReport(
+                expectedVersion: SQLiteGraphKernelStore.currentSchemaVersion,
+                actualVersion: 0,
+                status: .warning,
+                missingTables: [],
+                missingIndexes: [],
+                checkedAt: Date()
+            )
+            errorMessage = String(describing: error)
+        }
+    }
+
     func reloadGraphExtractionTraces() {
         do {
             graphExtractionTraces = try graphExtractionTraceRepository?.loadRecentTraces() ?? []
@@ -789,29 +807,86 @@ struct AppShellView: View {
             }
             .navigationTitle("Connor")
         } detail: {
-            Group {
-                switch viewModel.selection ?? .agentChat {
-                case .entities:
-                    GraphEntitiesView(entities: viewModel.entities, statements: viewModel.statements, episodes: viewModel.episodes)
-                case .search:
-                    SearchView(viewModel: viewModel)
-                case .observeLog:
-                    ObserveLogView(entries: viewModel.observeLogEntries)
-                case .agentChat:
-                    AgentChatView(viewModel: viewModel)
-                case .promotionQueue:
-                    PromotionQueueView(viewModel: viewModel)
-                case .graphWriteCandidates:
-                    GraphWriteCandidateReviewView(viewModel: viewModel)
-                case .memoryChangeLog:
-                    MemoryChangeLogView(viewModel: viewModel)
-                case .extractionDiagnostics:
-                    GraphExtractionDiagnosticsView(viewModel: viewModel)
-                case .llmSettings:
-                    LLMSettingsView(viewModel: viewModel)
+            VStack(spacing: 0) {
+                SchemaHealthBanner(viewModel: viewModel)
+                Divider()
+                Group {
+                    switch viewModel.selection ?? .agentChat {
+                    case .entities:
+                        GraphEntitiesView(entities: viewModel.entities, statements: viewModel.statements, episodes: viewModel.episodes)
+                    case .search:
+                        SearchView(viewModel: viewModel)
+                    case .observeLog:
+                        ObserveLogView(entries: viewModel.observeLogEntries)
+                    case .agentChat:
+                        AgentChatView(viewModel: viewModel)
+                    case .promotionQueue:
+                        PromotionQueueView(viewModel: viewModel)
+                    case .graphWriteCandidates:
+                        GraphWriteCandidateReviewView(viewModel: viewModel)
+                    case .memoryChangeLog:
+                        MemoryChangeLogView(viewModel: viewModel)
+                    case .extractionDiagnostics:
+                        GraphExtractionDiagnosticsView(viewModel: viewModel)
+                    case .llmSettings:
+                        LLMSettingsView(viewModel: viewModel)
+                    }
                 }
             }
             .frame(minWidth: 720, minHeight: 480)
+        }
+    }
+}
+
+struct SchemaHealthBanner: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if let report = viewModel.schemaHealthReport {
+                Circle()
+                    .fill(statusColor(report.status))
+                    .frame(width: 8, height: 8)
+                Text("图模型 v\(report.actualVersion)")
+                    .font(.caption.weight(.semibold))
+                Text(report.status.rawValue)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                if report.status != .healthy {
+                    Text(report.summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            } else {
+                Circle()
+                    .fill(Color.gray)
+                    .frame(width: 8, height: 8)
+                Text("图模型版本未加载")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if let databasePath = viewModel.databasePath {
+                Text(databasePath)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Button("刷新") { viewModel.reloadSchemaHealthReport() }
+                .font(.caption)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color.secondary.opacity(0.06))
+    }
+
+    private func statusColor(_ status: GraphSchemaHealthReport.Status) -> Color {
+        switch status {
+        case .healthy: return .green
+        case .warning: return .orange
+        case .migrationRequired: return .red
         }
     }
 }
