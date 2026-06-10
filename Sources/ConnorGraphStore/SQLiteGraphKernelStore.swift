@@ -211,6 +211,10 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         return try decodeEpisode(row)
     }
 
+    public func episodes(graphID: String, limit: Int = 200) throws -> [GraphEpisodeV3] {
+        try query(sql: "SELECT id, graph_id, source_type, source_id, title, content, source_description, occurred_at, ingested_at, session_id, work_object_id, status, metadata_json FROM graph_episodes_v3 WHERE graph_id = \(quote(graphID)) ORDER BY occurred_at DESC LIMIT \(limit)").map(decodeEpisode)
+    }
+
     public func upsert(entity: GraphEntity) throws {
         try execute("""
         INSERT OR REPLACE INTO graph_entities
