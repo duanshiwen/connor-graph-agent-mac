@@ -15,6 +15,20 @@ private struct StubGraphExtractor: GraphExtractorProvider {
     }
 }
 
+private struct FailingDiagnosticGraphExtractor: GraphExtractorProvider {
+    var response: GraphExtractionLLMResponse
+
+    func extract(from source: GraphExtractionSource) async throws -> GraphExtractionDraft {
+        throw GraphExtractionAttemptFailure(
+            source: source,
+            response: response,
+            normalizedJSON: response.text,
+            underlyingDescription: "invalidJSON: test malformed JSON",
+            decoderErrorKind: "invalid_json"
+        )
+    }
+}
+
 @Test func extractionWorkerRunsExtractionJobAndCommitsGraphBatch() async throws {
     let store = try SQLiteGraphKernelStore(path: temporaryExtractionWorkerDatabaseURL().path)
     try store.migrate()
@@ -95,6 +109,53 @@ private struct StubGraphExtractor: GraphExtractorProvider {
     #expect(traces[0].admissionAction == .hold)
     #expect(traces[0].admissionReasons.contains(.lowStatementConfidence))
     #expect(try store.runnableJobs(graphID: "default", at: now).contains { $0.id == "job-extract-low-confidence" } == false)
+}
+
+@Test func extractionWorkerPersistsDecoderFailureDiagnostics() async throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryExtractionWorkerDatabaseURL().path)
+    try store.migrate()
+    let now = Date(timeIntervalSince1970: 1_000)
+    let source = GraphExtractionSource(id: "email-bad-json", graphID: "default", sourceType: .email, title: "Bad JSON", content: "诗闻 prefers tea", occurredAt: now)
+    try store.upsert(job: GraphJobV3(
+        id: "job-extract-bad-json",
+        graphID: "default",
+        type: .extraction,
+        payload: GraphExtractionJobPayload(source: source).dictionary,
+        createdAt: now,
+        nextRunAt: now
+    ))
+
+    let response = GraphExtractionLLMResponse(
+        text: "{ not-json",
+        provider: "fake",
+        modelID: "fake-model",
+        promptVersion: "graph-extraction-test",
+        promptTokens: 7,
+        completionTokens: 3,
+        totalTokens: 10,
+        latencyMilliseconds: 99,
+        rawResponseID: "resp-bad-json",
+        rawResponseJSON: "{\"id\":\"resp-bad-json\"}",
+        metadata: ["finish_reason": "stop"]
+    )
+
+    let result = try await GraphExtractionWorker(
+        store: store,
+        extractor: FailingDiagnosticGraphExtractor(response: response)
+    ).runNext(graphID: "default", now: now)
+
+    #expect(result?.action == .failed)
+    let traces = try store.extractionTraces(jobID: "job-extract-bad-json")
+    #expect(traces.count == 1)
+    #expect(traces[0].outcome == .failed)
+    #expect(traces[0].sourceID == "email-bad-json")
+    #expect(traces[0].metadata["llm_provider"] == "fake")
+    #expect(traces[0].metadata["llm_model_id"] == "fake-model")
+    #expect(traces[0].metadata["prompt_tokens"] == "7")
+    #expect(traces[0].metadata["latency_ms"] == "99")
+    #expect(traces[0].metadata["raw_response_id"] == "resp-bad-json")
+    #expect(traces[0].metadata["normalized_json"] == "{ not-json")
+    #expect(traces[0].metadata["decoder_error_kind"] == "invalid_json")
 }
 
 @Test func extractionWorkerMarksJobFailedWhenPayloadIsInvalid() async throws {

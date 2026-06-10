@@ -181,6 +181,17 @@ public struct GraphExtractionWorker<Extractor: GraphExtractorProvider>: Sendable
                     admissionDecision: admission
                 )
             }
+        } catch let failure as GraphExtractionAttemptFailure {
+            let message = failure.description
+            try appendFailureTrace(
+                job: job,
+                source: failure.source,
+                errorMessage: message,
+                metadata: failure.traceMetadata,
+                now: now
+            )
+            try mark(job: job, status: .failed, now: now, errorCode: "extraction_failed", errorMessage: message)
+            return GraphExtractionWorkerResult(jobID: job.id, action: .failed, errorMessage: message)
         } catch {
             let message = String(describing: error)
             try appendFailureTrace(job: job, errorMessage: message, now: now)
@@ -221,17 +232,24 @@ public struct GraphExtractionWorker<Extractor: GraphExtractorProvider>: Sendable
         ))
     }
 
-    private func appendFailureTrace(job: GraphJobV3, errorMessage: String, now: Date) throws {
-        let sourceType = job.payload["source_type"].flatMap(GraphExtractionSourceType.init(rawValue:)) ?? .manual
+    private func appendFailureTrace(
+        job: GraphJobV3,
+        source: GraphExtractionSource? = nil,
+        errorMessage: String,
+        metadata: [String: String] = [:],
+        now: Date
+    ) throws {
+        let sourceType = source?.sourceType ?? job.payload["source_type"].flatMap(GraphExtractionSourceType.init(rawValue:)) ?? .manual
         try store.appendExtractionTrace(GraphExtractionTrace(
             id: "trace-\(job.id)-failed-\(Int(now.timeIntervalSince1970 * 1000))",
             jobID: job.id,
             graphID: job.graphID,
-            sourceID: job.payload["source_id"] ?? "unknown",
+            sourceID: source?.id ?? job.payload["source_id"] ?? "unknown",
             sourceType: sourceType,
             outcome: .failed,
             errorMessage: errorMessage,
-            createdAt: now
+            createdAt: now,
+            metadata: metadata
         ))
     }
 
