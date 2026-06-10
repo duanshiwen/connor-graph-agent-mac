@@ -1331,6 +1331,8 @@ user message
 
 目标：把 `GraphAgent` 的 simple ask path、`AgentLoopController` 的 tool-calling path、以及后台 extraction/admission path 收敛成一条主产品链路。
 
+当前 App 主 Chat runtime 已收敛到 `AgentLoopController` / `AgentLoopChatController`。`GraphAgent` simple ask path 只作为 legacy compatibility / tests / no-store demo fallback 保留，新产品能力默认不再接入 simple path。
+
 ### 2. Production Extraction Loop
 
 ```text
@@ -1442,7 +1444,7 @@ memory dashboard
 12. ✅ 为 memory distillation 增加 deterministic quality gate，区分 episode、preference、decision、project fact 等 candidate。
 13. ✅ 增加 LLM-backed distiller，实现比关键词分类更可靠的长期记忆选择，并保留 deterministic fallback。
 14. ✅ 将 App 主 Chat 的空搜索 fallback 替换为真实 `SQLiteGraphHybridSearchService`，确保回答能使用已提交图谱记忆。
-15. 🔜 收敛 `GraphAgent` simple ask path 与 `AgentLoopController` tool-calling path，形成单一主 runtime。
+15. ✅ 收敛 `GraphAgent` simple ask path 与 `AgentLoopController` tool-calling path，形成单一主 runtime。
 16. 🔜 让所有 manual candidate / extraction commit / future source write 强制经过统一 entity resolver。
 17. 🔜 为 admission hold queue 增加 approve / reject / rerun / inspect evidence 动作闭环。
 18. 🔜 实现 `groundingCheck` worker 的最小可用版本。
