@@ -1205,12 +1205,28 @@ SourceArtifact
 
 交付物：
 
-- Schema version health check。
+- ✅ Schema version health check。
 - Migration audit。
 - Backup before migration。
 - Integrity check。
 - Corruption detection。
 - Repair tools。
+
+当前实现状态：
+
+- `SQLiteGraphKernelStore.currentSchemaVersion` 定义当前图模型 schema 版本。
+- `migrate()` 会写入 SQLite `PRAGMA user_version`，作为本地数据库 schema version 标记。
+- `schemaHealthReport()` 会检查：
+  - `user_version` 是否达到当前版本；
+  - 核心 graph / job / trace / audit / app integration 表是否存在；
+  - FTS 表是否存在；
+  - 关键索引是否存在。
+- App 启动后会加载 `GraphSchemaHealthReport`，并在顶部 banner 展示：
+  - 图模型版本；
+  - health status；
+  - 数据库路径；
+  - 手动刷新入口。
+- 当前 health check 只做轻量版本/结构检查；migration audit、backup before migration、SQLite integrity check、corruption detection 与 repair tools 仍属于后续商用可靠性增强。
 
 商用验收标准：
 
