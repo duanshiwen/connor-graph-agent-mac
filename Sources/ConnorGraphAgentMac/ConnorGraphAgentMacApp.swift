@@ -84,16 +84,16 @@ final class AppViewModel: ObservableObject {
     private var hybridSearchService: (any GraphHybridSearchService)?
     private var backgroundJobRunner: AppGraphBackgroundJobRunner?
     // Legacy simple ask controller is kept only for demo/no-store fallback and compatibility helpers.
-    // The app's product chat path is AgentLoopChatController.
+    // The app's product chat path is NativeSessionManager: Connor owns session state, the agent backend is replaceable.
     private var legacyChatController: AgentChatController<AnyLLMProvider>
-    private var loopChatController: AgentLoopChatController<AnyAgentModelProvider>?
+    private var nativeSessionManager: NativeSessionManager<AnyAgentModelProvider>?
 
     private var activeChatSession: AgentSession {
-        loopChatController?.session ?? legacyChatController.agent.session
+        nativeSessionManager?.session ?? legacyChatController.agent.session
     }
 
     private var activeChatTranscript: [AgentMessage] {
-        loopChatController?.transcript ?? legacyChatController.transcript
+        nativeSessionManager?.session.messages ?? legacyChatController.transcript
     }
 
     var latestChatSummaryFreshness: AgentSessionSummaryFreshness? {
@@ -154,7 +154,7 @@ final class AppViewModel: ObservableObject {
         self.databasePath = databasePath
         let initialSession = AgentSession(id: "app-session")
         self.legacyChatController = Self.makeLegacyChatController(runtimeFactory: agentRuntimeFactory, settingsRepository: llmSettingsRepository, session: initialSession)
-        self.loopChatController = agentRuntimeFactory?.makeAgentLoopChatController(session: initialSession)
+        self.nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: initialSession)
         self.searchResults = []
         loadLLMSettings()
         reloadChatSessions()
@@ -311,7 +311,7 @@ final class AppViewModel: ObservableObject {
         observeLogEntries = snapshot.observeLogEntries
         let session = activeChatSession
         legacyChatController = Self.makeLegacyChatController(runtimeFactory: agentRuntimeFactory, settingsRepository: llmSettingsRepository, session: session)
-        loopChatController = agentRuntimeFactory?.makeAgentLoopChatController(session: session)
+        nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: session)
         Task { await runSearch() }
         reloadPromotionCandidates()
         reloadGraphWriteCandidates()
@@ -364,7 +364,7 @@ final class AppViewModel: ObservableObject {
             loadLLMSettings()
             let session = activeChatSession
             legacyChatController = Self.makeLegacyChatController(runtimeFactory: agentRuntimeFactory, settingsRepository: llmSettingsRepository, session: session)
-            loopChatController = agentRuntimeFactory?.makeAgentLoopChatController(session: session)
+            nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: session)
             llmSettingsMessage = "模型设置已保存。"
             llmHealthCheckMessage = nil
             errorMessage = nil
@@ -379,7 +379,7 @@ final class AppViewModel: ObservableObject {
             loadLLMSettings()
             let session = activeChatSession
             legacyChatController = Self.makeLegacyChatController(runtimeFactory: agentRuntimeFactory, settingsRepository: llmSettingsRepository, session: session)
-            loopChatController = agentRuntimeFactory?.makeAgentLoopChatController(session: session)
+            nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: session)
             llmSettingsMessage = "API Key 已清除。"
             llmHealthCheckMessage = nil
             errorMessage = nil
@@ -419,7 +419,7 @@ final class AppViewModel: ObservableObject {
             selectedChatSessionID = selectedID
             if let selectedID, let session = try chatSessionRepository.loadSession(id: selectedID) {
                 legacyChatController = Self.makeLegacyChatController(runtimeFactory: agentRuntimeFactory, settingsRepository: llmSettingsRepository, session: session)
-                loopChatController = agentRuntimeFactory?.makeAgentLoopChatController(session: session)
+                nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: session)
                 transcript = session.messages
                 agentEventTimeline = []
                 latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: selectedID)
@@ -439,7 +439,7 @@ final class AppViewModel: ObservableObject {
             let session = try chatSessionRepository.createSession()
             selectedChatSessionID = session.id
             legacyChatController = Self.makeLegacyChatController(runtimeFactory: agentRuntimeFactory, settingsRepository: llmSettingsRepository, session: session)
-            loopChatController = agentRuntimeFactory?.makeAgentLoopChatController(session: session)
+            nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: session)
             transcript = []
             agentEventTimeline = []
             latestChatSummary = nil
@@ -458,7 +458,7 @@ final class AppViewModel: ObservableObject {
             guard let session = try chatSessionRepository.loadSession(id: sessionID) else { return }
             selectedChatSessionID = session.id
             legacyChatController = Self.makeLegacyChatController(runtimeFactory: agentRuntimeFactory, settingsRepository: llmSettingsRepository, session: session)
-            loopChatController = agentRuntimeFactory?.makeAgentLoopChatController(session: session)
+            nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: session)
             transcript = session.messages
             agentEventTimeline = []
             latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: session.id)
@@ -734,15 +734,11 @@ final class AppViewModel: ObservableObject {
         lastPromptInspection = nil
         defer { isSubmittingChat = false }
         do {
-            if var loopController = loopChatController {
-                let previousMessageCount = loopController.transcript.count
-                let response = try await loopController.submit(prompt)
-                if let chatSessionRepository {
-                    _ = try chatSessionRepository.saveSession(response.session, previousMessageCount: previousMessageCount)
-                }
-                loopChatController = loopController
-                transcript = loopController.transcript
-                agentEventTimeline = loopController.eventPresentations
+            if var manager = nativeSessionManager {
+                let response = try await manager.submit(prompt)
+                nativeSessionManager = manager
+                transcript = manager.session.messages
+                agentEventTimeline = manager.eventPresentations
                 selectedChatSessionID = response.session.id
                 legacyChatController = Self.makeLegacyChatController(runtimeFactory: agentRuntimeFactory, settingsRepository: llmSettingsRepository, session: response.session)
                 if let chatSessionRepository {
