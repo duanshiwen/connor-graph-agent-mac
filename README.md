@@ -119,6 +119,7 @@ temporal graph-only
   - `AnyGraphExtractorProvider`；
   - `AppGraphBackgroundJobRunner` 的 LLM settings 接线。
 - 后台 extraction job pipeline 已可选择 LLM-backed extractor，并已接入 `GraphWriteAdmissionPolicy`：默认系统自动准入，高风险/低置信/缺证据时 hold 或 ask，而不是要求用户逐条审核。
+- 已新增 `GraphExtractionTrace` / `graph_extraction_traces`，持久化 extraction/admission 结果摘要，并在 macOS App 中提供“记忆准入”诊断视图。
 - `GraphBackgroundJobRunner` 已支持多类 job，但以下 worker 仍未实现：
   - `groundingCheck`
   - `confidenceDecay`
@@ -805,7 +806,7 @@ Index refreshes
   - `hold`：低置信、缺证据、潜在重复或需后台进一步处理的事实暂停；
   - `askUser`：只有敏感、冲突、高影响、长期偏好等必要场景才询问用户；
   - `discard`：空结果、无价值或明确不应保留的结果直接丢弃。
-- 每个 admission decision 保留：
+- 每个 admission decision 保留或计划保留：
   - evidence episode；
   - evidence span；
   - extraction rationale；
@@ -814,6 +815,7 @@ Index refreshes
   - contradiction warning；
   - confidence；
   - policy reason trace。
+- 当前已持久化：job/source、outcome、admission action/reasons、extracted/committed counts、anomaly count、error message、metadata。
 - UI 目标是 Memory Inspector / Change Log，而不是让用户逐条处理队列。
 
 商用验收标准：
