@@ -62,6 +62,7 @@ private struct AppLLMGraphExtractionClient: GraphExtractionLLMClient, Sendable {
 /// trusted graph commits.
 public struct AppGraphBackgroundJobRunner: @unchecked Sendable {
     public let runner: GraphBackgroundJobRunner<AnyGraphExtractorProvider>
+    public let memoryDistillationWorker: AppMemoryDistillationWorker
     public let graphID: String
 
     public init(store: SQLiteGraphKernelStore, graphID: String = "default") {
@@ -75,18 +76,24 @@ public struct AppGraphBackgroundJobRunner: @unchecked Sendable {
 
     public init(store: SQLiteGraphKernelStore, graphID: String = "default", extractor: AnyGraphExtractorProvider) {
         self.runner = GraphBackgroundJobRunner(store: store, extractor: extractor)
+        self.memoryDistillationWorker = AppMemoryDistillationWorker(store: store, graphID: graphID)
         self.graphID = graphID
     }
 
-    /// Run a single available job. Returns nil if no jobs are queued.
+    /// Run a single available graph job. Before checking graph jobs, stage any
+    /// closed conversation bundles into extraction jobs so chat memory can flow
+    /// through the existing extraction pipeline.
     public func runOnce(now: Date = Date()) async throws -> GraphBackgroundJobRunResult? {
-        try await runner.runOnce(graphID: graphID, now: now)
+        _ = try memoryDistillationWorker.runOnce(now: now)
+        return try await runner.runOnce(graphID: graphID, now: now)
     }
 
-    /// Run up to `limit` available jobs. Returns results for each job processed.
+    /// Run up to `limit` available graph jobs. Memory distillation is run first
+    /// and can enqueue extraction jobs that are processed in the same pass.
     @discardableResult
     public func runAvailable(now: Date = Date(), limit: Int = 10) async throws -> [GraphBackgroundJobRunResult] {
-        try await runner.runAvailable(graphID: graphID, now: now, limit: limit)
+        _ = try memoryDistillationWorker.runAvailable(now: now, limit: limit)
+        return try await runner.runAvailable(graphID: graphID, now: now, limit: limit)
     }
 
     private static func makeExtractor(settingsRepository: AppLLMSettingsRepository) -> AnyGraphExtractorProvider {
