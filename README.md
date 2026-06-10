@@ -168,13 +168,25 @@ temporal graph-only
 
 ### 当前测试说明
 
-当前 shell 环境执行 `swift test` 可能因缺少 Swift Testing 模块报：
+全量测试已迁移到当前 V3 graph kernel / repository 边界，并在 Xcode toolchain 下验证通过：
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
+```
+
+当前验证结果：
+
+```text
+Test run with 234 tests in 1 suite passed
+```
+
+如果本机默认 developer directory 仍指向 Command Line Tools，直接执行 `swift test` 可能因缺少 Swift Testing 模块报：
 
 ```text
 no such module 'Testing'
 ```
 
-这是命令行 Swift toolchain 环境问题。需要在支持 Swift Testing 的 Xcode/Swift 工具链环境下运行全量测试。
+这是本地 Swift toolchain 选择问题，不是项目测试失败。可通过设置 `DEVELOPER_DIR` 临时使用 Xcode toolchain，或用 `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer` 切换全局 developer directory。
 
 ---
 
@@ -482,15 +494,18 @@ SQLite 持久化、FTS、后台作业、图谱写入和自愈服务层。
 
 - SQLite schema migration；
 - GraphEntity / GraphStatement / GraphEpisodeV3 持久化；
-- ObserveLogEntry 持久化；
-- Chat sessions/messages 持久化；
-- Graph embeddings 持久化；
-- FTS 查询；
+- AgentSession / agent message / prompt inspection 持久化；
+- AgentRun / AgentEvent / AgentAuditEvent 持久化与查询；
+- MemoryStagingBuffer 持久化；
+- GraphJobV3 持久化与 runnable job 查询；
+- GraphWriteCandidate、admission hold queue、extraction trace、memory change log、anomaly 持久化；
+- entity / statement / episode FTS 查询；
 - SQLite graph traversal；
 - entity resolution；
 - optimistic write；
 - background job runner；
 - extraction worker；
+- grounding check worker；
 - index refresh worker；
 - self-healing service；
 - entity merge review worker。
@@ -638,17 +653,31 @@ ok (build complete)
 
 ### SwiftPM test
 
+推荐使用 Xcode toolchain 运行测试：
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
+```
+
+当前验证结果：
+
+```text
+Test run with 234 tests in 1 suite passed
+```
+
+如果直接执行：
+
 ```bash
 swift test
 ```
 
-当前 shell 环境可能报：
+并看到：
 
 ```text
 no such module 'Testing'
 ```
 
-这是当前命令行 Swift toolchain 缺少 Swift Testing 模块导致的环境问题。需要在支持 Swift Testing 的 Xcode/Swift 工具链环境下运行。
+通常说明当前 shell 的 developer directory 仍指向 Command Line Tools，缺少 Swift Testing 模块。可临时设置 `DEVELOPER_DIR`，或全局切换到 Xcode developer directory。
 
 ### Xcode App
 
