@@ -203,6 +203,26 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         );
         """)
         try execute("""
+        CREATE TABLE IF NOT EXISTS graph_admission_hold_queue (
+            id TEXT PRIMARY KEY,
+            trace_id TEXT NOT NULL,
+            job_id TEXT NOT NULL,
+            graph_id TEXT NOT NULL,
+            source_id TEXT NOT NULL,
+            source_type TEXT NOT NULL,
+            status TEXT NOT NULL,
+            reasons_json TEXT NOT NULL,
+            recommended_actions_json TEXT NOT NULL,
+            message TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            resolved_at TEXT,
+            metadata_json TEXT NOT NULL
+        );
+        """)
+        try execute("CREATE INDEX IF NOT EXISTS idx_graph_admission_hold_queue_status ON graph_admission_hold_queue(graph_id, status, created_at DESC);")
+        try execute("CREATE INDEX IF NOT EXISTS idx_graph_admission_hold_queue_trace ON graph_admission_hold_queue(trace_id);")
+        try execute("""
         CREATE VIRTUAL TABLE IF NOT EXISTS graph_entities_fts USING fts5(
             entity_id UNINDEXED,
             graph_id UNINDEXED,
@@ -458,6 +478,38 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         """).map(decodeExtractionTracePayload).first
     }
 
+    public func upsertAdmissionHoldQueueItem(_ item: GraphAdmissionHoldQueueItem) throws {
+        try execute("""
+        INSERT OR REPLACE INTO graph_admission_hold_queue
+        (id, trace_id, job_id, graph_id, source_id, source_type, status, reasons_json, recommended_actions_json, message, created_at, updated_at, resolved_at, metadata_json)
+        VALUES (\(quote(item.id)), \(quote(item.traceID)), \(quote(item.jobID)), \(quote(item.graphID)), \(quote(item.sourceID)), \(quote(item.sourceType.rawValue)), \(quote(item.status.rawValue)), \(quote(json(item.reasons.map(\.rawValue)))), \(quote(json(item.recommendedActions.map(\.rawValue)))), \(quote(item.message)), \(quote(iso(item.createdAt))), \(quote(iso(item.updatedAt))), \(quote(item.resolvedAt.map(iso))), \(quote(json(item.metadata))))
+        """)
+    }
+
+    public func admissionHoldQueueItems(graphID: String, status: GraphAdmissionHoldQueueStatus? = nil, limit: Int = 100) throws -> [GraphAdmissionHoldQueueItem] {
+        var conditions = ["graph_id = \(quote(graphID))"]
+        if let status { conditions.append("status = \(quote(status.rawValue))") }
+        return try query(sql: """
+        SELECT id, trace_id, job_id, graph_id, source_id, source_type, status, reasons_json, recommended_actions_json, message, created_at, updated_at, resolved_at, metadata_json
+        FROM graph_admission_hold_queue WHERE \(conditions.joined(separator: " AND ")) ORDER BY created_at DESC LIMIT \(limit)
+        """).map(decodeAdmissionHoldQueueItem)
+    }
+
+    public func admissionHoldQueueItem(id: String) throws -> GraphAdmissionHoldQueueItem? {
+        try query(sql: """
+        SELECT id, trace_id, job_id, graph_id, source_id, source_type, status, reasons_json, recommended_actions_json, message, created_at, updated_at, resolved_at, metadata_json
+        FROM graph_admission_hold_queue WHERE id = \(quote(id)) LIMIT 1
+        """).map(decodeAdmissionHoldQueueItem).first
+    }
+
+    public func updateAdmissionHoldQueueItemStatus(id: String, status: GraphAdmissionHoldQueueStatus, resolvedAt: Date? = nil, now: Date = Date()) throws {
+        try execute("""
+        UPDATE graph_admission_hold_queue
+        SET status = \(quote(status.rawValue)), updated_at = \(quote(iso(now))), resolved_at = \(quote(resolvedAt.map(iso)))
+        WHERE id = \(quote(id))
+        """)
+    }
+
     @discardableResult
     public func enqueueExtractionJob(
         graphID: String,
@@ -662,6 +714,27 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
     private func decodeAnomaly(_ row: [String]) throws -> GraphAnomaly {
         GraphAnomaly(
             id: row[0], graphID: row[1], anomalyType: GraphAnomalyType(rawValue: row[2]) ?? .commonSenseViolation, statementID: row[3], relatedStatementIDs: try decode([String].self, row[4]), severity: GraphAnomalySeverity(rawValue: row[5]) ?? .medium, status: GraphAnomalyStatus(rawValue: row[6]) ?? .open, detectedAt: try date(row[7]), resolvedAt: try optionalDate(row[8]), resolution: try decode([String: String].self, row[9]), metadata: try decode([String: String].self, row[10])
+        )
+    }
+
+    private func decodeAdmissionHoldQueueItem(_ row: [String]) throws -> GraphAdmissionHoldQueueItem {
+        let reasons = try decode([String].self, row[7]).compactMap(GraphWriteAdmissionReason.init(rawValue:))
+        let actions = try decode([String].self, row[8]).compactMap(GraphAdmissionHoldRecommendedAction.init(rawValue:))
+        return GraphAdmissionHoldQueueItem(
+            id: row[0],
+            traceID: row[1],
+            jobID: row[2],
+            graphID: row[3],
+            sourceID: row[4],
+            sourceType: GraphExtractionSourceType(rawValue: row[5]) ?? .manual,
+            status: GraphAdmissionHoldQueueStatus(rawValue: row[6]) ?? .open,
+            reasons: reasons,
+            recommendedActions: actions,
+            message: row[9],
+            createdAt: try date(row[10]),
+            updatedAt: try date(row[11]),
+            resolvedAt: try optionalDate(row[12]),
+            metadata: try decode([String: String].self, row[13])
         )
     }
 

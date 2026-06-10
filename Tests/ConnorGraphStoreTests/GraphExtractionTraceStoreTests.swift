@@ -59,3 +59,34 @@ private func temporaryExtractionTraceDatabaseURL(_ name: String = UUID().uuidStr
     #expect(try store.extractionTracePayload(traceID: "trace-payload-1") == payload)
     #expect(try store.extractionTracePayload(traceID: "missing") == nil)
 }
+
+@Test func admissionHoldQueuePersistsLoadsAndUpdatesStatus() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryExtractionTraceDatabaseURL().path)
+    try store.migrate()
+    let now = Date(timeIntervalSince1970: 3_000)
+    let item = GraphAdmissionHoldQueueItem(
+        id: "hold-1",
+        traceID: "trace-1",
+        jobID: "job-1",
+        graphID: "default",
+        sourceID: "source-1",
+        sourceType: .chat,
+        reasons: [.lowStatementConfidence, .missingStatementEvidence],
+        recommendedActions: [.rerunExtraction, .groundSource, .replayTrace],
+        message: "held by policy",
+        createdAt: now,
+        metadata: ["system_queue": "true"]
+    )
+
+    try store.upsertAdmissionHoldQueueItem(item)
+
+    #expect(try store.admissionHoldQueueItem(id: "hold-1") == item)
+    #expect(try store.admissionHoldQueueItems(graphID: "default", status: .open).map(\.id) == ["hold-1"])
+
+    let resolvedAt = Date(timeIntervalSince1970: 4_000)
+    try store.updateAdmissionHoldQueueItemStatus(id: "hold-1", status: .resolved, resolvedAt: resolvedAt, now: resolvedAt)
+    let resolved = try #require(store.admissionHoldQueueItem(id: "hold-1"))
+    #expect(resolved.status == .resolved)
+    #expect(resolved.resolvedAt == resolvedAt)
+    #expect(try store.admissionHoldQueueItems(graphID: "default", status: .open).isEmpty)
+}

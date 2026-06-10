@@ -154,7 +154,8 @@ public struct GraphExtractionWorker<Extractor: GraphExtractorProvider>: Sendable
                     admissionDecision: admission
                 )
             case .hold:
-                try appendTrace(job: job, source: payload.source, draft: draft, outcome: .held, admission: admission, errorMessage: admission.message, now: now)
+                let traceID = try appendTrace(job: job, source: payload.source, draft: draft, outcome: .held, admission: admission, errorMessage: admission.message, now: now)
+                try enqueueAdmissionHoldDiagnostics(traceID: traceID, job: job, source: payload.source, admission: admission, draft: draft, now: now)
                 try mark(job: job, status: .paused, now: now, errorCode: "admission_hold", errorMessage: admission.message)
                 return GraphExtractionWorkerResult(
                     jobID: job.id,
@@ -165,7 +166,8 @@ public struct GraphExtractionWorker<Extractor: GraphExtractorProvider>: Sendable
                     admissionDecision: admission
                 )
             case .askUser:
-                try appendTrace(job: job, source: payload.source, draft: draft, outcome: .askUser, admission: admission, errorMessage: admission.message, now: now)
+                let traceID = try appendTrace(job: job, source: payload.source, draft: draft, outcome: .askUser, admission: admission, errorMessage: admission.message, now: now)
+                try enqueueAdmissionHoldDiagnostics(traceID: traceID, job: job, source: payload.source, admission: admission, draft: draft, now: now)
                 try mark(job: job, status: .paused, now: now, errorCode: "admission_ask_user", errorMessage: admission.message)
                 return GraphExtractionWorkerResult(
                     jobID: job.id,
@@ -206,6 +208,7 @@ public struct GraphExtractionWorker<Extractor: GraphExtractorProvider>: Sendable
         }
     }
 
+    @discardableResult
     private func appendTrace(
         job: GraphJobV3,
         source: GraphExtractionSource,
@@ -215,7 +218,7 @@ public struct GraphExtractionWorker<Extractor: GraphExtractorProvider>: Sendable
         writeResult: GraphOptimisticWriteResult = GraphOptimisticWriteResult(),
         errorMessage: String? = nil,
         now: Date
-    ) throws {
+    ) throws -> String {
         let traceID = "trace-\(job.id)-\(outcome.rawValue)-\(Int(now.timeIntervalSince1970 * 1000))"
         var split = splitTracePayloadMetadata(draft.metadata)
         split.metadata["admission_message"] = admission.message
@@ -240,6 +243,37 @@ public struct GraphExtractionWorker<Extractor: GraphExtractorProvider>: Sendable
         if let payload = split.payload(traceID, now) {
             try store.appendExtractionTracePayload(payload)
         }
+        return traceID
+    }
+
+    private func enqueueAdmissionHoldDiagnostics(
+        traceID: String,
+        job: GraphJobV3,
+        source: GraphExtractionSource,
+        admission: GraphWriteAdmissionDecision,
+        draft: GraphExtractionDraft,
+        now: Date
+    ) throws {
+        let actions = GraphAdmissionHoldQueuePlanner().recommendedActions(for: admission.reasons)
+        let item = GraphAdmissionHoldQueueItem(
+            id: "hold-\(traceID)",
+            traceID: traceID,
+            jobID: job.id,
+            graphID: job.graphID,
+            sourceID: source.id,
+            sourceType: source.sourceType,
+            reasons: admission.reasons,
+            recommendedActions: actions,
+            message: admission.message,
+            createdAt: now,
+            metadata: [
+                "extracted_entity_count": String(draft.entities.count),
+                "extracted_statement_count": String(draft.statements.count),
+                "system_queue": "true",
+                "user_review_required_by_default": "false"
+            ]
+        )
+        try store.upsertAdmissionHoldQueueItem(item)
     }
 
     private func appendFailureTrace(
