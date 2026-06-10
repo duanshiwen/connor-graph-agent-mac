@@ -118,7 +118,7 @@ temporal graph-only
   - `LLMGraphExtractor`；
   - `AnyGraphExtractorProvider`；
   - `AppGraphBackgroundJobRunner` 的 LLM settings 接线。
-- 后台 extraction job pipeline 已可选择 LLM-backed extractor；但当前仍沿用 optimistic write commit 路径，尚未强制进入 Graph Write Candidate Review。
+- 后台 extraction job pipeline 已可选择 LLM-backed extractor，并已接入 `GraphWriteAdmissionPolicy`：默认系统自动准入，高风险/低置信/缺证据时 hold 或 ask，而不是要求用户逐条审核。
 - `GraphBackgroundJobRunner` 已支持多类 job，但以下 worker 仍未实现：
   - `groundingCheck`
   - `confidenceDecay`
@@ -227,11 +227,11 @@ graph LR
     Observe --> Extraction[Background Extraction LLM]
     Ingestion --> Extraction
 
-    Extraction --> Resolver[Entity Resolution]
+    Extraction --> Gate[Write Admission Gate]
+    Gate --> Resolver[Entity Resolution]
     Resolver --> Constraints[Constraint Validation]
-    Constraints --> Candidate[Graph Write Candidate]
-    Candidate --> Review[Review / Policy / Auto-Commit]
-    Review --> Graph[(SQLite Temporal Graph)]
+    Constraints --> Decision[Auto-Commit / Hold / Ask]
+    Decision --> Graph[(SQLite Temporal Graph)]
 
     Graph --> Index[FTS / Embedding / Graph Index]
     Index --> GraphRead
@@ -251,8 +251,8 @@ graph TD
     Statement -->|objectEntityID| EntityB[GraphEntity]
     Statement -->|justifications| Justification[GraphJustification]
     Observe[ObserveLogEntry] -->|promote / extract| Episode
-    Candidate[GraphWriteCandidate] -->|review / commit| EntityA
-    Candidate -->|review / commit| Statement
+    Admission[GraphWriteAdmissionPolicy] -->|auto-commit / hold / ask| EntityA
+    Admission -->|auto-commit / hold / ask| Statement
     Job[GraphJobV3] -->|background process| Episode
     Job -->|background process| Statement
 ```
@@ -285,8 +285,8 @@ observe
 → extract
 → resolve
 → validate
-→ write candidate
-→ review / commit
+→ write admission gate
+→ auto-commit / hold / ask when needed
 → index
 → retrieve
 → self-heal
@@ -328,8 +328,8 @@ Evidence Episode
 → Extraction Draft
 → Entity Resolution
 → Constraint Validation
-→ Graph Write Candidate
-→ Policy / Review / Auto-Commit
+→ Write Admission Gate
+→ Auto-Commit / Hold / Ask When Needed
 → Index Refresh
 ```
 
@@ -795,33 +795,34 @@ Index refreshes
 - 所有自动 merge 都有 reason trace；
 - 高风险 merge 必须进入 review。
 
-### A3. Graph Write Candidate Review
+### A3. Graph Write Admission Gate
 
 交付物：
 
-- Rich diff UI：展示候选写入前后的图谱变化。
-- Review actions：
-  - accept；
-  - reject；
-  - edit；
-  - merge；
-  - defer；
-  - mark as duplicate；
-  - mark as unsafe。
-- 每个 candidate 展示：
+- 系统级准入策略，而不是默认用户手动审核。
+- Admission actions：
+  - `autoCommit`：高置信、有证据、低风险事实自动进入 truth graph；
+  - `hold`：低置信、缺证据、潜在重复或需后台进一步处理的事实暂停；
+  - `askUser`：只有敏感、冲突、高影响、长期偏好等必要场景才询问用户；
+  - `discard`：空结果、无价值或明确不应保留的结果直接丢弃。
+- 每个 admission decision 保留：
   - evidence episode；
   - evidence span；
   - extraction rationale；
   - resolver result；
   - constraint validation result；
   - contradiction warning；
-  - confidence。
+  - confidence；
+  - policy reason trace。
+- UI 目标是 Memory Inspector / Change Log，而不是让用户逐条处理队列。
 
 商用验收标准：
 
-- 用户能理解“系统准备记住什么”；
-- 用户能修改候选事实再提交；
-- 所有 review 决策进入 audit log；
+- 普通高置信记忆自动维护，不制造用户审核疲劳；
+- 用户能理解“系统记住了什么、为什么记住、何时使用”；
+- 用户可以撤销、修改、禁用或导出记忆；
+- ask user 只发生在冲突、敏感、高影响或用户明确要求确认的场景；
+- 所有 admission 决策进入 audit log；
 - 可按 session、source、work object 回溯。
 
 ### A4. Complete Hybrid Retrieval
