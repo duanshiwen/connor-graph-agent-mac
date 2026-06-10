@@ -110,6 +110,11 @@ private struct FailingDiagnosticGraphExtractor: GraphExtractorProvider {
     #expect(traces[0].outcome == .held)
     #expect(traces[0].admissionAction == .hold)
     #expect(traces[0].admissionReasons.contains(.lowStatementConfidence))
+    let holdItems = try store.admissionHoldQueueItems(graphID: "default", status: .open)
+    #expect(holdItems.count == 1)
+    #expect(holdItems[0].traceID == traces[0].id)
+    #expect(holdItems[0].recommendedActions.contains(.rerunExtraction))
+    #expect(holdItems[0].metadata["user_review_required_by_default"] == "false")
     #expect(try store.runnableJobs(graphID: "default", at: now).contains { $0.id == "job-extract-low-confidence" } == false)
 }
 

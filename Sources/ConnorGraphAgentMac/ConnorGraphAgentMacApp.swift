@@ -47,6 +47,7 @@ final class AppViewModel: ObservableObject {
     @Published var graphWriteCandidates: [GraphWriteCandidate] = []
     @Published var graphWriteCandidateAudits: [String: [GraphWriteCandidateAuditPresentation]] = [:]
     @Published var graphExtractionTraces: [AppGraphExtractionTracePresentation] = []
+    @Published var admissionHoldQueueItems: [AppGraphAdmissionHoldQueuePresentation] = []
     @Published var lastPromotionResultSummary: String?
     @Published var lastGraphWriteCandidateResultSummary: String?
     @Published var llmProviderMode: AppLLMProviderMode = .stub
@@ -70,6 +71,7 @@ final class AppViewModel: ObservableObject {
     private var promotionRepository: AppPromotionQueueRepository?
     private var graphWriteCandidateRepository: AppGraphWriteCandidateRepository?
     private var graphExtractionTraceRepository: AppGraphExtractionTraceRepository?
+    private var admissionHoldQueueRepository: AppGraphAdmissionHoldQueueRepository?
     private var chatSessionRepository: AppChatSessionRepository?
     private var llmSettingsRepository: AppLLMSettingsRepository
     private var llmProviderHealthChecker: AppLLMProviderHealthChecker
@@ -125,6 +127,7 @@ final class AppViewModel: ObservableObject {
             self.promotionRepository = AppPromotionQueueRepository(store: repository.store)
             self.graphWriteCandidateRepository = AppGraphWriteCandidateRepository(store: repository.store)
             self.graphExtractionTraceRepository = AppGraphExtractionTraceRepository(store: repository.store)
+            self.admissionHoldQueueRepository = AppGraphAdmissionHoldQueueRepository(store: repository.store)
             self.chatSessionRepository = AppChatSessionRepository(store: repository.store)
             self.agentRuntimeFactory = AppGraphAgentRuntimeFactory(store: repository.store, settingsRepository: llmSettingsRepository)
             self.hybridSearchService = SQLiteGraphHybridSearchService(store: repository.store)
@@ -292,9 +295,11 @@ final class AppViewModel: ObservableObject {
             _ = try await backgroundJobRunner.runAvailable(limit: 20)
             let snapshot = try repository.loadSnapshot()
             let traces = try graphExtractionTraceRepository?.loadRecentTraces() ?? []
+            let holdItems = try admissionHoldQueueRepository?.loadOpenItems() ?? []
             await MainActor.run {
                 apply(snapshot: snapshot)
                 graphExtractionTraces = traces
+                admissionHoldQueueItems = holdItems
             }
         } catch {
             await MainActor.run { errorMessage = String(describing: error) }
@@ -493,6 +498,7 @@ final class AppViewModel: ObservableObject {
     func reloadGraphExtractionTraces() {
         do {
             graphExtractionTraces = try graphExtractionTraceRepository?.loadRecentTraces() ?? []
+            admissionHoldQueueItems = try admissionHoldQueueRepository?.loadOpenItems() ?? []
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -1022,6 +1028,35 @@ struct GraphExtractionDiagnosticsView: View {
                 Text("extract → validate → admit → auto-commit / hold / ask")
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
+            }
+
+            if !viewModel.admissionHoldQueueItems.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("系统待诊断队列")
+                        .font(.headline)
+                    Text("这些是后台自愈队列，不是默认用户逐条审核。系统可用于 replay、grounding、merge 或必要时询问用户。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    ForEach(viewModel.admissionHoldQueueItems) { item in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(item.title)
+                                    .font(.subheadline.weight(.semibold))
+                                Spacer()
+                                Text(item.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text(item.detail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                        .padding(8)
+                        .background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+                }
+                Divider()
             }
 
             if viewModel.graphExtractionTraces.isEmpty {
