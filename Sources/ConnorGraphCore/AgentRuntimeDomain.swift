@@ -109,12 +109,20 @@ public struct AgentTextCompleteEvent: Codable, Sendable, Equatable {
     public var sessionID: String
     public var text: String
     public var citations: [String]
+    public var contextSnapshot: String?
 
-    public init(runID: String, sessionID: String, text: String, citations: [String] = []) {
+    public init(
+        runID: String,
+        sessionID: String,
+        text: String,
+        citations: [String] = [],
+        contextSnapshot: String? = nil
+    ) {
         self.runID = runID
         self.sessionID = sessionID
         self.text = text
         self.citations = citations
+        self.contextSnapshot = contextSnapshot
     }
 }
 
