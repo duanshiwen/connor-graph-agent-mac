@@ -64,7 +64,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             toolRegistry: registry,
             configuration: effectiveConfiguration,
             auditLog: SQLiteAgentAuditLog(store: store),
-            eventRecorder: AgentEventRecorder(repository: store)
+            eventRecorder: AgentEventRecorder(repository: store),
+            contextBuilder: AgentContextBuilder(hybridSearchService: searchService, groupID: groupID)
         )
     }
 
