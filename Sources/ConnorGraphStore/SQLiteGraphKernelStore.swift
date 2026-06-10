@@ -1,6 +1,7 @@
 import Foundation
 import SQLite3
 import ConnorGraphCore
+import ConnorGraphMemory
 
 public enum SQLiteGraphKernelStoreError: Error, Equatable, CustomStringConvertible {
     case openFailed(String)
@@ -307,6 +308,20 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         );
         """)
         try execute("CREATE INDEX IF NOT EXISTS idx_agent_sessions_updated ON agent_sessions(updated_at DESC);")
+        try execute("""
+        CREATE TABLE IF NOT EXISTS memory_staging_buffers (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            bundle_count INTEGER NOT NULL,
+            token_estimate INTEGER NOT NULL,
+            last_distilled_at TEXT,
+            updated_at TEXT NOT NULL,
+            buffer_json TEXT NOT NULL
+        );
+        """)
+        try execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_staging_buffers_session ON memory_staging_buffers(session_id);")
+        try execute("CREATE INDEX IF NOT EXISTS idx_memory_staging_buffers_status ON memory_staging_buffers(status, updated_at DESC);")
         try execute("""
         CREATE TABLE IF NOT EXISTS agent_runs (
             id TEXT PRIMARY KEY,
@@ -682,6 +697,47 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
             messages: try decode([AgentMessage].self, row[2]),
             createdAt: try date(row[3]), updatedAt: try date(row[4])
         )
+    }
+
+    // MARK: - Memory Staging Buffers
+
+    public func upsertMemoryStagingBuffer(_ buffer: MemoryStagingBuffer, updatedAt: Date = Date()) throws {
+        try execute("""
+        INSERT OR REPLACE INTO memory_staging_buffers
+        (id, session_id, status, bundle_count, token_estimate, last_distilled_at, updated_at, buffer_json)
+        VALUES (\(quote(buffer.id)), \(quote(buffer.sessionID)), \(quote(buffer.status.rawValue)), \(buffer.bundleCount), \(buffer.tokenEstimate), \(quote(buffer.lastDistilledAt.map(iso))), \(quote(iso(updatedAt))), \(quote(json(buffer))))
+        """)
+    }
+
+    public func memoryStagingBuffer(id: String) throws -> MemoryStagingBuffer? {
+        try query(sql: "SELECT buffer_json FROM memory_staging_buffers WHERE id = \(quote(id)) LIMIT 1")
+            .compactMap { $0.first }
+            .map { try decode(MemoryStagingBuffer.self, $0) }
+            .first
+    }
+
+    public func memoryStagingBuffer(sessionID: String) throws -> MemoryStagingBuffer? {
+        try query(sql: "SELECT buffer_json FROM memory_staging_buffers WHERE session_id = \(quote(sessionID)) LIMIT 1")
+            .compactMap { $0.first }
+            .map { try decode(MemoryStagingBuffer.self, $0) }
+            .first
+    }
+
+    public func memoryStagingBuffers(status: MemoryStagingBufferStatus? = nil, limit: Int = 100) throws -> [MemoryStagingBuffer] {
+        var conditions: [String] = []
+        if let status { conditions.append("status = \(quote(status.rawValue))") }
+        let whereClause = conditions.isEmpty ? "" : "WHERE \(conditions.joined(separator: " AND "))"
+        return try query(sql: "SELECT buffer_json FROM memory_staging_buffers \(whereClause) ORDER BY updated_at DESC LIMIT \(limit)")
+            .compactMap { $0.first }
+            .map { try decode(MemoryStagingBuffer.self, $0) }
+    }
+
+    public func deleteMemoryStagingBuffer(sessionID: String) throws {
+        try execute("DELETE FROM memory_staging_buffers WHERE session_id = \(quote(sessionID));")
+    }
+
+    public func deleteMemoryStagingBuffer(id: String) throws {
+        try execute("DELETE FROM memory_staging_buffers WHERE id = \(quote(id));")
     }
 
     // MARK: - Agent Runs & Events
