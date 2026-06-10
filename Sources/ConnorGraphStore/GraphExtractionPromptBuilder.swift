@@ -2,6 +2,8 @@ import Foundation
 import ConnorGraphCore
 
 public struct GraphExtractionPromptBuilder: Sendable {
+    public static let defaultPromptVersion = "graph-extraction-v1"
+
     public var allowedPredicates: [GraphPredicate]
     public var allowedEntityKinds: [GraphEntityKind]
     public var allowedScopes: [GraphScope]

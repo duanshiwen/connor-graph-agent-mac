@@ -5,14 +5,48 @@ import ConnorGraphSearch
 import ConnorGraphStore
 
 private struct AppLLMGraphExtractionClient: GraphExtractionLLMClient, Sendable {
-    var provider: AnyLLMProvider
+    var provider: AnyAgentModelProvider
+    var providerName: String
+    var promptVersion: String
 
-    func completeExtraction(prompt: String) async throws -> String {
-        let response = try await provider.complete(
-            prompt: prompt,
-            context: AgentContext(query: "graph-extraction", items: [])
+    func completeExtraction(prompt: String) async throws -> GraphExtractionLLMResponse {
+        let startedAt = Date()
+        let response = try await provider.complete(AgentModelRequest(
+            messages: [
+                AgentModelMessage(
+                    role: .system,
+                    content: "You extract structured graph memory. Return only JSON that conforms to the user prompt schema."
+                ),
+                AgentModelMessage(role: .user, content: prompt)
+            ],
+            tools: [],
+            temperature: 0.1
+        ))
+        let latency = Int(Date().timeIntervalSince(startedAt) * 1000)
+        guard let text = response.text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw OpenAICompatibleProviderError.missingAssistantMessage
+        }
+        return GraphExtractionLLMResponse(
+            text: text,
+            provider: providerName,
+            modelID: provider.modelID,
+            promptVersion: promptVersion,
+            promptTokens: response.usage?.promptTokens,
+            completionTokens: response.usage?.completionTokens,
+            totalTokens: response.usage?.totalTokens,
+            latencyMilliseconds: latency,
+            rawResponseID: Self.rawResponseID(from: response.rawResponseJSON),
+            rawResponseJSON: response.rawResponseJSON,
+            metadata: ["finish_reason": response.finishReason.rawValue]
         )
-        return response.text
+    }
+
+    private static func rawResponseID(from rawResponseJSON: String?) -> String? {
+        guard let rawResponseJSON,
+              let data = rawResponseJSON.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return object["id"] as? String
     }
 }
 
@@ -60,8 +94,12 @@ public struct AppGraphBackgroundJobRunner: @unchecked Sendable {
             guard let config = try settingsRepository.openAICompatibleConfig() else {
                 return AnyGraphExtractorProvider(StubGraphExtractor())
             }
-            let provider = AnyLLMProvider(OpenAICompatibleProvider(config: config))
-            let client = AppLLMGraphExtractionClient(provider: provider)
+            let provider = AnyAgentModelProvider(OpenAICompatibleProvider(config: config))
+            let client = AppLLMGraphExtractionClient(
+                provider: provider,
+                providerName: "openai-compatible",
+                promptVersion: GraphExtractionPromptBuilder.defaultPromptVersion
+            )
             return AnyGraphExtractorProvider(LLMGraphExtractor(client: client))
         } catch {
             return AnyGraphExtractorProvider(StubGraphExtractor())

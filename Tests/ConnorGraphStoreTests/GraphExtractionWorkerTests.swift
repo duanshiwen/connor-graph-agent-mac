@@ -28,7 +28,8 @@ private struct StubGraphExtractor: GraphExtractorProvider {
         ],
         statements: [
             GraphExtractedStatementDraft(subjectLocalID: "shiwen", predicate: .prefers, objectLocalID: "tea", statementText: "诗闻 prefers tea", confidence: 0.85, metadata: ["evidence_span_ids": "span-1"])
-        ]
+        ],
+        metadata: ["llm_model_id": "fake-model", "prompt_tokens": "12", "latency_ms": "34"]
     )
     try store.upsert(job: GraphJobV3(
         id: "job-extract-1",
@@ -52,6 +53,9 @@ private struct StubGraphExtractor: GraphExtractorProvider {
     #expect(traces[0].outcome == .committed)
     #expect(traces[0].admissionAction == .autoCommit)
     #expect(traces[0].committedStatementCount == 1)
+    #expect(traces[0].metadata["llm_model_id"] == "fake-model")
+    #expect(traces[0].metadata["prompt_tokens"] == "12")
+    #expect(traces[0].metadata["latency_ms"] == "34")
     #expect(try store.runnableJobs(graphID: "default", at: now).contains { $0.id == "job-extract-1" } == false)
 }
 
