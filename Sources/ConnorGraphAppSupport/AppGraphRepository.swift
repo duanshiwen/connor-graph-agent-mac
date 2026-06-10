@@ -54,7 +54,7 @@ public struct AppGraphRepository: @unchecked Sendable {
         GraphStoreSnapshot(
             entities: Array(try store.entities(graphID: graphID).prefix(graphEntityLimit)),
             statements: Array(try store.statements(graphID: graphID).prefix(graphStatementLimit)),
-            episodes: [],
+            episodes: Array(try store.episodes(graphID: graphID, limit: graphEpisodeLimit)),
             observeLogEntries: []
         )
     }
