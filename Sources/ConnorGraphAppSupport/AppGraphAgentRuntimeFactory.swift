@@ -62,7 +62,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             modelProvider: makeAgentModelProvider(),
             toolRegistry: registry,
             configuration: effectiveConfiguration,
-            auditLog: NoopAgentAuditLog(),
+            auditLog: SQLiteAgentAuditLog(store: store),
             eventRecorder: AgentEventRecorder(repository: store)
         )
     }
