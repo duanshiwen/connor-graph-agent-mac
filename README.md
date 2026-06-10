@@ -110,8 +110,15 @@ temporal graph-only
 
 以下能力已经有模型、接口或框架，但还不是可商用完成态：
 
-- `GraphExtractorProvider` 已定义，但默认实现仍是 `StubGraphExtractor`。
-- 后台 extraction job pipeline 已存在，但真实 LLM-backed extraction 尚未接入。
+- `GraphExtractorProvider` 已定义，`StubGraphExtractor` 保留为测试 double / fallback。
+- 已新增 production-oriented extraction 基础设施：
+  - `GraphStructuredExtractionOutput`；
+  - `GraphExtractionDecoder`；
+  - `GraphExtractionPromptBuilder`；
+  - `LLMGraphExtractor`；
+  - `AnyGraphExtractorProvider`；
+  - `AppGraphBackgroundJobRunner` 的 LLM settings 接线。
+- 后台 extraction job pipeline 已可选择 LLM-backed extractor；但当前仍沿用 optimistic write commit 路径，尚未强制进入 Graph Write Candidate Review。
 - `GraphBackgroundJobRunner` 已支持多类 job，但以下 worker 仍未实现：
   - `groundingCheck`
   - `confidenceDecay`
@@ -1329,10 +1336,10 @@ memory dashboard
 
 优先级最高的具体工程任务：
 
-1. 新增 `LLMGraphExtractor`，并保留 `StubGraphExtractor` 作为测试 double。
-2. 新增 extraction JSON schema 与 prompt builder。
-3. 将 `AppGraphBackgroundJobRunner` 支持根据 LLM settings 选择真实 extractor。
-4. 为 `GraphExtractionWorker` 增加 extraction trace / raw response / validation failure 记录。
+1. ✅ 新增 `LLMGraphExtractor`，并保留 `StubGraphExtractor` 作为测试 double。
+2. ✅ 新增 extraction JSON schema、decoder 与 prompt builder。
+3. ✅ 将 `AppGraphBackgroundJobRunner` 支持根据 LLM settings 选择真实 extractor，并在不可用时 fallback 到 stub。
+4. 部分完成：`GraphExtractionWorker` 已增加 result-level entity/statement count 和 error message；raw response / validation failure 持久化 trace 仍需后续 schema 支持。
 5. 将 `SQLiteGraphEntityResolver` 接入 optimistic write 主路径。
 6. 补 `graph_episodes_v3` FTS 表和 episode search API。
 7. 扩展 `SQLiteGraphHybridSearchService`，支持 entity + statement + episode 三类结果。
