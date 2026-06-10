@@ -57,6 +57,9 @@ public struct GraphExtractionJobPayload: Sendable, Equatable {
 
 public enum GraphExtractionWorkerAction: String, Sendable, Equatable {
     case committed
+    case held
+    case askUser = "ask_user"
+    case discarded
     case failed
     case skipped
 }
@@ -69,6 +72,7 @@ public struct GraphExtractionWorkerResult: Sendable, Equatable, Identifiable {
     public var extractedEntityCount: Int
     public var extractedStatementCount: Int
     public var errorMessage: String?
+    public var admissionDecision: GraphWriteAdmissionDecision?
 
     public init(
         jobID: String,
@@ -76,7 +80,8 @@ public struct GraphExtractionWorkerResult: Sendable, Equatable, Identifiable {
         writeResult: GraphOptimisticWriteResult = GraphOptimisticWriteResult(),
         extractedEntityCount: Int = 0,
         extractedStatementCount: Int = 0,
-        errorMessage: String? = nil
+        errorMessage: String? = nil,
+        admissionDecision: GraphWriteAdmissionDecision? = nil
     ) {
         self.jobID = jobID
         self.action = action
@@ -84,6 +89,7 @@ public struct GraphExtractionWorkerResult: Sendable, Equatable, Identifiable {
         self.extractedEntityCount = extractedEntityCount
         self.extractedStatementCount = extractedStatementCount
         self.errorMessage = errorMessage
+        self.admissionDecision = admissionDecision
     }
 }
 
@@ -101,11 +107,18 @@ public struct GraphExtractionWorker<Extractor: GraphExtractorProvider>: Sendable
     public var store: SQLiteGraphKernelStore
     public var extractor: Extractor
     public var optimisticWriter: GraphOptimisticWriteService
+    public var admissionPolicy: GraphWriteAdmissionPolicy
 
-    public init(store: SQLiteGraphKernelStore, extractor: Extractor, optimisticWriter: GraphOptimisticWriteService? = nil) {
+    public init(
+        store: SQLiteGraphKernelStore,
+        extractor: Extractor,
+        optimisticWriter: GraphOptimisticWriteService? = nil,
+        admissionPolicy: GraphWriteAdmissionPolicy = GraphWriteAdmissionPolicy()
+    ) {
         self.store = store
         self.extractor = extractor
         self.optimisticWriter = optimisticWriter ?? GraphOptimisticWriteService(store: store)
+        self.admissionPolicy = admissionPolicy
     }
 
     public func runNext(graphID: String, now: Date = Date()) async throws -> GraphExtractionWorkerResult? {
@@ -119,16 +132,51 @@ public struct GraphExtractionWorker<Extractor: GraphExtractorProvider>: Sendable
         do {
             let payload = try GraphExtractionJobPayload(dictionary: job.payload)
             let draft = try await extractor.extract(from: payload.source)
-            let batch = try draft.toOptimisticWriteBatch(now: now)
-            let writeResult = try optimisticWriter.commit(batch)
-            try mark(job: job, status: .succeeded, now: now)
-            return GraphExtractionWorkerResult(
-                jobID: job.id,
-                action: .committed,
-                writeResult: writeResult,
-                extractedEntityCount: draft.entities.count,
-                extractedStatementCount: draft.statements.count
-            )
+            let admission = try admissionPolicy.decide(draft: draft, resolver: optimisticWriter.resolver)
+            switch admission.action {
+            case .autoCommit:
+                let batch = try draft.toOptimisticWriteBatch(now: now)
+                let writeResult = try optimisticWriter.commit(batch)
+                try mark(job: job, status: .succeeded, now: now)
+                return GraphExtractionWorkerResult(
+                    jobID: job.id,
+                    action: .committed,
+                    writeResult: writeResult,
+                    extractedEntityCount: draft.entities.count,
+                    extractedStatementCount: draft.statements.count,
+                    admissionDecision: admission
+                )
+            case .hold:
+                try mark(job: job, status: .paused, now: now, errorCode: "admission_hold", errorMessage: admission.message)
+                return GraphExtractionWorkerResult(
+                    jobID: job.id,
+                    action: .held,
+                    extractedEntityCount: draft.entities.count,
+                    extractedStatementCount: draft.statements.count,
+                    errorMessage: admission.message,
+                    admissionDecision: admission
+                )
+            case .askUser:
+                try mark(job: job, status: .paused, now: now, errorCode: "admission_ask_user", errorMessage: admission.message)
+                return GraphExtractionWorkerResult(
+                    jobID: job.id,
+                    action: .askUser,
+                    extractedEntityCount: draft.entities.count,
+                    extractedStatementCount: draft.statements.count,
+                    errorMessage: admission.message,
+                    admissionDecision: admission
+                )
+            case .discard:
+                try mark(job: job, status: .succeeded, now: now, errorCode: "admission_discard", errorMessage: admission.message)
+                return GraphExtractionWorkerResult(
+                    jobID: job.id,
+                    action: .discarded,
+                    extractedEntityCount: draft.entities.count,
+                    extractedStatementCount: draft.statements.count,
+                    errorMessage: admission.message,
+                    admissionDecision: admission
+                )
+            }
         } catch {
             let message = String(describing: error)
             try mark(job: job, status: .failed, now: now, errorCode: "extraction_failed", errorMessage: message)
