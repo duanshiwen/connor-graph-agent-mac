@@ -191,6 +191,18 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         try execute("CREATE INDEX IF NOT EXISTS idx_graph_extraction_traces_job ON graph_extraction_traces(job_id, created_at DESC);")
         try execute("CREATE INDEX IF NOT EXISTS idx_graph_extraction_traces_source ON graph_extraction_traces(graph_id, source_id, created_at DESC);")
         try execute("""
+        CREATE TABLE IF NOT EXISTS graph_extraction_trace_payloads (
+            trace_id TEXT PRIMARY KEY,
+            prompt_text TEXT,
+            raw_response_json TEXT,
+            normalized_json TEXT,
+            decoder_error_kind TEXT,
+            decoder_error_message TEXT,
+            created_at TEXT NOT NULL,
+            metadata_json TEXT NOT NULL
+        );
+        """)
+        try execute("""
         CREATE VIRTUAL TABLE IF NOT EXISTS graph_entities_fts USING fts5(
             entity_id UNINDEXED,
             graph_id UNINDEXED,
@@ -420,6 +432,21 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         """).map(decodeExtractionTrace)
     }
 
+    public func appendExtractionTracePayload(_ payload: GraphExtractionTracePayload) throws {
+        try execute("""
+        INSERT OR REPLACE INTO graph_extraction_trace_payloads
+        (trace_id, prompt_text, raw_response_json, normalized_json, decoder_error_kind, decoder_error_message, created_at, metadata_json)
+        VALUES (\(quote(payload.traceID)), \(quote(payload.promptText)), \(quote(payload.rawResponseJSON)), \(quote(payload.normalizedJSON)), \(quote(payload.decoderErrorKind)), \(quote(payload.decoderErrorMessage)), \(quote(iso(payload.createdAt))), \(quote(json(payload.metadata))))
+        """)
+    }
+
+    public func extractionTracePayload(traceID: String) throws -> GraphExtractionTracePayload? {
+        try query(sql: """
+        SELECT trace_id, prompt_text, raw_response_json, normalized_json, decoder_error_kind, decoder_error_message, created_at, metadata_json
+        FROM graph_extraction_trace_payloads WHERE trace_id = \(quote(traceID)) LIMIT 1
+        """).map(decodeExtractionTracePayload).first
+    }
+
     @discardableResult
     public func enqueueExtractionJob(
         graphID: String,
@@ -624,6 +651,19 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
     private func decodeAnomaly(_ row: [String]) throws -> GraphAnomaly {
         GraphAnomaly(
             id: row[0], graphID: row[1], anomalyType: GraphAnomalyType(rawValue: row[2]) ?? .commonSenseViolation, statementID: row[3], relatedStatementIDs: try decode([String].self, row[4]), severity: GraphAnomalySeverity(rawValue: row[5]) ?? .medium, status: GraphAnomalyStatus(rawValue: row[6]) ?? .open, detectedAt: try date(row[7]), resolvedAt: try optionalDate(row[8]), resolution: try decode([String: String].self, row[9]), metadata: try decode([String: String].self, row[10])
+        )
+    }
+
+    private func decodeExtractionTracePayload(_ row: [String]) throws -> GraphExtractionTracePayload {
+        GraphExtractionTracePayload(
+            traceID: row[0],
+            promptText: nilIfEmpty(row[1]),
+            rawResponseJSON: nilIfEmpty(row[2]),
+            normalizedJSON: nilIfEmpty(row[3]),
+            decoderErrorKind: nilIfEmpty(row[4]),
+            decoderErrorMessage: nilIfEmpty(row[5]),
+            createdAt: try date(row[6]),
+            metadata: try decode([String: String].self, row[7])
         )
     }
 

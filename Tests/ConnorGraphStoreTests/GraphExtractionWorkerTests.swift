@@ -154,8 +154,12 @@ private struct FailingDiagnosticGraphExtractor: GraphExtractorProvider {
     #expect(traces[0].metadata["prompt_tokens"] == "7")
     #expect(traces[0].metadata["latency_ms"] == "99")
     #expect(traces[0].metadata["raw_response_id"] == "resp-bad-json")
-    #expect(traces[0].metadata["normalized_json"] == "{ not-json")
-    #expect(traces[0].metadata["decoder_error_kind"] == "invalid_json")
+    #expect(traces[0].metadata["normalized_json"] == nil)
+    #expect(traces[0].metadata["decoder_error_kind"] == nil)
+    let payload = try store.extractionTracePayload(traceID: traces[0].id)
+    #expect(payload?.rawResponseJSON == "{\"id\":\"resp-bad-json\"}")
+    #expect(payload?.normalizedJSON == "{ not-json")
+    #expect(payload?.decoderErrorKind == "invalid_json")
 }
 
 @Test func extractionWorkerMarksJobFailedWhenPayloadIsInvalid() async throws {
