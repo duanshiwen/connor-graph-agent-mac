@@ -72,6 +72,11 @@ private struct FailingDiagnosticGraphExtractor: GraphExtractorProvider {
     #expect(traces[0].metadata["latency_ms"] == "34")
     #expect(traces[0].metadata["entity_resolution_create_count"] == "2")
     #expect(traces[0].metadata["entity_resolution_matched_count"] == "0")
+    let changeLog = try store.memoryChangeLogEntries(graphID: "default")
+    #expect(changeLog.count == 1)
+    #expect(changeLog[0].action == .extractionCommitted)
+    #expect(changeLog[0].traceID == traces[0].id)
+    #expect(changeLog[0].statementIDs.count == 1)
     #expect(try store.runnableJobs(graphID: "default", at: now).contains { $0.id == "job-extract-1" } == false)
 }
 
