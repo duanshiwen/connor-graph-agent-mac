@@ -5,7 +5,7 @@ public enum AgentPermissionCapability: String, Codable, Sendable, Equatable {
     case readSession
     case proposeGraphWrite
     case commitGraphWrite
-    case invalidateGraphFact
+    case invalidateGraphStatement
     case deleteGraphObject
     case externalNetwork
     case modelCall

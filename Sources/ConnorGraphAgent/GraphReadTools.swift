@@ -4,13 +4,13 @@ import ConnorGraphSearch
 
 public struct GraphSearchTool: AgentTool {
     public let name = "graph_search"
-    public let description = "Search the local temporal knowledge graph across nodes, facts, and episodes."
+    public let description = "Search the local temporal knowledge graph across entities, statements, and episodes."
     public let permission: AgentPermissionCapability = .readGraph
     public let inputSchema = AgentToolInputSchema.object(properties: [
         "query": .string(description: "Search query."),
         "limit": .integer(description: "Maximum number of hits to return."),
-        "includeNodes": .boolean(description: "Whether to include graph nodes."),
-        "includeFacts": .boolean(description: "Whether to include graph facts."),
+        "includeEntities": .boolean(description: "Whether to include graph entities."),
+        "includeStatements": .boolean(description: "Whether to include graph statements."),
         "includeEpisodes": .boolean(description: "Whether to include graph episodes.")
     ], required: ["query"])
 
@@ -27,9 +27,9 @@ public struct GraphSearchTool: AgentTool {
         let limit = arguments.int("limit") ?? 10
         let response = try await searchService.search(query: GraphSearchQuery(
             text: query,
-            groupID: context.groupID,
-            includeNodes: arguments.bool("includeNodes") ?? true,
-            includeFacts: arguments.bool("includeFacts") ?? true,
+            graphID: context.groupID,
+            includeEntities: arguments.bool("includeEntities") ?? true,
+            includeStatements: arguments.bool("includeStatements") ?? true,
             includeEpisodes: arguments.bool("includeEpisodes") ?? true,
             limit: max(1, min(limit, 50))
         ))
