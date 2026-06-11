@@ -10,6 +10,8 @@ public enum SQLiteGraphKernelStoreError: Error, Equatable, CustomStringConvertib
     case bindFailed(String)
     case stepFailed(String)
     case decodeFailed(String)
+    case pendingApprovalNotFound(String)
+    case invalidPendingApprovalResolution(String)
 
     public var description: String {
         switch self {
@@ -19,6 +21,8 @@ public enum SQLiteGraphKernelStoreError: Error, Equatable, CustomStringConvertib
         case .bindFailed(let message): "bindFailed: \(message)"
         case .stepFailed(let message): "stepFailed: \(message)"
         case .decodeFailed(let message): "decodeFailed: \(message)"
+        case .pendingApprovalNotFound(let requestID): "pendingApprovalNotFound: \(requestID)"
+        case .invalidPendingApprovalResolution(let message): "invalidPendingApprovalResolution: \(message)"
         }
     }
 }
@@ -965,6 +969,81 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         SELECT id, request_id, run_id, session_id, capability, tool_name, payload_json, status, created_at, updated_at
         FROM agent_pending_approvals WHERE request_id = \(quote(requestID)) LIMIT 1
         """).map(decodePendingApproval).first
+    }
+
+    @discardableResult
+    public func resolvePendingApproval(
+        requestID: String,
+        status: AgentPendingApprovalStatus,
+        reason: String,
+        actor: String = "human-reviewer"
+    ) throws -> AgentPendingApproval {
+        guard status != .pending else {
+            throw SQLiteGraphKernelStoreError.invalidPendingApprovalResolution("resolution status must not remain pending")
+        }
+        guard var approval = try pendingApproval(requestID: requestID) else {
+            throw SQLiteGraphKernelStoreError.pendingApprovalNotFound(requestID)
+        }
+
+        let now = Date()
+        approval.status = status
+        approval.updatedAt = now
+        let outcome = permissionOutcome(forResolvedStatus: status)
+        let decision = AgentPermissionDecision(
+            requestID: approval.requestID,
+            runID: approval.runID,
+            sessionID: approval.sessionID,
+            capability: approval.capability,
+            outcome: outcome,
+            reason: reason
+        )
+        let auditPayload = [
+            "request_id": approval.requestID,
+            "status": status.rawValue,
+            "reason": reason
+        ]
+
+        try execute("BEGIN TRANSACTION;")
+        do {
+            try upsert(pendingApproval: approval)
+            try append(auditEvent: AgentAuditEvent(
+                runID: approval.runID,
+                sessionID: approval.sessionID,
+                eventType: .permissionDecision,
+                actor: actor,
+                capability: approval.capability,
+                toolName: approval.toolName,
+                decision: decision,
+                payloadJSON: json(auditPayload),
+                createdAt: now
+            ))
+            try append(event: PersistedAgentEvent(
+                runID: approval.runID,
+                sessionID: approval.sessionID,
+                kind: .permissionResolved,
+                payloadJSON: json(decision),
+                sequence: try nextAgentEventSequence(runID: approval.runID),
+                createdAt: now
+            ))
+            try execute("COMMIT;")
+        } catch {
+            try? execute("ROLLBACK;")
+            throw error
+        }
+        return approval
+    }
+
+    private func permissionOutcome(forResolvedStatus status: AgentPendingApprovalStatus) -> AgentPermissionOutcome {
+        switch status {
+        case .approved: .approved
+        case .denied, .cancelled: .denied
+        case .pending: .needsApproval
+        }
+    }
+
+    private func nextAgentEventSequence(runID: String) throws -> Int {
+        let rows = try query(sql: "SELECT COALESCE(MAX(sequence), -1) + 1 FROM agent_events WHERE run_id = \(quote(runID))")
+        return rows.first?.first.flatMap(Int.init) ?? 0
     }
 
     private func upsertEpisodeFTS(_ episode: GraphEpisodeV3) throws {
