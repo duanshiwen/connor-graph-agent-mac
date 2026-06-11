@@ -140,6 +140,46 @@ public struct AgentSession: Codable, Sendable, Equatable, Identifiable {
     public var messages: [AgentMessage]
     public var createdAt: Date
     public var updatedAt: Date
+    public var governance: AgentSessionGovernanceMetadata
+
+    public init(
+        id: String = UUID().uuidString,
+        title: String = "New Chat",
+        messages: [AgentMessage] = [],
+        createdAt: Date = Date(),
+        updatedAt: Date? = nil,
+        governance: AgentSessionGovernanceMetadata = .default
+    ) {
+        self.id = id
+        self.title = title
+        self.messages = messages
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt ?? createdAt
+        self.governance = governance
+    }
+
+    public var status: AgentSessionStatus {
+        get { governance.status }
+        set { governance.status = newValue }
+    }
+
+    public var labels: [AgentSessionLabel] {
+        get { governance.labels }
+        set { governance.labels = newValue }
+    }
+
+    public var isArchived: Bool {
+        get { governance.isArchived }
+        set {
+            governance.isArchived = newValue
+            if !newValue { governance.archivedAt = nil }
+        }
+    }
+
+    public var isFlagged: Bool {
+        get { governance.isFlagged }
+        set { governance.isFlagged = newValue }
+    }
 
     public init(
         id: String = UUID().uuidString,
@@ -148,11 +188,14 @@ public struct AgentSession: Codable, Sendable, Equatable, Identifiable {
         createdAt: Date = Date(),
         updatedAt: Date? = nil
     ) {
-        self.id = id
-        self.title = title
-        self.messages = messages
-        self.createdAt = createdAt
-        self.updatedAt = updatedAt ?? createdAt
+        self.init(
+            id: id,
+            title: title,
+            messages: messages,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            governance: .default
+        )
     }
 
     @discardableResult

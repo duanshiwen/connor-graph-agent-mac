@@ -14,6 +14,15 @@ public enum AgentEvent: Sendable, Equatable {
     case permissionRequested(AgentPermissionRequest)
     case permissionResolved(AgentPermissionDecision)
     case budgetWarning(AgentBudgetWarning)
+    case sessionStatusChanged(AgentSessionGovernanceEvent)
+    case sessionLabelsChanged(AgentSessionGovernanceEvent)
+    case sessionArchived(AgentSessionGovernanceEvent)
+    case sessionRestored(AgentSessionGovernanceEvent)
+    case artifactCreated(AgentSessionArtifactEvent)
+    case automationTriggered(AgentAutomationPlaceholderEvent)
+    case graphMemoryProposed(AgentGraphMemoryLifecycleEvent)
+    case graphMemoryCommitted(AgentGraphMemoryLifecycleEvent)
+    case graphMemoryHeld(AgentGraphMemoryLifecycleEvent)
     case runFailed(AgentRunFailure)
     case runCompleted(AgentRunCompletedEvent)
 
@@ -31,6 +40,15 @@ public enum AgentEvent: Sendable, Equatable {
         case .permissionRequested: return .permissionRequested
         case .permissionResolved: return .permissionResolved
         case .budgetWarning: return .budgetWarning
+        case .sessionStatusChanged: return .sessionStatusChanged
+        case .sessionLabelsChanged: return .sessionLabelsChanged
+        case .sessionArchived: return .sessionArchived
+        case .sessionRestored: return .sessionRestored
+        case .artifactCreated: return .artifactCreated
+        case .automationTriggered: return .automationTriggered
+        case .graphMemoryProposed: return .graphMemoryProposed
+        case .graphMemoryCommitted: return .graphMemoryCommitted
+        case .graphMemoryHeld: return .graphMemoryHeld
         case .runFailed: return .runFailed
         case .runCompleted: return .runCompleted
         }
@@ -48,6 +66,10 @@ public enum AgentEvent: Sendable, Equatable {
         case .permissionRequested(let request): return request.runID
         case .permissionResolved(let decision): return decision.runID
         case .budgetWarning(let warning): return warning.runID
+        case .sessionStatusChanged(let event), .sessionLabelsChanged(let event), .sessionArchived(let event), .sessionRestored(let event): return event.runID
+        case .artifactCreated(let event): return event.runID
+        case .automationTriggered(let event): return event.runID
+        case .graphMemoryProposed(let event), .graphMemoryCommitted(let event), .graphMemoryHeld(let event): return event.runID
         case .runFailed(let failure): return failure.runID
         case .runCompleted(let event): return event.run.id
         }
@@ -65,6 +87,10 @@ public enum AgentEvent: Sendable, Equatable {
         case .permissionRequested(let request): return request.sessionID
         case .permissionResolved(let decision): return decision.sessionID
         case .budgetWarning(let warning): return warning.sessionID
+        case .sessionStatusChanged(let event), .sessionLabelsChanged(let event), .sessionArchived(let event), .sessionRestored(let event): return event.sessionID
+        case .artifactCreated(let event): return event.sessionID
+        case .automationTriggered(let event): return event.sessionID
+        case .graphMemoryProposed(let event), .graphMemoryCommitted(let event), .graphMemoryHeld(let event): return event.sessionID
         case .runFailed(let failure): return failure.sessionID
         case .runCompleted(let event): return event.run.sessionID
         }
