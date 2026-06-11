@@ -45,6 +45,7 @@ const parseCommand = (line) => {
   if (parsed.start) return { name: 'start', payload: validateRequest(parsed.start) };
   if (parsed.approvalResolved) return { name: 'approvalResolved', payload: parsed.approvalResolved };
   if (parsed.cancel) return { name: 'cancel', payload: parsed.cancel };
+  if (parsed.health) return { name: 'health', payload: parsed.health };
 
   // Backward compatibility: legacy one-shot transports still send the raw request shape.
   if (parsed.connorRunID && parsed.connorSessionID) {
@@ -322,6 +323,17 @@ const runDeferredResume = async (deferred, resolution) => {
   writeEvent({ runCompleted: {} });
 };
 
+const emitSidecarHealth = () => {
+  writeEvent({
+    sidecarHealth: {
+      status: 'ok',
+      pendingDeferredToolUseCount: pendingDeferredToolUses.size,
+      timestamp: new Date().toISOString(),
+      ownsProductState: false
+    }
+  });
+};
+
 const handleApprovalResolved = async (resolution) => {
   if (!resolution?.requestID) {
     writeEvent({ resumeRejected: { requestID: '', toolName: resolution?.toolName ?? null, reason: 'Missing approval request ID' } });
@@ -369,6 +381,9 @@ const runCommandLoop = async () => {
         break;
       case 'approvalResolved':
         await handleApprovalResolved(command.payload);
+        break;
+      case 'health':
+        emitSidecarHealth();
         break;
       case 'cancel':
         writeEvent({ runFailed: { message: 'Connor cancelled Claude SDK sidecar command loop' } });

@@ -117,6 +117,58 @@ private func temporaryFactoryNativeSessionDatabaseURL(_ name: String = UUID().uu
     #expect(approvals.first?.payloadJSON.contains("README.md") == true)
 }
 
+@Test func appGraphAgentRuntimeFactoryCreatesGovernedPersistentClaudeSidecarNativeSessionManagerWithRuntimeStore() async throws {
+    let appDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorFactoryGovernedPersistentSidecarRuntimeStore-")
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: appDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: appDirectory) }
+    let storagePaths = AppStoragePaths(applicationSupportDirectory: appDirectory)
+    try storagePaths.ensureDirectoryHierarchy()
+
+    let store = try SQLiteGraphKernelStore(path: temporaryFactoryNativeSessionDatabaseURL().path)
+    try store.migrate()
+    let settingsRepository = AppLLMSettingsRepository(
+        settingsStore: FactoryNativeSessionSettingsStore(),
+        credentialStore: FactoryNativeSessionCredentialStore()
+    )
+    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: settingsRepository, storagePaths: storagePaths)
+    let session = AgentSession(id: "factory-governed-runtime-store", title: "Governed Sidecar Chat")
+    let temporaryDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorFactoryGovernedPersistentSidecarRuntimeStoreScript-")
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let sidecarURL = temporaryDirectory.appendingPathComponent("persistent-sidecar.sh")
+    try """
+    #!/bin/sh
+    while IFS= read -r command; do
+      case "$command" in
+        *'"start"'*)
+          printf '%s\n' '{"runStarted":{"sdkSessionID":"sdk-factory-runtime-store"}}'
+          printf '%s\n' '{"textComplete":{"text":"ready","citations":[],"contextSnapshot":null}}'
+          printf '%s\n' '{"runCompleted":{}}'
+          ;;
+      esac
+    done
+    """.write(to: sidecarURL, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: sidecarURL.path)
+
+    var manager = try factory.makeGovernedClaudeSDKSidecarNativeSessionManager(
+        session: session,
+        sidecarExecutableURL: URL(fileURLWithPath: "/bin/sh"),
+        sidecarArguments: [sidecarURL.path],
+        workingDirectory: temporaryDirectory,
+        permissionMode: .askToWrite
+    )
+
+    _ = try await manager.submit("Use governed persistent sidecar with runtime store")
+    let runtimeRecord = try AppClaudeSDKSidecarRuntimeStore(configDirectory: storagePaths.configDirectory).load(connorSessionID: session.id)
+
+    #expect(runtimeRecord?.sdkSessionID == "sdk-factory-runtime-store")
+    #expect(runtimeRecord?.status == .ready)
+}
+
 @Test func appGraphAgentRuntimeFactoryCreatesGovernedPersistentClaudeSidecarNativeSessionManager() async throws {
     let store = try SQLiteGraphKernelStore(path: temporaryFactoryNativeSessionDatabaseURL().path)
     try store.migrate()

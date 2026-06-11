@@ -118,13 +118,27 @@ public struct ClaudeSDKSidecarApprovalResolution: Codable, Sendable, Equatable {
     }
 }
 
+public struct ClaudeSDKSidecarCancelCommand: Codable, Sendable, Equatable {
+    public var connorRunID: String
+    public var connorSessionID: String
+    public var reason: String
+
+    public init(connorRunID: String, connorSessionID: String, reason: String = "cancelled by Connor") {
+        self.connorRunID = connorRunID
+        self.connorSessionID = connorSessionID
+        self.reason = reason
+    }
+}
+
 public enum ClaudeSDKSidecarCommand: Codable, Sendable, Equatable {
     case start(ClaudeSDKSidecarRequest)
     case approvalResolved(ClaudeSDKSidecarApprovalResolution)
+    case cancel(ClaudeSDKSidecarCancelCommand)
 
     private enum CodingKeys: String, CodingKey {
         case start
         case approvalResolved
+        case cancel
     }
 
     public init(from decoder: Decoder) throws {
@@ -133,6 +147,8 @@ public enum ClaudeSDKSidecarCommand: Codable, Sendable, Equatable {
             self = .start(try container.decode(ClaudeSDKSidecarRequest.self, forKey: .start))
         } else if container.contains(.approvalResolved) {
             self = .approvalResolved(try container.decode(ClaudeSDKSidecarApprovalResolution.self, forKey: .approvalResolved))
+        } else if container.contains(.cancel) {
+            self = .cancel(try container.decode(ClaudeSDKSidecarCancelCommand.self, forKey: .cancel))
         } else {
             throw DecodingError.dataCorrupted(.init(
                 codingPath: decoder.codingPath,
@@ -145,6 +161,7 @@ public enum ClaudeSDKSidecarCommand: Codable, Sendable, Equatable {
         switch self {
         case .start: return "start"
         case .approvalResolved: return "approvalResolved"
+        case .cancel: return "cancel"
         }
     }
 
@@ -155,6 +172,8 @@ public enum ClaudeSDKSidecarCommand: Codable, Sendable, Equatable {
             try container.encode(payload, forKey: .start)
         case .approvalResolved(let payload):
             try container.encode(payload, forKey: .approvalResolved)
+        case .cancel(let payload):
+            try container.encode(payload, forKey: .cancel)
         }
     }
 }
@@ -275,6 +294,20 @@ public struct ClaudeSDKSidecarRunFailed: Codable, Sendable, Equatable {
     }
 }
 
+public struct ClaudeSDKSidecarHealth: Codable, Sendable, Equatable {
+    public var status: String
+    public var pendingDeferredToolUseCount: Int
+    public var timestamp: String
+    public var ownsProductState: Bool
+
+    public init(status: String, pendingDeferredToolUseCount: Int = 0, timestamp: String, ownsProductState: Bool = false) {
+        self.status = status
+        self.pendingDeferredToolUseCount = pendingDeferredToolUseCount
+        self.timestamp = timestamp
+        self.ownsProductState = ownsProductState
+    }
+}
+
 public enum ClaudeSDKSidecarEvent: Codable, Sendable, Equatable {
     case runStarted(ClaudeSDKSidecarRunStarted)
     case textDelta(ClaudeSDKSidecarTextDelta)
@@ -287,6 +320,7 @@ public enum ClaudeSDKSidecarEvent: Codable, Sendable, Equatable {
     case toolUseStarted(ClaudeSDKSidecarToolUseStarted)
     case toolUseCompleted(ClaudeSDKSidecarToolUseCompleted)
     case runFailed(ClaudeSDKSidecarRunFailed)
+    case sidecarHealth(ClaudeSDKSidecarHealth)
 
     private enum CodingKeys: String, CodingKey {
         case runStarted
@@ -300,6 +334,7 @@ public enum ClaudeSDKSidecarEvent: Codable, Sendable, Equatable {
         case toolUseStarted
         case toolUseCompleted
         case runFailed
+        case sidecarHealth
     }
 
     public init(from decoder: Decoder) throws {
@@ -326,6 +361,8 @@ public enum ClaudeSDKSidecarEvent: Codable, Sendable, Equatable {
             self = .toolUseCompleted(try container.decode(ClaudeSDKSidecarToolUseCompleted.self, forKey: .toolUseCompleted))
         } else if container.contains(.runFailed) {
             self = .runFailed(try container.decode(ClaudeSDKSidecarRunFailed.self, forKey: .runFailed))
+        } else if container.contains(.sidecarHealth) {
+            self = .sidecarHealth(try container.decode(ClaudeSDKSidecarHealth.self, forKey: .sidecarHealth))
         } else {
             throw DecodingError.dataCorrupted(.init(
                 codingPath: decoder.codingPath,
@@ -359,6 +396,8 @@ public enum ClaudeSDKSidecarEvent: Codable, Sendable, Equatable {
             try container.encode(payload, forKey: .toolUseCompleted)
         case .runFailed(let payload):
             try container.encode(payload, forKey: .runFailed)
+        case .sidecarHealth(let payload):
+            try container.encode(payload, forKey: .sidecarHealth)
         }
     }
 }
@@ -817,6 +856,8 @@ enum ClaudeSDKSidecarEventMapper {
                 sessionID: request.sessionID,
                 message: payload.message
             ))
+        case .sidecarHealth:
+            return nil
         }
     }
 }
