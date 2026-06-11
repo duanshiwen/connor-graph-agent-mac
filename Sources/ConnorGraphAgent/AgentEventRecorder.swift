@@ -47,6 +47,7 @@ public struct AgentEventRecorder: Sendable {
         case .budgetWarning(let payload): data = try encoder.encode(payload)
         case .sessionStatusChanged(let payload), .sessionLabelsChanged(let payload), .sessionArchived(let payload), .sessionRestored(let payload): data = try encoder.encode(payload)
         case .artifactCreated(let payload): data = try encoder.encode(payload)
+        case .sourceRegistryChanged(let payload), .skillRegistryChanged(let payload): data = try encoder.encode(payload)
         case .automationTriggered(let payload): data = try encoder.encode(payload)
         case .graphMemoryProposed(let payload), .graphMemoryCommitted(let payload), .graphMemoryHeld(let payload): data = try encoder.encode(payload)
         case .runFailed(let payload): data = try encoder.encode(payload)
