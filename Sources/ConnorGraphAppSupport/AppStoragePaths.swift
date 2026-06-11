@@ -1,4 +1,5 @@
 import Foundation
+import ConnorGraphCore
 
 public struct AppStoragePaths: Sendable, Equatable {
     public var applicationSupportDirectory: URL
@@ -6,6 +7,10 @@ public struct AppStoragePaths: Sendable, Equatable {
     public var sessionsDirectory: URL
     public var sourcesDirectory: URL
     public var skillsDirectory: URL
+    public var automationsDirectory: URL
+    public var labelsDirectory: URL
+    public var statusesDirectory: URL
+    public var artifactsDirectory: URL
     public var graphDirectory: URL
     public var graphIndexesDirectory: URL
     public var graphExportsDirectory: URL
@@ -22,6 +27,10 @@ public struct AppStoragePaths: Sendable, Equatable {
         sessionsDirectory: URL? = nil,
         sourcesDirectory: URL? = nil,
         skillsDirectory: URL? = nil,
+        automationsDirectory: URL? = nil,
+        labelsDirectory: URL? = nil,
+        statusesDirectory: URL? = nil,
+        artifactsDirectory: URL? = nil,
         graphDirectory: URL? = nil,
         graphIndexesDirectory: URL? = nil,
         graphExportsDirectory: URL? = nil,
@@ -44,6 +53,10 @@ public struct AppStoragePaths: Sendable, Equatable {
         self.sessionsDirectory = resolvedSessionsDirectory
         self.sourcesDirectory = resolvedSourcesDirectory
         self.skillsDirectory = resolvedSkillsDirectory
+        self.automationsDirectory = automationsDirectory ?? applicationSupportDirectory.appendingPathComponent("automations", isDirectory: true)
+        self.labelsDirectory = labelsDirectory ?? applicationSupportDirectory.appendingPathComponent("labels", isDirectory: true)
+        self.statusesDirectory = statusesDirectory ?? applicationSupportDirectory.appendingPathComponent("statuses", isDirectory: true)
+        self.artifactsDirectory = artifactsDirectory ?? applicationSupportDirectory.appendingPathComponent("artifacts", isDirectory: true)
         self.graphDirectory = resolvedGraphDirectory
         self.graphIndexesDirectory = graphIndexesDirectory ?? resolvedGraphDirectory.appendingPathComponent("indexes", isDirectory: true)
         self.graphExportsDirectory = graphExportsDirectory ?? resolvedGraphDirectory.appendingPathComponent("exports", isDirectory: true)
@@ -77,6 +90,10 @@ public struct AppStoragePaths: Sendable, Equatable {
             sessionsDirectory,
             sourcesDirectory,
             skillsDirectory,
+            automationsDirectory,
+            labelsDirectory,
+            statusesDirectory,
+            artifactsDirectory,
             graphDirectory,
             graphIndexesDirectory,
             graphExportsDirectory,
@@ -86,6 +103,18 @@ public struct AppStoragePaths: Sendable, Equatable {
             runtimeLogsDirectory,
             sidecarsDirectory
         ]
+    }
+
+    public func sessionArtifactDirectories(sessionID: String) -> AgentSessionArtifactDirectories {
+        AgentSessionArtifactDirectories(root: sessionsDirectory.appendingPathComponent(sessionID, isDirectory: true))
+    }
+
+    public func ensureSessionArtifactDirectories(sessionID: String, fileManager: FileManager = .default) throws -> AgentSessionArtifactDirectories {
+        let directories = sessionArtifactDirectories(sessionID: sessionID)
+        for directory in directories.all {
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+        return directories
     }
 
     public func ensureDirectoryHierarchy(fileManager: FileManager = .default) throws {
