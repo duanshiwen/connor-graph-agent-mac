@@ -95,6 +95,61 @@ public struct GraphMemoryDashboard: Sendable, Equatable {
     }
 }
 
+public struct GraphMemoryRetrievalExplanationCard: Codable, Sendable, Equatable, Identifiable {
+    public var id: String { "\(kind.rawValue):\(memoryID)" }
+    public var rank: Int
+    public var kind: GraphIndexOwnerType
+    public var memoryID: String
+    public var title: String
+    public var excerpt: String
+    public var score: Double
+    public var scoreLabel: String
+    public var retrievalMethod: String
+    public var why: String
+    public var evidenceEpisodeIDs: [String]
+    public var metadata: [String: String]
+
+    public init(rank: Int, hit: GraphSearchHit) {
+        self.rank = rank
+        self.kind = hit.ownerType
+        self.memoryID = hit.ownerID
+        self.title = hit.title
+        self.excerpt = hit.text
+        self.score = hit.score
+        self.scoreLabel = "\(Int((hit.score * 100).rounded()))%"
+        self.retrievalMethod = hit.retrievalMethod
+        self.evidenceEpisodeIDs = hit.sourceEpisodeIDs
+        self.metadata = hit.metadata
+        let evidence = hit.sourceEpisodeIDs.isEmpty ? "no linked episode evidence" : "episode evidence: \(hit.sourceEpisodeIDs.joined(separator: ", "))"
+        let belief = hit.metadata["belief_status"].map { "belief: \($0)" } ?? "belief: unknown"
+        self.why = "Rank \(rank) because \(hit.retrievalMethod) returned score \(self.scoreLabel); \(belief); \(evidence)."
+    }
+}
+
+public struct GraphMemoryRetrievalExplanation: Sendable, Equatable {
+    public var queryText: String
+    public var summary: String
+    public var cards: [GraphMemoryRetrievalExplanationCard]
+
+    public init(queryText: String, summary: String, cards: [GraphMemoryRetrievalExplanationCard]) {
+        self.queryText = queryText
+        self.summary = summary
+        self.cards = cards
+    }
+}
+
+public struct GraphMemoryRetrievalExplainer: Sendable {
+    public init() {}
+
+    public func explain(query: GraphSearchQuery, response: GraphSearchResponse) -> GraphMemoryRetrievalExplanation {
+        let cards = response.hits.enumerated().map { index, hit in
+            GraphMemoryRetrievalExplanationCard(rank: index + 1, hit: hit)
+        }
+        let summary = "\(cards.count) graph memory hit\(cards.count == 1 ? "" : "s") for query '\(query.text)' using graph \(query.graphID)."
+        return GraphMemoryRetrievalExplanation(queryText: query.text, summary: summary, cards: cards)
+    }
+}
+
 public struct GraphMemoryProductizationCenter: Sendable {
     public var candidateRepository: AppGraphWriteCandidateRepository
     public var holdQueueRepository: AppGraphAdmissionHoldQueueRepository

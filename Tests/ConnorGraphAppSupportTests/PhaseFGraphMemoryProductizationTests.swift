@@ -3,6 +3,7 @@ import Testing
 import ConnorGraphAgent
 import ConnorGraphCore
 import ConnorGraphStore
+import ConnorGraphSearch
 import ConnorGraphAppSupport
 
 @Suite("Phase F Graph Memory Productization Tests")
@@ -67,6 +68,45 @@ struct PhaseFGraphMemoryProductizationTests {
         #expect(dashboard.cards[2].kind == .changeLog)
         #expect(dashboard.cards[2].severity == .success)
     }
+    @Test func graphMemoryRetrievalExplainerBuildsExplainableCards() throws {
+        let query = GraphSearchQuery(text: "用户偏好", graphID: "default", limit: 2)
+        let response = GraphSearchResponse(hits: [
+            GraphSearchHit(
+                ownerType: .entity,
+                ownerID: "entity-1",
+                title: "诗闻",
+                text: "用户偏好系统化设计。",
+                score: 0.92,
+                retrievalMethod: "hybrid+graphiti_local",
+                sourceEpisodeIDs: ["episode-1"],
+                metadata: ["belief_status": "active", "evidence_count": "3"]
+            ),
+            GraphSearchHit(
+                ownerType: .statement,
+                ownerID: "statement-1",
+                title: "偏好陈述",
+                text: "诗闻偏好可追踪的系统设计。",
+                score: 0.71,
+                retrievalMethod: "episode_mentions",
+                sourceEpisodeIDs: ["episode-2"],
+                metadata: ["belief_status": "active"]
+            )
+        ])
+        let explainer = GraphMemoryRetrievalExplainer()
+
+        let explanation = explainer.explain(query: query, response: response)
+
+        #expect(explanation.queryText == "用户偏好")
+        #expect(explanation.cards.count == 2)
+        #expect(explanation.cards[0].memoryID == "entity-1")
+        #expect(explanation.cards[0].rank == 1)
+        #expect(explanation.cards[0].scoreLabel == "92%")
+        #expect(explanation.cards[0].why.contains("hybrid+graphiti_local"))
+        #expect(explanation.cards[0].evidenceEpisodeIDs == ["episode-1"])
+        #expect(explanation.cards[1].kind == .statement)
+        #expect(explanation.summary.contains("2 graph memory hit"))
+    }
+
     @Test func graphMemoryReviewCenterApprovesAndRejectsCandidatesWithEvents() async throws {
         let store = try phaseFStore()
         let pending = GraphWriteCandidate(
