@@ -141,7 +141,7 @@ public struct ConnorNativeShellRouteResolver: Sendable {
         case .productOS:
             ConnorNativeShellRoute(item: item, legacySidebarID: "productOS")
         case .sources:
-            ConnorNativeShellRoute(item: item, legacySidebarID: "runtimeCenter", isPlaceholder: true, placeholderTitle: "Sources runtime UI is not wired yet")
+            ConnorNativeShellRoute(item: item, legacySidebarID: "sources")
         case .skills:
             ConnorNativeShellRoute(item: item, legacySidebarID: "runtimeCenter", isPlaceholder: true, placeholderTitle: "Skills runtime UI is not wired yet")
         case .settings:
