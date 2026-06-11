@@ -61,6 +61,59 @@ private func temporaryPhaseCStoragePaths(_ name: String = UUID().uuidString) -> 
     }
 }
 
+@Test func mcpJSONRPCClientInitializesListsToolsCallsToolAndShutsDown() async throws {
+    let transport = MockMCPClientTransport(responses: [
+        MCPJSONRPCMessage(id: .number(1), result: .object([
+            "protocolVersion": .string("2025-06-18"),
+            "capabilities": .object(["tools": .object([:])]),
+            "serverInfo": .object(["name": .string("mock-mcp"), "version": .string("1.0.0")])
+        ])),
+        MCPJSONRPCMessage(id: .number(2), result: .object([
+            "tools": .array([
+                .object([
+                    "name": .string("search"),
+                    "description": .string("Search external system"),
+                    "inputSchema": .object(["type": .string("object")])
+                ])
+            ])
+        ])),
+        MCPJSONRPCMessage(id: .number(3), result: .object([
+            "content": .array([.object(["type": .string("text"), "text": .string("found")])]),
+            "isError": .bool(false)
+        ]))
+    ])
+    let client = MCPJSONRPCClient(transport: transport, clientName: "Connor", clientVersion: "1.0")
+
+    let initialization = try await client.initialize()
+    let tools = try await client.listTools()
+    let result = try await client.callTool(name: "search", arguments: .object(["query": .string("Connor")]))
+    try await client.shutdown()
+
+    #expect(initialization.protocolVersion == "2025-06-18")
+    #expect(initialization.serverInfo.name == "mock-mcp")
+    #expect(tools.map(\.name) == ["search"])
+    #expect(result.content.first?.text == "found")
+    let sentMethods = await transport.sent.compactMap(\.method)
+    #expect(sentMethods == ["initialize", "notifications/initialized", "tools/list", "tools/call"])
+    #expect(await transport.didClose)
+}
+
+@Test func mcpJSONRPCClientRejectsServerErrors() async throws {
+    let transport = MockMCPClientTransport(responses: [
+        MCPJSONRPCMessage(id: .number(1), error: MCPJSONRPCError(code: -32601, message: "Method not found"))
+    ])
+    let client = MCPJSONRPCClient(transport: transport, clientName: "Connor", clientVersion: "1.0")
+
+    do {
+        _ = try await client.initialize()
+        Issue.record("Expected initialize to fail on JSON-RPC error")
+    } catch let error as MCPJSONRPCClientError {
+        #expect(error == .serverError(code: -32601, message: "Method not found"))
+    } catch {
+        Issue.record("Expected MCPJSONRPCClientError, got \(error)")
+    }
+}
+
 @Test func mcpSourceRuntimeRepositoryProducesProductOSSourceDefinition() throws {
     let config = MCPSourceRuntimeConfiguration(
         sourceID: "github",
