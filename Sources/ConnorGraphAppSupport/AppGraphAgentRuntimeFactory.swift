@@ -64,6 +64,30 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         )
     }
 
+    public func makeClaudeSDKSidecarNativeSessionManager(
+        session: AgentSession = AgentSession(id: "app-session"),
+        sidecarExecutableURL: URL,
+        sidecarArguments: [String] = [],
+        sidecarEnvironment: [String: String] = [:],
+        workingDirectory: URL,
+        permissionMode: AgentPermissionMode = .askToWrite
+    ) -> NativeSessionManager {
+        let transport = ClaudeSDKSidecarProcessTransport(
+            executableURL: sidecarExecutableURL,
+            arguments: sidecarArguments,
+            environment: sidecarEnvironment,
+            currentDirectoryURL: workingDirectory
+        )
+        return NativeSessionManager(
+            backend: ClaudeSDKSidecarBackend(transport: transport, workingDirectory: workingDirectory),
+            sessionRepository: AppChatSessionRepository(store: store),
+            session: session,
+            groupID: groupID,
+            permissionMode: permissionMode,
+            memoryStagingRepository: AppMemoryStagingBufferRepository(store: store)
+        )
+    }
+
     public func makeAgentLoopController(
         permissionMode: AgentPermissionMode = .askToWrite,
         configuration: AgentLoopConfiguration = AgentLoopConfiguration()

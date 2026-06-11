@@ -1,12 +1,21 @@
 # Phase 2: AgentBackend Abstraction and Claude SDK Sidecar
 
-Last updated: 2026-06-11 11:05 GMT+8
+Last updated: 2026-06-11 11:24 GMT+8
 
 ## Status
 
 Phase 2 introduces the Swift-side backend boundary for replacing agent engines without moving product state out of Connor.
 
 This phase does **not** embed the Claude Agent SDK directly into the macOS app. The SDK remains an external sidecar engine. Connor owns sessions, graph memory, permissions, audit, and UI state.
+
+Current implementation status:
+
+- `AgentBackend` is the product-level backend interface.
+- `NativeSessionManager` depends on `AnyAgentBackend`, not a concrete SDK or model provider.
+- `AgentLoopBackend` adapts the existing native loop.
+- `ClaudeSDKSidecarBackend` maps sidecar events into Connor `AgentEvent`.
+- `ClaudeSDKSidecarProcessTransport` runs an external process and bridges one request plus JSONL sidecar events over stdin/stdout.
+- `sidecars/claude-agent-engine/` contains protocol docs plus mock Node/shell sidecars.
 
 ## Boundary
 
@@ -97,15 +106,31 @@ ClaudeSDKSidecarEvent
 
 These are deliberately smaller than the full Claude Agent SDK message union. The Swift boundary should grow only when Connor has a normalized product concept for the event.
 
+## Process Transport
+
+`ClaudeSDKSidecarProcessTransport` is the first real IPC bridge. It:
+
+1. Starts a configured executable.
+2. Writes exactly one `ClaudeSDKSidecarRequest` JSON line to stdin.
+3. Reads stdout as JSONL `ClaudeSDKSidecarEvent` values.
+4. Treats stderr as diagnostics.
+5. Treats non-zero process exit as transport failure.
+
+This transport is intentionally conservative: it validates the process boundary without yet depending on Node/Bun or the real Claude Agent SDK package.
+
 ## Next Slice
 
 Recommended next implementation slice:
 
-1. Add `ClaudeSDKSidecarProcessTransport` in AppSupport.
-2. Store the sidecar executable/scripts under `Application Support/Connor/sidecars/claude-agent-engine/`.
-3. Define a JSONL protocol over stdin/stdout:
-   - Swift writes `ClaudeSDKSidecarRequest`.
-   - Node/Bun sidecar calls `@anthropic-ai/claude-agent-sdk` `query()`.
-   - Sidecar maps SDK messages to `ClaudeSDKSidecarEvent` JSONL.
-4. Keep tests fake-transport based plus one disabled/smoke integration test gated by environment variables.
-5. Add tool/permission event normalization before enabling write-capable tools.
+1. Replace `sidecars/claude-agent-engine/mock-sidecar.mjs` internals with a real Node/Bun sidecar that imports `@anthropic-ai/claude-agent-sdk`.
+2. Call `query(request.prompt, options)` with:
+   - `cwd = request.cwd`
+   - `permissionMode = "bypassPermissions"`
+   - `resume = request.sdkSessionID` only as optional SDK metadata, never as Connor session identity.
+3. Map SDK messages into the existing JSONL protocol:
+   - system/session initialization → `runStarted`
+   - partial assistant streaming → `textDelta`
+   - final assistant/result → `textComplete` + `runCompleted`
+   - SDK errors/result failures → `runFailed`
+4. Add a gated integration test that only runs when a JS runtime and Claude SDK executable are explicitly configured.
+5. Add explicit tool/permission event normalization before enabling write-capable sidecar tools.
