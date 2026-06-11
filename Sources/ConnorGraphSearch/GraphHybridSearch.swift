@@ -20,17 +20,23 @@ public struct GraphRerankingConfig: Sendable, Codable, Equatable {
     public var mmrLambda: Double
     public var crossEncoderTopK: Int?
     public var episodeMentionEpisodeIDs: [String]
+    public var graphExpansionDepth: Int
+    public var candidatePoolMultiplier: Int
 
     public init(
         strategies: [GraphRerankerStrategy] = [.graphitiLocal],
         mmrLambda: Double = 0.5,
         crossEncoderTopK: Int? = nil,
-        episodeMentionEpisodeIDs: [String] = []
+        episodeMentionEpisodeIDs: [String] = [],
+        graphExpansionDepth: Int = 2,
+        candidatePoolMultiplier: Int = 3
     ) {
         self.strategies = strategies
         self.mmrLambda = mmrLambda
         self.crossEncoderTopK = crossEncoderTopK
         self.episodeMentionEpisodeIDs = episodeMentionEpisodeIDs
+        self.graphExpansionDepth = graphExpansionDepth < 0 ? 0 : (graphExpansionDepth > 4 ? 4 : graphExpansionDepth)
+        self.candidatePoolMultiplier = candidatePoolMultiplier < 1 ? 1 : (candidatePoolMultiplier > 10 ? 10 : candidatePoolMultiplier)
     }
 }
 
@@ -92,7 +98,7 @@ public struct GraphSearchQuery: Sendable, Equatable {
         embeddingModel: String? = nil,
         queryEmbedding: [Double]? = nil,
         centerEntityIDs: [String] = [],
-        reranking: GraphRerankingConfig = GraphRerankingConfig()
+        reranking: GraphRerankingConfig = GraphRerankingConfig(strategies: [.graphitiLocal, .episodeMentions])
     ) {
         self.text = text
         self.graphID = graphID

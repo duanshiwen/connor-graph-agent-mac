@@ -64,7 +64,7 @@ private func temporaryHybridSearchDatabaseURL(_ name: String = UUID().uuidString
     let episodeHit = try #require(hitsByID["episode:\(episode.id)"])
 
     #expect(statementHit.retrievalMethod.contains("statement_fts_v3"))
-    #expect(statementHit.retrievalMethod.contains("graph_neighborhood_v1"))
-    #expect(statementHit.metadata["fusion_methods"]?.contains("graph_neighborhood_v1") == true)
+    #expect(statementHit.retrievalMethod.contains("graph_neighborhood_hop1_v2"))
+    #expect(statementHit.metadata["fusion_methods"]?.contains("graph_neighborhood_hop1_v2") == true)
     #expect(episodeHit.retrievalMethod.contains("episode_fts_v3") || episodeHit.retrievalMethod.contains("source_episode_expansion_v1"))
 }
