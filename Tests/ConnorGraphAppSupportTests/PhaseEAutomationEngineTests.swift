@@ -3,6 +3,7 @@ import Testing
 import ConnorGraphAgent
 import ConnorGraphCore
 import ConnorGraphAppSupport
+import ConnorGraphStore
 
 @Suite("Phase E Automation Engine Tests")
 struct PhaseEAutomationEngineTests {
@@ -60,6 +61,83 @@ struct PhaseEAutomationEngineTests {
 
         #expect(run.actionPlans.map(\.disposition) == [.ready])
         #expect(run.records.first?.requiresReview == false)
+    }
+
+    @Test func automationEngineExecutesReadySessionGovernanceActions() throws {
+        let root = temporaryPhaseERoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let paths = AppStoragePaths(applicationSupportDirectory: root)
+        try paths.ensureDirectoryHierarchy()
+        let store = try SQLiteGraphKernelStore(path: paths.databaseURL.path)
+        try store.migrate()
+        let sessionRepository = AppChatSessionRepository(store: store, storagePaths: paths)
+        try sessionRepository.saveSession(AgentSession(id: "session-1", title: "Automation Target"))
+        let repository = AppProductOSAutomationRepository(storagePaths: paths)
+        let rule = ProductOSAutomationRule(
+            id: "important-ready-actions",
+            name: "Important Ready Actions",
+            trigger: ProductOSAutomationTrigger(kind: .sessionLabelAdded, labelID: "important"),
+            actions: [
+                ProductOSAutomationAction(kind: .appendTimelineEvent, message: "Important label changed."),
+                ProductOSAutomationAction(kind: .addSessionLabel, label: AgentSessionLabel(id: "graph-review"), message: "Add graph-review."),
+                ProductOSAutomationAction(kind: .setSessionStatus, status: .needsReview, message: "Move to Needs Review.")
+            ],
+            requiresReview: false
+        )
+        try repository.save(ProductOSAutomationConfig(rules: [rule]))
+        let engine = AutomationEngine(repository: repository)
+        let run = try engine.evaluate(context: ProductOSAutomationEventContext(
+            triggerKind: .sessionLabelAdded,
+            sessionID: "session-1",
+            labelID: "important"
+        ))
+
+        let result = try engine.execute(run: run, sessionRepository: sessionRepository)
+        let session = try #require(try sessionRepository.loadSession(id: "session-1"))
+
+        #expect(result.appliedPlans.count == 3)
+        #expect(result.skippedPlans.isEmpty)
+        #expect(session.governance.status == .needsReview)
+        #expect(session.governance.labels.map(\.id).contains("graph-review"))
+        #expect(result.events.contains { $0.kind == .sessionLabelsChanged })
+        #expect(result.events.contains { $0.kind == .sessionStatusChanged })
+        #expect(result.events.contains { $0.kind == .automationTriggered })
+    }
+
+    @Test func automationEngineDoesNotExecutePendingReviewActions() throws {
+        let root = temporaryPhaseERoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let paths = AppStoragePaths(applicationSupportDirectory: root)
+        try paths.ensureDirectoryHierarchy()
+        let store = try SQLiteGraphKernelStore(path: paths.databaseURL.path)
+        try store.migrate()
+        let sessionRepository = AppChatSessionRepository(store: store, storagePaths: paths)
+        try sessionRepository.saveSession(AgentSession(id: "session-1", title: "Automation Target"))
+        let repository = AppProductOSAutomationRepository(storagePaths: paths)
+        let rule = ProductOSAutomationRule(
+            id: "review-required-actions",
+            name: "Review Required Actions",
+            trigger: ProductOSAutomationTrigger(kind: .sessionStatusChanged, status: .needsReview),
+            actions: [ProductOSAutomationAction(kind: .addSessionLabel, label: AgentSessionLabel(id: "graph-review"), message: "Add graph-review.")],
+            requiresReview: true
+        )
+        try repository.save(ProductOSAutomationConfig(rules: [rule]))
+        let engine = AutomationEngine(repository: repository)
+        let run = try engine.evaluate(context: ProductOSAutomationEventContext(
+            triggerKind: .sessionStatusChanged,
+            sessionID: "session-1",
+            status: .needsReview
+        ))
+
+        let result = try engine.execute(run: run, sessionRepository: sessionRepository)
+        let session = try #require(try sessionRepository.loadSession(id: "session-1"))
+
+        #expect(result.appliedPlans.isEmpty)
+        #expect(result.skippedPlans.count == 1)
+        #expect(session.governance.labels.isEmpty)
+        #expect(result.events.contains { $0.kind == .automationTriggered })
     }
 
     @Test func automationEngineReturnsEmptyRunForNoMatches() throws {
