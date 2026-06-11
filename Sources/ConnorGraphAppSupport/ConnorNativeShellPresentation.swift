@@ -71,6 +71,7 @@ public enum ConnorNativeShellCommandID: String, Codable, Sendable, Equatable, Ha
     case openSources
     case openSkills
     case openAutomation
+    case checkCommercialReadiness
     case openSettings
 
     public var id: String { rawValue }
@@ -213,6 +214,7 @@ public struct ConnorNativeShellPresentation: Codable, Sendable, Equatable {
             ConnorNativeShellCommand(id: .openSources, title: "Open Sources", systemImage: "externaldrive.connected.to.line.below", keyboardShortcut: "⌘4", target: .sources),
             ConnorNativeShellCommand(id: .openSkills, title: "Open Skills", systemImage: "sparkles.rectangle.stack", keyboardShortcut: "⌘5", target: .skills),
             ConnorNativeShellCommand(id: .openAutomation, title: "Open Automation", systemImage: "bolt.badge.clock", keyboardShortcut: "⌘6", target: .automation),
+            ConnorNativeShellCommand(id: .checkCommercialReadiness, title: "Check Commercial Readiness", systemImage: "checkmark.seal", target: .productOS),
             ConnorNativeShellCommand(id: .openSettings, title: "Open Settings", systemImage: "gearshape", keyboardShortcut: "⌘,", target: .settings)
         ]
     )

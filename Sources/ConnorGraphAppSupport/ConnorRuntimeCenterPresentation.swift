@@ -7,6 +7,7 @@ public enum ConnorRuntimeMetricID: String, Codable, Sendable, Equatable, Hashabl
     case pendingApprovals
     case memoryReviews
     case automationTriggers
+    case commercialReadiness
 
     public var id: String { rawValue }
 }
@@ -34,6 +35,7 @@ public enum ConnorRuntimeSectionID: String, Codable, Sendable, Equatable, Hashab
     case reviewQueue
     case graphMemory
     case automation
+    case commercialReadiness
 
     public var id: String { rawValue }
 }
@@ -110,6 +112,7 @@ public struct ConnorRuntimeCenterPresentation: Codable, Sendable, Equatable {
         pendingApprovals: [AgentPendingApproval],
         automationTriggers: [ProductOSAutomationTriggerRecord],
         graphMemoryDashboard: GraphMemoryDashboard?,
+        commercialReadinessDashboard: CommercialReadinessDashboard? = nil,
         now: Date = Date()
     ) -> ConnorRuntimeCenterPresentation {
         let activeSessions = sessions.filter { !$0.isArchived && $0.status != .done }
@@ -123,12 +126,22 @@ public struct ConnorRuntimeCenterPresentation: Codable, Sendable, Equatable {
             updatedText: featured.map { relativeTime(from: $0.updatedAt, to: now) } ?? "—"
         )
 
-        let metrics = [
+        var metrics = [
             ConnorRuntimeMetricTile(id: .activeSessions, title: "Active sessions", value: "\(activeSessions.count)", subtitle: "running workspaces", severity: activeSessions.isEmpty ? .info : .success, target: .agentChat),
             ConnorRuntimeMetricTile(id: .pendingApprovals, title: "Pending approvals", value: "\(pendingApprovals.count)", subtitle: "human review gates", severity: pendingApprovals.isEmpty ? .success : .warning, target: .approvals),
             ConnorRuntimeMetricTile(id: .memoryReviews, title: "Memory reviews", value: "\(memoryReviews)", subtitle: "candidates + holds", severity: memoryReviews == 0 ? .success : .warning, target: .graphMemory),
             ConnorRuntimeMetricTile(id: .automationTriggers, title: "Automation triggers", value: "\(automationTriggers.count)", subtitle: "recent governed actions", severity: automationTriggers.contains { $0.requiresReview } ? .warning : .info, target: .automation)
         ]
+        if let commercialReadinessDashboard {
+            metrics.append(ConnorRuntimeMetricTile(
+                id: .commercialReadiness,
+                title: "Commercial readiness",
+                value: "\(commercialReadinessDashboard.readyCount)/\(commercialReadinessDashboard.cards.count)",
+                subtitle: commercialReadinessDashboard.overallStatus == .ready ? "all phases ready" : "blocked phases require review",
+                severity: commercialReadinessDashboard.overallStatus == .ready ? .success : .warning,
+                target: .productOS
+            ))
+        }
 
         let timelineItems = events.map { event in
             ConnorRuntimeCenterItem(
@@ -171,15 +184,35 @@ public struct ConnorRuntimeCenterPresentation: Codable, Sendable, Equatable {
             )
         }
 
+        var sections = [
+            ConnorRuntimeCenterSection(id: .runTimeline, title: "Run Timeline", subtitle: "Latest agent events", items: timelineItems, target: .runtimeCenter),
+            ConnorRuntimeCenterSection(id: .reviewQueue, title: "Review Queue", subtitle: "Permissions and human gates", items: approvalItems, target: .approvals),
+            ConnorRuntimeCenterSection(id: .graphMemory, title: "Graph Memory", subtitle: "Review center", items: memoryItems, target: .graphMemory),
+            ConnorRuntimeCenterSection(id: .automation, title: "Automation", subtitle: "Governed triggers", items: automationItems, target: .automation)
+        ]
+        if let commercialReadinessDashboard {
+            sections.append(ConnorRuntimeCenterSection(
+                id: .commercialReadiness,
+                title: "Commercial Readiness",
+                subtitle: commercialReadinessDashboard.summary,
+                items: commercialReadinessDashboard.cards.map { card in
+                    ConnorRuntimeCenterItem(
+                        id: card.id,
+                        title: card.title,
+                        subtitle: card.status.rawValue,
+                        detail: card.evidence,
+                        severity: card.status == .ready ? .success : .warning,
+                        target: card.target
+                    )
+                },
+                target: .productOS
+            ))
+        }
+
         return ConnorRuntimeCenterPresentation(
             hero: hero,
             metricTiles: metrics,
-            sections: [
-                ConnorRuntimeCenterSection(id: .runTimeline, title: "Run Timeline", subtitle: "Latest agent events", items: timelineItems, target: .runtimeCenter),
-                ConnorRuntimeCenterSection(id: .reviewQueue, title: "Review Queue", subtitle: "Permissions and human gates", items: approvalItems, target: .approvals),
-                ConnorRuntimeCenterSection(id: .graphMemory, title: "Graph Memory", subtitle: "Review center", items: memoryItems, target: .graphMemory),
-                ConnorRuntimeCenterSection(id: .automation, title: "Automation", subtitle: "Governed triggers", items: automationItems, target: .automation)
-            ]
+            sections: sections
         )
     }
 
