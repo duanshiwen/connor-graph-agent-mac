@@ -83,8 +83,12 @@ public struct AgentEventPresenter: Sendable {
                 severity: .warning
             )
         case .permissionResolved(let decision):
-            let severity: AgentEventPresentationSeverity = decision.outcome == .approved ? .success : .warning
-            return item(event, title: "Permission \(decision.outcome.rawValue)", detail: decision.reason, severity: severity)
+            return item(
+                event,
+                title: "Permission \(permissionResolutionLabel(decision.outcome)): \(decision.capability.rawValue)",
+                detail: "Request \(decision.requestID) · \(trimmedDetail(decision.reason))",
+                severity: permissionResolutionSeverity(decision.outcome)
+            )
         case .budgetWarning(let warning):
             return item(event, title: "Budget warning", detail: warning.message, severity: .warning)
         case .runFailed(let failure):
@@ -103,6 +107,22 @@ public struct AgentEventPresenter: Sendable {
             runID: event.runID,
             sessionID: event.sessionID
         )
+    }
+
+    private func permissionResolutionLabel(_ outcome: AgentPermissionOutcome) -> String {
+        switch outcome {
+        case .approved: "approved"
+        case .denied: "denied"
+        case .needsApproval: "needs approval"
+        }
+    }
+
+    private func permissionResolutionSeverity(_ outcome: AgentPermissionOutcome) -> AgentEventPresentationSeverity {
+        switch outcome {
+        case .approved: .success
+        case .denied: .error
+        case .needsApproval: .warning
+        }
     }
 
     private func compactJSON(_ json: String) -> String {
