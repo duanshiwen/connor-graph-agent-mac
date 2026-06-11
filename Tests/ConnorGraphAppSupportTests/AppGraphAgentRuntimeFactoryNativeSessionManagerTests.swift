@@ -60,3 +60,34 @@ private func temporaryFactoryNativeSessionDatabaseURL(_ name: String = UUID().uu
     #expect(loaded.messages.first?.content == "Use the native session manager path")
     #expect(loaded.messages.last?.content.isEmpty == false)
 }
+
+@Test func appGraphAgentRuntimeFactoryCreatesClaudeSidecarNativeSessionManager() async throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryFactoryNativeSessionDatabaseURL().path)
+    try store.migrate()
+    let settingsRepository = AppLLMSettingsRepository(
+        settingsStore: FactoryNativeSessionSettingsStore(),
+        credentialStore: FactoryNativeSessionCredentialStore()
+    )
+    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: settingsRepository)
+    let session = AgentSession(id: "factory-sidecar-session", title: "Sidecar Chat")
+    let sidecarURL = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("sidecars/claude-agent-engine/mock-sidecar.sh")
+    var manager = factory.makeClaudeSDKSidecarNativeSessionManager(
+        session: session,
+        sidecarExecutableURL: sidecarURL,
+        workingDirectory: sidecarURL.deletingLastPathComponent(),
+        permissionMode: .readOnly
+    )
+
+    let response = try await manager.submit("Use the Claude SDK sidecar process path")
+    let loaded = try #require(try AppChatSessionRepository(store: store).loadSession(id: "factory-sidecar-session"))
+
+    #expect(response.events.map(\.kind).contains(.runStarted))
+    #expect(response.events.map(\.kind).contains(.runCompleted))
+    #expect(loaded.messages.map(\.role) == [.user, .assistant])
+    #expect(loaded.messages.first?.content == "Use the Claude SDK sidecar process path")
+    #expect(loaded.messages.last?.content == "Mock Claude shell sidecar received a Connor request")
+}

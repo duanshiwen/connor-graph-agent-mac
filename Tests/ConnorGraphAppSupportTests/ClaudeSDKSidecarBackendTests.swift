@@ -80,3 +80,57 @@ private actor FakeClaudeSDKSidecarTransport: ClaudeSDKSidecarTransport {
         Issue.record("Expected runStarted event")
     }
 }
+
+@Test func claudeSDKSidecarProcessTransportWritesRequestAndReadsJSONLEvents() async throws {
+    let temporaryDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorSidecarTransportTests-")
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+    let capturedRequestURL = temporaryDirectory.appendingPathComponent("request.jsonl")
+    let scriptURL = temporaryDirectory.appendingPathComponent("mock-sidecar.sh")
+    try """
+    #!/bin/sh
+    IFS= read -r request
+    printf '%s\n' "$request" > "$CONNOR_CAPTURED_REQUEST"
+    printf '%s\n' '{"runStarted":{"sdkSessionID":"sdk-process-session"}}'
+    printf '%s\n' '{"textDelta":{"text":"Hello"}}'
+    printf '%s\n' '{"textComplete":{"text":"Hello from process","citations":["process"],"contextSnapshot":null}}'
+    printf '%s\n' '{"runCompleted":{}}'
+    """.write(to: scriptURL, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+    let transport = ClaudeSDKSidecarProcessTransport(
+        executableURL: URL(fileURLWithPath: "/bin/sh"),
+        arguments: [scriptURL.path],
+        environment: ["CONNOR_CAPTURED_REQUEST": capturedRequestURL.path]
+    )
+    let request = ClaudeSDKSidecarRequest(
+        connorRunID: "run-process",
+        connorSessionID: "session-process",
+        groupID: "default",
+        prompt: "Use the process transport",
+        cwd: temporaryDirectory.path,
+        permissionMode: .askToWrite
+    )
+
+    var events: [ClaudeSDKSidecarEvent] = []
+    for try await event in await transport.stream(request) {
+        events.append(event)
+    }
+
+    let capturedData = try Data(contentsOf: capturedRequestURL)
+    let captured = try JSONDecoder().decode(ClaudeSDKSidecarRequest.self, from: capturedData)
+    #expect(captured.connorRunID == "run-process")
+    #expect(captured.connorSessionID == "session-process")
+    #expect(captured.prompt == "Use the process transport")
+    #expect(captured.sdkPermissionMode == "bypassPermissions")
+    #expect(captured.ownsProductState == false)
+    #expect(events == [
+        .runStarted(ClaudeSDKSidecarRunStarted(sdkSessionID: "sdk-process-session")),
+        .textDelta(ClaudeSDKSidecarTextDelta(text: "Hello")),
+        .textComplete(ClaudeSDKSidecarTextComplete(text: "Hello from process", citations: ["process"])),
+        .runCompleted(ClaudeSDKSidecarRunCompleted())
+    ])
+}

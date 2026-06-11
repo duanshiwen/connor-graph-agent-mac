@@ -1,0 +1,10 @@
+{
+  "name": "connor-claude-agent-engine-sidecar",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Connor Claude Agent SDK sidecar protocol skeleton. Real SDK dependency is intentionally deferred.",
+  "scripts": {
+    "mock": "node mock-sidecar.mjs"
+  }
+}
