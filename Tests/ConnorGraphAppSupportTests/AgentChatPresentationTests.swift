@@ -140,6 +140,62 @@ import ConnorGraphAppSupport
     #expect(pending.processingSummary == "正在准备图谱上下文和提示词…")
 }
 
+@Test func agentEventPresenterSummarizesToolAndPermissionTimelineEvents() {
+    let presenter = AgentEventPresenter()
+    let toolCall = AgentToolCall(
+        id: "tool-1",
+        runID: "run-1",
+        sessionID: "session-1",
+        name: "Read",
+        argumentsJSON: "{\"file_path\":\"README.md\"}"
+    )
+    let permission = AgentPermissionRequest(
+        id: "permission-tool-1",
+        runID: "run-1",
+        sessionID: "session-1",
+        capability: .readSession,
+        toolName: "Read",
+        payloadJSON: "{\"file_path\":\"README.md\"}"
+    )
+    let result = AgentToolResult(
+        runID: "run-1",
+        sessionID: "session-1",
+        toolCallID: "tool-1",
+        toolName: "Read",
+        contentText: "README contents"
+    )
+    let failure = AgentToolFailure(
+        runID: "run-1",
+        sessionID: "session-1",
+        toolCallID: "tool-1",
+        toolName: "Write",
+        message: "Denied by Connor policy"
+    )
+
+    let rows = [
+        presenter.presentation(for: .toolRequested(toolCall)),
+        presenter.presentation(for: .permissionRequested(permission)),
+        presenter.presentation(for: .toolStarted(toolCall)),
+        presenter.presentation(for: .toolFinished(result)),
+        presenter.presentation(for: .toolFailed(failure))
+    ]
+
+    #expect(rows.map(\.title) == [
+        "Tool requested: Read",
+        "Permission requested: readSession",
+        "Tool running: Read",
+        "Tool finished: Read",
+        "Tool failed: Write"
+    ])
+    #expect(rows.map(\.severity) == [.info, .warning, .info, .success, .error])
+    #expect(rows[0].detail == "Call tool-1 · Arguments: {\"file_path\":\"README.md\"}")
+    #expect(rows[1].detail == "Request permission-tool-1 · Tool: Read · Payload: {\"file_path\":\"README.md\"}")
+    #expect(rows[2].detail == "Call tool-1 is executing.")
+    #expect(rows[3].detail == "Call tool-1 · README contents")
+    #expect(rows[4].detail == "Call tool-1 · Denied by Connor policy")
+    #expect(rows.allSatisfy { $0.runID == "run-1" && $0.sessionID == "session-1" })
+}
+
 @Test func agentChatMessagePresentationShowsLastContextOnlyForLatestAssistantMessage() {
     let context = AgentContext(
         query: "memory",
