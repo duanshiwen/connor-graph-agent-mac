@@ -15,13 +15,17 @@ struct ConnorRuntimeCenterView: View {
 
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 164), spacing: 12)], spacing: 12) {
                     ForEach(presentation.metricTiles) { tile in
-                        RuntimeMetricTileView(tile: tile)
+                        RuntimeMetricTileView(tile: tile) { target in
+                            viewModel.navigate(to: target)
+                        }
                     }
                 }
 
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 320), spacing: 14)], spacing: 14) {
                     ForEach(presentation.sections) { section in
-                        RuntimeSectionCard(section: section)
+                        RuntimeSectionCard(section: section) { target in
+                            viewModel.navigate(to: target)
+                        }
                     }
                 }
             }
@@ -85,9 +89,11 @@ private struct RuntimeHeroCard: View {
 
 private struct RuntimeMetricTileView: View {
     var tile: ConnorRuntimeMetricTile
+    var onNavigate: (ConnorNativeShellItem) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        Button(action: { if let target = tile.target { onNavigate(target) } }) {
+            VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Circle()
                     .fill(color(for: tile.severity))
@@ -103,24 +109,33 @@ private struct RuntimeMetricTileView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(tile.target == nil)
     }
 }
 
 private struct RuntimeSectionCard: View {
     var section: ConnorRuntimeCenterSection
+    var onNavigate: (ConnorNativeShellItem) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(section.title)
-                    .font(.headline)
-                Text(section.subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            Button(action: { if let target = section.target { onNavigate(target) } }) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(section.title)
+                        .font(.headline)
+                    Text(section.subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .buttonStyle(.plain)
+            .disabled(section.target == nil)
 
             if section.items.isEmpty {
                 Text("No items")
@@ -130,7 +145,9 @@ private struct RuntimeSectionCard: View {
             } else {
                 VStack(spacing: 8) {
                     ForEach(section.items.prefix(5)) { item in
-                        RuntimeCenterRow(item: item)
+                        RuntimeCenterRow(item: item) { target in
+                            onNavigate(target)
+                        }
                     }
                 }
             }
@@ -143,9 +160,11 @@ private struct RuntimeSectionCard: View {
 
 private struct RuntimeCenterRow: View {
     var item: ConnorRuntimeCenterItem
+    var onNavigate: (ConnorNativeShellItem) -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        Button(action: { if let target = item.target { onNavigate(target) } }) {
+            HStack(alignment: .top, spacing: 10) {
             Circle()
                 .fill(color(for: item.severity))
                 .frame(width: 8, height: 8)
@@ -166,8 +185,11 @@ private struct RuntimeCenterRow: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(10)
-        .background(.quaternary.opacity(0.18), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .padding(10)
+            .background(.quaternary.opacity(0.18), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(item.target == nil)
     }
 }
 

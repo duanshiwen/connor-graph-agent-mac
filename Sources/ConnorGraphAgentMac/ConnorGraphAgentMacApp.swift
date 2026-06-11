@@ -8,10 +8,43 @@ import ConnorGraphAppSupport
 
 @main
 struct ConnorGraphAgentMacApp: App {
+    @StateObject private var viewModel = AppViewModel.live()
+
     var body: some Scene {
         WindowGroup {
-            AppShellView(viewModel: AppViewModel.live())
+            AppShellView(viewModel: viewModel)
         }
+        .commands {
+            CommandMenu("Connor") {
+                Button("Open Command Palette") {
+                    viewModel.isCommandPalettePresented = true
+                }
+                .keyboardShortcut("k", modifiers: .command)
+
+                Divider()
+
+                ForEach(ConnorNativeShellPresentation.default.commands) { command in
+                    Button(command.title) {
+                        viewModel.performShellCommand(command.id)
+                    }
+                    .keyboardShortcut(keyEquivalent(for: command), modifiers: .command)
+                }
+            }
+        }
+    }
+}
+
+private func keyEquivalent(for command: ConnorNativeShellCommand) -> KeyEquivalent {
+    switch command.id {
+    case .newSession: "n"
+    case .toggleBrowser: "b"
+    case .openRuntimeCenter: "1"
+    case .openGraphMemoryReview: "2"
+    case .openApprovals: "3"
+    case .openSources: "4"
+    case .openSkills: "5"
+    case .openAutomation: "6"
+    case .openSettings: ","
     }
 }
 
@@ -26,7 +59,10 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case pendingApprovals = "权限审批"
     case memoryChangeLog = "记忆变更"
     case extractionDiagnostics = "记忆准入"
+    case automation = "自动化"
     case productOS = "Product OS"
+    case sources = "Sources"
+    case skills = "Skills"
     case llmSettings = "模型设置"
 
     var id: String { rawValue }
@@ -78,6 +114,9 @@ final class AppViewModel: ObservableObject {
     @Published var productOSRegistry: ProductOSRegistrySnapshot = .default
     @Published var automationConfig: ProductOSAutomationConfig = .default
     @Published var automationTriggerRecords: [ProductOSAutomationTriggerRecord] = []
+    @Published var automationExecutionHistory: [ProductOSAutomationExecutionHistoryRecord] = []
+    @Published var sourceRuntimeConfigurations: [MCPSourceRuntimeConfiguration] = []
+    @Published var skillRuntimeDefinitions: [SkillRuntimeDefinition] = []
     @Published var productOSRegistryMessage: String?
     @Published var selectedSessionArtifactDirectories: AgentSessionArtifactDirectories?
     @Published var latestChatSummary: AgentSessionSummary?
@@ -86,6 +125,7 @@ final class AppViewModel: ObservableObject {
     @Published var isSubmittingChat: Bool = false
     @Published var agentEventTimeline: [AgentEventPresentation] = []
     @Published var isBrowserVisible: Bool = false
+    @Published var isCommandPalettePresented: Bool = false
 
     private var repository: AppGraphRepository?
     private var promotionRepository: AppPromotionQueueRepository?
@@ -97,6 +137,8 @@ final class AppViewModel: ObservableObject {
     private var chatSessionRepository: AppChatSessionRepository?
     private var productOSRegistryRepository: AppProductOSRegistryRepository?
     private var automationRepository: AppProductOSAutomationRepository?
+    private var sourceRuntimeRepository: AppMCPSourceRuntimeRepository?
+    private var skillRuntimeRepository: AppSkillRuntimeRepository?
     private var storagePaths: AppStoragePaths?
     private var llmSettingsRepository: AppLLMSettingsRepository
     private var llmProviderHealthChecker: AppLLMProviderHealthChecker
@@ -114,6 +156,62 @@ final class AppViewModel: ObservableObject {
 
     private var activeChatTranscript: [AgentMessage] {
         nativeSessionManager?.session.messages ?? legacyChatController.transcript
+    }
+
+    func navigate(to item: ConnorNativeShellItem) {
+        switch item {
+        case .runtimeCenter:
+            selection = .runtimeCenter
+        case .agentChat:
+            isBrowserVisible = false
+            selection = .agentChat
+        case .browserWorkspace:
+            isBrowserVisible = true
+            selection = .agentChat
+        case .graphMemory:
+            selection = .graphWriteCandidates
+        case .search:
+            selection = .search
+        case .graphEntities:
+            selection = .entities
+        case .approvals:
+            selection = .pendingApprovals
+        case .automation:
+            selection = .automation
+        case .productOS:
+            selection = .productOS
+        case .sources:
+            selection = .sources
+        case .skills:
+            selection = .skills
+        case .settings:
+            selection = .llmSettings
+        }
+    }
+
+    func performShellCommand(_ commandID: ConnorNativeShellCommandID) {
+        switch commandID {
+        case .newSession:
+            newChatSession()
+            navigate(to: .agentChat)
+        case .toggleBrowser:
+            isBrowserVisible.toggle()
+            navigate(to: isBrowserVisible ? .browserWorkspace : .agentChat)
+        case .openRuntimeCenter, .openGraphMemoryReview, .openApprovals, .openSources, .openSkills, .openAutomation, .openSettings:
+            if let command = ConnorNativeShellPresentation.default.command(for: commandID) {
+                navigate(to: command.target)
+            }
+        }
+    }
+
+    func openDeepLink(_ url: URL) {
+        do {
+            let resolution = try ConnorDeepLinkNavigator().resolve(url)
+            navigate(to: resolution.item)
+            errorMessage = nil
+        } catch {
+            errorMessage = "Unsupported Connor link: \(url.absoluteString)"
+        }
     }
 
     var runtimeCenterPresentation: ConnorRuntimeCenterPresentation {
@@ -221,6 +319,8 @@ final class AppViewModel: ObservableObject {
         if let storagePaths {
             self.productOSRegistryRepository = AppProductOSRegistryRepository(storagePaths: storagePaths)
             self.automationRepository = AppProductOSAutomationRepository(storagePaths: storagePaths)
+            self.sourceRuntimeRepository = AppMCPSourceRuntimeRepository(storagePaths: storagePaths)
+            self.skillRuntimeRepository = AppSkillRuntimeRepository(storagePaths: storagePaths)
         }
         if let repository {
             self.promotionRepository = AppPromotionQueueRepository(store: repository.store)
@@ -244,6 +344,9 @@ final class AppViewModel: ObservableObject {
         loadLLMSettings()
         reloadProductOSRegistry()
         reloadAutomationConfig()
+        reloadAutomationExecutionHistory()
+        reloadSourceRuntimeConfigurations()
+        reloadSkillRuntimeDefinitions()
         reloadChatSessions()
         reloadSchemaHealthReport()
         reloadGraphExtractionTraces()
@@ -450,6 +553,33 @@ final class AppViewModel: ObservableObject {
                 automationConfig = try automationRepository.loadOrCreateDefault(governanceConfig: governanceConfig)
                 automationTriggerRecords = try automationRepository.loadRecentTriggerRecords()
             }
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func reloadAutomationExecutionHistory() {
+        do {
+            automationExecutionHistory = try automationRepository?.loadRecentExecutionHistory() ?? []
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func reloadSourceRuntimeConfigurations() {
+        do {
+            sourceRuntimeConfigurations = try sourceRuntimeRepository?.list() ?? []
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func reloadSkillRuntimeDefinitions() {
+        do {
+            skillRuntimeDefinitions = try skillRuntimeRepository?.list() ?? []
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -1170,14 +1300,23 @@ struct AppShellView: View {
                         MemoryChangeLogView(viewModel: viewModel)
                     case .extractionDiagnostics:
                         GraphExtractionDiagnosticsView(viewModel: viewModel)
+                    case .automation:
+                        AutomationRuntimePanelView(viewModel: viewModel)
                     case .productOS:
                         ProductOSRegistryView(viewModel: viewModel)
+                    case .sources:
+                        SourceRuntimePanelView(viewModel: viewModel)
+                    case .skills:
+                        SkillRuntimePanelView(viewModel: viewModel)
                     case .llmSettings:
                         LLMSettingsView(viewModel: viewModel)
                     }
                 }
             }
             .frame(minWidth: 720, minHeight: 480)
+        }
+        .sheet(isPresented: $viewModel.isCommandPalettePresented) {
+            ConnorCommandPaletteView(viewModel: viewModel)
         }
     }
 }
