@@ -7,12 +7,41 @@ public protocol AgentPendingApprovalRepository: Sendable {
     func upsert(pendingApproval approval: AgentPendingApproval) throws
 }
 
+public struct NativeSessionRuntimeState: Codable, Sendable, Equatable {
+    public var isProcessing: Bool
+    public var activeRunID: String?
+    public var lastRunID: String?
+    public var lastStartedAt: Date?
+    public var lastCompletedAt: Date?
+    public var lastFailureMessage: String?
+    public var cancellationReason: String?
+
+    public init(
+        isProcessing: Bool = false,
+        activeRunID: String? = nil,
+        lastRunID: String? = nil,
+        lastStartedAt: Date? = nil,
+        lastCompletedAt: Date? = nil,
+        lastFailureMessage: String? = nil,
+        cancellationReason: String? = nil
+    ) {
+        self.isProcessing = isProcessing
+        self.activeRunID = activeRunID
+        self.lastRunID = lastRunID
+        self.lastStartedAt = lastStartedAt
+        self.lastCompletedAt = lastCompletedAt
+        self.lastFailureMessage = lastFailureMessage
+        self.cancellationReason = cancellationReason
+    }
+}
+
 public struct NativeSessionManager: Sendable {
     public var backend: AnyAgentBackend
     public var sessionRepository: AppChatSessionRepository
     public private(set) var session: AgentSession
     public private(set) var events: [AgentEvent]
     public private(set) var eventPresentations: [AgentEventPresentation]
+    public private(set) var runtimeState: NativeSessionRuntimeState
     public var groupID: String
     public var permissionMode: AgentPermissionMode
 
@@ -38,6 +67,7 @@ public struct NativeSessionManager: Sendable {
         self.session = session
         self.events = []
         self.eventPresentations = []
+        self.runtimeState = NativeSessionRuntimeState()
         self.groupID = groupID
         self.permissionMode = permissionMode
         self.presenter = AgentEventPresenter()
@@ -78,6 +108,13 @@ public struct NativeSessionManager: Sendable {
             userMessage: prompt,
             permissionMode: permissionMode
         )
+        runtimeState.isProcessing = true
+        runtimeState.activeRunID = request.runID
+        runtimeState.lastRunID = request.runID
+        runtimeState.lastStartedAt = Date()
+        runtimeState.lastCompletedAt = nil
+        runtimeState.lastFailureMessage = nil
+        runtimeState.cancellationReason = nil
 
         var collectedEvents: [AgentEvent] = []
         var collectedPresentations: [AgentEventPresentation] = []
@@ -108,6 +145,9 @@ public struct NativeSessionManager: Sendable {
                 }
             }
 
+            runtimeState.isProcessing = false
+            runtimeState.activeRunID = nil
+            runtimeState.lastCompletedAt = Date()
             return AgentLoopChatResponse(
                 session: session,
                 events: collectedEvents,
@@ -115,10 +155,30 @@ public struct NativeSessionManager: Sendable {
                 assistantMessage: assistantMessage
             )
         } catch {
+            runtimeState.isProcessing = false
+            runtimeState.activeRunID = nil
+            runtimeState.lastCompletedAt = Date()
+            runtimeState.lastFailureMessage = String(describing: error)
             // Connor owns session state. A backend failure must not roll back the user's input.
             try persistSession()
             throw error
         }
+    }
+
+    public mutating func cancelActiveRun(reason: String = "cancelled by user") {
+        guard let runID = runtimeState.activeRunID else { return }
+        cancel(runID: runID, reason: reason)
+    }
+
+    public mutating func cancel(runID: String, reason: String = "cancelled by user") {
+        runtimeState.cancellationReason = reason
+        if runtimeState.activeRunID == runID {
+            runtimeState.isProcessing = false
+            runtimeState.activeRunID = nil
+            runtimeState.lastCompletedAt = Date()
+        }
+        runtimeState.lastRunID = runID
+        backend.abort(runID: runID)
     }
 
     private func persistSession() throws {
