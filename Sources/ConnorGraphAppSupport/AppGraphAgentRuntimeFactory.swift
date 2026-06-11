@@ -21,15 +21,18 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     public var store: SQLiteGraphKernelStore
     public var settingsRepository: AppLLMSettingsRepository
     public var groupID: String
+    public var storagePaths: AppStoragePaths?
 
     public init(
         store: SQLiteGraphKernelStore,
         settingsRepository: AppLLMSettingsRepository,
-        groupID: String = "default"
+        groupID: String = "default",
+        storagePaths: AppStoragePaths? = nil
     ) {
         self.store = store
         self.settingsRepository = settingsRepository
         self.groupID = groupID
+        self.storagePaths = storagePaths
     }
 
     /// Legacy simple ask runtime retained for compatibility and tests.
@@ -114,7 +117,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         return try GovernedClaudeSDKSidecarRuntime(
             transport: transport,
             workingDirectory: workingDirectory,
-            permissionMode: settings.sidecarPermissionMode
+            permissionMode: settings.sidecarPermissionMode,
+            runtimeStore: makeClaudeSDKSidecarRuntimeStore()
         )
     }
 
@@ -159,13 +163,19 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         let runtime = try GovernedClaudeSDKSidecarRuntime(
             transport: transport,
             workingDirectory: workingDirectory,
-            permissionMode: permissionMode
+            permissionMode: permissionMode,
+            runtimeStore: makeClaudeSDKSidecarRuntimeStore()
         )
         return makeClaudeSDKSidecarNativeSessionManager(
             backend: runtime,
             session: session,
             permissionMode: permissionMode
         )
+    }
+
+    private func makeClaudeSDKSidecarRuntimeStore() -> AppClaudeSDKSidecarRuntimeStore? {
+        guard let storagePaths else { return nil }
+        return AppClaudeSDKSidecarRuntimeStore(configDirectory: storagePaths.configDirectory)
     }
 
     private func makeClaudeSDKSidecarNativeSessionManager<Backend: AgentBackend>(
