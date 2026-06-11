@@ -95,6 +95,61 @@ public struct ConnorNativeShellCommand: Codable, Sendable, Equatable, Identifiab
     }
 }
 
+public struct ConnorNativeShellRoute: Codable, Sendable, Equatable {
+    public var item: ConnorNativeShellItem
+    public var legacySidebarID: String
+    public var requiresBrowserVisible: Bool
+    public var isPlaceholder: Bool
+    public var placeholderTitle: String?
+
+    public init(
+        item: ConnorNativeShellItem,
+        legacySidebarID: String,
+        requiresBrowserVisible: Bool = false,
+        isPlaceholder: Bool = false,
+        placeholderTitle: String? = nil
+    ) {
+        self.item = item
+        self.legacySidebarID = legacySidebarID
+        self.requiresBrowserVisible = requiresBrowserVisible
+        self.isPlaceholder = isPlaceholder
+        self.placeholderTitle = placeholderTitle
+    }
+}
+
+public struct ConnorNativeShellRouteResolver: Sendable {
+    public init() {}
+
+    public func route(for item: ConnorNativeShellItem) -> ConnorNativeShellRoute {
+        switch item {
+        case .runtimeCenter:
+            ConnorNativeShellRoute(item: item, legacySidebarID: "runtimeCenter")
+        case .agentChat:
+            ConnorNativeShellRoute(item: item, legacySidebarID: "agentChat")
+        case .browserWorkspace:
+            ConnorNativeShellRoute(item: item, legacySidebarID: "agentChat", requiresBrowserVisible: true)
+        case .graphMemory:
+            ConnorNativeShellRoute(item: item, legacySidebarID: "graphWriteCandidates")
+        case .search:
+            ConnorNativeShellRoute(item: item, legacySidebarID: "search")
+        case .graphEntities:
+            ConnorNativeShellRoute(item: item, legacySidebarID: "entities")
+        case .approvals:
+            ConnorNativeShellRoute(item: item, legacySidebarID: "pendingApprovals")
+        case .automation:
+            ConnorNativeShellRoute(item: item, legacySidebarID: "productOS")
+        case .productOS:
+            ConnorNativeShellRoute(item: item, legacySidebarID: "productOS")
+        case .sources:
+            ConnorNativeShellRoute(item: item, legacySidebarID: "runtimeCenter", isPlaceholder: true, placeholderTitle: "Sources runtime UI is not wired yet")
+        case .skills:
+            ConnorNativeShellRoute(item: item, legacySidebarID: "runtimeCenter", isPlaceholder: true, placeholderTitle: "Skills runtime UI is not wired yet")
+        case .settings:
+            ConnorNativeShellRoute(item: item, legacySidebarID: "llmSettings")
+        }
+    }
+}
+
 public struct ConnorNativeShellPresentation: Codable, Sendable, Equatable {
     public var title: String
     public var defaultSelection: ConnorNativeShellItem
