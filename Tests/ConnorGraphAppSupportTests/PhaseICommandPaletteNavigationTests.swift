@@ -1,5 +1,7 @@
 import Foundation
 import Testing
+import ConnorGraphAgent
+import ConnorGraphCore
 import ConnorGraphAppSupport
 
 @Suite("Phase I Command Palette Deep-link Navigation Tests")
@@ -43,5 +45,49 @@ struct PhaseICommandPaletteNavigationTests {
         #expect(automation.item == ConnorNativeShellItem.automation)
         #expect(automation.focus == "history")
         #expect(browser.requiresBrowserVisible == true)
+    }
+
+    @Test func runtimeCenterMetricAndSectionsExposeClickThroughDestinations() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let approval = AgentPendingApproval(
+            requestID: "request-1",
+            runID: "run-1",
+            sessionID: "session-1",
+            capability: .externalNetwork,
+            toolName: "linear.list_issues",
+            payloadJSON: "{}",
+            status: .pending,
+            createdAt: now,
+            updatedAt: now
+        )
+        let trigger = ProductOSAutomationTriggerRecord(
+            id: "trigger-1",
+            ruleID: "rule-1",
+            ruleName: "Rule One",
+            trigger: .sessionStatusChanged,
+            sessionID: "session-1",
+            actionSummaries: ["append timeline"],
+            requiresReview: true
+        )
+        let presentation = ConnorRuntimeCenterPresentation.build(
+            sessions: [],
+            events: [],
+            pendingApprovals: [approval],
+            automationTriggers: [trigger],
+            graphMemoryDashboard: nil,
+            now: now
+        )
+
+        let pendingApprovalsTile = presentation.metricTiles.first { $0.id == ConnorRuntimeMetricID.pendingApprovals }
+        let automationTile = presentation.metricTiles.first { $0.id == ConnorRuntimeMetricID.automationTriggers }
+        let reviewSection = presentation.sections.first { $0.id == ConnorRuntimeSectionID.reviewQueue }
+        let automationSection = presentation.sections.first { $0.id == ConnorRuntimeSectionID.automation }
+
+        #expect(pendingApprovalsTile?.target == ConnorNativeShellItem.approvals)
+        #expect(automationTile?.target == ConnorNativeShellItem.automation)
+        #expect(reviewSection?.target == ConnorNativeShellItem.approvals)
+        #expect(automationSection?.target == ConnorNativeShellItem.automation)
+        #expect(reviewSection?.items.first?.target == ConnorNativeShellItem.approvals)
+        #expect(automationSection?.items.first?.target == ConnorNativeShellItem.automation)
     }
 }

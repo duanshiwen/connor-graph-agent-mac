@@ -8,10 +8,43 @@ import ConnorGraphAppSupport
 
 @main
 struct ConnorGraphAgentMacApp: App {
+    @StateObject private var viewModel = AppViewModel.live()
+
     var body: some Scene {
         WindowGroup {
-            AppShellView(viewModel: AppViewModel.live())
+            AppShellView(viewModel: viewModel)
         }
+        .commands {
+            CommandMenu("Connor") {
+                Button("Open Command Palette") {
+                    viewModel.isCommandPalettePresented = true
+                }
+                .keyboardShortcut("k", modifiers: .command)
+
+                Divider()
+
+                ForEach(ConnorNativeShellPresentation.default.commands) { command in
+                    Button(command.title) {
+                        viewModel.performShellCommand(command.id)
+                    }
+                    .keyboardShortcut(keyEquivalent(for: command), modifiers: .command)
+                }
+            }
+        }
+    }
+}
+
+private func keyEquivalent(for command: ConnorNativeShellCommand) -> KeyEquivalent {
+    switch command.id {
+    case .newSession: "n"
+    case .toggleBrowser: "b"
+    case .openRuntimeCenter: "1"
+    case .openGraphMemoryReview: "2"
+    case .openApprovals: "3"
+    case .openSources: "4"
+    case .openSkills: "5"
+    case .openAutomation: "6"
+    case .openSettings: ","
     }
 }
 
@@ -92,6 +125,7 @@ final class AppViewModel: ObservableObject {
     @Published var isSubmittingChat: Bool = false
     @Published var agentEventTimeline: [AgentEventPresentation] = []
     @Published var isBrowserVisible: Bool = false
+    @Published var isCommandPalettePresented: Bool = false
 
     private var repository: AppGraphRepository?
     private var promotionRepository: AppPromotionQueueRepository?
@@ -122,6 +156,62 @@ final class AppViewModel: ObservableObject {
 
     private var activeChatTranscript: [AgentMessage] {
         nativeSessionManager?.session.messages ?? legacyChatController.transcript
+    }
+
+    func navigate(to item: ConnorNativeShellItem) {
+        switch item {
+        case .runtimeCenter:
+            selection = .runtimeCenter
+        case .agentChat:
+            isBrowserVisible = false
+            selection = .agentChat
+        case .browserWorkspace:
+            isBrowserVisible = true
+            selection = .agentChat
+        case .graphMemory:
+            selection = .graphWriteCandidates
+        case .search:
+            selection = .search
+        case .graphEntities:
+            selection = .entities
+        case .approvals:
+            selection = .pendingApprovals
+        case .automation:
+            selection = .automation
+        case .productOS:
+            selection = .productOS
+        case .sources:
+            selection = .sources
+        case .skills:
+            selection = .skills
+        case .settings:
+            selection = .llmSettings
+        }
+    }
+
+    func performShellCommand(_ commandID: ConnorNativeShellCommandID) {
+        switch commandID {
+        case .newSession:
+            newChatSession()
+            navigate(to: .agentChat)
+        case .toggleBrowser:
+            isBrowserVisible.toggle()
+            navigate(to: isBrowserVisible ? .browserWorkspace : .agentChat)
+        case .openRuntimeCenter, .openGraphMemoryReview, .openApprovals, .openSources, .openSkills, .openAutomation, .openSettings:
+            if let command = ConnorNativeShellPresentation.default.command(for: commandID) {
+                navigate(to: command.target)
+            }
+        }
+    }
+
+    func openDeepLink(_ url: URL) {
+        do {
+            let resolution = try ConnorDeepLinkNavigator().resolve(url)
+            navigate(to: resolution.item)
+            errorMessage = nil
+        } catch {
+            errorMessage = "Unsupported Connor link: \(url.absoluteString)"
+        }
     }
 
     var runtimeCenterPresentation: ConnorRuntimeCenterPresentation {
@@ -1224,6 +1314,9 @@ struct AppShellView: View {
                 }
             }
             .frame(minWidth: 720, minHeight: 480)
+        }
+        .sheet(isPresented: $viewModel.isCommandPalettePresented) {
+            ConnorCommandPaletteView(viewModel: viewModel)
         }
     }
 }
