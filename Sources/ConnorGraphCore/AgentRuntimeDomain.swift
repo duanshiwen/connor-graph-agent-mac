@@ -57,6 +57,8 @@ public enum AgentEventKind: String, Codable, Sendable, Equatable {
     case sessionArchived
     case sessionRestored
     case artifactCreated
+    case sourceRegistryChanged
+    case skillRegistryChanged
     case automationTriggered
     case graphMemoryProposed
     case graphMemoryCommitted
@@ -195,6 +197,31 @@ public struct AgentSessionArtifactEvent: Codable, Sendable, Equatable {
         self.sessionID = sessionID
         self.artifactKind = artifactKind
         self.path = path
+        self.message = message
+    }
+}
+
+public struct AgentProductOSRegistryEvent: Codable, Sendable, Equatable {
+    public var runID: String?
+    public var sessionID: String
+    public var registryKind: String
+    public var entryID: String
+    public var status: ProductOSRegistryEntryStatus?
+    public var message: String
+
+    public init(
+        runID: String? = nil,
+        sessionID: String,
+        registryKind: String,
+        entryID: String,
+        status: ProductOSRegistryEntryStatus? = nil,
+        message: String
+    ) {
+        self.runID = runID
+        self.sessionID = sessionID
+        self.registryKind = registryKind
+        self.entryID = entryID
+        self.status = status
         self.message = message
     }
 }

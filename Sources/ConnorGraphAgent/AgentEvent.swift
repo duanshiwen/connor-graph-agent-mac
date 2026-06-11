@@ -19,6 +19,8 @@ public enum AgentEvent: Sendable, Equatable {
     case sessionArchived(AgentSessionGovernanceEvent)
     case sessionRestored(AgentSessionGovernanceEvent)
     case artifactCreated(AgentSessionArtifactEvent)
+    case sourceRegistryChanged(AgentProductOSRegistryEvent)
+    case skillRegistryChanged(AgentProductOSRegistryEvent)
     case automationTriggered(AgentAutomationPlaceholderEvent)
     case graphMemoryProposed(AgentGraphMemoryLifecycleEvent)
     case graphMemoryCommitted(AgentGraphMemoryLifecycleEvent)
@@ -45,6 +47,8 @@ public enum AgentEvent: Sendable, Equatable {
         case .sessionArchived: return .sessionArchived
         case .sessionRestored: return .sessionRestored
         case .artifactCreated: return .artifactCreated
+        case .sourceRegistryChanged: return .sourceRegistryChanged
+        case .skillRegistryChanged: return .skillRegistryChanged
         case .automationTriggered: return .automationTriggered
         case .graphMemoryProposed: return .graphMemoryProposed
         case .graphMemoryCommitted: return .graphMemoryCommitted
@@ -68,6 +72,7 @@ public enum AgentEvent: Sendable, Equatable {
         case .budgetWarning(let warning): return warning.runID
         case .sessionStatusChanged(let event), .sessionLabelsChanged(let event), .sessionArchived(let event), .sessionRestored(let event): return event.runID
         case .artifactCreated(let event): return event.runID
+        case .sourceRegistryChanged(let event), .skillRegistryChanged(let event): return event.runID
         case .automationTriggered(let event): return event.runID
         case .graphMemoryProposed(let event), .graphMemoryCommitted(let event), .graphMemoryHeld(let event): return event.runID
         case .runFailed(let failure): return failure.runID
@@ -89,6 +94,7 @@ public enum AgentEvent: Sendable, Equatable {
         case .budgetWarning(let warning): return warning.sessionID
         case .sessionStatusChanged(let event), .sessionLabelsChanged(let event), .sessionArchived(let event), .sessionRestored(let event): return event.sessionID
         case .artifactCreated(let event): return event.sessionID
+        case .sourceRegistryChanged(let event), .skillRegistryChanged(let event): return event.sessionID
         case .automationTriggered(let event): return event.sessionID
         case .graphMemoryProposed(let event), .graphMemoryCommitted(let event), .graphMemoryHeld(let event): return event.sessionID
         case .runFailed(let failure): return failure.sessionID
