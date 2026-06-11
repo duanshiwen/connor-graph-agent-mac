@@ -29,4 +29,19 @@ struct PhaseICommandPaletteNavigationTests {
         #expect(automation?.target == ConnorNativeShellItem.automation)
         #expect(automation?.keyboardShortcut == "⌘6")
     }
+
+    @Test func deepLinkNavigatorResolvesSupportedConnorURLsToShellRoutes() throws {
+        let navigator = ConnorDeepLinkNavigator(routeResolver: ConnorNativeShellRouteResolver())
+
+        let sources = try navigator.resolve(URL(string: "connor://open/sources")!)
+        let automation = try navigator.resolve(URL(string: "connor://open/automation?focus=history")!)
+        let browser = try navigator.resolve(URL(string: "connor://open/browserWorkspace")!)
+
+        #expect(sources.item == ConnorNativeShellItem.sources)
+        #expect(sources.sidebarItem == "sources")
+        #expect(sources.focus == nil)
+        #expect(automation.item == ConnorNativeShellItem.automation)
+        #expect(automation.focus == "history")
+        #expect(browser.requiresBrowserVisible == true)
+    }
 }
