@@ -61,6 +61,51 @@ private func temporaryFactoryNativeSessionDatabaseURL(_ name: String = UUID().uu
     #expect(loaded.messages.last?.content.isEmpty == false)
 }
 
+@Test func appGraphAgentRuntimeFactoryPersistsClaudeSidecarToolEvents() async throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryFactoryNativeSessionDatabaseURL().path)
+    try store.migrate()
+    let settingsRepository = AppLLMSettingsRepository(
+        settingsStore: FactoryNativeSessionSettingsStore(),
+        credentialStore: FactoryNativeSessionCredentialStore()
+    )
+    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: settingsRepository)
+    let session = AgentSession(id: "factory-sidecar-tool-session", title: "Sidecar Tool Chat")
+    let temporaryDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorFactorySidecarToolEvents-")
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let sidecarURL = temporaryDirectory.appendingPathComponent("tool-sidecar.sh")
+    try """
+    #!/bin/sh
+    IFS= read -r request
+    printf '%s\n' '{"runStarted":{"sdkSessionID":"sdk-tool-session"}}'
+    printf '%s\n' '{"toolUseRequested":{"toolCallID":"tool-1","name":"Read","inputJSON":"{\\"file_path\\":\\"README.md\\"}"}}'
+    printf '%s\n' '{"permissionRequested":{"requestID":"permission-tool-1","capability":"readSession","toolName":"Read","payloadJSON":"{\\"file_path\\":\\"README.md\\"}"}}'
+    printf '%s\n' '{"toolUseStarted":{"toolCallID":"tool-1","name":"Read"}}'
+    printf '%s\n' '{"toolUseCompleted":{"toolCallID":"tool-1","name":"Read","contentText":"README contents","contentJSON":null,"isError":false}}'
+    printf '%s\n' '{"textComplete":{"text":"Done","citations":[],"contextSnapshot":null}}'
+    printf '%s\n' '{"runCompleted":{}}'
+    """.write(to: sidecarURL, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: sidecarURL.path)
+    var manager = factory.makeClaudeSDKSidecarNativeSessionManager(
+        session: session,
+        sidecarExecutableURL: URL(fileURLWithPath: "/bin/sh"),
+        sidecarArguments: [sidecarURL.path],
+        workingDirectory: temporaryDirectory,
+        permissionMode: .readOnly
+    )
+
+    let response = try await manager.submit("Use a sidecar tool")
+    let runID = try #require(response.events.first?.runID)
+    let persisted = try store.events(runID: runID, limit: 20)
+
+    #expect(response.events.map(\.kind) == [.runStarted, .toolRequested, .permissionRequested, .toolStarted, .toolFinished, .textComplete, .runCompleted])
+    #expect(persisted.map(\.kind) == [.runStarted, .toolRequested, .permissionRequested, .toolStarted, .toolFinished, .textComplete, .runCompleted])
+    #expect(persisted.map(\.sequence) == Array(0..<persisted.count))
+    #expect(persisted.contains { $0.kind == .permissionRequested && $0.payloadJSON.contains("permission-tool-1") })
+}
+
 @Test func appGraphAgentRuntimeFactoryCreatesClaudeSidecarNativeSessionManager() async throws {
     let store = try SQLiteGraphKernelStore(path: temporaryFactoryNativeSessionDatabaseURL().path)
     try store.migrate()
