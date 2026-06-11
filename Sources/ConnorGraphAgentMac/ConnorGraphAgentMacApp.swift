@@ -163,12 +163,18 @@ final class AppViewModel: ObservableObject {
 
     func deferViewUpdate(_ operation: @escaping @MainActor () -> Void) {
         Task { @MainActor in
-            await Task.yield()
+            try? await Task.sleep(nanoseconds: 10_000_000)
             operation()
         }
     }
 
     func navigate(to item: ConnorNativeShellItem) {
+        deferViewUpdate { [weak self] in
+            self?.applyNavigation(to: item)
+        }
+    }
+
+    private func applyNavigation(to item: ConnorNativeShellItem) {
         switch item {
         case .runtimeCenter:
             selection = .runtimeCenter
@@ -1325,13 +1331,19 @@ final class AppViewModel: ObservableObject {
 
 struct AppShellView: View {
     @StateObject var viewModel: AppViewModel
+    @State private var sidebarSelection: SidebarItem? = .runtimeCenter
 
     var body: some View {
         NavigationSplitView {
-            List(SidebarItem.allCases, selection: $viewModel.selection) { item in
+            List(SidebarItem.allCases, selection: $sidebarSelection) { item in
                 Text(item.rawValue).tag(item)
             }
             .navigationTitle("Connor")
+            .onChange(of: sidebarSelection) { _, newSelection in
+                viewModel.deferViewUpdate {
+                    viewModel.selection = newSelection
+                }
+            }
         } detail: {
             VStack(spacing: 0) {
                 SchemaHealthBanner(viewModel: viewModel)
@@ -1372,6 +1384,14 @@ struct AppShellView: View {
                 }
             }
             .frame(minWidth: 720, minHeight: 480)
+        }
+        .onAppear {
+            sidebarSelection = viewModel.selection
+        }
+        .onChange(of: viewModel.selection) { _, newSelection in
+            if sidebarSelection != newSelection {
+                sidebarSelection = newSelection
+            }
         }
         .sheet(isPresented: $viewModel.isCommandPalettePresented) {
             ConnorCommandPaletteView(viewModel: viewModel)
@@ -1570,8 +1590,9 @@ struct PromotionQueueView: View {
         .padding()
         .navigationTitle("提升队列")
         .task {
-            await Task.yield()
-            viewModel.reloadPromotionCandidates()
+            viewModel.deferViewUpdate {
+                viewModel.reloadPromotionCandidates()
+            }
         }
     }
 }
@@ -1655,8 +1676,9 @@ struct AgentPendingApprovalReviewView: View {
         .padding()
         .navigationTitle("权限审批")
         .task {
-            await Task.yield()
-            viewModel.reloadPendingApprovals()
+            viewModel.deferViewUpdate {
+                viewModel.reloadPendingApprovals()
+            }
         }
     }
 
@@ -1802,8 +1824,9 @@ struct GraphWriteCandidateReviewView: View {
         .padding()
         .navigationTitle("写入候选")
         .task {
-            await Task.yield()
-            viewModel.reloadGraphWriteCandidates()
+            viewModel.deferViewUpdate {
+                viewModel.reloadGraphWriteCandidates()
+            }
         }
     }
 
@@ -1877,8 +1900,9 @@ struct MemoryChangeLogView: View {
         .padding()
         .navigationTitle("记忆变更")
         .task {
-            await Task.yield()
-            viewModel.reloadMemoryChangeLog()
+            viewModel.deferViewUpdate {
+                viewModel.reloadMemoryChangeLog()
+            }
         }
     }
 
@@ -1999,8 +2023,9 @@ struct GraphExtractionDiagnosticsView: View {
         .padding()
         .navigationTitle("记忆准入")
         .task {
-            await Task.yield()
-            viewModel.reloadGraphExtractionTraces()
+            viewModel.deferViewUpdate {
+                viewModel.reloadGraphExtractionTraces()
+            }
         }
     }
 
