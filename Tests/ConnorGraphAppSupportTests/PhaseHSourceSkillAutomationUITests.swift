@@ -109,4 +109,65 @@ struct PhaseHSourceSkillAutomationUITests {
         #expect(route.isPlaceholder == false)
         #expect(route.placeholderTitle == nil)
     }
+
+    @Test func automationUIPresentationBuildsRuleTriggerAndHistoryCards() {
+        let config = ProductOSAutomationConfig(rules: [
+            ProductOSAutomationRule(
+                id: "rule-archive",
+                name: "Archive done sessions",
+                isEnabled: true,
+                trigger: ProductOSAutomationTrigger(kind: .sessionStatusChanged, status: .done),
+                actions: [ProductOSAutomationAction(kind: .appendTimelineEvent, message: "done")],
+                requiresReview: false,
+                tags: ["cleanup"]
+            ),
+            ProductOSAutomationRule(
+                id: "rule-review",
+                name: "Review graph memory",
+                isEnabled: false,
+                trigger: ProductOSAutomationTrigger(kind: .skillRegistryChanged),
+                actions: [ProductOSAutomationAction(kind: .triggerSkill, skillID: "superpowers", message: "review")],
+                requiresReview: true,
+                tags: ["review"]
+            )
+        ])
+        let triggers = [ProductOSAutomationTriggerRecord(
+            id: "trigger-1",
+            ruleID: "rule-archive",
+            ruleName: "Archive done sessions",
+            trigger: .sessionStatusChanged,
+            sessionID: "session-1",
+            actionSummaries: ["done"],
+            requiresReview: false
+        )]
+        let history = [ProductOSAutomationExecutionHistoryRecord(
+            id: "history-1",
+            sessionID: "session-1",
+            trigger: .sessionStatusChanged,
+            ruleIDs: ["rule-archive"],
+            appliedActionCount: 1,
+            skippedActionCount: 0,
+            eventCount: 2,
+            outcome: .completed,
+            message: "Applied"
+        )]
+
+        let presentation = AutomationRuntimeUIPresentation.build(config: config, triggers: triggers, history: history)
+
+        #expect(presentation.summary.totalRuleCount == 2)
+        #expect(presentation.summary.enabledRuleCount == 1)
+        #expect(presentation.summary.pendingReviewRuleCount == 1)
+        #expect(presentation.ruleCards.map(\.id) == ["rule-archive", "rule-review"])
+        #expect(presentation.ruleCards[0].dispositionLabel == "ready")
+        #expect(presentation.ruleCards[1].severity == .warning)
+        #expect(presentation.triggerCards.first?.detail == "done")
+        #expect(presentation.historyCards.first?.title == "completed · sessionStatusChanged")
+    }
+
+    @Test func automationRouteIsWiredToNativePanel() {
+        let route = ConnorNativeShellRouteResolver().route(for: .automation)
+
+        #expect(route.legacySidebarID == "automation")
+        #expect(route.isPlaceholder == false)
+    }
 }
