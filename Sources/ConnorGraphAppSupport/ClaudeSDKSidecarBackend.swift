@@ -681,7 +681,7 @@ private func runSidecarProcess(
         }
 }
 
-private extension ClaudeSDKSidecarEvent {
+extension ClaudeSDKSidecarEvent {
     var isTerminalForConnorSubmit: Bool {
         switch self {
         case .runCompleted, .runFailed:
@@ -725,7 +725,7 @@ public struct ClaudeSDKSidecarSessionBackend<Transport: ClaudeSDKSidecarSessionT
     }
 }
 
-private enum ClaudeSDKSidecarEventMapper {
+enum ClaudeSDKSidecarEventMapper {
     static func map(_ event: ClaudeSDKSidecarEvent, request: AgentChatRequest) -> AgentEvent? {
         switch event {
         case .runStarted(let payload):
