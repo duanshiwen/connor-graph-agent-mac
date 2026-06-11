@@ -22,6 +22,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case agentChat = "智能体聊天"
     case promotionQueue = "提升队列"
     case graphWriteCandidates = "写入候选"
+    case pendingApprovals = "权限审批"
     case memoryChangeLog = "记忆变更"
     case extractionDiagnostics = "记忆准入"
     case llmSettings = "模型设置"
@@ -48,11 +49,13 @@ final class AppViewModel: ObservableObject {
     @Published var promotionCandidates: [ObserveLogEntry] = []
     @Published var graphWriteCandidates: [GraphWriteCandidate] = []
     @Published var graphWriteCandidateAudits: [String: [GraphWriteCandidateAuditPresentation]] = [:]
+    @Published var pendingApprovals: [AgentPendingApproval] = []
     @Published var graphExtractionTraces: [AppGraphExtractionTracePresentation] = []
     @Published var admissionHoldQueueItems: [AppGraphAdmissionHoldQueuePresentation] = []
     @Published var memoryChangeLogEntries: [AppGraphMemoryChangeLogPresentation] = []
     @Published var lastPromotionResultSummary: String?
     @Published var lastGraphWriteCandidateResultSummary: String?
+    @Published var lastPendingApprovalResultSummary: String?
     @Published var lastAdmissionHoldQueueActionSummary: String?
     @Published var llmProviderMode: AppLLMProviderMode = .stub
     @Published var llmBaseURLString: String = AppLLMSettings.default.baseURLString
@@ -74,6 +77,7 @@ final class AppViewModel: ObservableObject {
     private var repository: AppGraphRepository?
     private var promotionRepository: AppPromotionQueueRepository?
     private var graphWriteCandidateRepository: AppGraphWriteCandidateRepository?
+    private var pendingApprovalRepository: AppAgentPendingApprovalRepository?
     private var graphExtractionTraceRepository: AppGraphExtractionTraceRepository?
     private var admissionHoldQueueRepository: AppGraphAdmissionHoldQueueRepository?
     private var memoryChangeLogRepository: AppGraphMemoryChangeLogRepository?
@@ -141,6 +145,7 @@ final class AppViewModel: ObservableObject {
         if let repository {
             self.promotionRepository = AppPromotionQueueRepository(store: repository.store)
             self.graphWriteCandidateRepository = AppGraphWriteCandidateRepository(store: repository.store)
+            self.pendingApprovalRepository = AppAgentPendingApprovalRepository(store: repository.store)
             self.graphExtractionTraceRepository = AppGraphExtractionTraceRepository(store: repository.store)
             self.admissionHoldQueueRepository = AppGraphAdmissionHoldQueueRepository(store: repository.store)
             self.memoryChangeLogRepository = AppGraphMemoryChangeLogRepository(store: repository.store)
@@ -185,6 +190,7 @@ final class AppViewModel: ObservableObject {
             )
             viewModel.reloadPromotionCandidates()
             viewModel.reloadGraphWriteCandidates()
+            viewModel.reloadPendingApprovals()
             return viewModel
         } catch {
             let viewModel = AppViewModel.demo()
@@ -315,6 +321,7 @@ final class AppViewModel: ObservableObject {
         Task { await runSearch() }
         reloadPromotionCandidates()
         reloadGraphWriteCandidates()
+        reloadPendingApprovals()
     }
 
     func runBackgroundJobs() async {
@@ -523,6 +530,48 @@ final class AppViewModel: ObservableObject {
             let candidates = try graphWriteCandidateRepository?.loadCandidates() ?? []
             graphWriteCandidates = candidates
             graphWriteCandidateAudits = try graphWriteCandidateRepository?.loadAuditTimelines(for: candidates) ?? [:]
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func reloadPendingApprovals() {
+        do {
+            pendingApprovals = try pendingApprovalRepository?.loadPending() ?? []
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func approvePendingApproval(_ approval: AgentPendingApproval) {
+        do {
+            _ = try pendingApprovalRepository?.approve(requestID: approval.requestID, reason: "Approved by reviewer")
+            reloadPendingApprovals()
+            lastPendingApprovalResultSummary = "已批准权限请求 \(approval.requestID)，并写入审计与 timeline"
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func denyPendingApproval(_ approval: AgentPendingApproval) {
+        do {
+            _ = try pendingApprovalRepository?.deny(requestID: approval.requestID, reason: "Denied by reviewer")
+            reloadPendingApprovals()
+            lastPendingApprovalResultSummary = "已拒绝权限请求 \(approval.requestID)，并写入审计与 timeline"
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func cancelPendingApproval(_ approval: AgentPendingApproval) {
+        do {
+            _ = try pendingApprovalRepository?.cancel(requestID: approval.requestID, reason: "Cancelled by system")
+            reloadPendingApprovals()
+            lastPendingApprovalResultSummary = "已取消权限请求 \(approval.requestID)，并写入审计与 timeline"
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -739,6 +788,7 @@ final class AppViewModel: ObservableObject {
                 nativeSessionManager = manager
                 transcript = manager.session.messages
                 agentEventTimeline = manager.eventPresentations
+                reloadPendingApprovals()
                 selectedChatSessionID = response.session.id
                 legacyChatController = Self.makeLegacyChatController(runtimeFactory: agentRuntimeFactory, settingsRepository: llmSettingsRepository, session: response.session)
                 if let chatSessionRepository {
@@ -820,6 +870,8 @@ struct AppShellView: View {
                         PromotionQueueView(viewModel: viewModel)
                     case .graphWriteCandidates:
                         GraphWriteCandidateReviewView(viewModel: viewModel)
+                    case .pendingApprovals:
+                        AgentPendingApprovalReviewView(viewModel: viewModel)
                     case .memoryChangeLog:
                         MemoryChangeLogView(viewModel: viewModel)
                     case .extractionDiagnostics:
@@ -1025,6 +1077,97 @@ struct PromotionQueueView: View {
         .padding()
         .navigationTitle("提升队列")
         .onAppear { viewModel.reloadPromotionCandidates() }
+    }
+}
+
+struct AgentPendingApprovalReviewView: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Button("刷新") { viewModel.reloadPendingApprovals() }
+                if let summary = viewModel.lastPendingApprovalResultSummary {
+                    Text(summary).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("request → review → decision → audit → timeline")
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+
+            if viewModel.pendingApprovals.isEmpty {
+                Text("暂无待审批权限请求。Sidecar 只能请求权限，Connor 负责审批、审计和 timeline。")
+                    .foregroundStyle(.secondary)
+                Spacer()
+            } else {
+                List(viewModel.pendingApprovals) { approval in
+                    let row = AppAgentPendingApprovalPresentation(approval)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(row.title)
+                                .font(.headline)
+                            Text(row.statusLabel)
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(severityColor(row.severity).opacity(0.15), in: Capsule())
+                                .foregroundStyle(severityColor(row.severity))
+                            Spacer()
+                            Text(row.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Text(row.detail)
+                            .font(.subheadline)
+                            .textSelection(.enabled)
+
+                        HStack(spacing: 12) {
+                            Label("run \(approval.runID)", systemImage: "play.circle")
+                            Label("session \(approval.sessionID)", systemImage: "bubble.left.and.bubble.right")
+                            if let toolName = approval.toolName {
+                                Label(toolName, systemImage: "wrench.and.screwdriver")
+                            }
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                        DisclosureGroup("Payload JSON") {
+                            Text(approval.payloadJSON)
+                                .font(.caption.monospaced())
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(8)
+                                .background(.quaternary.opacity(0.16), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        }
+
+                        HStack {
+                            Button("批准") { viewModel.approvePendingApproval(approval) }
+                            Button("拒绝", role: .destructive) { viewModel.denyPendingApproval(approval) }
+                            Button("取消") { viewModel.cancelPendingApproval(approval) }
+                        }
+                    }
+                    .padding(.vertical, 8)
+                }
+            }
+
+            if let error = viewModel.errorMessage {
+                Text(error).foregroundStyle(.red)
+            }
+        }
+        .padding()
+        .navigationTitle("权限审批")
+        .onAppear { viewModel.reloadPendingApprovals() }
+    }
+
+    private func severityColor(_ severity: AppAgentPendingApprovalSeverity) -> Color {
+        switch severity {
+        case .warning: .orange
+        case .success: .green
+        case .error: .red
+        case .cancelled: .secondary
+        }
     }
 }
 

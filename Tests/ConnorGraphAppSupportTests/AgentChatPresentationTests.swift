@@ -196,6 +196,51 @@ import ConnorGraphAppSupport
     #expect(rows.allSatisfy { $0.runID == "run-1" && $0.sessionID == "session-1" })
 }
 
+@Test func agentEventPresenterSummarizesPermissionResolvedTimelineEvents() {
+    let presenter = AgentEventPresenter()
+    let approved = AgentPermissionDecision(
+        requestID: "permission-approve-1",
+        runID: "run-1",
+        sessionID: "session-1",
+        capability: .commitGraphWrite,
+        outcome: .approved,
+        reason: "Human approved graph commit"
+    )
+    let denied = AgentPermissionDecision(
+        requestID: "permission-deny-1",
+        runID: "run-1",
+        sessionID: "session-1",
+        capability: .externalNetwork,
+        outcome: .denied,
+        reason: "External network is blocked"
+    )
+    let needsApproval = AgentPermissionDecision(
+        requestID: "permission-review-1",
+        runID: "run-1",
+        sessionID: "session-1",
+        capability: .costlyModelCall,
+        outcome: .needsApproval,
+        reason: "Costly model call requires review"
+    )
+
+    let rows = [
+        presenter.presentation(for: .permissionResolved(approved)),
+        presenter.presentation(for: .permissionResolved(denied)),
+        presenter.presentation(for: .permissionResolved(needsApproval))
+    ]
+
+    #expect(rows.map(\.title) == [
+        "Permission approved: commitGraphWrite",
+        "Permission denied: externalNetwork",
+        "Permission needs approval: costlyModelCall"
+    ])
+    #expect(rows.map(\.severity) == [.success, .error, .warning])
+    #expect(rows[0].detail == "Request permission-approve-1 · Human approved graph commit")
+    #expect(rows[1].detail == "Request permission-deny-1 · External network is blocked")
+    #expect(rows[2].detail == "Request permission-review-1 · Costly model call requires review")
+    #expect(rows.allSatisfy { $0.runID == "run-1" && $0.sessionID == "session-1" })
+}
+
 @Test func agentChatMessagePresentationShowsLastContextOnlyForLatestAssistantMessage() {
     let context = AgentContext(
         query: "memory",
