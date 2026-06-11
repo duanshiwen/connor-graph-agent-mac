@@ -1,6 +1,6 @@
 # Phase 2: AgentBackend Abstraction and Claude SDK Sidecar
 
-Last updated: 2026-06-11 11:24 GMT+8
+Last updated: 2026-06-11 11:32 GMT+8
 
 ## Status
 
@@ -15,7 +15,7 @@ Current implementation status:
 - `AgentLoopBackend` adapts the existing native loop.
 - `ClaudeSDKSidecarBackend` maps sidecar events into Connor `AgentEvent`.
 - `ClaudeSDKSidecarProcessTransport` runs an external process and bridges one request plus JSONL sidecar events over stdin/stdout.
-- `sidecars/claude-agent-engine/` contains protocol docs plus mock Node/shell sidecars.
+- `sidecars/claude-agent-engine/` contains protocol docs, mock Node/shell sidecars, and the real `claude-sidecar.mjs` SDK entry point.
 
 ## Boundary
 
@@ -118,19 +118,32 @@ These are deliberately smaller than the full Claude Agent SDK message union. The
 
 This transport is intentionally conservative: it validates the process boundary without yet depending on Node/Bun or the real Claude Agent SDK package.
 
+## Real SDK Entry Point
+
+`sidecars/claude-agent-engine/claude-sidecar.mjs` imports `@anthropic-ai/claude-agent-sdk` and calls `query(request.prompt, options)`.
+
+The current mapping is deliberately minimal:
+
+- `cwd = request.cwd`
+- `permissionMode = request.sdkPermissionMode`
+- `resume = request.sdkSessionID ?? undefined`
+- `includePartialMessages = true`
+- assistant-like SDK messages → `textDelta`
+- stream completion → `textComplete` + `runCompleted`
+- SDK errors/result failures → `runFailed`
+
+A Swift integration test exists but is gated by environment variables, so normal CI/local test runs do not require Node/Bun, npm install, Claude login, or network access.
+
 ## Next Slice
 
 Recommended next implementation slice:
 
-1. Replace `sidecars/claude-agent-engine/mock-sidecar.mjs` internals with a real Node/Bun sidecar that imports `@anthropic-ai/claude-agent-sdk`.
-2. Call `query(request.prompt, options)` with:
-   - `cwd = request.cwd`
-   - `permissionMode = "bypassPermissions"`
-   - `resume = request.sdkSessionID` only as optional SDK metadata, never as Connor session identity.
-3. Map SDK messages into the existing JSONL protocol:
-   - system/session initialization → `runStarted`
-   - partial assistant streaming → `textDelta`
-   - final assistant/result → `textComplete` + `runCompleted`
-   - SDK errors/result failures → `runFailed`
-4. Add a gated integration test that only runs when a JS runtime and Claude SDK executable are explicitly configured.
-5. Add explicit tool/permission event normalization before enabling write-capable sidecar tools.
+1. Add explicit sidecar event cases for tool and permission boundaries, for example:
+   - `toolUseRequested`
+   - `toolUseStarted`
+   - `toolUseCompleted`
+   - `permissionRequested`
+2. Map Claude SDK tool-use / permission messages into those normalized sidecar events.
+3. Extend `AgentEvent` only where Connor has a product concept for the event.
+4. Keep SDK permission mode bypassed until Connor can inspect, audit, and approve sidecar tool actions.
+5. Add cancellation support to `ClaudeSDKSidecarProcessTransport` before long-running sidecar tasks become default.
