@@ -1,6 +1,6 @@
 # Phase 2: AgentBackend Abstraction and Claude SDK Sidecar
 
-Last updated: 2026-06-11 15:57 GMT+8
+Last updated: 2026-06-11 16:06 GMT+8
 
 ## Status
 
@@ -18,6 +18,8 @@ Current implementation status:
 - `ClaudeSDKSidecarProcessTransport` runs an external process and bridges one request plus JSONL sidecar events over stdin/stdout.
 - `ClaudeSDKSidecarSessionTransport` is now a Swift protocol for long-lived sidecar sessions that can receive Connor-owned commands after start.
 - `ClaudeSDKSidecarPersistentProcessTransport` implements that long-lived Swift-side process boundary with persistent stdin command writes, stdout JSONL event streaming, stderr diagnostics, and cancellation.
+- `ClaudeSDKSidecarSessionBackend` adapts long-lived session transports back into Connor `AgentBackend` streams and ends each native submit on sidecar terminal events.
+- `AppGraphAgentRuntimeFactory.makeGovernedClaudeSDKSidecarNativeSessionManager(...)` exposes the governed persistent sidecar path while rejecting unsafe `.allowAll` permission mode.
 - `sidecars/claude-agent-engine/` contains protocol docs, mock Node/shell sidecars, and the real `claude-sidecar.mjs` SDK entry point.
 - `claude-sidecar.mjs` now includes a persistent command-loop skeleton for `start`, `approvalResolved`, and `cancel` command envelopes while preserving backward-compatible raw request input.
 
@@ -180,7 +182,7 @@ A Swift integration test exists but is gated by environment variables, so normal
 
 Recommended next implementation slice:
 
-1. Add governed write-capable sidecar settings in the macOS app only after the approval UI, audit trail, timeline, command transport, and deferred resume semantics are all visible and deterministic.
+Phase 2 is now feature-complete at the backend/control-plane level. Future app-level work can add a visible settings toggle for the governed persistent Claude sidecar path, but it should keep the same guardrails: no `.allowAll`, Connor-owned pending approvals, audit trail, native timeline, deterministic resume, and cancellation.
 4. Keep SDK permission mode bypassed until Connor can inspect, audit, approve, and resume sidecar tool actions end-to-end.
 5. Add cancellation support before long-running sidecar tasks become default.
 6. Only after those controls exist, consider enabling a constrained read-only Claude sidecar path in app settings.

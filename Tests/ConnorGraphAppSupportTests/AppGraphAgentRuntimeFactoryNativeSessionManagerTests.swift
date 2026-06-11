@@ -117,6 +117,78 @@ private func temporaryFactoryNativeSessionDatabaseURL(_ name: String = UUID().uu
     #expect(approvals.first?.payloadJSON.contains("README.md") == true)
 }
 
+@Test func appGraphAgentRuntimeFactoryCreatesGovernedPersistentClaudeSidecarNativeSessionManager() async throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryFactoryNativeSessionDatabaseURL().path)
+    try store.migrate()
+    let settingsRepository = AppLLMSettingsRepository(
+        settingsStore: FactoryNativeSessionSettingsStore(),
+        credentialStore: FactoryNativeSessionCredentialStore()
+    )
+    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: settingsRepository)
+    let session = AgentSession(id: "factory-governed-persistent-sidecar", title: "Governed Sidecar Chat")
+    let temporaryDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorFactoryGovernedPersistentSidecar-")
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let sidecarURL = temporaryDirectory.appendingPathComponent("persistent-sidecar.sh")
+    try """
+    #!/bin/sh
+    while IFS= read -r command; do
+      case "$command" in
+        *'"start"'*)
+          printf '%s\n' '{"runStarted":{"sdkSessionID":"sdk-governed-persistent"}}'
+          printf '%s\n' '{"permissionRequested":{"requestID":"permission-tool-1","capability":"commitGraphWrite","toolName":"Write","payloadJSON":"{}"}}'
+          printf '%s\n' '{"textComplete":{"text":"Waiting for Connor approval","citations":[],"contextSnapshot":null}}'
+          printf '%s\n' '{"runCompleted":{}}'
+          ;;
+      esac
+    done
+    """.write(to: sidecarURL, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: sidecarURL.path)
+
+    var manager = try factory.makeGovernedClaudeSDKSidecarNativeSessionManager(
+        session: session,
+        sidecarExecutableURL: URL(fileURLWithPath: "/bin/sh"),
+        sidecarArguments: [sidecarURL.path],
+        workingDirectory: temporaryDirectory,
+        permissionMode: .askToWrite
+    )
+
+    let response = try await manager.submit("Use governed persistent sidecar")
+    let runID = try #require(response.events.first?.runID)
+    let approvals = try store.pendingApprovals(runID: runID)
+
+    #expect(response.events.map(\.kind) == [.runStarted, .permissionRequested, .textComplete, .runCompleted])
+    #expect(approvals.count == 1)
+    #expect(approvals.first?.capability == .commitGraphWrite)
+    #expect(approvals.first?.status == .pending)
+    #expect(manager.permissionMode == .askToWrite)
+}
+
+@Test func appGraphAgentRuntimeFactoryRejectsAllowAllForGovernedClaudeSidecar() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryFactoryNativeSessionDatabaseURL().path)
+    try store.migrate()
+    let settingsRepository = AppLLMSettingsRepository(
+        settingsStore: FactoryNativeSessionSettingsStore(),
+        credentialStore: FactoryNativeSessionCredentialStore()
+    )
+    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: settingsRepository)
+
+    do {
+        _ = try factory.makeGovernedClaudeSDKSidecarNativeSessionManager(
+            sidecarExecutableURL: URL(fileURLWithPath: "/bin/sh"),
+            workingDirectory: FileManager.default.temporaryDirectory,
+            permissionMode: .allowAll
+        )
+        Issue.record("Expected governed Claude sidecar path to reject allowAll")
+    } catch let error as AppGraphAgentRuntimeFactoryError {
+        #expect(error == .unsafeSidecarPermissionMode(.allowAll))
+    } catch {
+        Issue.record("Expected AppGraphAgentRuntimeFactoryError.unsafeSidecarPermissionMode, got \(error)")
+    }
+}
+
 @Test func appGraphAgentRuntimeFactoryCreatesClaudeSidecarNativeSessionManager() async throws {
     let store = try SQLiteGraphKernelStore(path: temporaryFactoryNativeSessionDatabaseURL().path)
     try store.migrate()
