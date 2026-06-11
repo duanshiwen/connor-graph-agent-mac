@@ -75,6 +75,8 @@ final class AppViewModel: ObservableObject {
     @Published var sessionListFilter: AgentSessionListFilter = .inbox
     @Published var governanceConfig: AppSessionGovernanceConfig = .default
     @Published var productOSRegistry: ProductOSRegistrySnapshot = .default
+    @Published var automationConfig: ProductOSAutomationConfig = .default
+    @Published var automationTriggerRecords: [ProductOSAutomationTriggerRecord] = []
     @Published var productOSRegistryMessage: String?
     @Published var selectedSessionArtifactDirectories: AgentSessionArtifactDirectories?
     @Published var latestChatSummary: AgentSessionSummary?
@@ -93,6 +95,7 @@ final class AppViewModel: ObservableObject {
     private var memoryChangeLogRepository: AppGraphMemoryChangeLogRepository?
     private var chatSessionRepository: AppChatSessionRepository?
     private var productOSRegistryRepository: AppProductOSRegistryRepository?
+    private var automationRepository: AppProductOSAutomationRepository?
     private var storagePaths: AppStoragePaths?
     private var llmSettingsRepository: AppLLMSettingsRepository
     private var llmProviderHealthChecker: AppLLMProviderHealthChecker
@@ -150,6 +153,7 @@ final class AppViewModel: ObservableObject {
         storagePaths: AppStoragePaths? = nil,
         governanceConfig: AppSessionGovernanceConfig = .default,
         productOSRegistry: ProductOSRegistrySnapshot = .default,
+        automationConfig: ProductOSAutomationConfig = .default,
         llmSettingsRepository: AppLLMSettingsRepository = AppLLMSettingsRepository()
     ) {
         self.entities = entities
@@ -160,8 +164,10 @@ final class AppViewModel: ObservableObject {
         self.storagePaths = storagePaths
         self.governanceConfig = governanceConfig
         self.productOSRegistry = productOSRegistry
+        self.automationConfig = automationConfig
         if let storagePaths {
             self.productOSRegistryRepository = AppProductOSRegistryRepository(storagePaths: storagePaths)
+            self.automationRepository = AppProductOSAutomationRepository(storagePaths: storagePaths)
         }
         if let repository {
             self.promotionRepository = AppPromotionQueueRepository(store: repository.store)
@@ -184,6 +190,7 @@ final class AppViewModel: ObservableObject {
         self.searchResults = []
         loadLLMSettings()
         reloadProductOSRegistry()
+        reloadAutomationConfig()
         reloadChatSessions()
         reloadSchemaHealthReport()
         reloadGraphExtractionTraces()
@@ -196,6 +203,7 @@ final class AppViewModel: ObservableObject {
             let repository = try AppGraphRepository.bootstrap(paths: paths)
             let governanceConfig = try AppSessionGovernanceConfigRepository(configDirectory: paths.configDirectory).loadOrCreateDefault()
             let productOSRegistry = try AppProductOSRegistryRepository(storagePaths: paths).loadOrCreateDefault()
+            let automationConfig = try AppProductOSAutomationRepository(storagePaths: paths).loadOrCreateDefault(governanceConfig: governanceConfig)
             var snapshot = try repository.loadSnapshot()
             if snapshot.entities.isEmpty {
                 let demo = demoSnapshot()
@@ -213,7 +221,8 @@ final class AppViewModel: ObservableObject {
                 databasePath: paths.databaseURL.path,
                 storagePaths: paths,
                 governanceConfig: governanceConfig,
-                productOSRegistry: productOSRegistry
+                productOSRegistry: productOSRegistry,
+                automationConfig: automationConfig
             )
             viewModel.reloadPromotionCandidates()
             viewModel.reloadGraphWriteCandidates()
@@ -382,12 +391,56 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func reloadAutomationConfig() {
+        do {
+            if let automationRepository {
+                automationConfig = try automationRepository.loadOrCreateDefault(governanceConfig: governanceConfig)
+                automationTriggerRecords = try automationRepository.loadRecentTriggerRecords()
+            }
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func setAutomationRuleEnabled(id: String, isEnabled: Bool) {
+        do {
+            guard let automationRepository else { return }
+            automationConfig = try automationRepository.setRuleEnabled(id: id, isEnabled: isEnabled, governanceConfig: governanceConfig)
+            automationTriggerRecords = try automationRepository.loadRecentTriggerRecords()
+            productOSRegistryMessage = "Automation rule \(id) is now \(isEnabled ? "enabled" : "disabled")."
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    private func evaluateAutomation(_ context: ProductOSAutomationEventContext) {
+        do {
+            guard let automationRepository else { return }
+            let records = try automationRepository.evaluate(context: context, governanceConfig: governanceConfig)
+            guard !records.isEmpty else { return }
+            automationTriggerRecords = try automationRepository.loadRecentTriggerRecords()
+            for record in records {
+                let payload = AgentAutomationPlaceholderEvent(
+                    sessionID: record.sessionID,
+                    trigger: record.trigger.rawValue,
+                    message: "Automation \(record.ruleName) matched. Actions are recorded for governed review: \(record.actionSummaries.joined(separator: "; "))"
+                )
+                agentEventTimeline.insert(AgentEventPresenter().presentation(for: .automationTriggered(payload)), at: 0)
+            }
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
     func setSourceRegistryStatus(id: String, status: ProductOSRegistryEntryStatus) {
         do {
             guard let productOSRegistryRepository else { return }
             productOSRegistry = try productOSRegistryRepository.setSourceStatus(id: id, status: status)
             productOSRegistryMessage = "Source \(id) is now \(status.rawValue). Connor still owns credentials, permissions, audit, and graph ingestion."
             appendProductOSRegistryEvent(kind: "source", entryID: id, status: status, message: productOSRegistryMessage ?? "Source registry changed")
+            evaluateAutomation(ProductOSAutomationEventContext(triggerKind: .sourceRegistryChanged, sessionID: selectedChatSessionID ?? activeChatSession.id, registryEntryID: id))
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -400,6 +453,7 @@ final class AppViewModel: ObservableObject {
             productOSRegistry = try productOSRegistryRepository.setSkillStatus(id: id, status: status)
             productOSRegistryMessage = "Skill \(id) is now \(status.rawValue). Skills are instruction profiles; graph memory writes remain governed."
             appendProductOSRegistryEvent(kind: "skill", entryID: id, status: status, message: productOSRegistryMessage ?? "Skill registry changed")
+            evaluateAutomation(ProductOSAutomationEventContext(triggerKind: .skillRegistryChanged, sessionID: selectedChatSessionID ?? activeChatSession.id, registryEntryID: id))
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -578,6 +632,7 @@ final class AppViewModel: ObservableObject {
             self.selectedChatSessionID = session.id
             reloadChatSessions()
             appendGovernanceEvent(.sessionStatusChanged(AgentSessionGovernanceEvent(sessionID: session.id, message: "状态已更新为 \(status.displayName)", status: status)))
+            evaluateAutomation(ProductOSAutomationEventContext(triggerKind: .sessionStatusChanged, sessionID: session.id, status: status))
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -601,14 +656,18 @@ final class AppViewModel: ObservableObject {
         do {
             guard let session = try chatSessionRepository.loadSession(id: selectedChatSessionID) else { return }
             var labels = session.governance.labels
+            let didRemove: Bool
             if labels.contains(where: { $0.id == labelID }) {
                 labels.removeAll { $0.id == labelID }
+                didRemove = true
             } else {
                 labels.append(AgentSessionLabel(id: labelID))
+                didRemove = false
             }
             let updated = try chatSessionRepository.setLabels(sessionID: selectedChatSessionID, labels: labels)
             reloadChatSessions()
             appendGovernanceEvent(.sessionLabelsChanged(AgentSessionGovernanceEvent(sessionID: updated.id, message: "标签已更新：\(updated.governance.labels.map(\.displayText).joined(separator: ", "))", labels: updated.governance.labels)))
+            evaluateAutomation(ProductOSAutomationEventContext(triggerKind: didRemove ? .sessionLabelRemoved : .sessionLabelAdded, sessionID: updated.id, labelID: labelID))
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -620,6 +679,7 @@ final class AppViewModel: ObservableObject {
         do {
             let session = try chatSessionRepository.archive(sessionID: selectedChatSessionID)
             appendGovernanceEvent(.sessionArchived(AgentSessionGovernanceEvent(sessionID: session.id, message: "会话已归档", status: session.governance.status)))
+            evaluateAutomation(ProductOSAutomationEventContext(triggerKind: .sessionArchived, sessionID: session.id, status: session.governance.status))
             self.selectedChatSessionID = nil
             reloadChatSessions()
             errorMessage = nil
@@ -633,6 +693,7 @@ final class AppViewModel: ObservableObject {
         do {
             let session = try chatSessionRepository.restore(sessionID: selectedChatSessionID)
             appendGovernanceEvent(.sessionRestored(AgentSessionGovernanceEvent(sessionID: session.id, message: "会话已恢复", status: session.governance.status)))
+            evaluateAutomation(ProductOSAutomationEventContext(triggerKind: .sessionRestored, sessionID: session.id, status: session.governance.status))
             setSessionListFilter(.inbox)
             errorMessage = nil
         } catch {
@@ -1718,11 +1779,14 @@ struct ProductOSRegistryView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Product OS Registry")
                             .font(.largeTitle.bold())
-                        Text("Phase 4 将 Sources 与 Skills 提升为 Connor-owned 产品状态：配置、权限、审计、图谱摄入边界都属于 Connor，而不是 SDK 或外部连接器。")
+                        Text("Phase 5 将 Automation / Labels / Statuses 纳入 Connor-owned 控制平面：自动化只能记录和建议，不能绕过权限、审计和图谱准入。")
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button("重新加载") { viewModel.reloadProductOSRegistry() }
+                    Button("重新加载") {
+                        viewModel.reloadProductOSRegistry()
+                        viewModel.reloadAutomationConfig()
+                    }
                 }
 
                 if let message = viewModel.productOSRegistryMessage {
@@ -1731,7 +1795,64 @@ struct ProductOSRegistryView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                ProductOSRegistrySummary(snapshot: viewModel.productOSRegistry)
+                ProductOSRegistrySummary(snapshot: viewModel.productOSRegistry, automationConfig: viewModel.automationConfig, triggerRecords: viewModel.automationTriggerRecords)
+
+                GroupBox("Statuses") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(viewModel.governanceConfig.statuses) { status in
+                            HStack {
+                                Label(status.name, systemImage: status.systemImage)
+                                Spacer()
+                                ProductOSRegistryChip("id: \(status.id)")
+                                ProductOSRegistryChip(status.isTerminal ? "terminal" : "open")
+                                ProductOSRegistryChip("sort: \(status.sortOrder)")
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                GroupBox("Labels") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(viewModel.governanceConfig.labels) { label in
+                            HStack {
+                                Text(label.name).font(.headline)
+                                Text(label.id).font(.caption).foregroundStyle(.secondary)
+                                Spacer()
+                                ProductOSRegistryChip(label.valueType.rawValue)
+                                ProductOSRegistryChip(label.colorName)
+                                if let binding = label.graphBindingKind { ProductOSRegistryChip("graph: \(binding)") }
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                GroupBox("Automations") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(viewModel.automationConfig.rules) { rule in
+                            ProductOSAutomationRuleRow(rule: rule) { enabled in
+                                viewModel.setAutomationRuleEnabled(id: rule.id, isEnabled: enabled)
+                            }
+                            Divider()
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                GroupBox("Automation Trigger Log") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        if viewModel.automationTriggerRecords.isEmpty {
+                            Text("暂无触发记录。状态/标签/Source/Skill 变更后会在这里留下可审计记录。")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(viewModel.automationTriggerRecords.prefix(8)) { record in
+                                ProductOSAutomationRecordRow(record: record)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
 
                 GroupBox("Sources") {
                     VStack(alignment: .leading, spacing: 12) {
@@ -1757,12 +1878,13 @@ struct ProductOSRegistryView: View {
                     .padding(.vertical, 4)
                 }
 
-                GroupBox("Phase 4 Guardrails") {
+                GroupBox("Phase 5 Guardrails") {
                     VStack(alignment: .leading, spacing: 8) {
                         Label("Single Home Root: no multi-workspace abstraction is introduced.", systemImage: "house")
                         Label("Source credentials and connector execution remain governed by Connor.", systemImage: "lock.shield")
                         Label("Skills are instruction profiles; they cannot bypass graph admission or audit.", systemImage: "checkmark.seal")
                         Label("Graph memory stays a kernel, not a normal RAG/source plugin.", systemImage: "brain.head.profile")
+                        Label("Automation execution is audit-first: actions are recorded for review before becoming background execution.", systemImage: "bolt.badge.clock")
                     }
                     .foregroundStyle(.secondary)
                 }
@@ -1775,12 +1897,15 @@ struct ProductOSRegistryView: View {
 
 struct ProductOSRegistrySummary: View {
     var snapshot: ProductOSRegistrySnapshot
+    var automationConfig: ProductOSAutomationConfig
+    var triggerRecords: [ProductOSAutomationTriggerRecord]
 
     var body: some View {
         HStack(spacing: 12) {
             ProductOSMetricCard(title: "Sources", value: "\(snapshot.sources.count)", detail: "\(snapshot.sources.filter { $0.status == .enabled }.count) enabled")
             ProductOSMetricCard(title: "Skills", value: "\(snapshot.skills.count)", detail: "\(snapshot.skills.filter { $0.status == .enabled }.count) enabled")
-            ProductOSMetricCard(title: "Schema", value: "v\(snapshot.schemaVersion)", detail: "JSON registry")
+            ProductOSMetricCard(title: "Automations", value: "\(automationConfig.rules.count)", detail: "\(automationConfig.rules.filter(\.isEnabled).count) enabled")
+            ProductOSMetricCard(title: "Triggers", value: "\(triggerRecords.count)", detail: "recent audit log")
         }
     }
 }
@@ -1799,6 +1924,60 @@ struct ProductOSMetricCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+struct ProductOSAutomationRuleRow: View {
+    var rule: ProductOSAutomationRule
+    var onEnabledChange: (Bool) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(rule.name).font(.headline)
+                    Text(rule.id).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Toggle("Enabled", isOn: Binding(get: { rule.isEnabled }, set: onEnabledChange))
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+            }
+            HStack(spacing: 8) {
+                ProductOSRegistryChip("trigger: \(rule.trigger.kind.rawValue)")
+                if let status = rule.trigger.status { ProductOSRegistryChip("status: \(status.rawValue)") }
+                if let labelID = rule.trigger.labelID { ProductOSRegistryChip("label: \(labelID)") }
+                ProductOSRegistryChip(rule.requiresReview ? "review required" : "audit only")
+            }
+            ForEach(rule.actions) { action in
+                Text("• \(action.kind.rawValue): \(action.message)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+struct ProductOSAutomationRecordRow: View {
+    var record: ProductOSAutomationTriggerRecord
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(record.ruleName).font(.headline)
+                Spacer()
+                ProductOSRegistryChip(record.trigger.rawValue)
+            }
+            Text("Session: \(record.sessionID)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            ForEach(record.actionSummaries, id: \.self) { summary in
+                Text("• \(summary)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
     }
 }
 
