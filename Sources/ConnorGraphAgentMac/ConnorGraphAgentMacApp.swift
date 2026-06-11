@@ -16,6 +16,7 @@ struct ConnorGraphAgentMacApp: App {
 }
 
 enum SidebarItem: String, CaseIterable, Identifiable {
+    case runtimeCenter = "运行中心"
     case entities = "图谱节点"
     case search = "搜索"
     case observeLog = "观察日志"
@@ -33,7 +34,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
 
 @MainActor
 final class AppViewModel: ObservableObject {
-    @Published var selection: SidebarItem? = .agentChat
+    @Published var selection: SidebarItem? = .runtimeCenter
     @Published var query: String = "记忆"
     @Published var searchResults: [GraphSearchHit] = []
     @Published var chatInput: String = "记忆"
@@ -113,6 +114,58 @@ final class AppViewModel: ObservableObject {
 
     private var activeChatTranscript: [AgentMessage] {
         nativeSessionManager?.session.messages ?? legacyChatController.transcript
+    }
+
+    var runtimeCenterPresentation: ConnorRuntimeCenterPresentation {
+        ConnorRuntimeCenterPresentation.build(
+            sessions: chatSessions.isEmpty ? [activeChatSession] : chatSessions,
+            events: agentEventTimeline,
+            pendingApprovals: pendingApprovals,
+            automationTriggers: automationTriggerRecords,
+            graphMemoryDashboard: graphMemoryDashboardPresentation
+        )
+    }
+
+    private var graphMemoryDashboardPresentation: GraphMemoryDashboard {
+        let pendingCandidates = graphWriteCandidates.filter { $0.status == .pendingReview || $0.status == .validationFailed }
+        let memoryCards: [GraphMemoryProductCard] = admissionHoldQueueItems.map { item in
+            GraphMemoryProductCard(
+                id: item.id,
+                kind: .admissionHold,
+                title: item.title,
+                detail: item.detail,
+                severity: .needsReview,
+                recommendedActions: item.recommendedActions.map(\.rawValue),
+                createdAt: item.createdAt
+            )
+        } + pendingCandidates.map { candidate in
+            GraphMemoryProductCard(
+                id: candidate.id,
+                kind: .writeCandidate,
+                title: "\(candidate.kind.rawValue) · \(candidate.status.rawValue)",
+                detail: candidate.rationale,
+                severity: candidate.status == .validationFailed ? .error : .needsReview,
+                sourceIDs: candidate.sourceEpisodeIDs,
+                createdAt: candidate.createdAt
+            )
+        } + memoryChangeLogEntries.prefix(5).map { entry in
+            GraphMemoryProductCard(
+                id: entry.id,
+                kind: .changeLog,
+                title: entry.title,
+                detail: entry.detail,
+                severity: entry.action == .extractionCommitted ? .success : .info,
+                createdAt: entry.createdAt
+            )
+        }
+        return GraphMemoryDashboard(
+            summary: GraphMemoryDashboardSummary(
+                pendingCandidateCount: pendingCandidates.count,
+                openHoldCount: admissionHoldQueueItems.count,
+                recentChangeCount: memoryChangeLogEntries.count
+            ),
+            cards: memoryCards
+        )
     }
 
     var latestChatSummaryFreshness: AgentSessionSummaryFreshness? {
@@ -1096,7 +1149,9 @@ struct AppShellView: View {
                 SchemaHealthBanner(viewModel: viewModel)
                 Divider()
                 Group {
-                    switch viewModel.selection ?? .agentChat {
+                    switch viewModel.selection ?? .runtimeCenter {
+                    case .runtimeCenter:
+                        ConnorRuntimeCenterView(viewModel: viewModel)
                     case .entities:
                         GraphEntitiesView(entities: viewModel.entities, statements: viewModel.statements, episodes: viewModel.episodes)
                     case .search:

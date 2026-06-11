@@ -40,6 +40,19 @@ struct PhaseGCraftGradeNativeUITests {
         #expect(shell.command(for: .openSettings)?.target == .settings)
     }
 
+    @Test func nativeShellRouteResolverMapsCraftItemsToAppRoutes() {
+        let resolver = ConnorNativeShellRouteResolver()
+
+        #expect(resolver.route(for: .runtimeCenter).legacySidebarID == "runtimeCenter")
+        #expect(resolver.route(for: .agentChat).legacySidebarID == "agentChat")
+        #expect(resolver.route(for: .graphMemory).legacySidebarID == "graphWriteCandidates")
+        #expect(resolver.route(for: .approvals).legacySidebarID == "pendingApprovals")
+        #expect(resolver.route(for: .settings).legacySidebarID == "llmSettings")
+        #expect(resolver.route(for: .browserWorkspace).requiresBrowserVisible == true)
+        #expect(resolver.route(for: .sources).isPlaceholder == true)
+        #expect(resolver.route(for: .skills).placeholderTitle == "Skills runtime UI is not wired yet")
+    }
+
     @Test func runtimeCenterAggregatesSessionsEventsApprovalsAutomationAndMemory() {
         let now = Date(timeIntervalSince1970: 10_000)
         let session = AgentSession(
