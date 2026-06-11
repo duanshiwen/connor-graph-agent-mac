@@ -85,7 +85,7 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
 
     public init(
         settingsStore: LLMSettingsStore = UserDefaultsLLMSettingsStore(),
-        credentialStore: CredentialStore = KeychainCredentialStore()
+        credentialStore: CredentialStore = LocalEncryptedCredentialStore()
     ) {
         self.settingsStore = settingsStore
         self.credentialStore = credentialStore
