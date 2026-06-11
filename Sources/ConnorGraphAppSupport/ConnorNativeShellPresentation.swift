@@ -68,6 +68,9 @@ public enum ConnorNativeShellCommandID: String, Codable, Sendable, Equatable, Ha
     case openRuntimeCenter
     case openGraphMemoryReview
     case openApprovals
+    case openSources
+    case openSkills
+    case openAutomation
     case openSettings
 
     public var id: String { rawValue }
@@ -137,13 +140,13 @@ public struct ConnorNativeShellRouteResolver: Sendable {
         case .approvals:
             ConnorNativeShellRoute(item: item, legacySidebarID: "pendingApprovals")
         case .automation:
-            ConnorNativeShellRoute(item: item, legacySidebarID: "productOS")
+            ConnorNativeShellRoute(item: item, legacySidebarID: "automation")
         case .productOS:
             ConnorNativeShellRoute(item: item, legacySidebarID: "productOS")
         case .sources:
-            ConnorNativeShellRoute(item: item, legacySidebarID: "runtimeCenter", isPlaceholder: true, placeholderTitle: "Sources runtime UI is not wired yet")
+            ConnorNativeShellRoute(item: item, legacySidebarID: "sources")
         case .skills:
-            ConnorNativeShellRoute(item: item, legacySidebarID: "runtimeCenter", isPlaceholder: true, placeholderTitle: "Skills runtime UI is not wired yet")
+            ConnorNativeShellRoute(item: item, legacySidebarID: "skills")
         case .settings:
             ConnorNativeShellRoute(item: item, legacySidebarID: "llmSettings")
         }
@@ -207,6 +210,9 @@ public struct ConnorNativeShellPresentation: Codable, Sendable, Equatable {
             ConnorNativeShellCommand(id: .openRuntimeCenter, title: "Open Runtime Center", systemImage: "dot.radiowaves.left.and.right", keyboardShortcut: "⌘1", target: .runtimeCenter),
             ConnorNativeShellCommand(id: .openGraphMemoryReview, title: "Open Graph Memory", systemImage: "brain.head.profile", keyboardShortcut: "⌘2", target: .graphMemory),
             ConnorNativeShellCommand(id: .openApprovals, title: "Open Approvals", systemImage: "checkmark.shield", keyboardShortcut: "⌘3", target: .approvals),
+            ConnorNativeShellCommand(id: .openSources, title: "Open Sources", systemImage: "externaldrive.connected.to.line.below", keyboardShortcut: "⌘4", target: .sources),
+            ConnorNativeShellCommand(id: .openSkills, title: "Open Skills", systemImage: "sparkles.rectangle.stack", keyboardShortcut: "⌘5", target: .skills),
+            ConnorNativeShellCommand(id: .openAutomation, title: "Open Automation", systemImage: "bolt.badge.clock", keyboardShortcut: "⌘6", target: .automation),
             ConnorNativeShellCommand(id: .openSettings, title: "Open Settings", systemImage: "gearshape", keyboardShortcut: "⌘,", target: .settings)
         ]
     )
