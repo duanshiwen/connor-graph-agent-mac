@@ -134,3 +134,66 @@ private actor FakeClaudeSDKSidecarTransport: ClaudeSDKSidecarTransport {
         .runCompleted(ClaudeSDKSidecarRunCompleted())
     ])
 }
+
+@Test func claudeSDKSidecarEnginePackageDeclaresRealSDKEntryPoint() throws {
+    let root = repositoryRootURL()
+    let sidecarDirectory = root.appendingPathComponent("sidecars/claude-agent-engine", isDirectory: true)
+    let packageData = try Data(contentsOf: sidecarDirectory.appendingPathComponent("package.json"))
+    let package = try JSONSerialization.jsonObject(with: packageData) as? [String: Any]
+    let dependencies = package?["dependencies"] as? [String: String]
+    let scripts = package?["scripts"] as? [String: String]
+    let sidecarSource = try String(contentsOf: sidecarDirectory.appendingPathComponent("claude-sidecar.mjs"), encoding: .utf8)
+
+    #expect(dependencies?["@anthropic-ai/claude-agent-sdk"] != nil)
+    #expect(scripts?["start"] == "node claude-sidecar.mjs")
+    #expect(sidecarSource.contains("@anthropic-ai/claude-agent-sdk"))
+    #expect(sidecarSource.contains("query("))
+    #expect(sidecarSource.contains("permissionMode: request.sdkPermissionMode"))
+    #expect(sidecarSource.contains("ownsProductState"))
+}
+
+@Test func realClaudeSDKSidecarIntegrationSkipsUnlessExplicitlyEnabled() async throws {
+    let environment = ProcessInfo.processInfo.environment
+    guard environment["CONNOR_RUN_CLAUDE_SIDECAR_INTEGRATION"] == "1" else {
+        return
+    }
+    guard let runtime = environment["CONNOR_CLAUDE_SIDECAR_RUNTIME"] else {
+        Issue.record("Set CONNOR_CLAUDE_SIDECAR_RUNTIME to node or bun when enabling integration.")
+        return
+    }
+
+    let root = repositoryRootURL()
+    let sidecarDirectory = root.appendingPathComponent("sidecars/claude-agent-engine", isDirectory: true)
+    let executableURL = URL(fileURLWithPath: runtime)
+    let arguments = runtime.hasSuffix("bun")
+        ? [sidecarDirectory.appendingPathComponent("claude-sidecar.mjs").path]
+        : [sidecarDirectory.appendingPathComponent("claude-sidecar.mjs").path]
+    let transport = ClaudeSDKSidecarProcessTransport(
+        executableURL: executableURL,
+        arguments: arguments,
+        currentDirectoryURL: sidecarDirectory
+    )
+    let request = ClaudeSDKSidecarRequest(
+        connorRunID: "integration-run",
+        connorSessionID: "integration-session",
+        groupID: "default",
+        prompt: "Reply with exactly: Connor sidecar integration ok",
+        cwd: root.path,
+        permissionMode: .readOnly
+    )
+
+    var events: [ClaudeSDKSidecarEvent] = []
+    for try await event in await transport.stream(request) {
+        events.append(event)
+    }
+
+    #expect(events.contains { if case .runStarted = $0 { true } else { false } })
+    #expect(events.contains { if case .textComplete = $0 { true } else { false } })
+}
+
+private func repositoryRootURL() -> URL {
+    URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+}
