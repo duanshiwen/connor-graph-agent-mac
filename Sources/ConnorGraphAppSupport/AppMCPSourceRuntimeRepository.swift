@@ -1,4 +1,5 @@
 import Foundation
+import ConnorGraphAgent
 import ConnorGraphCore
 
 public enum MCPSourceRuntimeTransport: Codable, Sendable, Equatable {
@@ -135,6 +136,18 @@ public enum AppMCPSourceRuntimeRepositoryError: Error, Sendable, Equatable, Cust
     }
 }
 
+public struct MCPSourceRuntimeRegistrySyncResult: Sendable, Equatable {
+    public var snapshot: ProductOSRegistrySnapshot
+    public var registryEvent: AgentProductOSRegistryEvent
+    public var event: AgentEvent
+
+    public init(snapshot: ProductOSRegistrySnapshot, registryEvent: AgentProductOSRegistryEvent) {
+        self.snapshot = snapshot
+        self.registryEvent = registryEvent
+        self.event = .sourceRegistryChanged(registryEvent)
+    }
+}
+
 public struct AppMCPSourceRuntimeRepository: Sendable {
     public var storagePaths: AppStoragePaths
 
@@ -187,6 +200,35 @@ public struct AppMCPSourceRuntimeRepository: Sendable {
             return configuration
         }
         return configs.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+    }
+
+    public func syncProductOSRegistry(
+        using registryRepository: AppProductOSRegistryRepository,
+        sessionID: String,
+        runID: String? = nil
+    ) throws -> MCPSourceRuntimeRegistrySyncResult {
+        let configurations = try list()
+        var snapshot = try registryRepository.loadOrCreateDefault()
+        for configuration in configurations {
+            let source = configuration.productOSSourceDefinition()
+            if let index = snapshot.sources.firstIndex(where: { $0.id == source.id }) {
+                snapshot.sources[index] = source
+            } else {
+                snapshot.sources.append(source)
+            }
+        }
+        try registryRepository.save(snapshot)
+        let reloaded = try registryRepository.loadOrCreateDefault()
+        let latestConfiguration = configurations.sorted { $0.updatedAt > $1.updatedAt }.first
+        let registryEvent = AgentProductOSRegistryEvent(
+            runID: runID,
+            sessionID: sessionID,
+            registryKind: "source",
+            entryID: latestConfiguration?.sourceID ?? "mcp-source-runtime",
+            status: latestConfiguration?.status,
+            message: "MCP source runtime synchronized with Product OS registry."
+        )
+        return MCPSourceRuntimeRegistrySyncResult(snapshot: reloaded, registryEvent: registryEvent)
     }
 
     public func validate(_ configuration: MCPSourceRuntimeConfiguration) throws {
