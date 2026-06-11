@@ -50,6 +50,108 @@ public struct ClaudeSDKSidecarRequest: Codable, Sendable, Equatable {
     }
 }
 
+public struct ClaudeSDKSidecarApprovalResolution: Codable, Sendable, Equatable {
+    public var connorRunID: String
+    public var connorSessionID: String
+    public var requestID: String
+    public var status: AgentPendingApprovalStatus
+    public var outcome: AgentPermissionOutcome
+    public var capability: AgentPermissionCapability
+    public var toolName: String?
+    public var payloadJSON: String
+    public var reason: String
+    public var actor: String
+    public var ownsProductState: Bool
+
+    public init(
+        connorRunID: String,
+        connorSessionID: String,
+        requestID: String,
+        status: AgentPendingApprovalStatus,
+        outcome: AgentPermissionOutcome? = nil,
+        capability: AgentPermissionCapability,
+        toolName: String? = nil,
+        payloadJSON: String = "{}",
+        reason: String,
+        actor: String = "human-reviewer",
+        ownsProductState: Bool = false
+    ) {
+        self.connorRunID = connorRunID
+        self.connorSessionID = connorSessionID
+        self.requestID = requestID
+        self.status = status
+        self.outcome = outcome ?? Self.outcome(for: status)
+        self.capability = capability
+        self.toolName = toolName
+        self.payloadJSON = payloadJSON
+        self.reason = reason
+        self.actor = actor
+        self.ownsProductState = ownsProductState
+    }
+
+    public init(
+        approval: AgentPendingApproval,
+        status: AgentPendingApprovalStatus,
+        reason: String,
+        actor: String = "human-reviewer"
+    ) {
+        self.init(
+            connorRunID: approval.runID,
+            connorSessionID: approval.sessionID,
+            requestID: approval.requestID,
+            status: status,
+            capability: approval.capability,
+            toolName: approval.toolName,
+            payloadJSON: approval.payloadJSON,
+            reason: reason,
+            actor: actor,
+            ownsProductState: false
+        )
+    }
+
+    public static func outcome(for status: AgentPendingApprovalStatus) -> AgentPermissionOutcome {
+        switch status {
+        case .approved: return .approved
+        case .denied, .cancelled: return .denied
+        case .pending: return .needsApproval
+        }
+    }
+}
+
+public enum ClaudeSDKSidecarCommand: Codable, Sendable, Equatable {
+    case start(ClaudeSDKSidecarRequest)
+    case approvalResolved(ClaudeSDKSidecarApprovalResolution)
+
+    private enum CodingKeys: String, CodingKey {
+        case start
+        case approvalResolved
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if container.contains(.start) {
+            self = .start(try container.decode(ClaudeSDKSidecarRequest.self, forKey: .start))
+        } else if container.contains(.approvalResolved) {
+            self = .approvalResolved(try container.decode(ClaudeSDKSidecarApprovalResolution.self, forKey: .approvalResolved))
+        } else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: decoder.codingPath,
+                debugDescription: "Expected one Claude SDK sidecar command key."
+            ))
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .start(let payload):
+            try container.encode(payload, forKey: .start)
+        case .approvalResolved(let payload):
+            try container.encode(payload, forKey: .approvalResolved)
+        }
+    }
+}
+
 public struct ClaudeSDKSidecarRunStarted: Codable, Sendable, Equatable {
     public var sdkSessionID: String?
 

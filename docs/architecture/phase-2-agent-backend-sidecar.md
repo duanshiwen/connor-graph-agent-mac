@@ -1,6 +1,6 @@
 # Phase 2: AgentBackend Abstraction and Claude SDK Sidecar
 
-Last updated: 2026-06-11 15:03 GMT+8
+Last updated: 2026-06-11 15:12 GMT+8
 
 ## Status
 
@@ -75,7 +75,7 @@ Connor `AgentPermissionMode` remains the product-level permission source of trut
 - `trustedWrite`
 - `allowAll`
 
-The sidecar reports tool and permission boundary events back as normalized Connor `AgentEvent` values. Factory-created Claude sidecar `NativeSessionManager` instances persist those events into the SQLite `agent_events` timeline through `AgentEventRecorder`, create Connor-owned `agent_pending_approvals` records for normalized `permissionRequested` events, and render tool/permission events with tool names, call IDs, request IDs, and compact payload summaries for the native timeline UI. Pending approvals can now be resolved through Connor product APIs: approval resolution updates the pending record, writes an `AgentAuditEvent.permissionDecision`, and appends a `permissionResolved` timeline event that is rendered as approved/denied/needs-approval in the timeline. The macOS app now has a native "权限审批" surface that lists pending approvals and lets the reviewer approve, deny, or cancel them. Write-capable sidecar tools still must not become default until Connor has execution-resume semantics over these normalized decisions.
+The sidecar reports tool and permission boundary events back as normalized Connor `AgentEvent` values. Factory-created Claude sidecar `NativeSessionManager` instances persist those events into the SQLite `agent_events` timeline through `AgentEventRecorder`, create Connor-owned `agent_pending_approvals` records for normalized `permissionRequested` events, and render tool/permission events with tool names, call IDs, request IDs, and compact payload summaries for the native timeline UI. Pending approvals can now be resolved through Connor product APIs: approval resolution updates the pending record, writes an `AgentAuditEvent.permissionDecision`, and appends a `permissionResolved` timeline event that is rendered as approved/denied/needs-approval in the timeline. The macOS app now has a native "权限审批" surface that lists pending approvals and lets the reviewer approve, deny, or cancel them. Connor also has a Swift-side `ClaudeSDKSidecarCommand.approvalResolved` protocol skeleton for future Connor → sidecar resume, with `ownsProductState = false` preserved. Write-capable sidecar tools still must not become default until that skeleton is connected to safe execution-resume semantics.
 
 ## IPC Contract
 
@@ -148,7 +148,8 @@ A Swift integration test exists but is gated by environment variables, so normal
 Recommended next implementation slice:
 
 1. Add product-level approval flow for normalized sidecar `permissionRequested` events.
-2. Add sidecar execution-resume semantics after a Connor approval decision, without letting the SDK own Connor session or permission state.
-3. Keep SDK permission mode bypassed until Connor can inspect, audit, approve, and resume sidecar tool actions end-to-end.
-4. Add cancellation support to `ClaudeSDKSidecarProcessTransport` before long-running sidecar tasks become default.
-5. Only after those controls exist, consider enabling a constrained read-only Claude sidecar path in app settings.
+2. Connect `ClaudeSDKSidecarCommand.approvalResolved` to a process/session transport capable of sending more than the initial start request.
+3. Add sidecar execution-resume semantics after a Connor approval decision, without letting the SDK own Connor session or permission state.
+4. Keep SDK permission mode bypassed until Connor can inspect, audit, approve, and resume sidecar tool actions end-to-end.
+5. Add cancellation support to `ClaudeSDKSidecarProcessTransport` before long-running sidecar tasks become default.
+6. Only after those controls exist, consider enabling a constrained read-only Claude sidecar path in app settings.

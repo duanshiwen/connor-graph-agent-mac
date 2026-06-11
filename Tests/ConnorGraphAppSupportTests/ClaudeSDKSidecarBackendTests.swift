@@ -136,6 +136,66 @@ private actor FakeClaudeSDKSidecarTransport: ClaudeSDKSidecarTransport {
     }
 }
 
+@Test func claudeSDKSidecarApprovalResolutionCommandKeepsConnorStateOwnership() throws {
+    let approval = AgentPendingApproval(
+        requestID: "permission-tool-1",
+        runID: "run-sidecar-tools",
+        sessionID: "connor-session-sidecar-tools",
+        capability: .commitGraphWrite,
+        toolName: "Write",
+        payloadJSON: "{\"file_path\":\"README.md\"}",
+        status: .approved
+    )
+    let resolution = ClaudeSDKSidecarApprovalResolution(
+        approval: approval,
+        status: .approved,
+        reason: "Human reviewer approved the write",
+        actor: "human-reviewer"
+    )
+    let command = ClaudeSDKSidecarCommand.approvalResolved(resolution)
+
+    let data = try JSONEncoder().encode(command)
+    let decoded = try JSONDecoder().decode(ClaudeSDKSidecarCommand.self, from: data)
+
+    #expect(decoded == command)
+    if case .approvalResolved(let payload) = decoded {
+        #expect(payload.connorRunID == "run-sidecar-tools")
+        #expect(payload.connorSessionID == "connor-session-sidecar-tools")
+        #expect(payload.requestID == "permission-tool-1")
+        #expect(payload.status == .approved)
+        #expect(payload.outcome == .approved)
+        #expect(payload.capability == .commitGraphWrite)
+        #expect(payload.toolName == "Write")
+        #expect(payload.payloadJSON == "{\"file_path\":\"README.md\"}")
+        #expect(payload.reason == "Human reviewer approved the write")
+        #expect(payload.actor == "human-reviewer")
+        #expect(payload.ownsProductState == false)
+    } else {
+        Issue.record("Expected approvalResolved sidecar command")
+    }
+}
+
+@Test func claudeSDKSidecarApprovalResolutionCommandMapsCancelledToDeniedOutcome() throws {
+    let approval = AgentPendingApproval(
+        requestID: "permission-tool-2",
+        runID: "run-sidecar-tools",
+        sessionID: "connor-session-sidecar-tools",
+        capability: .externalNetwork,
+        toolName: "WebFetch",
+        status: .cancelled
+    )
+    let resolution = ClaudeSDKSidecarApprovalResolution(
+        approval: approval,
+        status: .cancelled,
+        reason: "Run was cancelled",
+        actor: "system"
+    )
+
+    #expect(resolution.status == .cancelled)
+    #expect(resolution.outcome == .denied)
+    #expect(resolution.ownsProductState == false)
+}
+
 @Test func claudeSDKSidecarJSONLProtocolDecodesToolAndPermissionEvents() throws {
     let lines = [
         "{\"toolUseRequested\":{\"toolCallID\":\"tool-1\",\"name\":\"Read\",\"inputJSON\":\"{}\"}}",
