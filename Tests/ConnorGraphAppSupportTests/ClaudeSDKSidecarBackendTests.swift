@@ -216,6 +216,80 @@ private actor FakeClaudeSDKSidecarTransport: ClaudeSDKSidecarTransport {
     ])
 }
 
+@Test func claudeSDKSidecarProcessTransportSupportsStartCommandBoundaryWithoutChangingLegacyRequestShape() async throws {
+    let temporaryDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorSidecarCommandTransportTests-")
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+    let capturedRequestURL = temporaryDirectory.appendingPathComponent("request.jsonl")
+    let scriptURL = temporaryDirectory.appendingPathComponent("mock-sidecar.sh")
+    try """
+    #!/bin/sh
+    IFS= read -r request
+    printf '%s\n' "$request" > "$CONNOR_CAPTURED_REQUEST"
+    printf '%s\n' '{"runStarted":{"sdkSessionID":"sdk-command-session"}}'
+    printf '%s\n' '{"runCompleted":{}}'
+    """.write(to: scriptURL, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+    let transport = ClaudeSDKSidecarProcessTransport(
+        executableURL: URL(fileURLWithPath: "/bin/sh"),
+        arguments: [scriptURL.path],
+        environment: ["CONNOR_CAPTURED_REQUEST": capturedRequestURL.path]
+    )
+    let request = ClaudeSDKSidecarRequest(
+        connorRunID: "run-command-start",
+        connorSessionID: "session-command-start",
+        groupID: "default",
+        prompt: "Use the command transport start boundary",
+        cwd: temporaryDirectory.path,
+        permissionMode: .askToWrite
+    )
+
+    var events: [ClaudeSDKSidecarEvent] = []
+    for try await event in await transport.stream(.start(request)) {
+        events.append(event)
+    }
+
+    let capturedData = try Data(contentsOf: capturedRequestURL)
+    let captured = try JSONDecoder().decode(ClaudeSDKSidecarRequest.self, from: capturedData)
+    #expect(captured.connorRunID == "run-command-start")
+    #expect(captured.connorSessionID == "session-command-start")
+    #expect(captured.ownsProductState == false)
+    #expect(events == [
+        .runStarted(ClaudeSDKSidecarRunStarted(sdkSessionID: "sdk-command-session")),
+        .runCompleted(ClaudeSDKSidecarRunCompleted())
+    ])
+}
+
+@Test func claudeSDKSidecarProcessTransportRejectsApprovalResolutionCommandUntilStreamingSessionExists() async throws {
+    let transport = ClaudeSDKSidecarProcessTransport(executableURL: URL(fileURLWithPath: "/bin/sh"))
+    let approval = AgentPendingApproval(
+        requestID: "permission-tool-1",
+        runID: "run-sidecar-tools",
+        sessionID: "connor-session-sidecar-tools",
+        capability: .commitGraphWrite,
+        toolName: "Write",
+        status: .approved
+    )
+    let resolution = ClaudeSDKSidecarApprovalResolution(
+        approval: approval,
+        status: .approved,
+        reason: "Approved by reviewer"
+    )
+
+    do {
+        for try await _ in await transport.stream(.approvalResolved(resolution)) {}
+        Issue.record("Expected approvalResolved command to be rejected by one-shot process transport")
+    } catch let error as ClaudeSDKSidecarProcessTransportError {
+        #expect(error == .unsupportedCommand("approvalResolved"))
+    } catch {
+        Issue.record("Expected ClaudeSDKSidecarProcessTransportError.unsupportedCommand, got \(error)")
+    }
+}
+
 @Test func claudeSDKSidecarProcessTransportWritesRequestAndReadsJSONLEvents() async throws {
     let temporaryDirectory = FileManager.default.temporaryDirectory
         .appendingPathComponent("ConnorSidecarTransportTests-")

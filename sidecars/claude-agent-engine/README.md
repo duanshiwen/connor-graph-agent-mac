@@ -91,7 +91,7 @@ Before enabling write-capable tools by default, Connor still needs execution-res
 
 ## Approval Resolution Command Skeleton
 
-Connor now has a Swift-side command envelope for the future Connor → sidecar resume path. The current process transport still sends the direct start request above; this command is a protocol skeleton for the next runtime slice, not an enabled write-tool execution path.
+Connor now has a Swift-side command envelope for the future Connor → sidecar resume path. `ClaudeSDKSidecarProcessTransport` implements the command transport boundary for `.start(...)` while preserving the direct request shape shown above. It explicitly rejects `.approvalResolved(...)` until Connor has a persistent streaming sidecar session transport. This command is a protocol skeleton, not an enabled write-tool execution path.
 
 ```jsonl
 {"approvalResolved":{"connorRunID":"run-id","connorSessionID":"session-id","requestID":"permission-tool-1","status":"approved","outcome":"approved","capability":"commitGraphWrite","toolName":"Write","payloadJSON":"{}","reason":"Human reviewer approved the write","actor":"human-reviewer","ownsProductState":false}}

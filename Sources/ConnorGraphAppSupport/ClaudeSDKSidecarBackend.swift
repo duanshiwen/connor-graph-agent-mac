@@ -141,6 +141,13 @@ public enum ClaudeSDKSidecarCommand: Codable, Sendable, Equatable {
         }
     }
 
+    public var commandName: String {
+        switch self {
+        case .start: return "start"
+        case .approvalResolved: return "approvalResolved"
+        }
+    }
+
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
@@ -324,10 +331,15 @@ public protocol ClaudeSDKSidecarTransport: Sendable {
     func stream(_ request: ClaudeSDKSidecarRequest) async -> AsyncThrowingStream<ClaudeSDKSidecarEvent, Error>
 }
 
+public protocol ClaudeSDKSidecarCommandTransport: ClaudeSDKSidecarTransport {
+    func stream(_ command: ClaudeSDKSidecarCommand) async -> AsyncThrowingStream<ClaudeSDKSidecarEvent, Error>
+}
+
 public enum ClaudeSDKSidecarProcessTransportError: Error, Sendable, Equatable, LocalizedError {
     case missingNewlineTerminator
     case nonZeroExit(code: Int32, stderr: String)
     case invalidJSONLine(String)
+    case unsupportedCommand(String)
 
     public var errorDescription: String? {
         switch self {
@@ -337,11 +349,13 @@ public enum ClaudeSDKSidecarProcessTransportError: Error, Sendable, Equatable, L
             return "Claude SDK sidecar exited with status \(code): \(stderr)"
         case .invalidJSONLine(let line):
             return "Claude SDK sidecar emitted an invalid JSONL event: \(line)"
+        case .unsupportedCommand(let command):
+            return "Claude SDK sidecar process transport does not support \(command) commands without a persistent streaming session."
         }
     }
 }
 
-public struct ClaudeSDKSidecarProcessTransport: ClaudeSDKSidecarTransport {
+public struct ClaudeSDKSidecarProcessTransport: ClaudeSDKSidecarCommandTransport {
     public var executableURL: URL
     public var arguments: [String]
     public var environment: [String: String]
@@ -360,6 +374,10 @@ public struct ClaudeSDKSidecarProcessTransport: ClaudeSDKSidecarTransport {
     }
 
     public func stream(_ request: ClaudeSDKSidecarRequest) async -> AsyncThrowingStream<ClaudeSDKSidecarEvent, Error> {
+        await stream(.start(request))
+    }
+
+    public func stream(_ command: ClaudeSDKSidecarCommand) async -> AsyncThrowingStream<ClaudeSDKSidecarEvent, Error> {
         let executableURL = executableURL
         let arguments = arguments
         let environment = environment
@@ -368,6 +386,9 @@ public struct ClaudeSDKSidecarProcessTransport: ClaudeSDKSidecarTransport {
         return AsyncThrowingStream { continuation in
             Task.detached(priority: .userInitiated) {
                 do {
+                    guard case .start(let request) = command else {
+                        throw ClaudeSDKSidecarProcessTransportError.unsupportedCommand(command.commandName)
+                    }
                     let events = try runSidecarProcess(
                         request: request,
                         executableURL: executableURL,
