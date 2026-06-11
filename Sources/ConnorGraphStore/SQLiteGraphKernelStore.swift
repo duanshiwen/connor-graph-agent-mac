@@ -10,6 +10,8 @@ public enum SQLiteGraphKernelStoreError: Error, Equatable, CustomStringConvertib
     case bindFailed(String)
     case stepFailed(String)
     case decodeFailed(String)
+    case pendingApprovalNotFound(String)
+    case invalidPendingApprovalResolution(String)
 
     public var description: String {
         switch self {
@@ -19,6 +21,8 @@ public enum SQLiteGraphKernelStoreError: Error, Equatable, CustomStringConvertib
         case .bindFailed(let message): "bindFailed: \(message)"
         case .stepFailed(let message): "stepFailed: \(message)"
         case .decodeFailed(let message): "decodeFailed: \(message)"
+        case .pendingApprovalNotFound(let requestID): "pendingApprovalNotFound: \(requestID)"
+        case .invalidPendingApprovalResolution(let message): "invalidPendingApprovalResolution: \(message)"
         }
     }
 }
@@ -88,6 +92,7 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         "agent_runs",
         "agent_events",
         "agent_audit_events",
+        "agent_pending_approvals",
         "graph_entities_fts",
         "graph_statements_fts",
         "graph_episodes_fts"
@@ -106,7 +111,9 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         "idx_graph_write_candidates_status",
         "idx_agent_sessions_updated",
         "idx_agent_events_run",
-        "idx_agent_audit_events_run"
+        "idx_agent_audit_events_run",
+        "idx_agent_pending_approvals_run",
+        "idx_agent_pending_approvals_status"
     ]
 
     private var db: OpaquePointer?
@@ -447,6 +454,22 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         );
         """)
         try execute("CREATE INDEX IF NOT EXISTS idx_agent_audit_events_run ON agent_audit_events(run_id);")
+        try execute("""
+        CREATE TABLE IF NOT EXISTS agent_pending_approvals (
+            id TEXT PRIMARY KEY,
+            request_id TEXT NOT NULL UNIQUE,
+            run_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            capability TEXT NOT NULL,
+            tool_name TEXT,
+            payload_json TEXT NOT NULL,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """)
+        try execute("CREATE INDEX IF NOT EXISTS idx_agent_pending_approvals_run ON agent_pending_approvals(run_id, created_at);")
+        try execute("CREATE INDEX IF NOT EXISTS idx_agent_pending_approvals_status ON agent_pending_approvals(status, created_at);")
         try execute("PRAGMA user_version = \(Self.currentSchemaVersion);")
     }
 
@@ -917,6 +940,112 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         """).map(decodeAuditEvent)
     }
 
+    // MARK: - Agent Pending Approvals
+
+    public func upsert(pendingApproval approval: AgentPendingApproval) throws {
+        try execute("""
+        INSERT OR REPLACE INTO agent_pending_approvals
+        (id, request_id, run_id, session_id, capability, tool_name, payload_json, status, created_at, updated_at)
+        VALUES (\(quote(approval.id)), \(quote(approval.requestID)), \(quote(approval.runID)), \(quote(approval.sessionID)), \(quote(approval.capability.rawValue)), \(quote(approval.toolName)), \(quote(approval.payloadJSON)), \(quote(approval.status.rawValue)), \(quote(iso(approval.createdAt))), \(quote(iso(approval.updatedAt))))
+        """)
+    }
+
+    public func pendingApprovals(runID: String, limit: Int = 100) throws -> [AgentPendingApproval] {
+        try query(sql: """
+        SELECT id, request_id, run_id, session_id, capability, tool_name, payload_json, status, created_at, updated_at
+        FROM agent_pending_approvals WHERE run_id = \(quote(runID)) ORDER BY created_at ASC LIMIT \(limit)
+        """).map(decodePendingApproval)
+    }
+
+    public func pendingApprovals(status: AgentPendingApprovalStatus = .pending, limit: Int = 100) throws -> [AgentPendingApproval] {
+        try query(sql: """
+        SELECT id, request_id, run_id, session_id, capability, tool_name, payload_json, status, created_at, updated_at
+        FROM agent_pending_approvals WHERE status = \(quote(status.rawValue)) ORDER BY created_at ASC LIMIT \(limit)
+        """).map(decodePendingApproval)
+    }
+
+    public func pendingApproval(requestID: String) throws -> AgentPendingApproval? {
+        try query(sql: """
+        SELECT id, request_id, run_id, session_id, capability, tool_name, payload_json, status, created_at, updated_at
+        FROM agent_pending_approvals WHERE request_id = \(quote(requestID)) LIMIT 1
+        """).map(decodePendingApproval).first
+    }
+
+    @discardableResult
+    public func resolvePendingApproval(
+        requestID: String,
+        status: AgentPendingApprovalStatus,
+        reason: String,
+        actor: String = "human-reviewer"
+    ) throws -> AgentPendingApproval {
+        guard status != .pending else {
+            throw SQLiteGraphKernelStoreError.invalidPendingApprovalResolution("resolution status must not remain pending")
+        }
+        guard var approval = try pendingApproval(requestID: requestID) else {
+            throw SQLiteGraphKernelStoreError.pendingApprovalNotFound(requestID)
+        }
+
+        let now = Date()
+        approval.status = status
+        approval.updatedAt = now
+        let outcome = permissionOutcome(forResolvedStatus: status)
+        let decision = AgentPermissionDecision(
+            requestID: approval.requestID,
+            runID: approval.runID,
+            sessionID: approval.sessionID,
+            capability: approval.capability,
+            outcome: outcome,
+            reason: reason
+        )
+        let auditPayload = [
+            "request_id": approval.requestID,
+            "status": status.rawValue,
+            "reason": reason
+        ]
+
+        try execute("BEGIN TRANSACTION;")
+        do {
+            try upsert(pendingApproval: approval)
+            try append(auditEvent: AgentAuditEvent(
+                runID: approval.runID,
+                sessionID: approval.sessionID,
+                eventType: .permissionDecision,
+                actor: actor,
+                capability: approval.capability,
+                toolName: approval.toolName,
+                decision: decision,
+                payloadJSON: json(auditPayload),
+                createdAt: now
+            ))
+            try append(event: PersistedAgentEvent(
+                runID: approval.runID,
+                sessionID: approval.sessionID,
+                kind: .permissionResolved,
+                payloadJSON: json(decision),
+                sequence: try nextAgentEventSequence(runID: approval.runID),
+                createdAt: now
+            ))
+            try execute("COMMIT;")
+        } catch {
+            try? execute("ROLLBACK;")
+            throw error
+        }
+        return approval
+    }
+
+    private func permissionOutcome(forResolvedStatus status: AgentPendingApprovalStatus) -> AgentPermissionOutcome {
+        switch status {
+        case .approved: .approved
+        case .denied, .cancelled: .denied
+        case .pending: .needsApproval
+        }
+    }
+
+    private func nextAgentEventSequence(runID: String) throws -> Int {
+        let rows = try query(sql: "SELECT COALESCE(MAX(sequence), -1) + 1 FROM agent_events WHERE run_id = \(quote(runID))")
+        return rows.first?.first.flatMap(Int.init) ?? 0
+    }
+
     private func upsertEpisodeFTS(_ episode: GraphEpisodeV3) throws {
         try execute("DELETE FROM graph_episodes_fts WHERE episode_id = \(quote(episode.id));")
         try execute("""
@@ -987,6 +1116,21 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
             decision: try nilIfEmpty(row[7]).map { try decode(AgentPermissionDecision.self, $0) },
             payloadJSON: row[8],
             createdAt: try date(row[9])
+        )
+    }
+
+    private func decodePendingApproval(_ row: [String]) throws -> AgentPendingApproval {
+        AgentPendingApproval(
+            id: row[0],
+            requestID: row[1],
+            runID: row[2],
+            sessionID: row[3],
+            capability: AgentPermissionCapability(rawValue: row[4]) ?? .modelCall,
+            toolName: nilIfEmpty(row[5]),
+            payloadJSON: row[6],
+            status: AgentPendingApprovalStatus(rawValue: row[7]) ?? .pending,
+            createdAt: try date(row[8]),
+            updatedAt: try date(row[9])
         )
     }
 

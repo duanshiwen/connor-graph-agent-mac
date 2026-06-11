@@ -3,19 +3,51 @@ import ConnorGraphAgent
 import ConnorGraphCore
 import ConnorGraphMemory
 
-public struct NativeSessionManager<Provider: AgentModelProvider>: Sendable {
-    public var loopController: AgentLoopController<Provider>
+public protocol AgentPendingApprovalRepository: Sendable {
+    func upsert(pendingApproval approval: AgentPendingApproval) throws
+}
+
+public struct NativeSessionManager: Sendable {
+    public var backend: AnyAgentBackend
     public var sessionRepository: AppChatSessionRepository
     public private(set) var session: AgentSession
     public private(set) var events: [AgentEvent]
     public private(set) var eventPresentations: [AgentEventPresentation]
     public var groupID: String
+    public var permissionMode: AgentPermissionMode
 
     private let presenter: AgentEventPresenter
     private let memoryIngestionService: MemoryIngestionService
     private let memoryStagingRepository: AppMemoryStagingBufferRepository?
+    private let eventRecorder: AgentEventRecorder?
+    private let pendingApprovalRepository: (any AgentPendingApprovalRepository)?
 
-    public init(
+    public init<Backend: AgentBackend>(
+        backend: Backend,
+        sessionRepository: AppChatSessionRepository,
+        session: AgentSession = AgentSession(),
+        groupID: String = "default",
+        permissionMode: AgentPermissionMode = .askToWrite,
+        memoryStagingRepository: AppMemoryStagingBufferRepository? = nil,
+        memoryIngestionService: MemoryIngestionService = MemoryIngestionService(),
+        eventRecorder: AgentEventRecorder? = nil,
+        pendingApprovalRepository: (any AgentPendingApprovalRepository)? = nil
+    ) {
+        self.backend = AnyAgentBackend(backend)
+        self.sessionRepository = sessionRepository
+        self.session = session
+        self.events = []
+        self.eventPresentations = []
+        self.groupID = groupID
+        self.permissionMode = permissionMode
+        self.presenter = AgentEventPresenter()
+        self.memoryStagingRepository = memoryStagingRepository
+        self.memoryIngestionService = memoryIngestionService
+        self.eventRecorder = eventRecorder
+        self.pendingApprovalRepository = pendingApprovalRepository
+    }
+
+    public init<Provider: AgentModelProvider>(
         loopController: AgentLoopController<Provider>,
         sessionRepository: AppChatSessionRepository,
         session: AgentSession = AgentSession(),
@@ -23,15 +55,15 @@ public struct NativeSessionManager<Provider: AgentModelProvider>: Sendable {
         memoryStagingRepository: AppMemoryStagingBufferRepository? = nil,
         memoryIngestionService: MemoryIngestionService = MemoryIngestionService()
     ) {
-        self.loopController = loopController
-        self.sessionRepository = sessionRepository
-        self.session = session
-        self.events = []
-        self.eventPresentations = []
-        self.groupID = groupID
-        self.presenter = AgentEventPresenter()
-        self.memoryStagingRepository = memoryStagingRepository
-        self.memoryIngestionService = memoryIngestionService
+        self.init(
+            backend: AgentLoopBackend(loopController: loopController),
+            sessionRepository: sessionRepository,
+            session: session,
+            groupID: groupID,
+            permissionMode: loopController.configuration.permissionMode,
+            memoryStagingRepository: memoryStagingRepository,
+            memoryIngestionService: memoryIngestionService
+        )
     }
 
     @discardableResult
@@ -44,7 +76,7 @@ public struct NativeSessionManager<Provider: AgentModelProvider>: Sendable {
             sessionID: session.id,
             groupID: groupID,
             userMessage: prompt,
-            permissionMode: loopController.configuration.permissionMode
+            permissionMode: permissionMode
         )
 
         var collectedEvents: [AgentEvent] = []
@@ -52,9 +84,12 @@ public struct NativeSessionManager<Provider: AgentModelProvider>: Sendable {
         var assistantMessage: AgentMessage?
 
         do {
-            for try await event in loopController.run(request) {
+            for try await event in backend.chat(request) {
                 collectedEvents.append(event)
                 events.append(event)
+
+                try recordBackendEvent(event, sequence: collectedEvents.count - 1)
+                try recordPendingApprovalIfNeeded(event)
 
                 let presentation = presenter.presentation(for: event)
                 collectedPresentations.append(presentation)
@@ -88,6 +123,34 @@ public struct NativeSessionManager<Provider: AgentModelProvider>: Sendable {
 
     private func persistSession() throws {
         try sessionRepository.saveSession(session)
+    }
+
+    private func recordBackendEvent(_ event: AgentEvent, sequence: Int) throws {
+        guard let eventRecorder else { return }
+        switch event {
+        case .runStarted(let payload):
+            try eventRecorder.recordRun(payload.run)
+        case .runCompleted(let payload):
+            try eventRecorder.recordRun(payload.run)
+        default:
+            break
+        }
+        try eventRecorder.record(event, sequence: sequence)
+    }
+
+    private func recordPendingApprovalIfNeeded(_ event: AgentEvent) throws {
+        guard let pendingApprovalRepository,
+              case .permissionRequested(let request) = event
+        else { return }
+        let approval = AgentPendingApproval(
+            requestID: request.id,
+            runID: request.runID,
+            sessionID: request.sessionID,
+            capability: request.capability,
+            toolName: request.toolName,
+            payloadJSON: request.payloadJSON
+        )
+        try pendingApprovalRepository.upsert(pendingApproval: approval)
     }
 
     private func persistMemoryStagingAfterUserMessage(_ message: AgentMessage) throws {
