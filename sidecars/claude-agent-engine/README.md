@@ -6,9 +6,12 @@ Connor remains the product state owner. The sidecar is a replaceable agent-engin
 
 ## Current Status
 
-Phase 2 currently ships the protocol skeleton and a mock sidecar CLI only. It does **not** install or call the real `@anthropic-ai/claude-agent-sdk` package yet.
+Phase 2 ships both:
 
-The next implementation slice should replace the mock internals with Claude Agent SDK `query(prompt, options)` while preserving this protocol.
+- a real SDK entry point: `claude-sidecar.mjs`
+- local protocol mocks: `mock-sidecar.mjs` and `mock-sidecar.sh`
+
+The real entry point imports `@anthropic-ai/claude-agent-sdk` and calls `query(prompt, options)`, but Connor does **not** enable it by default. Swift tests include a gated integration path that only runs when explicitly requested by environment variables.
 
 ## Request Protocol
 
@@ -55,19 +58,43 @@ Failure event:
 
 stderr is reserved for diagnostics. A non-zero exit code is treated as a transport failure by Swift.
 
-## Real SDK Mapping Plan
+## Real SDK Mapping
 
-When the real SDK is introduced:
+`claude-sidecar.mjs`:
 
-1. Read the request JSONL from stdin.
-2. Call `query(request.prompt, options)` from `@anthropic-ai/claude-agent-sdk`.
-3. Set SDK options from Connor policy envelope:
+1. Reads the request JSONL from stdin.
+2. Calls `query(request.prompt, options)` from `@anthropic-ai/claude-agent-sdk`.
+3. Sets SDK options from Connor policy envelope:
    - `cwd = request.cwd`
-   - `permissionMode = "bypassPermissions"`
-   - eventually add `canUseTool` or hooks that report permission requests back to Connor.
-4. Map SDK streaming assistant messages to `textDelta` / `textComplete`.
-5. Map SDK result messages to `runCompleted` or `runFailed`.
-6. Never persist SDK sessions as Connor sessions.
+   - `permissionMode = request.sdkPermissionMode`
+   - `resume = request.sdkSessionID ?? undefined`
+   - `includePartialMessages = true`
+4. Maps SDK assistant-like messages to `textDelta`.
+5. Emits `textComplete` and `runCompleted` after the SDK stream finishes.
+6. Emits `runFailed` for SDK errors or non-success result messages.
+7. Never persists SDK sessions as Connor sessions.
+
+Before enabling write-capable tools, Connor still needs explicit tool/permission event normalization.
+
+## Real SDK Local Run
+
+Install dependencies in this directory, then run:
+
+```bash
+npm install
+node claude-sidecar.mjs <<'EOF'
+{"connorRunID":"run-1","connorSessionID":"session-1","groupID":"default","prompt":"Reply with hello","cwd":"/tmp","permissionMode":"readOnly","sdkPermissionMode":"bypassPermissions","sdkSessionID":null,"ownsProductState":false}
+EOF
+```
+
+Optional Swift integration test:
+
+```bash
+CONNOR_RUN_CLAUDE_SIDECAR_INTEGRATION=1 \
+CONNOR_CLAUDE_SIDECAR_RUNTIME=/absolute/path/to/node \
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+swift test --filter realClaudeSDKSidecarIntegrationSkipsUnlessExplicitlyEnabled
+```
 
 ## Local Mocks
 
