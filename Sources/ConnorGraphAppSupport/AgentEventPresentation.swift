@@ -101,6 +101,10 @@ public struct AgentEventPresenter: Sendable {
             return item(event, title: "Session restored", detail: payload.message, severity: .success)
         case .artifactCreated(let payload):
             return item(event, title: "Artifact created: \(payload.artifactKind)", detail: payload.message, severity: .success)
+        case .sourceRegistryChanged(let payload):
+            return item(event, title: "Source registry changed: \(payload.entryID)", detail: payload.message, severity: .info)
+        case .skillRegistryChanged(let payload):
+            return item(event, title: "Skill registry changed: \(payload.entryID)", detail: payload.message, severity: .info)
         case .automationTriggered(let payload):
             return item(event, title: "Automation triggered: \(payload.trigger)", detail: payload.message, severity: .info)
         case .graphMemoryProposed(let payload):

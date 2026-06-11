@@ -25,6 +25,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case pendingApprovals = "权限审批"
     case memoryChangeLog = "记忆变更"
     case extractionDiagnostics = "记忆准入"
+    case productOS = "Product OS"
     case llmSettings = "模型设置"
 
     var id: String { rawValue }
@@ -73,6 +74,8 @@ final class AppViewModel: ObservableObject {
     @Published var selectedChatSessionID: String?
     @Published var sessionListFilter: AgentSessionListFilter = .inbox
     @Published var governanceConfig: AppSessionGovernanceConfig = .default
+    @Published var productOSRegistry: ProductOSRegistrySnapshot = .default
+    @Published var productOSRegistryMessage: String?
     @Published var selectedSessionArtifactDirectories: AgentSessionArtifactDirectories?
     @Published var latestChatSummary: AgentSessionSummary?
     @Published var isSummarizingChatSession: Bool = false
@@ -89,6 +92,7 @@ final class AppViewModel: ObservableObject {
     private var admissionHoldQueueRepository: AppGraphAdmissionHoldQueueRepository?
     private var memoryChangeLogRepository: AppGraphMemoryChangeLogRepository?
     private var chatSessionRepository: AppChatSessionRepository?
+    private var productOSRegistryRepository: AppProductOSRegistryRepository?
     private var storagePaths: AppStoragePaths?
     private var llmSettingsRepository: AppLLMSettingsRepository
     private var llmProviderHealthChecker: AppLLMProviderHealthChecker
@@ -145,6 +149,7 @@ final class AppViewModel: ObservableObject {
         databasePath: String? = nil,
         storagePaths: AppStoragePaths? = nil,
         governanceConfig: AppSessionGovernanceConfig = .default,
+        productOSRegistry: ProductOSRegistrySnapshot = .default,
         llmSettingsRepository: AppLLMSettingsRepository = AppLLMSettingsRepository()
     ) {
         self.entities = entities
@@ -154,6 +159,10 @@ final class AppViewModel: ObservableObject {
         self.repository = repository
         self.storagePaths = storagePaths
         self.governanceConfig = governanceConfig
+        self.productOSRegistry = productOSRegistry
+        if let storagePaths {
+            self.productOSRegistryRepository = AppProductOSRegistryRepository(storagePaths: storagePaths)
+        }
         if let repository {
             self.promotionRepository = AppPromotionQueueRepository(store: repository.store)
             self.graphWriteCandidateRepository = AppGraphWriteCandidateRepository(store: repository.store)
@@ -174,6 +183,7 @@ final class AppViewModel: ObservableObject {
         self.nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: initialSession)
         self.searchResults = []
         loadLLMSettings()
+        reloadProductOSRegistry()
         reloadChatSessions()
         reloadSchemaHealthReport()
         reloadGraphExtractionTraces()
@@ -185,6 +195,7 @@ final class AppViewModel: ObservableObject {
             let paths = try AppStoragePaths.live()
             let repository = try AppGraphRepository.bootstrap(paths: paths)
             let governanceConfig = try AppSessionGovernanceConfigRepository(configDirectory: paths.configDirectory).loadOrCreateDefault()
+            let productOSRegistry = try AppProductOSRegistryRepository(storagePaths: paths).loadOrCreateDefault()
             var snapshot = try repository.loadSnapshot()
             if snapshot.entities.isEmpty {
                 let demo = demoSnapshot()
@@ -201,7 +212,8 @@ final class AppViewModel: ObservableObject {
                 repository: repository,
                 databasePath: paths.databaseURL.path,
                 storagePaths: paths,
-                governanceConfig: governanceConfig
+                governanceConfig: governanceConfig,
+                productOSRegistry: productOSRegistry
             )
             viewModel.reloadPromotionCandidates()
             viewModel.reloadGraphWriteCandidates()
@@ -356,6 +368,55 @@ final class AppViewModel: ObservableObject {
         } catch {
             await MainActor.run { errorMessage = String(describing: error) }
         }
+    }
+
+    func reloadProductOSRegistry() {
+        do {
+            if let productOSRegistryRepository {
+                productOSRegistry = try productOSRegistryRepository.loadOrCreateDefault()
+                productOSRegistryMessage = "Product OS registry loaded from Connor Home."
+            }
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func setSourceRegistryStatus(id: String, status: ProductOSRegistryEntryStatus) {
+        do {
+            guard let productOSRegistryRepository else { return }
+            productOSRegistry = try productOSRegistryRepository.setSourceStatus(id: id, status: status)
+            productOSRegistryMessage = "Source \(id) is now \(status.rawValue). Connor still owns credentials, permissions, audit, and graph ingestion."
+            appendProductOSRegistryEvent(kind: "source", entryID: id, status: status, message: productOSRegistryMessage ?? "Source registry changed")
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func setSkillRegistryStatus(id: String, status: ProductOSRegistryEntryStatus) {
+        do {
+            guard let productOSRegistryRepository else { return }
+            productOSRegistry = try productOSRegistryRepository.setSkillStatus(id: id, status: status)
+            productOSRegistryMessage = "Skill \(id) is now \(status.rawValue). Skills are instruction profiles; graph memory writes remain governed."
+            appendProductOSRegistryEvent(kind: "skill", entryID: id, status: status, message: productOSRegistryMessage ?? "Skill registry changed")
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    private func appendProductOSRegistryEvent(kind: String, entryID: String, status: ProductOSRegistryEntryStatus, message: String) {
+        let sessionID = selectedChatSessionID ?? activeChatSession.id
+        let payload = AgentProductOSRegistryEvent(
+            sessionID: sessionID,
+            registryKind: kind,
+            entryID: entryID,
+            status: status,
+            message: message
+        )
+        let event: AgentEvent = kind == "source" ? .sourceRegistryChanged(payload) : .skillRegistryChanged(payload)
+        agentEventTimeline.insert(AgentEventPresenter().presentation(for: event), at: 0)
     }
 
     func loadLLMSettings() {
@@ -993,6 +1054,8 @@ struct AppShellView: View {
                         MemoryChangeLogView(viewModel: viewModel)
                     case .extractionDiagnostics:
                         GraphExtractionDiagnosticsView(viewModel: viewModel)
+                    case .productOS:
+                        ProductOSRegistryView(viewModel: viewModel)
                     case .llmSettings:
                         LLMSettingsView(viewModel: viewModel)
                     }
@@ -1642,6 +1705,178 @@ struct GraphExtractionDiagnosticsView: View {
         case .discarded: return .secondary
         case .failed: return .red
         }
+    }
+}
+
+struct ProductOSRegistryView: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Product OS Registry")
+                            .font(.largeTitle.bold())
+                        Text("Phase 4 将 Sources 与 Skills 提升为 Connor-owned 产品状态：配置、权限、审计、图谱摄入边界都属于 Connor，而不是 SDK 或外部连接器。")
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("重新加载") { viewModel.reloadProductOSRegistry() }
+                }
+
+                if let message = viewModel.productOSRegistryMessage {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                ProductOSRegistrySummary(snapshot: viewModel.productOSRegistry)
+
+                GroupBox("Sources") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(viewModel.productOSRegistry.sources) { source in
+                            ProductOSSourceRow(source: source) { status in
+                                viewModel.setSourceRegistryStatus(id: source.id, status: status)
+                            }
+                            Divider()
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                GroupBox("Skills") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(viewModel.productOSRegistry.skills) { skill in
+                            ProductOSSkillRow(skill: skill) { status in
+                                viewModel.setSkillRegistryStatus(id: skill.id, status: status)
+                            }
+                            Divider()
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                GroupBox("Phase 4 Guardrails") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Single Home Root: no multi-workspace abstraction is introduced.", systemImage: "house")
+                        Label("Source credentials and connector execution remain governed by Connor.", systemImage: "lock.shield")
+                        Label("Skills are instruction profiles; they cannot bypass graph admission or audit.", systemImage: "checkmark.seal")
+                        Label("Graph memory stays a kernel, not a normal RAG/source plugin.", systemImage: "brain.head.profile")
+                    }
+                    .foregroundStyle(.secondary)
+                }
+            }
+            .padding()
+        }
+        .navigationTitle("Product OS")
+    }
+}
+
+struct ProductOSRegistrySummary: View {
+    var snapshot: ProductOSRegistrySnapshot
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ProductOSMetricCard(title: "Sources", value: "\(snapshot.sources.count)", detail: "\(snapshot.sources.filter { $0.status == .enabled }.count) enabled")
+            ProductOSMetricCard(title: "Skills", value: "\(snapshot.skills.count)", detail: "\(snapshot.skills.filter { $0.status == .enabled }.count) enabled")
+            ProductOSMetricCard(title: "Schema", value: "v\(snapshot.schemaVersion)", detail: "JSON registry")
+        }
+    }
+}
+
+struct ProductOSMetricCard: View {
+    var title: String
+    var value: String
+    var detail: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(value).font(.title2.bold())
+            Text(detail).font(.caption2).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+struct ProductOSSourceRow: View {
+    var source: ProductOSSourceDefinition
+    var onStatusChange: (ProductOSRegistryEntryStatus) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(source.displayName).font(.headline)
+                    Text(source.id).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                ProductOSRegistryStatusPicker(status: source.status, onChange: onStatusChange)
+            }
+            HStack(spacing: 8) {
+                ProductOSRegistryChip(source.kind.rawValue)
+                ProductOSRegistryChip(source.credentialRequirement.rawValue)
+                ProductOSRegistryChip("graph: \(source.graphIngestionEnabled ? "on" : "off")")
+                ProductOSRegistryChip("write: \(source.graphWritePolicy.rawValue)")
+            }
+            Text(source.notes).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+}
+
+struct ProductOSSkillRow: View {
+    var skill: ProductOSSkillDefinition
+    var onStatusChange: (ProductOSRegistryEntryStatus) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(skill.displayName).font(.headline)
+                    Text(skill.id).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                ProductOSRegistryStatusPicker(status: skill.status, onChange: onStatusChange)
+            }
+            HStack(spacing: 8) {
+                ProductOSRegistryChip(skill.scope.rawValue)
+                ProductOSRegistryChip("triggers: \(skill.triggers.map(\.rawValue).joined(separator: ", "))")
+                ProductOSRegistryChip("graph: \(skill.graphContextPolicy.rawValue)")
+            }
+            Text(skill.notes).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+}
+
+struct ProductOSRegistryStatusPicker: View {
+    var status: ProductOSRegistryEntryStatus
+    var onChange: (ProductOSRegistryEntryStatus) -> Void
+
+    var body: some View {
+        Picker("Status", selection: Binding(get: { status }, set: onChange)) {
+            ForEach(ProductOSRegistryEntryStatus.allCases, id: \.self) { value in
+                Text(value.rawValue).tag(value)
+            }
+        }
+        .labelsHidden()
+        .frame(width: 150)
+    }
+}
+
+struct ProductOSRegistryChip: View {
+    var text: String
+
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(text)
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.accentColor.opacity(0.12), in: Capsule())
     }
 }
 
