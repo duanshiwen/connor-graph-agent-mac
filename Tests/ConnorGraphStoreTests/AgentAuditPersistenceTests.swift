@@ -60,3 +60,57 @@ import ConnorGraphStore
     #expect(byStatus == [approval])
     #expect(byRequest == approval)
 }
+
+@Test func storeResolvesPendingApprovalWithAuditAndTimelineEvent() throws {
+    let store = try SQLiteGraphKernelStore(path: ":memory:")
+    try store.migrate()
+    let run = AgentRun(id: "run-resolution", sessionID: "session-resolution", groupID: "group-resolution", status: .running)
+    try store.upsert(run: run)
+    try store.append(event: PersistedAgentEvent(
+        id: "event-permission-requested",
+        runID: run.id,
+        sessionID: run.sessionID,
+        kind: .permissionRequested,
+        payloadJSON: "{}",
+        sequence: 0,
+        createdAt: Date(timeIntervalSince1970: 1_000)
+    ))
+    try store.upsert(pendingApproval: AgentPendingApproval(
+        id: "approval-resolution",
+        requestID: "permission-tool-resolution",
+        runID: run.id,
+        sessionID: run.sessionID,
+        capability: .commitGraphWrite,
+        toolName: "graph_write_candidate_commit",
+        payloadJSON: "{\"candidate_id\":\"candidate-1\"}",
+        status: .pending,
+        createdAt: Date(timeIntervalSince1970: 1_001),
+        updatedAt: Date(timeIntervalSince1970: 1_001)
+    ))
+
+    let resolved = try store.resolvePendingApproval(
+        requestID: "permission-tool-resolution",
+        status: .approved,
+        reason: "Human approved graph commit",
+        actor: "human-reviewer"
+    )
+
+    #expect(resolved.status == .approved)
+    #expect(resolved.requestID == "permission-tool-resolution")
+    #expect(try store.pendingApproval(requestID: "permission-tool-resolution")?.status == .approved)
+
+    let auditEvents = try store.agentAuditEvents(runID: run.id)
+    #expect(auditEvents.count == 1)
+    #expect(auditEvents.first?.eventType == .permissionDecision)
+    #expect(auditEvents.first?.actor == "human-reviewer")
+    #expect(auditEvents.first?.capability == .commitGraphWrite)
+    #expect(auditEvents.first?.toolName == "graph_write_candidate_commit")
+    #expect(auditEvents.first?.decision?.requestID == "permission-tool-resolution")
+    #expect(auditEvents.first?.decision?.outcome == .approved)
+    #expect(auditEvents.first?.decision?.reason == "Human approved graph commit")
+
+    let timelineEvents = try store.events(runID: run.id)
+    #expect(timelineEvents.map(\.kind) == [.permissionRequested, .permissionResolved])
+    #expect(timelineEvents.map(\.sequence) == [0, 1])
+    #expect(timelineEvents.last?.payloadJSON.contains("permission-tool-resolution") == true)
+}
