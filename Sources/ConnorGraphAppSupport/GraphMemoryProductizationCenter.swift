@@ -61,6 +61,30 @@ public struct GraphMemoryProductCard: Codable, Sendable, Equatable, Identifiable
     }
 }
 
+public struct GraphMemoryReviewActionResult: Sendable, Equatable {
+    public var candidate: GraphWriteCandidate
+    public var card: GraphMemoryProductCard
+    public var event: AgentEvent
+    public var message: String
+
+    public init(candidate: GraphWriteCandidate, card: GraphMemoryProductCard, event: AgentEvent, message: String) {
+        self.candidate = candidate
+        self.card = card
+        self.event = event
+        self.message = message
+    }
+}
+
+public enum GraphMemoryProductizationError: Error, Sendable, Equatable, CustomStringConvertible {
+    case candidateNotFound(String)
+
+    public var description: String {
+        switch self {
+        case .candidateNotFound(let id): "candidateNotFound: \(id)"
+        }
+    }
+}
+
 public struct GraphMemoryDashboard: Sendable, Equatable {
     public var summary: GraphMemoryDashboardSummary
     public var cards: [GraphMemoryProductCard]
@@ -86,6 +110,32 @@ public struct GraphMemoryProductizationCenter: Sendable {
         self.changeLogRepository = changeLogRepository
     }
 
+    public func approveCandidate(id: String, sessionID: String, actor: String = "human-reviewer") async throws -> GraphMemoryReviewActionResult {
+        let candidate = try requireCandidate(id)
+        let approved = try await candidateRepository.approveGoverned(candidate, actor: actor)
+        let message = "Graph memory candidate \(id) approved and remains governed before commit."
+        let event = AgentEvent.graphMemoryHeld(AgentGraphMemoryLifecycleEvent(
+            runID: approved.proposedByRunID,
+            sessionID: sessionID,
+            memoryID: approved.id,
+            message: message
+        ))
+        return GraphMemoryReviewActionResult(candidate: approved, card: card(for: approved), event: event, message: message)
+    }
+
+    public func rejectCandidate(id: String, sessionID: String, reason: String, actor: String = "human-reviewer") async throws -> GraphMemoryReviewActionResult {
+        let candidate = try requireCandidate(id)
+        let rejected = try await candidateRepository.rejectGoverned(candidate, reason: reason, actor: actor)
+        let message = "Graph memory candidate \(id) rejected: \(reason)"
+        let event = AgentEvent.graphMemoryHeld(AgentGraphMemoryLifecycleEvent(
+            runID: rejected.proposedByRunID,
+            sessionID: sessionID,
+            memoryID: rejected.id,
+            message: message
+        ))
+        return GraphMemoryReviewActionResult(candidate: rejected, card: card(for: rejected), event: event, message: message)
+    }
+
     public func loadDashboard(limit: Int = 50) throws -> GraphMemoryDashboard {
         let pendingCandidates = try candidateRepository.loadCandidates(status: .pendingReview, limit: limit)
         let failedCandidates = try candidateRepository.loadCandidates(status: .validationFailed, limit: limit)
@@ -106,6 +156,13 @@ public struct GraphMemoryProductizationCenter: Sendable {
             ),
             cards: Array(cards.prefix(limit))
         )
+    }
+
+    private func requireCandidate(_ id: String) throws -> GraphWriteCandidate {
+        if let candidate = try candidateRepository.loadCandidates(status: nil, limit: 1_000).first(where: { $0.id == id }) {
+            return candidate
+        }
+        throw GraphMemoryProductizationError.candidateNotFound(id)
     }
 
     private func card(for item: AppGraphAdmissionHoldQueuePresentation) -> GraphMemoryProductCard {
