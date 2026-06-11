@@ -44,6 +44,7 @@ private func keyEquivalent(for command: ConnorNativeShellCommand) -> KeyEquivale
     case .openSources: "4"
     case .openSkills: "5"
     case .openAutomation: "6"
+    case .checkCommercialReadiness: "r"
     case .openSettings: ","
     }
 }
@@ -117,6 +118,8 @@ final class AppViewModel: ObservableObject {
     @Published var automationExecutionHistory: [ProductOSAutomationExecutionHistoryRecord] = []
     @Published var sourceRuntimeConfigurations: [MCPSourceRuntimeConfiguration] = []
     @Published var skillRuntimeDefinitions: [SkillRuntimeDefinition] = []
+    @Published var sidecarRuntimeDiagnostics: [ClaudeSDKSidecarRuntimeDiagnostics] = []
+    @Published var commercialReleaseGateResult: CommercialReadinessReleaseGateResult?
     @Published var productOSRegistryMessage: String?
     @Published var selectedSessionArtifactDirectories: AgentSessionArtifactDirectories?
     @Published var latestChatSummary: AgentSessionSummary?
@@ -197,6 +200,8 @@ final class AppViewModel: ObservableObject {
         case .toggleBrowser:
             isBrowserVisible.toggle()
             navigate(to: isBrowserVisible ? .browserWorkspace : .agentChat)
+        case .checkCommercialReadiness:
+            runCommercialReadinessReleaseGate()
         case .openRuntimeCenter, .openGraphMemoryReview, .openApprovals, .openSources, .openSkills, .openAutomation, .openSettings:
             if let command = ConnorNativeShellPresentation.default.command(for: commandID) {
                 navigate(to: command.target)
@@ -220,8 +225,31 @@ final class AppViewModel: ObservableObject {
             events: agentEventTimeline,
             pendingApprovals: pendingApprovals,
             automationTriggers: automationTriggerRecords,
-            graphMemoryDashboard: graphMemoryDashboardPresentation
+            graphMemoryDashboard: graphMemoryDashboardPresentation,
+            commercialReadinessDashboard: commercialReadinessDashboard
         )
+    }
+
+    var commercialReadinessDashboard: CommercialReadinessDashboard {
+        let input = CommercialReadinessSnapshotBuilder().build(
+            sessions: chatSessions.isEmpty ? [activeChatSession] : chatSessions,
+            governanceConfig: governanceConfig,
+            artifactDirectoriesReady: storagePaths != nil,
+            sidecarRecord: selectedSidecarRuntimeDiagnostics?.record,
+            sidecarHealthStatus: selectedSidecarRuntimeDiagnostics?.health.rawValue,
+            sources: sourceRuntimeConfigurations,
+            skills: skillRuntimeDefinitions,
+            automationConfig: automationConfig,
+            graphMemoryDashboard: graphMemoryDashboardPresentation,
+            shell: .default,
+            settingsPanelsReady: true
+        )
+        return CommercialReadinessGate().evaluate(input)
+    }
+
+    private var selectedSidecarRuntimeDiagnostics: ClaudeSDKSidecarRuntimeDiagnostics? {
+        let activeID = activeChatSession.id
+        return sidecarRuntimeDiagnostics.first { $0.record.connorSessionID == activeID } ?? sidecarRuntimeDiagnostics.first
     }
 
     private var graphMemoryDashboardPresentation: GraphMemoryDashboard {
@@ -347,6 +375,7 @@ final class AppViewModel: ObservableObject {
         reloadAutomationExecutionHistory()
         reloadSourceRuntimeConfigurations()
         reloadSkillRuntimeDefinitions()
+        reloadSidecarRuntimeDiagnostics()
         reloadChatSessions()
         reloadSchemaHealthReport()
         reloadGraphExtractionTraces()
@@ -584,6 +613,28 @@ final class AppViewModel: ObservableObject {
         } catch {
             errorMessage = String(describing: error)
         }
+    }
+
+    func reloadSidecarRuntimeDiagnostics() {
+        do {
+            if let storagePaths {
+                sidecarRuntimeDiagnostics = try AppClaudeSDKSidecarRuntimeStore(configDirectory: storagePaths.configDirectory).loadDiagnostics()
+            } else {
+                sidecarRuntimeDiagnostics = []
+            }
+            errorMessage = nil
+        } catch {
+            sidecarRuntimeDiagnostics = []
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func runCommercialReadinessReleaseGate() {
+        reloadSidecarRuntimeDiagnostics()
+        let result = CommercialReadinessReleaseGate().evaluate(commercialReadinessDashboard)
+        commercialReleaseGateResult = result
+        productOSRegistryMessage = result.summary
+        navigate(to: .productOS)
     }
 
     func setAutomationRuleEnabled(id: String, isEnabled: Bool) {
@@ -1980,6 +2031,7 @@ struct ProductOSRegistryView: View {
                     Button("重新加载") {
                         viewModel.reloadProductOSRegistry()
                         viewModel.reloadAutomationConfig()
+                        viewModel.reloadSidecarRuntimeDiagnostics()
                     }
                 }
 
@@ -1990,6 +2042,12 @@ struct ProductOSRegistryView: View {
                 }
 
                 ProductOSRegistrySummary(snapshot: viewModel.productOSRegistry, automationConfig: viewModel.automationConfig, triggerRecords: viewModel.automationTriggerRecords)
+
+                CommercialReadinessProductOSSection(
+                    dashboard: viewModel.commercialReadinessDashboard,
+                    releaseGateResult: viewModel.commercialReleaseGateResult,
+                    onCheck: { viewModel.runCommercialReadinessReleaseGate() }
+                )
 
                 GroupBox("Statuses") {
                     VStack(alignment: .leading, spacing: 10) {
@@ -2086,6 +2144,81 @@ struct ProductOSRegistryView: View {
             .padding()
         }
         .navigationTitle("Product OS")
+    }
+}
+
+struct CommercialReadinessProductOSSection: View {
+    var dashboard: CommercialReadinessDashboard
+    var releaseGateResult: CommercialReadinessReleaseGateResult?
+    var onCheck: () -> Void
+
+    var body: some View {
+        GroupBox("Commercial Readiness") {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(dashboard.summary)
+                            .font(.headline)
+                        if let releaseGateResult {
+                            Text(releaseGateResult.summary)
+                                .font(.caption)
+                                .foregroundStyle(releaseGateResult.status == .ready ? .green : .orange)
+                        } else {
+                            Text("Run the release gate to verify whether this build is commercial-ready.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    Button("Check Commercial Readiness", action: onCheck)
+                }
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12)], spacing: 12) {
+                    ForEach(dashboard.cards) { card in
+                        CommercialReadinessProductOSCard(card: card)
+                    }
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+}
+
+struct CommercialReadinessProductOSCard: View {
+    var card: CommercialReadinessCard
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(card.title)
+                    .font(.headline)
+                Spacer()
+                ProductOSRegistryChip(card.status.rawValue)
+            }
+            Text(card.evidence)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(3)
+            if !card.metrics.isEmpty {
+                HStack(spacing: 6) {
+                    ForEach(card.metrics.sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
+                        ProductOSRegistryChip("\(key): \(value)")
+                    }
+                }
+            }
+            if !card.blockingReasons.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(card.blockingReasons, id: \.self) { reason in
+                        Label(reason, systemImage: "exclamationmark.triangle")
+                            .font(.caption2)
+                    }
+                }
+                .foregroundStyle(.orange)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(card.status == .ready ? Color.green.opacity(0.08) : Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
     }
 }
 
