@@ -25,9 +25,7 @@ const stableJSONString = (value) => {
   }
 };
 
-const parseRequest = (line) => {
-  if (!line) throw new Error('Missing Connor sidecar request JSONL line');
-  const request = JSON.parse(line);
+const validateRequest = (request) => {
   if (request.ownsProductState !== false) {
     throw new Error('Refusing request: sidecar must not own Connor product state');
   }
@@ -39,6 +37,23 @@ const parseRequest = (line) => {
   }
   return request;
 };
+
+const parseCommand = (line) => {
+  if (!line) throw new Error('Missing Connor sidecar command JSONL line');
+  const parsed = JSON.parse(line);
+  if (parsed.start) return { name: 'start', payload: validateRequest(parsed.start) };
+  if (parsed.approvalResolved) return { name: 'approvalResolved', payload: parsed.approvalResolved };
+  if (parsed.cancel) return { name: 'cancel', payload: parsed.cancel };
+
+  // Backward compatibility: legacy one-shot transports still send the raw request shape.
+  if (parsed.connorRunID && parsed.connorSessionID) {
+    return { name: 'start', payload: validateRequest(parsed) };
+  }
+
+  throw new Error('Unknown Connor sidecar command envelope');
+};
+
+const parseRequest = (line) => parseCommand(line).payload;
 
 const textFromContentBlock = (block) => {
   if (!block) return '';
@@ -152,8 +167,7 @@ const processUserSideEffects = (message) => {
   for (const block of contentBlocks(message)) emitToolResultFromBlock(block);
 };
 
-const run = async () => {
-  const request = parseRequest(await readFirstJSONLine());
+const runRequest = async (request) => {
   let finalText = '';
   let emittedRunStarted = false;
 
@@ -223,8 +237,58 @@ const run = async () => {
   writeEvent({ runCompleted: {} });
 };
 
+const handleApprovalResolved = async (resolution) => {
+  // Skeleton only: real deferred Claude SDK resume is not enabled here.
+  if (!resolution?.requestID) {
+    writeEvent({ resumeRejected: { requestID: '', toolName: resolution?.toolName ?? null, reason: 'Missing approval request ID' } });
+    return;
+  }
+  if (resolution.ownsProductState !== false) {
+    writeEvent({ resumeRejected: { requestID: resolution.requestID, toolName: resolution.toolName ?? null, reason: 'Sidecar must not own Connor product state' } });
+    return;
+  }
+  if (resolution.outcome === 'approved') {
+    writeEvent({
+      resumeAccepted: {
+        requestID: resolution.requestID,
+        toolName: resolution.toolName ?? null,
+        message: 'Approval resolution accepted by sidecar skeleton; real deferred Claude SDK resume is not enabled'
+      }
+    });
+    return;
+  }
+  writeEvent({
+    resumeRejected: {
+      requestID: resolution.requestID,
+      toolName: resolution.toolName ?? null,
+      reason: resolution.reason ?? 'Approval resolution denied by Connor'
+    }
+  });
+};
+
+const runCommandLoop = async () => {
+  const rl = createInterface({ input: stdin, crlfDelay: Infinity });
+  for await (const line of rl) {
+    if (line.trim().length === 0) continue;
+    const command = parseCommand(line);
+    switch (command.name) {
+      case 'start':
+        await runRequest(command.payload);
+        break;
+      case 'approvalResolved':
+        await handleApprovalResolved(command.payload);
+        break;
+      case 'cancel':
+        writeEvent({ runFailed: { message: 'Connor cancelled Claude SDK sidecar command loop' } });
+        return;
+      default:
+        throw new Error(`Unsupported Connor sidecar command: ${command.name}`);
+    }
+  }
+};
+
 try {
-  await run();
+  await runCommandLoop();
 } catch (error) {
   writeDiagnostic(error?.stack ?? error?.message ?? String(error));
   try {
