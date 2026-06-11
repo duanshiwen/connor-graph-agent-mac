@@ -197,6 +197,120 @@ private extension SkillRuntimeUICard {
     }
 }
 
+public struct AutomationRuntimeUISummary: Codable, Sendable, Equatable {
+    public var totalRuleCount: Int
+    public var enabledRuleCount: Int
+    public var pendingReviewRuleCount: Int
+    public var recentTriggerCount: Int
+    public var historyCount: Int
+
+    public init(totalRuleCount: Int, enabledRuleCount: Int, pendingReviewRuleCount: Int, recentTriggerCount: Int, historyCount: Int) {
+        self.totalRuleCount = totalRuleCount
+        self.enabledRuleCount = enabledRuleCount
+        self.pendingReviewRuleCount = pendingReviewRuleCount
+        self.recentTriggerCount = recentTriggerCount
+        self.historyCount = historyCount
+    }
+}
+
+public struct AutomationRuntimeUICard: Codable, Sendable, Equatable, Identifiable {
+    public var id: String
+    public var title: String
+    public var subtitle: String
+    public var detail: String
+    public var severity: AgentEventPresentationSeverity
+    public var dispositionLabel: String
+
+    public init(id: String, title: String, subtitle: String, detail: String, severity: AgentEventPresentationSeverity, dispositionLabel: String) {
+        self.id = id
+        self.title = title
+        self.subtitle = subtitle
+        self.detail = detail
+        self.severity = severity
+        self.dispositionLabel = dispositionLabel
+    }
+}
+
+public struct AutomationRuntimeUIPresentation: Codable, Sendable, Equatable {
+    public var summary: AutomationRuntimeUISummary
+    public var ruleCards: [AutomationRuntimeUICard]
+    public var triggerCards: [AutomationRuntimeUICard]
+    public var historyCards: [AutomationRuntimeUICard]
+
+    public init(summary: AutomationRuntimeUISummary, ruleCards: [AutomationRuntimeUICard], triggerCards: [AutomationRuntimeUICard], historyCards: [AutomationRuntimeUICard]) {
+        self.summary = summary
+        self.ruleCards = ruleCards
+        self.triggerCards = triggerCards
+        self.historyCards = historyCards
+    }
+
+    public static func build(
+        config: ProductOSAutomationConfig,
+        triggers: [ProductOSAutomationTriggerRecord],
+        history: [ProductOSAutomationExecutionHistoryRecord]
+    ) -> AutomationRuntimeUIPresentation {
+        AutomationRuntimeUIPresentation(
+            summary: AutomationRuntimeUISummary(
+                totalRuleCount: config.rules.count,
+                enabledRuleCount: config.rules.filter(\.isEnabled).count,
+                pendingReviewRuleCount: config.rules.filter(\.requiresReview).count,
+                recentTriggerCount: triggers.count,
+                historyCount: history.count
+            ),
+            ruleCards: config.rules.map(AutomationRuntimeUICard.init(rule:)),
+            triggerCards: triggers.map(AutomationRuntimeUICard.init(trigger:)),
+            historyCards: history.map(AutomationRuntimeUICard.init(history:))
+        )
+    }
+}
+
+private extension AutomationRuntimeUICard {
+    init(rule: ProductOSAutomationRule) {
+        let disposition = rule.requiresReview ? "pendingReview" : "ready"
+        let actionSummary = rule.actions.map { "\($0.kind.rawValue): \($0.message)" }.joined(separator: " · ")
+        self.init(
+            id: rule.id,
+            title: rule.name,
+            subtitle: "\(rule.trigger.kind.rawValue) · \(rule.isEnabled ? "enabled" : "disabled")",
+            detail: actionSummary,
+            severity: !rule.isEnabled || rule.requiresReview ? .warning : .success,
+            dispositionLabel: disposition
+        )
+    }
+
+    init(trigger: ProductOSAutomationTriggerRecord) {
+        self.init(
+            id: trigger.id,
+            title: trigger.ruleName,
+            subtitle: "\(trigger.trigger.rawValue) · session \(trigger.sessionID)",
+            detail: trigger.actionSummaries.joined(separator: " · "),
+            severity: trigger.requiresReview ? .warning : .info,
+            dispositionLabel: trigger.requiresReview ? "pendingReview" : "ready"
+        )
+    }
+
+    init(history: ProductOSAutomationExecutionHistoryRecord) {
+        self.init(
+            id: history.id,
+            title: "\(history.outcome.rawValue) · \(history.trigger.rawValue)",
+            subtitle: "session \(history.sessionID) · rules \(history.ruleIDs.joined(separator: ","))",
+            detail: "applied \(history.appliedActionCount) · skipped \(history.skippedActionCount) · events \(history.eventCount) · \(history.message)",
+            severity: history.outcome.automationUISeverity,
+            dispositionLabel: history.outcome.rawValue
+        )
+    }
+}
+
+private extension ProductOSAutomationExecutionOutcome {
+    var automationUISeverity: AgentEventPresentationSeverity {
+        switch self {
+        case .completed: .success
+        case .partial, .skipped: .warning
+        case .failed: .error
+        }
+    }
+}
+
 private extension SkillRuntimeManifest {
     var skillUISeverity: AgentEventPresentationSeverity {
         if graphContextPolicy == .readOnly && requiredSources.isEmpty { return .success }
