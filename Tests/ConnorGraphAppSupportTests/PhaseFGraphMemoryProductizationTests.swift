@@ -67,6 +67,48 @@ struct PhaseFGraphMemoryProductizationTests {
         #expect(dashboard.cards[2].kind == .changeLog)
         #expect(dashboard.cards[2].severity == .success)
     }
+    @Test func graphMemoryReviewCenterApprovesAndRejectsCandidatesWithEvents() async throws {
+        let store = try phaseFStore()
+        let pending = GraphWriteCandidate(
+            id: "candidate-approve",
+            groupID: "default",
+            kind: .createFact,
+            proposedByRunID: "session-1",
+            rationale: "Approve this memory candidate.",
+            confidence: 0.88,
+            payloadJSON: "{\"fact\":\"approved\"}",
+            status: .pendingReview
+        )
+        let rejected = GraphWriteCandidate(
+            id: "candidate-reject",
+            groupID: "default",
+            kind: .createFact,
+            proposedByRunID: "session-1",
+            rationale: "Reject this memory candidate.",
+            confidence: 0.20,
+            payloadJSON: "{\"fact\":\"rejected\"}",
+            status: .pendingReview
+        )
+        try store.upsertWriteCandidate(pending)
+        try store.upsertWriteCandidate(rejected)
+        let center = GraphMemoryProductizationCenter(
+            candidateRepository: AppGraphWriteCandidateRepository(store: store),
+            holdQueueRepository: AppGraphAdmissionHoldQueueRepository(store: store),
+            changeLogRepository: AppGraphMemoryChangeLogRepository(store: store)
+        )
+
+        let approved = try await center.approveCandidate(id: "candidate-approve", sessionID: "session-1", actor: "tester")
+        let rejection = try await center.rejectCandidate(id: "candidate-reject", sessionID: "session-1", reason: "Not grounded enough", actor: "tester")
+        let candidates = try AppGraphWriteCandidateRepository(store: store).loadCandidates(limit: 10)
+
+        #expect(candidates.first { $0.id == "candidate-approve" }?.status == .approved)
+        #expect(candidates.first { $0.id == "candidate-reject" }?.status == .rejected)
+        #expect(approved.event.kind == .graphMemoryHeld)
+        #expect(approved.message.contains("approved"))
+        #expect(rejection.event.kind == .graphMemoryHeld)
+        #expect(rejection.message.contains("rejected"))
+        #expect(rejection.card.severity == .error)
+    }
 }
 
 private func phaseFStore(_ name: String = UUID().uuidString) throws -> SQLiteGraphKernelStore {
