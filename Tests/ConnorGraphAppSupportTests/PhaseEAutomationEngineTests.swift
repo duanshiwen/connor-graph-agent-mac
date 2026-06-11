@@ -140,6 +140,45 @@ struct PhaseEAutomationEngineTests {
         #expect(result.events.contains { $0.kind == .automationTriggered })
     }
 
+    @Test func automationEnginePersistsExecutionHistory() throws {
+        let root = temporaryPhaseERoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let paths = AppStoragePaths(applicationSupportDirectory: root)
+        try paths.ensureDirectoryHierarchy()
+        let store = try SQLiteGraphKernelStore(path: paths.databaseURL.path)
+        try store.migrate()
+        let sessionRepository = AppChatSessionRepository(store: store, storagePaths: paths)
+        try sessionRepository.saveSession(AgentSession(id: "session-1", title: "Automation Target"))
+        let repository = AppProductOSAutomationRepository(storagePaths: paths)
+        let rule = ProductOSAutomationRule(
+            id: "history-rule",
+            name: "History Rule",
+            trigger: ProductOSAutomationTrigger(kind: .sessionLabelAdded, labelID: "important"),
+            actions: [ProductOSAutomationAction(kind: .appendTimelineEvent, message: "Persist this execution.")],
+            requiresReview: false
+        )
+        try repository.save(ProductOSAutomationConfig(rules: [rule]))
+        let engine = AutomationEngine(repository: repository)
+        let run = try engine.evaluate(context: ProductOSAutomationEventContext(
+            triggerKind: .sessionLabelAdded,
+            sessionID: "session-1",
+            labelID: "important"
+        ))
+
+        _ = try engine.execute(run: run, sessionRepository: sessionRepository)
+        let history = try repository.loadRecentExecutionHistory(limit: 10)
+        let record = try #require(history.first)
+
+        #expect(record.sessionID == "session-1")
+        #expect(record.trigger == .sessionLabelAdded)
+        #expect(record.ruleIDs == ["history-rule"])
+        #expect(record.appliedActionCount == 1)
+        #expect(record.skippedActionCount == 0)
+        #expect(record.outcome == .completed)
+        #expect(FileManager.default.fileExists(atPath: repository.executionHistoryURL.path))
+    }
+
     @Test func automationEngineReturnsEmptyRunForNoMatches() throws {
         let root = temporaryPhaseERoot()
         defer { try? FileManager.default.removeItem(at: root) }

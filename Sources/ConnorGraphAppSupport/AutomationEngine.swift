@@ -194,6 +194,25 @@ public struct AutomationEngine: Sendable {
             }
         }
 
+        let outcome: ProductOSAutomationExecutionOutcome
+        if appliedPlans.isEmpty && !skippedPlans.isEmpty {
+            outcome = .skipped
+        } else if !appliedPlans.isEmpty && !skippedPlans.isEmpty {
+            outcome = .partial
+        } else {
+            outcome = .completed
+        }
+        try repository.appendExecutionHistory(ProductOSAutomationExecutionHistoryRecord(
+            sessionID: run.context.sessionID,
+            trigger: run.context.triggerKind,
+            ruleIDs: run.matchedRules.map(\.id),
+            appliedActionCount: appliedPlans.count,
+            skippedActionCount: skippedPlans.count,
+            eventCount: events.count,
+            outcome: outcome,
+            message: "Applied \(appliedPlans.count) automation action(s), skipped \(skippedPlans.count)."
+        ))
+
         return AutomationExecutionResult(appliedPlans: appliedPlans, skippedPlans: skippedPlans, events: events)
     }
 
