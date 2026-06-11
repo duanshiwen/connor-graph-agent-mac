@@ -78,6 +78,50 @@ public struct AgentPermissionDecision: Codable, Sendable, Equatable, Identifiabl
     }
 }
 
+public enum AgentPendingApprovalStatus: String, Codable, Sendable, Equatable {
+    case pending
+    case approved
+    case denied
+    case cancelled
+}
+
+public struct AgentPendingApproval: Codable, Sendable, Equatable, Identifiable {
+    public var id: String
+    public var requestID: String
+    public var runID: String
+    public var sessionID: String
+    public var capability: AgentPermissionCapability
+    public var toolName: String?
+    public var payloadJSON: String
+    public var status: AgentPendingApprovalStatus
+    public var createdAt: Date
+    public var updatedAt: Date
+
+    public init(
+        id: String = UUID().uuidString,
+        requestID: String,
+        runID: String,
+        sessionID: String,
+        capability: AgentPermissionCapability,
+        toolName: String? = nil,
+        payloadJSON: String = "{}",
+        status: AgentPendingApprovalStatus = .pending,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date()
+    ) {
+        self.id = id
+        self.requestID = requestID
+        self.runID = runID
+        self.sessionID = sessionID
+        self.capability = capability
+        self.toolName = toolName
+        self.payloadJSON = payloadJSON
+        self.status = status
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
 public enum AgentAuditEventType: String, Codable, Sendable, Equatable {
     case permissionDecision
     case toolStarted
