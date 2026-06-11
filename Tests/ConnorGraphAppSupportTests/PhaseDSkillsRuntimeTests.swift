@@ -72,6 +72,57 @@ Use concise bullets. Never bypass Connor graph admission.
     #expect(resolved.manifest.name == "Project Skill")
 }
 
+@Test func skillRuntimeBuildsInstructionBundleForMatchingTriggerAndGlob() throws {
+    let storagePaths = temporaryPhaseDStoragePaths()
+    defer { try? FileManager.default.removeItem(at: storagePaths.applicationSupportDirectory) }
+    let repository = AppSkillRuntimeRepository(storagePaths: storagePaths)
+    let skillURL = try writeSkill(root: storagePaths.skillsDirectory, slug: "markdown-review", content: validSkillMarkdown.replacingOccurrences(of: "Session Summary", with: "Markdown Review"))
+    let skill = try repository.loadSkill(slug: "markdown-review", scope: .home, skillURL: skillURL)
+    let runtime = SkillRuntime(definitions: [skill])
+
+    let maybeBundle = try runtime.instructionBundle(trigger: .afterModelResponse, filePaths: ["README.md"], sessionID: "session-1", runID: "run-1")
+    let bundle = try #require(maybeBundle)
+
+    #expect(bundle.skill.slug == "markdown-review")
+    #expect(bundle.instructions.contains("# Markdown Review"))
+    #expect(bundle.requiredSources == ["local-filesystem"])
+    #expect(bundle.permissionRequests.map(\.capability) == [.readSession])
+    #expect(bundle.registryEvent.entryID == "markdown-review")
+    #expect(bundle.event.kind == .skillRegistryChanged)
+}
+
+@Test func skillRuntimeDoesNotActivateNonMatchingTriggerOrGlob() throws {
+    let storagePaths = temporaryPhaseDStoragePaths()
+    defer { try? FileManager.default.removeItem(at: storagePaths.applicationSupportDirectory) }
+    let repository = AppSkillRuntimeRepository(storagePaths: storagePaths)
+    let skillURL = try writeSkill(root: storagePaths.skillsDirectory, slug: "markdown-review", content: validSkillMarkdown)
+    let skill = try repository.loadSkill(slug: "markdown-review", scope: .home, skillURL: skillURL)
+    let runtime = SkillRuntime(definitions: [skill])
+
+    let wrongTrigger = try runtime.instructionBundle(trigger: .sourceEvent, filePaths: ["README.md"], sessionID: "session-1")
+    let wrongGlob = try runtime.instructionBundle(trigger: .afterModelResponse, filePaths: ["main.swift"], sessionID: "session-1")
+    #expect(wrongTrigger == nil)
+    #expect(wrongGlob == nil)
+}
+
+@Test func skillRuntimeRejectsDisabledSkills() throws {
+    let storagePaths = temporaryPhaseDStoragePaths()
+    defer { try? FileManager.default.removeItem(at: storagePaths.applicationSupportDirectory) }
+    let repository = AppSkillRuntimeRepository(storagePaths: storagePaths)
+    let skillURL = try writeSkill(root: storagePaths.skillsDirectory, slug: "disabled-skill", content: validSkillMarkdown)
+    let skill = try repository.loadSkill(slug: "disabled-skill", scope: .home, skillURL: skillURL)
+    let runtime = SkillRuntime(definitions: [skill], disabledSkillIDs: ["disabled-skill"])
+
+    do {
+        _ = try runtime.instructionBundle(trigger: .manual, filePaths: ["README.md"], sessionID: "session-1")
+        Issue.record("Expected disabled skill to be rejected")
+    } catch let error as SkillRuntimeError {
+        #expect(error == .skillDisabled("disabled-skill"))
+    } catch {
+        Issue.record("Expected SkillRuntimeError, got \(error)")
+    }
+}
+
 @Test func skillsRuntimeRepositoryRejectsUnsafeGraphContextPolicy() throws {
     let storagePaths = temporaryPhaseDStoragePaths()
     defer { try? FileManager.default.removeItem(at: storagePaths.applicationSupportDirectory) }
