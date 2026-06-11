@@ -47,6 +47,14 @@ Phase 0 已冻结下一阶段产品架构方向，详见 [`docs/architecture/nat
 
 Phase 2 已开始冻结 `AgentBackend` 与 Claude SDK sidecar 边界，详见 [`docs/architecture/phase-2-agent-backend-sidecar.md`](docs/architecture/phase-2-agent-backend-sidecar.md)：`NativeSessionManager` 只依赖统一 backend 事件流；Claude SDK 作为外部 sidecar engine；SDK session / permission 只作为 metadata，不成为 Connor 产品状态主权方。
 
+Phase 4 已将 Product OS Source / Skill Registry 收敛为 Connor-owned 本地产品状态，详见 [`docs/architecture/phase-4-product-os-source-skill-registry.md`](docs/architecture/phase-4-product-os-source-skill-registry.md)：source 与 skill 先作为 typed registry / governance state 存在，不急于扩展到任意 MCP/OAuth/Skill execution surface。
+
+Phase 5 已加入 Automation / Labels / Statuses control-plane，详见 [`docs/architecture/phase-5-automation-labels-statuses.md`](docs/architecture/phase-5-automation-labels-statuses.md)：automation 目前是 audit-first skeleton，只匹配事件、记录 trigger、进入 timeline，不直接执行危险后台动作。
+
+Phase 6 已升级 graph retrieval，详见 [`docs/architecture/phase-6-graph-retrieval-upgrade.md`](docs/architecture/phase-6-graph-retrieval-upgrade.md)：SQLite hybrid search 支持扩大候选池、bounded multi-hop graph expansion、本地 query-aware reranking、MMR 可选路径与可解释 hit metadata。
+
+Phase 7 已新增 retrieval evaluation harness，详见 [`docs/architecture/phase-7-retrieval-evaluation-harness.md`](docs/architecture/phase-7-retrieval-evaluation-harness.md)：golden query manifests、top-k metrics、required-hit coverage 与本地 JSON report 持久化都由 Connor 自己持有。
+
 早期简单图模型、历史 Markdown 导入链路、基于数组扫描的内存搜索索引都已移除，不再保留兼容层。
 
 ---
@@ -60,17 +68,23 @@ temporal graph-only
 + SQLite-backed graph store
 + graph-aware agent runtime
 + tool-calling agent loop foundation
++ governed Claude SDK sidecar backend path
++ Product OS session / source / skill / automation governance state
 + background extraction/admission pipeline
-+ SwiftUI Mac app prototype
++ Phase 6 upgraded hybrid graph retrieval
++ Phase 7 retrieval evaluation harness
++ SwiftUI Mac Product OS workbench prototype
 + production-oriented graph memory architecture in progress
 ```
 
-截至本轮源码扫描，项目已经不是普通 demo，而是一个 **Swift/macOS 本地优先的 temporal knowledge graph memory kernel + graph-aware agent prototype**。它的核心优势在于：本地 truth layer、时序事实、证据 episode、实体消歧、写入准入、抽取 trace、自愈框架和可审计记忆变更。下一阶段的重点不是继续堆更多图谱模型，而是打通“正常对话 → 自动观察 → 后台抽取 → 准入写入 → 下次回答可检索引用”的产品闭环。
+截至 Phase 7，项目已经不是普通 demo，而是一个 **Swift/macOS 本地优先的 temporal knowledge graph memory kernel + graph-aware Agent OS prototype**。它的核心优势在于：本地 truth layer、时序事实、证据 episode、实体消歧、写入准入、抽取 trace、自愈框架、可审计记忆变更、Connor-owned Product OS 控制面，以及可度量的 graph retrieval 质量。下一阶段的重点不是继续堆更多图谱模型，而是在“正常对话 → 自动观察 → 后台抽取 → 准入写入 → 可检索引用 → 可评估回归”的闭环上继续产品化。
 
 ### 已完成并验证
 
 - macOS SwiftUI 应用外壳。
 - SwiftPM 包结构与 Xcode macOS App 工程。
+- Product OS skeleton：单一 Home / Runtime Root，包含 `config/`、`sessions/`、`sources/`、`skills/`、`automations/`、`labels/`、`statuses/`、`artifacts/`、`graph/`、`logs/`、`sidecars/`。
+- Session governance：typed statuses / labels、archive / restore / flag、per-session artifacts、session inspector 与三栏 workbench。
 - Temporal graph 领域模型：
   - `GraphEntity`
   - `GraphStatement`
@@ -130,13 +144,26 @@ temporal graph-only
   - `GraphExtractionTrace`；
   - `GraphAdmissionHoldQueue`；
   - `GraphMemoryChangeLog`。
-- Hybrid retrieval 初版：
+- Hybrid retrieval 升级路径：
   - statement/entity/episode FTS；
-  - graph neighborhood expansion；
+  - bounded multi-hop graph neighborhood expansion；
   - source episode expansion；
+  - candidate pool multiplier；
   - weighted rank-style fusion；
-  - hit metadata 中记录 fusion 与 graph context；
+  - local query-aware reranking；
+  - optional MMR diversity reranking；
+  - hit metadata 中记录 fusion methods、matched terms、rerank reasons、graph hop、retrieval pipeline；
   - App 主 `AgentLoopController` 首轮模型调用前会通过 `AgentContextBuilder` + `SQLiteGraphHybridSearchService` 注入相关长期图谱记忆，并将命中 source IDs 作为 response citations 返回。
+- Retrieval evaluation harness：
+  - JSON golden query manifests；
+  - top-k metrics：Precision@k、Recall@k、HitRate@k、MRR、Average Precision、nDCG@k、RequiredHitRate@k；
+  - 本地 report 持久化到 `graph/evaluations/reports/`；
+  - required-hit coverage 用于防止关键图谱事实回归。
+- Governed Claude SDK sidecar path：Connor 持有 session、permission、approval、audit、graph memory 与 product state，SDK 仅作为 sidecar/backend engine。
+- Product OS registries 与 control plane：
+  - source / skill registry；
+  - labels / statuses mirrors；
+  - audit-first automation rules 与 trigger log。
 - SwiftPM `swift build` 通过。
 
 ### 已有但仍需补齐的能力
@@ -157,15 +184,13 @@ temporal graph-only
   - `groundingCheck`
   - `confidenceDecay`
   - `ontologyPromotion`
-- `SQLiteGraphHybridSearchService` 已覆盖 entity / statement / episode FTS，并实现 graph neighborhood expansion、source episode expansion 和初版融合；完整 Graphiti-grade hybrid pipeline 仍需补齐：
+- `SQLiteGraphHybridSearchService` 已覆盖 entity / statement / episode FTS，并实现 bounded multi-hop graph expansion、source episode expansion、候选池扩大、本地 query-aware reranking、optional MMR 与可解释 metadata；完整商用 retrieval 仍需补齐：
   - embedding semantic retrieval；
-  - 正式 RRF fusion 与 query planner；
-  - graph topology reranking；
-  - entity linking / entity-centric retrieval；
-  - episode mention boost；
-  - MMR diversity reranking；
-  - optional cross-encoder reranking；
-  - retrieval trace 可视化。
+  - 更正式的 query planner；
+  - cross-encoder / scorer adapter seam；
+  - retrieval inspector UI；
+  - CI baseline comparison；
+  - retrieval trace 可视化与回归报告。
 - Entity resolver、entity resolution plan 与 entity merge review 已有基础，并已进入 extraction admission 主路径；下一步需要让所有 extraction/write/手动候选提交都强制经过统一 resolver。
 - Ontology / class promotion 的数据模型方向已具备，但缺少完整生命周期和 UI。
 - Permission model 已有 graph-specific capability，但缺少产品级审批 UI、pending approval queue、always-allow、per-source/per-scope policy，以及与 session mode 的完整联动。
@@ -181,7 +206,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
 当前验证结果：
 
 ```text
-Test run with 234 tests in 1 suite passed
+Test run with 288 tests in 4 suites passed
 ```
 
 如果本机默认 developer directory 仍指向 Command Line Tools，直接执行 `swift test` 可能因缺少 Swift Testing 模块报：
@@ -539,7 +564,9 @@ Sources/ConnorGraphStore/GraphEntityMergeReviewWorker.swift
 - `GraphSearchHit`；
 - `GraphSearchResponse`；
 - `GraphHybridSearchService` 协议；
-- graph context assembly 所需的 search result shape。
+- graph context assembly 所需的 search result shape；
+- `GraphRerankingConfig`，包含 graph expansion depth、candidate pool multiplier 与 reranking strategies；
+- retrieval evaluation manifest / metrics / harness。
 
 代表文件：
 
@@ -547,6 +574,7 @@ Sources/ConnorGraphStore/GraphEntityMergeReviewWorker.swift
 Sources/ConnorGraphSearch/GraphHybridSearch.swift
 Sources/ConnorGraphSearch/GraphSearch.swift
 Sources/ConnorGraphSearch/EmbeddingProvider.swift
+Sources/ConnorGraphSearch/GraphRetrievalEvaluation.swift
 ```
 
 ### `ConnorGraphAgent`
@@ -597,6 +625,9 @@ App 侧 repository 和系统集成层。
 - agent runtime factory；
 - background job runner factory；
 - LLM settings 持久化；
+- Product OS source / skill registry repository；
+- Product OS automation / labels / statuses repository；
+- graph retrieval evaluation manifest/report repository；
 - Keychain credential storage；
 - provider health check。
 
@@ -609,6 +640,9 @@ Sources/ConnorGraphAppSupport/AppChatSessionRepository.swift
 Sources/ConnorGraphAppSupport/AppGraphAgentRuntimeFactory.swift
 Sources/ConnorGraphAppSupport/AppGraphBackgroundJobRunner.swift
 Sources/ConnorGraphAppSupport/AppLLMSettingsRepository.swift
+Sources/ConnorGraphAppSupport/AppProductOSRegistryRepository.swift
+Sources/ConnorGraphAppSupport/AppProductOSAutomationRepository.swift
+Sources/ConnorGraphAppSupport/AppGraphRetrievalEvaluationRepository.swift
 Sources/ConnorGraphAppSupport/KeychainCredentialStore.swift
 ```
 
@@ -625,6 +659,8 @@ SwiftUI macOS App 层。
 - observe log UI；
 - promotion queue UI；
 - agent chat UI；
+- session inspector 与 artifact paths；
+- Product OS registry / labels / statuses / automations panel；
 - prompt inspection UI；
 - model settings UI；
 - browser workspace view。
@@ -666,7 +702,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
 当前验证结果：
 
 ```text
-Test run with 234 tests in 1 suite passed
+Test run with 288 tests in 4 suites passed
 ```
 
 如果直接执行：
@@ -931,6 +967,21 @@ Index refreshes
 - Evidence-aware context assembly。
 - MMR diversity reranking。
 - Search trace metadata。
+- Retrieval evaluation harness。
+
+当前已实现：
+
+- entity / statement / episode FTS；
+- bounded multi-hop graph expansion；
+- source episode expansion；
+- candidate pool multiplier；
+- local query-aware reranking；
+- optional MMR；
+- hit metadata：fusion methods、matched terms、rerank reasons、graph hop、retrieval pipeline；
+- `AgentContext.renderedText` reason line；
+- JSON golden query manifests；
+- Precision@k / Recall@k / HitRate@k / MRR / Average Precision / nDCG@k / RequiredHitRate@k；
+- local evaluation reports under `graph/evaluations/reports/`.
 
 商用验收标准：
 
@@ -978,6 +1029,15 @@ Index refreshes
 - Abort / retry / resume。
 - Session summary。
 - Branching / fork。
+
+当前已实现：
+
+- session status / labels / archive / flag；
+- session artifact directories；
+- AgentEvent Product OS lifecycle extensions；
+- Craft-style three-column SwiftUI workbench；
+- session inspector；
+- Product OS timeline events for governance / registry / automation changes。
 
 参考方向：Craft Agents OSS 的 SessionManager / AgentBackend / AgentEvent 架构。
 
@@ -1083,6 +1143,14 @@ SourceArtifact
 SourceIngestionPolicy
 SourceSyncState
 ```
+
+当前已实现：
+
+- Product OS Source Registry typed local state；
+- default local-filesystem / MCP placeholder definitions；
+- source status persistence；
+- source directory provisioning；
+- graph write policy guardrails，禁止 source 以 allow-all 绕过 Connor 图谱治理。
 
 支持 source 类型：
 
@@ -1420,15 +1488,16 @@ entity resolution
 
 ```text
 entity / statement / episode FTS
-→ semantic retrieval
-→ entity linking
-→ RRF / fusion
-→ graph topology rerank
+→ bounded graph expansion
+→ source episode expansion
+→ local reranking / optional MMR
 → graph context assembly
 → answer explainability
+→ retrieval evaluation report
+→ semantic retrieval / scorer adapter seam
 ```
 
-目标：从“在图里搜文本”升级到“围绕实体、关系、证据和时间组织上下文”。
+目标：从“在图里搜文本”升级到“围绕实体、关系、证据和时间组织上下文”，并能用 golden query manifests 检测 retrieval regression。Phase 6/7 已完成本地 hybrid retrieval 升级和 evaluation harness；下一步是 semantic retrieval、retrieval inspector UI 与 CI baseline comparison。
 
 ### 5. Self-Healing Workers
 
@@ -1506,6 +1575,10 @@ memory dashboard
 17. ✅ 为 admission hold queue 增加 approve / reject / rerun / inspect evidence 动作闭环。
 18. ✅ 实现 `groundingCheck` worker 的最小可用版本。
 19. ✅ 实现 schema/version health check，启动时展示图模型版本。
+20. ✅ 建立 Product OS single Home / Runtime Root、session governance、source / skill registry、labels / statuses / automation control-plane。
+21. ✅ 升级 graph retrieval：bounded multi-hop expansion、candidate pool multiplier、local reranking、optional MMR 与 explainable metadata。
+22. ✅ 新增 retrieval evaluation harness：golden cases、top-k metrics、required-hit coverage、本地 JSON reports。
+23. 下一步：Retrieval Inspector UI / CI baseline comparison / embedding-backed semantic retrieval。
 
 ---
 
