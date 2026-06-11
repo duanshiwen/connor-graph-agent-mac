@@ -14,6 +14,7 @@ const readFirstJSONLine = async () => {
 
 const writeEvent = (event) => stdout.write(`${JSON.stringify(event)}\n`);
 const writeDiagnostic = (message) => stderr.write(`${message}\n`);
+const pendingDeferredToolUses = new Map();
 
 const stableJSONString = (value) => {
   if (value === undefined) return '{}';
@@ -127,15 +128,26 @@ const emitToolResultFromBlock = (block) => {
   });
 };
 
-const emitPermissionRequestedFromDeferredResult = (message) => {
+const requestIDForDeferredTool = (deferred) => `permission-${deferred?.id ?? deferred?.tool_use_id ?? 'deferred-tool-call'}`;
+
+const emitPermissionRequestedFromDeferredResult = (message, request) => {
   const deferred = message?.deferred_tool_use ?? message?.deferredToolUse;
   if (!deferred) return false;
   const toolCallID = deferred.id ?? deferred.tool_use_id ?? 'deferred-tool-call';
   const name = deferred.name ?? deferred.tool_name ?? 'unknown';
   const payloadJSON = stableJSONString(deferred.input ?? {});
+  const requestID = requestIDForDeferredTool(deferred);
+  pendingDeferredToolUses.set(requestID, {
+    requestID,
+    toolCallID,
+    toolName: name,
+    input: deferred.input ?? {},
+    sdkSessionID: message?.session_id ?? message?.sessionId ?? request.sdkSessionID ?? null,
+    request
+  });
   writeEvent({
     permissionRequested: {
-      requestID: `permission-${toolCallID}`,
+      requestID,
       capability: capabilityForTool(name),
       toolName: name,
       payloadJSON
@@ -167,6 +179,30 @@ const processUserSideEffects = (message) => {
   for (const block of contentBlocks(message)) emitToolResultFromBlock(block);
 };
 
+const buildConnorDeferHooks = () => ({
+  PreToolUse: [
+    async () => ({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'defer'
+      }
+    })
+  ]
+});
+
+const buildDeferredResumeHooks = (deferred, resolution) => ({
+  PreToolUse: [
+    async () => ({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'allow',
+        permissionDecisionReason: resolution.reason ?? 'Connor approved deferred tool execution',
+        updatedInput: JSON.parse(resolution.payloadJSON || stableJSONString(deferred.input ?? {}))
+      }
+    })
+  ]
+});
+
 const runRequest = async (request) => {
   let finalText = '';
   let emittedRunStarted = false;
@@ -176,7 +212,8 @@ const runRequest = async (request) => {
     permissionMode: request.sdkPermissionMode,
     resume: request.sdkSessionID ?? undefined,
     includePartialMessages: true,
-    includeHookEvents: true
+    includeHookEvents: true,
+    hooks: buildConnorDeferHooks()
   };
 
   for await (const message of query(request.prompt, options)) {
@@ -212,7 +249,12 @@ const runRequest = async (request) => {
 
     if (isResultLike(message)) {
       const subtype = message?.subtype ?? message?.terminal_reason ?? 'completed';
-      if (emitPermissionRequestedFromDeferredResult(message)) {
+      const terminalReason = message?.terminal_reason ?? message?.stop_reason ?? subtype;
+      if (terminalReason === 'tool_deferred' && emitPermissionRequestedFromDeferredResult(message, request)) {
+        writeEvent({ runFailed: { message: 'Claude SDK deferred tool use pending Connor permission approval' } });
+        return;
+      }
+      if (emitPermissionRequestedFromDeferredResult(message, request)) {
         writeEvent({ runFailed: { message: 'Claude SDK deferred tool use pending Connor permission approval' } });
         return;
       }
@@ -237,8 +279,50 @@ const runRequest = async (request) => {
   writeEvent({ runCompleted: {} });
 };
 
+const runDeferredResume = async (deferred, resolution) => {
+  const request = deferred.request;
+  const options = {
+    cwd: request.cwd,
+    permissionMode: request.sdkPermissionMode,
+    resume: deferred.sdkSessionID,
+    includePartialMessages: true,
+    includeHookEvents: true,
+    hooks: buildDeferredResumeHooks(deferred, resolution)
+  };
+
+  let finalText = '';
+  for await (const message of query(request.prompt, options)) {
+    if (isErrorLike(message)) {
+      writeEvent({ runFailed: { message: message?.error?.message ?? message?.message ?? 'Claude SDK deferred resume error' } });
+      return;
+    }
+    if (isAssistantLike(message)) {
+      processAssistantSideEffects(message);
+      const text = textFromAssistantMessage(message);
+      if (text.length > 0) {
+        finalText += text;
+        writeEvent({ textDelta: { text } });
+      }
+      continue;
+    }
+    if (isUserLike(message)) {
+      processUserSideEffects(message);
+      continue;
+    }
+    if (isResultLike(message)) {
+      const subtype = message?.subtype ?? message?.terminal_reason ?? 'completed';
+      if (subtype !== 'success' && subtype !== 'completed') {
+        writeEvent({ runFailed: { message: `Claude SDK deferred resume result: ${subtype}` } });
+        return;
+      }
+    }
+  }
+
+  writeEvent({ textComplete: { text: finalText, citations: [], contextSnapshot: null } });
+  writeEvent({ runCompleted: {} });
+};
+
 const handleApprovalResolved = async (resolution) => {
-  // Skeleton only: real deferred Claude SDK resume is not enabled here.
   if (!resolution?.requestID) {
     writeEvent({ resumeRejected: { requestID: '', toolName: resolution?.toolName ?? null, reason: 'Missing approval request ID' } });
     return;
@@ -247,20 +331,28 @@ const handleApprovalResolved = async (resolution) => {
     writeEvent({ resumeRejected: { requestID: resolution.requestID, toolName: resolution.toolName ?? null, reason: 'Sidecar must not own Connor product state' } });
     return;
   }
+  const deferred = pendingDeferredToolUses.get(resolution.requestID);
+  if (!deferred) {
+    writeEvent({ resumeRejected: { requestID: resolution.requestID, toolName: resolution.toolName ?? null, reason: 'No deferred Claude SDK tool use is pending for this Connor request' } });
+    return;
+  }
   if (resolution.outcome === 'approved') {
     writeEvent({
       resumeAccepted: {
         requestID: resolution.requestID,
-        toolName: resolution.toolName ?? null,
-        message: 'Approval resolution accepted by sidecar skeleton; real deferred Claude SDK resume is not enabled'
+        toolName: resolution.toolName ?? deferred.toolName ?? null,
+        message: 'Approval resolution accepted; resuming deferred Claude SDK tool use under Connor governance'
       }
     });
+    pendingDeferredToolUses.delete(resolution.requestID);
+    await runDeferredResume(deferred, resolution);
     return;
   }
+  pendingDeferredToolUses.delete(resolution.requestID);
   writeEvent({
     resumeRejected: {
       requestID: resolution.requestID,
-      toolName: resolution.toolName ?? null,
+      toolName: resolution.toolName ?? deferred.toolName ?? null,
       reason: resolution.reason ?? 'Approval resolution denied by Connor'
     }
   });

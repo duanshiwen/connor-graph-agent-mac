@@ -578,7 +578,26 @@ private actor FakeClaudeSDKSidecarSessionTransport: ClaudeSDKSidecarSessionTrans
     #expect(sidecarSource.contains("case 'start'"))
     #expect(sidecarSource.contains("case 'approvalResolved'"))
     #expect(sidecarSource.contains("case 'cancel'"))
-    #expect(sidecarSource.contains("real deferred Claude SDK resume is not enabled"))
+    #expect(sidecarSource.contains("resuming deferred Claude SDK tool use under Connor governance"))
+}
+
+@Test func claudeSDKSidecarEngineDeclaresDeferredToolResumeAdapterSeam() throws {
+    let root = repositoryRootURL()
+    let sidecarSource = try String(
+        contentsOf: root.appendingPathComponent("sidecars/claude-agent-engine/claude-sidecar.mjs"),
+        encoding: .utf8
+    )
+
+    #expect(sidecarSource.contains("pendingDeferredToolUses"))
+    #expect(sidecarSource.contains("buildConnorDeferHooks"))
+    #expect(sidecarSource.contains("permissionDecision: 'defer'"))
+    #expect(sidecarSource.contains("terminalReason === 'tool_deferred'"))
+    #expect(sidecarSource.contains("deferred_tool_use"))
+    #expect(sidecarSource.contains("runDeferredResume"))
+    #expect(sidecarSource.contains("buildDeferredResumeHooks"))
+    #expect(sidecarSource.contains("permissionDecision: 'allow'"))
+    #expect(sidecarSource.contains("updatedInput"))
+    #expect(sidecarSource.contains("resume: deferred.sdkSessionID"))
 }
 
 @Test func realClaudeSDKSidecarIntegrationSkipsUnlessExplicitlyEnabled() async throws {

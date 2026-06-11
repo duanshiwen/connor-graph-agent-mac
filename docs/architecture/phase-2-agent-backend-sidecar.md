@@ -1,6 +1,6 @@
 # Phase 2: AgentBackend Abstraction and Claude SDK Sidecar
 
-Last updated: 2026-06-11 15:52 GMT+8
+Last updated: 2026-06-11 15:57 GMT+8
 
 ## Status
 
@@ -140,7 +140,7 @@ Connor can now start a persistent sidecar session, keep stdout event streaming, 
 4. Keeps stderr reserved for diagnostics.
 5. Supports `cancel()` by closing stdin and terminating the process when needed.
 
-The test fixture proves the same process can receive `.start(...)`, emit `permissionRequested`, then receive `.approvalResolved(...)` and emit `resumeAccepted`. The real Node SDK sidecar now exposes the command-loop envelope shape, but its `approvalResolved` handler is still a skeleton that emits `resumeAccepted` / `resumeRejected` without invoking real Claude SDK deferred resume.
+The test fixture proves the same process can receive `.start(...)`, emit `permissionRequested`, then receive `.approvalResolved(...)` and emit `resumeAccepted`. The real Node SDK sidecar now exposes the command-loop envelope shape and declares the official Claude Agent SDK defer/resume adapter path: `PreToolUse` returns `permissionDecision: 'defer'`, SDK result `terminal_reason` / `stop_reason` is `tool_deferred`, `deferred_tool_use` is normalized into a Connor `permissionRequested` event, and Connor `.approvalResolved(...)` resumes the same SDK session with `permissionDecision: 'allow'` plus `updatedInput`. This path is still guarded by Connor pending approvals and does not make the SDK the permission ledger.
 
 ## One-shot Process Transport
 
@@ -165,10 +165,12 @@ The current mapping is deliberately conservative:
 - `resume = request.sdkSessionID ?? undefined`
 - `includePartialMessages = true`
 - `includeHookEvents = true`
+- `hooks.PreToolUse` can defer tool execution so Connor can surface native approval
 - assistant-like SDK messages → `textDelta`
 - SDK `tool_use`-like content → `toolUseRequested` + `toolUseStarted`
 - SDK `tool_result`-like content → `toolUseCompleted`
 - deferred tool-use / permission denial state → `permissionRequested` or failed tool result
+- Connor approval resumes deferred SDK sessions using the same SDK session ID and `updatedInput`
 - stream completion → `textComplete` + `runCompleted`
 - SDK errors/result failures → `runFailed`
 
@@ -178,7 +180,7 @@ A Swift integration test exists but is gated by environment variables, so normal
 
 Recommended next implementation slice:
 
-1. Add sidecar execution-resume semantics after a Connor approval decision, without letting the SDK own Connor session or permission state.
+1. Add governed write-capable sidecar settings in the macOS app only after the approval UI, audit trail, timeline, command transport, and deferred resume semantics are all visible and deterministic.
 4. Keep SDK permission mode bypassed until Connor can inspect, audit, approve, and resume sidecar tool actions end-to-end.
 5. Add cancellation support before long-running sidecar tasks become default.
 6. Only after those controls exist, consider enabling a constrained read-only Claude sidecar path in app settings.
