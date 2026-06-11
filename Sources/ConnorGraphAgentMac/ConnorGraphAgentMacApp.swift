@@ -86,7 +86,7 @@ final class AppViewModel: ObservableObject {
     // Legacy simple ask controller is kept only for demo/no-store fallback and compatibility helpers.
     // The app's product chat path is NativeSessionManager: Connor owns session state, the agent backend is replaceable.
     private var legacyChatController: AgentChatController<AnyLLMProvider>
-    private var nativeSessionManager: NativeSessionManager<AnyAgentModelProvider>?
+    private var nativeSessionManager: NativeSessionManager?
 
     private var activeChatSession: AgentSession {
         nativeSessionManager?.session ?? legacyChatController.agent.session
