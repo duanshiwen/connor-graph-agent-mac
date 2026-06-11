@@ -217,6 +217,30 @@ public struct ClaudeSDKSidecarPermissionRequested: Codable, Sendable, Equatable 
     }
 }
 
+public struct ClaudeSDKSidecarResumeAccepted: Codable, Sendable, Equatable {
+    public var requestID: String
+    public var toolName: String?
+    public var message: String
+
+    public init(requestID: String, toolName: String? = nil, message: String = "") {
+        self.requestID = requestID
+        self.toolName = toolName
+        self.message = message
+    }
+}
+
+public struct ClaudeSDKSidecarResumeRejected: Codable, Sendable, Equatable {
+    public var requestID: String
+    public var toolName: String?
+    public var reason: String
+
+    public init(requestID: String, toolName: String? = nil, reason: String) {
+        self.requestID = requestID
+        self.toolName = toolName
+        self.reason = reason
+    }
+}
+
 public struct ClaudeSDKSidecarToolUseStarted: Codable, Sendable, Equatable {
     public var toolCallID: String
     public var name: String
@@ -258,6 +282,8 @@ public enum ClaudeSDKSidecarEvent: Codable, Sendable, Equatable {
     case runCompleted(ClaudeSDKSidecarRunCompleted)
     case toolUseRequested(ClaudeSDKSidecarToolUseRequested)
     case permissionRequested(ClaudeSDKSidecarPermissionRequested)
+    case resumeAccepted(ClaudeSDKSidecarResumeAccepted)
+    case resumeRejected(ClaudeSDKSidecarResumeRejected)
     case toolUseStarted(ClaudeSDKSidecarToolUseStarted)
     case toolUseCompleted(ClaudeSDKSidecarToolUseCompleted)
     case runFailed(ClaudeSDKSidecarRunFailed)
@@ -269,6 +295,8 @@ public enum ClaudeSDKSidecarEvent: Codable, Sendable, Equatable {
         case runCompleted
         case toolUseRequested
         case permissionRequested
+        case resumeAccepted
+        case resumeRejected
         case toolUseStarted
         case toolUseCompleted
         case runFailed
@@ -288,6 +316,10 @@ public enum ClaudeSDKSidecarEvent: Codable, Sendable, Equatable {
             self = .toolUseRequested(try container.decode(ClaudeSDKSidecarToolUseRequested.self, forKey: .toolUseRequested))
         } else if container.contains(.permissionRequested) {
             self = .permissionRequested(try container.decode(ClaudeSDKSidecarPermissionRequested.self, forKey: .permissionRequested))
+        } else if container.contains(.resumeAccepted) {
+            self = .resumeAccepted(try container.decode(ClaudeSDKSidecarResumeAccepted.self, forKey: .resumeAccepted))
+        } else if container.contains(.resumeRejected) {
+            self = .resumeRejected(try container.decode(ClaudeSDKSidecarResumeRejected.self, forKey: .resumeRejected))
         } else if container.contains(.toolUseStarted) {
             self = .toolUseStarted(try container.decode(ClaudeSDKSidecarToolUseStarted.self, forKey: .toolUseStarted))
         } else if container.contains(.toolUseCompleted) {
@@ -317,6 +349,10 @@ public enum ClaudeSDKSidecarEvent: Codable, Sendable, Equatable {
             try container.encode(payload, forKey: .toolUseRequested)
         case .permissionRequested(let payload):
             try container.encode(payload, forKey: .permissionRequested)
+        case .resumeAccepted(let payload):
+            try container.encode(payload, forKey: .resumeAccepted)
+        case .resumeRejected(let payload):
+            try container.encode(payload, forKey: .resumeRejected)
         case .toolUseStarted(let payload):
             try container.encode(payload, forKey: .toolUseStarted)
         case .toolUseCompleted(let payload):
@@ -333,6 +369,12 @@ public protocol ClaudeSDKSidecarTransport: Sendable {
 
 public protocol ClaudeSDKSidecarCommandTransport: ClaudeSDKSidecarTransport {
     func stream(_ command: ClaudeSDKSidecarCommand) async -> AsyncThrowingStream<ClaudeSDKSidecarEvent, Error>
+}
+
+public protocol ClaudeSDKSidecarSessionTransport: Sendable {
+    func start(_ request: ClaudeSDKSidecarRequest) async -> AsyncThrowingStream<ClaudeSDKSidecarEvent, Error>
+    func send(_ command: ClaudeSDKSidecarCommand) async throws
+    func cancel() async
 }
 
 public enum ClaudeSDKSidecarProcessTransportError: Error, Sendable, Equatable, LocalizedError {
@@ -487,14 +529,16 @@ public struct ClaudeSDKSidecarBackend<Transport: ClaudeSDKSidecarTransport>: Age
             Task {
                 let sidecarEvents = await transport.stream(sidecarRequest)
                 for try await event in sidecarEvents {
-                    continuation.yield(map(event, request: request))
+                    if let mapped = map(event, request: request) {
+                        continuation.yield(mapped)
+                    }
                 }
                 continuation.finish()
             }
         }
     }
 
-    private func map(_ event: ClaudeSDKSidecarEvent, request: AgentChatRequest) -> AgentEvent {
+    private func map(_ event: ClaudeSDKSidecarEvent, request: AgentChatRequest) -> AgentEvent? {
         switch event {
         case .runStarted(let payload):
             return .runStarted(AgentRunStartedEvent(run: AgentRun(
@@ -551,6 +595,8 @@ public struct ClaudeSDKSidecarBackend<Transport: ClaudeSDKSidecarTransport>: Age
                 toolName: payload.toolName,
                 payloadJSON: payload.payloadJSON
             ))
+        case .resumeAccepted, .resumeRejected:
+            return nil
         case .toolUseStarted(let payload):
             return .toolStarted(AgentToolCall(
                 id: payload.toolCallID,

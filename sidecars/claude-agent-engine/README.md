@@ -2,7 +2,7 @@
 
 This directory contains the future Node/Bun Claude Agent SDK sidecar for Connor.
 
-Connor remains the product state owner. The sidecar is a replaceable agent-engine process that receives one Connor-owned request over stdin and emits Connor-normalized sidecar events over stdout as JSONL.
+Connor remains the product state owner. The sidecar is a replaceable agent-engine process that currently receives one Connor-owned request over stdin and emits Connor-normalized sidecar events over stdout as JSONL. Swift now also defines a persistent session transport skeleton for the future command loop, but the real process path remains one-shot until that transport is implemented.
 
 ## Current Status
 
@@ -13,7 +13,7 @@ Phase 2 ships both:
 
 The real entry point imports `@anthropic-ai/claude-agent-sdk` and calls `query(prompt, options)`, but Connor does **not** enable it by default. Swift tests include a gated integration path that only runs when explicitly requested by environment variables.
 
-The sidecar now also emits normalized tool and permission boundary events. These events let Connor render/audit SDK tool activity without granting the SDK product-state authority.
+The sidecar now also emits normalized tool and permission boundary events. These events let Connor render/audit SDK tool activity without granting the SDK product-state authority. Swift-side protocol events for `resumeAccepted` and `resumeRejected` also exist as a skeleton for future approval resume, but they are not yet emitted by the real `claude-sidecar.mjs` entry point and do not enable deferred tool execution.
 
 ## Request Protocol
 
@@ -61,6 +61,15 @@ Tool / permission boundary events:
 {"toolUseCompleted":{"toolCallID":"tool-1","name":"Read","contentText":"README contents","contentJSON":null,"isError":false}}
 ```
 
+Future persistent resume skeleton events:
+
+```jsonl
+{"resumeAccepted":{"requestID":"permission-tool-1","toolName":"Write","message":"Resume accepted by fake sidecar"}}
+{"resumeRejected":{"requestID":"permission-tool-2","toolName":"Bash","reason":"Denied by reviewer"}}
+```
+
+These are protocol-level events only. They are not currently mapped to new Connor timeline event kinds and are not emitted by the real one-shot SDK sidecar.
+
 Failure event:
 
 ```jsonl
@@ -89,9 +98,21 @@ stderr is reserved for diagnostics. A non-zero exit code is treated as a transpo
 
 Before enabling write-capable tools by default, Connor still needs execution-resume semantics over product-owned approval decisions.
 
-## Approval Resolution Command Skeleton
+## Approval Resolution Command and Session Transport Skeleton
 
-Connor now has a Swift-side command envelope for the future Connor → sidecar resume path. `ClaudeSDKSidecarProcessTransport` implements the command transport boundary for `.start(...)` while preserving the direct request shape shown above. It explicitly rejects `.approvalResolved(...)` until Connor has a persistent streaming sidecar session transport. This command is a protocol skeleton, not an enabled write-tool execution path.
+Connor now has a Swift-side command envelope for the future Connor → sidecar resume path. `ClaudeSDKSidecarProcessTransport` implements the command transport boundary for `.start(...)` while preserving the direct request shape shown above. It explicitly rejects `.approvalResolved(...)` because it is still a one-shot process transport.
+
+Swift also defines `ClaudeSDKSidecarSessionTransport`:
+
+```swift
+public protocol ClaudeSDKSidecarSessionTransport: Sendable {
+    func start(_ request: ClaudeSDKSidecarRequest) async -> AsyncThrowingStream<ClaudeSDKSidecarEvent, Error>
+    func send(_ command: ClaudeSDKSidecarCommand) async throws
+    func cancel() async
+}
+```
+
+That protocol is the future persistent streaming boundary for sending `approvalResolved` after the initial start request. Current tests use a fake session transport to prove that an approval command can produce `resumeAccepted` or `resumeRejected`. This is a protocol skeleton, not an enabled write-tool execution path.
 
 ```jsonl
 {"approvalResolved":{"connorRunID":"run-id","connorSessionID":"session-id","requestID":"permission-tool-1","status":"approved","outcome":"approved","capability":"commitGraphWrite","toolName":"Write","payloadJSON":"{}","reason":"Human reviewer approved the write","actor":"human-reviewer","ownsProductState":false}}
@@ -103,6 +124,7 @@ Rules:
 - `ownsProductState` remains `false`; the sidecar must not become the approval ledger.
 - `approved` maps to SDK/tool continuation intent.
 - `denied` and `cancelled` both map to denied execution outcome; `cancelled` remains distinct only in Connor pending-approval state and audit history.
+- `resumeAccepted` / `resumeRejected` currently confirm protocol handling only.
 - This skeleton does not yet resume deferred SDK execution.
 
 ## Real SDK Local Run
