@@ -15,6 +15,7 @@ public struct NativeSessionManager: Sendable {
     private let presenter: AgentEventPresenter
     private let memoryIngestionService: MemoryIngestionService
     private let memoryStagingRepository: AppMemoryStagingBufferRepository?
+    private let eventRecorder: AgentEventRecorder?
 
     public init<Backend: AgentBackend>(
         backend: Backend,
@@ -23,7 +24,8 @@ public struct NativeSessionManager: Sendable {
         groupID: String = "default",
         permissionMode: AgentPermissionMode = .askToWrite,
         memoryStagingRepository: AppMemoryStagingBufferRepository? = nil,
-        memoryIngestionService: MemoryIngestionService = MemoryIngestionService()
+        memoryIngestionService: MemoryIngestionService = MemoryIngestionService(),
+        eventRecorder: AgentEventRecorder? = nil
     ) {
         self.backend = AnyAgentBackend(backend)
         self.sessionRepository = sessionRepository
@@ -35,6 +37,7 @@ public struct NativeSessionManager: Sendable {
         self.presenter = AgentEventPresenter()
         self.memoryStagingRepository = memoryStagingRepository
         self.memoryIngestionService = memoryIngestionService
+        self.eventRecorder = eventRecorder
     }
 
     public init<Provider: AgentModelProvider>(
@@ -78,6 +81,8 @@ public struct NativeSessionManager: Sendable {
                 collectedEvents.append(event)
                 events.append(event)
 
+                try recordBackendEvent(event, sequence: collectedEvents.count - 1)
+
                 let presentation = presenter.presentation(for: event)
                 collectedPresentations.append(presentation)
                 eventPresentations.append(presentation)
@@ -110,6 +115,19 @@ public struct NativeSessionManager: Sendable {
 
     private func persistSession() throws {
         try sessionRepository.saveSession(session)
+    }
+
+    private func recordBackendEvent(_ event: AgentEvent, sequence: Int) throws {
+        guard let eventRecorder else { return }
+        switch event {
+        case .runStarted(let payload):
+            try eventRecorder.recordRun(payload.run)
+        case .runCompleted(let payload):
+            try eventRecorder.recordRun(payload.run)
+        default:
+            break
+        }
+        try eventRecorder.record(event, sequence: sequence)
     }
 
     private func persistMemoryStagingAfterUserMessage(_ message: AgentMessage) throws {
