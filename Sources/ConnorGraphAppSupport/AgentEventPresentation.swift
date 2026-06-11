@@ -91,6 +91,24 @@ public struct AgentEventPresenter: Sendable {
             )
         case .budgetWarning(let warning):
             return item(event, title: "Budget warning", detail: warning.message, severity: .warning)
+        case .sessionStatusChanged(let payload):
+            return item(event, title: "Session status changed", detail: payload.message, severity: .info)
+        case .sessionLabelsChanged(let payload):
+            return item(event, title: "Session labels changed", detail: payload.message, severity: .info)
+        case .sessionArchived(let payload):
+            return item(event, title: "Session archived", detail: payload.message, severity: .warning)
+        case .sessionRestored(let payload):
+            return item(event, title: "Session restored", detail: payload.message, severity: .success)
+        case .artifactCreated(let payload):
+            return item(event, title: "Artifact created: \(payload.artifactKind)", detail: payload.message, severity: .success)
+        case .automationTriggered(let payload):
+            return item(event, title: "Automation triggered: \(payload.trigger)", detail: payload.message, severity: .info)
+        case .graphMemoryProposed(let payload):
+            return item(event, title: "Graph memory proposed", detail: payload.message, severity: .info)
+        case .graphMemoryCommitted(let payload):
+            return item(event, title: "Graph memory committed", detail: payload.message, severity: .success)
+        case .graphMemoryHeld(let payload):
+            return item(event, title: "Graph memory held", detail: payload.message, severity: .warning)
         case .runFailed(let failure):
             return item(event, title: "Run failed", detail: failure.message, severity: .error)
         case .runCompleted:
