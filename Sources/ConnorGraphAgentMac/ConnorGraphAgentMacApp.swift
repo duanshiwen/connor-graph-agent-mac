@@ -67,6 +67,9 @@ final class AppViewModel: ObservableObject {
     @Published var isTestingLLMConnection: Bool = false
     @Published var chatSessions: [AgentSession] = []
     @Published var selectedChatSessionID: String?
+    @Published var sessionListFilter: AgentSessionListFilter = .inbox
+    @Published var governanceConfig: AppSessionGovernanceConfig = .default
+    @Published var selectedSessionArtifactDirectories: AgentSessionArtifactDirectories?
     @Published var latestChatSummary: AgentSessionSummary?
     @Published var isSummarizingChatSession: Bool = false
     @Published var chatSummaryMessage: String?
@@ -82,6 +85,7 @@ final class AppViewModel: ObservableObject {
     private var admissionHoldQueueRepository: AppGraphAdmissionHoldQueueRepository?
     private var memoryChangeLogRepository: AppGraphMemoryChangeLogRepository?
     private var chatSessionRepository: AppChatSessionRepository?
+    private var storagePaths: AppStoragePaths?
     private var llmSettingsRepository: AppLLMSettingsRepository
     private var llmProviderHealthChecker: AppLLMProviderHealthChecker
     private var agentRuntimeFactory: AppGraphAgentRuntimeFactory?
@@ -135,6 +139,8 @@ final class AppViewModel: ObservableObject {
         observeLogEntries: [ObserveLogEntry],
         repository: AppGraphRepository? = nil,
         databasePath: String? = nil,
+        storagePaths: AppStoragePaths? = nil,
+        governanceConfig: AppSessionGovernanceConfig = .default,
         llmSettingsRepository: AppLLMSettingsRepository = AppLLMSettingsRepository()
     ) {
         self.entities = entities
@@ -142,6 +148,8 @@ final class AppViewModel: ObservableObject {
         self.episodes = episodes
         self.observeLogEntries = observeLogEntries
         self.repository = repository
+        self.storagePaths = storagePaths
+        self.governanceConfig = governanceConfig
         if let repository {
             self.promotionRepository = AppPromotionQueueRepository(store: repository.store)
             self.graphWriteCandidateRepository = AppGraphWriteCandidateRepository(store: repository.store)
@@ -149,7 +157,7 @@ final class AppViewModel: ObservableObject {
             self.graphExtractionTraceRepository = AppGraphExtractionTraceRepository(store: repository.store)
             self.admissionHoldQueueRepository = AppGraphAdmissionHoldQueueRepository(store: repository.store)
             self.memoryChangeLogRepository = AppGraphMemoryChangeLogRepository(store: repository.store)
-            self.chatSessionRepository = AppChatSessionRepository(store: repository.store)
+            self.chatSessionRepository = AppChatSessionRepository(store: repository.store, storagePaths: storagePaths, governanceConfig: governanceConfig)
             self.agentRuntimeFactory = AppGraphAgentRuntimeFactory(store: repository.store, settingsRepository: llmSettingsRepository)
             self.hybridSearchService = SQLiteGraphHybridSearchService(store: repository.store)
             self.backgroundJobRunner = AppGraphBackgroundJobRunner(store: repository.store, settingsRepository: llmSettingsRepository)
@@ -172,6 +180,7 @@ final class AppViewModel: ObservableObject {
         do {
             let paths = try AppStoragePaths.live()
             let repository = try AppGraphRepository.bootstrap(paths: paths)
+            let governanceConfig = try AppSessionGovernanceConfigRepository(configDirectory: paths.configDirectory).loadOrCreateDefault()
             var snapshot = try repository.loadSnapshot()
             if snapshot.entities.isEmpty {
                 let demo = demoSnapshot()
@@ -186,7 +195,9 @@ final class AppViewModel: ObservableObject {
                 episodes: snapshot.episodes,
                 observeLogEntries: snapshot.observeLogEntries,
                 repository: repository,
-                databasePath: paths.databaseURL.path
+                databasePath: paths.databaseURL.path,
+                storagePaths: paths,
+                governanceConfig: governanceConfig
             )
             viewModel.reloadPromotionCandidates()
             viewModel.reloadGraphWriteCandidates()
@@ -416,8 +427,8 @@ final class AppViewModel: ObservableObject {
             return
         }
         do {
-            var sessions = try chatSessionRepository.loadRecentSessions()
-            if sessions.isEmpty {
+            var sessions = try chatSessionRepository.loadSessions(filter: sessionListFilter)
+            if sessions.isEmpty, sessionListFilter == .inbox {
                 let session = try chatSessionRepository.createSession()
                 sessions = [session]
             }
@@ -430,7 +441,9 @@ final class AppViewModel: ObservableObject {
                 transcript = session.messages
                 agentEventTimeline = []
                 latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: selectedID)
+                selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: selectedID)
             } else {
+                selectedSessionArtifactDirectories = nil
                 latestChatSummary = nil
             }
             chatSummaryMessage = nil
@@ -452,6 +465,7 @@ final class AppViewModel: ObservableObject {
             latestChatSummary = nil
             chatSummaryMessage = nil
             lastPromptInspection = nil
+            selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
             reloadChatSessions()
             errorMessage = nil
         } catch {
@@ -469,6 +483,7 @@ final class AppViewModel: ObservableObject {
             transcript = session.messages
             agentEventTimeline = []
             latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: session.id)
+            selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
             chatSummaryMessage = nil
             lastContext = nil
             lastPromptInspection = nil
@@ -476,6 +491,84 @@ final class AppViewModel: ObservableObject {
         } catch {
             errorMessage = String(describing: error)
         }
+    }
+
+    func setSessionListFilter(_ filter: AgentSessionListFilter) {
+        sessionListFilter = filter
+        reloadChatSessions()
+    }
+
+    func setSelectedSessionStatus(_ status: AgentSessionStatus) {
+        guard let selectedChatSessionID, let chatSessionRepository else { return }
+        do {
+            let session = try chatSessionRepository.setStatus(sessionID: selectedChatSessionID, status: status)
+            self.selectedChatSessionID = session.id
+            reloadChatSessions()
+            appendGovernanceEvent(.sessionStatusChanged(AgentSessionGovernanceEvent(sessionID: session.id, message: "状态已更新为 \(status.displayName)", status: status)))
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func toggleSelectedSessionFlag() {
+        guard let selectedChatSessionID, let chatSessionRepository else { return }
+        do {
+            let session = try chatSessionRepository.toggleFlag(sessionID: selectedChatSessionID)
+            reloadChatSessions()
+            appendGovernanceEvent(.sessionLabelsChanged(AgentSessionGovernanceEvent(sessionID: session.id, message: session.governance.isFlagged ? "已标记重点会话" : "已取消重点标记", labels: session.governance.labels)))
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func toggleSelectedSessionLabel(_ labelID: String) {
+        guard let selectedChatSessionID, let chatSessionRepository else { return }
+        do {
+            guard let session = try chatSessionRepository.loadSession(id: selectedChatSessionID) else { return }
+            var labels = session.governance.labels
+            if labels.contains(where: { $0.id == labelID }) {
+                labels.removeAll { $0.id == labelID }
+            } else {
+                labels.append(AgentSessionLabel(id: labelID))
+            }
+            let updated = try chatSessionRepository.setLabels(sessionID: selectedChatSessionID, labels: labels)
+            reloadChatSessions()
+            appendGovernanceEvent(.sessionLabelsChanged(AgentSessionGovernanceEvent(sessionID: updated.id, message: "标签已更新：\(updated.governance.labels.map(\.displayText).joined(separator: ", "))", labels: updated.governance.labels)))
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func archiveSelectedSession() {
+        guard let selectedChatSessionID, let chatSessionRepository else { return }
+        do {
+            let session = try chatSessionRepository.archive(sessionID: selectedChatSessionID)
+            appendGovernanceEvent(.sessionArchived(AgentSessionGovernanceEvent(sessionID: session.id, message: "会话已归档", status: session.governance.status)))
+            self.selectedChatSessionID = nil
+            reloadChatSessions()
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func restoreSelectedSession() {
+        guard let selectedChatSessionID, let chatSessionRepository else { return }
+        do {
+            let session = try chatSessionRepository.restore(sessionID: selectedChatSessionID)
+            appendGovernanceEvent(.sessionRestored(AgentSessionGovernanceEvent(sessionID: session.id, message: "会话已恢复", status: session.governance.status)))
+            setSessionListFilter(.inbox)
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    private func appendGovernanceEvent(_ event: AgentEvent) {
+        agentEventTimeline.insert(AgentEventPresenter().presentation(for: event), at: 0)
     }
 
     func reloadPromotionCandidates() {
@@ -792,7 +885,7 @@ final class AppViewModel: ObservableObject {
                 selectedChatSessionID = response.session.id
                 legacyChatController = Self.makeLegacyChatController(runtimeFactory: agentRuntimeFactory, settingsRepository: llmSettingsRepository, session: response.session)
                 if let chatSessionRepository {
-                    chatSessions = try chatSessionRepository.loadRecentSessions()
+                    chatSessions = try chatSessionRepository.loadSessions(filter: sessionListFilter)
                     latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: response.session.id)
                 }
                 lastContext = nil
