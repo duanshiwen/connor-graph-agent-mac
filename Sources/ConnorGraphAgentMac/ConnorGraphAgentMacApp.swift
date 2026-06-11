@@ -62,6 +62,10 @@ final class AppViewModel: ObservableObject {
     @Published var llmModel: String = AppLLMSettings.default.model
     @Published var llmAPIKeyInput: String = ""
     @Published var llmHasAPIKey: Bool = false
+    @Published var sidecarExecutablePath: String = ""
+    @Published var sidecarArguments: String = ""
+    @Published var sidecarWorkingDirectoryPath: String = ""
+    @Published var sidecarPermissionMode: AgentPermissionMode = .readOnly
     @Published var llmSettingsMessage: String?
     @Published var llmHealthCheckMessage: String?
     @Published var isTestingLLMConnection: Bool = false
@@ -306,7 +310,7 @@ final class AppViewModel: ObservableObject {
         do {
             let settings = try settingsRepository.loadSettings()
             switch settings.providerMode {
-            case .stub:
+            case .stub, .governedClaudeSidecar:
                 return AnyLLMProvider(StubLLMProvider())
             case .openAICompatible:
                 guard let config = try settingsRepository.openAICompatibleConfig() else {
@@ -362,6 +366,10 @@ final class AppViewModel: ObservableObject {
             llmModel = settings.model
             llmHasAPIKey = settings.hasAPIKey
             llmAPIKeyInput = ""
+            sidecarExecutablePath = settings.sidecarExecutablePath
+            sidecarArguments = settings.sidecarArguments
+            sidecarWorkingDirectoryPath = settings.sidecarWorkingDirectoryPath
+            sidecarPermissionMode = settings.sidecarPermissionMode
             llmSettingsMessage = nil
             llmHealthCheckMessage = nil
         } catch {
@@ -375,7 +383,11 @@ final class AppViewModel: ObservableObject {
                 baseURLString: llmBaseURLString.trimmingCharacters(in: .whitespacesAndNewlines),
                 model: llmModel.trimmingCharacters(in: .whitespacesAndNewlines),
                 hasAPIKey: llmHasAPIKey,
-                providerMode: llmProviderMode
+                providerMode: llmProviderMode,
+                sidecarExecutablePath: sidecarExecutablePath.trimmingCharacters(in: .whitespacesAndNewlines),
+                sidecarArguments: sidecarArguments.trimmingCharacters(in: .whitespacesAndNewlines),
+                sidecarWorkingDirectoryPath: sidecarWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines),
+                sidecarPermissionMode: sidecarPermissionMode
             )
             let apiKey = llmAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
             try llmSettingsRepository.save(settings: settings, apiKey: apiKey.isEmpty ? nil : apiKey)
@@ -639,32 +651,44 @@ final class AppViewModel: ObservableObject {
     }
 
     func approvePendingApproval(_ approval: AgentPendingApproval) {
-        do {
-            _ = try pendingApprovalRepository?.approve(requestID: approval.requestID, reason: "Approved by reviewer")
-            reloadPendingApprovals()
-            lastPendingApprovalResultSummary = "已批准权限请求 \(approval.requestID)，并写入审计与 timeline"
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
+        Task { await resolvePendingApproval(approval, status: .approved, reason: "Approved by reviewer", actor: "human-reviewer") }
     }
 
     func denyPendingApproval(_ approval: AgentPendingApproval) {
-        do {
-            _ = try pendingApprovalRepository?.deny(requestID: approval.requestID, reason: "Denied by reviewer")
-            reloadPendingApprovals()
-            lastPendingApprovalResultSummary = "已拒绝权限请求 \(approval.requestID)，并写入审计与 timeline"
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
+        Task { await resolvePendingApproval(approval, status: .denied, reason: "Denied by reviewer", actor: "human-reviewer") }
     }
 
     func cancelPendingApproval(_ approval: AgentPendingApproval) {
+        Task { await resolvePendingApproval(approval, status: .cancelled, reason: "Cancelled by system", actor: "system") }
+    }
+
+    private func resolvePendingApproval(_ approval: AgentPendingApproval, status: AgentPendingApprovalStatus, reason: String, actor: String) async {
         do {
-            _ = try pendingApprovalRepository?.cancel(requestID: approval.requestID, reason: "Cancelled by system")
+            let resolved: AgentPendingApproval?
+            switch status {
+            case .approved:
+                resolved = try pendingApprovalRepository?.approve(requestID: approval.requestID, reason: reason, actor: actor)
+            case .denied:
+                resolved = try pendingApprovalRepository?.deny(requestID: approval.requestID, reason: reason, actor: actor)
+            case .cancelled:
+                resolved = try pendingApprovalRepository?.cancel(requestID: approval.requestID, reason: reason, actor: actor)
+            case .pending:
+                resolved = approval
+            }
+            if let resolved {
+                try await nativeSessionManager?.backend.resolveApproval(resolved, status: status, reason: reason, actor: actor)
+            }
             reloadPendingApprovals()
-            lastPendingApprovalResultSummary = "已取消权限请求 \(approval.requestID)，并写入审计与 timeline"
+            switch status {
+            case .approved:
+                lastPendingApprovalResultSummary = "已批准权限请求 \(approval.requestID)，并写入审计、timeline，且已向 sidecar 发送 resume。"
+            case .denied:
+                lastPendingApprovalResultSummary = "已拒绝权限请求 \(approval.requestID)，并写入审计、timeline，且已向 sidecar 发送 deny。"
+            case .cancelled:
+                lastPendingApprovalResultSummary = "已取消权限请求 \(approval.requestID)，并写入审计、timeline，且已向 sidecar 发送 cancel/deny。"
+            case .pending:
+                lastPendingApprovalResultSummary = "权限请求 \(approval.requestID) 仍为 pending。"
+            }
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -1629,15 +1653,38 @@ struct LLMSettingsView: View {
             Picker("模型提供方", selection: $viewModel.llmProviderMode) {
                 Text("模拟模式").tag(AppLLMProviderMode.stub)
                 Text("OpenAI 兼容").tag(AppLLMProviderMode.openAICompatible)
+                Text("Claude Sidecar").tag(AppLLMProviderMode.governedClaudeSidecar)
             }
             .pickerStyle(.segmented)
 
-            TextField("Base URL", text: $viewModel.llmBaseURLString)
-                .textFieldStyle(.roundedBorder)
-            TextField("模型", text: $viewModel.llmModel)
-                .textFieldStyle(.roundedBorder)
-            SecureField("API Key", text: $viewModel.llmAPIKeyInput)
-                .textFieldStyle(.roundedBorder)
+            if viewModel.llmProviderMode == .governedClaudeSidecar {
+                GroupBox("Governed Claude SDK Sidecar") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        TextField("Sidecar executable path，例如 /usr/local/bin/node", text: $viewModel.sidecarExecutablePath)
+                            .textFieldStyle(.roundedBorder)
+                        TextField("Sidecar arguments，例如 sidecars/claude-agent-engine/claude-sidecar.mjs", text: $viewModel.sidecarArguments)
+                            .textFieldStyle(.roundedBorder)
+                        TextField("Working directory", text: $viewModel.sidecarWorkingDirectoryPath)
+                            .textFieldStyle(.roundedBorder)
+                        Picker("Connor 权限模式", selection: $viewModel.sidecarPermissionMode) {
+                            Text("只读").tag(AgentPermissionMode.readOnly)
+                            Text("写入需审批").tag(AgentPermissionMode.askToWrite)
+                            Text("受信写入").tag(AgentPermissionMode.trustedWrite)
+                        }
+                        .pickerStyle(.segmented)
+                        Text("安全边界：SDK permissionMode 固定为 bypassPermissions；Connor 保留 session、pending approval、audit、graph memory 和 product state 主权。Sidecar 模式不允许 allowAll。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } else {
+                TextField("Base URL", text: $viewModel.llmBaseURLString)
+                    .textFieldStyle(.roundedBorder)
+                TextField("模型", text: $viewModel.llmModel)
+                    .textFieldStyle(.roundedBorder)
+                SecureField("API Key", text: $viewModel.llmAPIKeyInput)
+                    .textFieldStyle(.roundedBorder)
+            }
 
             HStack {
                 Button("保存设置") { viewModel.saveLLMSettings() }

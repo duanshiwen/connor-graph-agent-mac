@@ -645,3 +645,46 @@ private func repositoryRootURL() -> URL {
         .deletingLastPathComponent()
         .deletingLastPathComponent()
 }
+
+@Test func governedClaudeSidecarRuntimeSendsConnorOwnedApprovalResolution() async throws {
+    let transport = FakeClaudeSDKSidecarSessionTransport()
+    let runtime = try GovernedClaudeSDKSidecarRuntime(
+        transport: transport,
+        workingDirectory: URL(fileURLWithPath: "/tmp/project"),
+        permissionMode: .askToWrite
+    )
+    let approval = AgentPendingApproval(
+        requestID: "permission-tool-1",
+        runID: "run-sidecar-tools",
+        sessionID: "connor-session-sidecar-tools",
+        capability: .commitGraphWrite,
+        toolName: "Write",
+        payloadJSON: "{}",
+        status: .approved
+    )
+
+    try await runtime.resolveApproval(approval, status: .approved, reason: "Approved in Connor", actor: "human-reviewer")
+
+    let commands = await transport.recordedCommands()
+    #expect(commands.count == 1)
+    if case .approvalResolved(let resolution)? = commands.first {
+        #expect(resolution.connorRunID == "run-sidecar-tools")
+        #expect(resolution.connorSessionID == "connor-session-sidecar-tools")
+        #expect(resolution.requestID == "permission-tool-1")
+        #expect(resolution.status == .approved)
+        #expect(resolution.outcome == .approved)
+        #expect(resolution.ownsProductState == false)
+    } else {
+        Issue.record("Expected approvalResolved command")
+    }
+}
+
+@Test func governedClaudeSidecarRuntimeRejectsAllowAll() throws {
+    #expect(throws: GovernedClaudeSDKSidecarRuntimeError.self) {
+        _ = try GovernedClaudeSDKSidecarRuntime(
+            transport: FakeClaudeSDKSidecarSessionTransport(),
+            workingDirectory: URL(fileURLWithPath: "/tmp/project"),
+            permissionMode: .allowAll
+        )
+    }
+}

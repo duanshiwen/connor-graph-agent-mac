@@ -5,11 +5,14 @@ import ConnorGraphStore
 
 public enum AppGraphAgentRuntimeFactoryError: Error, Sendable, Equatable, LocalizedError {
     case unsafeSidecarPermissionMode(AgentPermissionMode)
+    case missingSidecarExecutablePath
 
     public var errorDescription: String? {
         switch self {
         case .unsafeSidecarPermissionMode(let mode):
             return "Governed Claude SDK sidecar path does not allow unsafe permission mode: \(mode.rawValue)."
+        case .missingSidecarExecutablePath:
+            return "Governed Claude SDK sidecar path requires a sidecar executable path."
         }
     }
 }
@@ -65,13 +68,53 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         permissionMode: AgentPermissionMode = .askToWrite,
         configuration: AgentLoopConfiguration = AgentLoopConfiguration()
     ) -> NativeSessionManager {
-        NativeSessionManager(
+        if let sidecarManager = try? makeConfiguredGovernedClaudeSDKSidecarNativeSessionManager(session: session) {
+            return sidecarManager
+        }
+        return NativeSessionManager(
             backend: AgentLoopBackend(loopController: makeAgentLoopController(permissionMode: permissionMode, configuration: configuration)),
             sessionRepository: AppChatSessionRepository(store: store),
             session: session,
             groupID: groupID,
             permissionMode: permissionMode,
             memoryStagingRepository: AppMemoryStagingBufferRepository(store: store)
+        )
+    }
+
+    public func makeConfiguredGovernedClaudeSDKSidecarNativeSessionManager(
+        session: AgentSession = AgentSession(id: "app-session")
+    ) throws -> NativeSessionManager? {
+        let settings = try settingsRepository.loadSettings()
+        guard settings.providerMode == .governedClaudeSidecar else { return nil }
+        let executablePath = settings.sidecarExecutablePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !executablePath.isEmpty else { throw AppGraphAgentRuntimeFactoryError.missingSidecarExecutablePath }
+        return try makeGovernedClaudeSDKSidecarNativeSessionManager(
+            session: session,
+            sidecarExecutableURL: URL(fileURLWithPath: executablePath),
+            sidecarArguments: Self.splitSidecarArguments(settings.sidecarArguments),
+            workingDirectory: Self.sidecarWorkingDirectory(from: settings),
+            permissionMode: settings.sidecarPermissionMode
+        )
+    }
+
+    public func makeConfiguredGovernedClaudeSDKSidecarRuntime() throws -> GovernedClaudeSDKSidecarRuntime<ClaudeSDKSidecarPersistentProcessTransport>? {
+        let settings = try settingsRepository.loadSettings()
+        guard settings.providerMode == .governedClaudeSidecar else { return nil }
+        let executablePath = settings.sidecarExecutablePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !executablePath.isEmpty else { throw AppGraphAgentRuntimeFactoryError.missingSidecarExecutablePath }
+        guard settings.sidecarPermissionMode != .allowAll else {
+            throw AppGraphAgentRuntimeFactoryError.unsafeSidecarPermissionMode(settings.sidecarPermissionMode)
+        }
+        let workingDirectory = Self.sidecarWorkingDirectory(from: settings)
+        let transport = ClaudeSDKSidecarPersistentProcessTransport(
+            executableURL: URL(fileURLWithPath: executablePath),
+            arguments: Self.splitSidecarArguments(settings.sidecarArguments),
+            currentDirectoryURL: workingDirectory
+        )
+        return try GovernedClaudeSDKSidecarRuntime(
+            transport: transport,
+            workingDirectory: workingDirectory,
+            permissionMode: settings.sidecarPermissionMode
         )
     }
 
@@ -113,8 +156,13 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             environment: sidecarEnvironment,
             currentDirectoryURL: workingDirectory
         )
+        let runtime = try GovernedClaudeSDKSidecarRuntime(
+            transport: transport,
+            workingDirectory: workingDirectory,
+            permissionMode: permissionMode
+        )
         return makeClaudeSDKSidecarNativeSessionManager(
-            backend: ClaudeSDKSidecarSessionBackend(transport: transport, workingDirectory: workingDirectory),
+            backend: runtime,
             session: session,
             permissionMode: permissionMode
         )
@@ -165,7 +213,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         do {
             let settings = try settingsRepository.loadSettings()
             switch settings.providerMode {
-            case .stub:
+            case .stub, .governedClaudeSidecar:
                 return AnyAgentModelProvider(StubAgentModelProvider())
             case .openAICompatible:
                 guard let config = try settingsRepository.openAICompatibleConfig() else {
@@ -184,7 +232,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         do {
             let settings = try settingsRepository.loadSettings()
             switch settings.providerMode {
-            case .stub:
+            case .stub, .governedClaudeSidecar:
                 return AnyLLMProvider(StubLLMProvider())
             case .openAICompatible:
                 guard let config = try settingsRepository.openAICompatibleConfig() else {
@@ -197,5 +245,19 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         } catch {
             return AnyLLMProvider { _, _ in throw error }
         }
+    }
+
+    private static func splitSidecarArguments(_ arguments: String) -> [String] {
+        arguments
+            .split(separator: " ", omittingEmptySubsequences: true)
+            .map(String.init)
+    }
+
+    private static func sidecarWorkingDirectory(from settings: AppLLMSettings) -> URL {
+        let path = settings.sidecarWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if path.isEmpty {
+            return URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        }
+        return URL(fileURLWithPath: path, isDirectory: true)
     }
 }
