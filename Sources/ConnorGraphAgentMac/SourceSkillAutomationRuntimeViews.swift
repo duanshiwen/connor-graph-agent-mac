@@ -29,7 +29,10 @@ struct SourceRuntimePanelView: View {
                 )
             }
         }
-        .onAppear { viewModel.reloadSourceRuntimeConfigurations() }
+        .task {
+            await Task.yield()
+            viewModel.reloadSourceRuntimeConfigurations()
+        }
     }
 }
 
@@ -61,7 +64,10 @@ struct SkillRuntimePanelView: View {
                 )
             }
         }
-        .onAppear { viewModel.reloadSkillRuntimeDefinitions() }
+        .task {
+            await Task.yield()
+            viewModel.reloadSkillRuntimeDefinitions()
+        }
     }
 }
 
@@ -104,7 +110,8 @@ struct AutomationRuntimePanelView: View {
                 RuntimePanelCard(title: card.title, subtitle: card.subtitle, detail: card.detail, chips: [card.dispositionLabel], severity: card.severity)
             }
         }
-        .onAppear {
+        .task {
+            await Task.yield()
             viewModel.reloadAutomationConfig()
             viewModel.reloadAutomationExecutionHistory()
         }
