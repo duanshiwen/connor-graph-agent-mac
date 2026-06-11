@@ -101,6 +101,9 @@ private func temporaryFactoryNativeSessionDatabaseURL(_ name: String = UUID().uu
     let persisted = try store.events(runID: runID, limit: 20)
 
     #expect(response.events.map(\.kind) == [.runStarted, .toolRequested, .permissionRequested, .toolStarted, .toolFinished, .textComplete, .runCompleted])
+    #expect(response.eventPresentations.map(\.title).contains("Tool requested: Read"))
+    #expect(response.eventPresentations.map(\.title).contains("Permission requested: readSession"))
+    #expect(manager.eventPresentations.map(\.title).contains("Tool finished: Read"))
     #expect(persisted.map(\.kind) == [.runStarted, .toolRequested, .permissionRequested, .toolStarted, .toolFinished, .textComplete, .runCompleted])
     #expect(persisted.map(\.sequence) == Array(0..<persisted.count))
     #expect(persisted.contains { $0.kind == .permissionRequested && $0.payloadJSON.contains("permission-tool-1") })
