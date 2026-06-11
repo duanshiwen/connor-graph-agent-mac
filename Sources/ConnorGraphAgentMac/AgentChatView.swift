@@ -31,7 +31,10 @@ struct AgentChatView: View {
                 .background(Color(nsColor: .windowBackgroundColor).opacity(0.92))
         }
         .navigationTitle("Connor Sessions")
-        .onAppear { viewModel.reloadChatSessions() }
+        .task {
+            await Task.yield()
+            viewModel.reloadChatSessions()
+        }
     }
 }
 
@@ -912,7 +915,11 @@ private struct AgentChatInspectorView: View {
                 .font(.subheadline.weight(.semibold))
             Picker("Status", selection: Binding(
                 get: { session.governance.status },
-                set: { viewModel.setSelectedSessionStatus($0) }
+                set: { newValue in
+                    viewModel.deferViewUpdate {
+                        viewModel.setSelectedSessionStatus(newValue)
+                    }
+                }
             )) {
                 ForEach(AgentSessionStatus.allCases.filter { $0 != .archived }, id: \.self) { status in
                     Text(status.displayName).tag(status)

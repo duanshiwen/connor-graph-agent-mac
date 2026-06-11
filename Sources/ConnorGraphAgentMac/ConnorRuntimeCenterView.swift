@@ -42,7 +42,8 @@ struct ConnorRuntimeCenterView: View {
                 viewModel.reloadMemoryChangeLog()
             }
         }
-        .onAppear {
+        .task {
+            await Task.yield()
             viewModel.reloadChatSessions()
             viewModel.reloadPendingApprovals()
             viewModel.reloadGraphWriteCandidates()
