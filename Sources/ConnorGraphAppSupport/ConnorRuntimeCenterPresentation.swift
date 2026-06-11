@@ -17,13 +17,15 @@ public struct ConnorRuntimeMetricTile: Codable, Sendable, Equatable, Identifiabl
     public var value: String
     public var subtitle: String
     public var severity: AgentEventPresentationSeverity
+    public var target: ConnorNativeShellItem?
 
-    public init(id: ConnorRuntimeMetricID, title: String, value: String, subtitle: String, severity: AgentEventPresentationSeverity) {
+    public init(id: ConnorRuntimeMetricID, title: String, value: String, subtitle: String, severity: AgentEventPresentationSeverity, target: ConnorNativeShellItem? = nil) {
         self.id = id
         self.title = title
         self.value = value
         self.subtitle = subtitle
         self.severity = severity
+        self.target = target
     }
 }
 
@@ -80,12 +82,14 @@ public struct ConnorRuntimeCenterSection: Codable, Sendable, Equatable, Identifi
     public var title: String
     public var subtitle: String
     public var items: [ConnorRuntimeCenterItem]
+    public var target: ConnorNativeShellItem?
 
-    public init(id: ConnorRuntimeSectionID, title: String, subtitle: String, items: [ConnorRuntimeCenterItem]) {
+    public init(id: ConnorRuntimeSectionID, title: String, subtitle: String, items: [ConnorRuntimeCenterItem], target: ConnorNativeShellItem? = nil) {
         self.id = id
         self.title = title
         self.subtitle = subtitle
         self.items = items
+        self.target = target
     }
 }
 
@@ -120,10 +124,10 @@ public struct ConnorRuntimeCenterPresentation: Codable, Sendable, Equatable {
         )
 
         let metrics = [
-            ConnorRuntimeMetricTile(id: .activeSessions, title: "Active sessions", value: "\(activeSessions.count)", subtitle: "running workspaces", severity: activeSessions.isEmpty ? .info : .success),
-            ConnorRuntimeMetricTile(id: .pendingApprovals, title: "Pending approvals", value: "\(pendingApprovals.count)", subtitle: "human review gates", severity: pendingApprovals.isEmpty ? .success : .warning),
-            ConnorRuntimeMetricTile(id: .memoryReviews, title: "Memory reviews", value: "\(memoryReviews)", subtitle: "candidates + holds", severity: memoryReviews == 0 ? .success : .warning),
-            ConnorRuntimeMetricTile(id: .automationTriggers, title: "Automation triggers", value: "\(automationTriggers.count)", subtitle: "recent governed actions", severity: automationTriggers.contains { $0.requiresReview } ? .warning : .info)
+            ConnorRuntimeMetricTile(id: .activeSessions, title: "Active sessions", value: "\(activeSessions.count)", subtitle: "running workspaces", severity: activeSessions.isEmpty ? .info : .success, target: .agentChat),
+            ConnorRuntimeMetricTile(id: .pendingApprovals, title: "Pending approvals", value: "\(pendingApprovals.count)", subtitle: "human review gates", severity: pendingApprovals.isEmpty ? .success : .warning, target: .approvals),
+            ConnorRuntimeMetricTile(id: .memoryReviews, title: "Memory reviews", value: "\(memoryReviews)", subtitle: "candidates + holds", severity: memoryReviews == 0 ? .success : .warning, target: .graphMemory),
+            ConnorRuntimeMetricTile(id: .automationTriggers, title: "Automation triggers", value: "\(automationTriggers.count)", subtitle: "recent governed actions", severity: automationTriggers.contains { $0.requiresReview } ? .warning : .info, target: .automation)
         ]
 
         let timelineItems = events.map { event in
@@ -171,10 +175,10 @@ public struct ConnorRuntimeCenterPresentation: Codable, Sendable, Equatable {
             hero: hero,
             metricTiles: metrics,
             sections: [
-                ConnorRuntimeCenterSection(id: .runTimeline, title: "Run Timeline", subtitle: "Latest agent events", items: timelineItems),
-                ConnorRuntimeCenterSection(id: .reviewQueue, title: "Review Queue", subtitle: "Permissions and human gates", items: approvalItems),
-                ConnorRuntimeCenterSection(id: .graphMemory, title: "Graph Memory", subtitle: "Review center", items: memoryItems),
-                ConnorRuntimeCenterSection(id: .automation, title: "Automation", subtitle: "Governed triggers", items: automationItems)
+                ConnorRuntimeCenterSection(id: .runTimeline, title: "Run Timeline", subtitle: "Latest agent events", items: timelineItems, target: .runtimeCenter),
+                ConnorRuntimeCenterSection(id: .reviewQueue, title: "Review Queue", subtitle: "Permissions and human gates", items: approvalItems, target: .approvals),
+                ConnorRuntimeCenterSection(id: .graphMemory, title: "Graph Memory", subtitle: "Review center", items: memoryItems, target: .graphMemory),
+                ConnorRuntimeCenterSection(id: .automation, title: "Automation", subtitle: "Governed triggers", items: automationItems, target: .automation)
             ]
         )
     }
