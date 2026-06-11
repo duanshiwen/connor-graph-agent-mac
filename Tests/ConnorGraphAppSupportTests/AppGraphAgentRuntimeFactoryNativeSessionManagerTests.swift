@@ -107,6 +107,14 @@ private func temporaryFactoryNativeSessionDatabaseURL(_ name: String = UUID().uu
     #expect(persisted.map(\.kind) == [.runStarted, .toolRequested, .permissionRequested, .toolStarted, .toolFinished, .textComplete, .runCompleted])
     #expect(persisted.map(\.sequence) == Array(0..<persisted.count))
     #expect(persisted.contains { $0.kind == .permissionRequested && $0.payloadJSON.contains("permission-tool-1") })
+
+    let approvals = try store.pendingApprovals(runID: runID)
+    #expect(approvals.count == 1)
+    #expect(approvals.first?.requestID == "permission-tool-1")
+    #expect(approvals.first?.status == .pending)
+    #expect(approvals.first?.capability == .readSession)
+    #expect(approvals.first?.toolName == "Read")
+    #expect(approvals.first?.payloadJSON.contains("README.md") == true)
 }
 
 @Test func appGraphAgentRuntimeFactoryCreatesClaudeSidecarNativeSessionManager() async throws {

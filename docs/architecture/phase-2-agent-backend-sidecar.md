@@ -1,6 +1,6 @@
 # Phase 2: AgentBackend Abstraction and Claude SDK Sidecar
 
-Last updated: 2026-06-11 13:18 GMT+8
+Last updated: 2026-06-11 14:08 GMT+8
 
 ## Status
 
@@ -75,7 +75,7 @@ Connor `AgentPermissionMode` remains the product-level permission source of trut
 - `trustedWrite`
 - `allowAll`
 
-The sidecar reports tool and permission boundary events back as normalized Connor `AgentEvent` values. Factory-created Claude sidecar `NativeSessionManager` instances persist those events into the SQLite `agent_events` timeline through `AgentEventRecorder`, and `AgentEventPresenter` renders tool/permission events with tool names, call IDs, request IDs, and compact payload summaries for the native timeline UI. Write-capable sidecar tools still must not become default until Connor has product-level approval flow and audit UI over these normalized events.
+The sidecar reports tool and permission boundary events back as normalized Connor `AgentEvent` values. Factory-created Claude sidecar `NativeSessionManager` instances persist those events into the SQLite `agent_events` timeline through `AgentEventRecorder`, create Connor-owned `agent_pending_approvals` records for normalized `permissionRequested` events, and render tool/permission events with tool names, call IDs, request IDs, and compact payload summaries for the native timeline UI. Write-capable sidecar tools still must not become default until Connor has product-level approval UI and execution-resume semantics over these normalized events.
 
 ## IPC Contract
 
@@ -148,7 +148,7 @@ A Swift integration test exists but is gated by environment variables, so normal
 Recommended next implementation slice:
 
 1. Add product-level approval flow for normalized sidecar `permissionRequested` events.
-2. Add product-level pending approval records for persisted sidecar `permissionRequested` events.
-3. Keep SDK permission mode bypassed until Connor can inspect, audit, and approve sidecar tool actions end-to-end.
+2. Add product-level UI for listing and resolving pending sidecar approvals.
+3. Keep SDK permission mode bypassed until Connor can inspect, audit, approve, and resume sidecar tool actions end-to-end.
 4. Add cancellation support to `ClaudeSDKSidecarProcessTransport` before long-running sidecar tasks become default.
 5. Only after those controls exist, consider enabling a constrained read-only Claude sidecar path in app settings.
