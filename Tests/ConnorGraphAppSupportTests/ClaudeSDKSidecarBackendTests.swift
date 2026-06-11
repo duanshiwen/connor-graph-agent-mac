@@ -81,6 +81,81 @@ private actor FakeClaudeSDKSidecarTransport: ClaudeSDKSidecarTransport {
     }
 }
 
+@Test func claudeSDKSidecarBackendNormalizesToolAndPermissionEvents() async throws {
+    let transport = FakeClaudeSDKSidecarTransport(scriptedEvents: [
+        .runStarted(ClaudeSDKSidecarRunStarted(sdkSessionID: "claude-sdk-session")),
+        .toolUseRequested(ClaudeSDKSidecarToolUseRequested(toolCallID: "tool-1", name: "Read", inputJSON: "{\"file_path\":\"README.md\"}")),
+        .permissionRequested(ClaudeSDKSidecarPermissionRequested(requestID: "permission-1", capability: .readSession, toolName: "Read", payloadJSON: "{\"file_path\":\"README.md\"}")),
+        .toolUseStarted(ClaudeSDKSidecarToolUseStarted(toolCallID: "tool-1", name: "Read")),
+        .toolUseCompleted(ClaudeSDKSidecarToolUseCompleted(toolCallID: "tool-1", name: "Read", contentText: "README contents", contentJSON: nil, isError: false)),
+        .runCompleted(ClaudeSDKSidecarRunCompleted())
+    ])
+    let backend = ClaudeSDKSidecarBackend(
+        transport: transport,
+        workingDirectory: URL(fileURLWithPath: "/tmp/project")
+    )
+    let request = AgentChatRequest(
+        runID: "run-sidecar-tools",
+        sessionID: "connor-session-sidecar-tools",
+        groupID: "default",
+        userMessage: "Read README",
+        permissionMode: .readOnly
+    )
+
+    var events: [AgentEvent] = []
+    for try await event in backend.chat(request) {
+        events.append(event)
+    }
+
+    #expect(events.map(\.kind) == [.runStarted, .toolRequested, .permissionRequested, .toolStarted, .toolFinished, .runCompleted])
+    if case .toolRequested(let call)? = events.first(where: { $0.kind == .toolRequested }) {
+        #expect(call.id == "tool-1")
+        #expect(call.runID == "run-sidecar-tools")
+        #expect(call.sessionID == "connor-session-sidecar-tools")
+        #expect(call.name == "Read")
+        #expect(call.argumentsJSON == "{\"file_path\":\"README.md\"}")
+    } else {
+        Issue.record("Expected normalized toolRequested event")
+    }
+    if case .permissionRequested(let permission)? = events.first(where: { $0.kind == .permissionRequested }) {
+        #expect(permission.id == "permission-1")
+        #expect(permission.runID == "run-sidecar-tools")
+        #expect(permission.sessionID == "connor-session-sidecar-tools")
+        #expect(permission.capability == .readSession)
+        #expect(permission.toolName == "Read")
+    } else {
+        Issue.record("Expected normalized permissionRequested event")
+    }
+    if case .toolFinished(let result)? = events.first(where: { $0.kind == .toolFinished }) {
+        #expect(result.toolCallID == "tool-1")
+        #expect(result.toolName == "Read")
+        #expect(result.contentText == "README contents")
+        #expect(result.error == nil)
+    } else {
+        Issue.record("Expected normalized toolFinished event")
+    }
+}
+
+@Test func claudeSDKSidecarJSONLProtocolDecodesToolAndPermissionEvents() throws {
+    let lines = [
+        "{\"toolUseRequested\":{\"toolCallID\":\"tool-1\",\"name\":\"Read\",\"inputJSON\":\"{}\"}}",
+        "{\"permissionRequested\":{\"requestID\":\"permission-1\",\"capability\":\"readSession\",\"toolName\":\"Read\",\"payloadJSON\":\"{}\"}}",
+        "{\"toolUseStarted\":{\"toolCallID\":\"tool-1\",\"name\":\"Read\"}}",
+        "{\"toolUseCompleted\":{\"toolCallID\":\"tool-1\",\"name\":\"Read\",\"contentText\":\"ok\",\"contentJSON\":null,\"isError\":false}}"
+    ]
+    let decoder = JSONDecoder()
+    let decoded = try lines.map { line in
+        try decoder.decode(ClaudeSDKSidecarEvent.self, from: Data(line.utf8))
+    }
+
+    #expect(decoded == [
+        .toolUseRequested(ClaudeSDKSidecarToolUseRequested(toolCallID: "tool-1", name: "Read", inputJSON: "{}")),
+        .permissionRequested(ClaudeSDKSidecarPermissionRequested(requestID: "permission-1", capability: .readSession, toolName: "Read", payloadJSON: "{}")),
+        .toolUseStarted(ClaudeSDKSidecarToolUseStarted(toolCallID: "tool-1", name: "Read")),
+        .toolUseCompleted(ClaudeSDKSidecarToolUseCompleted(toolCallID: "tool-1", name: "Read", contentText: "ok", contentJSON: nil, isError: false))
+    ])
+}
+
 @Test func claudeSDKSidecarProcessTransportWritesRequestAndReadsJSONLEvents() async throws {
     let temporaryDirectory = FileManager.default.temporaryDirectory
         .appendingPathComponent("ConnorSidecarTransportTests-")
@@ -150,6 +225,9 @@ private actor FakeClaudeSDKSidecarTransport: ClaudeSDKSidecarTransport {
     #expect(sidecarSource.contains("query("))
     #expect(sidecarSource.contains("permissionMode: request.sdkPermissionMode"))
     #expect(sidecarSource.contains("ownsProductState"))
+    #expect(sidecarSource.contains("toolUseRequested"))
+    #expect(sidecarSource.contains("permissionRequested"))
+    #expect(sidecarSource.contains("toolUseCompleted"))
 }
 
 @Test func realClaudeSDKSidecarIntegrationSkipsUnlessExplicitlyEnabled() async throws {

@@ -82,6 +82,58 @@ public struct ClaudeSDKSidecarRunCompleted: Codable, Sendable, Equatable {
     public init() {}
 }
 
+public struct ClaudeSDKSidecarToolUseRequested: Codable, Sendable, Equatable {
+    public var toolCallID: String
+    public var name: String
+    public var inputJSON: String
+
+    public init(toolCallID: String, name: String, inputJSON: String = "{}") {
+        self.toolCallID = toolCallID
+        self.name = name
+        self.inputJSON = inputJSON
+    }
+}
+
+public struct ClaudeSDKSidecarPermissionRequested: Codable, Sendable, Equatable {
+    public var requestID: String
+    public var capability: AgentPermissionCapability
+    public var toolName: String?
+    public var payloadJSON: String
+
+    public init(requestID: String, capability: AgentPermissionCapability, toolName: String? = nil, payloadJSON: String = "{}") {
+        self.requestID = requestID
+        self.capability = capability
+        self.toolName = toolName
+        self.payloadJSON = payloadJSON
+    }
+}
+
+public struct ClaudeSDKSidecarToolUseStarted: Codable, Sendable, Equatable {
+    public var toolCallID: String
+    public var name: String
+
+    public init(toolCallID: String, name: String) {
+        self.toolCallID = toolCallID
+        self.name = name
+    }
+}
+
+public struct ClaudeSDKSidecarToolUseCompleted: Codable, Sendable, Equatable {
+    public var toolCallID: String
+    public var name: String
+    public var contentText: String
+    public var contentJSON: String?
+    public var isError: Bool
+
+    public init(toolCallID: String, name: String, contentText: String, contentJSON: String? = nil, isError: Bool = false) {
+        self.toolCallID = toolCallID
+        self.name = name
+        self.contentText = contentText
+        self.contentJSON = contentJSON
+        self.isError = isError
+    }
+}
+
 public struct ClaudeSDKSidecarRunFailed: Codable, Sendable, Equatable {
     public var message: String
 
@@ -95,6 +147,10 @@ public enum ClaudeSDKSidecarEvent: Codable, Sendable, Equatable {
     case textDelta(ClaudeSDKSidecarTextDelta)
     case textComplete(ClaudeSDKSidecarTextComplete)
     case runCompleted(ClaudeSDKSidecarRunCompleted)
+    case toolUseRequested(ClaudeSDKSidecarToolUseRequested)
+    case permissionRequested(ClaudeSDKSidecarPermissionRequested)
+    case toolUseStarted(ClaudeSDKSidecarToolUseStarted)
+    case toolUseCompleted(ClaudeSDKSidecarToolUseCompleted)
     case runFailed(ClaudeSDKSidecarRunFailed)
 
     private enum CodingKeys: String, CodingKey {
@@ -102,6 +158,10 @@ public enum ClaudeSDKSidecarEvent: Codable, Sendable, Equatable {
         case textDelta
         case textComplete
         case runCompleted
+        case toolUseRequested
+        case permissionRequested
+        case toolUseStarted
+        case toolUseCompleted
         case runFailed
     }
 
@@ -115,6 +175,14 @@ public enum ClaudeSDKSidecarEvent: Codable, Sendable, Equatable {
             self = .textComplete(try container.decode(ClaudeSDKSidecarTextComplete.self, forKey: .textComplete))
         } else if container.contains(.runCompleted) {
             self = .runCompleted(try container.decode(ClaudeSDKSidecarRunCompleted.self, forKey: .runCompleted))
+        } else if container.contains(.toolUseRequested) {
+            self = .toolUseRequested(try container.decode(ClaudeSDKSidecarToolUseRequested.self, forKey: .toolUseRequested))
+        } else if container.contains(.permissionRequested) {
+            self = .permissionRequested(try container.decode(ClaudeSDKSidecarPermissionRequested.self, forKey: .permissionRequested))
+        } else if container.contains(.toolUseStarted) {
+            self = .toolUseStarted(try container.decode(ClaudeSDKSidecarToolUseStarted.self, forKey: .toolUseStarted))
+        } else if container.contains(.toolUseCompleted) {
+            self = .toolUseCompleted(try container.decode(ClaudeSDKSidecarToolUseCompleted.self, forKey: .toolUseCompleted))
         } else if container.contains(.runFailed) {
             self = .runFailed(try container.decode(ClaudeSDKSidecarRunFailed.self, forKey: .runFailed))
         } else {
@@ -136,6 +204,14 @@ public enum ClaudeSDKSidecarEvent: Codable, Sendable, Equatable {
             try container.encode(payload, forKey: .textComplete)
         case .runCompleted(let payload):
             try container.encode(payload, forKey: .runCompleted)
+        case .toolUseRequested(let payload):
+            try container.encode(payload, forKey: .toolUseRequested)
+        case .permissionRequested(let payload):
+            try container.encode(payload, forKey: .permissionRequested)
+        case .toolUseStarted(let payload):
+            try container.encode(payload, forKey: .toolUseStarted)
+        case .toolUseCompleted(let payload):
+            try container.encode(payload, forKey: .toolUseCompleted)
         case .runFailed(let payload):
             try container.encode(payload, forKey: .runFailed)
         }
@@ -335,6 +411,49 @@ public struct ClaudeSDKSidecarBackend<Transport: ClaudeSDKSidecarTransport>: Age
                 model: "claude-agent-sdk",
                 metadata: ["runtime": "claude-sdk-sidecar"]
             )))
+        case .toolUseRequested(let payload):
+            return .toolRequested(AgentToolCall(
+                id: payload.toolCallID,
+                runID: request.runID,
+                sessionID: request.sessionID,
+                name: payload.name,
+                argumentsJSON: payload.inputJSON
+            ))
+        case .permissionRequested(let payload):
+            return .permissionRequested(AgentPermissionRequest(
+                id: payload.requestID,
+                runID: request.runID,
+                sessionID: request.sessionID,
+                capability: payload.capability,
+                toolName: payload.toolName,
+                payloadJSON: payload.payloadJSON
+            ))
+        case .toolUseStarted(let payload):
+            return .toolStarted(AgentToolCall(
+                id: payload.toolCallID,
+                runID: request.runID,
+                sessionID: request.sessionID,
+                name: payload.name,
+                argumentsJSON: "{}"
+            ))
+        case .toolUseCompleted(let payload):
+            if payload.isError {
+                return .toolFailed(AgentToolFailure(
+                    runID: request.runID,
+                    sessionID: request.sessionID,
+                    toolCallID: payload.toolCallID,
+                    toolName: payload.name,
+                    message: payload.contentText
+                ))
+            }
+            return .toolFinished(AgentToolResult(
+                runID: request.runID,
+                sessionID: request.sessionID,
+                toolCallID: payload.toolCallID,
+                toolName: payload.name,
+                contentText: payload.contentText,
+                contentJSON: payload.contentJSON
+            ))
         case .runFailed(let payload):
             return .runFailed(AgentRunFailure(
                 runID: request.runID,
