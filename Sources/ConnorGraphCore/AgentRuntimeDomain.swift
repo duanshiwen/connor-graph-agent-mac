@@ -52,6 +52,15 @@ public enum AgentEventKind: String, Codable, Sendable, Equatable {
     case permissionRequested
     case permissionResolved
     case budgetWarning
+    case sessionStatusChanged
+    case sessionLabelsChanged
+    case sessionArchived
+    case sessionRestored
+    case artifactCreated
+    case automationTriggered
+    case graphMemoryProposed
+    case graphMemoryCommitted
+    case graphMemoryHeld
     case runFailed
     case runCompleted
 }
@@ -154,6 +163,68 @@ public struct AgentBudgetWarning: Codable, Sendable, Equatable {
     public init(runID: String, sessionID: String, message: String) {
         self.runID = runID
         self.sessionID = sessionID
+        self.message = message
+    }
+}
+
+public struct AgentSessionGovernanceEvent: Codable, Sendable, Equatable {
+    public var runID: String?
+    public var sessionID: String
+    public var message: String
+    public var status: AgentSessionStatus?
+    public var labels: [AgentSessionLabel]
+
+    public init(runID: String? = nil, sessionID: String, message: String, status: AgentSessionStatus? = nil, labels: [AgentSessionLabel] = []) {
+        self.runID = runID
+        self.sessionID = sessionID
+        self.message = message
+        self.status = status
+        self.labels = labels
+    }
+}
+
+public struct AgentSessionArtifactEvent: Codable, Sendable, Equatable {
+    public var runID: String?
+    public var sessionID: String
+    public var artifactKind: String
+    public var path: String
+    public var message: String
+
+    public init(runID: String? = nil, sessionID: String, artifactKind: String, path: String, message: String) {
+        self.runID = runID
+        self.sessionID = sessionID
+        self.artifactKind = artifactKind
+        self.path = path
+        self.message = message
+    }
+}
+
+public struct AgentAutomationPlaceholderEvent: Codable, Sendable, Equatable {
+    public var runID: String?
+    public var sessionID: String
+    public var trigger: String
+    public var message: String
+
+    public init(runID: String? = nil, sessionID: String, trigger: String, message: String) {
+        self.runID = runID
+        self.sessionID = sessionID
+        self.trigger = trigger
+        self.message = message
+    }
+}
+
+public struct AgentGraphMemoryLifecycleEvent: Codable, Sendable, Equatable {
+    public var runID: String?
+    public var sessionID: String
+    public var graphID: String
+    public var memoryID: String?
+    public var message: String
+
+    public init(runID: String? = nil, sessionID: String, graphID: String = "default", memoryID: String? = nil, message: String) {
+        self.runID = runID
+        self.sessionID = sessionID
+        self.graphID = graphID
+        self.memoryID = memoryID
         self.message = message
     }
 }

@@ -10,8 +10,8 @@ struct AgentChatView: View {
     var body: some View {
         HStack(spacing: 0) {
             AgentChatSessionListView(viewModel: viewModel)
-                .frame(width: 280)
-                .background(Color.black.opacity(0.10))
+                .frame(width: 304)
+                .background(.ultraThinMaterial)
 
             Divider()
 
@@ -23,8 +23,14 @@ struct AgentChatView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            Divider()
+
+            AgentChatInspectorView(viewModel: viewModel)
+                .frame(width: 320)
+                .background(Color(nsColor: .windowBackgroundColor).opacity(0.92))
         }
-        .navigationTitle("智能体聊天")
+        .navigationTitle("Connor Sessions")
         .onAppear { viewModel.reloadChatSessions() }
     }
 }
@@ -41,15 +47,18 @@ private struct AgentChatSessionListView: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
 
-            HStack {
-                Text("全部会话")
-                    .font(.headline)
-                Spacer()
-                Button(action: { viewModel.reloadChatSessions() }) {
-                    Image(systemName: "arrow.clockwise")
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Inbox")
+                        .font(.headline)
+                    Spacer()
+                    Button(action: { viewModel.reloadChatSessions() }) {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("重新加载会话")
                 }
-                .buttonStyle(.borderless)
-                .help("重新加载会话")
+                AgentSessionFilterBar(viewModel: viewModel)
             }
 
             ScrollView {
@@ -80,23 +89,32 @@ private struct AgentChatSessionRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 10) {
-                Image(systemName: isSelected ? "pin.fill" : "message")
-                    .font(.caption)
-                    .foregroundStyle(isSelected ? .orange : .secondary)
-                    .frame(width: 16)
-                VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 9) {
+                    Image(systemName: row.isFlagged ? "flag.fill" : (isSelected ? "message.fill" : "message"))
+                        .font(.caption)
+                        .foregroundStyle(row.isFlagged ? .orange : (isSelected ? .accentColor : .secondary))
+                        .frame(width: 16)
                     Text(row.title)
                         .font(.subheadline.weight(isSelected ? .semibold : .regular))
                         .lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                HStack(spacing: 6) {
+                    AgentStatusPill(status: row.status, text: row.statusText)
+                    Text("\(row.messageCount) msgs")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                     Text(row.relativeUpdatedTime)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
-                Spacer(minLength: 0)
+                if !row.labels.isEmpty {
+                    FlowLikeChips(values: row.labels.prefix(3).map(\.displayText))
+                }
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 9)
+            .padding(.vertical, 10)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
@@ -188,13 +206,21 @@ private struct AgentChatConversationHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(selectedTitle)
-                        .font(.headline)
+                        .font(.title3.weight(.semibold))
                         .lineLimit(1)
-                    Text("基于图谱上下文的对话工作区")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        if let session = viewModel.chatSessions.first(where: { $0.id == viewModel.selectedChatSessionID }) {
+                            AgentStatusPill(status: session.governance.status, text: session.governance.status.displayName)
+                            ForEach(session.governance.labels.prefix(4)) { label in
+                                AgentLabelPill(text: label.displayText)
+                            }
+                        }
+                        Text("图谱增强对话工作区")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Spacer()
                 Button("重新加载") { viewModel.reloadChatSessions() }
@@ -752,6 +778,253 @@ private struct AgentChatComposerView: View {
         case .safe: return .secondary
         case .warning: return .orange
         case .over: return .red
+        }
+    }
+}
+
+private struct AgentSessionFilterBar: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                FilterButton(title: "Inbox", isSelected: viewModel.sessionListFilter == .inbox) { viewModel.setSessionListFilter(.inbox) }
+                FilterButton(title: "All", isSelected: viewModel.sessionListFilter == .all) { viewModel.setSessionListFilter(.all) }
+                FilterButton(title: "Archive", isSelected: viewModel.sessionListFilter == .archived) { viewModel.setSessionListFilter(.archived) }
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(AgentSessionStatus.allCases.filter { $0 != .archived }, id: \.self) { status in
+                        FilterButton(title: status.displayName, isSelected: viewModel.sessionListFilter == .status(status)) {
+                            viewModel.setSessionListFilter(.status(status))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct FilterButton: View {
+    var title: String
+    var isSelected: Bool
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.caption.weight(isSelected ? .semibold : .regular))
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(isSelected ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.10), in: Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct AgentStatusPill: View {
+    var status: AgentSessionStatus
+    var text: String
+
+    var body: some View {
+        Label(text, systemImage: icon)
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(color.opacity(0.16), in: Capsule())
+            .foregroundStyle(color)
+    }
+
+    private var icon: String {
+        switch status {
+        case .todo: "circle"
+        case .inProgress: "play.circle"
+        case .waiting: "clock"
+        case .needsReview: "exclamationmark.bubble"
+        case .done: "checkmark.circle"
+        case .blocked: "nosign"
+        case .archived: "archivebox"
+        }
+    }
+
+    private var color: Color {
+        switch status {
+        case .todo: .secondary
+        case .inProgress: .blue
+        case .waiting: .orange
+        case .needsReview: .purple
+        case .done: .green
+        case .blocked: .red
+        case .archived: .gray
+        }
+    }
+}
+
+private struct AgentLabelPill: View {
+    var text: String
+
+    var body: some View {
+        Text(text)
+            .font(.caption2.weight(.medium))
+            .lineLimit(1)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(Color.teal.opacity(0.14), in: Capsule())
+            .foregroundStyle(.teal)
+    }
+}
+
+private struct AgentChatInspectorView: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    private var selectedSession: AgentSession? {
+        viewModel.chatSessions.first { $0.id == viewModel.selectedChatSessionID }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Session Inspector")
+                        .font(.headline)
+                    Text("Craft-style governance layer · Swift native")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let session = selectedSession {
+                    sessionGovernance(session)
+                    labels(session)
+                    artifacts
+                    graphMemory
+                } else {
+                    ContentUnavailableView("未选择会话", systemImage: "bubble.left.and.bubble.right", description: Text("从 Inbox 选择一个 session 查看治理信息。"))
+                        .frame(minHeight: 260)
+                }
+            }
+            .padding(16)
+        }
+    }
+
+    private func sessionGovernance(_ session: AgentSession) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Governance")
+                .font(.subheadline.weight(.semibold))
+            Picker("Status", selection: Binding(
+                get: { session.governance.status },
+                set: { viewModel.setSelectedSessionStatus($0) }
+            )) {
+                ForEach(AgentSessionStatus.allCases.filter { $0 != .archived }, id: \.self) { status in
+                    Text(status.displayName).tag(status)
+                }
+            }
+            .pickerStyle(.menu)
+
+            HStack(spacing: 8) {
+                Button(session.governance.isFlagged ? "Unflag" : "Flag") { viewModel.toggleSelectedSessionFlag() }
+                if session.governance.isArchived {
+                    Button("Restore") { viewModel.restoreSelectedSession() }
+                } else {
+                    Button("Archive") { viewModel.archiveSelectedSession() }
+                }
+            }
+            .buttonStyle(.bordered)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Messages: \(session.messages.count)")
+                Text("Updated: \(session.updatedAt.formatted())")
+                Text("Session ID: \(session.id)")
+                    .textSelection(.enabled)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .background(.quaternary.opacity(0.18), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private func labels(_ session: AgentSession) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Labels")
+                .font(.subheadline.weight(.semibold))
+            ForEach(viewModel.governanceConfig.labels.filter { $0.valueType == .boolean }) { definition in
+                Button {
+                    viewModel.toggleSelectedSessionLabel(definition.id)
+                } label: {
+                    HStack {
+                        Image(systemName: session.governance.labels.contains(where: { $0.id == definition.id }) ? "checkmark.circle.fill" : "circle")
+                        Text(definition.name)
+                        Spacer()
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(12)
+        .background(.quaternary.opacity(0.18), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private var artifacts: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Artifacts")
+                .font(.subheadline.weight(.semibold))
+            if let dirs = viewModel.selectedSessionArtifactDirectories {
+                ArtifactPathRow(label: "plans", path: dirs.plans.path)
+                ArtifactPathRow(label: "data", path: dirs.data.path)
+                ArtifactPathRow(label: "attachments", path: dirs.attachments.path)
+                ArtifactPathRow(label: "exports", path: dirs.exports.path)
+            } else {
+                Text("Artifact directories are not available.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .background(.quaternary.opacity(0.18), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private var graphMemory: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Graph Memory")
+                .font(.subheadline.weight(.semibold))
+            Text("Memory staging, extraction, admission and graph governance stay owned by Connor, not by the model SDK.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack {
+                Label("Trace", systemImage: "point.3.connected.trianglepath.dotted")
+                Spacer()
+                Text("\(viewModel.graphExtractionTraces.count)")
+            }
+            HStack {
+                Label("Hold Queue", systemImage: "tray.full")
+                Spacer()
+                Text("\(viewModel.admissionHoldQueueItems.count)")
+            }
+            HStack {
+                Label("Memory Log", systemImage: "clock.arrow.circlepath")
+                Spacer()
+                Text("\(viewModel.memoryChangeLogEntries.count)")
+            }
+            .font(.caption)
+        }
+        .padding(12)
+        .background(.quaternary.opacity(0.18), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
+private struct ArtifactPathRow: View {
+    var label: String
+    var path: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.caption.weight(.semibold))
+            Text(path)
+                .font(.caption2.monospaced())
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .textSelection(.enabled)
         }
     }
 }

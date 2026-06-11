@@ -7,11 +7,23 @@ public struct AgentChatSessionPresentation: Sendable, Equatable, Identifiable {
     public var id: String
     public var title: String
     public var relativeUpdatedTime: String
+    public var statusText: String
+    public var status: AgentSessionStatus
+    public var labels: [AgentSessionLabel]
+    public var isArchived: Bool
+    public var isFlagged: Bool
+    public var messageCount: Int
 
     public init(session: AgentSession, now: Date = Date()) {
         self.id = session.id
         self.title = session.title.isEmpty || session.title == "New Chat" ? "新对话" : session.title
         self.relativeUpdatedTime = Self.relativeTime(from: session.updatedAt, to: now)
+        self.status = session.governance.status
+        self.statusText = session.governance.status.displayName
+        self.labels = session.governance.labels
+        self.isArchived = session.governance.isArchived
+        self.isFlagged = session.governance.isFlagged
+        self.messageCount = session.messages.count
     }
 
     private static func relativeTime(from date: Date, to now: Date) -> String {
