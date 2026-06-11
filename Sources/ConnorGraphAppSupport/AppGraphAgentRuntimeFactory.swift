@@ -49,6 +49,20 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         )
     }
 
+    public func makeNativeSessionManager(
+        session: AgentSession = AgentSession(id: "app-session"),
+        permissionMode: AgentPermissionMode = .askToWrite,
+        configuration: AgentLoopConfiguration = AgentLoopConfiguration()
+    ) -> NativeSessionManager<AnyAgentModelProvider> {
+        NativeSessionManager(
+            loopController: makeAgentLoopController(permissionMode: permissionMode, configuration: configuration),
+            sessionRepository: AppChatSessionRepository(store: store),
+            session: session,
+            groupID: groupID,
+            memoryStagingRepository: AppMemoryStagingBufferRepository(store: store)
+        )
+    }
+
     public func makeAgentLoopController(
         permissionMode: AgentPermissionMode = .askToWrite,
         configuration: AgentLoopConfiguration = AgentLoopConfiguration()
