@@ -29,6 +29,7 @@ struct PhaseGCraftGradeNativeUITests {
             .openSources,
             .openSkills,
             .openAutomation,
+            .checkCommercialReadiness,
             .openSettings
         ])
         #expect(shell.commands.first?.keyboardShortcut == "⌘N")

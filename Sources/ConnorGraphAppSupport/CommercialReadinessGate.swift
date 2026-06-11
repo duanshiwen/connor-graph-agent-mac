@@ -202,6 +202,47 @@ public struct CommercialReadinessSnapshotBuilder: Sendable, Equatable {
     }
 }
 
+public struct CommercialReadinessReleaseGateResult: Codable, Sendable, Equatable {
+    public var status: CommercialReadinessStatus
+    public var dashboard: CommercialReadinessDashboard
+    public var blockingCards: [CommercialReadinessCard]
+    public var generatedAt: Date
+    public var summary: String
+
+    public var isCommercialReady: Bool { status == .ready }
+
+    public init(
+        status: CommercialReadinessStatus,
+        dashboard: CommercialReadinessDashboard,
+        blockingCards: [CommercialReadinessCard],
+        generatedAt: Date,
+        summary: String
+    ) {
+        self.status = status
+        self.dashboard = dashboard
+        self.blockingCards = blockingCards
+        self.generatedAt = generatedAt
+        self.summary = summary
+    }
+}
+
+public struct CommercialReadinessReleaseGate: Sendable, Equatable {
+    public init() {}
+
+    public func evaluate(_ dashboard: CommercialReadinessDashboard, generatedAt: Date = Date()) -> CommercialReadinessReleaseGateResult {
+        let blockingCards = dashboard.cards.filter { $0.status == .blocked }
+        let status: CommercialReadinessStatus = blockingCards.isEmpty ? .ready : .blocked
+        let prefix = status == .ready ? "READY" : "BLOCKED"
+        return CommercialReadinessReleaseGateResult(
+            status: status,
+            dashboard: dashboard,
+            blockingCards: blockingCards,
+            generatedAt: generatedAt,
+            summary: "\(prefix) · \(dashboard.summary)"
+        )
+    }
+}
+
 public struct CommercialReadinessGate: Sendable, Equatable {
     public init() {}
 
