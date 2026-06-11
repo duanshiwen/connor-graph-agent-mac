@@ -161,6 +161,13 @@ final class AppViewModel: ObservableObject {
         nativeSessionManager?.session.messages ?? legacyChatController.transcript
     }
 
+    func deferViewUpdate(_ operation: @escaping @MainActor () -> Void) {
+        Task { @MainActor in
+            await Task.yield()
+            operation()
+        }
+    }
+
     func navigate(to item: ConnorNativeShellItem) {
         switch item {
         case .runtimeCenter:
@@ -1562,7 +1569,10 @@ struct PromotionQueueView: View {
         }
         .padding()
         .navigationTitle("提升队列")
-        .onAppear { viewModel.reloadPromotionCandidates() }
+        .task {
+            await Task.yield()
+            viewModel.reloadPromotionCandidates()
+        }
     }
 }
 
@@ -1644,7 +1654,10 @@ struct AgentPendingApprovalReviewView: View {
         }
         .padding()
         .navigationTitle("权限审批")
-        .onAppear { viewModel.reloadPendingApprovals() }
+        .task {
+            await Task.yield()
+            viewModel.reloadPendingApprovals()
+        }
     }
 
     private func severityColor(_ severity: AppAgentPendingApprovalSeverity) -> Color {
@@ -1788,7 +1801,10 @@ struct GraphWriteCandidateReviewView: View {
         }
         .padding()
         .navigationTitle("写入候选")
-        .onAppear { viewModel.reloadGraphWriteCandidates() }
+        .task {
+            await Task.yield()
+            viewModel.reloadGraphWriteCandidates()
+        }
     }
 
     private func statusColor(_ status: GraphWriteCandidateStatus) -> Color {
@@ -1860,7 +1876,10 @@ struct MemoryChangeLogView: View {
         }
         .padding()
         .navigationTitle("记忆变更")
-        .onAppear { viewModel.reloadMemoryChangeLog() }
+        .task {
+            await Task.yield()
+            viewModel.reloadMemoryChangeLog()
+        }
     }
 
     private func changeLogColor(_ action: GraphMemoryChangeLogAction) -> Color {
@@ -1979,7 +1998,10 @@ struct GraphExtractionDiagnosticsView: View {
         }
         .padding()
         .navigationTitle("记忆准入")
-        .onAppear { viewModel.reloadGraphExtractionTraces() }
+        .task {
+            await Task.yield()
+            viewModel.reloadGraphExtractionTraces()
+        }
     }
 
     private func tracePayloadText(_ trace: AppGraphExtractionTracePresentation) -> String? {
@@ -2266,9 +2288,20 @@ struct ProductOSAutomationRuleRow: View {
                     Text(rule.id).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Toggle("Enabled", isOn: Binding(get: { rule.isEnabled }, set: onEnabledChange))
-                    .toggleStyle(.switch)
-                    .labelsHidden()
+                Toggle(
+                    "Enabled",
+                    isOn: Binding(
+                        get: { rule.isEnabled },
+                        set: { newValue in
+                            Task { @MainActor in
+                                await Task.yield()
+                                onEnabledChange(newValue)
+                            }
+                        }
+                    )
+                )
+                .toggleStyle(.switch)
+                .labelsHidden()
             }
             HStack(spacing: 8) {
                 ProductOSRegistryChip("trigger: \(rule.trigger.kind.rawValue)")
@@ -2362,7 +2395,18 @@ struct ProductOSRegistryStatusPicker: View {
     var onChange: (ProductOSRegistryEntryStatus) -> Void
 
     var body: some View {
-        Picker("Status", selection: Binding(get: { status }, set: onChange)) {
+        Picker(
+            "Status",
+            selection: Binding(
+                get: { status },
+                set: { newValue in
+                    Task { @MainActor in
+                        await Task.yield()
+                        onChange(newValue)
+                    }
+                }
+            )
+        ) {
             ForEach(ProductOSRegistryEntryStatus.allCases, id: \.self) { value in
                 Text(value.rawValue).tag(value)
             }

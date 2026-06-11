@@ -11,6 +11,9 @@
 		A0000000000000000000002C /* AgentChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000002D /* AgentChatView.swift */; };
 		A0000000000000000000002E /* EmptyGraphHybridSearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000002F /* EmptyGraphHybridSearchService.swift */; };
 		A00000000000000000000030 /* BrowserWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000031 /* BrowserWorkspaceView.swift */; };
+		A00000000000000000000032 /* ConnorCommandPaletteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000033 /* ConnorCommandPaletteView.swift */; };
+		A00000000000000000000034 /* ConnorRuntimeCenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000035 /* ConnorRuntimeCenterView.swift */; };
+		A00000000000000000000036 /* SourceSkillAutomationRuntimeViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000037 /* SourceSkillAutomationRuntimeViews.swift */; };
 		A00000000000000000000003 /* ConnorGraphCore in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000004 /* ConnorGraphCore */; };
 		A00000000000000000000005 /* ConnorGraphMemory in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000006 /* ConnorGraphMemory */; };
 		A00000000000000000000007 /* ConnorGraphStore in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000008 /* ConnorGraphStore */; };
@@ -25,6 +28,9 @@
 		A0000000000000000000002D /* AgentChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AgentChatView.swift; sourceTree = "<group>"; };
 		A0000000000000000000002F /* EmptyGraphHybridSearchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/EmptyGraphHybridSearchService.swift; sourceTree = "<group>"; };
 		A00000000000000000000031 /* BrowserWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/BrowserWorkspaceView.swift; sourceTree = "<group>"; };
+		A00000000000000000000033 /* ConnorCommandPaletteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ConnorCommandPaletteView.swift; sourceTree = "<group>"; };
+		A00000000000000000000035 /* ConnorRuntimeCenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ConnorRuntimeCenterView.swift; sourceTree = "<group>"; };
+		A00000000000000000000037 /* SourceSkillAutomationRuntimeViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/SourceSkillAutomationRuntimeViews.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -51,6 +57,9 @@
 				A0000000000000000000002D /* AgentChatView.swift */,
 				A0000000000000000000002F /* EmptyGraphHybridSearchService.swift */,
 				A00000000000000000000031 /* BrowserWorkspaceView.swift */,
+				A00000000000000000000033 /* ConnorCommandPaletteView.swift */,
+				A00000000000000000000035 /* ConnorRuntimeCenterView.swift */,
+				A00000000000000000000037 /* SourceSkillAutomationRuntimeViews.swift */,
 				A00000000000000000000014 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -135,6 +144,9 @@
 				A0000000000000000000002C /* AgentChatView.swift in Sources */,
 				A0000000000000000000002E /* EmptyGraphHybridSearchService.swift in Sources */,
 				A00000000000000000000030 /* BrowserWorkspaceView.swift in Sources */,
+				A00000000000000000000032 /* ConnorCommandPaletteView.swift in Sources */,
+				A00000000000000000000034 /* ConnorRuntimeCenterView.swift in Sources */,
+				A00000000000000000000036 /* SourceSkillAutomationRuntimeViews.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
