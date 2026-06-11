@@ -1,6 +1,6 @@
 # Phase 2: AgentBackend Abstraction and Claude SDK Sidecar
 
-Last updated: 2026-06-11 15:34 GMT+8
+Last updated: 2026-06-11 15:46 GMT+8
 
 ## Status
 
@@ -16,7 +16,8 @@ Current implementation status:
 - `AgentLoopBackend` adapts the existing native loop.
 - `ClaudeSDKSidecarBackend` maps sidecar events into Connor `AgentEvent`, including normalized tool and permission boundary events.
 - `ClaudeSDKSidecarProcessTransport` runs an external process and bridges one request plus JSONL sidecar events over stdin/stdout.
-- `ClaudeSDKSidecarSessionTransport` is now a Swift protocol skeleton for future long-lived sidecar sessions that can receive Connor-owned commands after start.
+- `ClaudeSDKSidecarSessionTransport` is now a Swift protocol for long-lived sidecar sessions that can receive Connor-owned commands after start.
+- `ClaudeSDKSidecarPersistentProcessTransport` implements that long-lived Swift-side process boundary with persistent stdin command writes, stdout JSONL event streaming, stderr diagnostics, and cancellation.
 - `sidecars/claude-agent-engine/` contains protocol docs, mock Node/shell sidecars, and the real `claude-sidecar.mjs` SDK entry point.
 
 ## Boundary
@@ -126,11 +127,23 @@ public protocol ClaudeSDKSidecarSessionTransport: Sendable {
 }
 ```
 
-The protocol exists so Connor can later start a persistent sidecar session, keep stdout event streaming, and send commands such as `.approvalResolved(...)` over the same live session. This slice does not make `ClaudeSDKSidecarProcessTransport` conform to the protocol because the current process transport is still one-shot and has no persistent stdin lifecycle. It also does not connect real Claude SDK deferred tool resume.
+Connor can now start a persistent sidecar session, keep stdout event streaming, and send commands such as `.approvalResolved(...)` over the same live process session through `ClaudeSDKSidecarPersistentProcessTransport`. This does not make the legacy `ClaudeSDKSidecarProcessTransport` conform to the protocol because that process transport remains one-shot and intentionally preserves the legacy one-line request shape. It also does not connect real Claude SDK deferred tool resume.
 
-## Process Transport
+## Persistent Process Transport
 
-`ClaudeSDKSidecarProcessTransport` is the first real IPC bridge. It:
+`ClaudeSDKSidecarPersistentProcessTransport` is the first long-lived IPC bridge. It:
+
+1. Starts a configured executable once per session.
+2. Writes `ClaudeSDKSidecarCommand` envelopes as JSONL to stdin.
+3. Streams stdout JSONL `ClaudeSDKSidecarEvent` values as they arrive.
+4. Keeps stderr reserved for diagnostics.
+5. Supports `cancel()` by closing stdin and terminating the process when needed.
+
+The test fixture proves the same process can receive `.start(...)`, emit `permissionRequested`, then receive `.approvalResolved(...)` and emit `resumeAccepted`. This is still a transport-level skeleton; the real Node SDK sidecar does not yet expose a command loop or SDK deferred resume.
+
+## One-shot Process Transport
+
+`ClaudeSDKSidecarProcessTransport` is the first conservative one-shot IPC bridge. It:
 
 1. Starts a configured executable.
 2. Writes exactly one `ClaudeSDKSidecarRequest` JSON line to stdin.
@@ -164,9 +177,8 @@ A Swift integration test exists but is gated by environment variables, so normal
 
 Recommended next implementation slice:
 
-1. Implement a real persistent process transport with long-lived process lifecycle, stdout line streaming, stdin command writing, stderr diagnostics, and cancellation.
-2. Add a JavaScript sidecar command loop skeleton for `start`, `approvalResolved`, and `cancel` envelopes, with `approvalResolved` still only emitting `resumeAccepted` / `resumeRejected` skeleton events.
-3. Add sidecar execution-resume semantics after a Connor approval decision, without letting the SDK own Connor session or permission state.
+1. Add a JavaScript sidecar command loop skeleton for `start`, `approvalResolved`, and `cancel` envelopes, with `approvalResolved` still only emitting `resumeAccepted` / `resumeRejected` skeleton events.
+2. Add sidecar execution-resume semantics after a Connor approval decision, without letting the SDK own Connor session or permission state.
 4. Keep SDK permission mode bypassed until Connor can inspect, audit, approve, and resume sidecar tool actions end-to-end.
 5. Add cancellation support before long-running sidecar tasks become default.
 6. Only after those controls exist, consider enabling a constrained read-only Claude sidecar path in app settings.

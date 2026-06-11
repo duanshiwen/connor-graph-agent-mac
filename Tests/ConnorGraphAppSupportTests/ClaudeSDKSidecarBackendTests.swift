@@ -329,6 +329,92 @@ private actor FakeClaudeSDKSidecarSessionTransport: ClaudeSDKSidecarSessionTrans
     await transport.cancel()
 }
 
+@Test func claudeSDKSidecarPersistentProcessTransportStreamsEventsAndSendsCommands() async throws {
+    let temporaryDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorPersistentSidecarTransportTests-")
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+    let capturedCommandsURL = temporaryDirectory.appendingPathComponent("commands.jsonl")
+    let scriptURL = temporaryDirectory.appendingPathComponent("mock-persistent-sidecar.sh")
+    try """
+    #!/bin/sh
+    while IFS= read -r command; do
+      printf '%s\n' "$command" >> "$CONNOR_CAPTURED_COMMANDS"
+      case "$command" in
+        *'"start"'*)
+          printf '%s\n' '{"runStarted":{"sdkSessionID":"sdk-persistent-session"}}'
+          printf '%s\n' '{"permissionRequested":{"requestID":"permission-tool-1","capability":"commitGraphWrite","toolName":"Write","payloadJSON":"{}"}}'
+          ;;
+        *'"approvalResolved"'*)
+          printf '%s\n' '{"resumeAccepted":{"requestID":"permission-tool-1","toolName":"Write","message":"persistent resume accepted"}}'
+          ;;
+      esac
+    done
+    """.write(to: scriptURL, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+    let transport = ClaudeSDKSidecarPersistentProcessTransport(
+        executableURL: URL(fileURLWithPath: "/bin/sh"),
+        arguments: [scriptURL.path],
+        environment: ["CONNOR_CAPTURED_COMMANDS": capturedCommandsURL.path],
+        currentDirectoryURL: temporaryDirectory
+    )
+    let request = ClaudeSDKSidecarRequest(
+        connorRunID: "run-persistent",
+        connorSessionID: "session-persistent",
+        groupID: "default",
+        prompt: "Use persistent process transport",
+        cwd: temporaryDirectory.path,
+        permissionMode: .askToWrite
+    )
+
+    var iterator = await transport.start(request).makeAsyncIterator()
+    let started = try await iterator.next()
+    let permission = try await iterator.next()
+
+    #expect(started == .runStarted(ClaudeSDKSidecarRunStarted(sdkSessionID: "sdk-persistent-session")))
+    #expect(permission == .permissionRequested(ClaudeSDKSidecarPermissionRequested(
+        requestID: "permission-tool-1",
+        capability: .commitGraphWrite,
+        toolName: "Write",
+        payloadJSON: "{}"
+    )))
+
+    let approval = AgentPendingApproval(
+        requestID: "permission-tool-1",
+        runID: "run-persistent",
+        sessionID: "session-persistent",
+        capability: .commitGraphWrite,
+        toolName: "Write",
+        payloadJSON: "{}",
+        status: .approved
+    )
+    let resolution = ClaudeSDKSidecarApprovalResolution(
+        approval: approval,
+        status: .approved,
+        reason: "Approved by reviewer"
+    )
+
+    try await transport.send(.approvalResolved(resolution))
+    let resume = try await iterator.next()
+    #expect(resume == .resumeAccepted(ClaudeSDKSidecarResumeAccepted(
+        requestID: "permission-tool-1",
+        toolName: "Write",
+        message: "persistent resume accepted"
+    )))
+
+    await transport.cancel()
+
+    let capturedLines = try String(contentsOf: capturedCommandsURL, encoding: .utf8)
+        .split(separator: "\n")
+        .map(String.init)
+    let decoder = JSONDecoder()
+    let commands = try capturedLines.map { try decoder.decode(ClaudeSDKSidecarCommand.self, from: Data($0.utf8)) }
+    #expect(commands == [.start(request), .approvalResolved(resolution)])
+}
+
 @Test func claudeSDKSidecarProcessTransportSupportsStartCommandBoundaryWithoutChangingLegacyRequestShape() async throws {
     let temporaryDirectory = FileManager.default.temporaryDirectory
         .appendingPathComponent("ConnorSidecarCommandTransportTests-")

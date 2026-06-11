@@ -2,7 +2,7 @@
 
 This directory contains the future Node/Bun Claude Agent SDK sidecar for Connor.
 
-Connor remains the product state owner. The sidecar is a replaceable agent-engine process that currently receives one Connor-owned request over stdin and emits Connor-normalized sidecar events over stdout as JSONL. Swift now also defines a persistent session transport skeleton for the future command loop, but the real process path remains one-shot until that transport is implemented.
+Connor remains the product state owner. The sidecar is a replaceable agent-engine process that currently receives one Connor-owned request over stdin and emits Connor-normalized sidecar events over stdout as JSONL. Swift now also has a persistent process transport for future command-loop sidecars, while the current real `claude-sidecar.mjs` entry point remains one-shot until the JavaScript command loop is implemented.
 
 ## Current Status
 
@@ -112,11 +112,18 @@ public protocol ClaudeSDKSidecarSessionTransport: Sendable {
 }
 ```
 
-That protocol is the future persistent streaming boundary for sending `approvalResolved` after the initial start request. Current tests use a fake session transport to prove that an approval command can produce `resumeAccepted` or `resumeRejected`. This is a protocol skeleton, not an enabled write-tool execution path.
+That protocol is the persistent streaming boundary for sending `approvalResolved` after the initial start request. Current tests use both a fake session transport and a Swift persistent process transport fixture to prove that an approval command can produce `resumeAccepted` or `resumeRejected`. This is still a transport skeleton, not an enabled write-tool execution path.
 
 ```jsonl
 {"approvalResolved":{"connorRunID":"run-id","connorSessionID":"session-id","requestID":"permission-tool-1","status":"approved","outcome":"approved","capability":"commitGraphWrite","toolName":"Write","payloadJSON":"{}","reason":"Human reviewer approved the write","actor":"human-reviewer","ownsProductState":false}}
 ```
+
+Swift persistent process transport status:
+
+- `ClaudeSDKSidecarPersistentProcessTransport` writes command envelopes as JSONL to stdin.
+- It streams stdout JSONL events as they arrive.
+- It supports `cancel()` by closing stdin and terminating the process if needed.
+- The real Node sidecar does not yet implement the corresponding command loop.
 
 Rules:
 

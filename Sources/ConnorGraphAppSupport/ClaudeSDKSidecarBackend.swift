@@ -382,6 +382,8 @@ public enum ClaudeSDKSidecarProcessTransportError: Error, Sendable, Equatable, L
     case nonZeroExit(code: Int32, stderr: String)
     case invalidJSONLine(String)
     case unsupportedCommand(String)
+    case sessionAlreadyStarted
+    case sessionNotStarted
 
     public var errorDescription: String? {
         switch self {
@@ -393,7 +395,172 @@ public enum ClaudeSDKSidecarProcessTransportError: Error, Sendable, Equatable, L
             return "Claude SDK sidecar emitted an invalid JSONL event: \(line)"
         case .unsupportedCommand(let command):
             return "Claude SDK sidecar process transport does not support \(command) commands without a persistent streaming session."
+        case .sessionAlreadyStarted:
+            return "Claude SDK sidecar persistent process transport session has already started."
+        case .sessionNotStarted:
+            return "Claude SDK sidecar persistent process transport session has not started."
         }
+    }
+}
+
+private final class ClaudeSDKSidecarLineBuffer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var buffer = Data()
+
+    func append(_ data: Data) -> [Data] {
+        lock.lock()
+        defer { lock.unlock() }
+        buffer.append(data)
+        var lines: [Data] = []
+        while let newlineIndex = buffer.firstIndex(of: 0x0A) {
+            let lineData = Data(buffer[..<newlineIndex])
+            buffer.removeSubrange(...newlineIndex)
+            if !lineData.isEmpty {
+                lines.append(lineData)
+            }
+        }
+        return lines
+    }
+}
+
+public final class ClaudeSDKSidecarPersistentProcessTransport: ClaudeSDKSidecarSessionTransport, @unchecked Sendable {
+    public var executableURL: URL
+    public var arguments: [String]
+    public var environment: [String: String]
+    public var currentDirectoryURL: URL?
+
+    private let stateQueue = DispatchQueue(label: "connor.claude-sidecar.persistent-process-transport")
+    private var process: Process?
+    private var stdinHandle: FileHandle?
+    private var stderrPipe: Pipe?
+    private var streamContinuation: AsyncThrowingStream<ClaudeSDKSidecarEvent, Error>.Continuation?
+
+    public init(
+        executableURL: URL,
+        arguments: [String] = [],
+        environment: [String: String] = [:],
+        currentDirectoryURL: URL? = nil
+    ) {
+        self.executableURL = executableURL
+        self.arguments = arguments
+        self.environment = environment
+        self.currentDirectoryURL = currentDirectoryURL
+    }
+
+    public func start(_ request: ClaudeSDKSidecarRequest) async -> AsyncThrowingStream<ClaudeSDKSidecarEvent, Error> {
+        let (stream, continuation) = AsyncThrowingStream.makeStream(of: ClaudeSDKSidecarEvent.self, throwing: Error.self)
+
+        let canStart = withLock {
+            guard process == nil else { return false }
+            streamContinuation = continuation
+            return true
+        }
+        guard canStart else {
+            continuation.finish(throwing: ClaudeSDKSidecarProcessTransportError.sessionAlreadyStarted)
+            return stream
+        }
+
+        do {
+            let process = Process()
+            process.executableURL = executableURL
+            process.arguments = arguments
+            process.currentDirectoryURL = currentDirectoryURL ?? URL(fileURLWithPath: request.cwd, isDirectory: true)
+
+            var processEnvironment = ProcessInfo.processInfo.environment
+            environment.forEach { key, value in processEnvironment[key] = value }
+            process.environment = processEnvironment
+
+            let stdin = Pipe()
+            let stdout = Pipe()
+            let stderr = Pipe()
+            process.standardInput = stdin
+            process.standardOutput = stdout
+            process.standardError = stderr
+
+            withLock {
+                self.process = process
+                self.stdinHandle = stdin.fileHandleForWriting
+                self.stderrPipe = stderr
+            }
+
+            try process.run()
+            startReading(stdout: stdout, stderr: stderr, continuation: continuation, process: process)
+            try await send(.start(request))
+        } catch {
+            continuation.finish(throwing: error)
+        }
+
+        return stream
+    }
+
+    public func send(_ command: ClaudeSDKSidecarCommand) async throws {
+        let handle: FileHandle? = withLock { stdinHandle }
+        guard let handle else {
+            throw ClaudeSDKSidecarProcessTransportError.sessionNotStarted
+        }
+        var data = try JSONEncoder().encode(command)
+        data.append(0x0A)
+        guard data.last == 0x0A else {
+            throw ClaudeSDKSidecarProcessTransportError.missingNewlineTerminator
+        }
+        try handle.write(contentsOf: data)
+    }
+
+    public func cancel() async {
+        let resources = withLock {
+            let resources = (process, stdinHandle, streamContinuation)
+            process = nil
+            stdinHandle = nil
+            streamContinuation = nil
+            stderrPipe = nil
+            return resources
+        }
+        try? resources.1?.close()
+        if resources.0?.isRunning == true {
+            resources.0?.terminate()
+        }
+        resources.2?.finish()
+    }
+
+    private func startReading(
+        stdout: Pipe,
+        stderr: Pipe,
+        continuation: AsyncThrowingStream<ClaudeSDKSidecarEvent, Error>.Continuation,
+        process: Process
+    ) {
+        let decoder = JSONDecoder()
+        let lineBuffer = ClaudeSDKSidecarLineBuffer()
+
+        stdout.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            guard !data.isEmpty else { return }
+            for lineData in lineBuffer.append(data) {
+                do {
+                    continuation.yield(try decoder.decode(ClaudeSDKSidecarEvent.self, from: lineData))
+                } catch {
+                    let lineText = String(data: lineData, encoding: .utf8) ?? ""
+                    continuation.finish(throwing: ClaudeSDKSidecarProcessTransportError.invalidJSONLine(lineText))
+                }
+            }
+        }
+
+        process.terminationHandler = { process in
+            stdout.fileHandleForReading.readabilityHandler = nil
+            let stderrData = stderr.fileHandleForReading.readDataToEndOfFile()
+            let stderrText = String(data: stderrData, encoding: .utf8) ?? ""
+            if process.terminationStatus != 0 && process.terminationReason != .uncaughtSignal {
+                continuation.finish(throwing: ClaudeSDKSidecarProcessTransportError.nonZeroExit(
+                    code: process.terminationStatus,
+                    stderr: stderrText.trimmingCharacters(in: .whitespacesAndNewlines)
+                ))
+            } else {
+                continuation.finish()
+            }
+        }
+    }
+
+    private func withLock<T>(_ body: () -> T) -> T {
+        stateQueue.sync(execute: body)
     }
 }
 
