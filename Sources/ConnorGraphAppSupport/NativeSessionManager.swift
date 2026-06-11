@@ -7,6 +7,16 @@ public protocol AgentPendingApprovalRepository: Sendable {
     func upsert(pendingApproval approval: AgentPendingApproval) throws
 }
 
+public enum NativeSessionManagerError: Error, Sendable, Equatable, LocalizedError {
+    case noUserMessageToRetry
+
+    public var errorDescription: String? {
+        switch self {
+        case .noUserMessageToRetry: "No user message is available to retry."
+        }
+    }
+}
+
 public struct NativeSessionRuntimeState: Codable, Sendable, Equatable {
     public var isProcessing: Bool
     public var activeRunID: String?
@@ -163,6 +173,14 @@ public struct NativeSessionManager: Sendable {
             try persistSession()
             throw error
         }
+    }
+
+    @discardableResult
+    public mutating func retryLastUserMessage() async throws -> AgentLoopChatResponse {
+        guard let prompt = session.messages.last(where: { $0.role == .user })?.content else {
+            throw NativeSessionManagerError.noUserMessageToRetry
+        }
+        return try await submit(prompt)
     }
 
     public mutating func cancelActiveRun(reason: String = "cancelled by user") {
