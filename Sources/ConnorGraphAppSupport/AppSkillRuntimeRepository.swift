@@ -1,4 +1,5 @@
 import Foundation
+import ConnorGraphAgent
 import ConnorGraphCore
 
 public struct SkillRuntimeManifest: Codable, Sendable, Equatable {
@@ -107,6 +108,18 @@ public enum AppSkillRuntimeRepositoryError: Error, Sendable, Equatable, CustomSt
     }
 }
 
+public struct SkillRuntimeRegistrySyncResult: Sendable, Equatable {
+    public var snapshot: ProductOSRegistrySnapshot
+    public var registryEvent: AgentProductOSRegistryEvent
+    public var event: AgentEvent
+
+    public init(snapshot: ProductOSRegistrySnapshot, registryEvent: AgentProductOSRegistryEvent) {
+        self.snapshot = snapshot
+        self.registryEvent = registryEvent
+        self.event = .skillRegistryChanged(registryEvent)
+    }
+}
+
 public struct AppSkillRuntimeRepository: Sendable {
     public var storagePaths: AppStoragePaths
     public var globalSkillsDirectory: URL
@@ -206,6 +219,35 @@ public struct AppSkillRuntimeRepository: Sendable {
             try validate(definition)
             return definition
         }.sorted { $0.manifest.name.localizedCaseInsensitiveCompare($1.manifest.name) == .orderedAscending }
+    }
+
+    public func syncProductOSRegistry(
+        using registryRepository: AppProductOSRegistryRepository,
+        sessionID: String,
+        runID: String? = nil
+    ) throws -> SkillRuntimeRegistrySyncResult {
+        let definitions = try list()
+        var snapshot = try registryRepository.loadOrCreateDefault()
+        for definition in definitions {
+            let skill = definition.productOSSkillDefinition()
+            if let index = snapshot.skills.firstIndex(where: { $0.id == skill.id }) {
+                snapshot.skills[index] = skill
+            } else {
+                snapshot.skills.append(skill)
+            }
+        }
+        try registryRepository.save(snapshot)
+        let reloaded = try registryRepository.loadOrCreateDefault()
+        let latestDefinition = definitions.sorted { $0.updatedAt > $1.updatedAt }.first
+        let registryEvent = AgentProductOSRegistryEvent(
+            runID: runID,
+            sessionID: sessionID,
+            registryKind: "skill",
+            entryID: latestDefinition?.slug ?? "skill-runtime",
+            status: latestDefinition.map { _ in ProductOSRegistryEntryStatus.enabled },
+            message: "Skills runtime synchronized with Product OS registry."
+        )
+        return SkillRuntimeRegistrySyncResult(snapshot: reloaded, registryEvent: registryEvent)
     }
 
     public func validate(_ definition: SkillRuntimeDefinition) throws {

@@ -123,6 +123,27 @@ Use concise bullets. Never bypass Connor graph admission.
     }
 }
 
+@Test func skillsRuntimeRepositorySyncsProductOSRegistryAndReturnsEvent() throws {
+    let storagePaths = temporaryPhaseDStoragePaths()
+    defer { try? FileManager.default.removeItem(at: storagePaths.applicationSupportDirectory) }
+    let repository = AppSkillRuntimeRepository(storagePaths: storagePaths)
+    let registryRepository = AppProductOSRegistryRepository(storagePaths: storagePaths)
+    let skillURL = try writeSkill(root: storagePaths.skillsDirectory, slug: "review-notes", content: validSkillMarkdown.replacingOccurrences(of: "Session Summary", with: "Review Notes"))
+    let skill = try repository.loadSkill(slug: "review-notes", scope: .home, skillURL: skillURL)
+    try repository.save(skill)
+
+    let result = try repository.syncProductOSRegistry(using: registryRepository, sessionID: "session-1", runID: "run-1")
+    let synced = try #require(result.snapshot.skills.first { $0.id == "review-notes" })
+
+    #expect(synced.displayName == "Review Notes")
+    #expect(synced.status == .enabled)
+    #expect(synced.triggers == [.manual, .afterModelResponse])
+    #expect(synced.requiredCapabilities == [.readSession])
+    #expect(result.event.kind == .skillRegistryChanged)
+    #expect(result.registryEvent.entryID == "review-notes")
+    #expect(result.registryEvent.status == .enabled)
+}
+
 @Test func skillsRuntimeRepositoryRejectsUnsafeGraphContextPolicy() throws {
     let storagePaths = temporaryPhaseDStoragePaths()
     defer { try? FileManager.default.removeItem(at: storagePaths.applicationSupportDirectory) }
