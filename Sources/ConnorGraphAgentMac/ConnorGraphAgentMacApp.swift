@@ -26,7 +26,10 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case pendingApprovals = "权限审批"
     case memoryChangeLog = "记忆变更"
     case extractionDiagnostics = "记忆准入"
+    case automation = "自动化"
     case productOS = "Product OS"
+    case sources = "Sources"
+    case skills = "Skills"
     case llmSettings = "模型设置"
 
     var id: String { rawValue }
@@ -78,6 +81,9 @@ final class AppViewModel: ObservableObject {
     @Published var productOSRegistry: ProductOSRegistrySnapshot = .default
     @Published var automationConfig: ProductOSAutomationConfig = .default
     @Published var automationTriggerRecords: [ProductOSAutomationTriggerRecord] = []
+    @Published var automationExecutionHistory: [ProductOSAutomationExecutionHistoryRecord] = []
+    @Published var sourceRuntimeConfigurations: [MCPSourceRuntimeConfiguration] = []
+    @Published var skillRuntimeDefinitions: [SkillRuntimeDefinition] = []
     @Published var productOSRegistryMessage: String?
     @Published var selectedSessionArtifactDirectories: AgentSessionArtifactDirectories?
     @Published var latestChatSummary: AgentSessionSummary?
@@ -97,6 +103,8 @@ final class AppViewModel: ObservableObject {
     private var chatSessionRepository: AppChatSessionRepository?
     private var productOSRegistryRepository: AppProductOSRegistryRepository?
     private var automationRepository: AppProductOSAutomationRepository?
+    private var sourceRuntimeRepository: AppMCPSourceRuntimeRepository?
+    private var skillRuntimeRepository: AppSkillRuntimeRepository?
     private var storagePaths: AppStoragePaths?
     private var llmSettingsRepository: AppLLMSettingsRepository
     private var llmProviderHealthChecker: AppLLMProviderHealthChecker
@@ -221,6 +229,8 @@ final class AppViewModel: ObservableObject {
         if let storagePaths {
             self.productOSRegistryRepository = AppProductOSRegistryRepository(storagePaths: storagePaths)
             self.automationRepository = AppProductOSAutomationRepository(storagePaths: storagePaths)
+            self.sourceRuntimeRepository = AppMCPSourceRuntimeRepository(storagePaths: storagePaths)
+            self.skillRuntimeRepository = AppSkillRuntimeRepository(storagePaths: storagePaths)
         }
         if let repository {
             self.promotionRepository = AppPromotionQueueRepository(store: repository.store)
@@ -244,6 +254,9 @@ final class AppViewModel: ObservableObject {
         loadLLMSettings()
         reloadProductOSRegistry()
         reloadAutomationConfig()
+        reloadAutomationExecutionHistory()
+        reloadSourceRuntimeConfigurations()
+        reloadSkillRuntimeDefinitions()
         reloadChatSessions()
         reloadSchemaHealthReport()
         reloadGraphExtractionTraces()
@@ -450,6 +463,33 @@ final class AppViewModel: ObservableObject {
                 automationConfig = try automationRepository.loadOrCreateDefault(governanceConfig: governanceConfig)
                 automationTriggerRecords = try automationRepository.loadRecentTriggerRecords()
             }
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func reloadAutomationExecutionHistory() {
+        do {
+            automationExecutionHistory = try automationRepository?.loadRecentExecutionHistory() ?? []
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func reloadSourceRuntimeConfigurations() {
+        do {
+            sourceRuntimeConfigurations = try sourceRuntimeRepository?.list() ?? []
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func reloadSkillRuntimeDefinitions() {
+        do {
+            skillRuntimeDefinitions = try skillRuntimeRepository?.list() ?? []
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -1170,8 +1210,14 @@ struct AppShellView: View {
                         MemoryChangeLogView(viewModel: viewModel)
                     case .extractionDiagnostics:
                         GraphExtractionDiagnosticsView(viewModel: viewModel)
+                    case .automation:
+                        AutomationRuntimePanelView(viewModel: viewModel)
                     case .productOS:
                         ProductOSRegistryView(viewModel: viewModel)
+                    case .sources:
+                        SourceRuntimePanelView(viewModel: viewModel)
+                    case .skills:
+                        SkillRuntimePanelView(viewModel: viewModel)
                     case .llmSettings:
                         LLMSettingsView(viewModel: viewModel)
                     }

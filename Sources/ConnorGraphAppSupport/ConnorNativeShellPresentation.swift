@@ -137,7 +137,7 @@ public struct ConnorNativeShellRouteResolver: Sendable {
         case .approvals:
             ConnorNativeShellRoute(item: item, legacySidebarID: "pendingApprovals")
         case .automation:
-            ConnorNativeShellRoute(item: item, legacySidebarID: "productOS")
+            ConnorNativeShellRoute(item: item, legacySidebarID: "automation")
         case .productOS:
             ConnorNativeShellRoute(item: item, legacySidebarID: "productOS")
         case .sources:

@@ -49,8 +49,10 @@ struct PhaseGCraftGradeNativeUITests {
         #expect(resolver.route(for: .approvals).legacySidebarID == "pendingApprovals")
         #expect(resolver.route(for: .settings).legacySidebarID == "llmSettings")
         #expect(resolver.route(for: .browserWorkspace).requiresBrowserVisible == true)
-        #expect(resolver.route(for: .sources).isPlaceholder == true)
-        #expect(resolver.route(for: .skills).placeholderTitle == "Skills runtime UI is not wired yet")
+        #expect(resolver.route(for: .sources).legacySidebarID == "sources")
+        #expect(resolver.route(for: .skills).legacySidebarID == "skills")
+        #expect(resolver.route(for: .sources).isPlaceholder == false)
+        #expect(resolver.route(for: .skills).isPlaceholder == false)
     }
 
     @Test func runtimeCenterAggregatesSessionsEventsApprovalsAutomationAndMemory() {
