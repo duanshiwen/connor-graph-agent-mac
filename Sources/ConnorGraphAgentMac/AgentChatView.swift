@@ -32,8 +32,9 @@ struct AgentChatView: View {
         }
         .navigationTitle("Connor Sessions")
         .task {
-            await Task.yield()
-            viewModel.reloadChatSessions()
+            viewModel.deferViewUpdate {
+                viewModel.reloadChatSessions()
+            }
         }
     }
 }

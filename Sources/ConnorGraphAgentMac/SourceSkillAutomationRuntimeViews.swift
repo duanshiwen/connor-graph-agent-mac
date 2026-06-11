@@ -30,8 +30,9 @@ struct SourceRuntimePanelView: View {
             }
         }
         .task {
-            await Task.yield()
-            viewModel.reloadSourceRuntimeConfigurations()
+            viewModel.deferViewUpdate {
+                viewModel.reloadSourceRuntimeConfigurations()
+            }
         }
     }
 }
@@ -65,8 +66,9 @@ struct SkillRuntimePanelView: View {
             }
         }
         .task {
-            await Task.yield()
-            viewModel.reloadSkillRuntimeDefinitions()
+            viewModel.deferViewUpdate {
+                viewModel.reloadSkillRuntimeDefinitions()
+            }
         }
     }
 }
@@ -111,9 +113,10 @@ struct AutomationRuntimePanelView: View {
             }
         }
         .task {
-            await Task.yield()
-            viewModel.reloadAutomationConfig()
-            viewModel.reloadAutomationExecutionHistory()
+            viewModel.deferViewUpdate {
+                viewModel.reloadAutomationConfig()
+                viewModel.reloadAutomationExecutionHistory()
+            }
         }
     }
 }

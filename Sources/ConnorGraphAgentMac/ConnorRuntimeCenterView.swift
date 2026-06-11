@@ -43,12 +43,13 @@ struct ConnorRuntimeCenterView: View {
             }
         }
         .task {
-            await Task.yield()
-            viewModel.reloadChatSessions()
-            viewModel.reloadPendingApprovals()
-            viewModel.reloadGraphWriteCandidates()
-            viewModel.reloadGraphExtractionTraces()
-            viewModel.reloadMemoryChangeLog()
+            viewModel.deferViewUpdate {
+                viewModel.reloadChatSessions()
+                viewModel.reloadPendingApprovals()
+                viewModel.reloadGraphWriteCandidates()
+                viewModel.reloadGraphExtractionTraces()
+                viewModel.reloadMemoryChangeLog()
+            }
         }
     }
 }
