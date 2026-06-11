@@ -681,7 +681,18 @@ private func runSidecarProcess(
         }
 }
 
-public struct ClaudeSDKSidecarBackend<Transport: ClaudeSDKSidecarTransport>: AgentBackend {
+private extension ClaudeSDKSidecarEvent {
+    var isTerminalForConnorSubmit: Bool {
+        switch self {
+        case .runCompleted, .runFailed:
+            return true
+        default:
+            return false
+        }
+    }
+}
+
+public struct ClaudeSDKSidecarSessionBackend<Transport: ClaudeSDKSidecarSessionTransport>: AgentBackend {
     public var transport: Transport
     public var workingDirectory: URL
 
@@ -694,10 +705,14 @@ public struct ClaudeSDKSidecarBackend<Transport: ClaudeSDKSidecarTransport>: Age
         let sidecarRequest = ClaudeSDKSidecarRequest(request: request, workingDirectory: workingDirectory)
         return AsyncThrowingStream { continuation in
             Task {
-                let sidecarEvents = await transport.stream(sidecarRequest)
+                let sidecarEvents = await transport.start(sidecarRequest)
                 for try await event in sidecarEvents {
-                    if let mapped = map(event, request: request) {
+                    if let mapped = ClaudeSDKSidecarEventMapper.map(event, request: request) {
                         continuation.yield(mapped)
+                    }
+                    if event.isTerminalForConnorSubmit {
+                        await transport.cancel()
+                        break
                     }
                 }
                 continuation.finish()
@@ -705,7 +720,13 @@ public struct ClaudeSDKSidecarBackend<Transport: ClaudeSDKSidecarTransport>: Age
         }
     }
 
-    private func map(_ event: ClaudeSDKSidecarEvent, request: AgentChatRequest) -> AgentEvent? {
+    public func abort(runID: String) async {
+        await transport.cancel()
+    }
+}
+
+private enum ClaudeSDKSidecarEventMapper {
+    static func map(_ event: ClaudeSDKSidecarEvent, request: AgentChatRequest) -> AgentEvent? {
         switch event {
         case .runStarted(let payload):
             return .runStarted(AgentRunStartedEvent(run: AgentRun(
@@ -798,4 +819,30 @@ public struct ClaudeSDKSidecarBackend<Transport: ClaudeSDKSidecarTransport>: Age
             ))
         }
     }
+}
+
+public struct ClaudeSDKSidecarBackend<Transport: ClaudeSDKSidecarTransport>: AgentBackend {
+    public var transport: Transport
+    public var workingDirectory: URL
+
+    public init(transport: Transport, workingDirectory: URL) {
+        self.transport = transport
+        self.workingDirectory = workingDirectory
+    }
+
+    public func chat(_ request: AgentChatRequest) -> AsyncThrowingStream<AgentEvent, Error> {
+        let sidecarRequest = ClaudeSDKSidecarRequest(request: request, workingDirectory: workingDirectory)
+        return AsyncThrowingStream { continuation in
+            Task {
+                let sidecarEvents = await transport.stream(sidecarRequest)
+                for try await event in sidecarEvents {
+                    if let mapped = ClaudeSDKSidecarEventMapper.map(event, request: request) {
+                        continuation.yield(mapped)
+                    }
+                }
+                continuation.finish()
+            }
+        }
+    }
+
 }
