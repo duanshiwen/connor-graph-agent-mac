@@ -33,6 +33,18 @@ public struct AutomationActionPlan: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
+public struct AutomationExecutionResult: Sendable, Equatable {
+    public var appliedPlans: [AutomationActionPlan]
+    public var skippedPlans: [AutomationActionPlan]
+    public var events: [AgentEvent]
+
+    public init(appliedPlans: [AutomationActionPlan], skippedPlans: [AutomationActionPlan], events: [AgentEvent]) {
+        self.appliedPlans = appliedPlans
+        self.skippedPlans = skippedPlans
+        self.events = events
+    }
+}
+
 public struct AutomationEngineRun: Sendable, Equatable {
     public var context: ProductOSAutomationEventContext
     public var matchedRules: [ProductOSAutomationRule]
@@ -90,6 +102,106 @@ public struct AutomationEngine: Sendable {
             message: automationMessage(records: records, actionPlans: actionPlans)
         ))
         return AutomationEngineRun(context: context, matchedRules: matchedRules, actionPlans: actionPlans, records: records, events: [event])
+    }
+
+    public func execute(run: AutomationEngineRun, sessionRepository: AppChatSessionRepository, runID: String? = nil) throws -> AutomationExecutionResult {
+        var appliedPlans: [AutomationActionPlan] = []
+        var skippedPlans: [AutomationActionPlan] = []
+        var events = run.events
+
+        for plan in run.actionPlans {
+            guard plan.disposition == .ready else {
+                skippedPlans.append(plan)
+                continue
+            }
+
+            switch plan.action.kind {
+            case .appendTimelineEvent:
+                events.append(.automationTriggered(AgentAutomationPlaceholderEvent(
+                    runID: runID,
+                    sessionID: run.context.sessionID,
+                    trigger: run.context.triggerKind.rawValue,
+                    message: plan.action.message
+                )))
+                appliedPlans.append(plan)
+
+            case .setSessionStatus:
+                guard let status = plan.action.status else {
+                    skippedPlans.append(blocked(plan, reason: "setSessionStatus requires a status."))
+                    continue
+                }
+                _ = try sessionRepository.setStatus(sessionID: run.context.sessionID, status: status)
+                events.append(.sessionStatusChanged(AgentSessionGovernanceEvent(
+                    runID: runID,
+                    sessionID: run.context.sessionID,
+                    message: plan.action.message,
+                    status: status
+                )))
+                appliedPlans.append(plan)
+
+            case .addSessionLabel:
+                guard let label = plan.action.label else {
+                    skippedPlans.append(blocked(plan, reason: "addSessionLabel requires a label."))
+                    continue
+                }
+                let session = try sessionRepository.updateGovernance(sessionID: run.context.sessionID) { governance in
+                    if !governance.labels.contains(where: { $0.id == label.id }) {
+                        governance.labels.append(label)
+                    }
+                }
+                events.append(.sessionLabelsChanged(AgentSessionGovernanceEvent(
+                    runID: runID,
+                    sessionID: run.context.sessionID,
+                    message: plan.action.message,
+                    labels: session.governance.labels
+                )))
+                appliedPlans.append(plan)
+
+            case .removeSessionLabel:
+                guard let label = plan.action.label else {
+                    skippedPlans.append(blocked(plan, reason: "removeSessionLabel requires a label."))
+                    continue
+                }
+                let session = try sessionRepository.updateGovernance(sessionID: run.context.sessionID) { governance in
+                    governance.labels.removeAll { $0.id == label.id }
+                }
+                events.append(.sessionLabelsChanged(AgentSessionGovernanceEvent(
+                    runID: runID,
+                    sessionID: run.context.sessionID,
+                    message: plan.action.message,
+                    labels: session.governance.labels
+                )))
+                appliedPlans.append(plan)
+
+            case .triggerSkill:
+                events.append(.automationTriggered(AgentAutomationPlaceholderEvent(
+                    runID: runID,
+                    sessionID: run.context.sessionID,
+                    trigger: "triggerSkill",
+                    message: "Skill trigger requested: \(plan.action.skillID ?? "unknown"). \(plan.action.message)"
+                )))
+                appliedPlans.append(plan)
+
+            case .createArtifactPlaceholder:
+                events.append(.artifactCreated(AgentSessionArtifactEvent(
+                    runID: runID,
+                    sessionID: run.context.sessionID,
+                    artifactKind: "automation-placeholder",
+                    path: "automation://\(plan.id)",
+                    message: plan.action.message
+                )))
+                appliedPlans.append(plan)
+            }
+        }
+
+        return AutomationExecutionResult(appliedPlans: appliedPlans, skippedPlans: skippedPlans, events: events)
+    }
+
+    private func blocked(_ plan: AutomationActionPlan, reason: String) -> AutomationActionPlan {
+        var blockedPlan = plan
+        blockedPlan.disposition = .blocked
+        blockedPlan.reason = reason
+        return blockedPlan
     }
 
     private func automationMessage(records: [ProductOSAutomationTriggerRecord], actionPlans: [AutomationActionPlan]) -> String {
