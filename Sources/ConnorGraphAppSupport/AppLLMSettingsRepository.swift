@@ -4,6 +4,7 @@ import ConnorGraphAgent
 public enum AppLLMProviderMode: String, Sendable, Equatable, CaseIterable {
     case stub
     case openAICompatible = "openai_compatible"
+    case governedClaudeSidecar = "governed_claude_sidecar"
 }
 
 public struct AppLLMSettings: Sendable, Equatable {
@@ -11,12 +12,29 @@ public struct AppLLMSettings: Sendable, Equatable {
     public var model: String
     public var hasAPIKey: Bool
     public var providerMode: AppLLMProviderMode
+    public var sidecarExecutablePath: String
+    public var sidecarArguments: String
+    public var sidecarWorkingDirectoryPath: String
+    public var sidecarPermissionMode: AgentPermissionMode
 
-    public init(baseURLString: String, model: String, hasAPIKey: Bool, providerMode: AppLLMProviderMode) {
+    public init(
+        baseURLString: String,
+        model: String,
+        hasAPIKey: Bool,
+        providerMode: AppLLMProviderMode,
+        sidecarExecutablePath: String = "",
+        sidecarArguments: String = "",
+        sidecarWorkingDirectoryPath: String = "",
+        sidecarPermissionMode: AgentPermissionMode = .readOnly
+    ) {
         self.baseURLString = baseURLString
         self.model = model
         self.hasAPIKey = hasAPIKey
         self.providerMode = providerMode
+        self.sidecarExecutablePath = sidecarExecutablePath
+        self.sidecarArguments = sidecarArguments
+        self.sidecarWorkingDirectoryPath = sidecarWorkingDirectoryPath
+        self.sidecarPermissionMode = sidecarPermissionMode == .allowAll ? .readOnly : sidecarPermissionMode
     }
 
     public static let `default` = AppLLMSettings(
@@ -56,6 +74,10 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
         static let providerMode = "llm.providerMode"
         static let baseURLString = "llm.baseURLString"
         static let model = "llm.model"
+        static let sidecarExecutablePath = "llm.sidecar.executablePath"
+        static let sidecarArguments = "llm.sidecar.arguments"
+        static let sidecarWorkingDirectoryPath = "llm.sidecar.workingDirectoryPath"
+        static let sidecarPermissionMode = "llm.sidecar.permissionMode"
     }
 
     public var settingsStore: LLMSettingsStore
@@ -77,11 +99,17 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
             service: Self.keychainService,
             account: Self.apiKeyAccount
         )
+        let sidecarPermissionRaw = settingsStore.string(forKey: Keys.sidecarPermissionMode) ?? defaults.sidecarPermissionMode.rawValue
+        let sidecarPermissionMode = AgentPermissionMode(rawValue: sidecarPermissionRaw) ?? defaults.sidecarPermissionMode
         return AppLLMSettings(
             baseURLString: settingsStore.string(forKey: Keys.baseURLString) ?? defaults.baseURLString,
             model: settingsStore.string(forKey: Keys.model) ?? defaults.model,
             hasAPIKey: apiKey?.isEmpty == false,
-            providerMode: mode
+            providerMode: mode,
+            sidecarExecutablePath: settingsStore.string(forKey: Keys.sidecarExecutablePath) ?? defaults.sidecarExecutablePath,
+            sidecarArguments: settingsStore.string(forKey: Keys.sidecarArguments) ?? defaults.sidecarArguments,
+            sidecarWorkingDirectoryPath: settingsStore.string(forKey: Keys.sidecarWorkingDirectoryPath) ?? defaults.sidecarWorkingDirectoryPath,
+            sidecarPermissionMode: sidecarPermissionMode
         )
     }
 
@@ -89,6 +117,10 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
         settingsStore.set(settings.providerMode.rawValue, forKey: Keys.providerMode)
         settingsStore.set(settings.baseURLString, forKey: Keys.baseURLString)
         settingsStore.set(settings.model, forKey: Keys.model)
+        settingsStore.set(settings.sidecarExecutablePath, forKey: Keys.sidecarExecutablePath)
+        settingsStore.set(settings.sidecarArguments, forKey: Keys.sidecarArguments)
+        settingsStore.set(settings.sidecarWorkingDirectoryPath, forKey: Keys.sidecarWorkingDirectoryPath)
+        settingsStore.set(settings.sidecarPermissionMode == .allowAll ? AgentPermissionMode.readOnly.rawValue : settings.sidecarPermissionMode.rawValue, forKey: Keys.sidecarPermissionMode)
         if let apiKey, !apiKey.isEmpty {
             try credentialStore.saveSecret(
                 apiKey,

@@ -29,10 +29,12 @@ public struct AgentChatRequest: Sendable, Equatable {
 public protocol AgentBackend: Sendable {
     func chat(_ request: AgentChatRequest) -> AsyncThrowingStream<AgentEvent, Error>
     func abort(runID: String)
+    func resolveApproval(_ approval: AgentPendingApproval, status: AgentPendingApprovalStatus, reason: String, actor: String) async throws
 }
 
 public extension AgentBackend {
     func abort(runID: String) {}
+    func resolveApproval(_ approval: AgentPendingApproval, status: AgentPendingApprovalStatus, reason: String, actor: String = "human-reviewer") async throws {}
 }
 
 public typealias GraphAgentBackend = AgentBackend

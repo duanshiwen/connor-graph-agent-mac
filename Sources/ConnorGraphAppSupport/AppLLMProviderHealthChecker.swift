@@ -39,6 +39,15 @@ public struct AppLLMProviderHealthChecker: Sendable {
             switch settings.providerMode {
             case .stub:
                 return AppLLMProviderHealthCheckResult(status: .success, message: "模拟模型提供方可用。")
+            case .governedClaudeSidecar:
+                let path = settings.sidecarExecutablePath.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !path.isEmpty else {
+                    return AppLLMProviderHealthCheckResult(status: .notConfigured, message: "Governed Claude Sidecar 缺少 executable path。")
+                }
+                guard settings.sidecarPermissionMode != .allowAll else {
+                    return AppLLMProviderHealthCheckResult(status: .failed, message: "Governed Claude Sidecar 不允许 allowAll 权限模式。")
+                }
+                return AppLLMProviderHealthCheckResult(status: .success, message: "Governed Claude Sidecar 配置可用；实际 SDK 登录和依赖由 sidecar 运行时验证。")
             case .openAICompatible:
                 guard let config = try settingsRepository.openAICompatibleConfig() else {
                     return AppLLMProviderHealthCheckResult(status: .notConfigured, message: "OpenAI 兼容模型提供方缺少 API Key。")
