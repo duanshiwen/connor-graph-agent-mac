@@ -24,6 +24,51 @@ private actor FakeClaudeSDKSidecarTransport: ClaudeSDKSidecarTransport {
     func recordedRequests() -> [ClaudeSDKSidecarRequest] { requests }
 }
 
+private actor FakeClaudeSDKSidecarSessionTransport: ClaudeSDKSidecarSessionTransport {
+    private var continuation: AsyncThrowingStream<ClaudeSDKSidecarEvent, Error>.Continuation?
+    private(set) var startRequests: [ClaudeSDKSidecarRequest] = []
+    private(set) var commands: [ClaudeSDKSidecarCommand] = []
+
+    func start(_ request: ClaudeSDKSidecarRequest) async -> AsyncThrowingStream<ClaudeSDKSidecarEvent, Error> {
+        startRequests.append(request)
+        let (stream, continuation) = AsyncThrowingStream.makeStream(of: ClaudeSDKSidecarEvent.self, throwing: Error.self)
+        self.continuation = continuation
+        continuation.yield(.runStarted(ClaudeSDKSidecarRunStarted(sdkSessionID: "fake-session")))
+        continuation.yield(.permissionRequested(ClaudeSDKSidecarPermissionRequested(
+            requestID: "permission-tool-1",
+            capability: .commitGraphWrite,
+            toolName: "Write",
+            payloadJSON: "{}"
+        )))
+        return stream
+    }
+
+    func send(_ command: ClaudeSDKSidecarCommand) async throws {
+        commands.append(command)
+        guard case .approvalResolved(let resolution) = command else { return }
+        if resolution.outcome == .approved {
+            continuation?.yield(.resumeAccepted(ClaudeSDKSidecarResumeAccepted(
+                requestID: resolution.requestID,
+                toolName: resolution.toolName,
+                message: "Resume accepted by fake sidecar"
+            )))
+        } else {
+            continuation?.yield(.resumeRejected(ClaudeSDKSidecarResumeRejected(
+                requestID: resolution.requestID,
+                toolName: resolution.toolName,
+                reason: resolution.reason
+            )))
+        }
+    }
+
+    func cancel() async {
+        continuation?.finish()
+    }
+
+    func recordedStartRequests() -> [ClaudeSDKSidecarRequest] { startRequests }
+    func recordedCommands() -> [ClaudeSDKSidecarCommand] { commands }
+}
+
 @Test func claudeSDKSidecarRequestMapsConnorPolicyWithoutGrantingSDKStateOwnership() throws {
     let request = AgentChatRequest(
         runID: "run-1",
@@ -214,6 +259,74 @@ private actor FakeClaudeSDKSidecarTransport: ClaudeSDKSidecarTransport {
         .toolUseStarted(ClaudeSDKSidecarToolUseStarted(toolCallID: "tool-1", name: "Read")),
         .toolUseCompleted(ClaudeSDKSidecarToolUseCompleted(toolCallID: "tool-1", name: "Read", contentText: "ok", contentJSON: nil, isError: false))
     ])
+}
+
+@Test func claudeSDKSidecarJSONLProtocolDecodesResumeEvents() throws {
+    let lines = [
+        "{\"resumeAccepted\":{\"requestID\":\"permission-tool-1\",\"toolName\":\"Write\",\"message\":\"accepted\"}}",
+        "{\"resumeRejected\":{\"requestID\":\"permission-tool-2\",\"toolName\":\"Bash\",\"reason\":\"denied\"}}"
+    ]
+    let decoder = JSONDecoder()
+    let decoded = try lines.map { line in
+        try decoder.decode(ClaudeSDKSidecarEvent.self, from: Data(line.utf8))
+    }
+
+    #expect(decoded == [
+        .resumeAccepted(ClaudeSDKSidecarResumeAccepted(requestID: "permission-tool-1", toolName: "Write", message: "accepted")),
+        .resumeRejected(ClaudeSDKSidecarResumeRejected(requestID: "permission-tool-2", toolName: "Bash", reason: "denied"))
+    ])
+}
+
+@Test func claudeSDKSidecarSessionTransportAcceptsApprovalResolutionCommands() async throws {
+    let transport = FakeClaudeSDKSidecarSessionTransport()
+    let request = ClaudeSDKSidecarRequest(
+        connorRunID: "run-session-transport",
+        connorSessionID: "connor-session-transport",
+        groupID: "default",
+        prompt: "Use a persistent sidecar session transport",
+        cwd: "/tmp/project",
+        permissionMode: .askToWrite
+    )
+
+    var iterator = await transport.start(request).makeAsyncIterator()
+    let started = try await iterator.next()
+    let permission = try await iterator.next()
+
+    #expect(started == .runStarted(ClaudeSDKSidecarRunStarted(sdkSessionID: "fake-session")))
+    #expect(permission == .permissionRequested(ClaudeSDKSidecarPermissionRequested(
+        requestID: "permission-tool-1",
+        capability: .commitGraphWrite,
+        toolName: "Write",
+        payloadJSON: "{}"
+    )))
+
+    let approval = AgentPendingApproval(
+        requestID: "permission-tool-1",
+        runID: "run-session-transport",
+        sessionID: "connor-session-transport",
+        capability: .commitGraphWrite,
+        toolName: "Write",
+        payloadJSON: "{}",
+        status: .approved
+    )
+    let resolution = ClaudeSDKSidecarApprovalResolution(
+        approval: approval,
+        status: .approved,
+        reason: "Human reviewer approved the write"
+    )
+
+    try await transport.send(.approvalResolved(resolution))
+    let resumeEvent = try await iterator.next()
+
+    #expect(resumeEvent == .resumeAccepted(ClaudeSDKSidecarResumeAccepted(
+        requestID: "permission-tool-1",
+        toolName: "Write",
+        message: "Resume accepted by fake sidecar"
+    )))
+    #expect(await transport.recordedStartRequests() == [request])
+    #expect(await transport.recordedCommands() == [.approvalResolved(resolution)])
+
+    await transport.cancel()
 }
 
 @Test func claudeSDKSidecarProcessTransportSupportsStartCommandBoundaryWithoutChangingLegacyRequestShape() async throws {
