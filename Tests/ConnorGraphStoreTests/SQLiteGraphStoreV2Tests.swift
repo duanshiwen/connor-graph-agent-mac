@@ -28,6 +28,7 @@ private func temporaryV3DatabaseURL(_ name: String = UUID().uuidString) -> URL {
     #expect(tables.contains("agent_runs"))
     #expect(tables.contains("agent_events"))
     #expect(tables.contains("agent_audit_events"))
+    #expect(tables.contains("agent_pending_approvals"))
     #expect(tables.contains("memory_staging_buffers"))
 }
 
@@ -60,6 +61,8 @@ private func temporaryV3DatabaseURL(_ name: String = UUID().uuidString) -> URL {
     #expect(indexes.contains("idx_agent_sessions_updated"))
     #expect(indexes.contains("idx_agent_events_run"))
     #expect(indexes.contains("idx_agent_audit_events_run"))
+    #expect(indexes.contains("idx_agent_pending_approvals_run"))
+    #expect(indexes.contains("idx_agent_pending_approvals_status"))
 }
 
 @Test func graphKernelStoreMigrationIsIdempotentAndPreservesAgentSessionHistory() throws {

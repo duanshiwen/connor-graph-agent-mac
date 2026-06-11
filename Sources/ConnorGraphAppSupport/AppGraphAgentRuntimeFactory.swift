@@ -85,7 +85,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             groupID: groupID,
             permissionMode: permissionMode,
             memoryStagingRepository: AppMemoryStagingBufferRepository(store: store),
-            eventRecorder: AgentEventRecorder(repository: store)
+            eventRecorder: AgentEventRecorder(repository: store),
+            pendingApprovalRepository: store
         )
     }
 

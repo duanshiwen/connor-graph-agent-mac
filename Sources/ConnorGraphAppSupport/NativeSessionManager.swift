@@ -3,6 +3,10 @@ import ConnorGraphAgent
 import ConnorGraphCore
 import ConnorGraphMemory
 
+public protocol AgentPendingApprovalRepository: Sendable {
+    func upsert(pendingApproval approval: AgentPendingApproval) throws
+}
+
 public struct NativeSessionManager: Sendable {
     public var backend: AnyAgentBackend
     public var sessionRepository: AppChatSessionRepository
@@ -16,6 +20,7 @@ public struct NativeSessionManager: Sendable {
     private let memoryIngestionService: MemoryIngestionService
     private let memoryStagingRepository: AppMemoryStagingBufferRepository?
     private let eventRecorder: AgentEventRecorder?
+    private let pendingApprovalRepository: (any AgentPendingApprovalRepository)?
 
     public init<Backend: AgentBackend>(
         backend: Backend,
@@ -25,7 +30,8 @@ public struct NativeSessionManager: Sendable {
         permissionMode: AgentPermissionMode = .askToWrite,
         memoryStagingRepository: AppMemoryStagingBufferRepository? = nil,
         memoryIngestionService: MemoryIngestionService = MemoryIngestionService(),
-        eventRecorder: AgentEventRecorder? = nil
+        eventRecorder: AgentEventRecorder? = nil,
+        pendingApprovalRepository: (any AgentPendingApprovalRepository)? = nil
     ) {
         self.backend = AnyAgentBackend(backend)
         self.sessionRepository = sessionRepository
@@ -38,6 +44,7 @@ public struct NativeSessionManager: Sendable {
         self.memoryStagingRepository = memoryStagingRepository
         self.memoryIngestionService = memoryIngestionService
         self.eventRecorder = eventRecorder
+        self.pendingApprovalRepository = pendingApprovalRepository
     }
 
     public init<Provider: AgentModelProvider>(
@@ -82,6 +89,7 @@ public struct NativeSessionManager: Sendable {
                 events.append(event)
 
                 try recordBackendEvent(event, sequence: collectedEvents.count - 1)
+                try recordPendingApprovalIfNeeded(event)
 
                 let presentation = presenter.presentation(for: event)
                 collectedPresentations.append(presentation)
@@ -128,6 +136,21 @@ public struct NativeSessionManager: Sendable {
             break
         }
         try eventRecorder.record(event, sequence: sequence)
+    }
+
+    private func recordPendingApprovalIfNeeded(_ event: AgentEvent) throws {
+        guard let pendingApprovalRepository,
+              case .permissionRequested(let request) = event
+        else { return }
+        let approval = AgentPendingApproval(
+            requestID: request.id,
+            runID: request.runID,
+            sessionID: request.sessionID,
+            capability: request.capability,
+            toolName: request.toolName,
+            payloadJSON: request.payloadJSON
+        )
+        try pendingApprovalRepository.upsert(pendingApproval: approval)
     }
 
     private func persistMemoryStagingAfterUserMessage(_ message: AgentMessage) throws {
