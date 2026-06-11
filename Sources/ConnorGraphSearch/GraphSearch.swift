@@ -19,6 +19,7 @@ public struct AgentContext: Sendable, Equatable {
         var lines: [String] = ["Query: \(query)"]
         for item in items {
             lines.append("Source: \(item.sourceID)")
+            lines.append("Reason: \(item.reason)")
             lines.append(item.content)
         }
         return lines.joined(separator: "\n")
