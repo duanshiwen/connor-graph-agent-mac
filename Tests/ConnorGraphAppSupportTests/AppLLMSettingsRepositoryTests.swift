@@ -88,3 +88,26 @@ private final class FakeSettingsStore: LLMSettingsStore, @unchecked Sendable {
 
     #expect(config == nil)
 }
+
+@Test func settingsRepositoryPersistsGovernedSidecarSettingsAndClampsAllowAll() throws {
+    let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
+    let settings = AppLLMSettings(
+        baseURLString: "https://example.com/v1",
+        model: "unused-in-sidecar",
+        hasAPIKey: false,
+        providerMode: .governedClaudeSidecar,
+        sidecarExecutablePath: "/usr/local/bin/node",
+        sidecarArguments: "sidecars/claude-agent-engine/claude-sidecar.mjs",
+        sidecarWorkingDirectoryPath: "/tmp/project",
+        sidecarPermissionMode: .allowAll
+    )
+
+    try repository.save(settings: settings, apiKey: nil)
+    let loaded = try repository.loadSettings()
+
+    #expect(loaded.providerMode == .governedClaudeSidecar)
+    #expect(loaded.sidecarExecutablePath == "/usr/local/bin/node")
+    #expect(loaded.sidecarArguments == "sidecars/claude-agent-engine/claude-sidecar.mjs")
+    #expect(loaded.sidecarWorkingDirectoryPath == "/tmp/project")
+    #expect(loaded.sidecarPermissionMode == .readOnly)
+}
