@@ -179,6 +179,34 @@ struct PhaseEAutomationEngineTests {
         #expect(FileManager.default.fileExists(atPath: repository.executionHistoryURL.path))
     }
 
+    @Test func automationEngineRateLimitsRepeatedTriggers() throws {
+        let root = temporaryPhaseERoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = AppProductOSAutomationRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
+        let rule = ProductOSAutomationRule(
+            id: "limited-rule",
+            name: "Limited Rule",
+            trigger: ProductOSAutomationTrigger(kind: .sessionLabelAdded, labelID: "important"),
+            actions: [ProductOSAutomationAction(kind: .appendTimelineEvent, message: "Limited action.")],
+            requiresReview: false
+        )
+        try repository.save(ProductOSAutomationConfig(rules: [rule]))
+        let limiter = AutomationRateLimiter(maxEvents: 1, interval: 60)
+        let engine = AutomationEngine(repository: repository, rateLimiter: limiter)
+        let context = ProductOSAutomationEventContext(
+            triggerKind: .sessionLabelAdded,
+            sessionID: "session-1",
+            labelID: "important"
+        )
+
+        _ = try engine.evaluate(context: context, now: Date(timeIntervalSince1970: 1_000))
+        #expect(throws: AutomationEngineError.self) {
+            _ = try engine.evaluate(context: context, now: Date(timeIntervalSince1970: 1_010))
+        }
+        let later = try engine.evaluate(context: context, now: Date(timeIntervalSince1970: 1_061))
+        #expect(later.matchedRules.map(\.id) == ["limited-rule"])
+    }
+
     @Test func automationEngineReturnsEmptyRunForNoMatches() throws {
         let root = temporaryPhaseERoot()
         defer { try? FileManager.default.removeItem(at: root) }
