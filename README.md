@@ -45,6 +45,8 @@ Connor Graph Agent Mac 的产品定位是：
 
 Phase 0 已冻结下一阶段产品架构方向，详见 [`docs/architecture/native-connor-agent-os.md`](docs/architecture/native-connor-agent-os.md)：Connor 是 macOS 原生 Graph-Native Agent OS；Craft Agents OSS 是成熟系统蓝本而不是 Electron 代码基底；产品不引入多 workspace；Session、权限、图谱记忆和审计状态由 Connor 自己持有；Claude Agent SDK 未来作为 sidecar backend 接入，而不是产品状态主权方。
 
+Phase 2 已开始冻结 `AgentBackend` 与 Claude SDK sidecar 边界，详见 [`docs/architecture/phase-2-agent-backend-sidecar.md`](docs/architecture/phase-2-agent-backend-sidecar.md)：`NativeSessionManager` 只依赖统一 backend 事件流；Claude SDK 作为外部 sidecar engine；SDK session / permission 只作为 metadata，不成为 Connor 产品状态主权方。
+
 早期简单图模型、历史 Markdown 导入链路、基于数组扫描的内存搜索索引都已移除，不再保留兼容层。
 
 ---

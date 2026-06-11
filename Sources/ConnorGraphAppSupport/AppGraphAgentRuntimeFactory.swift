@@ -3,6 +3,17 @@ import ConnorGraphAgent
 import ConnorGraphCore
 import ConnorGraphStore
 
+public enum AppGraphAgentRuntimeFactoryError: Error, Sendable, Equatable, LocalizedError {
+    case unsafeSidecarPermissionMode(AgentPermissionMode)
+
+    public var errorDescription: String? {
+        switch self {
+        case .unsafeSidecarPermissionMode(let mode):
+            return "Governed Claude SDK sidecar path does not allow unsafe permission mode: \(mode.rawValue)."
+        }
+    }
+}
+
 public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     public var store: SQLiteGraphKernelStore
     public var settingsRepository: AppLLMSettingsRepository
@@ -53,13 +64,76 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         session: AgentSession = AgentSession(id: "app-session"),
         permissionMode: AgentPermissionMode = .askToWrite,
         configuration: AgentLoopConfiguration = AgentLoopConfiguration()
-    ) -> NativeSessionManager<AnyAgentModelProvider> {
+    ) -> NativeSessionManager {
         NativeSessionManager(
-            loopController: makeAgentLoopController(permissionMode: permissionMode, configuration: configuration),
+            backend: AgentLoopBackend(loopController: makeAgentLoopController(permissionMode: permissionMode, configuration: configuration)),
             sessionRepository: AppChatSessionRepository(store: store),
             session: session,
             groupID: groupID,
+            permissionMode: permissionMode,
             memoryStagingRepository: AppMemoryStagingBufferRepository(store: store)
+        )
+    }
+
+    public func makeClaudeSDKSidecarNativeSessionManager(
+        session: AgentSession = AgentSession(id: "app-session"),
+        sidecarExecutableURL: URL,
+        sidecarArguments: [String] = [],
+        sidecarEnvironment: [String: String] = [:],
+        workingDirectory: URL,
+        permissionMode: AgentPermissionMode = .askToWrite
+    ) -> NativeSessionManager {
+        let transport = ClaudeSDKSidecarProcessTransport(
+            executableURL: sidecarExecutableURL,
+            arguments: sidecarArguments,
+            environment: sidecarEnvironment,
+            currentDirectoryURL: workingDirectory
+        )
+        return makeClaudeSDKSidecarNativeSessionManager(
+            backend: ClaudeSDKSidecarBackend(transport: transport, workingDirectory: workingDirectory),
+            session: session,
+            permissionMode: permissionMode
+        )
+    }
+
+    public func makeGovernedClaudeSDKSidecarNativeSessionManager(
+        session: AgentSession = AgentSession(id: "app-session"),
+        sidecarExecutableURL: URL,
+        sidecarArguments: [String] = [],
+        sidecarEnvironment: [String: String] = [:],
+        workingDirectory: URL,
+        permissionMode: AgentPermissionMode = .askToWrite
+    ) throws -> NativeSessionManager {
+        guard permissionMode != .allowAll else {
+            throw AppGraphAgentRuntimeFactoryError.unsafeSidecarPermissionMode(permissionMode)
+        }
+        let transport = ClaudeSDKSidecarPersistentProcessTransport(
+            executableURL: sidecarExecutableURL,
+            arguments: sidecarArguments,
+            environment: sidecarEnvironment,
+            currentDirectoryURL: workingDirectory
+        )
+        return makeClaudeSDKSidecarNativeSessionManager(
+            backend: ClaudeSDKSidecarSessionBackend(transport: transport, workingDirectory: workingDirectory),
+            session: session,
+            permissionMode: permissionMode
+        )
+    }
+
+    private func makeClaudeSDKSidecarNativeSessionManager<Backend: AgentBackend>(
+        backend: Backend,
+        session: AgentSession,
+        permissionMode: AgentPermissionMode
+    ) -> NativeSessionManager {
+        NativeSessionManager(
+            backend: backend,
+            sessionRepository: AppChatSessionRepository(store: store),
+            session: session,
+            groupID: groupID,
+            permissionMode: permissionMode,
+            memoryStagingRepository: AppMemoryStagingBufferRepository(store: store),
+            eventRecorder: AgentEventRecorder(repository: store),
+            pendingApprovalRepository: store
         )
     }
 

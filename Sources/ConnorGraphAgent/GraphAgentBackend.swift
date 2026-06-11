@@ -26,11 +26,25 @@ public struct AgentChatRequest: Sendable, Equatable {
     }
 }
 
-public protocol GraphAgentBackend: Sendable {
+public protocol AgentBackend: Sendable {
     func chat(_ request: AgentChatRequest) -> AsyncThrowingStream<AgentEvent, Error>
     func abort(runID: String)
 }
 
-public extension GraphAgentBackend {
+public extension AgentBackend {
     func abort(runID: String) {}
+}
+
+public typealias GraphAgentBackend = AgentBackend
+
+public struct AgentLoopBackend<Provider: AgentModelProvider>: AgentBackend {
+    public var loopController: AgentLoopController<Provider>
+
+    public init(loopController: AgentLoopController<Provider>) {
+        self.loopController = loopController
+    }
+
+    public func chat(_ request: AgentChatRequest) -> AsyncThrowingStream<AgentEvent, Error> {
+        loopController.run(request)
+    }
 }

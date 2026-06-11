@@ -50,20 +50,45 @@ public struct AgentEventPresenter: Sendable {
         case .assistantMessageCreated(let message):
             return item(event, title: "Assistant message saved", detail: message.content, severity: .success)
         case .toolRequested(let call):
-            return item(event, title: "Tool requested", detail: call.name, severity: .info)
+            return item(
+                event,
+                title: "Tool requested: \(call.name)",
+                detail: "Call \(call.id) · Arguments: \(compactJSON(call.argumentsJSON))",
+                severity: .info
+            )
         case .toolApproved(let call):
-            return item(event, title: "Tool approved", detail: call.name, severity: .success)
+            return item(event, title: "Tool approved: \(call.name)", detail: "Call \(call.id) approved for execution.", severity: .success)
         case .toolStarted(let call):
-            return item(event, title: "Tool started", detail: call.name, severity: .info)
+            return item(event, title: "Tool running: \(call.name)", detail: "Call \(call.id) is executing.", severity: .info)
         case .toolFinished(let result):
-            return item(event, title: "Tool finished", detail: result.contentText, severity: .success)
+            return item(
+                event,
+                title: "Tool finished: \(result.toolName)",
+                detail: "Call \(result.toolCallID) · \(trimmedDetail(result.contentText))",
+                severity: .success
+            )
         case .toolFailed(let failure):
-            return item(event, title: "Tool failed", detail: failure.message, severity: .error)
+            return item(
+                event,
+                title: "Tool failed: \(failure.toolName)",
+                detail: "Call \(failure.toolCallID) · \(trimmedDetail(failure.message))",
+                severity: .error
+            )
         case .permissionRequested(let request):
-            return item(event, title: "Permission requested", detail: request.capability.rawValue, severity: .warning)
+            let toolDetail = request.toolName.map { " · Tool: \($0)" } ?? ""
+            return item(
+                event,
+                title: "Permission requested: \(request.capability.rawValue)",
+                detail: "Request \(request.id)\(toolDetail) · Payload: \(compactJSON(request.payloadJSON))",
+                severity: .warning
+            )
         case .permissionResolved(let decision):
-            let severity: AgentEventPresentationSeverity = decision.outcome == .approved ? .success : .warning
-            return item(event, title: "Permission \(decision.outcome.rawValue)", detail: decision.reason, severity: severity)
+            return item(
+                event,
+                title: "Permission \(permissionResolutionLabel(decision.outcome)): \(decision.capability.rawValue)",
+                detail: "Request \(decision.requestID) · \(trimmedDetail(decision.reason))",
+                severity: permissionResolutionSeverity(decision.outcome)
+            )
         case .budgetWarning(let warning):
             return item(event, title: "Budget warning", detail: warning.message, severity: .warning)
         case .runFailed(let failure):
@@ -82,5 +107,39 @@ public struct AgentEventPresenter: Sendable {
             runID: event.runID,
             sessionID: event.sessionID
         )
+    }
+
+    private func permissionResolutionLabel(_ outcome: AgentPermissionOutcome) -> String {
+        switch outcome {
+        case .approved: "approved"
+        case .denied: "denied"
+        case .needsApproval: "needs approval"
+        }
+    }
+
+    private func permissionResolutionSeverity(_ outcome: AgentPermissionOutcome) -> AgentEventPresentationSeverity {
+        switch outcome {
+        case .approved: .success
+        case .denied: .error
+        case .needsApproval: .warning
+        }
+    }
+
+    private func compactJSON(_ json: String) -> String {
+        let trimmed = json.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let data = trimmed.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data),
+              JSONSerialization.isValidJSONObject(object),
+              let compact = try? JSONSerialization.data(withJSONObject: object, options: []),
+              let string = String(data: compact, encoding: .utf8)
+        else { return trimmedDetail(trimmed) }
+        return trimmedDetail(string)
+    }
+
+    private func trimmedDetail(_ value: String, maxLength: Int = 220) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > maxLength else { return trimmed }
+        let end = trimmed.index(trimmed.startIndex, offsetBy: maxLength)
+        return String(trimmed[..<end]) + "…"
     }
 }

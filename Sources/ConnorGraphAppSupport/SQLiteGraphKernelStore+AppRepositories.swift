@@ -45,4 +45,6 @@ extension SQLiteGraphKernelStore: AgentRunEventRepository {
     }
 }
 
+extension SQLiteGraphKernelStore: AgentPendingApprovalRepository {}
+
 
