@@ -13,6 +13,8 @@ Phase 2 ships both:
 
 The real entry point imports `@anthropic-ai/claude-agent-sdk` and calls `query(prompt, options)`, but Connor does **not** enable it by default. Swift tests include a gated integration path that only runs when explicitly requested by environment variables.
 
+The sidecar now also emits normalized tool and permission boundary events. These events let Connor render/audit SDK tool activity without granting the SDK product-state authority.
+
 ## Request Protocol
 
 Swift writes exactly one JSON line to stdin:
@@ -50,6 +52,15 @@ The sidecar emits one JSON object per line to stdout:
 {"runCompleted":{}}
 ```
 
+Tool / permission boundary events:
+
+```jsonl
+{"toolUseRequested":{"toolCallID":"tool-1","name":"Read","inputJSON":"{\"file_path\":\"README.md\"}"}}
+{"permissionRequested":{"requestID":"permission-tool-1","capability":"readSession","toolName":"Read","payloadJSON":"{\"file_path\":\"README.md\"}"}}
+{"toolUseStarted":{"toolCallID":"tool-1","name":"Read"}}
+{"toolUseCompleted":{"toolCallID":"tool-1","name":"Read","contentText":"README contents","contentJSON":null,"isError":false}}
+```
+
 Failure event:
 
 ```jsonl
@@ -70,11 +81,13 @@ stderr is reserved for diagnostics. A non-zero exit code is treated as a transpo
    - `resume = request.sdkSessionID ?? undefined`
    - `includePartialMessages = true`
 4. Maps SDK assistant-like messages to `textDelta`.
-5. Emits `textComplete` and `runCompleted` after the SDK stream finishes.
-6. Emits `runFailed` for SDK errors or non-success result messages.
-7. Never persists SDK sessions as Connor sessions.
+5. Maps SDK `tool_use` / `tool_result`-like content into normalized tool events.
+6. Maps deferred or denied tool-use states into `permissionRequested` / failed tool results.
+7. Emits `textComplete` and `runCompleted` after the SDK stream finishes.
+8. Emits `runFailed` for SDK errors or non-success result messages.
+9. Never persists SDK sessions as Connor sessions.
 
-Before enabling write-capable tools, Connor still needs explicit tool/permission event normalization.
+Before enabling write-capable tools by default, Connor still needs product-level approval flow and audit UI for these normalized events.
 
 ## Real SDK Local Run
 

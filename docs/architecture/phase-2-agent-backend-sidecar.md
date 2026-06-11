@@ -1,6 +1,6 @@
 # Phase 2: AgentBackend Abstraction and Claude SDK Sidecar
 
-Last updated: 2026-06-11 11:32 GMT+8
+Last updated: 2026-06-11 11:42 GMT+8
 
 ## Status
 
@@ -13,7 +13,7 @@ Current implementation status:
 - `AgentBackend` is the product-level backend interface.
 - `NativeSessionManager` depends on `AnyAgentBackend`, not a concrete SDK or model provider.
 - `AgentLoopBackend` adapts the existing native loop.
-- `ClaudeSDKSidecarBackend` maps sidecar events into Connor `AgentEvent`.
+- `ClaudeSDKSidecarBackend` maps sidecar events into Connor `AgentEvent`, including normalized tool and permission boundary events.
 - `ClaudeSDKSidecarProcessTransport` runs an external process and bridges one request plus JSONL sidecar events over stdin/stdout.
 - `sidecars/claude-agent-engine/` contains protocol docs, mock Node/shell sidecars, and the real `claude-sidecar.mjs` SDK entry point.
 
@@ -74,7 +74,7 @@ Connor `AgentPermissionMode` remains the product-level permission source of trut
 - `trustedWrite`
 - `allowAll`
 
-The sidecar must report tool or permission events back as normalized Connor `AgentEvent` values. Future work should add explicit sidecar permission request events before any write-capable sidecar tools are enabled.
+The sidecar reports tool and permission boundary events back as normalized Connor `AgentEvent` values. Write-capable sidecar tools still must not become default until Connor has product-level approval flow and audit UI over these normalized events.
 
 ## IPC Contract
 
@@ -100,6 +100,10 @@ ClaudeSDKSidecarEvent
   runStarted(sdkSessionID?)
   textDelta(text)
   textComplete(text, citations, contextSnapshot?)
+  toolUseRequested(toolCallID, name, inputJSON)
+  permissionRequested(requestID, capability, toolName?, payloadJSON)
+  toolUseStarted(toolCallID, name)
+  toolUseCompleted(toolCallID, name, contentText, contentJSON?, isError)
   runCompleted
   runFailed(message)
 ```
@@ -122,13 +126,17 @@ This transport is intentionally conservative: it validates the process boundary 
 
 `sidecars/claude-agent-engine/claude-sidecar.mjs` imports `@anthropic-ai/claude-agent-sdk` and calls `query(request.prompt, options)`.
 
-The current mapping is deliberately minimal:
+The current mapping is deliberately conservative:
 
 - `cwd = request.cwd`
 - `permissionMode = request.sdkPermissionMode`
 - `resume = request.sdkSessionID ?? undefined`
 - `includePartialMessages = true`
+- `includeHookEvents = true`
 - assistant-like SDK messages → `textDelta`
+- SDK `tool_use`-like content → `toolUseRequested` + `toolUseStarted`
+- SDK `tool_result`-like content → `toolUseCompleted`
+- deferred tool-use / permission denial state → `permissionRequested` or failed tool result
 - stream completion → `textComplete` + `runCompleted`
 - SDK errors/result failures → `runFailed`
 
@@ -138,12 +146,8 @@ A Swift integration test exists but is gated by environment variables, so normal
 
 Recommended next implementation slice:
 
-1. Add explicit sidecar event cases for tool and permission boundaries, for example:
-   - `toolUseRequested`
-   - `toolUseStarted`
-   - `toolUseCompleted`
-   - `permissionRequested`
-2. Map Claude SDK tool-use / permission messages into those normalized sidecar events.
-3. Extend `AgentEvent` only where Connor has a product concept for the event.
-4. Keep SDK permission mode bypassed until Connor can inspect, audit, and approve sidecar tool actions.
-5. Add cancellation support to `ClaudeSDKSidecarProcessTransport` before long-running sidecar tasks become default.
+1. Add product-level approval flow for normalized sidecar `permissionRequested` events.
+2. Persist sidecar tool/permission events into Connor audit timelines, not just transient event streams.
+3. Keep SDK permission mode bypassed until Connor can inspect, audit, and approve sidecar tool actions end-to-end.
+4. Add cancellation support to `ClaudeSDKSidecarProcessTransport` before long-running sidecar tasks become default.
+5. Only after those controls exist, consider enabling a constrained read-only Claude sidecar path in app settings.
