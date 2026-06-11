@@ -17,7 +17,7 @@ The sidecar now also emits normalized tool and permission boundary events. These
 
 ## Request Protocol
 
-Swift writes exactly one JSON line to stdin:
+Swift currently writes exactly one start request JSON line to stdin:
 
 ```json
 {
@@ -87,7 +87,23 @@ stderr is reserved for diagnostics. A non-zero exit code is treated as a transpo
 8. Emits `runFailed` for SDK errors or non-success result messages.
 9. Never persists SDK sessions as Connor sessions.
 
-Before enabling write-capable tools by default, Connor still needs product-level approval flow and audit UI for these normalized events.
+Before enabling write-capable tools by default, Connor still needs execution-resume semantics over product-owned approval decisions.
+
+## Approval Resolution Command Skeleton
+
+Connor now has a Swift-side command envelope for the future Connor → sidecar resume path. The current process transport still sends the direct start request above; this command is a protocol skeleton for the next runtime slice, not an enabled write-tool execution path.
+
+```jsonl
+{"approvalResolved":{"connorRunID":"run-id","connorSessionID":"session-id","requestID":"permission-tool-1","status":"approved","outcome":"approved","capability":"commitGraphWrite","toolName":"Write","payloadJSON":"{}","reason":"Human reviewer approved the write","actor":"human-reviewer","ownsProductState":false}}
+```
+
+Rules:
+
+- `approvalResolved` is driven by Connor `agent_pending_approvals`, not by the SDK.
+- `ownsProductState` remains `false`; the sidecar must not become the approval ledger.
+- `approved` maps to SDK/tool continuation intent.
+- `denied` and `cancelled` both map to denied execution outcome; `cancelled` remains distinct only in Connor pending-approval state and audit history.
+- This skeleton does not yet resume deferred SDK execution.
 
 ## Real SDK Local Run
 
