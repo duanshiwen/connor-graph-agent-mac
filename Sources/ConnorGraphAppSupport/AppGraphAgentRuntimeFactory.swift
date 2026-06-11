@@ -53,12 +53,13 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         session: AgentSession = AgentSession(id: "app-session"),
         permissionMode: AgentPermissionMode = .askToWrite,
         configuration: AgentLoopConfiguration = AgentLoopConfiguration()
-    ) -> NativeSessionManager<AnyAgentModelProvider> {
+    ) -> NativeSessionManager {
         NativeSessionManager(
-            loopController: makeAgentLoopController(permissionMode: permissionMode, configuration: configuration),
+            backend: AgentLoopBackend(loopController: makeAgentLoopController(permissionMode: permissionMode, configuration: configuration)),
             sessionRepository: AppChatSessionRepository(store: store),
             session: session,
             groupID: groupID,
+            permissionMode: permissionMode,
             memoryStagingRepository: AppMemoryStagingBufferRepository(store: store)
         )
     }

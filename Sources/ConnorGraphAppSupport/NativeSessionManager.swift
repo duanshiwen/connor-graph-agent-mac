@@ -3,19 +3,41 @@ import ConnorGraphAgent
 import ConnorGraphCore
 import ConnorGraphMemory
 
-public struct NativeSessionManager<Provider: AgentModelProvider>: Sendable {
-    public var loopController: AgentLoopController<Provider>
+public struct NativeSessionManager: Sendable {
+    public var backend: AnyAgentBackend
     public var sessionRepository: AppChatSessionRepository
     public private(set) var session: AgentSession
     public private(set) var events: [AgentEvent]
     public private(set) var eventPresentations: [AgentEventPresentation]
     public var groupID: String
+    public var permissionMode: AgentPermissionMode
 
     private let presenter: AgentEventPresenter
     private let memoryIngestionService: MemoryIngestionService
     private let memoryStagingRepository: AppMemoryStagingBufferRepository?
 
-    public init(
+    public init<Backend: AgentBackend>(
+        backend: Backend,
+        sessionRepository: AppChatSessionRepository,
+        session: AgentSession = AgentSession(),
+        groupID: String = "default",
+        permissionMode: AgentPermissionMode = .askToWrite,
+        memoryStagingRepository: AppMemoryStagingBufferRepository? = nil,
+        memoryIngestionService: MemoryIngestionService = MemoryIngestionService()
+    ) {
+        self.backend = AnyAgentBackend(backend)
+        self.sessionRepository = sessionRepository
+        self.session = session
+        self.events = []
+        self.eventPresentations = []
+        self.groupID = groupID
+        self.permissionMode = permissionMode
+        self.presenter = AgentEventPresenter()
+        self.memoryStagingRepository = memoryStagingRepository
+        self.memoryIngestionService = memoryIngestionService
+    }
+
+    public init<Provider: AgentModelProvider>(
         loopController: AgentLoopController<Provider>,
         sessionRepository: AppChatSessionRepository,
         session: AgentSession = AgentSession(),
@@ -23,15 +45,15 @@ public struct NativeSessionManager<Provider: AgentModelProvider>: Sendable {
         memoryStagingRepository: AppMemoryStagingBufferRepository? = nil,
         memoryIngestionService: MemoryIngestionService = MemoryIngestionService()
     ) {
-        self.loopController = loopController
-        self.sessionRepository = sessionRepository
-        self.session = session
-        self.events = []
-        self.eventPresentations = []
-        self.groupID = groupID
-        self.presenter = AgentEventPresenter()
-        self.memoryStagingRepository = memoryStagingRepository
-        self.memoryIngestionService = memoryIngestionService
+        self.init(
+            backend: AgentLoopBackend(loopController: loopController),
+            sessionRepository: sessionRepository,
+            session: session,
+            groupID: groupID,
+            permissionMode: loopController.configuration.permissionMode,
+            memoryStagingRepository: memoryStagingRepository,
+            memoryIngestionService: memoryIngestionService
+        )
     }
 
     @discardableResult
@@ -44,7 +66,7 @@ public struct NativeSessionManager<Provider: AgentModelProvider>: Sendable {
             sessionID: session.id,
             groupID: groupID,
             userMessage: prompt,
-            permissionMode: loopController.configuration.permissionMode
+            permissionMode: permissionMode
         )
 
         var collectedEvents: [AgentEvent] = []
@@ -52,7 +74,7 @@ public struct NativeSessionManager<Provider: AgentModelProvider>: Sendable {
         var assistantMessage: AgentMessage?
 
         do {
-            for try await event in loopController.run(request) {
+            for try await event in backend.chat(request) {
                 collectedEvents.append(event)
                 events.append(event)
 
