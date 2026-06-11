@@ -563,6 +563,24 @@ private actor FakeClaudeSDKSidecarSessionTransport: ClaudeSDKSidecarSessionTrans
     #expect(sidecarSource.contains("toolUseCompleted"))
 }
 
+@Test func claudeSDKSidecarEngineDeclaresPersistentCommandLoopSkeleton() throws {
+    let root = repositoryRootURL()
+    let sidecarSource = try String(
+        contentsOf: root.appendingPathComponent("sidecars/claude-agent-engine/claude-sidecar.mjs"),
+        encoding: .utf8
+    )
+
+    #expect(sidecarSource.contains("parseCommand"))
+    #expect(sidecarSource.contains("runCommandLoop"))
+    #expect(sidecarSource.contains("handleApprovalResolved"))
+    #expect(sidecarSource.contains("resumeAccepted"))
+    #expect(sidecarSource.contains("resumeRejected"))
+    #expect(sidecarSource.contains("case 'start'"))
+    #expect(sidecarSource.contains("case 'approvalResolved'"))
+    #expect(sidecarSource.contains("case 'cancel'"))
+    #expect(sidecarSource.contains("real deferred Claude SDK resume is not enabled"))
+}
+
 @Test func realClaudeSDKSidecarIntegrationSkipsUnlessExplicitlyEnabled() async throws {
     let environment = ProcessInfo.processInfo.environment
     guard environment["CONNOR_RUN_CLAUDE_SIDECAR_INTEGRATION"] == "1" else {

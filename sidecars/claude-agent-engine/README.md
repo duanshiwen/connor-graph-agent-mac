@@ -2,7 +2,7 @@
 
 This directory contains the future Node/Bun Claude Agent SDK sidecar for Connor.
 
-Connor remains the product state owner. The sidecar is a replaceable agent-engine process that currently receives one Connor-owned request over stdin and emits Connor-normalized sidecar events over stdout as JSONL. Swift now also has a persistent process transport for future command-loop sidecars, while the current real `claude-sidecar.mjs` entry point remains one-shot until the JavaScript command loop is implemented.
+Connor remains the product state owner. The sidecar is a replaceable agent-engine process that can receive either a backward-compatible raw Connor request or persistent command envelopes over stdin, then emit Connor-normalized sidecar events over stdout as JSONL. Swift has a persistent process transport for command-loop sidecars, and `claude-sidecar.mjs` now declares the matching command-loop skeleton.
 
 ## Current Status
 
@@ -123,7 +123,7 @@ Swift persistent process transport status:
 - `ClaudeSDKSidecarPersistentProcessTransport` writes command envelopes as JSONL to stdin.
 - It streams stdout JSONL events as they arrive.
 - It supports `cancel()` by closing stdin and terminating the process if needed.
-- The real Node sidecar does not yet implement the corresponding command loop.
+- The real Node sidecar implements the command envelope skeleton for `start`, `approvalResolved`, and `cancel`.
 
 Rules:
 
@@ -132,6 +132,7 @@ Rules:
 - `approved` maps to SDK/tool continuation intent.
 - `denied` and `cancelled` both map to denied execution outcome; `cancelled` remains distinct only in Connor pending-approval state and audit history.
 - `resumeAccepted` / `resumeRejected` currently confirm protocol handling only.
+- `approvalResolved` in `claude-sidecar.mjs` explicitly reports that real deferred Claude SDK resume is not enabled.
 - This skeleton does not yet resume deferred SDK execution.
 
 ## Real SDK Local Run
