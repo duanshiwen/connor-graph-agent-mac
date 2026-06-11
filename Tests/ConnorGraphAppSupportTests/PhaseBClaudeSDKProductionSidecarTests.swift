@@ -45,6 +45,13 @@ private func phaseBTemporaryDirectory(_ name: String) throws -> URL {
     return url
 }
 
+private func phaseBRepositoryRootURL() -> URL {
+    URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+}
+
 @Test func claudeSDKSidecarRuntimeStorePersistsSDKSessionIDForResume() throws {
     let directory = try phaseBTemporaryDirectory("RuntimeStore")
     defer { try? FileManager.default.removeItem(at: directory) }
@@ -153,4 +160,78 @@ private func phaseBTemporaryDirectory(_ name: String) throws -> URL {
     #expect(ClaudeSDKSidecarRuntimeDiagnostics(record: ready).health == .healthy)
     #expect(ClaudeSDKSidecarRuntimeDiagnostics(record: failed).health == .failed)
     #expect(ClaudeSDKSidecarRuntimeDiagnostics(record: pending).health == .waitingForApproval)
+}
+
+@Test func persistentProcessTransportWritesCancelCommandBeforeTerminating() async throws {
+    let temporaryDirectory = try phaseBTemporaryDirectory("PersistentCancel")
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+    let capturedCommandsURL = temporaryDirectory.appendingPathComponent("commands.jsonl")
+    let scriptURL = temporaryDirectory.appendingPathComponent("mock-cancel-sidecar.sh")
+    try """
+    #!/bin/sh
+    while IFS= read -r command; do
+      printf '%s\n' "$command" >> "$CONNOR_CAPTURED_COMMANDS"
+      case "$command" in
+        *'"start"'*)
+          printf '%s\n' '{"runStarted":{"sdkSessionID":"sdk-cancel-session"}}'
+          ;;
+        *'"cancel"'*)
+          printf '%s\n' '{"runFailed":{"message":"cancelled by test"}}'
+          exit 0
+          ;;
+      esac
+    done
+    """.write(to: scriptURL, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+    let transport = ClaudeSDKSidecarPersistentProcessTransport(
+        executableURL: URL(fileURLWithPath: "/bin/sh"),
+        arguments: [scriptURL.path],
+        environment: ["CONNOR_CAPTURED_COMMANDS": capturedCommandsURL.path],
+        currentDirectoryURL: temporaryDirectory
+    )
+    let request = ClaudeSDKSidecarRequest(
+        connorRunID: "run-cancel-persistent",
+        connorSessionID: "session-cancel-persistent",
+        groupID: "default",
+        prompt: "start then cancel",
+        cwd: temporaryDirectory.path,
+        permissionMode: .askToWrite
+    )
+
+    var iterator = await transport.start(request).makeAsyncIterator()
+    _ = try await iterator.next()
+    try await transport.send(.cancel(ClaudeSDKSidecarCancelCommand(
+        connorRunID: "run-cancel-persistent",
+        connorSessionID: "session-cancel-persistent",
+        reason: "user cancelled"
+    )))
+    _ = try await iterator.next()
+    await transport.cancel()
+
+    let capturedLines = try String(contentsOf: capturedCommandsURL, encoding: .utf8)
+        .split(separator: "\n")
+        .map(String.init)
+    let commands = try capturedLines.map { try JSONDecoder().decode(ClaudeSDKSidecarCommand.self, from: Data($0.utf8)) }
+    #expect(commands.map(\.commandName) == ["start", "cancel"])
+}
+
+@Test func claudeSDKSidecarEngineDeclaresHealthCommand() throws {
+    let root = phaseBRepositoryRootURL()
+    let sidecarSource = try String(
+        contentsOf: root.appendingPathComponent("sidecars/claude-agent-engine/claude-sidecar.mjs"),
+        encoding: .utf8
+    )
+
+    #expect(sidecarSource.contains("case 'health'"))
+    #expect(sidecarSource.contains("sidecarHealth"))
+    #expect(sidecarSource.contains("pendingDeferredToolUses.size"))
+}
+
+@Test func claudeSDKSidecarJSONLProtocolDecodesHealthEvent() throws {
+    let line = "{\"sidecarHealth\":{\"status\":\"ok\",\"pendingDeferredToolUseCount\":2,\"timestamp\":\"2026-06-11T11:57:00.000Z\",\"ownsProductState\":false}}"
+    let decoded = try JSONDecoder().decode(ClaudeSDKSidecarEvent.self, from: Data(line.utf8))
+
+    #expect(decoded == .sidecarHealth(ClaudeSDKSidecarHealth(status: "ok", pendingDeferredToolUseCount: 2, timestamp: "2026-06-11T11:57:00.000Z", ownsProductState: false)))
 }
