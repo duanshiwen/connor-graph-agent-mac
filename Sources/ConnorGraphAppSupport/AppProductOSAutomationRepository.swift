@@ -17,6 +17,50 @@ public enum AppProductOSAutomationError: Error, Equatable, CustomStringConvertib
     }
 }
 
+public enum ProductOSAutomationExecutionOutcome: String, Codable, Sendable, Equatable {
+    case completed
+    case partial
+    case skipped
+    case failed
+}
+
+public struct ProductOSAutomationExecutionHistoryRecord: Codable, Sendable, Equatable, Identifiable {
+    public var id: String
+    public var sessionID: String
+    public var trigger: ProductOSAutomationTriggerKind
+    public var ruleIDs: [String]
+    public var appliedActionCount: Int
+    public var skippedActionCount: Int
+    public var eventCount: Int
+    public var outcome: ProductOSAutomationExecutionOutcome
+    public var message: String
+    public var createdAt: Date
+
+    public init(
+        id: String = UUID().uuidString,
+        sessionID: String,
+        trigger: ProductOSAutomationTriggerKind,
+        ruleIDs: [String],
+        appliedActionCount: Int,
+        skippedActionCount: Int,
+        eventCount: Int,
+        outcome: ProductOSAutomationExecutionOutcome,
+        message: String,
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.sessionID = sessionID
+        self.trigger = trigger
+        self.ruleIDs = ruleIDs
+        self.appliedActionCount = appliedActionCount
+        self.skippedActionCount = skippedActionCount
+        self.eventCount = eventCount
+        self.outcome = outcome
+        self.message = message
+        self.createdAt = createdAt
+    }
+}
+
 public struct AppProductOSAutomationRepository: Sendable {
     public var storagePaths: AppStoragePaths
 
@@ -26,6 +70,7 @@ public struct AppProductOSAutomationRepository: Sendable {
 
     public var automationConfigURL: URL { storagePaths.automationsDirectory.appendingPathComponent("automations.json") }
     public var automationLogURL: URL { storagePaths.automationsDirectory.appendingPathComponent("automation-trigger-log.json") }
+    public var executionHistoryURL: URL { storagePaths.automationsDirectory.appendingPathComponent("automation-execution-history.json") }
     public var statusesMirrorURL: URL { storagePaths.statusesDirectory.appendingPathComponent("statuses.json") }
     public var labelsMirrorURL: URL { storagePaths.labelsDirectory.appendingPathComponent("labels.json") }
 
@@ -83,6 +128,25 @@ public struct AppProductOSAutomationRepository: Sendable {
         guard !records.isEmpty else { return [] }
         try append(records: records)
         return records
+    }
+
+    public func appendExecutionHistory(_ record: ProductOSAutomationExecutionHistoryRecord) throws {
+        var existing = try loadRecentExecutionHistory(limit: 1_000)
+        existing.append(record)
+        existing = Array(existing.sorted { $0.createdAt > $1.createdAt }.prefix(1_000))
+        try FileManager.default.createDirectory(at: storagePaths.automationsDirectory, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(existing).write(to: executionHistoryURL, options: .atomic)
+    }
+
+    public func loadRecentExecutionHistory(limit: Int = 50) throws -> [ProductOSAutomationExecutionHistoryRecord] {
+        guard FileManager.default.fileExists(atPath: executionHistoryURL.path) else { return [] }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let records = try decoder.decode([ProductOSAutomationExecutionHistoryRecord].self, from: try Data(contentsOf: executionHistoryURL))
+        return Array(records.sorted { $0.createdAt > $1.createdAt }.prefix(limit))
     }
 
     public func loadRecentTriggerRecords(limit: Int = 50) throws -> [ProductOSAutomationTriggerRecord] {
