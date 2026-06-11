@@ -2437,16 +2437,16 @@ struct LLMSettingsView: View {
                 .disabled(viewModel.isTestingLLMConnection)
             }
 
-            Text(viewModel.llmHasAPIKey ? "API Key：已存入钥匙串" : "API Key：尚未保存")
+            Text(viewModel.llmHasAPIKey ? "API Key：已本地加密保存" : "API Key：尚未保存")
                 .foregroundStyle(viewModel.llmHasAPIKey ? .green : .secondary)
 
             GroupBox {
                 VStack(alignment: .leading, spacing: 6) {
-                    Label("安全提示：API Key 会保存到 macOS 钥匙串", systemImage: "lock.shield")
+                    Label("安全提示：API Key 会保存到 Connor Home 的本地加密凭据文件", systemImage: "lock.shield")
                         .font(.caption.weight(.semibold))
-                    Text("为保证安全，Connor Graph Agent 会将 API Key 存入 macOS 钥匙串，而不是以明文写入应用设置或项目文件。")
-                    Text("当 macOS 请求钥匙串访问权限时，请为当前已签名的应用构建选择“始终允许”，以避免重复弹窗。")
-                    Text("如果每次 Xcode 重新构建后仍然弹窗，请打开 app target 的 Signing & Capabilities，并确认 Team 设置为 诗闻 段 (Personal Team)。")
+                    Text("为减少钥匙串弹窗，Connor Graph Agent 会使用本机生成的 master key 对 API Key 进行 AES-GCM 加密，并写入 Application Support/Connor/config/credentials。")
+                    Text("API Key 不会以明文写入应用设置、项目文件或 Git 仓库；删除 API Key 会移除对应加密凭据文件。")
+                    Text("这是本机本地加密存储，不依赖 macOS 钥匙串授权弹窗。")
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
