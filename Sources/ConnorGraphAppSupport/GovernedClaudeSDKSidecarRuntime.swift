@@ -179,7 +179,7 @@ public final class GovernedClaudeSDKSidecarRuntime<Transport: ClaudeSDKSidecarSe
                 pendingApprovalRequestID: nil,
                 lastError: nil
             )
-        case .textDelta, .textComplete, .toolUseRequested, .toolUseStarted, .toolUseCompleted:
+        case .textDelta, .textComplete, .toolUseRequested, .toolUseStarted, .toolUseCompleted, .sidecarHealth:
             break
         }
     }
