@@ -2,6 +2,43 @@ import Foundation
 import ConnorGraphAgent
 import ConnorGraphCore
 
+public enum AutomationEngineError: Error, Sendable, Equatable, CustomStringConvertible {
+    case rateLimited(String)
+
+    public var description: String {
+        switch self {
+        case .rateLimited(let key): "rateLimited: \(key)"
+        }
+    }
+}
+
+public final class AutomationRateLimiter: @unchecked Sendable {
+    private let maxEvents: Int
+    private let interval: TimeInterval
+    private var buckets: [String: [Date]]
+    private let lock = NSLock()
+
+    public init(maxEvents: Int = 10, interval: TimeInterval = 60) {
+        self.maxEvents = max(1, maxEvents)
+        self.interval = max(1, interval)
+        self.buckets = [:]
+    }
+
+    public func allow(key: String, now: Date = Date()) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        let cutoff = now.addingTimeInterval(-interval)
+        var events = buckets[key, default: []].filter { $0 > cutoff }
+        guard events.count < maxEvents else {
+            buckets[key] = events
+            return false
+        }
+        events.append(now)
+        buckets[key] = events
+        return true
+    }
+}
+
 public enum AutomationActionDisposition: String, Codable, Sendable, Equatable {
     case ready
     case pendingReview
@@ -70,17 +107,28 @@ public struct AutomationEngineRun: Sendable, Equatable {
 public struct AutomationEngine: Sendable {
     public var repository: AppProductOSAutomationRepository
     public var governanceConfig: AppSessionGovernanceConfig
+    public var rateLimiter: AutomationRateLimiter?
 
-    public init(repository: AppProductOSAutomationRepository, governanceConfig: AppSessionGovernanceConfig = .default) {
+    public init(
+        repository: AppProductOSAutomationRepository,
+        governanceConfig: AppSessionGovernanceConfig = .default,
+        rateLimiter: AutomationRateLimiter? = nil
+    ) {
         self.repository = repository
         self.governanceConfig = governanceConfig
+        self.rateLimiter = rateLimiter
     }
 
-    public func evaluate(context: ProductOSAutomationEventContext, runID: String? = nil) throws -> AutomationEngineRun {
+    public func evaluate(context: ProductOSAutomationEventContext, runID: String? = nil, now: Date = Date()) throws -> AutomationEngineRun {
         let config = try repository.loadOrCreateDefault(governanceConfig: governanceConfig)
         let matchedRules = config.rules.filter { $0.isEnabled && AppProductOSAutomationRepository.matches(rule: $0, context: context) }
         guard !matchedRules.isEmpty else {
-            return AutomationEngineRun(context: context, matchedRules: [], actionPlans: [], records: [], events: [])
+             return AutomationEngineRun(context: context, matchedRules: [], actionPlans: [], records: [], events: [])
+         }
+
+        let limiterKey = rateLimitKey(context: context)
+        if let rateLimiter, !rateLimiter.allow(key: limiterKey, now: now) {
+            throw AutomationEngineError.rateLimited(limiterKey)
         }
 
         let records = try repository.evaluate(context: context, governanceConfig: governanceConfig)
@@ -221,6 +269,16 @@ public struct AutomationEngine: Sendable {
         blockedPlan.disposition = .blocked
         blockedPlan.reason = reason
         return blockedPlan
+    }
+
+    private func rateLimitKey(context: ProductOSAutomationEventContext) -> String {
+        [
+            context.triggerKind.rawValue,
+            context.sessionID,
+            context.status?.rawValue ?? "",
+            context.labelID ?? "",
+            context.registryEntryID ?? ""
+        ].joined(separator: "|")
     }
 
     private func automationMessage(records: [ProductOSAutomationTriggerRecord], actionPlans: [AutomationActionPlan]) -> String {
