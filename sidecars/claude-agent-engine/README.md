@@ -132,8 +132,9 @@ Rules:
 - `approved` maps to SDK/tool continuation intent.
 - `denied` and `cancelled` both map to denied execution outcome; `cancelled` remains distinct only in Connor pending-approval state and audit history.
 - `resumeAccepted` / `resumeRejected` currently confirm protocol handling only.
-- `approvalResolved` in `claude-sidecar.mjs` explicitly reports that real deferred Claude SDK resume is not enabled.
-- This skeleton does not yet resume deferred SDK execution.
+- `approvalResolved` in `claude-sidecar.mjs` now looks up Connor-tracked deferred SDK tool uses and resumes the same SDK session only after Connor approval.
+- The resume path follows the official hook round trip: `PreToolUse` returns `permissionDecision: "defer"`; SDK returns `tool_deferred` with `deferred_tool_use`; Connor approval resumes with `permissionDecision: "allow"` and `updatedInput`.
+- This does not make the SDK the permission ledger; Connor pending approvals, audit, and native timeline remain authoritative.
 
 ## Real SDK Local Run
 
