@@ -996,7 +996,7 @@ final class AppViewModel: ObservableObject {
                 fallbackChatSession = session
                 nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: session)
                 transcript = session.messages
-                agentEventTimeline = []
+                try restoreLatestAgentEventTimeline(sessionID: selectedID)
                 latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: selectedID)
                 selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: selectedID)
             } else {
@@ -1030,6 +1030,28 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    private func restoreLatestAgentEventTimeline(sessionID: String) throws {
+        guard let chatSessionRepository else {
+            agentEventTimeline = []
+            return
+        }
+        let runs = try chatSessionRepository.loadRuns(
+            sessionID: sessionID,
+            statuses: [.completed, .failed, .cancelled],
+            limit: 5
+        )
+        guard let latestRun = runs.first else {
+            agentEventTimeline = []
+            return
+        }
+        let persistedEvents = try chatSessionRepository.loadRunEvents(runID: latestRun.id, limit: 200)
+        let sequencedEvents = persistedEvents.filter { $0.sequence != nil }
+        let replaySource = sequencedEvents.isEmpty ? persistedEvents : sequencedEvents
+        let replayer = AgentEventReplayer()
+        let presenter = AgentEventPresenter()
+        agentEventTimeline = try replayer.replay(replaySource).map { presenter.presentation(for: $0) }
+    }
+
     func selectChatSession(_ sessionID: String) {
         guard let chatSessionRepository else { return }
         do {
@@ -1038,7 +1060,7 @@ final class AppViewModel: ObservableObject {
             fallbackChatSession = session
             nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: session)
             transcript = session.messages
-            agentEventTimeline = []
+            try restoreLatestAgentEventTimeline(sessionID: session.id)
             latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: session.id)
             selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
             chatSummaryMessage = nil
@@ -1450,6 +1472,7 @@ final class AppViewModel: ObservableObject {
         let prompt = rawPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty, !isSubmittingChat else { return }
         if clearComposer { chatInput = "" }
+        agentEventTimeline = []
         isSubmittingChat = true
         let optimisticTranscript = transcript
         let optimisticUserMessage = AgentMessage(role: .user, content: prompt)

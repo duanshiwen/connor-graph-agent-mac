@@ -236,7 +236,6 @@ private struct AgentChatConversationView: View {
                 }
             }
 
-
             AgentChatComposerView(viewModel: viewModel, isSessionInfoPresented: $isSessionInfoPresented)
                 .padding(.horizontal, 0)
                 .padding(.vertical, AgentChatLayout.spaceM)
