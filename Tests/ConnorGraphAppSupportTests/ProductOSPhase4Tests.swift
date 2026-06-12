@@ -53,14 +53,14 @@ struct ProductOSPhase4Tests {
         let repository = AppProductOSRegistryRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
 
         _ = try repository.loadOrCreateDefault()
-        let afterSource = try repository.setSourceStatus(id: "mcp-registry-placeholder", status: .needsReview)
-        #expect(afterSource.sources.first { $0.id == "mcp-registry-placeholder" }?.status == .needsReview)
+        let afterSource = try repository.setSourceStatus(id: "mcp-source-registry", status: .needsReview)
+        #expect(afterSource.sources.first { $0.id == "mcp-source-registry" }?.status == .needsReview)
 
         let afterSkill = try repository.setSkillStatus(id: "session-summary", status: .disabled)
         #expect(afterSkill.skills.first { $0.id == "session-summary" }?.status == .disabled)
 
         let reloaded = try repository.loadOrCreateDefault()
-        #expect(reloaded.sources.first { $0.id == "mcp-registry-placeholder" }?.status == .needsReview)
+        #expect(reloaded.sources.first { $0.id == "mcp-source-registry" }?.status == .needsReview)
         #expect(reloaded.skills.first { $0.id == "session-summary" }?.status == .disabled)
     }
 }

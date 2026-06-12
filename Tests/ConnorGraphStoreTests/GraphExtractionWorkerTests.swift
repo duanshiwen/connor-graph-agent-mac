@@ -7,7 +7,7 @@ private func temporaryExtractionWorkerDatabaseURL(_ name: String = UUID().uuidSt
     FileManager.default.temporaryDirectory.appendingPathComponent("\(name).sqlite")
 }
 
-private struct StubGraphExtractor: GraphExtractorProvider {
+private struct FakeGraphExtractor: GraphExtractorProvider {
     var draft: GraphExtractionDraft
 
     func extract(from source: GraphExtractionSource) async throws -> GraphExtractionDraft {
@@ -54,7 +54,7 @@ private struct FailingDiagnosticGraphExtractor: GraphExtractorProvider {
         nextRunAt: now
     ))
 
-    let result = try await GraphExtractionWorker(store: store, extractor: StubGraphExtractor(draft: draft)).runNext(graphID: "default", now: now)
+    let result = try await GraphExtractionWorker(store: store, extractor: FakeGraphExtractor(draft: draft)).runNext(graphID: "default", now: now)
 
     #expect(result?.jobID == "job-extract-1")
     #expect(result?.extractedEntityCount == 2)
@@ -104,7 +104,7 @@ private struct FailingDiagnosticGraphExtractor: GraphExtractorProvider {
         nextRunAt: now
     ))
 
-    let result = try await GraphExtractionWorker(store: store, extractor: StubGraphExtractor(draft: draft)).runNext(graphID: "default", now: now)
+    let result = try await GraphExtractionWorker(store: store, extractor: FakeGraphExtractor(draft: draft)).runNext(graphID: "default", now: now)
 
     #expect(result?.action == .held)
     #expect(result?.admissionDecision?.reasons.contains(.lowStatementConfidence) == true)
@@ -181,7 +181,7 @@ private struct FailingDiagnosticGraphExtractor: GraphExtractorProvider {
     let emptySource = GraphExtractionSource(id: "unused", graphID: "default", sourceType: .manual, title: "unused", content: "unused", occurredAt: now)
     try store.upsert(job: GraphJobV3(id: "bad-job", graphID: "default", type: .extraction, payload: [:], createdAt: now, nextRunAt: now))
 
-    let result = try await GraphExtractionWorker(store: store, extractor: StubGraphExtractor(draft: GraphExtractionDraft(source: emptySource))).runNext(graphID: "default", now: now)
+    let result = try await GraphExtractionWorker(store: store, extractor: FakeGraphExtractor(draft: GraphExtractionDraft(source: emptySource))).runNext(graphID: "default", now: now)
 
     #expect(result?.action == .failed)
     #expect(result?.errorMessage?.contains("invalidPayload") == true)

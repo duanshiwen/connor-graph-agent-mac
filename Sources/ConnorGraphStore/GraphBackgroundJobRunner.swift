@@ -113,18 +113,23 @@ public struct GraphBackgroundJobRunner<Extractor: GraphExtractorProvider>: Senda
             let outcome: GraphBackgroundJobOutcome = result.action == .failed ? .failed : .succeeded
             return GraphBackgroundJobRunResult(jobID: job.id, jobType: job.type, outcome: outcome, message: result.message)
         case .confidenceDecay, .ontologyPromotion:
-            try pauseUnsupported(job: job, now: now)
-            return GraphBackgroundJobRunResult(jobID: job.id, jobType: job.type, outcome: .paused, message: "Worker not implemented for \(job.type.rawValue)")
+            let message = unsupportedJobMessage(for: job.type)
+            try skipUnsupported(job: job, now: now, message: message)
+            return GraphBackgroundJobRunResult(jobID: job.id, jobType: job.type, outcome: .skipped, message: message)
         }
     }
 
-    private func pauseUnsupported(job: GraphJobV3, now: Date) throws {
-        var paused = job
-        paused.status = .paused
-        paused.updatedAt = now
-        paused.finishedAt = now
-        paused.errorCode = "worker_not_implemented"
-        paused.errorMessage = "Worker not implemented for \(job.type.rawValue)"
-        try store.upsert(job: paused)
+    private func skipUnsupported(job: GraphJobV3, now: Date, message: String) throws {
+        var skipped = job
+        skipped.status = .succeeded
+        skipped.updatedAt = now
+        skipped.finishedAt = now
+        skipped.errorCode = "unsupported_job_type"
+        skipped.errorMessage = message
+        try store.upsert(job: skipped)
+    }
+
+    private func unsupportedJobMessage(for type: GraphJobV3Type) -> String {
+        "Unsupported background job type: \(type)"
     }
 }

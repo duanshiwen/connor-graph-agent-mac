@@ -38,7 +38,6 @@ private func keyEquivalent(for command: ConnorNativeShellCommand) -> KeyEquivale
     switch command.id {
     case .newSession: "n"
     case .toggleBrowser: "b"
-    case .openRuntimeCenter: "1"
     case .openGraphMemoryReview: "2"
     case .openApprovals: "3"
     case .openSources: "4"
@@ -50,7 +49,6 @@ private func keyEquivalent(for command: ConnorNativeShellCommand) -> KeyEquivale
 }
 
 enum SidebarItem: String, CaseIterable, Identifiable {
-    case runtimeCenter = "运行中心"
     case entities = "图谱节点"
     case search = "搜索"
     case observeLog = "观察日志"
@@ -183,7 +181,7 @@ final class AppViewModel: ObservableObject {
     @Published var lastGraphWriteCandidateResultSummary: String?
     @Published var lastPendingApprovalResultSummary: String?
     @Published var lastAdmissionHoldQueueActionSummary: String?
-    @Published var llmProviderMode: AppLLMProviderMode = .stub
+    @Published var llmProviderMode: AppLLMProviderMode = .openAICompatible
     @Published var llmBaseURLString: String = AppLLMSettings.default.baseURLString
     @Published var llmModel: String = AppLLMSettings.default.model
     @Published var llmSelectedModel: String = AppLLMSettings.default.effectiveModel
@@ -294,10 +292,6 @@ final class AppViewModel: ObservableObject {
 
     private func applyNavigation(to item: ConnorNativeShellItem) {
         switch item {
-        case .runtimeCenter:
-            isBrowserVisible = false
-            sessionListFilter = .all
-            selection = .agentChat
         case .agentChat:
             isBrowserVisible = false
             selection = .agentChat
@@ -335,9 +329,6 @@ final class AppViewModel: ObservableObject {
             navigate(to: isBrowserVisible ? .browserWorkspace : .agentChat)
         case .checkCommercialReadiness:
             runCommercialReadinessReleaseGate()
-        case .openRuntimeCenter:
-            sessionListFilter = .all
-            navigate(to: .agentChat)
         case .openGraphMemoryReview, .openApprovals, .openSources, .openSkills, .openAutomation, .openSettings:
             if let command = ConnorNativeShellPresentation.default.command(for: commandID) {
                 navigate(to: command.target)
@@ -353,17 +344,6 @@ final class AppViewModel: ObservableObject {
         } catch {
             errorMessage = "Unsupported Connor link: \(url.absoluteString)"
         }
-    }
-
-    var runtimeCenterPresentation: ConnorRuntimeCenterPresentation {
-        ConnorRuntimeCenterPresentation.build(
-            sessions: chatSessions.isEmpty ? [activeChatSession] : chatSessions,
-            events: agentEventTimeline,
-            pendingApprovals: pendingApprovals,
-            automationTriggers: automationTriggerRecords,
-            graphMemoryDashboard: graphMemoryDashboardPresentation,
-            commercialReadinessDashboard: commercialReadinessDashboard
-        )
     }
 
     var commercialReadinessDashboard: CommercialReadinessDashboard {
@@ -631,8 +611,10 @@ final class AppViewModel: ObservableObject {
         do {
             let settings = try settingsRepository.loadSettings()
             switch settings.providerMode {
-            case .stub, .governedClaudeSidecar:
-                return AnyLLMProvider(StubLLMProvider())
+            case .governedClaudeSidecar:
+                return AnyLLMProvider { _, _ in
+                    throw AppGraphAgentRuntimeFactoryError.sidecarRequiresSessionManager
+                }
             case .openAICompatible:
                 guard let config = try settingsRepository.openAICompatibleConfig() else {
                     return AnyLLMProvider { _, _ in
@@ -1677,8 +1659,6 @@ private struct CraftListPaneView: View {
                 CraftSessionListPane(viewModel: viewModel)
             case .llmSettings:
                 CraftSettingsListPane(viewModel: viewModel, selection: $selection)
-            case .runtimeCenter:
-                CraftSessionListPane(viewModel: viewModel)
             case .sources:
                 CraftSimpleListPane(title: "数据源", subtitle: "MCP Source Runtime", rows: viewModel.sourceRuntimeConfigurations.map(\.displayName))
             case .skills:
@@ -1750,8 +1730,6 @@ private struct CraftDetailPaneView: View {
     var body: some View {
         Group {
             switch selection {
-            case .runtimeCenter:
-                AgentChatView(viewModel: viewModel)
             case .entities:
                 GraphEntitiesView(entities: viewModel.entities, statements: viewModel.statements, episodes: viewModel.episodes)
             case .search:
@@ -3085,7 +3063,6 @@ struct LLMSettingsView: View {
     var body: some View {
         Form {
             Picker("模型提供方", selection: $viewModel.llmProviderMode) {
-                Text("模拟模式").tag(AppLLMProviderMode.stub)
                 Text("OpenAI 兼容").tag(AppLLMProviderMode.openAICompatible)
                 Text("Claude Sidecar").tag(AppLLMProviderMode.governedClaudeSidecar)
             }
@@ -3270,7 +3247,6 @@ private struct SettingsAISection: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsGroup(title: "默认") {
                 SettingsPickerRow(title: "连接", subtitle: "新聊天的 API 连接", selection: $viewModel.llmProviderMode) {
-                    Text("模拟模式").tag(AppLLMProviderMode.stub)
                     Text("OpenAI 兼容").tag(AppLLMProviderMode.openAICompatible)
                     Text("Claude Sidecar").tag(AppLLMProviderMode.governedClaudeSidecar)
                 }

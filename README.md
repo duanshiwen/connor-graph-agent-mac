@@ -325,7 +325,7 @@ App repositories、runtime factory、runtime integration 和 SwiftUI presentatio
 - Skill runtime
 - Graph Memory Productization Center
 - Native shell presentation
-- Runtime center presentation
+- Runtime/readiness presentation models
 - Source / skill / automation UI presentation
 - Command palette presentation
 - Deep-link navigation resolver
@@ -366,7 +366,7 @@ Sources/ConnorGraphAppSupport/ConnorDeepLinkNavigator.swift
 
 ### ConnorGraphAgentMac
 
-SwiftUI macOS executable target。当前前台体验采用 Craft Agent 风格三栏布局：左侧产品导航、中间列表/设置分类、右侧详情工作区。普通用户主导航不暴露 graph node、write candidate、promotion queue、Runtime Center 或记忆调试中心；图谱能力作为后台记忆基础设施服务于会话和检索。
+SwiftUI macOS executable target。当前前台体验采用 Craft Agent 风格三栏布局：左侧产品导航、中间列表/设置分类、右侧详情工作区。程序启动默认进入“所有会话 / 全部”，并自动选择最近更新的对话。普通用户主导航不暴露 graph node、write candidate、promotion queue、Runtime Center 或记忆调试中心；图谱能力作为后台记忆基础设施服务于会话和检索。
 
 包含：
 
@@ -384,13 +384,12 @@ SwiftUI macOS executable target。当前前台体验采用 Craft Agent 风格三
 - Automation runtime panel
 - Command Palette view
 - Browser workspace view
-- Developer/runtime diagnostic views retained in code but hidden from primary user navigation
+- Developer/runtime diagnostics retained as data/presentation models where still used by readiness tests; Runtime Center no longer has a user-facing SwiftUI view or command entry
 
 相关文件示例：
 
 ```text
 Sources/ConnorGraphAgentMac/ConnorGraphAgentMacApp.swift
-Sources/ConnorGraphAgentMac/ConnorRuntimeCenterView.swift
 Sources/ConnorGraphAgentMac/ConnorCommandPaletteView.swift
 Sources/ConnorGraphAgentMac/SourceSkillAutomationRuntimeViews.swift
 Sources/ConnorGraphAgentMac/AgentChatView.swift
@@ -505,6 +504,7 @@ Sources/ConnorGraphAppSupport/AppGraphAgentRuntimeFactory.swift
 - Approval resolution command mapping
 - Persistent process transport
 - Factory wiring through app storage paths
+- Guardrail against routing governed Claude Sidecar mode through legacy direct model provider paths; Sidecar runs through `NativeSessionManager` + `ClaudeSDKSidecarBackend`.
 
 ---
 
@@ -657,7 +657,7 @@ Runtime Center
 Graph Memory Review Center
 ```
 
-这些能力仍可作为后台基础设施、开发诊断视图或命令入口存在，但不再放入主产品导航，避免让用户把 Connor 理解成“图谱编辑器”。
+这些能力仍可作为后台基础设施、内部数据模型或开发诊断能力存在；Runtime Center 的用户界面与命令入口已删除，避免让用户把 Connor 理解成“运行时控制台”或“图谱编辑器”。
 
 当前 native panels / views 包括：
 
@@ -675,7 +675,6 @@ SkillRuntimePanelView
 AutomationRuntimePanelView
 ConnorCommandPaletteView
 BrowserWorkspaceView
-ConnorRuntimeCenterView
 ```
 
 聊天工作台当前特性：
@@ -684,7 +683,7 @@ ConnorRuntimeCenterView
 - 右侧常驻 inspector 已改为浮动“信息”面板。
 - Composer 底部提供附件、浏览器、token 信息、权限模式、模型选择和发送按钮。
 - 权限模式显示中文名称，并默认隐藏 `allowAll` 级别。
-- 模型选择目前仍是 UI 层候选列表，后续应接入真实 provider / model registry。
+- 模型选择由 `AppLLMModelCatalog` 从当前 provider mode 构建连接：OpenAI-compatible 可读取 live `/models`，Claude Sidecar 使用 sidecar 配置候选；Sidecar 执行路径通过 `NativeSessionManager` + `ClaudeSDKSidecarBackend`。产品设置不再提供模拟 provider mode。
 
 ### 设置中心
 
@@ -782,12 +781,13 @@ AgentRuntimeUISettings
 
 AI 设置页复用现有 LLM 设置逻辑：
 
-- provider mode：stub、OpenAI-compatible、governed Claude Sidecar
-- model
+- provider mode：OpenAI-compatible、governed Claude Sidecar
+- model / selected model
 - base URL
 - API Key 输入 / 清除
 - 连接测试
 - Claude Sidecar executable / arguments / working directory
+- Sidecar mode guardrail：legacy direct LLM/model provider path 会返回明确错误，Claude Sidecar 只通过 session manager/backend 执行。
 
 注意：部分设置目前已完成本地持久化，但尚未全部接入实际运行时行为，例如桌面通知、保持屏幕常亮、外观模式实时切换、输入框拼写检查和网络 / Shell 审批细粒度 enforcement。
 
