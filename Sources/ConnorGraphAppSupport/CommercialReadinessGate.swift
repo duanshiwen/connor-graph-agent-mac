@@ -83,7 +83,19 @@ public enum CommercialExtensionRuntimeReadiness: Codable, Sendable, Equatable {
 }
 
 public enum CommercialGraphMemoryReadiness: Codable, Sendable, Equatable {
-    case ready(pendingCandidateCount: Int, openHoldCount: Int, recentChangeCount: Int)
+    case ready(
+        pendingCandidateCount: Int,
+        openHoldCount: Int,
+        recentChangeCount: Int,
+        contextReady: Bool = false,
+        ingestionReady: Bool = false,
+        distillationReady: Bool = false,
+        reviewReady: Bool = true,
+        contextItemCount: Int = 0,
+        stagedBundleCount: Int = 0,
+        distillationCandidateCount: Int = 0,
+        feedbackSignalCount: Int = 0
+    )
     case missing(String)
 }
 
@@ -242,7 +254,15 @@ public struct CommercialReadinessSnapshotBuilder: Sendable, Equatable {
             graphMemory = .ready(
                 pendingCandidateCount: graphMemoryDashboard.summary.pendingCandidateCount,
                 openHoldCount: graphMemoryDashboard.summary.openHoldCount,
-                recentChangeCount: graphMemoryDashboard.summary.recentChangeCount
+                recentChangeCount: graphMemoryDashboard.summary.recentChangeCount,
+                contextReady: graphMemoryDashboard.summary.contextReady,
+                ingestionReady: graphMemoryDashboard.summary.ingestionReady,
+                distillationReady: graphMemoryDashboard.summary.distillationReady,
+                reviewReady: graphMemoryDashboard.summary.reviewReady,
+                contextItemCount: graphMemoryDashboard.summary.contextItemCount,
+                stagedBundleCount: graphMemoryDashboard.summary.stagedBundleCount,
+                distillationCandidateCount: graphMemoryDashboard.summary.distillationCandidateCount,
+                feedbackSignalCount: graphMemoryDashboard.summary.feedbackSignalCount
             )
         } else {
             graphMemory = .missing("Graph memory dashboard is not available")
@@ -437,16 +457,42 @@ public struct CommercialReadinessGate: Sendable, Equatable {
 
     private func graphMemoryCard(_ readiness: CommercialGraphMemoryReadiness) -> CommercialReadinessCard {
         switch readiness {
-        case .ready(let pendingCandidateCount, let openHoldCount, let recentChangeCount):
+        case .ready(
+            let pendingCandidateCount,
+            let openHoldCount,
+            let recentChangeCount,
+            let contextReady,
+            let ingestionReady,
+            let distillationReady,
+            let reviewReady,
+            let contextItemCount,
+            let stagedBundleCount,
+            let distillationCandidateCount,
+            let feedbackSignalCount
+        ):
+            let hasCoreEvidence = contextReady || ingestionReady || distillationReady || reviewReady
+            let blockingReasons = hasCoreEvidence ? [] : ["Graph memory is not wired into the Agent core runtime"]
+            var metrics = [
+                "candidates": "\(pendingCandidateCount)",
+                "holds": "\(openHoldCount)",
+                "changes": "\(recentChangeCount)"
+            ]
+            if contextReady || ingestionReady || distillationReady || contextItemCount > 0 || stagedBundleCount > 0 || distillationCandidateCount > 0 || feedbackSignalCount > 0 {
+                metrics["contextReady"] = contextReady ? "true" : "false"
+                metrics["ingestionReady"] = ingestionReady ? "true" : "false"
+                metrics["distillationReady"] = distillationReady ? "true" : "false"
+                metrics["reviewReady"] = reviewReady ? "true" : "false"
+                metrics["contextItems"] = "\(contextItemCount)"
+                metrics["stagedBundles"] = "\(stagedBundleCount)"
+                metrics["distillationCandidates"] = "\(distillationCandidateCount)"
+                metrics["feedbackSignals"] = "\(feedbackSignalCount)"
+            }
             return CommercialReadinessCard(
                 phase: .graphMemoryLoop,
-                status: .ready,
-                evidence: "\(pendingCandidateCount) candidates · \(openHoldCount) holds · \(recentChangeCount) recent changes",
-                metrics: [
-                    "candidates": "\(pendingCandidateCount)",
-                    "holds": "\(openHoldCount)",
-                    "changes": "\(recentChangeCount)"
-                ]
+                status: blockingReasons.isEmpty ? .ready : .blocked,
+                evidence: "\(pendingCandidateCount) candidates · \(openHoldCount) holds · \(recentChangeCount) recent changes · context \(contextReady ? "ready" : "not ready") · ingestion \(ingestionReady ? "ready" : "not ready") · distillation \(distillationReady ? "ready" : "not ready")",
+                metrics: metrics,
+                blockingReasons: blockingReasons
             )
         case .missing(let reason):
             return blockedCard(phase: .graphMemoryLoop, reason: reason)
