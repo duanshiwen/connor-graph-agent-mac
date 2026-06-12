@@ -91,24 +91,6 @@ public protocol LLMProvider: Sendable {
     func complete(prompt: String, context: AgentContext) async throws -> LLMResponse
 }
 
-public struct StubLLMProvider: LLMProvider, Sendable, Equatable {
-    public init() {}
-
-    public func complete(prompt: String, context: AgentContext) async throws -> LLMResponse {
-        let citations = context.items.map(\.sourceID)
-        let contextSummary: String
-        if context.items.isEmpty {
-            contextSummary = "No graph context was found."
-        } else {
-            contextSummary = context.items.map { $0.content }.joined(separator: "\n")
-        }
-        return LLMResponse(
-            text: "Stub answer for: \(prompt)\n\nGrounded context:\n\(contextSummary)",
-            citations: citations
-        )
-    }
-}
-
 public extension AgentContextBuilder {
     var groupIdentifier: String { groupID }
 }

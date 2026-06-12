@@ -167,7 +167,7 @@ public extension ProductOSSourceDefinition {
             notes: "Built-in local read surface. Graph writes must still pass Connor admission."
         ),
         ProductOSSourceDefinition(
-            id: "mcp-registry-placeholder",
+            id: "mcp-source-registry",
             displayName: "MCP Source Registry",
             kind: .mcp,
             status: .draft,
@@ -176,7 +176,7 @@ public extension ProductOSSourceDefinition {
             graphIngestionEnabled: false,
             graphWritePolicy: .askToWrite,
             tags: ["phase-4", "mcp"],
-            notes: "Placeholder for future MCP/OAuth source runtime; disabled until connector execution is governed."
+            notes: "Draft registry entry for governed MCP/OAuth source runtime. Connector execution remains disabled until source validation and approval policies are satisfied."
         )
     ]
 }

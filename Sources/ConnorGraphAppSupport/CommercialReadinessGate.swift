@@ -24,7 +24,7 @@ public enum CommercialReadinessPhase: String, Codable, Sendable, Equatable, Hash
     public var target: ConnorNativeShellItem {
         switch self {
         case .sessionGovernance: .agentChat
-        case .claudeSDKSidecar: .runtimeCenter
+        case .claudeSDKSidecar: .settings
         case .sourcesSkillsAutomations: .sources
         case .graphMemoryLoop: .graphMemory
         case .nativeCommercialUI: .settings

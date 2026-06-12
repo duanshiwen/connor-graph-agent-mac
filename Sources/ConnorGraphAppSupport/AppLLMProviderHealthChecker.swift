@@ -37,8 +37,6 @@ public struct AppLLMProviderHealthChecker: Sendable {
         do {
             let settings = try settingsRepository.loadSettings()
             switch settings.providerMode {
-            case .stub:
-                return AppLLMProviderHealthCheckResult(status: .success, message: "模拟模型提供方可用。")
             case .governedClaudeSidecar:
                 let path = settings.sidecarExecutablePath.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !path.isEmpty else {

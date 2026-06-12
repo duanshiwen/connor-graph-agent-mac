@@ -6,6 +6,7 @@ import ConnorGraphStore
 public enum AppGraphAgentRuntimeFactoryError: Error, Sendable, Equatable, LocalizedError {
     case unsafeSidecarPermissionMode(AgentPermissionMode)
     case missingSidecarExecutablePath
+    case sidecarRequiresSessionManager
 
     public var errorDescription: String? {
         switch self {
@@ -13,6 +14,8 @@ public enum AppGraphAgentRuntimeFactoryError: Error, Sendable, Equatable, Locali
             return "Governed Claude SDK sidecar path does not allow unsafe permission mode: \(mode.rawValue)."
         case .missingSidecarExecutablePath:
             return "Governed Claude SDK sidecar path requires a sidecar executable path."
+        case .sidecarRequiresSessionManager:
+            return "Governed Claude SDK sidecar must run through NativeSessionManager/ClaudeSDKSidecarBackend, not the legacy direct model provider path."
         }
     }
 }
@@ -205,8 +208,10 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         do {
             let settings = try settingsRepository.loadSettings()
             switch settings.providerMode {
-            case .stub, .governedClaudeSidecar:
-                return AnyAgentModelProvider(StubAgentModelProvider())
+            case .governedClaudeSidecar:
+                return AnyAgentModelProvider(modelID: "governed-claude-sidecar-requires-session-manager") { _ in
+                    throw AppGraphAgentRuntimeFactoryError.sidecarRequiresSessionManager
+                }
             case .openAICompatible:
                 guard let config = try settingsRepository.openAICompatibleConfig() else {
                     return AnyAgentModelProvider(modelID: "missing-openai-compatible-config") { _ in
@@ -224,8 +229,10 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         do {
             let settings = try settingsRepository.loadSettings()
             switch settings.providerMode {
-            case .stub, .governedClaudeSidecar:
-                return AnyLLMProvider(StubLLMProvider())
+            case .governedClaudeSidecar:
+                return AnyLLMProvider { _, _ in
+                    throw AppGraphAgentRuntimeFactoryError.sidecarRequiresSessionManager
+                }
             case .openAICompatible:
                 guard let config = try settingsRepository.openAICompatibleConfig() else {
                     return AnyLLMProvider { _, _ in
