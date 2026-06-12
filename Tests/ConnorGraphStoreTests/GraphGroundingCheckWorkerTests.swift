@@ -7,7 +7,7 @@ private func temporaryGroundingCheckDatabaseURL(_ name: String = UUID().uuidStri
     FileManager.default.temporaryDirectory.appendingPathComponent("\(name).sqlite")
 }
 
-private struct GroundingRunnerStubExtractor: GraphExtractorProvider {
+private struct GroundingRunnerFakeExtractor: GraphExtractorProvider {
     var draft: GraphExtractionDraft
 
     func extract(from source: GraphExtractionSource) async throws -> GraphExtractionDraft {
@@ -113,7 +113,7 @@ private struct GroundingRunnerStubExtractor: GraphExtractorProvider {
     ))
     let source = GraphExtractionSource(id: "unused", graphID: "default", sourceType: .manual, title: "unused", content: "unused", occurredAt: now)
 
-    let result = try await GraphBackgroundJobRunner(store: store, extractor: GroundingRunnerStubExtractor(draft: GraphExtractionDraft(source: source))).runOnce(graphID: "default", now: now)
+    let result = try await GraphBackgroundJobRunner(store: store, extractor: GroundingRunnerFakeExtractor(draft: GraphExtractionDraft(source: source))).runOnce(graphID: "default", now: now)
 
     #expect(result?.jobID == "job-grounding-runner")
     #expect(result?.jobType == .groundingCheck)

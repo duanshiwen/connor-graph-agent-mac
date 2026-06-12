@@ -31,26 +31,3 @@ public struct AnyAgentModelProvider: AgentModelProvider {
         try await completeHandler(request)
     }
 }
-
-public struct StubAgentModelProvider: AgentModelProvider, Sendable {
-    public var modelID: String { "stub-agent-model" }
-    public var capabilities: AgentModelCapabilities {
-        AgentModelCapabilities(
-            supportsStreaming: false,
-            supportsToolCalling: true,
-            supportsParallelToolCalls: false,
-            supportsStructuredOutput: false,
-            supportsVision: false
-        )
-    }
-
-    public init() {}
-
-    public func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
-        if request.messages.contains(where: { $0.role == .tool }) {
-            let toolText = request.messages.last(where: { $0.role == .tool })?.content ?? ""
-            return AgentModelResponse(text: "Stub answer grounded in tool result: \(toolText)", finishReason: .stop)
-        }
-        return AgentModelResponse(text: "Stub answer. Configure an OpenAI-compatible provider for production tool calling.", finishReason: .stop)
-    }
-}

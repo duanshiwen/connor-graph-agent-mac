@@ -3,7 +3,7 @@ import Testing
 import ConnorGraphCore
 import ConnorGraphMemory
 
-private enum StubMemoryDistillationError: Error {
+private enum FakeMemoryDistillationError: Error {
     case failed
 }
 
@@ -40,8 +40,8 @@ private enum StubMemoryDistillationError: Error {
     let client = ClosureMemoryDistillationLLMClient(completion: { _ in
         MemoryDistillationLLMResponse(
             text: json,
-            provider: "stub",
-            modelID: "stub-memory",
+            provider: "test-provider",
+            modelID: "test-memory",
             promptVersion: MemoryDistillationPromptBuilder.defaultPromptVersion
         )
     })
@@ -67,7 +67,7 @@ private enum StubMemoryDistillationError: Error {
     )
     let buffer = MemoryStagingBuffer(id: "buffer-1", sessionID: "session-1", pendingBundles: [bundle])
     let client = ClosureMemoryDistillationLLMClient(completion: { _ in
-        throw StubMemoryDistillationError.failed
+        throw FakeMemoryDistillationError.failed
     })
     let distiller = LLMMemoryDistiller(client: client)
 

@@ -55,8 +55,8 @@ private struct AppLLMGraphExtractionClient: GraphExtractionLLMClient, Sendable {
 /// interface for running queued background jobs (extraction, index refresh,
 /// anomaly resolution, entity merge review).
 ///
-/// Defaults to a safe stub extractor. When LLM settings contain a valid
-/// OpenAI-compatible provider configuration, the app can construct an
+/// Defaults to an explicit unavailable extractor. When LLM settings contain a
+/// valid OpenAI-compatible provider configuration, the app constructs an
 /// LLM-backed extractor that produces validated extraction drafts. Extraction
 /// drafts still flow through the store-side optimistic write pipeline; future
 /// review-queue work should route them through `GraphWriteCandidate` before
@@ -67,7 +67,7 @@ public struct AppGraphBackgroundJobRunner: @unchecked Sendable {
     public let graphID: String
 
     public init(store: SQLiteGraphKernelStore, graphID: String = "default") {
-        self.init(store: store, graphID: graphID, extractor: AnyGraphExtractorProvider(StubGraphExtractor()))
+        self.init(store: store, graphID: graphID, extractor: AnyGraphExtractorProvider(UnavailableGraphExtractor()))
     }
 
     public init(store: SQLiteGraphKernelStore, graphID: String = "default", settingsRepository: AppLLMSettingsRepository) {
@@ -130,7 +130,7 @@ public struct AppGraphBackgroundJobRunner: @unchecked Sendable {
     private static func makeExtractor(settingsRepository: AppLLMSettingsRepository) -> AnyGraphExtractorProvider {
         do {
             guard let config = try settingsRepository.openAICompatibleConfig() else {
-                return AnyGraphExtractorProvider(StubGraphExtractor())
+                return AnyGraphExtractorProvider(UnavailableGraphExtractor())
             }
             let provider = AnyAgentModelProvider(OpenAICompatibleProvider(config: config))
             let client = AppLLMGraphExtractionClient(
@@ -140,7 +140,7 @@ public struct AppGraphBackgroundJobRunner: @unchecked Sendable {
             )
             return AnyGraphExtractorProvider(LLMGraphExtractor(client: client))
         } catch {
-            return AnyGraphExtractorProvider(StubGraphExtractor())
+            return AnyGraphExtractorProvider(UnavailableGraphExtractor(error: .invalidLLMConfiguration(String(describing: error))))
         }
     }
 }

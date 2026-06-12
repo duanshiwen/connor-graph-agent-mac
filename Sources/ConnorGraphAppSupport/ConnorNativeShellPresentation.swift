@@ -1,7 +1,6 @@
 import Foundation
 
 public enum ConnorNativeShellItem: String, Codable, Sendable, Equatable, Hashable, CaseIterable, Identifiable {
-    case runtimeCenter
     case agentChat
     case browserWorkspace
     case graphMemory
@@ -65,7 +64,6 @@ public struct ConnorNativeShellSidebarGroup: Codable, Sendable, Equatable, Ident
 public enum ConnorNativeShellCommandID: String, Codable, Sendable, Equatable, Hashable, Identifiable {
     case newSession
     case toggleBrowser
-    case openRuntimeCenter
     case openGraphMemoryReview
     case openApprovals
     case openSources
@@ -126,8 +124,6 @@ public struct ConnorNativeShellRouteResolver: Sendable {
 
     public func route(for item: ConnorNativeShellItem) -> ConnorNativeShellRoute {
         switch item {
-        case .runtimeCenter:
-            ConnorNativeShellRoute(item: .agentChat, legacySidebarID: "agentChat")
         case .agentChat:
             ConnorNativeShellRoute(item: item, legacySidebarID: "agentChat")
         case .browserWorkspace:
