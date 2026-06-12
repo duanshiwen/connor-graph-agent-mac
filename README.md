@@ -953,7 +953,7 @@ swift build --product connor-graph-agent-mac
 最近验证结果：
 
 ```text
-Build of product 'connor-graph-agent-mac' complete! (2026-06-12 20:47 GMT+8)
+Build of product 'connor-graph-agent-mac' complete! (2026-06-12 21:12 GMT+8)
 ```
 
 Test：
@@ -966,7 +966,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
 最近验证结果：
 
 ```text
-364 tests in 14 suites passed (2026-06-12 20:47 GMT+8)
+369 tests in 15 suites passed (2026-06-12 21:12 GMT+8)
 ```
 
 Phase I 专项验证：
@@ -1019,6 +1019,24 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --filter Pha
 ---
 
 
+
+### Commercial Train 5: Native UI Commercialization
+
+本阶段将 Connor 的 Swift Native UI 从“功能入口集合”升级为商业级 Agent OS 控制台：
+
+- 新增 `ConnorNativeCommercialUIPresentation` 与 settings presentation contract，将 shell、runtime center、command palette、settings、readiness evidence 汇总为可测试的 Native UI 商业化契约。
+- Native Shell 信息架构升级为 Home / Work / Memory / Governance / Extensions / System，并新增 Runtime Center 作为默认商业首页。
+- Sidebar item 和 command 增加 commercial metadata：primary action、risk level、empty state、group、keywords、shortcut 等。
+- Runtime Center 升级为商业首页，展示 Native UI health metric 和 Next Best Actions，优先引导 approvals、graph memory review、automation review、commercial readiness blockers。
+- Command Palette 支持 group / risk / primary action / keywords / shortcut 搜索，并在 SwiftUI 中显示 primary、group、risk badge 和空状态。
+- Commercial Readiness Gate 的 Native Commercial UI phase 升级为 Train 5 evidence：home surface、runtime center、command palette、readiness link、primary actions、empty states、keyboard shortcuts、settings sections。
+- SwiftUI app 轻量接入 Runtime Center home view，不重写整套 UI，不引入 Craft UI fork 或多 workspace。
+- 新增 `CommercialTrain5NativeUICommercializationTests` 覆盖 Native UI IA、command palette、runtime center next actions、settings/readiness aggregation 和 readiness gate evidence。
+
+本阶段仍不做 App Store packaging/notarization、完整 theme editor、复杂 onboarding、team billing、多用户协作或 Electron/Web UI；Connor 继续保持单 Home / Runtime Root 与 SwiftUI native shell。
+
+---
+
 ### Commercial Train 4: Graph Memory as Agent Core Capability
 
 本阶段将 Graph Memory 从后处理/Review Center 能力升级为 Agent runtime 的核心能力：
@@ -1053,6 +1071,7 @@ Commercial Train 1: Session OS Maturation
 Commercial Train 2: Claude SDK Sidecar Productionization
 Commercial Train 3: Source / MCP Platformization
 Commercial Train 4: Graph Memory as Agent Core Capability
+Commercial Train 5: Native UI Commercialization
 Local UI Refresh: Craft-like three-column shell and user-facing navigation cleanup
 Local Settings Center: App / AI / Appearance / Input / Permissions / Labels / Shortcuts / Preferences
 ```
