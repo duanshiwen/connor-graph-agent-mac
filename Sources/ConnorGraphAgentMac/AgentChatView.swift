@@ -4,6 +4,33 @@ import ConnorGraphAgent
 import ConnorGraphSearch
 import ConnorGraphAppSupport
 
+private enum AgentChatLayout {
+    static let spaceXS: CGFloat = 4
+    static let spaceS: CGFloat = 8
+    static let spaceM: CGFloat = 12
+    static let spaceL: CGFloat = 16
+    static let spaceXL: CGFloat = 24
+
+    static let radiusS: CGFloat = 8
+    static let radiusM: CGFloat = 12
+    static let radiusL: CGFloat = 16
+    static let radiusXL: CGFloat = 20
+
+    static let hairlineOpacity: Double = 0.14
+    static let chipHeight: CGFloat = 28
+    static let iconButtonSize: CGFloat = 28
+    static let primaryButtonSize: CGFloat = 32
+    static let composerTextMinHeight: CGFloat = 52
+    static let composerTextMaxHeight: CGFloat = 132
+    static let composerInfoButtonWidth: CGFloat = 88
+    static let modelMenuMaxWidth: CGFloat = 190
+
+    static let messageMaxWidth: CGFloat = 760
+    static let userMessageMaxWidth: CGFloat = 560
+    static let processMaxWidth: CGFloat = 700
+    static let messageSideInset: CGFloat = 80
+}
+
 struct AgentChatView: View {
     @ObservedObject var viewModel: AppViewModel
     @State private var isSessionInfoPresented = false
@@ -22,15 +49,15 @@ struct AgentChatView: View {
             if isSessionInfoPresented {
                 AgentChatInspectorView(viewModel: viewModel)
                     .frame(width: 360, height: 420)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusXL, style: .continuous))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
+                        RoundedRectangle(cornerRadius: AgentChatLayout.radiusXL, style: .continuous)
+                            .stroke(Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1)
                     )
                     .shadow(color: .black.opacity(0.16), radius: 24, x: 0, y: 12)
                     .transition(.scale(scale: 0.96, anchor: .topTrailing).combined(with: .opacity))
-                    .padding(.top, 14)
-                    .padding(.trailing, 18)
+                    .padding(.top, AgentChatLayout.spaceL)
+                    .padding(.trailing, AgentChatLayout.spaceL)
             }
         }
         .navigationTitle("Connor Sessions")
@@ -46,7 +73,7 @@ private struct AgentChatSessionListView: View {
     @ObservedObject var viewModel: AppViewModel
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: AgentChatLayout.spaceM) {
             Button(action: { viewModel.newChatSession() }) {
                 Label("新建对话", systemImage: "square.and.pencil")
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -54,7 +81,7 @@ private struct AgentChatSessionListView: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                 HStack {
                     Text("Inbox")
                         .font(.headline)
@@ -69,7 +96,7 @@ private struct AgentChatSessionListView: View {
             }
 
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 6) {
+                LazyVStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                     ForEach(viewModel.chatSessions) { session in
                         let row = AgentChatSessionPresentation(session: session)
                         AgentChatSessionRow(
@@ -80,12 +107,12 @@ private struct AgentChatSessionListView: View {
                         }
                     }
                 }
-                .padding(.vertical, 4)
+                .padding(.vertical, AgentChatLayout.spaceXS)
             }
 
             Spacer(minLength: 0)
         }
-        .padding(12)
+        .padding(AgentChatLayout.spaceM)
     }
 }
 
@@ -96,8 +123,8 @@ private struct AgentChatSessionRow: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 9) {
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+                HStack(spacing: AgentChatLayout.spaceS) {
                     Image(systemName: row.isFlagged ? "flag.fill" : (isSelected ? "message.fill" : "message"))
                         .font(.caption)
                         .foregroundStyle(row.isFlagged ? .orange : (isSelected ? .accentColor : .secondary))
@@ -107,7 +134,7 @@ private struct AgentChatSessionRow: View {
                         .lineLimit(1)
                     Spacer(minLength: 0)
                 }
-                HStack(spacing: 6) {
+                HStack(spacing: AgentChatLayout.spaceS) {
                     AgentStatusPill(status: row.status, text: row.statusText)
                     Text("\(row.messageCount) msgs")
                         .font(.caption2)
@@ -120,13 +147,13 @@ private struct AgentChatSessionRow: View {
                     FlowLikeChips(values: row.labels.prefix(3).map(\.displayText))
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 10)
+            .padding(.horizontal, AgentChatLayout.spaceM)
+            .padding(.vertical, AgentChatLayout.spaceM)
             .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous)
                     .fill(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
             )
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -155,20 +182,20 @@ private struct AgentChatConversationView: View {
     var body: some View {
         VStack(spacing: 0) {
             AgentChatConversationHeader(viewModel: viewModel)
-                .padding(.horizontal, 18)
-                .padding(.vertical, 10)
+                .padding(.horizontal, AgentChatLayout.spaceL)
+                .padding(.vertical, AgentChatLayout.spaceM)
 
             if !viewModel.agentEventTimeline.isEmpty {
                 AgentEventTimelineView(events: viewModel.agentEventTimeline)
-                    .padding(.horizontal, 18)
-                    .padding(.bottom, 8)
+                    .padding(.horizontal, AgentChatLayout.spaceL)
+                    .padding(.bottom, AgentChatLayout.spaceS)
             }
 
             Divider()
 
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 16) {
+                    LazyVStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
                         if timelineItems.isEmpty {
                             AgentChatEmptyStateView()
                                 .frame(maxWidth: .infinity, minHeight: 360)
@@ -184,8 +211,8 @@ private struct AgentChatConversationView: View {
                             }
                         }
                     }
-                    .padding(.horizontal, 28)
-                    .padding(.vertical, 22)
+                    .padding(.horizontal, AgentChatLayout.spaceXL)
+                    .padding(.vertical, AgentChatLayout.spaceXL)
                 }
                 .onChange(of: viewModel.transcript.count) { _, _ in
                     scrollToBottom(proxy: proxy)
@@ -198,8 +225,8 @@ private struct AgentChatConversationView: View {
             Divider()
 
             AgentChatComposerView(viewModel: viewModel, isSessionInfoPresented: $isSessionInfoPresented)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
+                .padding(.horizontal, AgentChatLayout.spaceL)
+                .padding(.vertical, AgentChatLayout.spaceM)
         }
         .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
     }
@@ -213,13 +240,13 @@ private struct AgentChatConversationHeader: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
+            HStack(spacing: AgentChatLayout.spaceM) {
+                VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
                     Text(selectedTitle)
                         .font(.title3.weight(.semibold))
                         .lineLimit(1)
-                    HStack(spacing: 8) {
+                    HStack(spacing: AgentChatLayout.spaceS) {
                         if let session = viewModel.chatSessions.first(where: { $0.id == viewModel.selectedChatSessionID }) {
                             AgentStatusPill(status: session.governance.status, text: session.governance.status.displayName)
                             ForEach(session.governance.labels.prefix(4)) { label in
@@ -241,7 +268,7 @@ private struct AgentChatConversationHeader: View {
 
             if let summary = viewModel.latestChatSummary {
                 DisclosureGroup {
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                         Text(summary.content)
                             .font(.subheadline)
                             .textSelection(.enabled)
@@ -259,13 +286,13 @@ private struct AgentChatConversationHeader: View {
                                 .foregroundStyle(.green)
                         }
                     }
-                    .padding(.top, 6)
+                    .padding(.top, AgentChatLayout.spaceS)
                 } label: {
                     Label("会话摘要", systemImage: "text.quote")
                         .font(.caption.weight(.semibold))
                 }
-                .padding(10)
-                .background(.quaternary.opacity(0.20), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .padding(AgentChatLayout.spaceM)
+                .background(.quaternary.opacity(0.20), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
             }
         }
     }
@@ -277,10 +304,10 @@ private struct AgentEventTimelineView: View {
     var body: some View {
         DisclosureGroup {
             ScrollView(.horizontal, showsIndicators: true) {
-                HStack(alignment: .top, spacing: 10) {
+                HStack(alignment: .top, spacing: AgentChatLayout.spaceM) {
                     ForEach(events) { event in
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack(spacing: 6) {
+                        VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+                            HStack(spacing: AgentChatLayout.spaceS) {
                                 Image(systemName: icon(for: event.severity))
                                     .foregroundStyle(color(for: event.severity))
                                 Text(event.title)
@@ -296,11 +323,11 @@ private struct AgentEventTimelineView: View {
                                 .font(.caption2.monospaced())
                                 .foregroundStyle(.tertiary)
                         }
-                        .padding(10)
+                        .padding(AgentChatLayout.spaceM)
                         .frame(width: 250, alignment: .leading)
-                        .background(.quaternary.opacity(0.16), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .background(.quaternary.opacity(0.16), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous)
                                 .stroke(color(for: event.severity).opacity(0.28), lineWidth: 1)
                         )
                     }
@@ -357,10 +384,10 @@ private struct AgentChatMessageRow: View {
 
     var body: some View {
         HStack(alignment: .top) {
-            if isUser { Spacer(minLength: 80) }
+            if isUser { Spacer(minLength: AgentChatLayout.messageSideInset) }
 
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+                HStack(spacing: AgentChatLayout.spaceS) {
                     Text(row.roleLabel)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(isUser ? .white.opacity(0.90) : .secondary)
@@ -378,15 +405,15 @@ private struct AgentChatMessageRow: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
 
             }
-            .padding(12)
-            .frame(maxWidth: isUser ? 560 : 760, alignment: .leading)
-            .background(messageBackground, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(AgentChatLayout.spaceM)
+            .frame(maxWidth: isUser ? AgentChatLayout.userMessageMaxWidth : AgentChatLayout.messageMaxWidth, alignment: .leading)
+            .background(messageBackground, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(isUser ? Color.clear : Color.secondary.opacity(0.12), lineWidth: 1)
+                RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                    .stroke(isUser ? Color.clear : Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1)
             )
 
-            if !isUser { Spacer(minLength: 80) }
+            if !isUser { Spacer(minLength: AgentChatLayout.messageSideInset) }
         }
         .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
     }
@@ -402,10 +429,10 @@ private struct AgentChatTurnProcessRow: View {
 
     var body: some View {
         HStack(alignment: .top) {
-            Spacer(minLength: 120)
+            Spacer(minLength: AgentChatLayout.messageSideInset)
 
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+                HStack(spacing: AgentChatLayout.spaceS) {
                     Image(systemName: process.state == .running ? "clock.arrow.circlepath" : "checkmark.circle")
                         .foregroundStyle(process.state == .running ? .orange : .secondary)
                     Text(process.title)
@@ -420,23 +447,23 @@ private struct AgentChatTurnProcessRow: View {
                 }
                 .foregroundStyle(.secondary)
 
-                HStack(spacing: 8) {
+                HStack(spacing: AgentChatLayout.spaceS) {
                     Image(systemName: "info.circle")
                     Text(process.summary)
                     Spacer(minLength: 0)
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
-                .background(.quaternary.opacity(0.18), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .padding(.horizontal, AgentChatLayout.spaceS)
+                .padding(.vertical, AgentChatLayout.spaceS)
+                .background(.quaternary.opacity(0.18), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
 
                 if process.state == .running {
                     ThinkingDotsView()
                 }
 
                 DisclosureGroup {
-                    VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
                         if process.state == .running {
                             Label("正在准备图谱上下文和提示词", systemImage: "magnifyingglass")
                             Label("正在组装近期对话和可选会话摘要", systemImage: "text.bubble")
@@ -452,13 +479,13 @@ private struct AgentChatTurnProcessRow: View {
                         }
 
                         if !process.conversationHistory.isEmpty {
-                            VStack(alignment: .leading, spacing: 8) {
+                            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                                 Text("完整对话历史（截至本轮回复前 \(process.fullConversationMessageCount) 条）")
                                     .font(.caption.weight(.semibold))
                                     .foregroundStyle(.secondary)
                                 ForEach(process.conversationHistory) { historyRow in
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        HStack(spacing: 6) {
+                                    VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
+                                        HStack(spacing: AgentChatLayout.spaceS) {
                                             Text(historyRow.roleLabel)
                                                 .font(.caption.weight(.semibold))
                                             Text("第 \(historyRow.turnNumber) 轮")
@@ -485,7 +512,7 @@ private struct AgentChatTurnProcessRow: View {
                         }
 
                         if !process.expandedContextItems.isEmpty {
-                            VStack(alignment: .leading, spacing: 8) {
+                            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                                 Text("使用的图谱上下文")
                                     .font(.caption.weight(.semibold))
                                     .foregroundStyle(.secondary)
@@ -522,15 +549,15 @@ private struct AgentChatTurnProcessRow: View {
                 }
                 .font(.caption)
             }
-            .padding(10)
-            .frame(maxWidth: 700, alignment: .leading)
-            .background(.quaternary.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .padding(AgentChatLayout.spaceM)
+            .frame(maxWidth: AgentChatLayout.processMaxWidth, alignment: .leading)
+            .background(.quaternary.opacity(0.12), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous)
                     .stroke(Color.secondary.opacity(0.10), lineWidth: 1)
             )
 
-            Spacer(minLength: 120)
+            Spacer(minLength: AgentChatLayout.messageSideInset)
         }
         .frame(maxWidth: .infinity, alignment: .center)
     }
@@ -541,8 +568,8 @@ private struct AgentChatPendingAssistantRow: View {
 
     var body: some View {
         HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
+                HStack(spacing: AgentChatLayout.spaceS) {
                     Text("助手")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
@@ -561,7 +588,7 @@ private struct AgentChatPendingAssistantRow: View {
                 ThinkingDotsView()
 
                 DisclosureGroup {
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                         Label(pending.processingSummary, systemImage: "magnifyingglass")
                         Label("正在组装近期对话和可选会话摘要", systemImage: "text.bubble")
                         Label("正在调用已配置的模型提供方", systemImage: "network")
@@ -575,15 +602,15 @@ private struct AgentChatPendingAssistantRow: View {
                 }
                 .font(.caption)
             }
-            .padding(12)
-            .frame(maxWidth: 760, alignment: .leading)
-            .background(Color(nsColor: .controlBackgroundColor).opacity(0.85), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(AgentChatLayout.spaceM)
+            .frame(maxWidth: AgentChatLayout.messageMaxWidth, alignment: .leading)
+            .background(Color(nsColor: .controlBackgroundColor).opacity(0.85), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+                RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                    .stroke(Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1)
             )
 
-            Spacer(minLength: 80)
+            Spacer(minLength: AgentChatLayout.messageSideInset)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -609,9 +636,9 @@ private struct AgentChatTurnInspectorView: View {
     var row: AgentChatMessagePresentation
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
             if let summary = row.turnMetadataSummary {
-                HStack(spacing: 8) {
+                HStack(spacing: AgentChatLayout.spaceS) {
                     Image(systemName: "info.circle")
                     Text(summary)
                     Spacer(minLength: 0)
@@ -624,7 +651,7 @@ private struct AgentChatTurnInspectorView: View {
             }
 
             DisclosureGroup {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
                     if let request = row.currentRequest {
                         MetadataBlock(title: "当前请求", text: request)
                     }
@@ -634,7 +661,7 @@ private struct AgentChatTurnInspectorView: View {
                     }
 
                     if !row.expandedContextItems.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
+                        VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                             Text("引用的图谱上下文")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.secondary)
@@ -697,7 +724,7 @@ private struct MetadataChips: View {
     var values: [String]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
             Text(title)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
@@ -710,7 +737,7 @@ private struct FlowLikeChips: View {
     var values: [String]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
             ForEach(values, id: \.self) { value in
                 Text(value)
                     .font(.caption2)
@@ -728,7 +755,7 @@ private struct AgentChatComposerView: View {
     @Binding var isSessionInfoPresented: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
             ZStack(alignment: .topTrailing) {
                 SafeChatComposerTextView(
                     text: $viewModel.chatInput,
@@ -736,10 +763,10 @@ private struct AgentChatComposerView: View {
                     isSpellCheckEnabled: viewModel.spellCheckEnabled,
                     onSubmit: { Task { await viewModel.submitChat() } }
                 )
-                .padding(.leading, 14)
-                .padding(.trailing, 88)
-                .padding(.vertical, 11)
-                .frame(minHeight: 46, maxHeight: 128, alignment: .topLeading)
+                .padding(.leading, AgentChatLayout.spaceM)
+                .padding(.trailing, AgentChatLayout.composerInfoButtonWidth)
+                .padding(.vertical, AgentChatLayout.spaceM)
+                .frame(minHeight: AgentChatLayout.composerTextMinHeight, maxHeight: AgentChatLayout.composerTextMaxHeight, alignment: .topLeading)
 
                 Button {
                     withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
@@ -748,25 +775,25 @@ private struct AgentChatComposerView: View {
                 } label: {
                     Label("信息", systemImage: "info.circle")
                         .font(.caption.weight(.medium))
-                        .padding(.horizontal, 10)
-                        .frame(height: 30)
+                        .padding(.horizontal, AgentChatLayout.spaceM)
+                        .frame(height: AgentChatLayout.chipHeight)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.regular)
                 .help("会话信息")
-                .padding(.top, 8)
-                .padding(.trailing, 10)
+                .padding(.top, AgentChatLayout.spaceS)
+                .padding(.trailing, AgentChatLayout.spaceS)
             }
-            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
+                RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                    .stroke(Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1)
             )
 
-            HStack(spacing: 8) {
+            HStack(spacing: AgentChatLayout.spaceS) {
                 Button(action: {}) {
                     Image(systemName: "paperclip")
-                        .frame(width: 26, height: 26)
+                        .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
                 }
                 .buttonStyle(.plain)
                 .help("添加附件")
@@ -774,8 +801,8 @@ private struct AgentChatComposerView: View {
                 Button(action: { viewModel.isBrowserVisible.toggle() }) {
                     Label(viewModel.isBrowserVisible ? "隐藏浏览器" : "浏览器", systemImage: "safari")
                         .font(.caption.weight(.medium))
-                        .padding(.horizontal, 9)
-                        .frame(height: 28)
+                        .padding(.horizontal, AgentChatLayout.spaceM)
+                        .frame(height: AgentChatLayout.chipHeight)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -786,7 +813,7 @@ private struct AgentChatComposerView: View {
                         .foregroundStyle(promptBudgetStatusColor(inspection.promptBudgetStatus))
                 }
 
-                Spacer(minLength: 8)
+                Spacer(minLength: AgentChatLayout.spaceS)
 
                 Picker("权限", selection: $viewModel.sidecarPermissionMode) {
                     ForEach(AgentPermissionMode.allCases.filter { $0 != .allowAll }, id: \.self) { mode in
@@ -799,29 +826,18 @@ private struct AgentChatComposerView: View {
                 .controlSize(.small)
                 .help("调整本轮会话权限")
 
-                Picker("模型", selection: $viewModel.llmModel) {
-                    Text(viewModel.llmModel.isEmpty ? "未选择模型" : viewModel.llmModel).tag(viewModel.llmModel)
-                    Text("gpt-4.1").tag("gpt-4.1")
-                    Text("gpt-4.1-mini").tag("gpt-4.1-mini")
-                    Text("claude-sonnet-4").tag("claude-sonnet-4")
-                    Text("deepseek-v3").tag("deepseek-v3")
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .frame(maxWidth: 150)
-                .controlSize(.small)
-                .help("选择模型")
+                modelSelectionMenu
 
                 Button(action: { Task { await viewModel.submitChat() } }) {
                     Image(systemName: viewModel.isSubmittingChat ? "stop.fill" : "arrow.up")
                         .font(.system(size: 13, weight: .semibold))
-                        .frame(width: 28, height: 28)
+                        .frame(width: AgentChatLayout.primaryButtonSize, height: AgentChatLayout.primaryButtonSize)
                 }
                 .buttonStyle(.borderedProminent)
                 .clipShape(Circle())
                 .disabled(viewModel.chatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.isSubmittingChat)
             }
-            .frame(minHeight: 30)
+            .frame(minHeight: AgentChatLayout.primaryButtonSize)
 
             if let error = viewModel.errorMessage {
                 Text(error)
@@ -830,12 +846,81 @@ private struct AgentChatComposerView: View {
                     .textSelection(.enabled)
             }
         }
-        .padding(10)
-        .background(Color(nsColor: .windowBackgroundColor).opacity(0.92), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(AgentChatLayout.spaceM)
+        .background(Color(nsColor: .windowBackgroundColor).opacity(0.92), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.secondary.opacity(0.14), lineWidth: 1)
+            RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                .stroke(Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1)
         )
+    }
+
+    private var modelSelectionMenu: some View {
+        Menu {
+            if viewModel.isLoadingLLMModelConnections {
+                Label("正在加载模型列表…", systemImage: "arrow.triangle.2.circlepath")
+            }
+
+            if viewModel.llmModelConnections.isEmpty {
+                Button(viewModel.llmModel.isEmpty ? "未选择模型" : viewModel.llmModel) {}
+                    .disabled(true)
+            } else {
+                ForEach(viewModel.llmModelConnections) { connection in
+                    Menu {
+                        if connection.models.isEmpty {
+                            Button("没有可用模型") {}
+                                .disabled(true)
+                        } else {
+                            ForEach(connection.models) { model in
+                                Button {
+                                    viewModel.selectLLMModel(model.id, providerMode: connection.providerMode)
+                                } label: {
+                                    if model.id == viewModel.llmModel && connection.providerMode == viewModel.llmProviderMode {
+                                        Label(model.displayName, systemImage: "checkmark")
+                                    } else {
+                                        Text(model.displayName)
+                                    }
+                                }
+                                .help(model.id)
+                            }
+                        }
+                    } label: {
+                        Label {
+                            VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
+                                Text(connection.title)
+                                Text(connection.subtitle)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        } icon: {
+                            Image(systemName: connection.isLiveCatalog ? "network" : "bolt.horizontal.circle")
+                        }
+                    }
+                }
+
+                Divider()
+
+                Button {
+                    Task { await viewModel.reloadLLMModelConnections() }
+                } label: {
+                    Label("刷新模型列表", systemImage: "arrow.clockwise")
+                }
+            }
+        } label: {
+            Label {
+                Text(viewModel.llmModel.isEmpty ? "未选择模型" : viewModel.llmModel)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            } icon: {
+                Image(systemName: "cpu")
+            }
+            .font(.caption.weight(.medium))
+            .padding(.horizontal, AgentChatLayout.spaceM)
+            .frame(height: AgentChatLayout.chipHeight)
+            .frame(maxWidth: AgentChatLayout.modelMenuMaxWidth)
+        }
+        .menuStyle(.borderlessButton)
+        .controlSize(.small)
+        .help("选择真实配置的连接和模型；切换后下一轮请求立即使用该模型")
     }
 
     private func promptBudgetStatusColor(_ status: AgentPromptBudgetStatus) -> Color {
@@ -851,14 +936,14 @@ private struct AgentSessionFilterBar: View {
     @ObservedObject var viewModel: AppViewModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+            HStack(spacing: AgentChatLayout.spaceS) {
                 FilterButton(title: "Inbox", isSelected: viewModel.sessionListFilter == .inbox) { viewModel.setSessionListFilter(.inbox) }
                 FilterButton(title: "All", isSelected: viewModel.sessionListFilter == .all) { viewModel.setSessionListFilter(.all) }
                 FilterButton(title: "Archive", isSelected: viewModel.sessionListFilter == .archived) { viewModel.setSessionListFilter(.archived) }
             }
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
+                HStack(spacing: AgentChatLayout.spaceS) {
                     ForEach(AgentSessionStatus.allCases.filter { $0 != .archived }, id: \.self) { status in
                         FilterButton(title: status.displayName, isSelected: viewModel.sessionListFilter == .status(status)) {
                             viewModel.setSessionListFilter(.status(status))
@@ -879,8 +964,8 @@ private struct FilterButton: View {
         Button(action: action) {
             Text(title)
                 .font(.caption.weight(isSelected ? .semibold : .regular))
-                .padding(.horizontal, 9)
-                .padding(.vertical, 5)
+                .padding(.horizontal, AgentChatLayout.spaceM)
+                .padding(.vertical, AgentChatLayout.spaceS)
                 .background(isSelected ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.10), in: Capsule())
         }
         .buttonStyle(.plain)
@@ -894,8 +979,8 @@ private struct AgentStatusPill: View {
     var body: some View {
         Label(text, systemImage: icon)
             .font(.caption2.weight(.semibold))
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
+            .padding(.horizontal, AgentChatLayout.spaceS)
+            .padding(.vertical, AgentChatLayout.spaceXS)
             .background(color.opacity(0.16), in: Capsule())
             .foregroundStyle(color)
     }
@@ -932,8 +1017,8 @@ private struct AgentLabelPill: View {
         Text(text)
             .font(.caption2.weight(.medium))
             .lineLimit(1)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
+            .padding(.horizontal, AgentChatLayout.spaceS)
+            .padding(.vertical, AgentChatLayout.spaceXS)
             .background(Color.teal.opacity(0.14), in: Capsule())
             .foregroundStyle(.teal)
     }
@@ -948,8 +1033,8 @@ private struct AgentChatInspectorView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
+                VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
                     Text("信息")
                         .font(.headline)
                     Text("会话设置、标签和文件")
@@ -966,12 +1051,12 @@ private struct AgentChatInspectorView: View {
                         .frame(minHeight: 240)
                 }
             }
-            .padding(16)
+            .padding(AgentChatLayout.spaceL)
         }
     }
 
     private func sessionGovernance(_ session: AgentSession) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
             Text("会话")
                 .font(.subheadline.weight(.semibold))
             Picker("状态", selection: Binding(
@@ -988,7 +1073,7 @@ private struct AgentChatInspectorView: View {
             }
             .pickerStyle(.menu)
 
-            HStack(spacing: 8) {
+            HStack(spacing: AgentChatLayout.spaceS) {
                 Button(session.governance.isFlagged ? "取消标记" : "标记") { viewModel.toggleSelectedSessionFlag() }
                 if session.governance.isArchived {
                     Button("恢复") { viewModel.restoreSelectedSession() }
@@ -999,7 +1084,7 @@ private struct AgentChatInspectorView: View {
             .buttonStyle(.bordered)
             .controlSize(.small)
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
                 Text("消息：\(session.messages.count)")
                 Text("更新：\(session.updatedAt.formatted())")
                 Text("会话 ID：\(session.id)")
@@ -1008,12 +1093,12 @@ private struct AgentChatInspectorView: View {
             .font(.caption)
             .foregroundStyle(.secondary)
         }
-        .padding(12)
-        .background(.quaternary.opacity(0.16), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(AgentChatLayout.spaceM)
+        .background(.quaternary.opacity(0.16), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
     }
 
     private func labels(_ session: AgentSession) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
             Text("标签")
                 .font(.subheadline.weight(.semibold))
             ForEach(viewModel.governanceConfig.labels.filter { $0.valueType == .boolean }) { definition in
@@ -1031,12 +1116,12 @@ private struct AgentChatInspectorView: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(12)
-        .background(.quaternary.opacity(0.16), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(AgentChatLayout.spaceM)
+        .background(.quaternary.opacity(0.16), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
     }
 
     private var artifacts: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
             Text("会话文件")
                 .font(.subheadline.weight(.semibold))
             if let dirs = viewModel.selectedSessionArtifactDirectories {
@@ -1050,8 +1135,8 @@ private struct AgentChatInspectorView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(12)
-        .background(.quaternary.opacity(0.16), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(AgentChatLayout.spaceM)
+        .background(.quaternary.opacity(0.16), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
     }
 }
 
