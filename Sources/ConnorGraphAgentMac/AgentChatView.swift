@@ -5,25 +5,25 @@ import ConnorGraphSearch
 import ConnorGraphAppSupport
 
 private enum AgentChatLayout {
-    static let spaceXS: CGFloat = 4
-    static let spaceS: CGFloat = 8
-    static let spaceM: CGFloat = 12
-    static let spaceL: CGFloat = 16
-    static let spaceXL: CGFloat = 24
+    static let spaceXS: CGFloat = 3
+    static let spaceS: CGFloat = 6
+    static let spaceM: CGFloat = 10
+    static let spaceL: CGFloat = 14
+    static let spaceXL: CGFloat = 20
 
-    static let radiusS: CGFloat = 8
-    static let radiusM: CGFloat = 12
-    static let radiusL: CGFloat = 16
-    static let radiusXL: CGFloat = 20
+    static let radiusS: CGFloat = 7
+    static let radiusM: CGFloat = 10
+    static let radiusL: CGFloat = 14
+    static let radiusXL: CGFloat = 18
 
     static let hairlineOpacity: Double = 0.14
-    static let chipHeight: CGFloat = 28
-    static let iconButtonSize: CGFloat = 28
-    static let primaryButtonSize: CGFloat = 32
-    static let composerTextMinHeight: CGFloat = 52
-    static let composerTextMaxHeight: CGFloat = 132
-    static let composerInfoButtonWidth: CGFloat = 88
-    static let modelMenuMaxWidth: CGFloat = 190
+    static let chipHeight: CGFloat = 24
+    static let iconButtonSize: CGFloat = 24
+    static let primaryButtonSize: CGFloat = 28
+    static let composerTextMinHeight: CGFloat = 46
+    static let composerTextMaxHeight: CGFloat = 120
+    static let composerInfoButtonWidth: CGFloat = 78
+    static let modelMenuMaxWidth: CGFloat = 176
 
     static let messageMaxWidth: CGFloat = 760
     static let userMessageMaxWidth: CGFloat = 560
@@ -163,6 +163,7 @@ private struct AgentChatSessionRow: View {
 private struct AgentChatConversationView: View {
     @ObservedObject var viewModel: AppViewModel
     @Binding var isSessionInfoPresented: Bool
+    @State private var activityDetailEvent: AgentEventPresentation?
 
     private var timelineItems: [AgentChatTurnTimelineItem] {
         AgentChatTurnTimelineItem.items(
@@ -180,17 +181,22 @@ private struct AgentChatConversationView: View {
         }
     }
 
+    private var latestProcessID: String? {
+        timelineItems.last(where: { $0.process != nil })?.process?.id
+    }
+
+    private func activityEvents(for process: AgentChatTurnProcessPresentation) -> [AgentEventPresentation] {
+        if process.id == latestProcessID, !viewModel.agentEventTimeline.isEmpty {
+            return viewModel.agentEventTimeline
+        }
+        return AgentActivityFallbackEvents.events(for: process)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             AgentChatConversationHeader(viewModel: viewModel)
                 .padding(.horizontal, AgentChatLayout.spaceL)
                 .padding(.vertical, AgentChatLayout.spaceM)
-
-            if !viewModel.agentEventTimeline.isEmpty {
-                AgentEventTimelineView(events: viewModel.agentEventTimeline)
-                    .padding(.horizontal, AgentChatLayout.spaceL)
-                    .padding(.bottom, AgentChatLayout.spaceS)
-            }
 
             Divider()
 
@@ -206,8 +212,14 @@ private struct AgentChatConversationView: View {
                                     AgentChatMessageRow(row: message)
                                         .id(item.id)
                                 } else if let process = item.process {
-                                    AgentChatTurnProcessRow(process: process)
-                                        .id(item.id)
+                                    AgentChatTurnProcessRow(
+                                        process: process,
+                                        events: activityEvents(for: process),
+                                        onOpenDetail: { event in
+                                            activityDetailEvent = event
+                                        }
+                                    )
+                                    .id(item.id)
                                 }
                             }
                         }
@@ -230,6 +242,14 @@ private struct AgentChatConversationView: View {
                 .padding(.vertical, AgentChatLayout.spaceM)
         }
         .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
+        .overlay {
+            if let event = activityDetailEvent {
+                AgentActivityDetailOverlay(event: event) {
+                    activityDetailEvent = nil
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.985)))
+            }
+        }
     }
 }
 
@@ -315,10 +335,8 @@ private struct AgentEventTimelineView: View {
                                     .font(.caption.weight(.semibold))
                                     .lineLimit(1)
                             }
-                            Text(event.detail)
-                                .font(.caption2)
+                            AgentMarkdownPreviewText(markdown: event.detail, font: .caption2, lineLimit: 3)
                                 .foregroundStyle(.secondary)
-                                .lineLimit(3)
                                 .frame(width: 220, alignment: .leading)
                             Text(event.kind)
                                 .font(.caption2.monospaced())
@@ -378,6 +396,217 @@ private struct AgentChatEmptyStateView: View {
     }
 }
 
+private struct AgentMarkdownPreviewText: View {
+    var markdown: String
+    var font: Font = .body
+    var monospacedFallback: Bool = false
+    var lineLimit: Int? = nil
+
+    private enum Block: Identifiable {
+        case heading(level: Int, text: String)
+        case paragraph(String)
+        case unorderedItem(String)
+        case orderedItem(number: String, text: String)
+        case quote(String)
+        case code(String)
+        case spacer
+
+        var id: String { UUID().uuidString }
+    }
+
+    private var inlineRendered: AttributedString {
+        renderInline(markdown)
+    }
+
+    private var blocks: [Block] {
+        parseBlocks(markdown)
+    }
+
+    @ViewBuilder
+    var body: some View {
+        if let lineLimit {
+            Text(inlineRendered)
+                .font(monospacedFallback ? .system(.caption, design: .monospaced) : font)
+                .lineLimit(lineLimit)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else if monospacedFallback {
+            Text(markdown)
+                .font(.system(.caption, design: .monospaced))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            VStack(alignment: .leading, spacing: 7) {
+                ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                    view(for: block)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .textSelection(.enabled)
+        }
+    }
+
+    @ViewBuilder
+    private func view(for block: Block) -> some View {
+        switch block {
+        case .heading(let level, let text):
+            Text(renderInline(text))
+                .font(headingFont(level))
+                .frame(maxWidth: .infinity, alignment: .leading)
+        case .paragraph(let text):
+            Text(renderInline(text))
+                .font(font)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        case .unorderedItem(let text):
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("•")
+                    .font(font)
+                    .frame(width: 12, alignment: .trailing)
+                Text(renderInline(text))
+                    .font(font)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.leading, 4)
+        case .orderedItem(let number, let text):
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("\(number).")
+                    .font(font)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22, alignment: .trailing)
+                Text(renderInline(text))
+                    .font(font)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.leading, 2)
+        case .quote(let text):
+            HStack(alignment: .top, spacing: 8) {
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.28))
+                    .frame(width: 3)
+                Text(renderInline(text))
+                    .font(font)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        case .code(let text):
+            Text(text)
+                .font(.system(.caption, design: .monospaced))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(8)
+                .background(.quaternary.opacity(0.18), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        case .spacer:
+            Color.clear.frame(height: 4)
+        }
+    }
+
+    private func headingFont(_ level: Int) -> Font {
+        switch level {
+        case 1: return .title3.weight(.semibold)
+        case 2: return .headline.weight(.semibold)
+        default: return .subheadline.weight(.semibold)
+        }
+    }
+
+    private func renderInline(_ text: String) -> AttributedString {
+        if let attributed = try? AttributedString(
+            markdown: text,
+            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        ) {
+            return attributed
+        }
+        return AttributedString(text)
+    }
+
+    private func parseBlocks(_ markdown: String) -> [Block] {
+        let lines = markdown.replacingOccurrences(of: "\r\n", with: "\n").split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var result: [Block] = []
+        var paragraph: [String] = []
+        var codeLines: [String] = []
+        var isInCodeBlock = false
+
+        func flushParagraph() {
+            let text = paragraph.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty { result.append(.paragraph(text)) }
+            paragraph.removeAll()
+        }
+
+        for rawLine in lines {
+            let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
+
+            if trimmed.hasPrefix("```") {
+                if isInCodeBlock {
+                    result.append(.code(codeLines.joined(separator: "\n")))
+                    codeLines.removeAll()
+                    isInCodeBlock = false
+                } else {
+                    flushParagraph()
+                    isInCodeBlock = true
+                }
+                continue
+            }
+
+            if isInCodeBlock {
+                codeLines.append(rawLine)
+                continue
+            }
+
+            if trimmed.isEmpty {
+                flushParagraph()
+                if result.last.map({ if case .spacer = $0 { return true }; return false }) != true {
+                    result.append(.spacer)
+                }
+                continue
+            }
+
+            if let heading = parseHeading(trimmed) {
+                flushParagraph()
+                result.append(.heading(level: heading.level, text: heading.text))
+            } else if let item = parseUnorderedItem(trimmed) {
+                flushParagraph()
+                result.append(.unorderedItem(item))
+            } else if let item = parseOrderedItem(trimmed) {
+                flushParagraph()
+                result.append(.orderedItem(number: item.number, text: item.text))
+            } else if trimmed.hasPrefix(">") {
+                flushParagraph()
+                result.append(.quote(String(trimmed.dropFirst()).trimmingCharacters(in: .whitespaces)))
+            } else {
+                paragraph.append(rawLine.trimmingCharacters(in: .whitespaces))
+            }
+        }
+
+        if isInCodeBlock, !codeLines.isEmpty { result.append(.code(codeLines.joined(separator: "\n"))) }
+        flushParagraph()
+        return result.filter { block in
+            if case .spacer = block { return true }
+            return true
+        }
+    }
+
+    private func parseHeading(_ line: String) -> (level: Int, text: String)? {
+        let hashes = line.prefix { $0 == "#" }.count
+        guard hashes > 0, hashes <= 6, line.dropFirst(hashes).first == " " else { return nil }
+        return (hashes, String(line.dropFirst(hashes + 1)))
+    }
+
+    private func parseUnorderedItem(_ line: String) -> String? {
+        for marker in ["- ", "* ", "+ "] where line.hasPrefix(marker) {
+            return String(line.dropFirst(marker.count)).trimmingCharacters(in: .whitespaces)
+        }
+        return nil
+    }
+
+    private func parseOrderedItem(_ line: String) -> (number: String, text: String)? {
+        guard let dot = line.firstIndex(of: ".") else { return nil }
+        let number = String(line[..<dot])
+        guard !number.isEmpty, number.allSatisfy({ $0.isNumber }) else { return nil }
+        let rest = line[line.index(after: dot)...]
+        guard rest.first == " " else { return nil }
+        return (number, String(rest.dropFirst()).trimmingCharacters(in: .whitespaces))
+    }
+}
+
 private struct AgentChatMessageRow: View {
     var row: AgentChatMessagePresentation
 
@@ -400,10 +629,7 @@ private struct AgentChatMessageRow: View {
                         .foregroundStyle(isUser ? .white.opacity(0.65) : .secondary)
                 }
 
-                Text(row.message.content)
-                    .font(.body)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                AgentMarkdownPreviewText(markdown: row.message.content, font: .body)
 
             }
             .padding(AgentChatLayout.spaceM)
@@ -427,140 +653,240 @@ private struct AgentChatMessageRow: View {
 
 private struct AgentChatTurnProcessRow: View {
     var process: AgentChatTurnProcessPresentation
+    var events: [AgentEventPresentation]
+    var onOpenDetail: (AgentEventPresentation) -> Void
+    @State private var isExpanded: Bool = false
+
+    private var visibleEvents: [AgentEventPresentation] {
+        events.isEmpty ? AgentActivityFallbackEvents.events(for: process) : events
+    }
 
     var body: some View {
-        HStack(alignment: .top) {
+        HStack(alignment: .top, spacing: AgentChatLayout.spaceS) {
             Spacer(minLength: AgentChatLayout.messageSideInset)
 
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
-                HStack(spacing: AgentChatLayout.spaceS) {
-                    Image(systemName: process.state == .running ? "clock.arrow.circlepath" : "checkmark.circle")
-                        .foregroundStyle(process.state == .running ? .orange : .secondary)
-                    Text(process.title)
-                        .font(.caption.weight(.semibold))
-                    if process.state == .running {
-                        ProgressView()
-                            .controlSize(.small)
-                            .frame(width: 14, height: 14)
-                            .fixedSize()
-                    }
-                    Spacer(minLength: 0)
+                Button(action: { withAnimation(.easeOut(duration: 0.16)) { isExpanded.toggle() } }) {
+                    activityHeader
                 }
-                .foregroundStyle(.secondary)
+                .buttonStyle(.plain)
 
-                HStack(spacing: AgentChatLayout.spaceS) {
-                    Image(systemName: "info.circle")
-                    Text(process.summary)
-                    Spacer(minLength: 0)
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, AgentChatLayout.spaceS)
-                .padding(.vertical, AgentChatLayout.spaceS)
-                .background(.quaternary.opacity(0.18), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
-
-                if process.state == .running {
-                    ThinkingDotsView()
-                }
-
-                DisclosureGroup {
-                    VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
-                        if process.state == .running {
-                            Label("正在准备图谱上下文和提示词", systemImage: "magnifyingglass")
-                            Label("正在组装近期对话和可选会话摘要", systemImage: "text.bubble")
-                            Label("正在调用已配置的模型提供方", systemImage: "network")
-                        }
-
-                        Text("这里展示的是本轮调用前真实可见的会话历史，以及本轮提示词快照；其中“对话上下文”只代表发送给模型的近期消息数量，不等于完整历史。")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        if let request = process.currentRequest {
-                            MetadataBlock(title: "本轮用户输入", text: request)
-                        }
-
-                        if !process.conversationHistory.isEmpty {
-                            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
-                                Text("完整对话历史（截至本轮回复前 \(process.fullConversationMessageCount) 条）")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                ForEach(process.conversationHistory) { historyRow in
-                                    VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
-                                        HStack(spacing: AgentChatLayout.spaceS) {
-                                            Text(historyRow.roleLabel)
-                                                .font(.caption.weight(.semibold))
-                                            Text("第 \(historyRow.turnNumber) 轮")
-                                                .font(.caption2)
-                                                .foregroundStyle(.secondary)
-                                            Text(historyRow.message.createdAt.formatted(date: .omitted, time: .shortened))
-                                                .font(.caption2)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        Text(historyRow.message.content)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .textSelection(.enabled)
-                                    }
-                                    .padding(8)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(.quaternary.opacity(0.14), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                                }
+                if isExpanded {
+                    VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
+                        ForEach(visibleEvents) { event in
+                            Button(action: { onOpenDetail(event) }) {
+                                AgentActivityEventRow(event: event)
                             }
-                        }
-
-                        if !process.citationIDs.isEmpty {
-                            MetadataChips(title: "本轮使用的引用", values: process.citationIDs)
-                        }
-
-                        if !process.expandedContextItems.isEmpty {
-                            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
-                                Text("使用的图谱上下文")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                ForEach(process.expandedContextItems) { item in
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(item.sourceID)
-                                            .font(.caption.weight(.semibold))
-                                        Text(item.content)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .textSelection(.enabled)
-                                    }
-                                    .padding(8)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(.quaternary.opacity(0.14), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                                }
-                            }
-                        }
-
-                        if let prompt = process.promptSnapshotText, !prompt.isEmpty {
-                            MetadataBlock(title: "提示词快照", text: prompt, monospaced: true)
-                        } else if process.state == .completed {
-                            Text("本轮没有保存渲染后的提示词快照。")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                            .buttonStyle(.plain)
                         }
                     }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 8)
-                } label: {
-                    Text(process.state == .running ? "处理详情" : "轮次详情")
-                        .font(.caption.weight(.semibold))
+                    .padding(.leading, 28)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
-                .font(.caption)
             }
-            .padding(AgentChatLayout.spaceM)
             .frame(maxWidth: AgentChatLayout.processMaxWidth, alignment: .leading)
-            .background(.quaternary.opacity(0.12), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous)
-                    .stroke(Color.secondary.opacity(0.10), lineWidth: 1)
-            )
 
             Spacer(minLength: AgentChatLayout.messageSideInset)
         }
         .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    private var activityHeader: some View {
+        HStack(spacing: AgentChatLayout.spaceS) {
+            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 14)
+
+            Text("\(visibleEvents.count)")
+                .font(.caption2.monospacedDigit().weight(.medium))
+                .foregroundStyle(.secondary)
+                .frame(minWidth: 22, minHeight: 22)
+                .background(Color.clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+                )
+
+            if process.state == .running {
+                ProgressView()
+                    .controlSize(.mini)
+                    .frame(width: 12, height: 12)
+                    .fixedSize()
+                Text("正在处理")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+
+            Text("Activity")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+            Text("第 \(process.turnNumber) 轮 · \(visibleEvents.count) 个事件")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, AgentChatLayout.spaceM)
+        .padding(.vertical, AgentChatLayout.spaceS)
+        .background(Color.clear, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous)
+                .stroke(Color.secondary.opacity(process.state == .running ? 0.24 : 0.16), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.05), radius: 3, x: 0, y: 1)
+        .contentShape(RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
+    }
+}
+
+private struct AgentActivityEventRow: View {
+    var event: AgentEventPresentation
+
+    var body: some View {
+        HStack(spacing: AgentChatLayout.spaceS) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(color)
+                .frame(width: 14)
+            Text(event.title)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            AgentMarkdownPreviewText(markdown: event.detail, font: .caption, lineLimit: 1)
+                .foregroundStyle(.tertiary)
+                .truncationMode(.tail)
+            Spacer(minLength: 0)
+            Text(event.kind)
+                .font(.caption2.monospaced())
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+            Image(systemName: "arrow.up.right")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, AgentChatLayout.spaceM)
+        .padding(.vertical, AgentChatLayout.spaceXS)
+        .contentShape(RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
+    }
+
+    private var icon: String {
+        switch event.severity {
+        case .info: return "circle.dashed"
+        case .success: return "checkmark.circle"
+        case .warning: return "exclamationmark.triangle"
+        case .error: return "xmark.octagon"
+        }
+    }
+
+    private var color: Color {
+        switch event.severity {
+        case .info: return .secondary
+        case .success: return .green
+        case .warning: return .orange
+        case .error: return .red
+        }
+    }
+}
+
+private enum AgentActivityFallbackEvents {
+    static func events(for process: AgentChatTurnProcessPresentation) -> [AgentEventPresentation] {
+        var items: [AgentEventPresentation] = []
+        if let request = process.currentRequest, !request.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            items.append(AgentEventPresentation(kind: "user_input", title: "User prompt", detail: request, severity: .info, runID: nil, sessionID: nil))
+        }
+        if !process.expandedContextItems.isEmpty {
+            items.append(AgentEventPresentation(kind: "context", title: "Context assembled", detail: "使用了 \(process.expandedContextItems.count) 个图谱上下文项", severity: .info, runID: nil, sessionID: nil))
+        }
+        if !process.citationIDs.isEmpty {
+            items.append(AgentEventPresentation(kind: "citations", title: "Citations attached", detail: process.citationIDs.joined(separator: ", "), severity: .success, runID: nil, sessionID: nil))
+        }
+        if let prompt = process.promptSnapshotText, !prompt.isEmpty {
+            items.append(AgentEventPresentation(kind: "prompt_snapshot", title: "Prompt snapshot", detail: prompt, severity: .info, runID: nil, sessionID: nil))
+        }
+        if let response = process.assistantResponse, !response.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            items.append(AgentEventPresentation(kind: "assistant_response", title: "Answer completed", detail: response, severity: .success, runID: nil, sessionID: nil))
+        }
+        if items.isEmpty {
+            items.append(AgentEventPresentation(kind: "activity", title: process.state == .running ? "Processing" : "Activity", detail: process.summary, severity: process.state == .running ? .info : .success, runID: nil, sessionID: nil))
+        }
+        return items
+    }
+}
+
+private struct AgentActivityDetailOverlay: View {
+    var event: AgentEventPresentation
+    var onClose: () -> Void
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black.opacity(0.18)
+                .ignoresSafeArea()
+                .onTapGesture(perform: onClose)
+
+            VStack(spacing: 0) {
+                HStack {
+                    Spacer()
+                    Label("Activity", systemImage: "info.circle")
+                        .font(.caption.weight(.medium))
+                        .padding(.horizontal, AgentChatLayout.spaceS)
+                        .frame(height: 24)
+                        .background(Color.clear, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
+                                .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+                        )
+                    Spacer()
+
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 11, weight: .semibold))
+                            .frame(width: 24, height: 24)
+                    }
+                    .buttonStyle(.plain)
+                    .keyboardShortcut(.escape, modifiers: [])
+                    .background(Color.clear, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
+                            .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+                    )
+                }
+                .padding(AgentChatLayout.spaceM)
+
+                Spacer(minLength: 0)
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
+                        HStack(spacing: AgentChatLayout.spaceS) {
+                            Text(event.title)
+                                .font(.headline)
+                            Text(event.kind)
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.tertiary)
+                            Spacer()
+                        }
+                        AgentMarkdownPreviewText(markdown: event.detail, font: .body)
+                            .foregroundStyle(.primary)
+                    }
+                    .frame(maxWidth: 900, alignment: .leading)
+                    .padding(AgentChatLayout.spaceXL)
+                    .background(Color(nsColor: .controlBackgroundColor).opacity(0.48), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                            .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+                    )
+                }
+                .frame(maxWidth: .infinity)
+
+                Spacer(minLength: 0)
+            }
+            .background(Color(nsColor: .windowBackgroundColor).opacity(0.96), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusXL, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: AgentChatLayout.radiusXL, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.20), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.18), radius: 24, x: 0, y: 14)
+            .padding(AgentChatLayout.spaceXL)
+        }
     }
 }
 
@@ -641,7 +967,7 @@ private struct AgentChatTurnInspectorView: View {
             if let summary = row.turnMetadataSummary {
                 HStack(spacing: AgentChatLayout.spaceS) {
                     Image(systemName: "info.circle")
-                    Text(summary)
+                    AgentMarkdownPreviewText(markdown: summary, font: .caption, lineLimit: 1)
                     Spacer(minLength: 0)
                 }
                 .font(.caption)
@@ -670,10 +996,8 @@ private struct AgentChatTurnInspectorView: View {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(item.sourceID)
                                         .font(.caption.weight(.semibold))
-                                    Text(item.content)
-                                        .font(.caption)
+                                    AgentMarkdownPreviewText(markdown: item.content, font: .caption)
                                         .foregroundStyle(.secondary)
-                                        .textSelection(.enabled)
                                 }
                                 .padding(8)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -710,10 +1034,7 @@ private struct MetadataBlock: View {
             Text(title)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
-            Text(text)
-                .font(monospaced ? .system(.caption, design: .monospaced) : .caption)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            AgentMarkdownPreviewText(markdown: text, font: .caption, monospacedFallback: monospaced)
                 .padding(8)
                 .background(.quaternary.opacity(0.14), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
@@ -866,39 +1187,18 @@ private struct AgentChatComposerView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
-            ZStack(alignment: .topTrailing) {
-                SafeChatComposerTextView(
-                    text: $viewModel.chatInput,
-                    placeholder: "按 Shift + Return 换行",
-                    isSpellCheckEnabled: viewModel.spellCheckEnabled,
-                    onSubmit: { Task { await viewModel.submitChat() } }
-                )
-                .padding(.leading, AgentChatLayout.spaceM)
-                .padding(.trailing, AgentChatLayout.composerInfoButtonWidth)
-                .padding(.vertical, AgentChatLayout.spaceM)
-                .frame(minHeight: AgentChatLayout.composerTextMinHeight, maxHeight: AgentChatLayout.composerTextMaxHeight, alignment: .topLeading)
+            optionBadgeRow
 
-                Button {
-                    withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
-                        isSessionInfoPresented.toggle()
-                    }
-                } label: {
-                    Label("信息", systemImage: "info.circle")
-                        .font(.caption.weight(.medium))
-                        .padding(.horizontal, AgentChatLayout.spaceM)
-                        .frame(height: AgentChatLayout.chipHeight)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.regular)
-                .help("会话信息")
-                .padding(.top, AgentChatLayout.spaceS)
-                .padding(.trailing, AgentChatLayout.spaceS)
-            }
-            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
-                    .stroke(Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1)
+            SafeChatComposerTextView(
+                text: $viewModel.chatInput,
+                placeholder: "按 Shift + Return 换行",
+                isSpellCheckEnabled: viewModel.spellCheckEnabled,
+                onSubmit: { Task { await viewModel.submitChat() } }
             )
+            .padding(.horizontal, AgentChatLayout.spaceM)
+            .padding(.vertical, AgentChatLayout.spaceM)
+            .frame(minHeight: AgentChatLayout.composerTextMinHeight, maxHeight: AgentChatLayout.composerTextMaxHeight, alignment: .topLeading)
+            .background(Color.clear)
 
             HStack(spacing: AgentChatLayout.spaceS) {
                 Button(action: {}) {
@@ -909,13 +1209,16 @@ private struct AgentChatComposerView: View {
                 .help("添加附件")
 
                 Button(action: { viewModel.isBrowserVisible.toggle() }) {
-                    Label(viewModel.isBrowserVisible ? "隐藏浏览器" : "浏览器", systemImage: "safari")
-                        .font(.caption.weight(.medium))
-                        .padding(.horizontal, AgentChatLayout.spaceM)
-                        .frame(height: AgentChatLayout.chipHeight)
+                    AgentComposerOptionBadge(
+                        title: viewModel.isBrowserVisible ? "隐藏浏览器" : "浏览器",
+                        systemImage: "safari",
+                        tint: viewModel.isBrowserVisible ? .accentColor : .secondary,
+                        showsChevron: false,
+                        isActive: viewModel.isBrowserVisible,
+                        style: .compact
+                    )
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .buttonStyle(.plain)
 
                 if let inspection = viewModel.lastPromptInspection {
                     Label("约 \(inspection.estimatedPromptTokenCount) tokens", systemImage: "text.alignleft")
@@ -925,43 +1228,112 @@ private struct AgentChatComposerView: View {
 
                 Spacer(minLength: AgentChatLayout.spaceS)
 
-                Picker("权限", selection: $viewModel.sidecarPermissionMode) {
-                    ForEach(AgentPermissionMode.allCases.filter { $0 != .allowAll }, id: \.self) { mode in
-                        Text(mode.displayName).tag(mode)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .frame(maxWidth: 116)
-                .controlSize(.small)
-                .help("调整本轮会话权限")
-
                 modelSelectionMenu
 
                 Button(action: { Task { await viewModel.submitChat() } }) {
                     Image(systemName: viewModel.isSubmittingChat ? "stop.fill" : "arrow.up")
-                        .font(.system(size: 13, weight: .semibold))
-                        .frame(width: AgentChatLayout.primaryButtonSize, height: AgentChatLayout.primaryButtonSize)
+                        .font(.system(size: 11, weight: .semibold))
+                        .frame(width: 22, height: 22)
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.mini)
                 .clipShape(Circle())
                 .disabled(viewModel.chatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.isSubmittingChat)
             }
             .frame(minHeight: AgentChatLayout.primaryButtonSize)
 
             if let error = viewModel.errorMessage {
-                Text(error)
-                    .font(.caption)
+                AgentMarkdownPreviewText(markdown: error, font: .caption)
                     .foregroundStyle(.red)
-                    .textSelection(.enabled)
             }
         }
-        .padding(AgentChatLayout.spaceM)
-        .background(Color(nsColor: .windowBackgroundColor).opacity(0.92), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
-                .stroke(Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1)
-        )
+        .padding(0)
+        .background(Color.clear)
+    }
+
+    private var selectedSession: AgentSession? {
+        viewModel.chatSessions.first { $0.id == viewModel.selectedChatSessionID }
+    }
+
+    private func menuOptionTitle(_ title: String, isSelected: Bool) -> String {
+        "\(isSelected ? "✓" : "  ")  \(title)"
+    }
+
+    private var optionBadgeRow: some View {
+        HStack(spacing: AgentChatLayout.spaceS) {
+            permissionModeMenu
+
+            if let session = selectedSession {
+                sessionStatusMenu(session)
+            }
+
+            Spacer(minLength: AgentChatLayout.spaceS)
+
+            Button {
+                withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
+                    isSessionInfoPresented.toggle()
+                }
+            } label: {
+                AgentComposerOptionBadge(
+                    title: "信息",
+                    systemImage: "info.circle",
+                    tint: .secondary,
+                    showsChevron: false,
+                    isActive: isSessionInfoPresented,
+                    style: .compact
+                )
+            }
+            .buttonStyle(.plain)
+            .help("会话信息")
+        }
+        .padding(.horizontal, 1)
+        .padding(.bottom, 2)
+    }
+
+    private var permissionModeMenu: some View {
+        Menu {
+            ForEach(AgentPermissionMode.allCases.filter { $0 != .allowAll }, id: \.self) { mode in
+                Button {
+                    viewModel.sidecarPermissionMode = mode
+                } label: {
+                    Text(menuOptionTitle(mode.displayName, isSelected: mode == viewModel.sidecarPermissionMode))
+                }
+            }
+        } label: {
+            AgentComposerOptionBadge(
+                title: viewModel.sidecarPermissionMode.displayName,
+                systemImage: permissionModeIcon(viewModel.sidecarPermissionMode),
+                tint: permissionModeColor(viewModel.sidecarPermissionMode),
+                isActive: true,
+                style: .prominent
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .help("调整本轮会话权限")
+    }
+
+    private func sessionStatusMenu(_ session: AgentSession) -> some View {
+        Menu {
+            ForEach(AgentSessionStatus.allCases.filter { $0 != .archived }, id: \.self) { status in
+                Button {
+                    viewModel.deferViewUpdate {
+                        viewModel.setSelectedSessionStatus(status)
+                    }
+                } label: {
+                    Text(menuOptionTitle(status.displayName, isSelected: status == session.governance.status))
+                }
+            }
+        } label: {
+            AgentComposerOptionBadge(
+                title: session.governance.status.displayName,
+                systemImage: sessionStatusIcon(session.governance.status),
+                tint: sessionStatusColor(session.governance.status),
+                isActive: false,
+                style: .prominent
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .help("更改会话状态")
     }
 
     private var modelSelectionMenu: some View {
@@ -1023,7 +1395,7 @@ private struct AgentChatComposerView: View {
             } icon: {
                 Image(systemName: "cpu")
             }
-            .font(.caption.weight(.medium))
+            .font(.caption2.weight(.medium))
             .padding(.horizontal, AgentChatLayout.spaceM)
             .frame(height: AgentChatLayout.chipHeight)
             .frame(maxWidth: AgentChatLayout.modelMenuMaxWidth)
@@ -1039,6 +1411,111 @@ private struct AgentChatComposerView: View {
         case .warning: return .orange
         case .over: return .red
         }
+    }
+
+    private func permissionModeIcon(_ mode: AgentPermissionMode) -> String {
+        switch mode {
+        case .readOnly: "eye"
+        case .askToWrite: "exclamationmark.circle"
+        case .trustedWrite: "pencil.and.outline"
+        case .allowAll: "bolt.circle"
+        }
+    }
+
+    private func permissionModeColor(_ mode: AgentPermissionMode) -> Color {
+        switch mode {
+        case .readOnly: .secondary
+        case .askToWrite: .orange
+        case .trustedWrite: .accentColor
+        case .allowAll: .purple
+        }
+    }
+
+    private func sessionStatusIcon(_ status: AgentSessionStatus) -> String {
+        switch status {
+        case .todo: "circle"
+        case .inProgress: "play.circle"
+        case .waiting: "clock"
+        case .needsReview: "exclamationmark.bubble"
+        case .done: "checkmark.circle"
+        case .blocked: "nosign"
+        case .archived: "archivebox"
+        }
+    }
+
+    private func sessionStatusColor(_ status: AgentSessionStatus) -> Color {
+        switch status {
+        case .todo: .secondary
+        case .inProgress: .blue
+        case .waiting: .orange
+        case .needsReview: .purple
+        case .done: .green
+        case .blocked: .red
+        case .archived: .gray
+        }
+    }
+}
+
+private struct AgentComposerOptionBadge: View {
+    enum Style {
+        case compact
+        case prominent
+
+        var iconSize: CGFloat {
+            switch self {
+            case .compact: 12
+            case .prominent: 13
+            }
+        }
+
+        var textFont: Font {
+            switch self {
+            case .compact: .caption2.weight(.medium)
+            case .prominent: .caption.weight(.semibold)
+            }
+        }
+
+        var chevronSize: CGFloat {
+            switch self {
+            case .compact: 9
+            case .prominent: 10
+            }
+        }
+    }
+
+    var title: String
+    var systemImage: String
+    var tint: Color
+    var showsChevron: Bool = true
+    var isActive: Bool = false
+    var style: Style = .compact
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: systemImage)
+                .font(.system(size: style.iconSize, weight: .semibold))
+            Text(title)
+                .font(style.textFont)
+                .lineLimit(1)
+            if showsChevron {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: style.chevronSize, weight: .semibold))
+                    .opacity(0.72)
+            }
+        }
+        .padding(.horizontal, AgentChatLayout.spaceS)
+        .frame(height: 26)
+        .foregroundStyle(tint)
+        .background(
+            RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
+                .fill(Color.clear)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
+                .stroke(Color.secondary.opacity(isActive ? 0.28 : 0.18), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
+        .contentShape(RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
     }
 }
 
