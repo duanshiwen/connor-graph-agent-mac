@@ -160,7 +160,7 @@ final class AppViewModel: ObservableObject {
     @Published var selection: SidebarItem? = .agentChat
     @Published var query: String = "记忆"
     @Published var searchResults: [GraphSearchHit] = []
-    @Published var chatInput: String = "记忆"
+    @Published var chatInput: String = ""
     @Published var transcript: [AgentMessage] = []
     @Published var lastContext: AgentContext?
     @Published var lastPromptInspection: AgentChatPromptInspection?
