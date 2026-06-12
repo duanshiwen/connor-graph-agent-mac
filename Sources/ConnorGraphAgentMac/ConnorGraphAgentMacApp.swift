@@ -264,6 +264,8 @@ final class AppViewModel: ObservableObject {
     // fallbackChatSession is UI-only for demo/no-runtime states.
     private var fallbackChatSession: AgentSession
     private var nativeSessionManager: NativeSessionManager?
+    private var submittingChatSessionID: String?
+    private var agentEventTimelinesBySessionID: [String: [AgentEventPresentation]] = [:]
 
     private var activeChatSession: AgentSession {
         nativeSessionManager?.session ?? fallbackChatSession
@@ -996,7 +998,12 @@ final class AppViewModel: ObservableObject {
                 fallbackChatSession = session
                 nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: session)
                 transcript = session.messages
-                try restoreLatestAgentEventTimeline(sessionID: selectedID)
+                isSubmittingChat = submittingChatSessionID == selectedID
+                if let cachedTimeline = agentEventTimelinesBySessionID[selectedID] {
+                    agentEventTimeline = cachedTimeline
+                } else {
+                    try restoreLatestAgentEventTimeline(sessionID: selectedID)
+                }
                 latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: selectedID)
                 selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: selectedID)
             } else {
@@ -1018,7 +1025,9 @@ final class AppViewModel: ObservableObject {
             fallbackChatSession = session
             nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: session)
             transcript = []
+            isSubmittingChat = false
             agentEventTimeline = []
+            agentEventTimelinesBySessionID[session.id] = []
             latestChatSummary = nil
             chatSummaryMessage = nil
             lastPromptInspection = nil
@@ -1032,24 +1041,64 @@ final class AppViewModel: ObservableObject {
 
     private func restoreLatestAgentEventTimeline(sessionID: String) throws {
         guard let chatSessionRepository else {
+            agentEventTimelinesBySessionID[sessionID] = []
             agentEventTimeline = []
             return
         }
+
+        let replayer = AgentEventReplayer()
+        let presenter = AgentEventPresenter()
+
+        func presentations(from persistedEvents: [PersistedAgentEvent]) -> [AgentEventPresentation] {
+            let sequencedEvents = persistedEvents.filter { $0.sequence != nil }
+            let replaySource = sequencedEvents.isEmpty ? persistedEvents : sequencedEvents
+            return replaySource.compactMap { persistedEvent in
+                try? replayer.replay(persistedEvent)
+            }.map { event in
+                presenter.presentation(for: event)
+            }
+        }
+
         let runs = try chatSessionRepository.loadRuns(
             sessionID: sessionID,
             statuses: [.completed, .failed, .cancelled],
-            limit: 5
+            limit: 10
         )
-        guard let latestRun = runs.first else {
-            agentEventTimeline = []
-            return
+        for run in runs {
+            let restored = presentations(from: try chatSessionRepository.loadRunEvents(runID: run.id, limit: 300))
+            if !restored.isEmpty {
+                agentEventTimelinesBySessionID[sessionID] = restored
+                agentEventTimeline = restored
+                return
+            }
         }
-        let persistedEvents = try chatSessionRepository.loadRunEvents(runID: latestRun.id, limit: 200)
-        let sequencedEvents = persistedEvents.filter { $0.sequence != nil }
-        let replaySource = sequencedEvents.isEmpty ? persistedEvents : sequencedEvents
-        let replayer = AgentEventReplayer()
-        let presenter = AgentEventPresenter()
-        agentEventTimeline = try replayer.replay(replaySource).map { presenter.presentation(for: $0) }
+
+        let recentEvents = try chatSessionRepository.loadRecentJournalEvents(sessionID: sessionID, limit: 300)
+        var seenRunIDs: [String] = []
+        for event in recentEvents where !seenRunIDs.contains(event.runID) {
+            seenRunIDs.append(event.runID)
+        }
+        for runID in seenRunIDs {
+            let runEvents = recentEvents
+                .filter { $0.runID == runID }
+                .sorted { lhs, rhs in
+                    switch (lhs.sequence, rhs.sequence) {
+                    case let (left?, right?): return left < right
+                    case (.some, .none): return true
+                    case (.none, .some): return false
+                    case (.none, .none): return lhs.createdAt < rhs.createdAt
+                    }
+                }
+            let restored = presentations(from: runEvents)
+            if !restored.isEmpty {
+                agentEventTimelinesBySessionID[sessionID] = restored
+                agentEventTimeline = restored
+                return
+            }
+        }
+
+        agentEventTimelinesBySessionID[sessionID] = []
+        agentEventTimeline = []
     }
 
     func selectChatSession(_ sessionID: String) {
@@ -1060,7 +1109,12 @@ final class AppViewModel: ObservableObject {
             fallbackChatSession = session
             nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: session)
             transcript = session.messages
-            try restoreLatestAgentEventTimeline(sessionID: session.id)
+            isSubmittingChat = submittingChatSessionID == session.id
+            if let cachedTimeline = agentEventTimelinesBySessionID[session.id] {
+                agentEventTimeline = cachedTimeline
+            } else {
+                try restoreLatestAgentEventTimeline(sessionID: session.id)
+            }
             latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: session.id)
             selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
             chatSummaryMessage = nil
@@ -1470,44 +1524,72 @@ final class AppViewModel: ObservableObject {
 
     func submitChat(prompt rawPrompt: String, clearComposer: Bool = false) async {
         let prompt = rawPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !prompt.isEmpty, !isSubmittingChat else { return }
+        guard !prompt.isEmpty, submittingChatSessionID == nil else { return }
+        guard var manager = nativeSessionManager else {
+            errorMessage = String(describing: AppChatRuntimeUnavailableError.nativeSessionManagerUnavailable)
+            return
+        }
+        let submittingSessionID = manager.session.id
         if clearComposer { chatInput = "" }
+        agentEventTimelinesBySessionID[submittingSessionID] = []
         agentEventTimeline = []
-        isSubmittingChat = true
+        submittingChatSessionID = submittingSessionID
+        isSubmittingChat = selectedChatSessionID == submittingSessionID
         let optimisticTranscript = transcript
         let optimisticUserMessage = AgentMessage(role: .user, content: prompt)
-        transcript = optimisticTranscript + [optimisticUserMessage]
+        if selectedChatSessionID == submittingSessionID {
+            transcript = optimisticTranscript + [optimisticUserMessage]
+        }
         lastContext = nil
         lastPromptInspection = nil
-        defer { isSubmittingChat = false }
-        do {
-            guard var manager = nativeSessionManager else {
-                throw AppChatRuntimeUnavailableError.nativeSessionManagerUnavailable
+        defer {
+            if submittingChatSessionID == submittingSessionID {
+                submittingChatSessionID = nil
             }
+            isSubmittingChat = selectedChatSessionID == submittingSessionID ? false : (submittingChatSessionID == selectedChatSessionID)
+        }
+        do {
             let sessionSummary: AgentSessionSummary?
-            if let chatSessionRepository, let selectedChatSessionID {
-                let candidateSummary = try chatSessionRepository.loadLatestSummary(sessionID: selectedChatSessionID)
+            if let chatSessionRepository {
+                let candidateSummary = try chatSessionRepository.loadLatestSummary(sessionID: submittingSessionID)
                 sessionSummary = AgentSessionSummaryPolicy().summaryForContext(candidateSummary, session: manager.session)
             } else {
                 sessionSummary = nil
             }
-            let response = try await manager.submit(prompt, sessionSummary: sessionSummary)
-            nativeSessionManager = manager
-            fallbackChatSession = response.session
-            transcript = manager.session.messages
-            agentEventTimeline = manager.eventPresentations
+            let response = try await manager.submit(
+                prompt,
+                sessionSummary: sessionSummary,
+                onEventPresentation: { [weak self] presentation in
+                    guard let self else { return }
+                    var timeline = self.agentEventTimelinesBySessionID[submittingSessionID] ?? []
+                    timeline.append(presentation)
+                    self.agentEventTimelinesBySessionID[submittingSessionID] = timeline
+                    if self.selectedChatSessionID == submittingSessionID {
+                        self.agentEventTimeline = timeline
+                    }
+                }
+            )
+            agentEventTimelinesBySessionID[submittingSessionID] = manager.eventPresentations
+            if selectedChatSessionID == submittingSessionID {
+                nativeSessionManager = manager
+                fallbackChatSession = response.session
+                transcript = manager.session.messages
+                agentEventTimeline = manager.eventPresentations
+                selectedChatSessionID = response.session.id
+                latestChatSummary = try chatSessionRepository?.loadLatestSummary(sessionID: response.session.id)
+                lastContext = nil
+                lastPromptInspection = nil
+            }
             reloadPendingApprovals()
-            selectedChatSessionID = response.session.id
             if let chatSessionRepository {
                 chatSessions = try chatSessionRepository.loadSessions(filter: sessionListFilter)
-                latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: response.session.id)
             }
-            lastContext = nil
-            lastPromptInspection = nil
             errorMessage = nil
             Task { await runBackgroundJobs() }
         } catch {
-            transcript = optimisticTranscript + [optimisticUserMessage]
+            if selectedChatSessionID == submittingSessionID {
+                transcript = optimisticTranscript + [optimisticUserMessage]
+            }
             reloadPendingApprovals()
             errorMessage = String(describing: error)
         }

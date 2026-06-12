@@ -158,10 +158,7 @@ public struct AgentEventPresenter: Sendable {
         return trimmedDetail(string)
     }
 
-    private func trimmedDetail(_ value: String, maxLength: Int = 220) -> String {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.count > maxLength else { return trimmed }
-        let end = trimmed.index(trimmed.startIndex, offsetBy: maxLength)
-        return String(trimmed[..<end]) + "…"
+    private func trimmedDetail(_ value: String, maxLength _: Int = 220) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

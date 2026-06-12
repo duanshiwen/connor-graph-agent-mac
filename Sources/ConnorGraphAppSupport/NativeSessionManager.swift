@@ -124,7 +124,11 @@ public struct NativeSessionManager: Sendable {
     }
 
     @discardableResult
-    public mutating func submit(_ prompt: String, sessionSummary: AgentSessionSummary?) async throws -> AgentLoopChatResponse {
+    public mutating func submit(
+        _ prompt: String,
+        sessionSummary: AgentSessionSummary?,
+        onEventPresentation: (@MainActor @Sendable (AgentEventPresentation) -> Void)? = nil
+    ) async throws -> AgentLoopChatResponse {
         let recentMessages = Array(session.messages.suffix(max(0, recentMessageLimit)))
         let userMessage = session.appendUserMessage(prompt)
         try persistSession()
@@ -220,6 +224,9 @@ public struct NativeSessionManager: Sendable {
                 let presentation = presenter.presentation(for: event)
                 collectedPresentations.append(presentation)
                 eventPresentations.append(presentation)
+                if let onEventPresentation {
+                    await onEventPresentation(presentation)
+                }
 
                 if case .textComplete(let payload) = event {
                     assistantMessage = session.appendAssistantMessage(

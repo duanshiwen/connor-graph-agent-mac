@@ -1,4 +1,5 @@
 import SwiftUI
+import Foundation
 import ConnorGraphCore
 import ConnorGraphAgent
 import ConnorGraphSearch
@@ -639,6 +640,7 @@ private struct AgentChatTurnProcessRow: View {
     var events: [AgentEventPresentation]
     var onOpenDetail: (AgentEventPresentation) -> Void
     @State private var isExpanded: Bool = false
+    @State private var startedAt: Date = Date()
 
     private var visibleEvents: [AgentEventPresentation] {
         events.isEmpty ? AgentActivityFallbackEvents.events(for: process) : events
@@ -659,6 +661,9 @@ private struct AgentChatTurnProcessRow: View {
                                 AgentActivityEventRow(event: event)
                             }
                             .buttonStyle(.plain)
+                        }
+                        if process.state == .running {
+                            AgentActivityLoadingRow(startedAt: startedAt)
                         }
                     }
                     .padding(.leading, 18)
@@ -707,6 +712,43 @@ private struct AgentChatTurnProcessRow: View {
         .padding(.vertical, AgentChatLayout.spaceXS)
         .background(Color.clear)
         .contentShape(Rectangle())
+    }
+}
+
+private struct AgentActivityLoadingRow: View {
+    var startedAt: Date
+
+    var body: some View {
+        TimelineView(.periodic(from: startedAt, by: 1)) { context in
+            HStack(spacing: AgentChatLayout.spaceS) {
+                ProgressView()
+                    .controlSize(.mini)
+                    .frame(width: 12, height: 12)
+                    .fixedSize()
+                Text("忙碌中…")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+                Text(Self.elapsedText(from: startedAt, to: context.date))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, AgentChatLayout.spaceM)
+            .padding(.vertical, 3)
+            .contentShape(RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
+        }
+    }
+
+    private static func elapsedText(from start: Date, to end: Date) -> String {
+        let seconds = max(0, Int(end.timeIntervalSince(start)))
+        let minutes = seconds / 60
+        let remainder = seconds % 60
+        if minutes >= 60 {
+            let hours = minutes / 60
+            let minuteRemainder = minutes % 60
+            return "\(hours):\(String(format: "%02d", minuteRemainder)):\(String(format: "%02d", remainder))"
+        }
+        return "\(minutes):\(String(format: "%02d", remainder))"
     }
 }
 
