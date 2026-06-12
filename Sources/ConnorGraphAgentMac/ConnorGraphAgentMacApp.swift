@@ -274,6 +274,11 @@ final class AppViewModel: ObservableObject {
         nativeSessionManager?.session.messages ?? fallbackChatSession.messages
     }
 
+    var activeChatPendingApprovals: [AgentPendingApproval] {
+        let activeSessionID = activeChatSession.id
+        return pendingApprovals.filter { $0.sessionID == activeSessionID }
+    }
+
     func deferViewUpdate(_ operation: @escaping @MainActor () -> Void) {
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 10_000_000)
@@ -1218,6 +1223,12 @@ final class AppViewModel: ObservableObject {
         Task { await resolvePendingApproval(approval, status: .cancelled, reason: "Cancelled by system", actor: "system") }
     }
 
+    func alwaysAllowPendingApproval(_ approval: AgentPendingApproval) {
+        sidecarPermissionMode = .trustedWrite
+        saveLLMSettings()
+        Task { await resolvePendingApproval(approval, status: .approved, reason: "Always allowed by reviewer for this trusted session", actor: "human-reviewer") }
+    }
+
     private func resolvePendingApproval(_ approval: AgentPendingApproval, status: AgentPendingApprovalStatus, reason: String, actor: String) async {
         do {
             let resolved: AgentPendingApproval?
@@ -1483,6 +1494,7 @@ final class AppViewModel: ObservableObject {
             Task { await runBackgroundJobs() }
         } catch {
             transcript = optimisticTranscript + [optimisticUserMessage]
+            reloadPendingApprovals()
             errorMessage = String(describing: error)
         }
     }
