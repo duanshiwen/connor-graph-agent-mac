@@ -9,6 +9,7 @@ public enum ConnorNativeShellItem: String, Codable, Sendable, Equatable, Hashabl
     case graphEntities
     case approvals
     case automation
+    case localAutomationSurface
     case productOS
     case sources
     case skills
@@ -86,6 +87,7 @@ public enum ConnorNativeShellCommandID: String, Codable, Sendable, Equatable, Ha
     case openSources
     case openSkills
     case openAutomation
+    case openLocalAutomationSurface
     case checkCommercialReadiness
     case openSettings
 
@@ -169,6 +171,8 @@ public struct ConnorNativeShellRouteResolver: Sendable {
             ConnorNativeShellRoute(item: item, legacySidebarID: "pendingApprovals")
         case .automation:
             ConnorNativeShellRoute(item: item, legacySidebarID: "automation")
+        case .localAutomationSurface:
+            ConnorNativeShellRoute(item: item, legacySidebarID: "automation")
         case .productOS:
             ConnorNativeShellRoute(item: item, legacySidebarID: "productOS")
         case .sources:
@@ -226,6 +230,7 @@ public struct ConnorNativeShellPresentation: Codable, Sendable, Equatable {
             ConnorNativeShellSidebarGroup(id: "governance", title: "Governance", items: [
                 ConnorNativeShellSidebarItem(id: .approvals, title: "Approvals", subtitle: "Permissions and reviews", systemImage: "checkmark.shield", badgeStyle: .warning, isPrimary: true, riskLevel: .high, emptyStateTitle: "No pending approvals", emptyStateActionTitle: "Review Policy"),
                 ConnorNativeShellSidebarItem(id: .automation, title: "Automation", subtitle: "Rules, history, rate limits", systemImage: "bolt.badge.clock", badgeStyle: .warning, riskLevel: .medium),
+                ConnorNativeShellSidebarItem(id: .localAutomationSurface, title: "Local API / CLI", subtitle: "Scriptable automation surface", systemImage: "terminal", badgeStyle: .info, isPrimary: true, riskLevel: .medium, emptyStateTitle: "No local automation calls", emptyStateActionTitle: "Copy CLI Command"),
                 ConnorNativeShellSidebarItem(id: .productOS, title: "Product OS", subtitle: "Registry, labels, readiness", systemImage: "square.grid.2x2", isPrimary: true)
             ]),
             ConnorNativeShellSidebarGroup(id: "extensions", title: "Extensions", items: [
@@ -245,6 +250,7 @@ public struct ConnorNativeShellPresentation: Codable, Sendable, Equatable {
             ConnorNativeShellCommand(id: .openSources, title: "Open Sources", systemImage: "externaldrive.connected.to.line.below", keyboardShortcut: "⌘4", target: .sources, groupID: "extensions", keywords: ["mcp", "source", "tools"]),
             ConnorNativeShellCommand(id: .openSkills, title: "Open Skills", systemImage: "sparkles.rectangle.stack", keyboardShortcut: "⌘5", target: .skills, groupID: "extensions", keywords: ["skill", "instruction"]),
             ConnorNativeShellCommand(id: .openAutomation, title: "Open Automation", systemImage: "bolt.badge.clock", keyboardShortcut: "⌘6", target: .automation, groupID: "governance", riskLevel: .medium, keywords: ["automation", "rules"]),
+            ConnorNativeShellCommand(id: .openLocalAutomationSurface, title: "Open Local API / CLI", systemImage: "terminal", keyboardShortcut: "⌘7", target: .localAutomationSurface, groupID: "governance", isPrimaryAction: true, riskLevel: .medium, keywords: ["local", "api", "cli", "automation", "script"]),
             ConnorNativeShellCommand(id: .checkCommercialReadiness, title: "Check Commercial Readiness", systemImage: "checkmark.seal", keyboardShortcut: "⌘R", target: .productOS, groupID: "governance", isPrimaryAction: true, riskLevel: .medium, keywords: ["readiness", "release", "commercial"]),
             ConnorNativeShellCommand(id: .openSettings, title: "Open Settings", systemImage: "gearshape", keyboardShortcut: "⌘,", target: .settings, groupID: "system", isPrimaryAction: true, keywords: ["settings", "model", "preferences"])
         ]

@@ -43,10 +43,15 @@ private func temporaryFactoryNativeSessionDatabaseURL(_ name: String = UUID().uu
     let sidecarURL = temporaryDirectory.appendingPathComponent("configured-sidecar.sh")
     try """
     #!/bin/sh
-    IFS= read -r request
-    printf '%s\n' '{"runStarted":{"sdkSessionID":"sdk-configured-session"}}'
-    printf '%s\n' '{"textComplete":{"text":"Configured sidecar answer","citations":[],"contextSnapshot":null}}'
-    printf '%s\n' '{"runCompleted":{}}'
+    while IFS= read -r command; do
+      case "$command" in
+        *'"start"'*)
+          printf '%s\n' '{"runStarted":{"sdkSessionID":"sdk-configured-session"}}'
+          printf '%s\n' '{"textComplete":{"text":"Configured sidecar answer","citations":[],"contextSnapshot":null}}'
+          printf '%s\n' '{"runCompleted":{}}'
+          ;;
+      esac
+    done
     """.write(to: sidecarURL, atomically: true, encoding: .utf8)
     try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: sidecarURL.path)
 
