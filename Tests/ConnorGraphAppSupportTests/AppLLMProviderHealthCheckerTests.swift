@@ -26,7 +26,7 @@ private final class HealthCheckFakeSettingsStore: LLMSettingsStore, @unchecked S
     func set(_ value: String, forKey key: String) { values[key] = value }
 }
 
-@Test func healthCheckerReportsStubProviderAvailable() async throws {
+@Test func healthCheckerReportsDefaultOpenAICompatibleProviderNeedsConfiguration() async throws {
     let settingsRepository = AppLLMSettingsRepository(
         settingsStore: HealthCheckFakeSettingsStore(),
         credentialStore: HealthCheckFakeCredentialStore()
@@ -35,8 +35,8 @@ private final class HealthCheckFakeSettingsStore: LLMSettingsStore, @unchecked S
 
     let result = await checker.testConnection()
 
-    #expect(result.status == .success)
-    #expect(result.message == "模拟模型提供方可用。")
+    #expect(result.status == .notConfigured)
+    #expect(result.message.contains("API Key"))
 }
 
 @Test func healthCheckerReportsMissingOpenAICompatibleConfig() async throws {
