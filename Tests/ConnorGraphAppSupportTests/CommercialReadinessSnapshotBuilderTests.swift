@@ -95,7 +95,9 @@ struct CommercialReadinessSnapshotBuilderTests {
             .graphMemoryLoop,
             .nativeCommercialUI
         ])
-        #expect(dashboard.cards.last?.status == .blocked)
-        #expect(dashboard.cards.last?.metrics["settings"] == "partial")
+        #expect(dashboard.cards[4].status == .blocked)
+        #expect(dashboard.cards[4].metrics["settings"] == "partial")
+        #expect(dashboard.cards.last?.phase == .localAPICLIAutomationSurface)
+        #expect(dashboard.cards.last?.status == .ready)
     }
 }

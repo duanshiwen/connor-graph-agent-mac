@@ -13,7 +13,8 @@ let package = Package(
         .library(name: "ConnorGraphSearch", targets: ["ConnorGraphSearch"]),
         .library(name: "ConnorGraphAgent", targets: ["ConnorGraphAgent"]),
         .library(name: "ConnorGraphAppSupport", targets: ["ConnorGraphAppSupport"]),
-        .executable(name: "connor-graph-agent-mac", targets: ["ConnorGraphAgentMac"])
+        .executable(name: "connor-graph-agent-mac", targets: ["ConnorGraphAgentMac"]),
+        .executable(name: "connor", targets: ["ConnorCLI"])
     ],
     targets: [
         .target(name: "ConnorGraphCore"),
@@ -40,6 +41,10 @@ let package = Package(
             name: "ConnorGraphAgentMac",
             dependencies: ["ConnorGraphAgent", "ConnorGraphStore", "ConnorGraphAppSupport"],
             linkerSettings: [.linkedFramework("WebKit")]
+        ),
+        .executableTarget(
+            name: "ConnorCLI",
+            dependencies: ["ConnorGraphAppSupport", "ConnorGraphCore"]
         ),
         .testTarget(name: "ConnorGraphCoreTests", dependencies: ["ConnorGraphCore"]),
         .testTarget(name: "ConnorGraphMemoryTests", dependencies: ["ConnorGraphMemory"]),
