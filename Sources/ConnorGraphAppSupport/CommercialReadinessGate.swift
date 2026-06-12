@@ -53,7 +53,19 @@ public enum CommercialSessionGovernanceReadiness: Codable, Sendable, Equatable {
 }
 
 public enum CommercialClaudeSidecarReadiness: Codable, Sendable, Equatable {
-    case ready(runtimeStatus: ClaudeSDKSidecarRuntimeStatus, sdkSessionID: String?, healthStatus: String)
+    case ready(
+        runtimeStatus: ClaudeSDKSidecarRuntimeStatus,
+        sdkSessionID: String?,
+        healthStatus: String,
+        protocolVersion: Int = 2,
+        sdkCWD: String? = nil,
+        hasHeartbeat: Bool = false,
+        lastDiagnosticMessage: String? = nil,
+        failureCode: ClaudeSDKSidecarFailureCode? = nil,
+        recoverability: ClaudeSDKSidecarRecoverability? = nil,
+        ownsProductState: Bool = false,
+        governedPermissionMode: Bool = true
+    )
     case missing(String)
 }
 
@@ -174,7 +186,15 @@ public struct CommercialReadinessSnapshotBuilder: Sendable, Equatable {
             claudeSidecar = .ready(
                 runtimeStatus: sidecarRecord.status,
                 sdkSessionID: sidecarRecord.sdkSessionID,
-                healthStatus: sidecarHealthStatus ?? sidecarRecord.status.rawValue
+                healthStatus: sidecarHealthStatus ?? sidecarRecord.status.rawValue,
+                protocolVersion: sidecarRecord.protocolVersion,
+                sdkCWD: sidecarRecord.sdkCWD,
+                hasHeartbeat: sidecarRecord.lastHeartbeatAt != nil,
+                lastDiagnosticMessage: sidecarRecord.lastDiagnosticMessage,
+                failureCode: sidecarRecord.failureCode,
+                recoverability: sidecarRecord.recoverability,
+                ownsProductState: false,
+                governedPermissionMode: true
             )
         } else {
             claudeSidecar = .missing("Claude SDK sidecar runtime has not been initialized")
@@ -311,12 +331,42 @@ public struct CommercialReadinessGate: Sendable, Equatable {
 
     private func claudeSidecarCard(_ readiness: CommercialClaudeSidecarReadiness) -> CommercialReadinessCard {
         switch readiness {
-        case .ready(let runtimeStatus, let sdkSessionID, let healthStatus):
+        case .ready(
+            let runtimeStatus,
+            let sdkSessionID,
+            let healthStatus,
+            let protocolVersion,
+            let sdkCWD,
+            let hasHeartbeat,
+            let lastDiagnosticMessage,
+            let failureCode,
+            let recoverability,
+            let ownsProductState,
+            let governedPermissionMode
+        ):
+            let blockedReasons = [
+                ownsProductState ? "Claude SDK sidecar must not own Connor product state" : nil,
+                governedPermissionMode ? nil : "Claude SDK sidecar is not governed by Connor permission mode",
+                protocolVersion >= 2 ? nil : "Claude SDK sidecar protocol v2 is required for production diagnostics"
+            ].compactMap { $0 }
             return CommercialReadinessCard(
                 phase: .claudeSDKSidecar,
-                status: .ready,
-                evidence: "runtime \(runtimeStatus.rawValue) · health \(healthStatus) · sdk session \(sdkSessionID ?? "not yet established")",
-                metrics: ["runtime": runtimeStatus.rawValue, "health": healthStatus]
+                status: blockedReasons.isEmpty ? .ready : .blocked,
+                evidence: "runtime \(runtimeStatus.rawValue) · health \(healthStatus) · protocol v\(protocolVersion) · sdk session \(sdkSessionID ?? "not yet established") · cwd \(sdkCWD ?? "unknown") · heartbeat \(hasHeartbeat ? "seen" : "not seen") · sovereignty \(ownsProductState ? "violated" : "Connor-owned")",
+                metrics: [
+                    "runtime": runtimeStatus.rawValue,
+                    "health": healthStatus,
+                    "protocol": "v\(protocolVersion)",
+                    "sdkSession": sdkSessionID ?? "not-established",
+                    "sdkCWD": sdkCWD ?? "unknown",
+                    "heartbeat": hasHeartbeat ? "seen" : "missing",
+                    "diagnostic": lastDiagnosticMessage ?? "none",
+                    "failureCode": failureCode?.rawValue ?? "none",
+                    "recoverability": recoverability?.rawValue ?? "unknown",
+                    "productState": ownsProductState ? "sdk-owned" : "Connor-owned",
+                    "permission": governedPermissionMode ? "Connor-governed" : "unsafe"
+                ],
+                blockingReasons: blockedReasons
             )
         case .missing(let reason):
             return blockedCard(phase: .claudeSDKSidecar, reason: reason)
