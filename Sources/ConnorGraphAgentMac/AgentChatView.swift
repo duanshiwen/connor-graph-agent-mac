@@ -25,10 +25,11 @@ private enum AgentChatLayout {
     static let composerInfoButtonWidth: CGFloat = 78
     static let modelMenuMaxWidth: CGFloat = 176
 
-    static let messageMaxWidth: CGFloat = 760
-    static let userMessageMaxWidth: CGFloat = 560
-    static let processMaxWidth: CGFloat = 700
-    static let messageSideInset: CGFloat = 80
+    static let chatContentMaxWidth: CGFloat = 720
+    static let messageMaxWidth: CGFloat = chatContentMaxWidth
+    static let userMessageMaxWidth: CGFloat = chatContentMaxWidth * 0.72
+    static let processMaxWidth: CGFloat = chatContentMaxWidth
+    static let messageSideInset: CGFloat = 0
 }
 
 struct AgentChatView: View {
@@ -198,8 +199,6 @@ private struct AgentChatConversationView: View {
                 .padding(.horizontal, AgentChatLayout.spaceL)
                 .padding(.vertical, AgentChatLayout.spaceM)
 
-            Divider()
-
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
@@ -224,7 +223,7 @@ private struct AgentChatConversationView: View {
                             }
                         }
                     }
-                    .padding(.horizontal, AgentChatLayout.spaceXL)
+                    .padding(.horizontal, 0)
                     .padding(.vertical, AgentChatLayout.spaceXL)
                 }
                 .onChange(of: viewModel.transcript.count) { _, _ in
@@ -235,12 +234,13 @@ private struct AgentChatConversationView: View {
                 }
             }
 
-            Divider()
 
             AgentChatComposerView(viewModel: viewModel, isSessionInfoPresented: $isSessionInfoPresented)
                 .padding(.horizontal, AgentChatLayout.spaceL)
                 .padding(.vertical, AgentChatLayout.spaceM)
         }
+        .frame(maxWidth: AgentChatLayout.chatContentMaxWidth, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
         .overlay {
             if let event = activityDetailEvent {
@@ -250,6 +250,8 @@ private struct AgentChatConversationView: View {
                 .transition(.opacity.combined(with: .scale(scale: 0.985)))
             }
         }
+        .padding(.horizontal, AgentChatLayout.spaceL)
+        .padding(.vertical, AgentChatLayout.spaceM)
     }
 }
 
@@ -263,28 +265,10 @@ private struct AgentChatConversationHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
             HStack(spacing: AgentChatLayout.spaceM) {
-                VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
-                    Text(selectedTitle)
-                        .font(.title3.weight(.semibold))
-                        .lineLimit(1)
-                    HStack(spacing: AgentChatLayout.spaceS) {
-                        if let session = viewModel.chatSessions.first(where: { $0.id == viewModel.selectedChatSessionID }) {
-                            AgentStatusPill(status: session.governance.status, text: session.governance.status.displayName)
-                            ForEach(session.governance.labels.prefix(4)) { label in
-                                AgentLabelPill(text: label.displayText)
-                            }
-                        }
-                        Text("图谱增强对话工作区")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+                Text(selectedTitle)
+                    .font(.title3.weight(.semibold))
+                    .lineLimit(1)
                 Spacer()
-                Button("重新加载") { viewModel.reloadChatSessions() }
-                Button(viewModel.summarizeChatSessionButtonTitle) {
-                    Task { await viewModel.summarizeSelectedChatSession() }
-                }
-                .disabled(!viewModel.canSummarizeSelectedChatSession)
             }
 
             if let summary = viewModel.latestChatSummary {
