@@ -186,6 +186,7 @@ final class AppViewModel: ObservableObject {
     @Published var llmProviderMode: AppLLMProviderMode = .stub
     @Published var llmBaseURLString: String = AppLLMSettings.default.baseURLString
     @Published var llmModel: String = AppLLMSettings.default.model
+    @Published var llmSelectedModel: String = AppLLMSettings.default.effectiveModel
     @Published var llmAPIKeyInput: String = ""
     @Published var llmHasAPIKey: Bool = false
     @Published var sidecarExecutablePath: String = ""
@@ -820,6 +821,7 @@ final class AppViewModel: ObservableObject {
             llmProviderMode = settings.providerMode
             llmBaseURLString = settings.baseURLString
             llmModel = settings.model
+            llmSelectedModel = settings.effectiveModel
             llmHasAPIKey = settings.hasAPIKey
             llmAPIKeyInput = ""
             sidecarExecutablePath = settings.sidecarExecutablePath
@@ -843,7 +845,7 @@ final class AppViewModel: ObservableObject {
     func selectLLMModel(_ modelID: String, providerMode: AppLLMProviderMode) {
         guard !modelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         llmProviderMode = providerMode
-        llmModel = modelID
+        llmSelectedModel = modelID
         saveLLMSettings()
     }
 
@@ -852,6 +854,7 @@ final class AppViewModel: ObservableObject {
             let settings = AppLLMSettings(
                 baseURLString: llmBaseURLString.trimmingCharacters(in: .whitespacesAndNewlines),
                 model: llmModel.trimmingCharacters(in: .whitespacesAndNewlines),
+                selectedModel: llmSelectedModel.trimmingCharacters(in: .whitespacesAndNewlines),
                 hasAPIKey: llmHasAPIKey,
                 providerMode: llmProviderMode,
                 sidecarExecutablePath: sidecarExecutablePath.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -3094,7 +3097,7 @@ struct LLMSettingsView: View {
             } else {
                 TextField("Base URL", text: $viewModel.llmBaseURLString)
                     .textFieldStyle(.roundedBorder)
-                TextField("模型", text: $viewModel.llmModel)
+                TextField("模型列表（逗号分隔）", text: $viewModel.llmModel)
                     .textFieldStyle(.roundedBorder)
                 SecureField("API Key", text: $viewModel.llmAPIKeyInput)
                     .textFieldStyle(.roundedBorder)
@@ -3255,7 +3258,7 @@ private struct SettingsAISection: View {
                     Text("Claude Sidecar").tag(AppLLMProviderMode.governedClaudeSidecar)
                 }
                 Divider()
-                SettingsTextFieldRow(title: "模型", subtitle: "新聊天的 AI 模型", text: $viewModel.llmModel)
+                SettingsTextFieldRow(title: "模型列表", subtitle: "逗号分隔多个候选模型；聊天输入区每次只选择其中一个实际模型", text: $viewModel.llmModel)
                 Divider()
                 SettingsPickerRow(title: "权限", subtitle: "新聊天默认权限", selection: $viewModel.defaultPermissionMode) {
                     ForEach(AgentPermissionMode.allCases.filter { $0 != .allowAll }, id: \.self) { mode in

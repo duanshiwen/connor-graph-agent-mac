@@ -91,6 +91,29 @@ private struct FakeAgentHTTPClient: AgentHTTPClient, Sendable {
     #expect(config.apiKey == "secret-key")
 }
 
+@Test func settingsRepositorySeparatesModelListFromSelectedModel() throws {
+    let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
+    try repository.save(
+        settings: AppLLMSettings(
+            baseURLString: "https://example.com/v1",
+            model: "mimo-v2.5-pro, mimo-v2.5, mimo-v2.5-tts",
+            selectedModel: "mimo-v2.5",
+            hasAPIKey: false,
+            providerMode: .openAICompatible
+        ),
+        apiKey: "secret-key"
+    )
+
+    let loaded = try repository.loadSettings()
+    let config = try #require(try repository.openAICompatibleConfig())
+
+    #expect(loaded.model == "mimo-v2.5-pro, mimo-v2.5, mimo-v2.5-tts")
+    #expect(loaded.modelOptions == ["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2.5-tts"])
+    #expect(loaded.selectedModel == "mimo-v2.5")
+    #expect(loaded.effectiveModel == "mimo-v2.5")
+    #expect(config.model == "mimo-v2.5")
+}
+
 @Test func settingsRepositoryReturnsNilConfigWhenKeyMissing() throws {
     let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
     try repository.save(settings: AppLLMSettings.default, apiKey: nil)
@@ -103,7 +126,7 @@ private struct FakeAgentHTTPClient: AgentHTTPClient, Sendable {
 @Test func modelCatalogLoadsOpenAICompatibleModelsFromProvider() async throws {
     let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
     try repository.save(
-        settings: AppLLMSettings(baseURLString: "https://example.com/v1", model: "gpt-current", hasAPIKey: false, providerMode: .openAICompatible),
+        settings: AppLLMSettings(baseURLString: "https://example.com/v1", model: "gpt-current, gpt-local", selectedModel: "gpt-current", hasAPIKey: false, providerMode: .openAICompatible),
         apiKey: "secret-key"
     )
     let body = #"{"data":[{"id":"gpt-z"},{"id":"gpt-a"}]}"#.data(using: .utf8)!
@@ -117,13 +140,13 @@ private struct FakeAgentHTTPClient: AgentHTTPClient, Sendable {
 
     #expect(connection.providerMode == .openAICompatible)
     #expect(connection.isLiveCatalog == true)
-    #expect(connection.models.map(\.id) == ["gpt-current", "gpt-a", "gpt-z"])
+    #expect(connection.models.map(\.id) == ["gpt-current", "gpt-local", "gpt-a", "gpt-z"])
 }
 
 @Test func modelCatalogFallsBackToConfiguredModelWhenOpenAIKeyMissing() async throws {
     let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
     try repository.save(
-        settings: AppLLMSettings(baseURLString: "https://example.com/v1", model: "configured-model", hasAPIKey: false, providerMode: .openAICompatible),
+        settings: AppLLMSettings(baseURLString: "https://example.com/v1", model: "configured-model, backup-model", selectedModel: "backup-model", hasAPIKey: false, providerMode: .openAICompatible),
         apiKey: nil
     )
     let catalog = AppLLMModelCatalog(
@@ -136,7 +159,7 @@ private struct FakeAgentHTTPClient: AgentHTTPClient, Sendable {
 
     #expect(connection.providerMode == .openAICompatible)
     #expect(connection.isLiveCatalog == false)
-    #expect(connection.models.map(\.id) == ["configured-model"])
+    #expect(connection.models.map(\.id) == ["configured-model", "backup-model"])
 }
 
 @Test func settingsRepositoryPersistsGovernedSidecarSettingsAndClampsAllowAll() throws {

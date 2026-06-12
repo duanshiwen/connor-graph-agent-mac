@@ -861,7 +861,7 @@ private struct AgentChatComposerView: View {
             }
 
             if viewModel.llmModelConnections.isEmpty {
-                Button(viewModel.llmModel.isEmpty ? "未选择模型" : viewModel.llmModel) {}
+                Button(viewModel.llmSelectedModel.isEmpty ? "未选择模型" : viewModel.llmSelectedModel) {}
                     .disabled(true)
             } else {
                 ForEach(viewModel.llmModelConnections) { connection in
@@ -874,7 +874,7 @@ private struct AgentChatComposerView: View {
                                 Button {
                                     viewModel.selectLLMModel(model.id, providerMode: connection.providerMode)
                                 } label: {
-                                    if model.id == viewModel.llmModel && connection.providerMode == viewModel.llmProviderMode {
+                                    if model.id == viewModel.llmSelectedModel && connection.providerMode == viewModel.llmProviderMode {
                                         Label(model.displayName, systemImage: "checkmark")
                                     } else {
                                         Text(model.displayName)
@@ -907,7 +907,7 @@ private struct AgentChatComposerView: View {
             }
         } label: {
             Label {
-                Text(viewModel.llmModel.isEmpty ? "未选择模型" : viewModel.llmModel)
+                Text(viewModel.llmSelectedModel.isEmpty ? "未选择模型" : viewModel.llmSelectedModel)
                     .lineLimit(1)
                     .truncationMode(.middle)
             } icon: {
