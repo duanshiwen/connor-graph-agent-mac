@@ -156,6 +156,10 @@ public struct AppChatSessionRepository: Sendable {
         try store.recentEvents(sessionID: sessionID, limit: limit)
     }
 
+    public func loadRunEvents(runID: String, limit: Int = 200) throws -> [PersistedAgentEvent] {
+        try store.events(runID: runID, limit: limit)
+    }
+
     public func savePendingApproval(_ approval: AgentPendingApproval) throws {
         try store.upsert(pendingApproval: approval)
     }
