@@ -32,6 +32,11 @@ struct ConnorCommandPaletteView: View {
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
+                    if results.isEmpty {
+                        ContentUnavailableView("No command found", systemImage: "command", description: Text("Try searching by destination, shortcut, group, or risk."))
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 80)
+                    }
                     ForEach(results.prefix(12)) { entry in
                         Button(action: { activate(entry) }) {
                             HStack(spacing: 12) {
@@ -46,6 +51,19 @@ struct ConnorCommandPaletteView: View {
                                         .foregroundStyle(.secondary)
                                 }
                                 Spacer()
+                                if entry.isPrimaryAction {
+                                    Text("Primary")
+                                        .font(.caption2.weight(.semibold))
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(.blue.opacity(0.12), in: Capsule())
+                                }
+                                Text(entry.groupID.capitalized)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Text(entry.riskLevel.rawValue)
+                                    .font(.caption2)
+                                    .foregroundStyle(color(for: entry.riskLevel))
                                 if let shortcut = entry.keyboardShortcut {
                                     Text(shortcut)
                                         .font(.caption.monospaced())
@@ -63,6 +81,14 @@ struct ConnorCommandPaletteView: View {
         }
         .padding(16)
         .frame(width: 560, height: 520)
+    }
+
+    private func color(for risk: ConnorNativeCommercialUIRiskLevel) -> Color {
+        switch risk {
+        case .low: .secondary
+        case .medium: .orange
+        case .high: .red
+        }
     }
 
     private func activate(_ entry: ConnorCommandPaletteEntry) {

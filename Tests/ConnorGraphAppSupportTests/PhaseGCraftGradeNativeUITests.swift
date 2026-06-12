@@ -10,17 +10,18 @@ struct PhaseGCraftGradeNativeUITests {
         let shell = ConnorNativeShellPresentation.default
 
         #expect(shell.title == "Connor")
-        #expect(shell.defaultSelection == .agentChat)
-        #expect(shell.sidebarGroups.map(\.title) == ["Run", "Memory", "Governance", "System"])
+        #expect(shell.defaultSelection == .home)
+        #expect(shell.sidebarGroups.map(\.title) == ["Home", "Work", "Memory", "Governance", "Extensions", "System"])
         #expect(shell.sidebarGroups.flatMap(\.items).map(\.id).prefix(5) == [
-            ConnorNativeShellItem.agentChat,
+            ConnorNativeShellItem.home,
+            .agentChat,
             .browserWorkspace,
             .graphMemory,
-            .search,
-            .graphEntities
+            .search
         ])
         #expect(shell.sidebarGroups.flatMap(\.items).allSatisfy { !$0.title.isEmpty && !$0.systemImage.isEmpty })
         #expect(shell.commands.map(\.id) == [
+            .openHome,
             .newSession,
             .toggleBrowser,
             .openGraphMemoryReview,
@@ -31,8 +32,8 @@ struct PhaseGCraftGradeNativeUITests {
             .checkCommercialReadiness,
             .openSettings
         ])
-        #expect(shell.commands.first?.keyboardShortcut == "⌘N")
-        #expect(shell.commands[2].target == .graphMemory)
+        #expect(shell.commands.first?.keyboardShortcut == "⌘1")
+        #expect(shell.commands[3].target == .graphMemory)
     }
 
     @Test func nativeShellFindsItemsByIdentifierForDeepLinks() {
@@ -111,13 +112,13 @@ struct PhaseGCraftGradeNativeUITests {
             now: now
         )
 
-        #expect(center.hero.title == "Production hardening")
-        #expect(center.hero.statusText == "in_progress")
-        #expect(center.metricTiles.map(\.id) == [.activeSessions, .pendingApprovals, .memoryReviews, .automationTriggers])
-        #expect(center.metricTiles.map(\.value) == ["1", "1", "3", "1"])
-        #expect(center.sections.map(\.id) == [.runTimeline, .reviewQueue, .graphMemory, .automation])
-        #expect(center.sections[0].items.first?.title == "Graph memory held")
-        #expect(center.sections[1].items.first?.severity == .warning)
-        #expect(center.sections[2].items.first?.subtitle == "admissionHold · needsReview")
+        #expect(center.hero.title == "Connor Runtime Center")
+        #expect(center.hero.statusText == "ready")
+        #expect(center.metricTiles.map(\.id) == [.activeSessions, .pendingApprovals, .memoryReviews, .automationTriggers, .nativeUIHealth])
+        #expect(center.metricTiles.map(\.value) == ["1", "1", "3", "1", "ready"])
+        #expect(center.sections.map(\.id) == [.nextBestActions, .runTimeline, .reviewQueue, .graphMemory, .automation])
+        #expect(center.sections[0].items.first?.title == "Review pending approvals")
+        #expect(center.sections[2].items.first?.severity == .warning)
+        #expect(center.sections[3].items.first?.subtitle == "admissionHold · needsReview")
     }
 }

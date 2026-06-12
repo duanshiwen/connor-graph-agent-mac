@@ -100,7 +100,19 @@ public enum CommercialGraphMemoryReadiness: Codable, Sendable, Equatable {
 }
 
 public enum CommercialNativeUIReadiness: Codable, Sendable, Equatable {
-    case ready(shellItemCount: Int, commandCount: Int, settingsPanelsReady: Bool)
+    case ready(
+        shellItemCount: Int,
+        commandCount: Int,
+        settingsPanelsReady: Bool,
+        homeSurfaceReady: Bool = false,
+        runtimeCenterReady: Bool = false,
+        commandPaletteReady: Bool = false,
+        readinessDashboardLinked: Bool = false,
+        primaryActionCount: Int = 0,
+        emptyStateCount: Int = 0,
+        keyboardShortcutCount: Int = 0,
+        settingsSectionCount: Int = 0
+    )
     case missing(String)
 }
 
@@ -268,10 +280,19 @@ public struct CommercialReadinessSnapshotBuilder: Sendable, Equatable {
             graphMemory = .missing("Graph memory dashboard is not available")
         }
 
+        let nativePresentation = ConnorNativeCommercialUIPresentation.build(shell: shell)
         let nativeUI = CommercialNativeUIReadiness.ready(
             shellItemCount: shell.sidebarGroups.flatMap(\.items).count,
             commandCount: shell.commands.count,
-            settingsPanelsReady: settingsPanelsReady
+            settingsPanelsReady: settingsPanelsReady,
+            homeSurfaceReady: shell.item(for: .home) != nil,
+            runtimeCenterReady: shell.defaultSelection == .home,
+            commandPaletteReady: !shell.commands.isEmpty,
+            readinessDashboardLinked: shell.command(for: .checkCommercialReadiness) != nil,
+            primaryActionCount: shell.commands.filter(\.isPrimaryAction).count,
+            emptyStateCount: shell.sidebarGroups.flatMap(\.items).filter { $0.emptyStateTitle != nil }.count,
+            keyboardShortcutCount: shell.commands.filter { $0.keyboardShortcut != nil }.count,
+            settingsSectionCount: nativePresentation.settings.sections.count
         )
 
         return CommercialReadinessInput(
@@ -501,16 +522,51 @@ public struct CommercialReadinessGate: Sendable, Equatable {
 
     private func nativeUICard(_ readiness: CommercialNativeUIReadiness) -> CommercialReadinessCard {
         switch readiness {
-        case .ready(let shellItemCount, let commandCount, let settingsPanelsReady):
+        case .ready(
+            let shellItemCount,
+            let commandCount,
+            let settingsPanelsReady,
+            let homeSurfaceReady,
+            let runtimeCenterReady,
+            let commandPaletteReady,
+            let readinessDashboardLinked,
+            let primaryActionCount,
+            let emptyStateCount,
+            let keyboardShortcutCount,
+            let settingsSectionCount
+        ):
+            let hasTrain5Evidence = homeSurfaceReady || runtimeCenterReady || commandPaletteReady || readinessDashboardLinked || primaryActionCount > 0 || emptyStateCount > 0 || keyboardShortcutCount > 0 || settingsSectionCount > 0
+            let blockingReasons = hasTrain5Evidence ? [
+                shellItemCount > 0 ? nil : "Native shell has no navigation items",
+                commandCount > 0 ? nil : "Command palette has no commands",
+                settingsPanelsReady ? nil : "Settings panels are not ready",
+                homeSurfaceReady ? nil : "Home runtime surface is not available",
+                runtimeCenterReady ? nil : "Runtime center is not the default commercial home",
+                commandPaletteReady ? nil : "Command palette is not ready",
+                readinessDashboardLinked ? nil : "Commercial readiness dashboard is not linked",
+                primaryActionCount >= 4 ? nil : "Not enough primary native actions",
+                emptyStateCount >= 3 ? nil : "Not enough empty states for commercial UI",
+                keyboardShortcutCount >= 6 ? nil : "Not enough keyboard shortcuts",
+                settingsSectionCount >= 6 ? nil : "Settings surface is incomplete"
+            ].compactMap { $0 } : []
             return CommercialReadinessCard(
                 phase: .nativeCommercialUI,
-                status: .ready,
-                evidence: "\(shellItemCount) shell items · \(commandCount) commands · settings \(settingsPanelsReady ? "ready" : "partial")",
+                status: blockingReasons.isEmpty ? .ready : .blocked,
+                evidence: "\(shellItemCount) shell items · \(commandCount) commands · \(primaryActionCount) primary actions · \(keyboardShortcutCount) shortcuts · \(settingsSectionCount) settings sections",
                 metrics: [
                     "shellItems": "\(shellItemCount)",
                     "commands": "\(commandCount)",
-                    "settings": settingsPanelsReady ? "ready" : "partial"
-                ]
+                    "settings": settingsPanelsReady ? "ready" : "partial",
+                    "homeSurfaceReady": homeSurfaceReady ? "true" : "false",
+                    "runtimeCenterReady": runtimeCenterReady ? "true" : "false",
+                    "commandPaletteReady": commandPaletteReady ? "true" : "false",
+                    "readinessDashboardLinked": readinessDashboardLinked ? "true" : "false",
+                    "primaryActions": "\(primaryActionCount)",
+                    "emptyStates": "\(emptyStateCount)",
+                    "keyboardShortcuts": "\(keyboardShortcutCount)",
+                    "settingsSections": "\(settingsSectionCount)"
+                ],
+                blockingReasons: blockingReasons
             )
         case .missing(let reason):
             return blockedCard(phase: .nativeCommercialUI, reason: reason)
