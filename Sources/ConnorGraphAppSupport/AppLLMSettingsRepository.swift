@@ -2,7 +2,6 @@ import Foundation
 import ConnorGraphAgent
 
 public enum AppLLMProviderMode: String, Sendable, Equatable, CaseIterable {
-    case stub
     case openAICompatible = "openai_compatible"
     case governedClaudeSidecar = "governed_claude_sidecar"
 }
@@ -102,7 +101,7 @@ public struct AppLLMSettings: Sendable, Equatable {
         model: "gpt-4o-mini",
         selectedModel: "gpt-4o-mini",
         hasAPIKey: false,
-        providerMode: .stub
+        providerMode: .openAICompatible
     )
 }
 
@@ -228,10 +227,6 @@ public struct AppLLMModelCatalog<Client: AgentHTTPClient>: Sendable {
             let settings = try settingsRepository.loadSettings()
             var connections: [AppLLMModelConnection] = []
 
-            if settings.providerMode == .stub {
-                connections.append(stubConnection(settings: settings))
-            }
-
             if let openAIConnection = await openAICompatibleConnection(settings: settings) {
                 connections.append(openAIConnection)
             }
@@ -240,24 +235,10 @@ public struct AppLLMModelCatalog<Client: AgentHTTPClient>: Sendable {
                 connections.append(sidecarConnection(settings: settings))
             }
 
-            if connections.isEmpty {
-                connections.append(stubConnection(settings: settings))
-            }
             return connections
         } catch {
             return fallbackConnections(error: error)
         }
-    }
-
-    private func stubConnection(settings: AppLLMSettings) -> AppLLMModelConnection {
-        AppLLMModelConnection(
-            id: AppLLMProviderMode.stub.rawValue,
-            title: "模拟模式",
-            subtitle: "本地 Stub Provider",
-            providerMode: .stub,
-            models: options(from: settings, fallback: AppLLMSettings.default.effectiveModel),
-            isLiveCatalog: false
-        )
     }
 
     private func sidecarConnection(settings: AppLLMSettings) -> AppLLMModelConnection {
@@ -387,8 +368,6 @@ public struct AppLLMModelCatalog<Client: AgentHTTPClient>: Sendable {
 private extension AppLLMProviderMode {
     var displayName: String {
         switch self {
-        case .stub:
-            return "模拟模式"
         case .openAICompatible:
             return "OpenAI 兼容"
         case .governedClaudeSidecar:

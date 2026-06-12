@@ -120,7 +120,7 @@ public struct ConnorRuntimeCenterPresentation: Codable, Sendable, Equatable {
         let memoryReviews = (graphMemoryDashboard?.summary.pendingCandidateCount ?? 0) + (graphMemoryDashboard?.summary.openHoldCount ?? 0)
 
         let hero = ConnorRuntimeCenterHero(
-            title: featured?.title ?? "Connor Runtime Center",
+            title: featured?.title ?? "Connor Runtime Summary",
             subtitle: featured.map { "Session \($0.id) · \($0.messages.count) messages" } ?? "No active session",
             statusText: featured?.status.rawValue ?? "idle",
             updatedText: featured.map { relativeTime(from: $0.updatedAt, to: now) } ?? "—"
@@ -150,7 +150,7 @@ public struct ConnorRuntimeCenterPresentation: Codable, Sendable, Equatable {
                 subtitle: event.kind,
                 detail: event.detail,
                 severity: event.severity,
-                target: .runtimeCenter
+                target: .agentChat
             )
         }
         let approvalItems = pendingApprovals.map { approval in
@@ -185,7 +185,7 @@ public struct ConnorRuntimeCenterPresentation: Codable, Sendable, Equatable {
         }
 
         var sections = [
-            ConnorRuntimeCenterSection(id: .runTimeline, title: "Run Timeline", subtitle: "Latest agent events", items: timelineItems, target: .runtimeCenter),
+            ConnorRuntimeCenterSection(id: .runTimeline, title: "Run Timeline", subtitle: "Latest agent events", items: timelineItems, target: .agentChat),
             ConnorRuntimeCenterSection(id: .reviewQueue, title: "Review Queue", subtitle: "Permissions and human gates", items: approvalItems, target: .approvals),
             ConnorRuntimeCenterSection(id: .graphMemory, title: "Graph Memory", subtitle: "Review center", items: memoryItems, target: .graphMemory),
             ConnorRuntimeCenterSection(id: .automation, title: "Automation", subtitle: "Governed triggers", items: automationItems, target: .automation)

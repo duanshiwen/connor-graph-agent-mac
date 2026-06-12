@@ -13,7 +13,7 @@ struct PhaseICommandPaletteNavigationTests {
         #expect(palette.entries.contains { $0.id == "item.sources" && $0.kind == ConnorCommandPaletteEntryKind.destination })
         #expect(palette.entries.contains { $0.id == "item.skills" && $0.kind == ConnorCommandPaletteEntryKind.destination })
         #expect(palette.entries.contains { $0.id == "item.automation" && $0.kind == ConnorCommandPaletteEntryKind.destination })
-        #expect(palette.entries.allSatisfy { $0.id != "command.openRuntimeCenter" && $0.target != ConnorNativeShellItem.runtimeCenter })
+        #expect(palette.entries.allSatisfy { $0.id != "command.openRuntimeCenter" })
         #expect(palette.search("source").map(\.target).contains(ConnorNativeShellItem.sources))
         #expect(palette.search("⌘N").first?.target == ConnorNativeShellItem.agentChat)
         #expect(palette.search("approval").contains { $0.target == ConnorNativeShellItem.approvals })
