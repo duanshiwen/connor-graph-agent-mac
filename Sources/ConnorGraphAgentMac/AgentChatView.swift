@@ -617,20 +617,7 @@ private struct AgentChatMessageRow: View {
             if isUser { Spacer(minLength: AgentChatLayout.messageSideInset) }
 
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
-                HStack(spacing: AgentChatLayout.spaceS) {
-                    Text(row.roleLabel)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(isUser ? .white.opacity(0.90) : .secondary)
-                    Text("第 \(row.turnNumber) 轮")
-                        .font(.caption2)
-                        .foregroundStyle(isUser ? .white.opacity(0.65) : .secondary)
-                    Text(row.message.createdAt.formatted(date: .omitted, time: .shortened))
-                        .font(.caption2)
-                        .foregroundStyle(isUser ? .white.opacity(0.65) : .secondary)
-                }
-
                 AgentMarkdownPreviewText(markdown: row.message.content, font: .body)
-
             }
             .padding(AgentChatLayout.spaceM)
             .frame(maxWidth: isUser ? AgentChatLayout.userMessageMaxWidth : AgentChatLayout.messageMaxWidth, alignment: .leading)
