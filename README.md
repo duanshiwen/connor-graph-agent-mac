@@ -953,7 +953,7 @@ swift build --product connor-graph-agent-mac
 最近验证结果：
 
 ```text
-Build of product 'connor-graph-agent-mac' complete! (2026-06-12 14:58 GMT+8)
+Build of product 'connor-graph-agent-mac' complete! (2026-06-12 19:49 GMT+8)
 ```
 
 Test：
@@ -966,7 +966,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
 最近验证结果：
 
 ```text
-344 tests in 9 suites passed
+349 tests in 14 suites passed (2026-06-12 19:49 GMT+8)
 ```
 
 Phase I 专项验证：
@@ -980,6 +980,24 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --filter Pha
 ```text
 4 tests passed
 ```
+
+---
+
+
+### Commercial Train 1: Session OS Maturation
+
+本阶段将 `NativeSessionManager` 从纯内存态 turn executor 推进为第一阶段 Session OS runtime：
+
+- 新增 `SessionOSDomain`：pending plan、branch record、restore snapshot、journal payload。
+- 扩展 `AgentRunStatus`：`queued` 与 `waiting_for_approval`，用于表达 run queue / approval wait。
+- 扩展 SQLite runtime schema：`session_pending_plans`、`session_branch_records`，并补齐 run/session 查询、recent journal 查询、pending plan resolution 与 branch metadata 持久化。
+- `AppChatSessionRepository` 增加 Session OS API：run save/load、journal append/load、pending approval restore、pending plan create/resolve、session branch、restore snapshot。
+- `NativeSessionManager` 现在会在用户消息落盘后创建持久化 run record，记录 queued/running/completed/failed/cancelled 状态，pending approval 会进入可恢复 snapshot。
+- status / labels / archive / restore 变更会写入 session journal，为 automation fanout 提供稳定事件入口。
+- Commercial readiness gate 的 Session Governance card 增加 runs、journal events、pending plans、branches、restore snapshot 指标。
+- 新增 `NativeSessionManagerSessionOSTests` 覆盖 run lifecycle、failure durability、pending approval restore、pending plan、branch、governance fanout。
+
+本阶段仍刻意不引入多 workspace；session 继续落在 single Home / Runtime Root 语义下。Claude SDK production backend、Source lifecycle platform 与 Graph Memory Review 商用 UI 留给后续 Commercial Train。
 
 ---
 
@@ -997,6 +1015,7 @@ Phase F: Graph Memory Productization
 Phase G: Craft-grade Native UI
 Phase H: Source / Skill / Automation UI Integration
 Phase I: Command Palette / Deep-link Navigation / Runtime Click-through
+Commercial Train 1: Session OS Maturation
 Local UI Refresh: Craft-like three-column shell and user-facing navigation cleanup
 Local Settings Center: App / AI / Appearance / Input / Permissions / Labels / Shortcuts / Preferences
 ```

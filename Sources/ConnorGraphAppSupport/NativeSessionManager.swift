@@ -20,28 +20,37 @@ public enum NativeSessionManagerError: Error, Sendable, Equatable, LocalizedErro
 public struct NativeSessionRuntimeState: Codable, Sendable, Equatable {
     public var isProcessing: Bool
     public var activeRunID: String?
+    public var queuedRunIDs: [String]
     public var lastRunID: String?
     public var lastStartedAt: Date?
     public var lastCompletedAt: Date?
     public var lastFailureMessage: String?
     public var cancellationReason: String?
+    public var pendingApprovalCount: Int
+    public var pendingPlanCount: Int
 
     public init(
         isProcessing: Bool = false,
         activeRunID: String? = nil,
+        queuedRunIDs: [String] = [],
         lastRunID: String? = nil,
         lastStartedAt: Date? = nil,
         lastCompletedAt: Date? = nil,
         lastFailureMessage: String? = nil,
-        cancellationReason: String? = nil
+        cancellationReason: String? = nil,
+        pendingApprovalCount: Int = 0,
+        pendingPlanCount: Int = 0
     ) {
         self.isProcessing = isProcessing
         self.activeRunID = activeRunID
+        self.queuedRunIDs = queuedRunIDs
         self.lastRunID = lastRunID
         self.lastStartedAt = lastStartedAt
         self.lastCompletedAt = lastCompletedAt
         self.lastFailureMessage = lastFailureMessage
         self.cancellationReason = cancellationReason
+        self.pendingApprovalCount = pendingApprovalCount
+        self.pendingPlanCount = pendingPlanCount
     }
 }
 
@@ -129,10 +138,54 @@ public struct NativeSessionManager: Sendable {
             recentMessages: recentMessages,
             permissionMode: permissionMode
         )
+        let now = Date()
+        var run = AgentRun(
+            id: request.runID,
+            sessionID: session.id,
+            groupID: groupID,
+            status: .queued,
+            startedAt: now,
+            metadata: ["user_message_id": userMessage.id, "queue": "single-session"]
+        )
+        try sessionRepository.saveRun(run)
+        if eventRecorder == nil {
+            try sessionRepository.appendJournalEvent(
+                runID: run.id,
+                sessionID: session.id,
+                kind: .runStarted,
+                action: "message_persisted",
+                message: "User message persisted before backend execution",
+                metadata: ["message_id": userMessage.id]
+            )
+        }
+        if eventRecorder == nil {
+        try sessionRepository.appendJournalEvent(
+                runID: run.id,
+                sessionID: session.id,
+                kind: .runStarted,
+                action: "run_queued",
+                message: "Session run queued",
+                metadata: ["user_message_id": userMessage.id]
+            )
+        }
+        runtimeState.queuedRunIDs.append(run.id)
+        run.status = .running
+        try sessionRepository.saveRun(run)
+        if eventRecorder == nil {
+        try sessionRepository.appendJournalEvent(
+                runID: run.id,
+                sessionID: session.id,
+                kind: .runStarted,
+                action: "run_started",
+                message: "Session run started",
+                metadata: ["user_message_id": userMessage.id]
+            )
+        }
+        runtimeState.queuedRunIDs.removeAll { $0 == run.id }
         runtimeState.isProcessing = true
         runtimeState.activeRunID = request.runID
         runtimeState.lastRunID = request.runID
-        runtimeState.lastStartedAt = Date()
+        runtimeState.lastStartedAt = now
         runtimeState.lastCompletedAt = nil
         runtimeState.lastFailureMessage = nil
         runtimeState.cancellationReason = nil
@@ -148,6 +201,21 @@ public struct NativeSessionManager: Sendable {
 
                 try recordBackendEvent(event, sequence: collectedEvents.count - 1)
                 try recordPendingApprovalIfNeeded(event)
+                if case .permissionRequested = event {
+                    runtimeState.pendingApprovalCount += 1
+                    var waitingRun = run
+                    waitingRun.status = .waitingForApproval
+                    try sessionRepository.saveRun(waitingRun)
+        if eventRecorder == nil {
+                    try sessionRepository.appendJournalEvent(
+                            runID: run.id,
+                            sessionID: session.id,
+                            kind: .permissionRequested,
+                            action: "run_waiting_for_approval",
+                            message: "Run is waiting for approval"
+                        )
+        }
+                }
 
                 let presentation = presenter.presentation(for: event)
                 collectedPresentations.append(presentation)
@@ -169,6 +237,19 @@ public struct NativeSessionManager: Sendable {
             runtimeState.isProcessing = false
             runtimeState.activeRunID = nil
             runtimeState.lastCompletedAt = Date()
+            var completedRun = run
+            completedRun.status = .completed
+            completedRun.completedAt = runtimeState.lastCompletedAt
+            try sessionRepository.saveRun(completedRun)
+        if eventRecorder == nil {
+            try sessionRepository.appendJournalEvent(
+                    runID: run.id,
+                    sessionID: session.id,
+                    kind: .runCompleted,
+                    action: "run_completed",
+                    message: "Session run completed"
+                )
+        }
             return AgentLoopChatResponse(
                 session: session,
                 events: collectedEvents,
@@ -180,6 +261,20 @@ public struct NativeSessionManager: Sendable {
             runtimeState.activeRunID = nil
             runtimeState.lastCompletedAt = Date()
             runtimeState.lastFailureMessage = String(describing: error)
+            var failedRun = run
+            failedRun.status = .failed
+            failedRun.completedAt = runtimeState.lastCompletedAt
+            failedRun.metadata["failure"] = String(describing: error)
+            try sessionRepository.saveRun(failedRun)
+        if eventRecorder == nil {
+            try sessionRepository.appendJournalEvent(
+                    runID: run.id,
+                    sessionID: session.id,
+                    kind: .runFailed,
+                    action: "run_failed",
+                    message: String(describing: error)
+                )
+        }
             // Connor owns session state. A backend failure must not roll back the user's input.
             try persistSession()
             throw error
@@ -201,13 +296,39 @@ public struct NativeSessionManager: Sendable {
 
     public mutating func cancel(runID: String, reason: String = "cancelled by user") {
         runtimeState.cancellationReason = reason
+        runtimeState.queuedRunIDs.removeAll { $0 == runID }
+        let completedAt = Date()
         if runtimeState.activeRunID == runID {
             runtimeState.isProcessing = false
             runtimeState.activeRunID = nil
-            runtimeState.lastCompletedAt = Date()
+            runtimeState.lastCompletedAt = completedAt
         }
         runtimeState.lastRunID = runID
+        if var run = try? sessionRepository.loadRun(id: runID) {
+            run.status = .cancelled
+            run.completedAt = completedAt
+            run.metadata["cancellation_reason"] = reason
+            try? sessionRepository.saveRun(run)
+            try? sessionRepository.appendJournalEvent(
+                runID: runID,
+                sessionID: run.sessionID,
+                kind: .runFailed,
+                action: "run_cancelled",
+                message: reason
+            )
+        }
         backend.abort(runID: runID)
+    }
+
+    public mutating func hydrateRuntimeState(now: Date = Date()) throws -> SessionOSRestoreSnapshot {
+        let snapshot = try sessionRepository.restoreSnapshot(sessionID: session.id, now: now)
+        runtimeState.activeRunID = snapshot.activeRuns.first(where: { $0.status == .running || $0.status == .waitingForApproval })?.id
+        runtimeState.queuedRunIDs = snapshot.activeRuns.filter { $0.status == .queued || $0.status == .pending }.map(\.id)
+        runtimeState.isProcessing = runtimeState.activeRunID != nil
+        runtimeState.pendingApprovalCount = snapshot.pendingApprovalCount
+        runtimeState.pendingPlanCount = snapshot.pendingPlans.count
+        runtimeState.lastRunID = runtimeState.activeRunID ?? runtimeState.queuedRunIDs.first ?? runtimeState.lastRunID
+        return snapshot
     }
 
     private func persistSession() throws {
@@ -228,9 +349,7 @@ public struct NativeSessionManager: Sendable {
     }
 
     private func recordPendingApprovalIfNeeded(_ event: AgentEvent) throws {
-        guard let pendingApprovalRepository,
-              case .permissionRequested(let request) = event
-        else { return }
+        guard case .permissionRequested(let request) = event else { return }
         let approval = AgentPendingApproval(
             requestID: request.id,
             runID: request.runID,
@@ -239,7 +358,8 @@ public struct NativeSessionManager: Sendable {
             toolName: request.toolName,
             payloadJSON: request.payloadJSON
         )
-        try pendingApprovalRepository.upsert(pendingApproval: approval)
+        try pendingApprovalRepository?.upsert(pendingApproval: approval)
+        try sessionRepository.savePendingApproval(approval)
     }
 
     private func persistMemoryStagingAfterUserMessage(_ message: AgentMessage) throws {

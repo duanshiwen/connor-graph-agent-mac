@@ -1,8 +1,10 @@
 import Foundation
 
 public enum AgentRunStatus: String, Codable, Sendable, Equatable {
+    case queued
     case pending
     case running
+    case waitingForApproval = "waiting_for_approval"
     case completed
     case failed
     case cancelled

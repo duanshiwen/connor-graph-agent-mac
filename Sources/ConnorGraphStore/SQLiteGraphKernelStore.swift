@@ -93,6 +93,8 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         "agent_events",
         "agent_audit_events",
         "agent_pending_approvals",
+        "session_pending_plans",
+        "session_branch_records",
         "graph_entities_fts",
         "graph_statements_fts",
         "graph_episodes_fts"
@@ -114,7 +116,11 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         "idx_agent_events_run",
         "idx_agent_audit_events_run",
         "idx_agent_pending_approvals_run",
-        "idx_agent_pending_approvals_status"
+        "idx_agent_pending_approvals_status",
+        "idx_session_pending_plans_session",
+        "idx_session_pending_plans_status",
+        "idx_session_branch_records_source",
+        "idx_session_branch_records_target"
     ]
 
     private var db: OpaquePointer?
@@ -487,6 +493,35 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         """)
         try execute("CREATE INDEX IF NOT EXISTS idx_agent_pending_approvals_run ON agent_pending_approvals(run_id, created_at);")
         try execute("CREATE INDEX IF NOT EXISTS idx_agent_pending_approvals_status ON agent_pending_approvals(status, created_at);")
+        try execute("""
+        CREATE TABLE IF NOT EXISTS session_pending_plans (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            markdown_path TEXT,
+            content_reference TEXT,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            resolved_at TEXT,
+            resolution_reason TEXT
+        );
+        """)
+        try execute("CREATE INDEX IF NOT EXISTS idx_session_pending_plans_session ON session_pending_plans(session_id, updated_at DESC);")
+        try execute("CREATE INDEX IF NOT EXISTS idx_session_pending_plans_status ON session_pending_plans(status, updated_at DESC);")
+        try execute("""
+        CREATE TABLE IF NOT EXISTS session_branch_records (
+            id TEXT PRIMARY KEY,
+            source_session_id TEXT NOT NULL,
+            target_session_id TEXT NOT NULL,
+            branch_point_message_id TEXT,
+            branch_point_event_id TEXT,
+            reason TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        """)
+        try execute("CREATE INDEX IF NOT EXISTS idx_session_branch_records_source ON session_branch_records(source_session_id, created_at DESC);")
+        try execute("CREATE INDEX IF NOT EXISTS idx_session_branch_records_target ON session_branch_records(target_session_id, created_at DESC);")
         try execute("PRAGMA user_version = \(Self.currentSchemaVersion);")
     }
 
@@ -967,6 +1002,39 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         """).map(decodePersistedAgentEvent)
     }
 
+    public func runs(sessionID: String, statuses: [AgentRunStatus]? = nil, limit: Int = 100) throws -> [AgentRun] {
+        let statusPredicate: String
+        if let statuses, !statuses.isEmpty {
+            statusPredicate = " AND status IN (\(statuses.map { quote($0.rawValue) }.joined(separator: ", ")))"
+        } else {
+            statusPredicate = ""
+        }
+        return try query(sql: """
+        SELECT id, session_id, group_id, status, started_at, completed_at, model, metadata_json
+        FROM agent_runs WHERE session_id = \(quote(sessionID))\(statusPredicate)
+        ORDER BY started_at DESC LIMIT \(limit)
+        """).map(decodeAgentRun)
+    }
+
+    public func recentEvents(sessionID: String, limit: Int = 100) throws -> [PersistedAgentEvent] {
+        try query(sql: """
+        SELECT id, run_id, session_id, sequence, kind, payload_json, created_at
+        FROM agent_events WHERE session_id = \(quote(sessionID))
+        ORDER BY created_at DESC LIMIT \(limit)
+        """).map(decodePersistedAgentEvent)
+    }
+
+    public func appendJournalEvent(runID: String, sessionID: String, kind: AgentEventKind, payload: SessionOSJournalPayload, sequence: Int? = nil, createdAt: Date = Date()) throws {
+        try append(event: PersistedAgentEvent(
+            runID: runID,
+            sessionID: sessionID,
+            kind: kind,
+            payloadJSON: json(payload),
+            sequence: sequence ?? nextAgentEventSequence(runID: runID),
+            createdAt: createdAt
+        ))
+    }
+
     // MARK: - Agent Audit Events
 
     public func append(auditEvent: AgentAuditEvent) throws {
@@ -1079,6 +1147,69 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         }
     }
 
+
+
+    // MARK: - Session OS Pending Plans & Branches
+
+    public func upsert(pendingPlan plan: SessionPendingPlan) throws {
+        try execute("""
+        INSERT OR REPLACE INTO session_pending_plans
+        (id, session_id, title, markdown_path, content_reference, status, created_at, updated_at, resolved_at, resolution_reason)
+        VALUES (\(quote(plan.id)), \(quote(plan.sessionID)), \(quote(plan.title)), \(quote(plan.markdownPath)), \(quote(plan.contentReference)), \(quote(plan.status.rawValue)), \(quote(iso(plan.createdAt))), \(quote(iso(plan.updatedAt))), \(quote(plan.resolvedAt.map(iso))), \(quote(plan.resolutionReason)))
+        """)
+    }
+
+    public func pendingPlan(id: String) throws -> SessionPendingPlan? {
+        try query(sql: """
+        SELECT id, session_id, title, markdown_path, content_reference, status, created_at, updated_at, resolved_at, resolution_reason
+        FROM session_pending_plans WHERE id = \(quote(id)) LIMIT 1
+        """).map(decodePendingPlan).first
+    }
+
+    public func pendingPlans(sessionID: String, status: SessionPendingPlanStatus? = nil, limit: Int = 100) throws -> [SessionPendingPlan] {
+        let predicate = status.map { " AND status = \(quote($0.rawValue))" } ?? ""
+        return try query(sql: """
+        SELECT id, session_id, title, markdown_path, content_reference, status, created_at, updated_at, resolved_at, resolution_reason
+        FROM session_pending_plans WHERE session_id = \(quote(sessionID))\(predicate)
+        ORDER BY updated_at DESC LIMIT \(limit)
+        """).map(decodePendingPlan)
+    }
+
+    @discardableResult
+    public func resolvePendingPlan(id: String, status: SessionPendingPlanStatus, reason: String? = nil, now: Date = Date()) throws -> SessionPendingPlan {
+        guard status == .accepted || status == .rejected || status == .expired else {
+            throw SQLiteGraphKernelStoreError.executeFailed("pending plan resolution must be accepted, rejected, or expired")
+        }
+        guard var plan = try pendingPlan(id: id) else {
+            throw SQLiteGraphKernelStoreError.executeFailed("pendingPlanNotFound: \(id)")
+        }
+        plan.status = status
+        plan.updatedAt = now
+        plan.resolvedAt = now
+        plan.resolutionReason = reason
+        try upsert(pendingPlan: plan)
+        return plan
+    }
+
+    public func upsert(branchRecord record: SessionBranchRecord) throws {
+        try execute("""
+        INSERT OR REPLACE INTO session_branch_records
+        (id, source_session_id, target_session_id, branch_point_message_id, branch_point_event_id, reason, created_at)
+        VALUES (\(quote(record.id)), \(quote(record.sourceSessionID)), \(quote(record.targetSessionID)), \(quote(record.branchPointMessageID)), \(quote(record.branchPointEventID)), \(quote(record.reason)), \(quote(iso(record.createdAt))))
+        """)
+    }
+
+    public func branchRecords(sourceSessionID: String? = nil, targetSessionID: String? = nil, limit: Int = 100) throws -> [SessionBranchRecord] {
+        var conditions: [String] = []
+        if let sourceSessionID { conditions.append("source_session_id = \(quote(sourceSessionID))") }
+        if let targetSessionID { conditions.append("target_session_id = \(quote(targetSessionID))") }
+        let whereClause = conditions.isEmpty ? "" : "WHERE \(conditions.joined(separator: " AND "))"
+        return try query(sql: """
+        SELECT id, source_session_id, target_session_id, branch_point_message_id, branch_point_event_id, reason, created_at
+        FROM session_branch_records \(whereClause) ORDER BY created_at DESC LIMIT \(limit)
+        """).map(decodeBranchRecord)
+    }
+
     private func permissionOutcome(forResolvedStatus status: AgentPendingApprovalStatus) -> AgentPermissionOutcome {
         switch status {
         case .approved: .approved
@@ -1177,6 +1308,33 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
             status: AgentPendingApprovalStatus(rawValue: row[7]) ?? .pending,
             createdAt: try date(row[8]),
             updatedAt: try date(row[9])
+        )
+    }
+
+    private func decodePendingPlan(_ row: [String]) throws -> SessionPendingPlan {
+        SessionPendingPlan(
+            id: row[0],
+            sessionID: row[1],
+            title: row[2],
+            markdownPath: nilIfEmpty(row[3]),
+            contentReference: nilIfEmpty(row[4]),
+            status: SessionPendingPlanStatus(rawValue: row[5]) ?? .waitingForApproval,
+            createdAt: try date(row[6]),
+            updatedAt: try date(row[7]),
+            resolvedAt: try optionalDate(row[8]),
+            resolutionReason: nilIfEmpty(row[9])
+        )
+    }
+
+    private func decodeBranchRecord(_ row: [String]) throws -> SessionBranchRecord {
+        SessionBranchRecord(
+            id: row[0],
+            sourceSessionID: row[1],
+            targetSessionID: row[2],
+            branchPointMessageID: nilIfEmpty(row[3]),
+            branchPointEventID: nilIfEmpty(row[4]),
+            reason: row[5],
+            createdAt: try date(row[6])
         )
     }
 
