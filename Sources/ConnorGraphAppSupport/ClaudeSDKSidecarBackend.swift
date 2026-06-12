@@ -2,7 +2,118 @@ import Foundation
 import ConnorGraphAgent
 import ConnorGraphCore
 
+
+public enum ClaudeSDKSidecarRequestKind: String, Codable, Sendable, Equatable {
+    case fresh
+    case resume
+    case fork
+}
+
+public enum ClaudeSDKSidecarFailureCode: String, Codable, Sendable, Equatable {
+    case sdkError = "sdk_error"
+    case invalidRequest = "invalid_request"
+    case permissionDeferred = "permission_deferred"
+    case permissionDenied = "permission_denied"
+    case processFailed = "process_failed"
+    case cancelled
+    case unknown
+}
+
+public enum ClaudeSDKSidecarRecoverability: String, Codable, Sendable, Equatable {
+    case retryable
+    case resumable
+    case requiresUserAction = "requires_user_action"
+    case terminal
+    case unknown
+}
+
+public struct ClaudeSDKSidecarRequestOptions: Codable, Sendable, Equatable {
+    public var maxTurns: Int?
+    public var model: String?
+    public var effort: String?
+    public var includePartialMessages: Bool
+    public var includeHookEvents: Bool
+    public var persistSession: Bool
+    public var sdkSessionStoreHint: String?
+
+    public init(
+        maxTurns: Int? = nil,
+        model: String? = nil,
+        effort: String? = nil,
+        includePartialMessages: Bool = true,
+        includeHookEvents: Bool = true,
+        persistSession: Bool = true,
+        sdkSessionStoreHint: String? = nil
+    ) {
+        self.maxTurns = maxTurns
+        self.model = model
+        self.effort = effort
+        self.includePartialMessages = includePartialMessages
+        self.includeHookEvents = includeHookEvents
+        self.persistSession = persistSession
+        self.sdkSessionStoreHint = sdkSessionStoreHint
+    }
+}
+
+public struct ClaudeSDKSidecarRuntimeDiagnostic: Codable, Sendable, Equatable {
+    public var protocolVersion: Int
+    public var status: String
+    public var message: String
+    public var sdkSessionID: String?
+    public var sdkCWD: String?
+    public var failureCode: ClaudeSDKSidecarFailureCode?
+    public var recoverability: ClaudeSDKSidecarRecoverability?
+    public var ownsProductState: Bool
+
+    public init(
+        protocolVersion: Int = 2,
+        status: String,
+        message: String,
+        sdkSessionID: String? = nil,
+        sdkCWD: String? = nil,
+        failureCode: ClaudeSDKSidecarFailureCode? = nil,
+        recoverability: ClaudeSDKSidecarRecoverability? = nil,
+        ownsProductState: Bool = false
+    ) {
+        self.protocolVersion = protocolVersion
+        self.status = status
+        self.message = message
+        self.sdkSessionID = sdkSessionID
+        self.sdkCWD = sdkCWD
+        self.failureCode = failureCode
+        self.recoverability = recoverability
+        self.ownsProductState = ownsProductState
+    }
+}
+
+public struct ClaudeSDKSidecarHeartbeat: Codable, Sendable, Equatable {
+    public var protocolVersion: Int
+    public var sdkSessionID: String?
+    public var sdkCWD: String
+    public var timestamp: String
+    public var pendingDeferredToolUseCount: Int
+    public var ownsProductState: Bool
+
+    public init(
+        protocolVersion: Int = 2,
+        sdkSessionID: String? = nil,
+        sdkCWD: String,
+        timestamp: String,
+        pendingDeferredToolUseCount: Int = 0,
+        ownsProductState: Bool = false
+    ) {
+        self.protocolVersion = protocolVersion
+        self.sdkSessionID = sdkSessionID
+        self.sdkCWD = sdkCWD
+        self.timestamp = timestamp
+        self.pendingDeferredToolUseCount = pendingDeferredToolUseCount
+        self.ownsProductState = ownsProductState
+    }
+}
+
 public struct ClaudeSDKSidecarRequest: Codable, Sendable, Equatable {
+    public var protocolVersion: Int
+    public var requestKind: ClaudeSDKSidecarRequestKind
     public var connorRunID: String
     public var connorSessionID: String
     public var groupID: String
@@ -11,9 +122,13 @@ public struct ClaudeSDKSidecarRequest: Codable, Sendable, Equatable {
     public var permissionMode: AgentPermissionMode
     public var sdkPermissionMode: String
     public var sdkSessionID: String?
+    public var forkFromSDKSessionID: String?
+    public var options: ClaudeSDKSidecarRequestOptions
     public var ownsProductState: Bool
 
     public init(
+        protocolVersion: Int = 2,
+        requestKind: ClaudeSDKSidecarRequestKind = .fresh,
         connorRunID: String,
         connorSessionID: String,
         groupID: String,
@@ -22,8 +137,12 @@ public struct ClaudeSDKSidecarRequest: Codable, Sendable, Equatable {
         permissionMode: AgentPermissionMode,
         sdkPermissionMode: String = "bypassPermissions",
         sdkSessionID: String? = nil,
+        forkFromSDKSessionID: String? = nil,
+        options: ClaudeSDKSidecarRequestOptions = ClaudeSDKSidecarRequestOptions(),
         ownsProductState: Bool = false
     ) {
+        self.protocolVersion = protocolVersion
+        self.requestKind = requestKind
         self.connorRunID = connorRunID
         self.connorSessionID = connorSessionID
         self.groupID = groupID
@@ -32,6 +151,8 @@ public struct ClaudeSDKSidecarRequest: Codable, Sendable, Equatable {
         self.permissionMode = permissionMode
         self.sdkPermissionMode = sdkPermissionMode
         self.sdkSessionID = sdkSessionID
+        self.forkFromSDKSessionID = forkFromSDKSessionID
+        self.options = options
         self.ownsProductState = ownsProductState
     }
 
@@ -47,6 +168,12 @@ public struct ClaudeSDKSidecarRequest: Codable, Sendable, Equatable {
             sdkSessionID: sdkSessionID,
             ownsProductState: false
         )
+    }
+
+    public var effectiveRequestKind: ClaudeSDKSidecarRequestKind {
+        if forkFromSDKSessionID != nil { return .fork }
+        if sdkSessionID != nil { return .resume }
+        return requestKind
     }
 }
 
@@ -288,9 +415,30 @@ public struct ClaudeSDKSidecarToolUseCompleted: Codable, Sendable, Equatable {
 
 public struct ClaudeSDKSidecarRunFailed: Codable, Sendable, Equatable {
     public var message: String
+    public var code: ClaudeSDKSidecarFailureCode
+    public var recoverability: ClaudeSDKSidecarRecoverability
 
-    public init(message: String) {
+    private enum CodingKeys: String, CodingKey {
+        case message
+        case code
+        case recoverability
+    }
+
+    public init(
+        message: String,
+        code: ClaudeSDKSidecarFailureCode = .unknown,
+        recoverability: ClaudeSDKSidecarRecoverability = .unknown
+    ) {
         self.message = message
+        self.code = code
+        self.recoverability = recoverability
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.message = try container.decode(String.self, forKey: .message)
+        self.code = try container.decodeIfPresent(ClaudeSDKSidecarFailureCode.self, forKey: .code) ?? .unknown
+        self.recoverability = try container.decodeIfPresent(ClaudeSDKSidecarRecoverability.self, forKey: .recoverability) ?? .unknown
     }
 }
 
@@ -299,12 +447,42 @@ public struct ClaudeSDKSidecarHealth: Codable, Sendable, Equatable {
     public var pendingDeferredToolUseCount: Int
     public var timestamp: String
     public var ownsProductState: Bool
+    public var protocolVersion: Int
+    public var capabilities: [String]
 
-    public init(status: String, pendingDeferredToolUseCount: Int = 0, timestamp: String, ownsProductState: Bool = false) {
+    private enum CodingKeys: String, CodingKey {
+        case status
+        case pendingDeferredToolUseCount
+        case timestamp
+        case ownsProductState
+        case protocolVersion
+        case capabilities
+    }
+
+    public init(
+        status: String,
+        pendingDeferredToolUseCount: Int = 0,
+        timestamp: String,
+        ownsProductState: Bool = false,
+        protocolVersion: Int = 2,
+        capabilities: [String] = []
+    ) {
         self.status = status
         self.pendingDeferredToolUseCount = pendingDeferredToolUseCount
         self.timestamp = timestamp
         self.ownsProductState = ownsProductState
+        self.protocolVersion = protocolVersion
+        self.capabilities = capabilities
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.status = try container.decode(String.self, forKey: .status)
+        self.pendingDeferredToolUseCount = try container.decodeIfPresent(Int.self, forKey: .pendingDeferredToolUseCount) ?? 0
+        self.timestamp = try container.decode(String.self, forKey: .timestamp)
+        self.ownsProductState = try container.decodeIfPresent(Bool.self, forKey: .ownsProductState) ?? false
+        self.protocolVersion = try container.decodeIfPresent(Int.self, forKey: .protocolVersion) ?? 2
+        self.capabilities = try container.decodeIfPresent([String].self, forKey: .capabilities) ?? []
     }
 }
 
@@ -321,6 +499,8 @@ public enum ClaudeSDKSidecarEvent: Codable, Sendable, Equatable {
     case toolUseCompleted(ClaudeSDKSidecarToolUseCompleted)
     case runFailed(ClaudeSDKSidecarRunFailed)
     case sidecarHealth(ClaudeSDKSidecarHealth)
+    case runtimeDiagnostic(ClaudeSDKSidecarRuntimeDiagnostic)
+    case heartbeat(ClaudeSDKSidecarHeartbeat)
 
     private enum CodingKeys: String, CodingKey {
         case runStarted
@@ -335,6 +515,8 @@ public enum ClaudeSDKSidecarEvent: Codable, Sendable, Equatable {
         case toolUseCompleted
         case runFailed
         case sidecarHealth
+        case runtimeDiagnostic
+        case heartbeat
     }
 
     public init(from decoder: Decoder) throws {
@@ -363,6 +545,10 @@ public enum ClaudeSDKSidecarEvent: Codable, Sendable, Equatable {
             self = .runFailed(try container.decode(ClaudeSDKSidecarRunFailed.self, forKey: .runFailed))
         } else if container.contains(.sidecarHealth) {
             self = .sidecarHealth(try container.decode(ClaudeSDKSidecarHealth.self, forKey: .sidecarHealth))
+        } else if container.contains(.runtimeDiagnostic) {
+            self = .runtimeDiagnostic(try container.decode(ClaudeSDKSidecarRuntimeDiagnostic.self, forKey: .runtimeDiagnostic))
+        } else if container.contains(.heartbeat) {
+            self = .heartbeat(try container.decode(ClaudeSDKSidecarHeartbeat.self, forKey: .heartbeat))
         } else {
             throw DecodingError.dataCorrupted(.init(
                 codingPath: decoder.codingPath,
@@ -398,6 +584,10 @@ public enum ClaudeSDKSidecarEvent: Codable, Sendable, Equatable {
             try container.encode(payload, forKey: .runFailed)
         case .sidecarHealth(let payload):
             try container.encode(payload, forKey: .sidecarHealth)
+        case .runtimeDiagnostic(let payload):
+            try container.encode(payload, forKey: .runtimeDiagnostic)
+        case .heartbeat(let payload):
+            try container.encode(payload, forKey: .heartbeat)
         }
     }
 }
@@ -856,7 +1046,7 @@ enum ClaudeSDKSidecarEventMapper {
                 sessionID: request.sessionID,
                 message: payload.message
             ))
-        case .sidecarHealth:
+        case .sidecarHealth, .runtimeDiagnostic, .heartbeat:
             return nil
         }
     }
