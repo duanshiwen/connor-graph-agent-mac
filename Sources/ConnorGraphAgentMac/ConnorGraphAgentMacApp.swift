@@ -36,6 +36,7 @@ struct ConnorGraphAgentMacApp: App {
 
 private func keyEquivalent(for command: ConnorNativeShellCommand) -> KeyEquivalent {
     switch command.id {
+    case .openHome: "1"
     case .newSession: "n"
     case .toggleBrowser: "b"
     case .openGraphMemoryReview: "2"
@@ -49,6 +50,7 @@ private func keyEquivalent(for command: ConnorNativeShellCommand) -> KeyEquivale
 }
 
 enum SidebarItem: String, CaseIterable, Identifiable {
+    case home = "运行中心"
     case entities = "图谱节点"
     case search = "搜索"
     case observeLog = "观察日志"
@@ -292,6 +294,8 @@ final class AppViewModel: ObservableObject {
 
     private func applyNavigation(to item: ConnorNativeShellItem) {
         switch item {
+        case .home:
+            selection = .home
         case .agentChat:
             isBrowserVisible = false
             selection = .agentChat
@@ -321,6 +325,8 @@ final class AppViewModel: ObservableObject {
 
     func performShellCommand(_ commandID: ConnorNativeShellCommandID) {
         switch commandID {
+        case .openHome:
+            navigate(to: .home)
         case .newSession:
             newChatSession()
             navigate(to: .agentChat)
@@ -344,6 +350,17 @@ final class AppViewModel: ObservableObject {
         } catch {
             errorMessage = "Unsupported Connor link: \(url.absoluteString)"
         }
+    }
+
+    var runtimeCenterPresentation: ConnorRuntimeCenterPresentation {
+        ConnorRuntimeCenterPresentation.build(
+            sessions: chatSessions.isEmpty ? [activeChatSession] : chatSessions,
+            events: agentEventTimeline,
+            pendingApprovals: pendingApprovals,
+            automationTriggers: automationTriggerRecords,
+            graphMemoryDashboard: graphMemoryDashboardPresentation,
+            commercialReadinessDashboard: commercialReadinessDashboard
+        )
     }
 
     var commercialReadinessDashboard: CommercialReadinessDashboard {
@@ -1572,6 +1589,8 @@ private struct CraftPrimarySidebarView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
+                    SidebarRow(title: "运行中心", systemImage: "rectangle.3.group", count: viewModel.runtimeCenterPresentation.nextBestActions.count, isSelected: selection == .home) { select(.home) }
+
                     SidebarDisclosure(title: "所有会话", systemImage: "tray", isExpanded: $sessionsExpanded) {
                         SidebarRow(title: "全部", systemImage: "bubble.left.and.bubble.right", count: viewModel.chatSessions.count, isSelected: selection == .agentChat && viewModel.sessionListFilter == .all) {
                             viewModel.setSessionListFilter(.all)
@@ -1655,6 +1674,8 @@ private struct CraftListPaneView: View {
     var body: some View {
         VStack(spacing: 0) {
             switch selection ?? .agentChat {
+            case .home:
+                CraftSimpleListPane(title: "运行中心", subtitle: "商业级 Agent OS 控制台", rows: viewModel.runtimeCenterPresentation.nextBestActions.map(\.title))
             case .agentChat:
                 CraftSessionListPane(viewModel: viewModel)
             case .llmSettings:
@@ -1730,6 +1751,8 @@ private struct CraftDetailPaneView: View {
     var body: some View {
         Group {
             switch selection {
+            case .home:
+                ConnorRuntimeCenterView(viewModel: viewModel)
             case .entities:
                 GraphEntitiesView(entities: viewModel.entities, statements: viewModel.statements, episodes: viewModel.episodes)
             case .search:
@@ -1759,6 +1782,150 @@ private struct CraftDetailPaneView: View {
             case .llmSettings:
                 ConnorSettingsDetailView(viewModel: viewModel)
             }
+        }
+    }
+}
+
+
+private struct ConnorRuntimeCenterView: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    private var presentation: ConnorRuntimeCenterPresentation {
+        viewModel.runtimeCenterPresentation
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(presentation.hero.title)
+                        .font(.largeTitle.bold())
+                    Text(presentation.hero.subtitle)
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        Text(presentation.hero.statusText)
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(.green.opacity(0.14), in: Capsule())
+                        Text("Updated \(presentation.hero.updatedText)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 12)], spacing: 12) {
+                    ForEach(presentation.metricTiles) { metric in
+                        RuntimeMetricTileView(metric: metric)
+                    }
+                }
+
+                ForEach(presentation.sections) { section in
+                    GroupBox(section.title) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(section.subtitle)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            if section.items.isEmpty {
+                                ContentUnavailableView("No items", systemImage: "checkmark.circle", description: Text("This surface is currently clear."))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                            } else {
+                                ForEach(section.items.prefix(6)) { item in
+                                    RuntimeCenterItemRow(item: item) {
+                                        if let target = item.target { viewModel.navigate(to: target) }
+                                    }
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+private struct RuntimeMetricTileView: View {
+    var metric: ConnorRuntimeMetricTile
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(metric.title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Circle()
+                    .fill(color(for: metric.severity).opacity(0.85))
+                    .frame(width: 8, height: 8)
+            }
+            Text(metric.value)
+                .font(.title2.bold())
+            Text(metric.subtitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+        }
+        .padding(14)
+        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private func color(for severity: AgentEventPresentationSeverity) -> Color {
+        switch severity {
+        case .success: .green
+        case .warning: .orange
+        case .error: .red
+        case .info: .blue
+        }
+    }
+}
+
+private struct RuntimeCenterItemRow: View {
+    var item: ConnorRuntimeCenterItem
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: icon(for: item.severity))
+                    .foregroundStyle(color(for: item.severity))
+                    .frame(width: 18)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item.title)
+                        .font(.subheadline.weight(.semibold))
+                    Text(item.subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(item.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                Spacer()
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func icon(for severity: AgentEventPresentationSeverity) -> String {
+        switch severity {
+        case .success: "checkmark.circle.fill"
+        case .warning: "exclamationmark.triangle.fill"
+        case .error: "xmark.octagon.fill"
+        case .info: "info.circle.fill"
+        }
+    }
+
+    private func color(for severity: AgentEventPresentationSeverity) -> Color {
+        switch severity {
+        case .success: .green
+        case .warning: .orange
+        case .error: .red
+        case .info: .blue
         }
     }
 }

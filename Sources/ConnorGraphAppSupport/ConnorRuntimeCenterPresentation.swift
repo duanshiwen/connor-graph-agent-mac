@@ -8,6 +8,7 @@ public enum ConnorRuntimeMetricID: String, Codable, Sendable, Equatable, Hashabl
     case memoryReviews
     case automationTriggers
     case commercialReadiness
+    case nativeUIHealth
 
     public var id: String { rawValue }
 }
@@ -31,6 +32,7 @@ public struct ConnorRuntimeMetricTile: Codable, Sendable, Equatable, Identifiabl
 }
 
 public enum ConnorRuntimeSectionID: String, Codable, Sendable, Equatable, Hashable, Identifiable {
+    case nextBestActions
     case runTimeline
     case reviewQueue
     case graphMemory
@@ -99,11 +101,13 @@ public struct ConnorRuntimeCenterPresentation: Codable, Sendable, Equatable {
     public var hero: ConnorRuntimeCenterHero
     public var metricTiles: [ConnorRuntimeMetricTile]
     public var sections: [ConnorRuntimeCenterSection]
+    public var nextBestActions: [ConnorRuntimeCenterItem]
 
-    public init(hero: ConnorRuntimeCenterHero, metricTiles: [ConnorRuntimeMetricTile], sections: [ConnorRuntimeCenterSection]) {
+    public init(hero: ConnorRuntimeCenterHero, metricTiles: [ConnorRuntimeMetricTile], sections: [ConnorRuntimeCenterSection], nextBestActions: [ConnorRuntimeCenterItem] = []) {
         self.hero = hero
         self.metricTiles = metricTiles
         self.sections = sections
+        self.nextBestActions = nextBestActions
     }
 
     public static func build(
@@ -119,10 +123,11 @@ public struct ConnorRuntimeCenterPresentation: Codable, Sendable, Equatable {
         let featured = activeSessions.sorted { $0.updatedAt > $1.updatedAt }.first ?? sessions.sorted { $0.updatedAt > $1.updatedAt }.first
         let memoryReviews = (graphMemoryDashboard?.summary.pendingCandidateCount ?? 0) + (graphMemoryDashboard?.summary.openHoldCount ?? 0)
 
+        let readinessBlockedCount = commercialReadinessDashboard?.blockedCount ?? 0
         let hero = ConnorRuntimeCenterHero(
-            title: featured?.title ?? "Connor Runtime Summary",
-            subtitle: featured.map { "Session \($0.id) · \($0.messages.count) messages" } ?? "No active session",
-            statusText: featured?.status.rawValue ?? "idle",
+            title: "Connor Runtime Center",
+            subtitle: featured.map { "Active focus: \($0.title) · \($0.messages.count) messages" } ?? "Native Agent OS commercial control surface",
+            statusText: readinessBlockedCount == 0 ? "ready" : "needs_review",
             updatedText: featured.map { relativeTime(from: $0.updatedAt, to: now) } ?? "—"
         )
 
@@ -132,6 +137,14 @@ public struct ConnorRuntimeCenterPresentation: Codable, Sendable, Equatable {
             ConnorRuntimeMetricTile(id: .memoryReviews, title: "Memory reviews", value: "\(memoryReviews)", subtitle: "candidates + holds", severity: memoryReviews == 0 ? .success : .warning, target: .graphMemory),
             ConnorRuntimeMetricTile(id: .automationTriggers, title: "Automation triggers", value: "\(automationTriggers.count)", subtitle: "recent governed actions", severity: automationTriggers.contains { $0.requiresReview } ? .warning : .info, target: .automation)
         ]
+        metrics.append(ConnorRuntimeMetricTile(
+            id: .nativeUIHealth,
+            title: "Native UI",
+            value: "ready",
+            subtitle: "shell · commands · settings",
+            severity: .success,
+            target: .home
+        ))
         if let commercialReadinessDashboard {
             metrics.append(ConnorRuntimeMetricTile(
                 id: .commercialReadiness,
@@ -184,10 +197,18 @@ public struct ConnorRuntimeCenterPresentation: Codable, Sendable, Equatable {
             )
         }
 
+        let nextBestActions = buildNextBestActions(
+            pendingApprovals: pendingApprovals,
+            memoryReviews: memoryReviews,
+            automationTriggers: automationTriggers,
+            commercialReadinessDashboard: commercialReadinessDashboard
+        )
+
         var sections = [
+            ConnorRuntimeCenterSection(id: .nextBestActions, title: "Next Best Actions", subtitle: "Recommended commercial operations", items: nextBestActions, target: nextBestActions.first?.target),
             ConnorRuntimeCenterSection(id: .runTimeline, title: "Run Timeline", subtitle: "Latest agent events", items: timelineItems, target: .agentChat),
             ConnorRuntimeCenterSection(id: .reviewQueue, title: "Review Queue", subtitle: "Permissions and human gates", items: approvalItems, target: .approvals),
-            ConnorRuntimeCenterSection(id: .graphMemory, title: "Graph Memory", subtitle: "Review center", items: memoryItems, target: .graphMemory),
+            ConnorRuntimeCenterSection(id: .graphMemory, title: "Graph Memory Core", subtitle: "Context, feedback, review", items: memoryItems, target: .graphMemory),
             ConnorRuntimeCenterSection(id: .automation, title: "Automation", subtitle: "Governed triggers", items: automationItems, target: .automation)
         ]
         if let commercialReadinessDashboard {
@@ -212,8 +233,34 @@ public struct ConnorRuntimeCenterPresentation: Codable, Sendable, Equatable {
         return ConnorRuntimeCenterPresentation(
             hero: hero,
             metricTiles: metrics,
-            sections: sections
+            sections: sections,
+            nextBestActions: nextBestActions
         )
+    }
+
+    private static func buildNextBestActions(
+        pendingApprovals: [AgentPendingApproval],
+        memoryReviews: Int,
+        automationTriggers: [ProductOSAutomationTriggerRecord],
+        commercialReadinessDashboard: CommercialReadinessDashboard?
+    ) -> [ConnorRuntimeCenterItem] {
+        var actions: [ConnorRuntimeCenterItem] = []
+        if !pendingApprovals.isEmpty {
+            actions.append(ConnorRuntimeCenterItem(id: "next.approvals", title: "Review pending approvals", subtitle: "\(pendingApprovals.count) human gates", detail: "Resolve permission requests before continuing autonomous work.", severity: .warning, target: .approvals))
+        }
+        if memoryReviews > 0 {
+            actions.append(ConnorRuntimeCenterItem(id: "next.memory", title: "Process graph memory reviews", subtitle: "\(memoryReviews) candidates or holds", detail: "Promote, hold, or reject memory candidates through Connor governance.", severity: .warning, target: .graphMemory))
+        }
+        if automationTriggers.contains(where: { $0.requiresReview }) {
+            actions.append(ConnorRuntimeCenterItem(id: "next.automation", title: "Inspect automation review triggers", subtitle: "Governed automation", detail: "Review automation triggers that requested human confirmation.", severity: .warning, target: .automation))
+        }
+        if let commercialReadinessDashboard, commercialReadinessDashboard.blockedCount > 0 {
+            actions.append(ConnorRuntimeCenterItem(id: "next.readiness", title: "Fix commercial readiness blockers", subtitle: "\(commercialReadinessDashboard.blockedCount) blocked phases", detail: commercialReadinessDashboard.summary, severity: .warning, target: .productOS))
+        }
+        if actions.isEmpty {
+            actions.append(ConnorRuntimeCenterItem(id: "next.session", title: "Start or continue a session", subtitle: "Commercial runtime ready", detail: "Open Sessions to continue graph-memory-native agent work.", severity: .success, target: .agentChat))
+        }
+        return actions
     }
 
     private static func eventSeverity(for severity: GraphMemoryProductSeverity) -> AgentEventPresentationSeverity {

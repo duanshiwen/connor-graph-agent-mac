@@ -14,6 +14,10 @@ public struct ConnorCommandPaletteEntry: Codable, Sendable, Equatable, Identifia
     public var target: ConnorNativeShellItem
     public var kind: ConnorCommandPaletteEntryKind
     public var keywords: [String]
+    public var groupID: String
+    public var riskLevel: ConnorNativeCommercialUIRiskLevel
+    public var isPrimaryAction: Bool
+    public var rank: Int
 
     public init(
         id: String,
@@ -23,7 +27,11 @@ public struct ConnorCommandPaletteEntry: Codable, Sendable, Equatable, Identifia
         keyboardShortcut: String? = nil,
         target: ConnorNativeShellItem,
         kind: ConnorCommandPaletteEntryKind,
-        keywords: [String] = []
+        keywords: [String] = [],
+        groupID: String = "general",
+        riskLevel: ConnorNativeCommercialUIRiskLevel = .low,
+        isPrimaryAction: Bool = false,
+        rank: Int = 100
     ) {
         self.id = id
         self.title = title
@@ -33,6 +41,10 @@ public struct ConnorCommandPaletteEntry: Codable, Sendable, Equatable, Identifia
         self.target = target
         self.kind = kind
         self.keywords = keywords
+        self.groupID = groupID
+        self.riskLevel = riskLevel
+        self.isPrimaryAction = isPrimaryAction
+        self.rank = rank
     }
 
     public func matches(_ query: String) -> Bool {
@@ -42,7 +54,7 @@ public struct ConnorCommandPaletteEntry: Codable, Sendable, Equatable, Identifia
     }
 
     private var searchableText: String {
-        ([id, title, subtitle, systemImage, keyboardShortcut ?? "", target.rawValue, kind.rawValue] + keywords)
+        ([id, title, subtitle, systemImage, keyboardShortcut ?? "", target.rawValue, kind.rawValue, groupID, riskLevel.rawValue, isPrimaryAction ? "primary" : ""] + keywords)
             .joined(separator: " ")
             .lowercased()
     }
@@ -69,7 +81,11 @@ public struct ConnorCommandPalettePresentation: Codable, Sendable, Equatable {
                     systemImage: item.systemImage,
                     target: item.id,
                     kind: .destination,
-                    keywords: [group.id, group.title, item.badgeText ?? "", item.badgeStyle.rawValue]
+                    keywords: [group.id, group.title, item.badgeText ?? "", item.badgeStyle.rawValue, item.emptyStateTitle ?? "", item.emptyStateActionTitle ?? ""],
+                    groupID: group.id,
+                    riskLevel: item.riskLevel,
+                    isPrimaryAction: item.isPrimary,
+                    rank: item.isPrimary ? 10 : 50
                 )
             }
         }
@@ -78,16 +94,21 @@ public struct ConnorCommandPalettePresentation: Codable, Sendable, Equatable {
             ConnorCommandPaletteEntry(
                 id: "command.\(command.id.rawValue)",
                 title: command.title,
-                subtitle: command.keyboardShortcut.map { "Command · \($0)" } ?? "Command",
+                subtitle: command.keyboardShortcut.map { "\(command.groupID.capitalized) · \($0)" } ?? command.groupID.capitalized,
                 systemImage: command.systemImage,
                 keyboardShortcut: command.keyboardShortcut,
                 target: command.target,
                 kind: .command,
-                keywords: [command.id.rawValue]
+                keywords: [command.id.rawValue] + command.keywords,
+                groupID: command.groupID,
+                riskLevel: command.riskLevel,
+                isPrimaryAction: command.isPrimaryAction,
+                rank: command.isPrimaryAction ? 0 : 40
             )
         }
 
         let entries = (commandEntries + itemEntries).sorted { lhs, rhs in
+            if lhs.rank != rhs.rank { return lhs.rank < rhs.rank }
             if lhs.kind != rhs.kind { return lhs.kind.rawValue < rhs.kind.rawValue }
             return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
         }
