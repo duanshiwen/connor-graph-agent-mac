@@ -743,19 +743,20 @@ private struct AgentChatComposerView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
-            TextField("按 Shift + Return 换行", text: $viewModel.chatInput, axis: .vertical)
-                .textFieldStyle(.plain)
-                .lineLimit(1...5)
-                .font(.body)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 11)
-                .frame(minHeight: 46, alignment: .topLeading)
-                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
-                )
-                .onSubmit { Task { await viewModel.submitChat() } }
+            SafeChatComposerTextView(
+                text: $viewModel.chatInput,
+                placeholder: "按 Shift + Return 换行",
+                isSpellCheckEnabled: viewModel.spellCheckEnabled,
+                onSubmit: { Task { await viewModel.submitChat() } }
+            )
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .frame(minHeight: 46, maxHeight: 128, alignment: .topLeading)
+            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
+            )
 
             HStack(spacing: 8) {
                 Button(action: {}) {
@@ -1063,5 +1064,116 @@ private struct ArtifactPathRow: View {
                 .lineLimit(2)
                 .textSelection(.enabled)
         }
+    }
+}
+
+private struct SafeChatComposerTextView: NSViewRepresentable {
+    @Binding var text: String
+    var placeholder: String
+    var isSpellCheckEnabled: Bool
+    var onSubmit: () -> Void
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = false
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.borderType = .noBorder
+
+        let textView = SubmitAwareTextView()
+        textView.delegate = context.coordinator
+        textView.onSubmit = onSubmit
+        textView.placeholderString = placeholder
+        textView.isRichText = false
+        textView.importsGraphics = false
+        textView.allowsUndo = true
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticTextReplacementEnabled = false
+        textView.isAutomaticDataDetectionEnabled = false
+        textView.isAutomaticLinkDetectionEnabled = false
+        textView.isContinuousSpellCheckingEnabled = isSpellCheckEnabled
+        textView.isGrammarCheckingEnabled = false
+        textView.isAutomaticSpellingCorrectionEnabled = false
+        textView.enabledTextCheckingTypes = isSpellCheckEnabled ? NSTextCheckingResult.CheckingType.spelling.rawValue : 0
+        textView.font = .preferredFont(forTextStyle: .body)
+        textView.textColor = .labelColor
+        textView.backgroundColor = .clear
+        textView.drawsBackground = false
+        textView.textContainerInset = .zero
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.minSize = NSSize(width: 0, height: 0)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.heightTracksTextView = false
+        textView.string = text
+
+        scrollView.documentView = textView
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let textView = scrollView.documentView as? SubmitAwareTextView else { return }
+        textView.onSubmit = onSubmit
+        textView.placeholderString = placeholder
+        if textView.string != text {
+            textView.string = text
+        }
+        textView.isContinuousSpellCheckingEnabled = isSpellCheckEnabled
+        textView.enabledTextCheckingTypes = isSpellCheckEnabled ? NSTextCheckingResult.CheckingType.spelling.rawValue : 0
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text)
+    }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        @Binding var text: String
+
+        init(text: Binding<String>) {
+            self._text = text
+        }
+
+        func textDidChange(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            text = textView.string
+        }
+    }
+}
+
+private final class SubmitAwareTextView: NSTextView {
+    var onSubmit: (() -> Void)?
+    var placeholderString: String = "" {
+        didSet { needsDisplay = true }
+    }
+
+    override var string: String {
+        didSet { needsDisplay = true }
+    }
+
+    override func insertNewline(_ sender: Any?) {
+        let flags = NSApp.currentEvent?.modifierFlags ?? []
+        if flags.contains(.shift) || flags.contains(.option) {
+            super.insertNewline(sender)
+        } else {
+            onSubmit?()
+        }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard string.isEmpty, !placeholderString.isEmpty else { return }
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font ?? NSFont.preferredFont(forTextStyle: .body),
+            .foregroundColor: NSColor.placeholderTextColor
+        ]
+        placeholderString.draw(
+            at: NSPoint(x: textContainerInset.width + 1, y: textContainerInset.height),
+            withAttributes: attributes
+        )
     }
 }
