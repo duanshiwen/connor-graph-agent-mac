@@ -28,6 +28,7 @@ private enum AgentChatLayout {
     static let chatContentMaxWidth: CGFloat = 720
     static let messageMaxWidth: CGFloat = chatContentMaxWidth
     static let userMessageMaxWidth: CGFloat = chatContentMaxWidth * 0.72
+    static let assistantMessageMaxHeight: CGFloat = 800
     static let processMaxWidth: CGFloat = chatContentMaxWidth
     static let messageSideInset: CGFloat = 0
 }
@@ -197,7 +198,8 @@ private struct AgentChatConversationView: View {
         VStack(spacing: 0) {
             AgentChatConversationHeader(viewModel: viewModel)
                 .padding(.horizontal, AgentChatLayout.spaceL)
-                .padding(.vertical, AgentChatLayout.spaceM)
+                .padding(.top, AgentChatLayout.spaceS)
+                .padding(.bottom, AgentChatLayout.spaceXS)
 
             ScrollViewReader { proxy in
                 ScrollView {
@@ -236,7 +238,7 @@ private struct AgentChatConversationView: View {
 
 
             AgentChatComposerView(viewModel: viewModel, isSessionInfoPresented: $isSessionInfoPresented)
-                .padding(.horizontal, AgentChatLayout.spaceL)
+                .padding(.horizontal, 0)
                 .padding(.vertical, AgentChatLayout.spaceM)
         }
         .frame(maxWidth: AgentChatLayout.chatContentMaxWidth, maxHeight: .infinity)
@@ -264,12 +266,10 @@ private struct AgentChatConversationHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
-            HStack(spacing: AgentChatLayout.spaceM) {
-                Text(selectedTitle)
-                    .font(.title3.weight(.semibold))
-                    .lineLimit(1)
-                Spacer()
-            }
+            Text(selectedTitle)
+                .font(.headline)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .center)
 
             if let summary = viewModel.latestChatSummary {
                 DisclosureGroup {
@@ -601,7 +601,7 @@ private struct AgentChatMessageRow: View {
             if isUser { Spacer(minLength: AgentChatLayout.messageSideInset) }
 
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
-                AgentMarkdownPreviewText(markdown: row.message.content, font: .body)
+                messageContent
             }
             .padding(AgentChatLayout.spaceM)
             .frame(maxWidth: isUser ? AgentChatLayout.userMessageMaxWidth : AgentChatLayout.messageMaxWidth, alignment: .leading)
@@ -614,6 +614,19 @@ private struct AgentChatMessageRow: View {
             if !isUser { Spacer(minLength: AgentChatLayout.messageSideInset) }
         }
         .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+    }
+
+    @ViewBuilder
+    private var messageContent: some View {
+        if isUser {
+            AgentMarkdownPreviewText(markdown: row.message.content, font: .body)
+        } else {
+            ScrollView {
+                AgentMarkdownPreviewText(markdown: row.message.content, font: .body)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: AgentChatLayout.assistantMessageMaxHeight, alignment: .top)
+        }
     }
 
     private var messageBackground: Color {
@@ -1148,58 +1161,67 @@ private struct AgentChatComposerView: View {
 
             optionBadgeRow
 
-            SafeChatComposerTextView(
-                text: $viewModel.chatInput,
-                placeholder: "按 Shift + Return 换行",
-                isSpellCheckEnabled: viewModel.spellCheckEnabled,
-                onSubmit: { Task { await viewModel.submitChat() } }
-            )
-            .padding(.horizontal, AgentChatLayout.spaceM)
-            .padding(.vertical, AgentChatLayout.spaceM)
-            .frame(minHeight: AgentChatLayout.composerTextMinHeight, maxHeight: AgentChatLayout.composerTextMaxHeight, alignment: .topLeading)
-            .background(Color.clear)
+            VStack(spacing: 0) {
+                SafeChatComposerTextView(
+                    text: $viewModel.chatInput,
+                    placeholder: "按 Shift + Return 换行",
+                    isSpellCheckEnabled: viewModel.spellCheckEnabled,
+                    onSubmit: { Task { await viewModel.submitChat() } }
+                )
+                .padding(.horizontal, AgentChatLayout.spaceL)
+                .padding(.vertical, AgentChatLayout.spaceM)
+                .frame(minHeight: AgentChatLayout.composerTextMinHeight, maxHeight: AgentChatLayout.composerTextMaxHeight, alignment: .topLeading)
+                .background(Color.clear)
 
-            HStack(spacing: AgentChatLayout.spaceS) {
-                Button(action: {}) {
-                    Image(systemName: "paperclip")
-                        .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
+                HStack(spacing: AgentChatLayout.spaceS) {
+                    Button(action: {}) {
+                        Image(systemName: "paperclip")
+                            .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
+                    }
+                    .buttonStyle(.plain)
+                    .help("添加附件")
+
+                    Button(action: { viewModel.isBrowserVisible.toggle() }) {
+                        AgentComposerOptionBadge(
+                            title: viewModel.isBrowserVisible ? "隐藏浏览器" : "浏览器",
+                            systemImage: "safari",
+                            tint: viewModel.isBrowserVisible ? .accentColor : .secondary,
+                            showsChevron: false,
+                            isActive: viewModel.isBrowserVisible,
+                            style: .compact
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    if let inspection = viewModel.lastPromptInspection {
+                        Label("约 \(inspection.estimatedPromptTokenCount) tokens", systemImage: "text.alignleft")
+                            .font(.caption2)
+                            .foregroundStyle(promptBudgetStatusColor(inspection.promptBudgetStatus))
+                    }
+
+                    Spacer(minLength: AgentChatLayout.spaceS)
+
+                    modelSelectionMenu
+
+                    Button(action: { Task { await viewModel.submitChat() } }) {
+                        Image(systemName: viewModel.isSubmittingChat ? "stop.fill" : "arrow.up")
+                            .font(.system(size: 11, weight: .semibold))
+                            .frame(width: 22, height: 22)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.mini)
+                    .clipShape(Circle())
+                    .disabled(viewModel.chatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.isSubmittingChat)
                 }
-                .buttonStyle(.plain)
-                .help("添加附件")
-
-                Button(action: { viewModel.isBrowserVisible.toggle() }) {
-                    AgentComposerOptionBadge(
-                        title: viewModel.isBrowserVisible ? "隐藏浏览器" : "浏览器",
-                        systemImage: "safari",
-                        tint: viewModel.isBrowserVisible ? .accentColor : .secondary,
-                        showsChevron: false,
-                        isActive: viewModel.isBrowserVisible,
-                        style: .compact
-                    )
-                }
-                .buttonStyle(.plain)
-
-                if let inspection = viewModel.lastPromptInspection {
-                    Label("约 \(inspection.estimatedPromptTokenCount) tokens", systemImage: "text.alignleft")
-                        .font(.caption2)
-                        .foregroundStyle(promptBudgetStatusColor(inspection.promptBudgetStatus))
-                }
-
-                Spacer(minLength: AgentChatLayout.spaceS)
-
-                modelSelectionMenu
-
-                Button(action: { Task { await viewModel.submitChat() } }) {
-                    Image(systemName: viewModel.isSubmittingChat ? "stop.fill" : "arrow.up")
-                        .font(.system(size: 11, weight: .semibold))
-                        .frame(width: 22, height: 22)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.mini)
-                .clipShape(Circle())
-                .disabled(viewModel.chatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.isSubmittingChat)
+                .padding(.horizontal, AgentChatLayout.spaceM)
+                .padding(.vertical, AgentChatLayout.spaceS)
+                .frame(minHeight: AgentChatLayout.primaryButtonSize)
             }
-            .frame(minHeight: AgentChatLayout.primaryButtonSize)
+            .background(Color(nsColor: .controlBackgroundColor).opacity(0.58), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusXL, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: AgentChatLayout.radiusXL, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+            )
 
             if let error = viewModel.errorMessage {
                 AgentMarkdownPreviewText(markdown: error, font: .caption)
