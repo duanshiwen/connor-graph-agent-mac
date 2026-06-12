@@ -6,11 +6,27 @@ public struct SourceRuntimeUISummary: Codable, Sendable, Equatable {
     public var totalCount: Int
     public var enabledCount: Int
     public var needsCredentialCount: Int
+    public var healthyCount: Int
+    public var failedCount: Int
+    public var discoveredToolCount: Int
+    public var auditedInvocationCount: Int
 
-    public init(totalCount: Int, enabledCount: Int, needsCredentialCount: Int) {
+    public init(
+        totalCount: Int,
+        enabledCount: Int,
+        needsCredentialCount: Int,
+        healthyCount: Int = 0,
+        failedCount: Int = 0,
+        discoveredToolCount: Int = 0,
+        auditedInvocationCount: Int = 0
+    ) {
         self.totalCount = totalCount
         self.enabledCount = enabledCount
         self.needsCredentialCount = needsCredentialCount
+        self.healthyCount = healthyCount
+        self.failedCount = failedCount
+        self.discoveredToolCount = discoveredToolCount
+        self.auditedInvocationCount = auditedInvocationCount
     }
 }
 
@@ -23,6 +39,13 @@ public struct SourceRuntimeUICard: Codable, Sendable, Equatable, Identifiable {
     public var capabilityLabels: [String]
     public var toolPrefixLabel: String
     public var graphPolicyLabel: String
+    public var healthLabel: String
+    public var lifecycleLabel: String
+    public var toolCountLabel: String
+    public var lastCheckedLabel: String
+    public var lastErrorLabel: String
+    public var platformCapabilityLabels: [String]
+    public var auditCountLabel: String
     public var tags: [String]
     public var severity: AgentEventPresentationSeverity
 
@@ -35,6 +58,13 @@ public struct SourceRuntimeUICard: Codable, Sendable, Equatable, Identifiable {
         capabilityLabels: [String],
         toolPrefixLabel: String,
         graphPolicyLabel: String,
+        healthLabel: String = "unknown",
+        lifecycleLabel: String = "draft",
+        toolCountLabel: String = "0 tools",
+        lastCheckedLabel: String = "never checked",
+        lastErrorLabel: String = "",
+        platformCapabilityLabels: [String] = [],
+        auditCountLabel: String = "0 audits",
         tags: [String],
         severity: AgentEventPresentationSeverity
     ) {
@@ -46,6 +76,13 @@ public struct SourceRuntimeUICard: Codable, Sendable, Equatable, Identifiable {
         self.capabilityLabels = capabilityLabels
         self.toolPrefixLabel = toolPrefixLabel
         self.graphPolicyLabel = graphPolicyLabel
+        self.healthLabel = healthLabel
+        self.lifecycleLabel = lifecycleLabel
+        self.toolCountLabel = toolCountLabel
+        self.lastCheckedLabel = lastCheckedLabel
+        self.lastErrorLabel = lastErrorLabel
+        self.platformCapabilityLabels = platformCapabilityLabels
+        self.auditCountLabel = auditCountLabel
         self.tags = tags
         self.severity = severity
     }
@@ -61,14 +98,34 @@ public struct SourceRuntimeUIPresentation: Codable, Sendable, Equatable {
     }
 
     public static func build(sources: [MCPSourceRuntimeConfiguration]) -> SourceRuntimeUIPresentation {
+        build(sources: sources, healthRecords: [], auditRecords: [])
+    }
+
+    public static func build(
+        sources: [MCPSourceRuntimeConfiguration],
+        healthRecords: [MCPSourceRuntimeHealthRecord],
+        auditRecords: [MCPSourceRuntimeAuditRecord]
+    ) -> SourceRuntimeUIPresentation {
+        let healthBySource = Dictionary(uniqueKeysWithValues: healthRecords.map { ($0.sourceID, $0) })
+        let auditCountBySource = Dictionary(grouping: auditRecords, by: \.sourceID).mapValues(\.count)
         let cards = sources
             .sorted { lhs, rhs in lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending }
-            .map(SourceRuntimeUICard.init(configuration:))
+            .map { source in
+                SourceRuntimeUICard(
+                    configuration: source,
+                    healthRecord: healthBySource[source.sourceID],
+                    auditCount: auditCountBySource[source.sourceID] ?? 0
+                )
+            }
         return SourceRuntimeUIPresentation(
             summary: SourceRuntimeUISummary(
                 totalCount: sources.count,
                 enabledCount: sources.filter { $0.status == .enabled }.count,
-                needsCredentialCount: sources.filter { $0.credentialRequirement != .none }.count
+                needsCredentialCount: sources.filter { $0.credentialRequirement != .none }.count,
+                healthyCount: healthRecords.filter { $0.healthStatus == .healthy }.count,
+                failedCount: healthRecords.filter { $0.healthStatus == .failed }.count,
+                discoveredToolCount: healthRecords.reduce(0) { $0 + $1.discoveredToolCount },
+                auditedInvocationCount: auditRecords.count
             ),
             cards: cards
         )
@@ -77,6 +134,11 @@ public struct SourceRuntimeUIPresentation: Codable, Sendable, Equatable {
 
 private extension SourceRuntimeUICard {
     init(configuration: MCPSourceRuntimeConfiguration) {
+        self.init(configuration: configuration, healthRecord: nil, auditCount: 0)
+    }
+
+    init(configuration: MCPSourceRuntimeConfiguration, healthRecord: MCPSourceRuntimeHealthRecord?, auditCount: Int) {
+        let capabilityLabels = healthRecord?.capabilitySnapshot?.uiCapabilityLabels ?? []
         self.init(
             id: configuration.sourceID,
             title: configuration.displayName,
@@ -86,9 +148,42 @@ private extension SourceRuntimeUICard {
             capabilityLabels: configuration.allowedCapabilities.map(\.rawValue),
             toolPrefixLabel: configuration.toolNamePrefix,
             graphPolicyLabel: "ingest \(configuration.graphIngestionEnabled ? "on" : "off") · \(configuration.graphWritePolicy.rawValue)",
+            healthLabel: healthRecord?.healthStatus.rawValue ?? "unknown",
+            lifecycleLabel: healthRecord?.lifecycleState.rawValue ?? configuration.status.rawValue,
+            toolCountLabel: "\(healthRecord?.discoveredToolCount ?? 0) tools",
+            lastCheckedLabel: healthRecord?.lastCheckedAt.ISO8601Format() ?? "never checked",
+            lastErrorLabel: healthRecord?.lastErrorMessage ?? "",
+            platformCapabilityLabels: capabilityLabels,
+            auditCountLabel: "\(auditCount) audits",
             tags: configuration.tags,
-            severity: configuration.status.sourceUISeverity
+            severity: healthRecord?.healthStatus.sourceUISeverity ?? configuration.status.sourceUISeverity
         )
+    }
+}
+
+private extension MCPSourceRuntimeCapabilitySnapshot {
+    var uiCapabilityLabels: [String] {
+        var labels: [String] = []
+        if supportsTools { labels.append("tools") }
+        if supportsResources { labels.append("resources") }
+        if supportsPrompts { labels.append("prompts") }
+        if supportsSampling { labels.append("sampling") }
+        if supportsRoots { labels.append("roots") }
+        if supportsElicitation { labels.append("elicitation") }
+        if supportsLogging { labels.append("logging") }
+        if supportsProgress { labels.append("progress") }
+        if supportsCancellation { labels.append("cancellation") }
+        return labels
+    }
+}
+
+private extension MCPSourceRuntimeHealthStatus {
+    var sourceUISeverity: AgentEventPresentationSeverity {
+        switch self {
+        case .healthy: .success
+        case .degraded, .unknown: .warning
+        case .failed: .error
+        }
     }
 }
 
