@@ -29,6 +29,7 @@ struct PhaseGCraftGradeNativeUITests {
             .openSources,
             .openSkills,
             .openAutomation,
+            .openLocalAutomationSurface,
             .checkCommercialReadiness,
             .openSettings
         ])
@@ -114,9 +115,9 @@ struct PhaseGCraftGradeNativeUITests {
 
         #expect(center.hero.title == "Connor Runtime Center")
         #expect(center.hero.statusText == "ready")
-        #expect(center.metricTiles.map(\.id) == [.activeSessions, .pendingApprovals, .memoryReviews, .automationTriggers, .nativeUIHealth])
-        #expect(center.metricTiles.map(\.value) == ["1", "1", "3", "1", "ready"])
-        #expect(center.sections.map(\.id) == [.nextBestActions, .runTimeline, .reviewQueue, .graphMemory, .automation])
+        #expect(center.metricTiles.map(\.id) == [.activeSessions, .pendingApprovals, .memoryReviews, .automationTriggers, .nativeUIHealth, .localAutomationSurface])
+        #expect(center.metricTiles.map(\.value) == ["1", "1", "3", "1", "ready", "11"])
+        #expect(center.sections.map(\.id) == [.nextBestActions, .runTimeline, .reviewQueue, .graphMemory, .automation, .localAutomationSurface])
         #expect(center.sections[0].items.first?.title == "Review pending approvals")
         #expect(center.sections[2].items.first?.severity == .warning)
         #expect(center.sections[3].items.first?.subtitle == "admissionHold · needsReview")
