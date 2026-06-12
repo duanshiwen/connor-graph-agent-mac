@@ -953,7 +953,7 @@ swift build --product connor-graph-agent-mac
 最近验证结果：
 
 ```text
-Build of product 'connor-graph-agent-mac' complete! (2026-06-12 20:17 GMT+8)
+Build of product 'connor-graph-agent-mac' complete! (2026-06-12 20:32 GMT+8)
 ```
 
 Test：
@@ -966,7 +966,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
 最近验证结果：
 
 ```text
-354 tests in 14 suites passed (2026-06-12 20:17 GMT+8)
+359 tests in 14 suites passed (2026-06-12 20:32 GMT+8)
 ```
 
 Phase I 专项验证：
@@ -1001,6 +1001,23 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --filter Pha
 
 ---
 
+
+### Commercial Train 3: Source / MCP Platformization
+
+本阶段将 MCP Source runtime 从“可配置、可调用”推进为第一阶段商业化 Source Platform：
+
+- 新增 Source 平台状态模型：health status、lifecycle state、capability snapshot、health record、audit record、discovery snapshot。
+- MCP discovery 现在会生成 Connor-owned capability snapshot 与 tool catalog：protocol version、server info、tools/resources/prompts/sampling/roots/elicitation/logging/progress/cancellation 能力标记、tool count 与 tool names。
+- Source runtime tool invocation 现在同时返回 Connor permission/tool events 与 source audit envelope，便于后续 Runtime Center、审计与 graph ingestion 串联。
+- `AppMCPSourceRuntimeRepository` 新增 per-source `health.json`、`catalog.json`、`audit.jsonl` 持久化，不破坏既有 `mcp-runtime.json` 配置兼容。
+- Source UI presentation 增加 health、lifecycle、tool count、last checked、last error、platform capabilities 与 audit count 指标。
+- Commercial Readiness Phase 3 从“有 enabled source”升级为“Source 平台具备健康发现、工具目录、审计与 Connor-governed graph write policy 证据”。
+- 新增 `CommercialTrain3SourceMCPPlatformTests` 覆盖 repository persistence、runtime discovery、tool invocation audit、UI signals 与 readiness evidence。
+
+本阶段仍不引入 Craft-style multi-workspace，不接真实第三方 OAuth，不把 MCP server 当作 Connor 权限/状态源，也不完整产品化 resources/prompts/sampling/roots/elicitation UI；这些能力先作为 capability snapshot 纳入治理面。
+
+---
+
 ## 已记录的阶段性系统增量
 
 截至提交 `eac3db3` 并叠加当前本地改造，已合入 / 已完成的阶段性增量包括：
@@ -1017,6 +1034,7 @@ Phase H: Source / Skill / Automation UI Integration
 Phase I: Command Palette / Deep-link Navigation / Runtime Click-through
 Commercial Train 1: Session OS Maturation
 Commercial Train 2: Claude SDK Sidecar Productionization
+Commercial Train 3: Source / MCP Platformization
 Local UI Refresh: Craft-like three-column shell and user-facing navigation cleanup
 Local Settings Center: App / AI / Appearance / Input / Permissions / Labels / Shortcuts / Preferences
 ```

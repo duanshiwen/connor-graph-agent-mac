@@ -165,6 +165,18 @@ public struct AppMCPSourceRuntimeRepository: Sendable {
         sourceDirectory(sourceID: sourceID).appendingPathComponent("mcp-runtime.json")
     }
 
+    public func healthURL(sourceID: String) -> URL {
+        sourceDirectory(sourceID: sourceID).appendingPathComponent("health.json")
+    }
+
+    public func catalogURL(sourceID: String) -> URL {
+        sourceDirectory(sourceID: sourceID).appendingPathComponent("catalog.json")
+    }
+
+    public func auditURL(sourceID: String) -> URL {
+        sourceDirectory(sourceID: sourceID).appendingPathComponent("audit.jsonl")
+    }
+
     public func save(_ configuration: MCPSourceRuntimeConfiguration) throws {
         try validate(configuration)
         try storagePaths.ensureDirectoryHierarchy()
@@ -175,6 +187,90 @@ public struct AppMCPSourceRuntimeRepository: Sendable {
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(normalized).write(to: configurationURL(sourceID: normalized.sourceID), options: .atomic)
+    }
+
+    public func saveHealthRecord(_ record: MCPSourceRuntimeHealthRecord) throws {
+        try validateID(record.sourceID)
+        try storagePaths.ensureDirectoryHierarchy()
+        try FileManager.default.createDirectory(at: sourceDirectory(sourceID: record.sourceID), withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(record).write(to: healthURL(sourceID: record.sourceID), options: .atomic)
+    }
+
+    public func loadHealthRecord(sourceID: String) throws -> MCPSourceRuntimeHealthRecord? {
+        let url = healthURL(sourceID: sourceID)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(MCPSourceRuntimeHealthRecord.self, from: try Data(contentsOf: url))
+    }
+
+    public func listHealthRecords() throws -> [MCPSourceRuntimeHealthRecord] {
+        guard FileManager.default.fileExists(atPath: runtimeDirectory.path) else { return [] }
+        let entries = try FileManager.default.contentsOfDirectory(at: runtimeDirectory, includingPropertiesForKeys: nil)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try entries.compactMap { entry -> MCPSourceRuntimeHealthRecord? in
+            let url = entry.appendingPathComponent("health.json")
+            guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+            return try decoder.decode(MCPSourceRuntimeHealthRecord.self, from: try Data(contentsOf: url))
+        }.sorted { $0.sourceID < $1.sourceID }
+    }
+
+    public func saveToolCatalog(sourceID: String, catalog: [MCPSourceToolDescriptor]) throws {
+        try validateID(sourceID)
+        try storagePaths.ensureDirectoryHierarchy()
+        try FileManager.default.createDirectory(at: sourceDirectory(sourceID: sourceID), withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(catalog).write(to: catalogURL(sourceID: sourceID), options: .atomic)
+    }
+
+    public func loadToolCatalog(sourceID: String) throws -> [MCPSourceToolDescriptor] {
+        let url = catalogURL(sourceID: sourceID)
+        guard FileManager.default.fileExists(atPath: url.path) else { return [] }
+        return try JSONDecoder().decode([MCPSourceToolDescriptor].self, from: try Data(contentsOf: url))
+    }
+
+    public func appendAuditRecord(_ record: MCPSourceRuntimeAuditRecord) throws {
+        try validateID(record.sourceID)
+        try storagePaths.ensureDirectoryHierarchy()
+        try FileManager.default.createDirectory(at: sourceDirectory(sourceID: record.sourceID), withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.sortedKeys]
+        let line = String(decoding: try encoder.encode(record), as: UTF8.self) + "\n"
+        let url = auditURL(sourceID: record.sourceID)
+        if FileManager.default.fileExists(atPath: url.path) {
+            let handle = try FileHandle(forWritingTo: url)
+            try handle.seekToEnd()
+            try handle.write(contentsOf: Data(line.utf8))
+            try handle.close()
+        } else {
+            try line.write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
+
+    public func appendAuditRecords(_ records: [MCPSourceRuntimeAuditRecord]) throws {
+        for record in records { try appendAuditRecord(record) }
+    }
+
+    public func loadRecentAuditRecords(sourceID: String, limit: Int = 50) throws -> [MCPSourceRuntimeAuditRecord] {
+        let url = auditURL(sourceID: sourceID)
+        guard FileManager.default.fileExists(atPath: url.path) else { return [] }
+        let text = try String(contentsOf: url, encoding: .utf8)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let records = try text.split(separator: "\n").map { line in
+            try decoder.decode(MCPSourceRuntimeAuditRecord.self, from: Data(line.utf8))
+        }
+        return Array(records.suffix(max(0, limit)))
+    }
+
+    public func validateForEnablement(_ configuration: MCPSourceRuntimeConfiguration) throws {
+        try validate(configuration)
     }
 
     public func load(sourceID: String) throws -> MCPSourceRuntimeConfiguration? {
