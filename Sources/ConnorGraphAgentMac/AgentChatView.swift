@@ -9,45 +9,29 @@ struct AgentChatView: View {
     @State private var isSessionInfoPresented = false
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
+        ZStack(alignment: .topTrailing) {
             Group {
                 if viewModel.isBrowserVisible {
                     BrowserWorkspaceView(viewModel: viewModel)
                 } else {
-                    AgentChatConversationView(viewModel: viewModel)
+                    AgentChatConversationView(viewModel: viewModel, isSessionInfoPresented: $isSessionInfoPresented)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            VStack(alignment: .trailing, spacing: 10) {
-                if isSessionInfoPresented {
-                    AgentChatInspectorView(viewModel: viewModel)
-                        .frame(width: 360, height: 420)
-                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
-                        )
-                        .shadow(color: .black.opacity(0.16), radius: 24, x: 0, y: 12)
-                        .transition(.scale(scale: 0.96, anchor: .bottomTrailing).combined(with: .opacity))
-                }
-
-                Button {
-                    withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
-                        isSessionInfoPresented.toggle()
-                    }
-                } label: {
-                    Label("信息", systemImage: "info.circle")
-                        .font(.caption.weight(.medium))
-                        .padding(.horizontal, 10)
-                        .frame(height: 30)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.regular)
-                .help("会话信息")
+            if isSessionInfoPresented {
+                AgentChatInspectorView(viewModel: viewModel)
+                    .frame(width: 360, height: 420)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
+                    )
+                    .shadow(color: .black.opacity(0.16), radius: 24, x: 0, y: 12)
+                    .transition(.scale(scale: 0.96, anchor: .topTrailing).combined(with: .opacity))
+                    .padding(.top, 14)
+                    .padding(.trailing, 18)
             }
-            .padding(.trailing, 18)
-            .padding(.bottom, 74)
         }
         .navigationTitle("Connor Sessions")
         .task {
@@ -150,6 +134,7 @@ private struct AgentChatSessionRow: View {
 
 private struct AgentChatConversationView: View {
     @ObservedObject var viewModel: AppViewModel
+    @Binding var isSessionInfoPresented: Bool
 
     private var timelineItems: [AgentChatTurnTimelineItem] {
         AgentChatTurnTimelineItem.items(
@@ -212,7 +197,7 @@ private struct AgentChatConversationView: View {
 
             Divider()
 
-            AgentChatComposerView(viewModel: viewModel)
+            AgentChatComposerView(viewModel: viewModel, isSessionInfoPresented: $isSessionInfoPresented)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
         }
@@ -740,18 +725,38 @@ private struct FlowLikeChips: View {
 
 private struct AgentChatComposerView: View {
     @ObservedObject var viewModel: AppViewModel
+    @Binding var isSessionInfoPresented: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
-            SafeChatComposerTextView(
-                text: $viewModel.chatInput,
-                placeholder: "按 Shift + Return 换行",
-                isSpellCheckEnabled: viewModel.spellCheckEnabled,
-                onSubmit: { Task { await viewModel.submitChat() } }
-            )
-            .padding(.horizontal, 14)
-            .padding(.vertical, 11)
-            .frame(minHeight: 46, maxHeight: 128, alignment: .topLeading)
+            ZStack(alignment: .topTrailing) {
+                SafeChatComposerTextView(
+                    text: $viewModel.chatInput,
+                    placeholder: "按 Shift + Return 换行",
+                    isSpellCheckEnabled: viewModel.spellCheckEnabled,
+                    onSubmit: { Task { await viewModel.submitChat() } }
+                )
+                .padding(.leading, 14)
+                .padding(.trailing, 88)
+                .padding(.vertical, 11)
+                .frame(minHeight: 46, maxHeight: 128, alignment: .topLeading)
+
+                Button {
+                    withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
+                        isSessionInfoPresented.toggle()
+                    }
+                } label: {
+                    Label("信息", systemImage: "info.circle")
+                        .font(.caption.weight(.medium))
+                        .padding(.horizontal, 10)
+                        .frame(height: 30)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
+                .help("会话信息")
+                .padding(.top, 8)
+                .padding(.trailing, 10)
+            }
             .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
