@@ -48,6 +48,8 @@ public final class GovernedClaudeSDKSidecarRuntime<Transport: ClaudeSDKSidecarSe
             sessionID: request.sessionID,
             groupID: request.groupID,
             userMessage: request.userMessage,
+            sessionSummary: request.sessionSummary,
+            recentMessages: request.recentMessages,
             permissionMode: permissionMode
         )
         let resumeSDKSessionID = (try? runtimeStore?.load(connorSessionID: safeRequest.sessionID))?.sdkSessionID
