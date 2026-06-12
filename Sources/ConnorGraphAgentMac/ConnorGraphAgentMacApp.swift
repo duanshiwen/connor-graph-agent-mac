@@ -246,6 +246,7 @@ final class AppViewModel: ObservableObject {
     private var agentRuntimeFactory: AppGraphAgentRuntimeFactory?
     private var hybridSearchService: (any GraphHybridSearchService)?
     private var backgroundJobRunner: AppGraphBackgroundJobRunner?
+    private var isRunningBackgroundJobs: Bool = false
     // Legacy simple ask controller is kept only for demo/no-store fallback and compatibility helpers.
     // The app's product chat path is NativeSessionManager: Connor owns session state, the agent backend is replaceable.
     private var legacyChatController: AgentChatController<AnyLLMProvider>
@@ -661,9 +662,12 @@ final class AppViewModel: ObservableObject {
     }
 
     func runBackgroundJobs() async {
+        guard !isRunningBackgroundJobs else { return }
         guard let backgroundJobRunner, let repository else { return }
+        isRunningBackgroundJobs = true
+        defer { isRunningBackgroundJobs = false }
         do {
-            _ = try await backgroundJobRunner.runAvailable(limit: 20)
+            _ = try await backgroundJobRunner.runAvailable(limit: 5)
             let snapshot = try repository.loadSnapshot()
             let traces = try graphExtractionTraceRepository?.loadRecentTraces() ?? []
             let holdItems = try admissionHoldQueueRepository?.loadOpenItems() ?? []
