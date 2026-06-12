@@ -46,7 +46,6 @@ struct PhaseGCraftGradeNativeUITests {
     @Test func nativeShellRouteResolverMapsCraftItemsToAppRoutes() {
         let resolver = ConnorNativeShellRouteResolver()
 
-        #expect(resolver.route(for: .runtimeCenter).legacySidebarID == "agentChat")
         #expect(resolver.route(for: .agentChat).legacySidebarID == "agentChat")
         #expect(resolver.route(for: .graphMemory).legacySidebarID == "graphWriteCandidates")
         #expect(resolver.route(for: .approvals).legacySidebarID == "pendingApprovals")

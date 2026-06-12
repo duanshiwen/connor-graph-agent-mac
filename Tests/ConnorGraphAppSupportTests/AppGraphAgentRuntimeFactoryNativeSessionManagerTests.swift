@@ -35,6 +35,21 @@ private func temporaryFactoryNativeSessionDatabaseURL(_ name: String = UUID().uu
 @Test func appGraphAgentRuntimeFactoryCreatesNativeSessionManagerBackedByRepository() async throws {
     let store = try SQLiteGraphKernelStore(path: temporaryFactoryNativeSessionDatabaseURL().path)
     try store.migrate()
+    let temporaryDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorFactoryConfiguredSidecar-")
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+    let sidecarURL = temporaryDirectory.appendingPathComponent("configured-sidecar.sh")
+    try """
+    #!/bin/sh
+    IFS= read -r request
+    printf '%s\n' '{"runStarted":{"sdkSessionID":"sdk-configured-session"}}'
+    printf '%s\n' '{"textComplete":{"text":"Configured sidecar answer","citations":[],"contextSnapshot":null}}'
+    printf '%s\n' '{"runCompleted":{}}'
+    """.write(to: sidecarURL, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: sidecarURL.path)
+
     let settingsRepository = AppLLMSettingsRepository(
         settingsStore: FactoryNativeSessionSettingsStore(),
         credentialStore: FactoryNativeSessionCredentialStore()
@@ -44,7 +59,10 @@ private func temporaryFactoryNativeSessionDatabaseURL(_ name: String = UUID().uu
             baseURLString: AppLLMSettings.default.baseURLString,
             model: AppLLMSettings.default.model,
             hasAPIKey: false,
-            providerMode: .stub
+            providerMode: .governedClaudeSidecar,
+            sidecarExecutablePath: "/bin/sh",
+            sidecarArguments: sidecarURL.path,
+            sidecarWorkingDirectoryPath: temporaryDirectory.path
         ),
         apiKey: nil
     )
@@ -58,7 +76,33 @@ private func temporaryFactoryNativeSessionDatabaseURL(_ name: String = UUID().uu
     #expect(response.session.id == "factory-native-session")
     #expect(loaded.messages.map(\.role) == [.user, .assistant])
     #expect(loaded.messages.first?.content == "Use the native session manager path")
-    #expect(loaded.messages.last?.content.isEmpty == false)
+    #expect(loaded.messages.last?.content == "Configured sidecar answer")
+}
+
+@Test func appGraphAgentRuntimeFactoryDoesNotUseLegacyDirectProviderForClaudeSidecarMode() async throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryFactoryNativeSessionDatabaseURL().path)
+    try store.migrate()
+    let settingsRepository = AppLLMSettingsRepository(
+        settingsStore: FactoryNativeSessionSettingsStore(),
+        credentialStore: FactoryNativeSessionCredentialStore()
+    )
+    try settingsRepository.save(
+        settings: AppLLMSettings(
+            baseURLString: AppLLMSettings.default.baseURLString,
+            model: AppLLMSettings.default.model,
+            hasAPIKey: false,
+            providerMode: .governedClaudeSidecar
+        ),
+        apiKey: nil
+    )
+    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: settingsRepository)
+
+    let provider = factory.makeAgentModelProvider()
+
+    #expect(provider.modelID == "governed-claude-sidecar-requires-session-manager")
+    await #expect(throws: AppGraphAgentRuntimeFactoryError.self) {
+        _ = try await provider.complete(AgentModelRequest(messages: []))
+    }
 }
 
 @Test func appGraphAgentRuntimeFactoryPersistsClaudeSidecarToolEvents() async throws {
