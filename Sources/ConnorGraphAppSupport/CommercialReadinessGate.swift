@@ -108,7 +108,6 @@ public enum CommercialNativeUIReadiness: Codable, Sendable, Equatable {
         commandCount: Int,
         settingsPanelsReady: Bool,
         homeSurfaceReady: Bool = false,
-        runtimeCenterReady: Bool = false,
         commandPaletteReady: Bool = false,
         readinessDashboardLinked: Bool = false,
         primaryActionCount: Int = 0,
@@ -312,8 +311,7 @@ public struct CommercialReadinessSnapshotBuilder: Sendable, Equatable {
             shellItemCount: shell.sidebarGroups.flatMap(\.items).count,
             commandCount: shell.commands.count,
             settingsPanelsReady: settingsPanelsReady,
-            homeSurfaceReady: shell.item(for: .home) != nil,
-            runtimeCenterReady: shell.defaultSelection == .home,
+            homeSurfaceReady: shell.item(for: shell.defaultSelection) != nil,
             commandPaletteReady: !shell.commands.isEmpty,
             readinessDashboardLinked: shell.command(for: .checkCommercialReadiness) != nil,
             primaryActionCount: shell.commands.filter(\.isPrimaryAction).count,
@@ -567,7 +565,6 @@ public struct CommercialReadinessGate: Sendable, Equatable {
             let commandCount,
             let settingsPanelsReady,
             let homeSurfaceReady,
-            let runtimeCenterReady,
             let commandPaletteReady,
             let readinessDashboardLinked,
             let primaryActionCount,
@@ -575,13 +572,12 @@ public struct CommercialReadinessGate: Sendable, Equatable {
             let keyboardShortcutCount,
             let settingsSectionCount
         ):
-            let hasTrain5Evidence = homeSurfaceReady || runtimeCenterReady || commandPaletteReady || readinessDashboardLinked || primaryActionCount > 0 || emptyStateCount > 0 || keyboardShortcutCount > 0 || settingsSectionCount > 0
+            let hasTrain5Evidence = homeSurfaceReady || commandPaletteReady || readinessDashboardLinked || primaryActionCount > 0 || emptyStateCount > 0 || keyboardShortcutCount > 0 || settingsSectionCount > 0
             let blockingReasons = hasTrain5Evidence ? [
                 shellItemCount > 0 ? nil : "Native shell has no navigation items",
                 commandCount > 0 ? nil : "Command palette has no commands",
                 settingsPanelsReady ? nil : "Settings panels are not ready",
-                homeSurfaceReady ? nil : "Home runtime surface is not available",
-                runtimeCenterReady ? nil : "Runtime center is not the default commercial home",
+                homeSurfaceReady ? nil : "Default home surface is not available",
                 commandPaletteReady ? nil : "Command palette is not ready",
                 readinessDashboardLinked ? nil : "Commercial readiness dashboard is not linked",
                 primaryActionCount >= 4 ? nil : "Not enough primary native actions",
@@ -598,7 +594,6 @@ public struct CommercialReadinessGate: Sendable, Equatable {
                     "commands": "\(commandCount)",
                     "settings": settingsPanelsReady ? "ready" : "partial",
                     "homeSurfaceReady": homeSurfaceReady ? "true" : "false",
-                    "runtimeCenterReady": runtimeCenterReady ? "true" : "false",
                     "commandPaletteReady": commandPaletteReady ? "true" : "false",
                     "readinessDashboardLinked": readinessDashboardLinked ? "true" : "false",
                     "primaryActions": "\(primaryActionCount)",
