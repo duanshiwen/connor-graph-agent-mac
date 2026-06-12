@@ -166,13 +166,13 @@ public struct ConnorNativeCommercialUIPresentation: Codable, Sendable, Equatable
         self.readinessLinked = readinessLinked
     }
 
-    public static func build(shell: ConnorNativeShellPresentation = .default, runtimeCenter: ConnorRuntimeCenterPresentation? = nil, readinessDashboard: CommercialReadinessDashboard? = nil, settings: ConnorNativeSettingsPresentation = .default) -> ConnorNativeCommercialUIPresentation {
+    public static func build(shell: ConnorNativeShellPresentation = .default, readinessDashboard: CommercialReadinessDashboard? = nil, settings: ConnorNativeSettingsPresentation = .default) -> ConnorNativeCommercialUIPresentation {
         let shellItems = shell.sidebarGroups.flatMap(\.items)
         let blockedReadiness = readinessDashboard?.blockedCount ?? 0
         let status: ConnorNativeCommercialUIStatus = blockedReadiness == 0 ? .ready : .needsReview
         let hero = ConnorNativeCommercialUIHero(
-            title: runtimeCenter?.hero.title ?? "Connor Home",
-            subtitle: runtimeCenter?.hero.subtitle ?? "Native Agent OS control center",
+            title: "Connor Home",
+            subtitle: "Native Agent OS control center",
             status: status,
             statusText: blockedReadiness == 0 ? "Commercial UI ready" : "\(blockedReadiness) readiness checks need review"
         )

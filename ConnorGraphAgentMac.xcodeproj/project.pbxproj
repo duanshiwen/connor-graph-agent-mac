@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		B00000000000000000000001 /* XcodeSwiftPMBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000002 /* XcodeSwiftPMBridgeTests.swift */; };
 		A00000000000000000000001 /* ConnorGraphAgentMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000002 /* ConnorGraphAgentMacApp.swift */; };
 		A0000000000000000000002C /* AgentChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000002D /* AgentChatView.swift */; };
 		A0000000000000000000002E /* EmptyGraphHybridSearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000002F /* EmptyGraphHybridSearchService.swift */; };
@@ -22,6 +23,8 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		B00000000000000000000002 /* XcodeSwiftPMBridgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XcodeSwiftPMBridgeTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000003 /* ConnorGraphAgentMacTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ConnorGraphAgentMacTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A00000000000000000000011 /* ConnorGraphAgentMacApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ConnorGraphAgentMacApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A00000000000000000000002 /* ConnorGraphAgentMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ConnorGraphAgentMacApp.swift; sourceTree = "<group>"; };
 		A0000000000000000000002D /* AgentChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AgentChatView.swift; sourceTree = "<group>"; };
@@ -32,6 +35,13 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		B00000000000000000000005 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A00000000000000000000012 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -51,6 +61,7 @@
 		A00000000000000000000013 = {
 			isa = PBXGroup;
 			children = (
+				B00000000000000000000004 /* XcodeTestBridge */,
 				A00000000000000000000002 /* ConnorGraphAgentMacApp.swift */,
 				A0000000000000000000002D /* AgentChatView.swift */,
 				A0000000000000000000002F /* EmptyGraphHybridSearchService.swift */,
@@ -65,13 +76,40 @@
 			isa = PBXGroup;
 			children = (
 				A00000000000000000000011 /* ConnorGraphAgentMacApp.app */,
+				B00000000000000000000003 /* ConnorGraphAgentMacTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		B00000000000000000000004 /* XcodeTestBridge */ = {
+			isa = PBXGroup;
+			children = (
+				B00000000000000000000002 /* XcodeSwiftPMBridgeTests.swift */,
+			);
+			path = Tests/XcodeTestBridge;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		B00000000000000000000007 /* ConnorGraphAgentMacTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B00000000000000000000008 /* Build configuration list for PBXNativeTarget "ConnorGraphAgentMacTests" */;
+			buildPhases = (
+				B00000000000000000000006 /* Sources */,
+				B00000000000000000000005 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ConnorGraphAgentMacTests;
+			packageProductDependencies = (
+			);
+			productName = ConnorGraphAgentMacTests;
+			productReference = B00000000000000000000003 /* ConnorGraphAgentMacTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		A00000000000000000000015 /* ConnorGraphAgentMacApp */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = A00000000000000000000016 /* Build configuration list for PBXNativeTarget \"ConnorGraphAgentMacApp\" */;
@@ -109,6 +147,10 @@
 					A00000000000000000000015 = {
 						CreatedOnToolsVersion = 16.0;
 					};
+					B00000000000000000000007 = {
+						CreatedOnToolsVersion = 16.0;
+						TestTargetID = A00000000000000000000015;
+					};
 				};
 			};
 			buildConfigurationList = A00000000000000000000019 /* Build configuration list for PBXProject \"ConnorGraphAgentMac\" */;
@@ -128,11 +170,20 @@
 			projectRoot = "";
 			targets = (
 				A00000000000000000000015 /* ConnorGraphAgentMacApp */,
+				B00000000000000000000007 /* ConnorGraphAgentMacTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXSourcesBuildPhase section */
+		B00000000000000000000006 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B00000000000000000000001 /* XcodeSwiftPMBridgeTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A00000000000000000000017 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -320,6 +371,46 @@
 			};
 			name = Release;
 		};
+		B00000000000000000000009 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 65H6S5LS3P;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.shiwen.connor-graph-agent-mac.tests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "";
+			};
+			name = Debug;
+		};
+		B0000000000000000000000A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 65H6S5LS3P;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.shiwen.connor-graph-agent-mac.tests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -337,6 +428,15 @@
 			buildConfigurations = (
 				A0000000000000000000001D /* Debug */,
 				A0000000000000000000001E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B00000000000000000000008 /* Build configuration list for PBXNativeTarget "ConnorGraphAgentMacTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B00000000000000000000009 /* Debug */,
+				B0000000000000000000000A /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

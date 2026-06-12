@@ -79,7 +79,6 @@ public struct ConnorNativeShellSidebarGroup: Codable, Sendable, Equatable, Ident
 }
 
 public enum ConnorNativeShellCommandID: String, Codable, Sendable, Equatable, Hashable, Identifiable {
-    case openHome
     case newSession
     case toggleBrowser
     case openGraphMemoryReview
@@ -213,11 +212,8 @@ public struct ConnorNativeShellPresentation: Codable, Sendable, Equatable {
 
     public static let `default` = ConnorNativeShellPresentation(
         title: "Connor",
-        defaultSelection: .home,
+        defaultSelection: .agentChat,
         sidebarGroups: [
-            ConnorNativeShellSidebarGroup(id: "home", title: "Home", items: [
-                ConnorNativeShellSidebarItem(id: .home, title: "Runtime Center", subtitle: "Commercial control surface", systemImage: "rectangle.3.group", isPrimary: true, emptyStateTitle: "No runtime activity yet", emptyStateActionTitle: "Start a session")
-            ]),
             ConnorNativeShellSidebarGroup(id: "work", title: "Work", items: [
                 ConnorNativeShellSidebarItem(id: .agentChat, title: "Sessions", subtitle: "Graph-backed conversations", systemImage: "message.fill", isPrimary: true, emptyStateTitle: "No sessions yet", emptyStateActionTitle: "New Session"),
                 ConnorNativeShellSidebarItem(id: .browserWorkspace, title: "Browser Workspace", subtitle: "In-app browsing surface", systemImage: "globe", emptyStateTitle: "Browser hidden", emptyStateActionTitle: "Toggle Browser")
@@ -242,7 +238,6 @@ public struct ConnorNativeShellPresentation: Codable, Sendable, Equatable {
             ])
         ],
         commands: [
-            ConnorNativeShellCommand(id: .openHome, title: "Open Runtime Center", systemImage: "rectangle.3.group", keyboardShortcut: "⌘1", target: .home, groupID: "home", isPrimaryAction: true, keywords: ["home", "runtime", "dashboard"]),
             ConnorNativeShellCommand(id: .newSession, title: "New Session", systemImage: "square.and.pencil", keyboardShortcut: "⌘N", target: .agentChat, groupID: "work", isPrimaryAction: true, keywords: ["chat", "conversation"]),
             ConnorNativeShellCommand(id: .toggleBrowser, title: "Toggle Browser", systemImage: "globe", keyboardShortcut: "⌘B", target: .browserWorkspace, groupID: "work", keywords: ["browser", "web"]),
             ConnorNativeShellCommand(id: .openGraphMemoryReview, title: "Open Graph Memory", systemImage: "brain.head.profile", keyboardShortcut: "⌘2", target: .graphMemory, groupID: "memory", isPrimaryAction: true, riskLevel: .medium, keywords: ["memory", "review", "graph"]),
