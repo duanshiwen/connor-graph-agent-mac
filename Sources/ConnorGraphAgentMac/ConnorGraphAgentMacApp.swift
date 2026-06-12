@@ -1530,6 +1530,7 @@ struct AppShellView: View {
             .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
         }
         .frame(minWidth: 1120, minHeight: 680)
+        .controlSize(.small)
         .onAppear {
             sidebarSelection = viewModel.selection ?? .agentChat
             viewModel.reloadChatSessions()
