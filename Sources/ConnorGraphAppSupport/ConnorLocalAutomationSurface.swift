@@ -20,7 +20,6 @@ public enum ConnorLocalAPIAuthMode: String, Codable, Sendable, Equatable, Hashab
 
 public enum ConnorLocalAPIRouteID: String, Codable, Sendable, Equatable, Hashable, Identifiable, CaseIterable {
     case readiness
-    case runtimeCenter
     case sessions
     case sessionDetail
     case automations
@@ -72,7 +71,6 @@ public struct ConnorLocalAPIEndpointPresentation: Codable, Sendable, Equatable, 
 public enum ConnorCLICommandID: String, Codable, Sendable, Equatable, Hashable, Identifiable, CaseIterable {
     case commands
     case readiness
-    case runtimeCenter
     case sessionList
     case sessionShow
     case automationList
@@ -234,7 +232,6 @@ public struct ConnorLocalAutomationSurfacePresentation: Codable, Sendable, Equat
 public enum ConnorLocalAutomationSurfaceCatalog {
     public static let defaultEndpoints: [ConnorLocalAPIEndpointPresentation] = [
         .init(id: .readiness, method: .get, path: "/v1/readiness", summary: "Return commercial readiness dashboard.", auditCategory: "local.readiness", cliEquivalent: "connor readiness --json"),
-        .init(id: .runtimeCenter, method: .get, path: "/v1/runtime-center", summary: "Return runtime center presentation.", auditCategory: "local.runtime", cliEquivalent: "connor runtime-center --json"),
         .init(id: .sessions, method: .get, path: "/v1/sessions", summary: "List Connor sessions.", auditCategory: "local.sessions", cliEquivalent: "connor sessions list"),
         .init(id: .sessionDetail, method: .get, path: "/v1/sessions/{id}", summary: "Show one Connor session.", auditCategory: "local.sessions", cliEquivalent: "connor sessions show <id>"),
         .init(id: .automations, method: .get, path: "/v1/automations", summary: "List governed automation rules.", auditCategory: "local.automation", cliEquivalent: "connor automations list"),
@@ -247,7 +244,6 @@ public enum ConnorLocalAutomationSurfaceCatalog {
     public static let defaultCommands: [ConnorCLICommandPresentation] = [
         .init(id: .commands, name: "commands", usage: "connor commands", summary: "List available Connor CLI commands.", examples: ["connor commands"]),
         .init(id: .readiness, name: "readiness", usage: "connor readiness --json", summary: "Inspect commercial readiness.", examples: ["connor readiness --json"], apiRoute: .readiness),
-        .init(id: .runtimeCenter, name: "runtime-center", usage: "connor runtime-center --json", summary: "Inspect Runtime Center presentation.", examples: ["connor runtime-center --json"], apiRoute: .runtimeCenter),
         .init(id: .sessionList, name: "sessions list", usage: "connor sessions list --limit 20", summary: "List recent sessions.", examples: ["connor sessions list"], apiRoute: .sessions),
         .init(id: .sessionShow, name: "sessions show", usage: "connor sessions show <session-id>", summary: "Show one session.", examples: ["connor sessions show session-1"], apiRoute: .sessionDetail),
         .init(id: .automationList, name: "automations list", usage: "connor automations list", summary: "List automation rules.", examples: ["connor automations list"], apiRoute: .automations),
