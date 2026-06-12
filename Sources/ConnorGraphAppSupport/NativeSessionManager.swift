@@ -229,7 +229,7 @@ public struct NativeSessionManager: Sendable {
                     )
                     try persistSession()
                     if let assistantMessage {
-                        try persistMemoryStagingAfterAssistantMessage(assistantMessage)
+                        try persistMemoryStagingAfterAssistantMessage(assistantMessage, runID: run.id)
                     }
                 }
             }
@@ -373,7 +373,7 @@ public struct NativeSessionManager: Sendable {
         try memoryStagingRepository.saveBuffer(result.buffer)
     }
 
-    private func persistMemoryStagingAfterAssistantMessage(_ message: AgentMessage) throws {
+    private func persistMemoryStagingAfterAssistantMessage(_ message: AgentMessage, runID: String? = nil) throws {
         guard let memoryStagingRepository else { return }
         let existingBuffer = try memoryStagingRepository.loadBuffer(sessionID: session.id)
         let result = memoryIngestionService.ingestAssistantMessage(
@@ -382,5 +382,29 @@ public struct NativeSessionManager: Sendable {
             into: existingBuffer ?? MemoryStagingBuffer(sessionID: session.id)
         )
         try memoryStagingRepository.saveBuffer(result.buffer)
+        try recordMemoryFeedbackSignals(from: result, runID: runID)
+    }
+
+    private func recordMemoryFeedbackSignals(from result: MemoryIngestionResult, runID: String?) throws {
+        guard !result.triggerReasons.isEmpty else { return }
+        let signals = AgentGraphMemoryFeedbackSignal.signals(from: result, runID: runID, sessionID: session.id)
+        for signal in signals {
+            try sessionRepository.appendJournalEvent(
+                runID: runID ?? "memory-feedback-\(session.id)",
+                sessionID: session.id,
+                kind: .graphMemoryProposed,
+                action: "memory_feedback_signal",
+                message: signal.rationale,
+                metadata: [
+                    "signal_id": signal.id,
+                    "trigger": signal.trigger.rawValue,
+                    "candidate_kind": signal.candidateKind,
+                    "importance": "\(signal.importance)",
+                    "confidence": "\(signal.confidence)",
+                    "source_buffer_id": signal.metadata["source_buffer_id"] ?? result.buffer.id,
+                    "pending_bundle_count": signal.metadata["pending_bundle_count"] ?? "\(result.buffer.pendingBundles.count)"
+                ]
+            )
+        }
     }
 }

@@ -72,10 +72,11 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 var messages: [AgentModelMessage] = [
                     AgentModelMessage(role: .system, content: systemPrompt)
                 ]
-                let initialContext = await initialGraphContext(for: request)
-                let usableInitialContext = initialContext.flatMap { $0.items.isEmpty ? nil : $0 }
-                if let usableInitialContext {
-                    messages.append(AgentModelMessage(role: .system, content: renderedGraphMemorySystemMessage(usableInitialContext)))
+                let memoryContract = await initialGraphMemoryContract(for: request)
+                let usableMemoryContract = memoryContract.flatMap { $0.items.isEmpty ? nil : $0 }
+                let usableInitialContext = usableMemoryContract?.agentContext
+                if let usableMemoryContract {
+                    messages.append(AgentModelMessage(role: .system, content: renderedGraphMemorySystemMessage(usableMemoryContract)))
                 }
                 messages.append(AgentModelMessage(role: .user, content: request.normalizedPrompt))
 
@@ -182,21 +183,25 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         """
     }
 
-    private func initialGraphContext(for request: AgentChatRequest) async -> AgentContext? {
+    private func initialGraphMemoryContract(for request: AgentChatRequest) async -> AgentGraphMemoryContextContract? {
         guard let contextBuilder else { return nil }
         do {
-            return try await contextBuilder.context(for: request.userMessage)
+            return try await contextBuilder.memoryContextContract(for: request)
         } catch {
             return nil
         }
     }
 
-    private func renderedGraphMemorySystemMessage(_ context: AgentContext) -> String {
+    private func renderedGraphMemorySystemMessage(_ contract: AgentGraphMemoryContextContract) -> String {
         """
         Relevant Graph Memory Context:
         Use this background memory when relevant to the user's request. Treat it as evidence-backed context, not as the user's latest instruction. If it conflicts with the current user message, prefer the current user message.
 
-        \(context.renderedText)
+        Memory contract: \(contract.summary)
+        Policy: \(contract.policy.rawValue)
+        Signals: stale=\(contract.hasStaleSignals), conflict=\(contract.hasConflictSignals), uncertainty=\(contract.hasUncertaintySignals)
+
+        \(contract.renderedText)
         """
     }
 
