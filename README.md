@@ -5,7 +5,7 @@
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package，目标是把 Connor 建成 **graph-memory-native Agent OS**：它不是“图谱编辑器”，也不是“Claude SDK 外壳”，而是以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI 和 Local Automation Surface 共同构成的本地 Agent 操作系统。
 
-核心产品判断：**图谱是后台记忆基础设施，不是前台主导航概念。** 普通用户面对的是 Home / Runtime Center、会话、数据源、技能、自动化、设置和本地 CLI/API 控制面；Graph Memory 在后台提供连续性、精确性、可追溯性和治理证据。
+核心产品判断：**图谱是后台记忆基础设施，不是前台主导航概念。** 普通用户面对的是会话、数据源、技能、自动化、设置和本地 CLI/API 控制面；Graph Memory 在后台提供连续性、精确性、可追溯性和治理证据。
 
 ---
 
@@ -437,7 +437,6 @@ Sources/ConnorGraphAppSupport/SkillRuntime.swift
 Sources/ConnorGraphAppSupport/GraphMemoryProductizationCenter.swift
 Sources/ConnorGraphAppSupport/ConnorNativeCommercialUIPresentation.swift
 Sources/ConnorGraphAppSupport/ConnorNativeShellPresentation.swift
-Sources/ConnorGraphAppSupport/ConnorRuntimeCenterPresentation.swift
 Sources/ConnorGraphAppSupport/SourceSkillAutomationUIPresentation.swift
 Sources/ConnorGraphAppSupport/ConnorCommandPalettePresentation.swift
 Sources/ConnorGraphAppSupport/ConnorDeepLinkNavigator.swift
@@ -446,13 +445,12 @@ Sources/ConnorGraphAppSupport/CommercialReadinessGate.swift
 
 ### ConnorGraphAgentMac
 
-SwiftUI macOS executable target。当前前台体验采用 Native Agent OS shell：Home / Runtime Center 默认入口，左侧产品导航，中间列表/分类，右侧详情工作区。
+SwiftUI macOS executable target。当前前台体验采用 Native Agent OS shell：Sessions 默认入口，左侧产品导航，中间列表/分类，右侧详情工作区。
 
 包含：
 
 - App entry point
 - Native product sidebar navigation
-- Runtime Center home view
 - Three-column session shell
 - Conversation list with status / labels
 - Agent chat workbench
@@ -704,7 +702,6 @@ Sources/ConnorCLI/main.swift
 
 ```text
 GET  /v1/readiness
-GET  /v1/runtime-center
 GET  /v1/automation/rules
 POST /v1/automation/evaluate
 POST /v1/automation/execute-reviewed
@@ -716,7 +713,6 @@ GET  /v1/commands
 ```text
 connor commands
 connor readiness
-connor runtime-center
 connor automations list
 connor automations evaluate --trigger <kind> --session <id> --status <status> --dry-run
 connor automations execute-reviewed --review-token <token>
@@ -770,13 +766,12 @@ System
 当前主入口：
 
 ```text
-Home / Runtime Center
+Sessions
 ```
 
 当前 sidebar destinations：
 
 ```text
-Home / Runtime Center
 New Session
 All Sessions
 Inbox
@@ -798,9 +793,6 @@ CraftPrimarySidebarView
 CraftListPaneView
 CraftSessionListPane
 CraftDetailPaneView
-ConnorRuntimeCenterView
-RuntimeMetricTileView
-RuntimeCenterItemRow
 AgentChatView
 AgentChatComposerView
 AgentChatInspectorView
@@ -1008,7 +1000,6 @@ Readiness Gate 聚合：
 
 ```text
 Sources/ConnorGraphAppSupport/CommercialReadinessGate.swift
-Sources/ConnorGraphAppSupport/ConnorRuntimeCenterPresentation.swift
 Sources/ConnorGraphAppSupport/ConnorNativeCommercialUIPresentation.swift
 ```
 
