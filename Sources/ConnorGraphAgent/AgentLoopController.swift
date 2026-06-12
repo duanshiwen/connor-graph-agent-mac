@@ -77,7 +77,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 if let usableInitialContext {
                     messages.append(AgentModelMessage(role: .system, content: renderedGraphMemorySystemMessage(usableInitialContext)))
                 }
-                messages.append(AgentModelMessage(role: .user, content: request.userMessage))
+                messages.append(AgentModelMessage(role: .user, content: request.normalizedPrompt))
 
                 do {
                     for _ in 0..<configuration.maxToolIterations {

@@ -54,6 +54,7 @@ public struct NativeSessionManager: Sendable {
     public private(set) var runtimeState: NativeSessionRuntimeState
     public var groupID: String
     public var permissionMode: AgentPermissionMode
+    public var recentMessageLimit: Int
 
     private let presenter: AgentEventPresenter
     private let memoryIngestionService: MemoryIngestionService
@@ -67,6 +68,7 @@ public struct NativeSessionManager: Sendable {
         session: AgentSession = AgentSession(),
         groupID: String = "default",
         permissionMode: AgentPermissionMode = .askToWrite,
+        recentMessageLimit: Int = 6,
         memoryStagingRepository: AppMemoryStagingBufferRepository? = nil,
         memoryIngestionService: MemoryIngestionService = MemoryIngestionService(),
         eventRecorder: AgentEventRecorder? = nil,
@@ -80,6 +82,7 @@ public struct NativeSessionManager: Sendable {
         self.runtimeState = NativeSessionRuntimeState()
         self.groupID = groupID
         self.permissionMode = permissionMode
+        self.recentMessageLimit = recentMessageLimit
         self.presenter = AgentEventPresenter()
         self.memoryStagingRepository = memoryStagingRepository
         self.memoryIngestionService = memoryIngestionService
@@ -108,6 +111,12 @@ public struct NativeSessionManager: Sendable {
 
     @discardableResult
     public mutating func submit(_ prompt: String) async throws -> AgentLoopChatResponse {
+        try await submit(prompt, sessionSummary: nil)
+    }
+
+    @discardableResult
+    public mutating func submit(_ prompt: String, sessionSummary: AgentSessionSummary?) async throws -> AgentLoopChatResponse {
+        let recentMessages = Array(session.messages.suffix(max(0, recentMessageLimit)))
         let userMessage = session.appendUserMessage(prompt)
         try persistSession()
         try persistMemoryStagingAfterUserMessage(userMessage)
@@ -116,6 +125,8 @@ public struct NativeSessionManager: Sendable {
             sessionID: session.id,
             groupID: groupID,
             userMessage: prompt,
+            sessionSummary: sessionSummary,
+            recentMessages: recentMessages,
             permissionMode: permissionMode
         )
         runtimeState.isProcessing = true
@@ -180,7 +191,7 @@ public struct NativeSessionManager: Sendable {
         guard let prompt = session.messages.last(where: { $0.role == .user })?.content else {
             throw NativeSessionManagerError.noUserMessageToRetry
         }
-        return try await submit(prompt)
+        return try await submit(prompt, sessionSummary: nil)
     }
 
     public mutating func cancelActiveRun(reason: String = "cancelled by user") {

@@ -688,3 +688,43 @@ private func repositoryRootURL() -> URL {
         )
     }
 }
+
+@Test func governedClaudeSidecarRuntimeSendsNormalizedPromptWithSessionContext() async throws {
+    let transport = FakeClaudeSDKSidecarSessionTransport()
+    let runtime = try GovernedClaudeSDKSidecarRuntime(
+        transport: transport,
+        workingDirectory: URL(fileURLWithPath: "/tmp/project"),
+        permissionMode: .askToWrite
+    )
+    let summary = AgentSessionSummary(
+        sessionID: "connor-session-normalized",
+        content: "We were migrating all calls to NativeSessionManager.",
+        sourceMessageCount: 2
+    )
+    let request = AgentChatRequest(
+        runID: "run-normalized",
+        sessionID: "connor-session-normalized",
+        groupID: "default",
+        userMessage: "继续",
+        sessionSummary: summary,
+        recentMessages: [
+            AgentMessage(role: .user, content: "先定位为什么继续失效"),
+            AgentMessage(role: .assistant, content: "主路径没有显式传同 session 上下文。")
+        ],
+        permissionMode: .readOnly
+    )
+
+    var iterator = runtime.chat(request).makeAsyncIterator()
+    _ = try await iterator.next()
+    await runtime.cancel()
+
+    let recorded = await transport.recordedStartRequests()
+    let prompt = try #require(recorded.first?.prompt)
+    #expect(prompt.contains("Previous session summary:"))
+    #expect(prompt.contains("We were migrating all calls to NativeSessionManager."))
+    #expect(prompt.contains("Recent conversation:"))
+    #expect(prompt.contains("User: 先定位为什么继续失效"))
+    #expect(prompt.contains("Assistant: 主路径没有显式传同 session 上下文。"))
+    #expect(prompt.contains("Current user request:\n继续"))
+    #expect(recorded.first?.permissionMode == .askToWrite)
+}

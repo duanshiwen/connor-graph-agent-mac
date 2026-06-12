@@ -7,6 +7,7 @@ public struct AgentChatRequest: Sendable, Equatable {
     public var groupID: String
     public var userMessage: String
     public var sessionSummary: AgentSessionSummary?
+    public var recentMessages: [AgentMessage]
     public var permissionMode: AgentPermissionMode
 
     public init(
@@ -15,6 +16,7 @@ public struct AgentChatRequest: Sendable, Equatable {
         groupID: String = "default",
         userMessage: String,
         sessionSummary: AgentSessionSummary? = nil,
+        recentMessages: [AgentMessage] = [],
         permissionMode: AgentPermissionMode = .askToWrite
     ) {
         self.runID = runID
@@ -22,7 +24,16 @@ public struct AgentChatRequest: Sendable, Equatable {
         self.groupID = groupID
         self.userMessage = userMessage
         self.sessionSummary = sessionSummary
+        self.recentMessages = recentMessages
         self.permissionMode = permissionMode
+    }
+
+    public var normalizedPrompt: String {
+        AgentChatPromptContext(
+            userPrompt: userMessage,
+            sessionSummary: sessionSummary,
+            recentMessages: recentMessages
+        ).renderedPrompt
     }
 }
 
