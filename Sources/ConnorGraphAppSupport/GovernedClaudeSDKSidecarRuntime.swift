@@ -65,7 +65,11 @@ public final class GovernedClaudeSDKSidecarRuntime<Transport: ClaudeSDKSidecarSe
             status: .starting,
             sdkSessionID: sidecarRequest.sdkSessionID,
             pendingApprovalRequestID: nil,
-            lastError: nil
+            lastError: nil,
+            protocolVersion: sidecarRequest.protocolVersion,
+            sdkCWD: sidecarRequest.cwd,
+            sdkSessionStoreHint: sidecarRequest.options.sdkSessionStoreHint,
+            forkedFromSDKSessionID: sidecarRequest.forkFromSDKSessionID
         )
         let finalSidecarRequest = sidecarRequest
         return AsyncThrowingStream { continuation in
@@ -90,7 +94,9 @@ public final class GovernedClaudeSDKSidecarRuntime<Transport: ClaudeSDKSidecarSe
                         runID: safeRequest.runID,
                         status: .failed,
                         sdkSessionID: finalSidecarRequest.sdkSessionID,
-                        lastError: String(describing: error)
+                        lastError: String(describing: error),
+                        failureCode: .processFailed,
+                        recoverability: .retryable
                     )
                     continuation.finish(throwing: error)
                 }
@@ -170,7 +176,9 @@ public final class GovernedClaudeSDKSidecarRuntime<Transport: ClaudeSDKSidecarSe
                 runID: request.runID,
                 status: .failed,
                 pendingApprovalRequestID: nil,
-                lastError: payload.message
+                lastError: payload.message,
+                failureCode: payload.code,
+                recoverability: payload.recoverability
             )
         case .runCompleted:
             try updateRuntimeRecord(
@@ -180,6 +188,31 @@ public final class GovernedClaudeSDKSidecarRuntime<Transport: ClaudeSDKSidecarSe
                 status: .ready,
                 pendingApprovalRequestID: nil,
                 lastError: nil
+            )
+        case .runtimeDiagnostic(let payload):
+            try updateRuntimeRecord(
+                sessionID: request.sessionID,
+                groupID: request.groupID,
+                runID: request.runID,
+                status: payload.status == "failed" ? .failed : .running,
+                sdkSessionID: payload.sdkSessionID,
+                lastError: payload.failureCode == nil ? nil : payload.message,
+                protocolVersion: payload.protocolVersion,
+                sdkCWD: payload.sdkCWD,
+                lastDiagnosticMessage: payload.message,
+                failureCode: payload.failureCode,
+                recoverability: payload.recoverability
+            )
+        case .heartbeat(let payload):
+            try updateRuntimeRecord(
+                sessionID: request.sessionID,
+                groupID: request.groupID,
+                runID: request.runID,
+                status: .running,
+                sdkSessionID: payload.sdkSessionID,
+                protocolVersion: payload.protocolVersion,
+                sdkCWD: payload.sdkCWD,
+                lastHeartbeatAt: Date()
             )
         case .textDelta, .textComplete, .toolUseRequested, .toolUseStarted, .toolUseCompleted, .sidecarHealth:
             break
@@ -193,7 +226,15 @@ public final class GovernedClaudeSDKSidecarRuntime<Transport: ClaudeSDKSidecarSe
         status: ClaudeSDKSidecarRuntimeStatus,
         sdkSessionID: String? = nil,
         pendingApprovalRequestID: String? = nil,
-        lastError: String? = nil
+        lastError: String? = nil,
+        protocolVersion: Int? = nil,
+        sdkCWD: String? = nil,
+        sdkSessionStoreHint: String? = nil,
+        forkedFromSDKSessionID: String? = nil,
+        lastHeartbeatAt: Date? = nil,
+        lastDiagnosticMessage: String? = nil,
+        failureCode: ClaudeSDKSidecarFailureCode? = nil,
+        recoverability: ClaudeSDKSidecarRecoverability? = nil
     ) throws {
         guard let runtimeStore else { return }
         var record = try runtimeStore.load(connorSessionID: sessionID) ?? ClaudeSDKSidecarRuntimeRecord(
@@ -205,6 +246,14 @@ public final class GovernedClaudeSDKSidecarRuntime<Transport: ClaudeSDKSidecarSe
         record.status = status
         record.pendingApprovalRequestID = pendingApprovalRequestID
         record.lastError = lastError
+        if let protocolVersion { record.protocolVersion = protocolVersion }
+        if let sdkCWD { record.sdkCWD = sdkCWD }
+        if let sdkSessionStoreHint { record.sdkSessionStoreHint = sdkSessionStoreHint }
+        if let forkedFromSDKSessionID { record.forkedFromSDKSessionID = forkedFromSDKSessionID }
+        if let lastHeartbeatAt { record.lastHeartbeatAt = lastHeartbeatAt }
+        if let lastDiagnosticMessage { record.lastDiagnosticMessage = lastDiagnosticMessage }
+        if let failureCode { record.failureCode = failureCode }
+        if let recoverability { record.recoverability = recoverability }
         if let sdkSessionID { record.sdkSessionID = sdkSessionID }
         try runtimeStore.save(record)
     }

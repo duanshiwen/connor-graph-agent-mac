@@ -14,6 +14,8 @@ const readFirstJSONLine = async () => {
 
 const writeEvent = (event) => stdout.write(`${JSON.stringify(event)}\n`);
 const writeDiagnostic = (message) => stderr.write(`${message}\n`);
+const SIDECAR_PROTOCOL_VERSION = 2;
+const SIDECAR_CAPABILITIES = ['resume', 'fork', 'defer-permissions', 'health', 'heartbeat', 'diagnostics', 'structured-failure'];
 const pendingDeferredToolUses = new Map();
 
 const stableJSONString = (value) => {
@@ -30,8 +32,14 @@ const validateRequest = (request) => {
   if (request.ownsProductState !== false) {
     throw new Error('Refusing request: sidecar must not own Connor product state');
   }
+  if ((request.protocolVersion ?? SIDECAR_PROTOCOL_VERSION) !== SIDECAR_PROTOCOL_VERSION) {
+    throw new Error(`Refusing request: unsupported Connor sidecar protocol version ${request.protocolVersion}`);
+  }
   if (request.sdkPermissionMode !== 'bypassPermissions') {
     throw new Error('Refusing request: Connor expects SDK permissions to be bypassed and governed externally');
+  }
+  if (request.sdkSessionID && request.forkFromSDKSessionID) {
+    throw new Error('Refusing request: resume sdkSessionID and forkFromSDKSessionID are mutually exclusive');
   }
   if (!request.connorRunID || !request.connorSessionID) {
     throw new Error('Invalid request: Connor run/session IDs are required');
@@ -80,6 +88,38 @@ const sessionIDFromMessage = (message) =>
   message?.session?.id ??
   message?.metadata?.session_id ??
   null;
+
+const emitHeartbeat = (request, sdkSessionID = null) => {
+  writeEvent({
+    heartbeat: {
+      protocolVersion: SIDECAR_PROTOCOL_VERSION,
+      sdkSessionID: sdkSessionID ?? request.sdkSessionID ?? null,
+      sdkCWD: request.cwd,
+      timestamp: new Date().toISOString(),
+      pendingDeferredToolUseCount: pendingDeferredToolUses.size,
+      ownsProductState: false
+    }
+  });
+};
+
+const emitDiagnostic = ({ status, message, request = null, sdkSessionID = null, failureCode = null, recoverability = null }) => {
+  writeEvent({
+    runtimeDiagnostic: {
+      protocolVersion: SIDECAR_PROTOCOL_VERSION,
+      status,
+      message,
+      sdkSessionID: sdkSessionID ?? request?.sdkSessionID ?? null,
+      sdkCWD: request?.cwd ?? null,
+      failureCode,
+      recoverability,
+      ownsProductState: false
+    }
+  });
+};
+
+const emitRunFailed = (message, code = 'unknown', recoverability = 'unknown') => {
+  writeEvent({ runFailed: { message, code, recoverability } });
+};
 
 const isAssistantLike = (message) =>
   message?.type === 'assistant' ||
@@ -208,23 +248,34 @@ const runRequest = async (request) => {
   let finalText = '';
   let emittedRunStarted = false;
 
+  const requestOptions = request.options ?? {};
   const options = {
     cwd: request.cwd,
     permissionMode: request.sdkPermissionMode,
     resume: request.sdkSessionID ?? undefined,
-    includePartialMessages: true,
-    includeHookEvents: true,
+    forkSession: request.forkFromSDKSessionID ?? undefined,
+    maxTurns: requestOptions.maxTurns ?? undefined,
+    model: requestOptions.model ?? undefined,
+    effort: requestOptions.effort ?? undefined,
+    includePartialMessages: requestOptions.includePartialMessages ?? true,
+    includeHookEvents: requestOptions.includeHookEvents ?? true,
+    persistSession: requestOptions.persistSession ?? true,
     hooks: buildConnorDeferHooks()
   };
 
+  emitDiagnostic({ status: 'starting', message: `Starting Claude SDK sidecar ${request.forkFromSDKSessionID ? 'fork' : request.sdkSessionID ? 'resume' : 'fresh'} request`, request });
+  emitHeartbeat(request);
+
   for await (const message of query(request.prompt, options)) {
     if (!emittedRunStarted) {
-      writeEvent({ runStarted: { sdkSessionID: sessionIDFromMessage(message) } });
+      const sdkSessionID = sessionIDFromMessage(message);
+      writeEvent({ runStarted: { sdkSessionID } });
+      emitHeartbeat(request, sdkSessionID);
       emittedRunStarted = true;
     }
 
     if (isErrorLike(message)) {
-      writeEvent({ runFailed: { message: message?.error?.message ?? message?.message ?? 'Claude SDK sidecar error' } });
+      emitRunFailed(message?.error?.message ?? message?.message ?? 'Claude SDK sidecar error', 'sdk_error', 'retryable');
       return;
     }
 
@@ -252,15 +303,15 @@ const runRequest = async (request) => {
       const subtype = message?.subtype ?? message?.terminal_reason ?? 'completed';
       const terminalReason = message?.terminal_reason ?? message?.stop_reason ?? subtype;
       if (terminalReason === 'tool_deferred' && emitPermissionRequestedFromDeferredResult(message, request)) {
-        writeEvent({ runFailed: { message: 'Claude SDK deferred tool use pending Connor permission approval' } });
+        emitRunFailed('Claude SDK deferred tool use pending Connor permission approval', 'permission_deferred', 'requires_user_action');
         return;
       }
       if (emitPermissionRequestedFromDeferredResult(message, request)) {
-        writeEvent({ runFailed: { message: 'Claude SDK deferred tool use pending Connor permission approval' } });
+        emitRunFailed('Claude SDK deferred tool use pending Connor permission approval', 'permission_deferred', 'requires_user_action');
         return;
       }
       if (subtype !== 'success' && subtype !== 'completed') {
-        writeEvent({ runFailed: { message: `Claude SDK result: ${subtype}` } });
+        emitRunFailed(`Claude SDK result: ${subtype}`, 'sdk_error', subtype === 'error_max_turns' ? 'resumable' : 'retryable');
         return;
       }
     }
@@ -270,6 +321,7 @@ const runRequest = async (request) => {
     writeEvent({ runStarted: { sdkSessionID: request.sdkSessionID ?? null } });
   }
 
+  emitDiagnostic({ status: 'ready', message: 'Claude SDK sidecar request completed', request });
   writeEvent({
     textComplete: {
       text: finalText,
@@ -294,7 +346,7 @@ const runDeferredResume = async (deferred, resolution) => {
   let finalText = '';
   for await (const message of query(request.prompt, options)) {
     if (isErrorLike(message)) {
-      writeEvent({ runFailed: { message: message?.error?.message ?? message?.message ?? 'Claude SDK deferred resume error' } });
+      emitRunFailed(message?.error?.message ?? message?.message ?? 'Claude SDK deferred resume error', 'sdk_error', 'retryable');
       return;
     }
     if (isAssistantLike(message)) {
@@ -313,7 +365,7 @@ const runDeferredResume = async (deferred, resolution) => {
     if (isResultLike(message)) {
       const subtype = message?.subtype ?? message?.terminal_reason ?? 'completed';
       if (subtype !== 'success' && subtype !== 'completed') {
-        writeEvent({ runFailed: { message: `Claude SDK deferred resume result: ${subtype}` } });
+        emitRunFailed(`Claude SDK deferred resume result: ${subtype}`, 'sdk_error', 'retryable');
         return;
       }
     }
@@ -329,7 +381,9 @@ const emitSidecarHealth = () => {
       status: 'ok',
       pendingDeferredToolUseCount: pendingDeferredToolUses.size,
       timestamp: new Date().toISOString(),
-      ownsProductState: false
+      ownsProductState: false,
+      protocolVersion: SIDECAR_PROTOCOL_VERSION,
+      capabilities: SIDECAR_CAPABILITIES
     }
   });
 };
@@ -386,7 +440,7 @@ const runCommandLoop = async () => {
         emitSidecarHealth();
         break;
       case 'cancel':
-        writeEvent({ runFailed: { message: 'Connor cancelled Claude SDK sidecar command loop' } });
+        emitRunFailed('Connor cancelled Claude SDK sidecar command loop', 'cancelled', 'terminal');
         return;
       default:
         throw new Error(`Unsupported Connor sidecar command: ${command.name}`);
@@ -399,7 +453,7 @@ try {
 } catch (error) {
   writeDiagnostic(error?.stack ?? error?.message ?? String(error));
   try {
-    writeEvent({ runFailed: { message: error?.message ?? String(error) } });
+    emitRunFailed(error?.message ?? String(error), 'invalid_request', 'requires_user_action');
   } catch {
     // If stdout is unavailable, stderr diagnostics above are the fallback.
   }

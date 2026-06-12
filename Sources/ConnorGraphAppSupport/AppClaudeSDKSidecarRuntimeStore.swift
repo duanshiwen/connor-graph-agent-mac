@@ -19,6 +19,14 @@ public struct ClaudeSDKSidecarRuntimeRecord: Codable, Sendable, Equatable, Ident
     public var status: ClaudeSDKSidecarRuntimeStatus
     public var pendingApprovalRequestID: String?
     public var lastError: String?
+    public var protocolVersion: Int
+    public var sdkCWD: String?
+    public var sdkSessionStoreHint: String?
+    public var forkedFromSDKSessionID: String?
+    public var lastHeartbeatAt: Date?
+    public var lastDiagnosticMessage: String?
+    public var failureCode: ClaudeSDKSidecarFailureCode?
+    public var recoverability: ClaudeSDKSidecarRecoverability?
     public var createdAt: Date
     public var updatedAt: Date
 
@@ -30,6 +38,14 @@ public struct ClaudeSDKSidecarRuntimeRecord: Codable, Sendable, Equatable, Ident
         status: ClaudeSDKSidecarRuntimeStatus = .idle,
         pendingApprovalRequestID: String? = nil,
         lastError: String? = nil,
+        protocolVersion: Int = 2,
+        sdkCWD: String? = nil,
+        sdkSessionStoreHint: String? = nil,
+        forkedFromSDKSessionID: String? = nil,
+        lastHeartbeatAt: Date? = nil,
+        lastDiagnosticMessage: String? = nil,
+        failureCode: ClaudeSDKSidecarFailureCode? = nil,
+        recoverability: ClaudeSDKSidecarRecoverability? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -40,6 +56,14 @@ public struct ClaudeSDKSidecarRuntimeRecord: Codable, Sendable, Equatable, Ident
         self.status = status
         self.pendingApprovalRequestID = pendingApprovalRequestID
         self.lastError = lastError
+        self.protocolVersion = protocolVersion
+        self.sdkCWD = sdkCWD
+        self.sdkSessionStoreHint = sdkSessionStoreHint
+        self.forkedFromSDKSessionID = forkedFromSDKSessionID
+        self.lastHeartbeatAt = lastHeartbeatAt
+        self.lastDiagnosticMessage = lastDiagnosticMessage
+        self.failureCode = failureCode
+        self.recoverability = recoverability
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -87,7 +111,9 @@ public struct ClaudeSDKSidecarRuntimeDiagnostics: Codable, Sendable, Equatable {
         case .waitingForApproval:
             return "Claude SDK sidecar is waiting for Connor approval: \(record.pendingApprovalRequestID ?? "unknown")."
         case .failed:
-            return record.lastError ?? "Claude SDK sidecar runtime failed."
+            let code = record.failureCode?.rawValue ?? "unknown"
+            let recoverability = record.recoverability?.rawValue ?? "unknown"
+            return record.lastError ?? "Claude SDK sidecar runtime failed (code: \(code), recoverability: \(recoverability))."
         case .cancelled:
             return "Claude SDK sidecar runtime was cancelled."
         case .unknown:

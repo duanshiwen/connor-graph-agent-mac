@@ -953,7 +953,7 @@ swift build --product connor-graph-agent-mac
 最近验证结果：
 
 ```text
-Build of product 'connor-graph-agent-mac' complete! (2026-06-12 19:49 GMT+8)
+Build of product 'connor-graph-agent-mac' complete! (2026-06-12 20:17 GMT+8)
 ```
 
 Test：
@@ -966,7 +966,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
 最近验证结果：
 
 ```text
-349 tests in 14 suites passed (2026-06-12 19:49 GMT+8)
+354 tests in 14 suites passed (2026-06-12 20:17 GMT+8)
 ```
 
 Phase I 专项验证：
@@ -1016,6 +1016,7 @@ Phase G: Craft-grade Native UI
 Phase H: Source / Skill / Automation UI Integration
 Phase I: Command Palette / Deep-link Navigation / Runtime Click-through
 Commercial Train 1: Session OS Maturation
+Commercial Train 2: Claude SDK Sidecar Productionization
 Local UI Refresh: Craft-like three-column shell and user-facing navigation cleanup
 Local Settings Center: App / AI / Appearance / Input / Permissions / Labels / Shortcuts / Preferences
 ```
