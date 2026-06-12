@@ -160,7 +160,7 @@ final class AppViewModel: ObservableObject {
     @Published var selection: SidebarItem? = .agentChat
     @Published var query: String = "记忆"
     @Published var searchResults: [GraphSearchHit] = []
-    @Published var chatInput: String = "记忆"
+    @Published var chatInput: String = ""
     @Published var transcript: [AgentMessage] = []
     @Published var lastContext: AgentContext?
     @Published var lastPromptInspection: AgentChatPromptInspection?
@@ -1530,6 +1530,7 @@ struct AppShellView: View {
             .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
         }
         .frame(minWidth: 1120, minHeight: 680)
+        .controlSize(.small)
         .onAppear {
             sidebarSelection = viewModel.selection ?? .agentChat
             viewModel.reloadChatSessions()
