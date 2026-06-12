@@ -650,9 +650,7 @@ private struct AgentChatTurnProcessRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: AgentChatLayout.spaceS) {
-            Spacer(minLength: AgentChatLayout.messageSideInset)
-
-            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
                 Button(action: { withAnimation(.easeOut(duration: 0.16)) { isExpanded.toggle() } }) {
                     activityHeader
                 }
@@ -667,33 +665,28 @@ private struct AgentChatTurnProcessRow: View {
                             .buttonStyle(.plain)
                         }
                     }
-                    .padding(.leading, 28)
+                    .padding(.leading, 18)
                     .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
-            .frame(maxWidth: AgentChatLayout.processMaxWidth, alignment: .leading)
+            .frame(maxWidth: AgentChatLayout.messageMaxWidth, alignment: .leading)
 
             Spacer(minLength: AgentChatLayout.messageSideInset)
         }
-        .frame(maxWidth: .infinity, alignment: .center)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var activityHeader: some View {
         HStack(spacing: AgentChatLayout.spaceS) {
             Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.secondary)
-                .frame(width: 14)
+                .frame(width: 12)
 
             Text("\(visibleEvents.count)")
                 .font(.caption2.monospacedDigit().weight(.medium))
                 .foregroundStyle(.secondary)
-                .frame(minWidth: 22, minHeight: 22)
-                .background(Color.clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
-                )
+                .frame(minWidth: 14, alignment: .center)
 
             if process.state == .running {
                 ProgressView()
@@ -701,28 +694,23 @@ private struct AgentChatTurnProcessRow: View {
                     .frame(width: 12, height: 12)
                     .fixedSize()
                 Text("正在处理")
-                    .font(.caption.weight(.medium))
+                    .font(.caption2.weight(.medium))
                     .foregroundStyle(.secondary)
             }
 
             Text("Activity")
-                .font(.caption.weight(.medium))
+                .font(.caption2.weight(.medium))
                 .foregroundStyle(.secondary)
             Text("第 \(process.turnNumber) 轮 · \(visibleEvents.count) 个事件")
-                .font(.caption)
+                .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, AgentChatLayout.spaceM)
-        .padding(.vertical, AgentChatLayout.spaceS)
-        .background(Color.clear, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous)
-                .stroke(Color.secondary.opacity(process.state == .running ? 0.24 : 0.16), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.05), radius: 3, x: 0, y: 1)
-        .contentShape(RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
+        .padding(.vertical, AgentChatLayout.spaceXS)
+        .background(Color.clear)
+        .contentShape(Rectangle())
     }
 }
 
@@ -732,14 +720,14 @@ private struct AgentActivityEventRow: View {
     var body: some View {
         HStack(spacing: AgentChatLayout.spaceS) {
             Image(systemName: icon)
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(color)
-                .frame(width: 14)
+                .frame(width: 12)
             Text(event.title)
-                .font(.caption.weight(.medium))
+                .font(.caption2.weight(.medium))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-            AgentMarkdownPreviewText(markdown: event.detail, font: .caption, lineLimit: 1)
+            AgentMarkdownPreviewText(markdown: event.detail, font: .caption2, lineLimit: 1)
                 .foregroundStyle(.tertiary)
                 .truncationMode(.tail)
             Spacer(minLength: 0)
@@ -748,11 +736,11 @@ private struct AgentActivityEventRow: View {
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
             Image(systemName: "arrow.up.right")
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(.tertiary)
         }
         .padding(.horizontal, AgentChatLayout.spaceM)
-        .padding(.vertical, AgentChatLayout.spaceXS)
+        .padding(.vertical, 2)
         .contentShape(RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
     }
 
