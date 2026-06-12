@@ -8,6 +8,7 @@ public enum CommercialReadinessPhase: String, Codable, Sendable, Equatable, Hash
     case sourcesSkillsAutomations
     case graphMemoryLoop
     case nativeCommercialUI
+    case localAPICLIAutomationSurface
 
     public var id: String { rawValue }
 
@@ -18,6 +19,7 @@ public enum CommercialReadinessPhase: String, Codable, Sendable, Equatable, Hash
         case .sourcesSkillsAutomations: "Phase 3 · Sources / Skills / Automations"
         case .graphMemoryLoop: "Phase 4 · Graph Memory Loop"
         case .nativeCommercialUI: "Phase 5 · Native Commercial UI"
+        case .localAPICLIAutomationSurface: "Phase 6 · Local API / CLI / Automation Surface"
         }
     }
 
@@ -28,6 +30,7 @@ public enum CommercialReadinessPhase: String, Codable, Sendable, Equatable, Hash
         case .sourcesSkillsAutomations: .sources
         case .graphMemoryLoop: .graphMemory
         case .nativeCommercialUI: .settings
+        case .localAPICLIAutomationSurface: .localAutomationSurface
         }
     }
 }
@@ -116,25 +119,49 @@ public enum CommercialNativeUIReadiness: Codable, Sendable, Equatable {
     case missing(String)
 }
 
+public enum CommercialLocalAutomationSurfaceReadiness: Codable, Sendable, Equatable {
+    case ready(
+        endpointCount: Int,
+        cliCommandCount: Int,
+        automationTriggerCount: Int,
+        dryRunEvaluationReady: Bool,
+        reviewedExecutionGateReady: Bool,
+        auditSurfaceReady: Bool,
+        localOnly: Bool
+    )
+    case missing(String)
+}
+
 public struct CommercialReadinessInput: Codable, Sendable, Equatable {
     public var sessionGovernance: CommercialSessionGovernanceReadiness
     public var claudeSidecar: CommercialClaudeSidecarReadiness
     public var extensionRuntime: CommercialExtensionRuntimeReadiness
     public var graphMemory: CommercialGraphMemoryReadiness
     public var nativeUI: CommercialNativeUIReadiness
+    public var localAutomationSurface: CommercialLocalAutomationSurfaceReadiness
 
     public init(
         sessionGovernance: CommercialSessionGovernanceReadiness,
         claudeSidecar: CommercialClaudeSidecarReadiness,
         extensionRuntime: CommercialExtensionRuntimeReadiness,
         graphMemory: CommercialGraphMemoryReadiness,
-        nativeUI: CommercialNativeUIReadiness
+        nativeUI: CommercialNativeUIReadiness,
+        localAutomationSurface: CommercialLocalAutomationSurfaceReadiness = .ready(
+            endpointCount: ConnorLocalAutomationSurfacePresentation.default.endpoints.count,
+            cliCommandCount: ConnorLocalAutomationSurfacePresentation.default.cliCommands.count,
+            automationTriggerCount: ConnorLocalAutomationSurfacePresentation.default.supportedTriggers.count,
+            dryRunEvaluationReady: true,
+            reviewedExecutionGateReady: true,
+            auditSurfaceReady: true,
+            localOnly: true
+        )
     ) {
         self.sessionGovernance = sessionGovernance
         self.claudeSidecar = claudeSidecar
         self.extensionRuntime = extensionRuntime
         self.graphMemory = graphMemory
         self.nativeUI = nativeUI
+        self.localAutomationSurface = localAutomationSurface
     }
 }
 
@@ -295,12 +322,24 @@ public struct CommercialReadinessSnapshotBuilder: Sendable, Equatable {
             settingsSectionCount: nativePresentation.settings.sections.count
         )
 
+        let localAutomationSurfacePresentation = ConnorLocalAutomationSurfacePresentation.default
+        let localAutomationSurface = CommercialLocalAutomationSurfaceReadiness.ready(
+            endpointCount: localAutomationSurfacePresentation.endpoints.count,
+            cliCommandCount: localAutomationSurfacePresentation.cliCommands.count,
+            automationTriggerCount: localAutomationSurfacePresentation.supportedTriggers.count,
+            dryRunEvaluationReady: localAutomationSurfacePresentation.dryRunEvaluationReady,
+            reviewedExecutionGateReady: localAutomationSurfacePresentation.reviewedExecutionGateReady,
+            auditSurfaceReady: localAutomationSurfacePresentation.auditSurfaceReady,
+            localOnly: localAutomationSurfacePresentation.localOnly
+        )
+
         return CommercialReadinessInput(
             sessionGovernance: sessionGovernance,
             claudeSidecar: claudeSidecar,
             extensionRuntime: extensionRuntime,
             graphMemory: graphMemory,
-            nativeUI: nativeUI
+            nativeUI: nativeUI,
+            localAutomationSurface: localAutomationSurface
         )
     }
 }
@@ -355,7 +394,8 @@ public struct CommercialReadinessGate: Sendable, Equatable {
             claudeSidecarCard(input.claudeSidecar),
             extensionRuntimeCard(input.extensionRuntime),
             graphMemoryCard(input.graphMemory),
-            nativeUICard(input.nativeUI)
+            nativeUICard(input.nativeUI),
+            localAutomationSurfaceCard(input.localAutomationSurface)
         ])
     }
 
@@ -570,6 +610,38 @@ public struct CommercialReadinessGate: Sendable, Equatable {
             )
         case .missing(let reason):
             return blockedCard(phase: .nativeCommercialUI, reason: reason)
+        }
+    }
+
+    private func localAutomationSurfaceCard(_ readiness: CommercialLocalAutomationSurfaceReadiness) -> CommercialReadinessCard {
+        switch readiness {
+        case .ready(let endpointCount, let cliCommandCount, let automationTriggerCount, let dryRunEvaluationReady, let reviewedExecutionGateReady, let auditSurfaceReady, let localOnly):
+            let blockingReasons = [
+                endpointCount >= 6 ? nil : "Local API endpoint catalog is incomplete",
+                cliCommandCount >= 6 ? nil : "CLI command catalog is incomplete",
+                automationTriggerCount >= 4 ? nil : "Automation trigger coverage is incomplete",
+                dryRunEvaluationReady ? nil : "Automation dry-run evaluation is not ready",
+                reviewedExecutionGateReady ? nil : "Reviewed execution gate is not ready",
+                auditSurfaceReady ? nil : "Local automation audit surface is not ready",
+                localOnly ? nil : "Local API surface must remain local-only in this phase"
+            ].compactMap { $0 }
+            return CommercialReadinessCard(
+                phase: .localAPICLIAutomationSurface,
+                status: blockingReasons.isEmpty ? .ready : .blocked,
+                evidence: "\(endpointCount) endpoints · \(cliCommandCount) CLI commands · \(automationTriggerCount) triggers · dry-run \(dryRunEvaluationReady ? "ready" : "blocked") · reviewed gate \(reviewedExecutionGateReady ? "ready" : "blocked") · local-only \(localOnly ? "true" : "false")",
+                metrics: [
+                    "endpoints": "\(endpointCount)",
+                    "cliCommands": "\(cliCommandCount)",
+                    "triggers": "\(automationTriggerCount)",
+                    "dryRun": dryRunEvaluationReady ? "ready" : "blocked",
+                    "reviewedGate": reviewedExecutionGateReady ? "ready" : "blocked",
+                    "audit": auditSurfaceReady ? "ready" : "blocked",
+                    "localOnly": localOnly ? "true" : "false"
+                ],
+                blockingReasons: blockingReasons
+            )
+        case .missing(let reason):
+            return blockedCard(phase: .localAPICLIAutomationSurface, reason: reason)
         }
     }
 

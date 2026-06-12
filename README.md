@@ -953,7 +953,7 @@ swift build --product connor-graph-agent-mac
 最近验证结果：
 
 ```text
-Build of product 'connor-graph-agent-mac' complete! (2026-06-12 21:12 GMT+8)
+Build of products 'connor-graph-agent-mac' and 'connor' complete! (2026-06-12 21:34 GMT+8)
 ```
 
 Test：
@@ -966,7 +966,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
 最近验证结果：
 
 ```text
-369 tests in 15 suites passed (2026-06-12 21:12 GMT+8)
+377 tests in 16 suites passed (2026-06-12 21:34 GMT+8)
 ```
 
 Phase I 专项验证：
@@ -1020,6 +1020,23 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --filter Pha
 
 
 
+
+### Commercial Train 6: Local API / CLI / Automation Surface
+
+本阶段为 Connor 增加本地可编程控制面，使 Native Agent OS 能被本机脚本、CLI、自动化和未来 Shortcuts/loopback API 安全调用，同时不改变 Connor 的主权边界：Session OS 仍拥有会话状态，Policy Engine 仍拥有权限治理，Graph Memory 写入仍走 staging / distillation / review，不开放无审查直写。
+
+- 新增 `ConnorLocalAutomationSurface` contract，定义 Local API endpoint catalog、CLI command catalog、automation trigger request、dry-run evaluation、reviewed execution gate、local-only/audit readiness evidence。
+- 新增 `connor` SwiftPM executable，支持最小 CLI smoke path：`connor commands`、`connor readiness`、`connor automations evaluate --trigger sessionStatusChanged --session demo --status needs_review --dry-run`。
+- Automation Surface 支持 governed dry-run evaluation：输出 matched rules、action plans、ready/pending/blocked counts 和 audit summary；未经 reviewed evidence 不执行 state-changing automation。
+- Runtime Center 增加 Local API / CLI metric 与 section，将 endpoints/commands 显示为商业控制台 evidence。
+- Native Shell / Command Palette 增加 Local API / CLI 入口，映射到现有 Automation surface，不引入新 workspace 或 Web UI。
+- Commercial Readiness Dashboard 升级为 6 phases，新增 `Phase 6 · Local API / CLI / Automation Surface`，检查 endpoint count、CLI command count、trigger coverage、dry-run、reviewed execution gate、audit surface 和 local-only 安全边界。
+- 新增 `CommercialTrain6LocalAPICLIAutomationSurfaceTests` 覆盖 Local API catalog、CLI mapping、automation dry-run/gate、runtime center、readiness gate 与 shell/command palette discovery。
+
+本阶段仍不做公网 API、远程 daemon、OAuth server、多用户权限、真实 macOS Shortcuts 集成或完整 REST server；Local API 目前是 AppSupport contract/router 与 local-only readiness evidence，为后续产品化 server 留出边界。
+
+---
+
 ### Commercial Train 5: Native UI Commercialization
 
 本阶段将 Connor 的 Swift Native UI 从“功能入口集合”升级为商业级 Agent OS 控制台：
@@ -1072,6 +1089,7 @@ Commercial Train 2: Claude SDK Sidecar Productionization
 Commercial Train 3: Source / MCP Platformization
 Commercial Train 4: Graph Memory as Agent Core Capability
 Commercial Train 5: Native UI Commercialization
+Commercial Train 6: Local API / CLI / Automation Surface
 Local UI Refresh: Craft-like three-column shell and user-facing navigation cleanup
 Local Settings Center: App / AI / Appearance / Input / Permissions / Labels / Shortcuts / Preferences
 ```
