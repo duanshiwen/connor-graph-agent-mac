@@ -9,6 +9,7 @@ public enum ConnorRuntimeMetricID: String, Codable, Sendable, Equatable, Hashabl
     case automationTriggers
     case commercialReadiness
     case nativeUIHealth
+    case localAutomationSurface
 
     public var id: String { rawValue }
 }
@@ -37,6 +38,7 @@ public enum ConnorRuntimeSectionID: String, Codable, Sendable, Equatable, Hashab
     case reviewQueue
     case graphMemory
     case automation
+    case localAutomationSurface
     case commercialReadiness
 
     public var id: String { rawValue }
@@ -117,6 +119,7 @@ public struct ConnorRuntimeCenterPresentation: Codable, Sendable, Equatable {
         automationTriggers: [ProductOSAutomationTriggerRecord],
         graphMemoryDashboard: GraphMemoryDashboard?,
         commercialReadinessDashboard: CommercialReadinessDashboard? = nil,
+        localAutomationSurface: ConnorLocalAutomationSurfacePresentation? = .default,
         now: Date = Date()
     ) -> ConnorRuntimeCenterPresentation {
         let activeSessions = sessions.filter { !$0.isArchived && $0.status != .done }
@@ -145,6 +148,16 @@ public struct ConnorRuntimeCenterPresentation: Codable, Sendable, Equatable {
             severity: .success,
             target: .home
         ))
+        if let localAutomationSurface {
+            metrics.append(ConnorRuntimeMetricTile(
+                id: .localAutomationSurface,
+                title: "Local API / CLI",
+                value: "\(localAutomationSurface.cliCommands.count)",
+                subtitle: "commands · \(localAutomationSurface.endpoints.count) endpoints",
+                severity: localAutomationSurface.localOnly && localAutomationSurface.reviewedExecutionGateReady ? .success : .warning,
+                target: .localAutomationSurface
+            ))
+        }
         if let commercialReadinessDashboard {
             metrics.append(ConnorRuntimeMetricTile(
                 id: .commercialReadiness,
@@ -197,11 +210,23 @@ public struct ConnorRuntimeCenterPresentation: Codable, Sendable, Equatable {
             )
         }
 
+        let localSurfaceItems = (localAutomationSurface?.endpoints ?? []).map { endpoint in
+            ConnorRuntimeCenterItem(
+                id: endpoint.id.rawValue,
+                title: endpoint.cliEquivalent,
+                subtitle: "\(endpoint.method.rawValue) \(endpoint.path)",
+                detail: endpoint.summary,
+                severity: endpoint.requiresReview ? .warning : .info,
+                target: .localAutomationSurface
+            )
+        }
+
         let nextBestActions = buildNextBestActions(
             pendingApprovals: pendingApprovals,
             memoryReviews: memoryReviews,
             automationTriggers: automationTriggers,
-            commercialReadinessDashboard: commercialReadinessDashboard
+            commercialReadinessDashboard: commercialReadinessDashboard,
+            localAutomationSurface: localAutomationSurface
         )
 
         var sections = [
@@ -209,7 +234,8 @@ public struct ConnorRuntimeCenterPresentation: Codable, Sendable, Equatable {
             ConnorRuntimeCenterSection(id: .runTimeline, title: "Run Timeline", subtitle: "Latest agent events", items: timelineItems, target: .agentChat),
             ConnorRuntimeCenterSection(id: .reviewQueue, title: "Review Queue", subtitle: "Permissions and human gates", items: approvalItems, target: .approvals),
             ConnorRuntimeCenterSection(id: .graphMemory, title: "Graph Memory Core", subtitle: "Context, feedback, review", items: memoryItems, target: .graphMemory),
-            ConnorRuntimeCenterSection(id: .automation, title: "Automation", subtitle: "Governed triggers", items: automationItems, target: .automation)
+            ConnorRuntimeCenterSection(id: .automation, title: "Automation", subtitle: "Governed triggers", items: automationItems, target: .automation),
+            ConnorRuntimeCenterSection(id: .localAutomationSurface, title: "Local API / CLI", subtitle: "Scriptable local automation surface", items: localSurfaceItems, target: .localAutomationSurface)
         ]
         if let commercialReadinessDashboard {
             sections.append(ConnorRuntimeCenterSection(
@@ -242,7 +268,8 @@ public struct ConnorRuntimeCenterPresentation: Codable, Sendable, Equatable {
         pendingApprovals: [AgentPendingApproval],
         memoryReviews: Int,
         automationTriggers: [ProductOSAutomationTriggerRecord],
-        commercialReadinessDashboard: CommercialReadinessDashboard?
+        commercialReadinessDashboard: CommercialReadinessDashboard?,
+        localAutomationSurface: ConnorLocalAutomationSurfacePresentation?
     ) -> [ConnorRuntimeCenterItem] {
         var actions: [ConnorRuntimeCenterItem] = []
         if !pendingApprovals.isEmpty {
@@ -253,6 +280,9 @@ public struct ConnorRuntimeCenterPresentation: Codable, Sendable, Equatable {
         }
         if automationTriggers.contains(where: { $0.requiresReview }) {
             actions.append(ConnorRuntimeCenterItem(id: "next.automation", title: "Inspect automation review triggers", subtitle: "Governed automation", detail: "Review automation triggers that requested human confirmation.", severity: .warning, target: .automation))
+        }
+        if let localAutomationSurface, !localAutomationSurface.reviewedExecutionGateReady || !localAutomationSurface.localOnly {
+            actions.append(ConnorRuntimeCenterItem(id: "next.local-automation", title: "Review local automation surface", subtitle: "API / CLI governance", detail: "Local automation must stay local-only with reviewed execution gates.", severity: .warning, target: .localAutomationSurface))
         }
         if let commercialReadinessDashboard, commercialReadinessDashboard.blockedCount > 0 {
             actions.append(ConnorRuntimeCenterItem(id: "next.readiness", title: "Fix commercial readiness blockers", subtitle: "\(commercialReadinessDashboard.blockedCount) blocked phases", detail: commercialReadinessDashboard.summary, severity: .warning, target: .productOS))
