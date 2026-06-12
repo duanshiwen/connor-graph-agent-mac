@@ -127,7 +127,7 @@ public struct ConnorNativeShellRouteResolver: Sendable {
     public func route(for item: ConnorNativeShellItem) -> ConnorNativeShellRoute {
         switch item {
         case .runtimeCenter:
-            ConnorNativeShellRoute(item: item, legacySidebarID: "runtimeCenter")
+            ConnorNativeShellRoute(item: .agentChat, legacySidebarID: "agentChat")
         case .agentChat:
             ConnorNativeShellRoute(item: item, legacySidebarID: "agentChat")
         case .browserWorkspace:
@@ -182,10 +182,9 @@ public struct ConnorNativeShellPresentation: Codable, Sendable, Equatable {
 
     public static let `default` = ConnorNativeShellPresentation(
         title: "Connor",
-        defaultSelection: .runtimeCenter,
+        defaultSelection: .agentChat,
         sidebarGroups: [
             ConnorNativeShellSidebarGroup(id: "run", title: "Run", items: [
-                ConnorNativeShellSidebarItem(id: .runtimeCenter, title: "Runtime Center", subtitle: "Runs, events, approvals", systemImage: "dot.radiowaves.left.and.right", badgeStyle: .info),
                 ConnorNativeShellSidebarItem(id: .agentChat, title: "Sessions", subtitle: "Graph-backed conversations", systemImage: "message.fill"),
                 ConnorNativeShellSidebarItem(id: .browserWorkspace, title: "Browser Workspace", subtitle: "In-app browsing surface", systemImage: "globe")
             ]),
@@ -208,7 +207,6 @@ public struct ConnorNativeShellPresentation: Codable, Sendable, Equatable {
         commands: [
             ConnorNativeShellCommand(id: .newSession, title: "New Session", systemImage: "square.and.pencil", keyboardShortcut: "⌘N", target: .agentChat),
             ConnorNativeShellCommand(id: .toggleBrowser, title: "Toggle Browser", systemImage: "globe", keyboardShortcut: "⌘B", target: .browserWorkspace),
-            ConnorNativeShellCommand(id: .openRuntimeCenter, title: "Open Runtime Center", systemImage: "dot.radiowaves.left.and.right", keyboardShortcut: "⌘1", target: .runtimeCenter),
             ConnorNativeShellCommand(id: .openGraphMemoryReview, title: "Open Graph Memory", systemImage: "brain.head.profile", keyboardShortcut: "⌘2", target: .graphMemory),
             ConnorNativeShellCommand(id: .openApprovals, title: "Open Approvals", systemImage: "checkmark.shield", keyboardShortcut: "⌘3", target: .approvals),
             ConnorNativeShellCommand(id: .openSources, title: "Open Sources", systemImage: "externaldrive.connected.to.line.below", keyboardShortcut: "⌘4", target: .sources),
