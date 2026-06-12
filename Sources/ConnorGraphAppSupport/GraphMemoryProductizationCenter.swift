@@ -1,6 +1,7 @@
 import Foundation
 import ConnorGraphAgent
 import ConnorGraphCore
+import ConnorGraphMemory
 import ConnorGraphSearch
 import ConnorGraphStore
 
@@ -8,6 +9,9 @@ public enum GraphMemoryProductCardKind: String, Codable, Sendable, Equatable {
     case writeCandidate
     case admissionHold
     case changeLog
+    case contextUse
+    case feedbackSignal
+    case distillationCandidate
 }
 
 public enum GraphMemoryProductSeverity: String, Codable, Sendable, Equatable {
@@ -22,11 +26,39 @@ public struct GraphMemoryDashboardSummary: Codable, Sendable, Equatable {
     public var pendingCandidateCount: Int
     public var openHoldCount: Int
     public var recentChangeCount: Int
+    public var contextItemCount: Int
+    public var feedbackSignalCount: Int
+    public var stagedBundleCount: Int
+    public var distillationCandidateCount: Int
+    public var contextReady: Bool
+    public var ingestionReady: Bool
+    public var distillationReady: Bool
+    public var reviewReady: Bool
 
-    public init(pendingCandidateCount: Int, openHoldCount: Int, recentChangeCount: Int) {
+    public init(
+        pendingCandidateCount: Int,
+        openHoldCount: Int,
+        recentChangeCount: Int,
+        contextItemCount: Int = 0,
+        feedbackSignalCount: Int = 0,
+        stagedBundleCount: Int = 0,
+        distillationCandidateCount: Int = 0,
+        contextReady: Bool = false,
+        ingestionReady: Bool = false,
+        distillationReady: Bool = false,
+        reviewReady: Bool = true
+    ) {
         self.pendingCandidateCount = pendingCandidateCount
         self.openHoldCount = openHoldCount
         self.recentChangeCount = recentChangeCount
+        self.contextItemCount = contextItemCount
+        self.feedbackSignalCount = feedbackSignalCount
+        self.stagedBundleCount = stagedBundleCount
+        self.distillationCandidateCount = distillationCandidateCount
+        self.contextReady = contextReady
+        self.ingestionReady = ingestionReady
+        self.distillationReady = distillationReady
+        self.reviewReady = reviewReady
     }
 }
 
@@ -207,7 +239,50 @@ public struct GraphMemoryProductizationCenter: Sendable {
             summary: GraphMemoryDashboardSummary(
                 pendingCandidateCount: pendingCandidates.count + failedCandidates.count,
                 openHoldCount: holds.count,
-                recentChangeCount: changes.count
+                recentChangeCount: changes.count,
+                reviewReady: true
+            ),
+            cards: Array(cards.prefix(limit))
+        )
+    }
+
+    public static func dashboard(
+        contextContract: AgentGraphMemoryContextContract? = nil,
+        feedbackSignals: [AgentGraphMemoryFeedbackSignal] = [],
+        stagingBuffer: MemoryStagingBuffer? = nil,
+        distillationResult: MemoryDistillationResult? = nil,
+        reviewDashboard: GraphMemoryDashboard? = nil,
+        limit: Int = 50
+    ) -> GraphMemoryDashboard {
+        var cards: [GraphMemoryProductCard] = []
+        if let contextContract {
+            cards.append(contentsOf: contextContract.items.map { card(for: $0, contract: contextContract) })
+        }
+        cards.append(contentsOf: feedbackSignals.map(card(for:)))
+        if let distillationResult {
+            cards.append(contentsOf: distillationResult.proposedCandidates.map { card(for: $0, result: distillationResult) })
+        }
+        if let reviewDashboard {
+            cards.append(contentsOf: reviewDashboard.cards)
+        }
+        let pendingCandidateCount = reviewDashboard?.summary.pendingCandidateCount ?? 0
+        let openHoldCount = reviewDashboard?.summary.openHoldCount ?? 0
+        let recentChangeCount = reviewDashboard?.summary.recentChangeCount ?? 0
+        let stagedBundleCount = stagingBuffer?.pendingBundles.count ?? 0
+        let distillationCandidateCount = distillationResult?.proposedCandidates.count ?? 0
+        return GraphMemoryDashboard(
+            summary: GraphMemoryDashboardSummary(
+                pendingCandidateCount: pendingCandidateCount,
+                openHoldCount: openHoldCount,
+                recentChangeCount: recentChangeCount,
+                contextItemCount: contextContract?.items.count ?? 0,
+                feedbackSignalCount: feedbackSignals.count,
+                stagedBundleCount: stagedBundleCount,
+                distillationCandidateCount: distillationCandidateCount,
+                contextReady: contextContract != nil,
+                ingestionReady: stagingBuffer != nil || !feedbackSignals.isEmpty,
+                distillationReady: distillationResult != nil,
+                reviewReady: reviewDashboard != nil
             ),
             cards: Array(cards.prefix(limit))
         )
@@ -281,6 +356,44 @@ public struct GraphMemoryProductizationCenter: Sendable {
         default:
             return []
         }
+    }
+
+    private static func card(for item: AgentGraphMemoryContextItem, contract: AgentGraphMemoryContextContract) -> GraphMemoryProductCard {
+        GraphMemoryProductCard(
+            id: "context-\(item.sourceID)",
+            kind: .contextUse,
+            title: "\(item.role.rawValue) · \(item.sourceID)",
+            detail: "\(item.reason) · \(item.scoreLabel) · \(item.content)",
+            severity: item.role == .risk || item.role == .openQuestion ? .needsReview : .info,
+            sourceIDs: item.evidenceEpisodeIDs,
+            recommendedActions: ["cite_memory", "inspect_source", "check_conflicts"],
+            createdAt: contract.generatedAt
+        )
+    }
+
+    private static func card(for signal: AgentGraphMemoryFeedbackSignal) -> GraphMemoryProductCard {
+        GraphMemoryProductCard(
+            id: signal.id,
+            kind: .feedbackSignal,
+            title: "\(signal.trigger.rawValue) · \(signal.candidateKind)",
+            detail: signal.rationale,
+            severity: signal.highValue || signal.explicitRemember ? .needsReview : .info,
+            recommendedActions: ["distill", "inspect_buffer"],
+            createdAt: signal.createdAt
+        )
+    }
+
+    private static func card(for candidate: MemoryDistillationCandidate, result: MemoryDistillationResult) -> GraphMemoryProductCard {
+        GraphMemoryProductCard(
+            id: candidate.id,
+            kind: .distillationCandidate,
+            title: "\(candidate.kind.rawValue) · confidence \(String(format: "%.2f", candidate.confidence))",
+            detail: candidate.rationale.isEmpty ? candidate.content : candidate.rationale,
+            severity: candidate.kind == .riskFlag || candidate.kind == .unresolvedQuestion ? .needsReview : .info,
+            sourceIDs: candidate.sourceRefIDs,
+            recommendedActions: ["promote_candidate", "hold_for_review", "discard"],
+            createdAt: result.createdAt
+        )
     }
 
     private func severity(for action: GraphMemoryChangeLogAction) -> GraphMemoryProductSeverity {
