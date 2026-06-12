@@ -70,7 +70,15 @@ public enum CommercialClaudeSidecarReadiness: Codable, Sendable, Equatable {
 }
 
 public enum CommercialExtensionRuntimeReadiness: Codable, Sendable, Equatable {
-    case ready(enabledSourceCount: Int, loadedSkillCount: Int, enabledAutomationRuleCount: Int)
+    case ready(
+        enabledSourceCount: Int,
+        loadedSkillCount: Int,
+        enabledAutomationRuleCount: Int,
+        healthySourceCount: Int = 0,
+        discoveredToolCount: Int = 0,
+        auditedInvocationCount: Int = 0,
+        governedSourcePolicy: Bool = true
+    )
     case missing(String)
 }
 
@@ -161,6 +169,8 @@ public struct CommercialReadinessSnapshotBuilder: Sendable, Equatable {
         sidecarRecord: ClaudeSDKSidecarRuntimeRecord?,
         sidecarHealthStatus: String?,
         sources: [MCPSourceRuntimeConfiguration],
+        sourceHealthRecords: [MCPSourceRuntimeHealthRecord] = [],
+        sourceAuditRecords: [MCPSourceRuntimeAuditRecord] = [],
         skills: [SkillRuntimeDefinition],
         automationConfig: ProductOSAutomationConfig,
         graphMemoryDashboard: GraphMemoryDashboard?,
@@ -202,13 +212,30 @@ public struct CommercialReadinessSnapshotBuilder: Sendable, Equatable {
 
         let enabledSources = sources.filter { $0.status == .enabled }
         let enabledAutomations = automationConfig.rules.filter(\.isEnabled)
-        let extensionRuntime: CommercialExtensionRuntimeReadiness = enabledSources.isEmpty
-            ? .missing("No enabled source runtime")
-            : .ready(
+        let enabledSourceIDs = Set(enabledSources.map(\.sourceID))
+        let healthySourceCount = sourceHealthRecords.filter { enabledSourceIDs.contains($0.sourceID) && $0.healthStatus == .healthy }.count
+        let discoveredToolCount = sourceHealthRecords
+            .filter { enabledSourceIDs.contains($0.sourceID) }
+            .reduce(0) { $0 + $1.discoveredToolCount }
+        let governedSourcePolicy = enabledSources.allSatisfy { $0.graphWritePolicy != .allowAll }
+        let extensionRuntime: CommercialExtensionRuntimeReadiness
+        if enabledSources.isEmpty {
+            extensionRuntime = .missing("No enabled source runtime")
+        } else if !sourceHealthRecords.isEmpty && healthySourceCount == 0 {
+            extensionRuntime = .missing("Enabled source runtime exists but no healthy source has been discovered")
+        } else if !governedSourcePolicy {
+            extensionRuntime = .missing("Enabled source runtime includes unsafe graph write policy")
+        } else {
+            extensionRuntime = .ready(
                 enabledSourceCount: enabledSources.count,
                 loadedSkillCount: skills.count,
-                enabledAutomationRuleCount: enabledAutomations.count
+                enabledAutomationRuleCount: enabledAutomations.count,
+                healthySourceCount: healthySourceCount,
+                discoveredToolCount: discoveredToolCount,
+                auditedInvocationCount: sourceAuditRecords.count,
+                governedSourcePolicy: governedSourcePolicy
             )
+        }
 
         let graphMemory: CommercialGraphMemoryReadiness
         if let graphMemoryDashboard {
@@ -375,16 +402,33 @@ public struct CommercialReadinessGate: Sendable, Equatable {
 
     private func extensionRuntimeCard(_ readiness: CommercialExtensionRuntimeReadiness) -> CommercialReadinessCard {
         switch readiness {
-        case .ready(let enabledSourceCount, let loadedSkillCount, let enabledAutomationRuleCount):
+        case .ready(
+            let enabledSourceCount,
+            let loadedSkillCount,
+            let enabledAutomationRuleCount,
+            let healthySourceCount,
+            let discoveredToolCount,
+            let auditedInvocationCount,
+            let governedSourcePolicy
+        ):
+            let blockingReasons = governedSourcePolicy ? [] : ["Source graph write policy is not Connor-governed"]
+            var metrics = [
+                "sources": "\(enabledSourceCount)",
+                "skills": "\(loadedSkillCount)",
+                "automations": "\(enabledAutomationRuleCount)"
+            ]
+            if healthySourceCount > 0 || discoveredToolCount > 0 || auditedInvocationCount > 0 || !governedSourcePolicy {
+                metrics["healthySources"] = "\(healthySourceCount)"
+                metrics["discoveredTools"] = "\(discoveredToolCount)"
+                metrics["sourceAudits"] = "\(auditedInvocationCount)"
+                metrics["governedSourcePolicy"] = governedSourcePolicy ? "true" : "false"
+            }
             return CommercialReadinessCard(
                 phase: .sourcesSkillsAutomations,
-                status: .ready,
-                evidence: "\(enabledSourceCount) sources · \(loadedSkillCount) skills · \(enabledAutomationRuleCount) automations",
-                metrics: [
-                    "sources": "\(enabledSourceCount)",
-                    "skills": "\(loadedSkillCount)",
-                    "automations": "\(enabledAutomationRuleCount)"
-                ]
+                status: blockingReasons.isEmpty ? .ready : .blocked,
+                evidence: "\(enabledSourceCount) sources · \(healthySourceCount) healthy · \(discoveredToolCount) tools · \(loadedSkillCount) skills · \(enabledAutomationRuleCount) automations",
+                metrics: metrics,
+                blockingReasons: blockingReasons
             )
         case .missing(let reason):
             return blockedCard(phase: .sourcesSkillsAutomations, reason: reason)
