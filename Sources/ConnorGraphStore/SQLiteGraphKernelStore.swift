@@ -118,6 +118,7 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
     ]
 
     private var db: OpaquePointer?
+    private let databaseLock = NSRecursiveLock()
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
 
@@ -126,13 +127,17 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         self.decoder = JSONDecoder()
         self.encoder.dateEncodingStrategy = .iso8601
         self.decoder.dateDecodingStrategy = .iso8601
-        if sqlite3_open(path, &db) != SQLITE_OK {
+        let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX
+        if sqlite3_open_v2(path, &db, flags, nil) != SQLITE_OK {
             throw SQLiteGraphKernelStoreError.openFailed(Self.message(db))
         }
     }
 
     deinit {
+        databaseLock.lock()
         sqlite3_close(db)
+        db = nil
+        databaseLock.unlock()
     }
 
     public func migrate() throws {
@@ -1017,59 +1022,61 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         reason: String,
         actor: String = "human-reviewer"
     ) throws -> AgentPendingApproval {
-        guard status != .pending else {
-            throw SQLiteGraphKernelStoreError.invalidPendingApprovalResolution("resolution status must not remain pending")
-        }
-        guard var approval = try pendingApproval(requestID: requestID) else {
-            throw SQLiteGraphKernelStoreError.pendingApprovalNotFound(requestID)
-        }
+        try withDatabaseLock {
+            guard status != .pending else {
+                throw SQLiteGraphKernelStoreError.invalidPendingApprovalResolution("resolution status must not remain pending")
+            }
+            guard var approval = try pendingApproval(requestID: requestID) else {
+                throw SQLiteGraphKernelStoreError.pendingApprovalNotFound(requestID)
+            }
 
-        let now = Date()
-        approval.status = status
-        approval.updatedAt = now
-        let outcome = permissionOutcome(forResolvedStatus: status)
-        let decision = AgentPermissionDecision(
-            requestID: approval.requestID,
-            runID: approval.runID,
-            sessionID: approval.sessionID,
-            capability: approval.capability,
-            outcome: outcome,
-            reason: reason
-        )
-        let auditPayload = [
-            "request_id": approval.requestID,
-            "status": status.rawValue,
-            "reason": reason
-        ]
-
-        try execute("BEGIN TRANSACTION;")
-        do {
-            try upsert(pendingApproval: approval)
-            try append(auditEvent: AgentAuditEvent(
+            let now = Date()
+            approval.status = status
+            approval.updatedAt = now
+            let outcome = permissionOutcome(forResolvedStatus: status)
+            let decision = AgentPermissionDecision(
+                requestID: approval.requestID,
                 runID: approval.runID,
                 sessionID: approval.sessionID,
-                eventType: .permissionDecision,
-                actor: actor,
                 capability: approval.capability,
-                toolName: approval.toolName,
-                decision: decision,
-                payloadJSON: json(auditPayload),
-                createdAt: now
-            ))
-            try append(event: PersistedAgentEvent(
-                runID: approval.runID,
-                sessionID: approval.sessionID,
-                kind: .permissionResolved,
-                payloadJSON: json(decision),
-                sequence: try nextAgentEventSequence(runID: approval.runID),
-                createdAt: now
-            ))
-            try execute("COMMIT;")
-        } catch {
-            try? execute("ROLLBACK;")
-            throw error
+                outcome: outcome,
+                reason: reason
+            )
+            let auditPayload = [
+                "request_id": approval.requestID,
+                "status": status.rawValue,
+                "reason": reason
+            ]
+
+            try execute("BEGIN TRANSACTION;")
+            do {
+                try upsert(pendingApproval: approval)
+                try append(auditEvent: AgentAuditEvent(
+                    runID: approval.runID,
+                    sessionID: approval.sessionID,
+                    eventType: .permissionDecision,
+                    actor: actor,
+                    capability: approval.capability,
+                    toolName: approval.toolName,
+                    decision: decision,
+                    payloadJSON: json(auditPayload),
+                    createdAt: now
+                ))
+                try append(event: PersistedAgentEvent(
+                    runID: approval.runID,
+                    sessionID: approval.sessionID,
+                    kind: .permissionResolved,
+                    payloadJSON: json(decision),
+                    sequence: try nextAgentEventSequence(runID: approval.runID),
+                    createdAt: now
+                ))
+                try execute("COMMIT;")
+            } catch {
+                try? execute("ROLLBACK;")
+                throw error
+            }
+            return approval
         }
-        return approval
     }
 
     private func permissionOutcome(forResolvedStatus status: AgentPendingApprovalStatus) -> AgentPermissionOutcome {
@@ -1283,39 +1290,49 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         )
     }
 
+    private func withDatabaseLock<T>(_ operation: () throws -> T) rethrows -> T {
+        databaseLock.lock()
+        defer { databaseLock.unlock() }
+        return try operation()
+    }
+
     private func execute(_ sql: String) throws {
-        if sqlite3_exec(db, sql, nil, nil, nil) != SQLITE_OK {
-            throw SQLiteGraphKernelStoreError.executeFailed(Self.message(db))
+        try withDatabaseLock {
+            if sqlite3_exec(db, sql, nil, nil, nil) != SQLITE_OK {
+                throw SQLiteGraphKernelStoreError.executeFailed(Self.message(db))
+            }
         }
     }
 
     private func query(sql: String) throws -> [[String]] {
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
-            throw SQLiteGraphKernelStoreError.prepareFailed(Self.message(db))
-        }
-        defer { sqlite3_finalize(statement) }
-        var rows: [[String]] = []
-        while true {
-            let result = sqlite3_step(statement)
-            if result == SQLITE_ROW {
-                let count = sqlite3_column_count(statement)
-                var row: [String] = []
-                for index in 0..<count {
-                    if let cString = sqlite3_column_text(statement, index) {
-                        row.append(String(cString: cString))
-                    } else {
-                        row.append("")
-                    }
-                }
-                rows.append(row)
-            } else if result == SQLITE_DONE {
-                break
-            } else {
-                throw SQLiteGraphKernelStoreError.stepFailed(Self.message(db))
+        try withDatabaseLock {
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                throw SQLiteGraphKernelStoreError.prepareFailed(Self.message(db))
             }
+            defer { sqlite3_finalize(statement) }
+            var rows: [[String]] = []
+            while true {
+                let result = sqlite3_step(statement)
+                if result == SQLITE_ROW {
+                    let count = sqlite3_column_count(statement)
+                    var row: [String] = []
+                    for index in 0..<count {
+                        if let cString = sqlite3_column_text(statement, index) {
+                            row.append(String(cString: cString))
+                        } else {
+                            row.append("")
+                        }
+                    }
+                    rows.append(row)
+                } else if result == SQLITE_DONE {
+                    break
+                } else {
+                    throw SQLiteGraphKernelStoreError.stepFailed(Self.message(db))
+                }
+            }
+            return rows
         }
-        return rows
     }
 
     private func queryStrings(sql: String) throws -> [String] {
