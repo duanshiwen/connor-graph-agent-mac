@@ -953,7 +953,7 @@ swift build --product connor-graph-agent-mac
 最近验证结果：
 
 ```text
-Build of product 'connor-graph-agent-mac' complete! (2026-06-12 20:32 GMT+8)
+Build of product 'connor-graph-agent-mac' complete! (2026-06-12 20:47 GMT+8)
 ```
 
 Test：
@@ -966,7 +966,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
 最近验证结果：
 
 ```text
-359 tests in 14 suites passed (2026-06-12 20:32 GMT+8)
+364 tests in 14 suites passed (2026-06-12 20:47 GMT+8)
 ```
 
 Phase I 专项验证：
@@ -1018,6 +1018,23 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --filter Pha
 
 ---
 
+
+### Commercial Train 4: Graph Memory as Agent Core Capability
+
+本阶段将 Graph Memory 从后处理/Review Center 能力升级为 Agent runtime 的核心能力：
+
+- 新增 Agent Graph Memory core runtime domain：memory use policy、context item role、context contract、retrieval metrics、feedback signal、runtime snapshot。
+- `AgentContextBuilder` 新增 `memoryContextContract(...)` API，在保留旧 `context(for:)` 兼容的同时，显式输出每轮回答可追溯的 Graph Memory Contract。
+- `AgentLoopController` 现在通过 Graph Memory Context Contract 注入系统记忆上下文，保留 citation/context snapshot，并在检索失败时 graceful degradation，不阻断回答。
+- `NativeSessionManager` 在 assistant turn 进入 memory staging 后，会把 trigger reasons 转换为 Connor-owned memory feedback signals，并写入 Session OS journal，形成回答后的 Memory Feedback Loop 证据。
+- `GraphMemoryProductizationCenter` 从 Review Center 扩展为 Core Memory Surface：支持 context usage、feedback signal、distillation candidate cards，并在 summary 中暴露 context/ingestion/distillation/review readiness。
+- `CommercialReadinessGate` 的 Graph Memory Phase 从候选/hold/change 计数升级为 core memory evidence：context ready、ingestion ready、distillation ready、review ready、context item count、staged bundle count、distillation candidate count、feedback signal count。
+- 新增 `CommercialTrain4GraphMemoryCoreTests` 覆盖 context contract、graceful degradation、feedback signal、dashboard core surface 与 readiness evidence。
+
+本阶段仍不接外部 Graphiti/Neo4j/Mem0/Letta，不替换 SQLite graph kernel，不让 Claude SDK 或 MCP server 拥有 Connor memory state，也不做完整 autonomous self-editing memory UI；Graph Memory 继续作为 Connor-owned background memory substrate 服务通用助手。
+
+---
+
 ## 已记录的阶段性系统增量
 
 截至提交 `eac3db3` 并叠加当前本地改造，已合入 / 已完成的阶段性增量包括：
@@ -1035,6 +1052,7 @@ Phase I: Command Palette / Deep-link Navigation / Runtime Click-through
 Commercial Train 1: Session OS Maturation
 Commercial Train 2: Claude SDK Sidecar Productionization
 Commercial Train 3: Source / MCP Platformization
+Commercial Train 4: Graph Memory as Agent Core Capability
 Local UI Refresh: Craft-like three-column shell and user-facing navigation cleanup
 Local Settings Center: App / AI / Appearance / Input / Permissions / Labels / Shortcuts / Preferences
 ```
