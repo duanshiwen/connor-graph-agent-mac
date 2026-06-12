@@ -92,9 +92,10 @@ struct CommercialReadinessSnapshotBuilderTests {
             .sessionGovernance,
             .claudeSDKSidecar,
             .sourcesSkillsAutomations,
-            .graphMemoryLoop
+            .graphMemoryLoop,
+            .nativeCommercialUI
         ])
-        #expect(dashboard.cards.last?.status == .ready)
+        #expect(dashboard.cards.last?.status == .blocked)
         #expect(dashboard.cards.last?.metrics["settings"] == "partial")
     }
 }
