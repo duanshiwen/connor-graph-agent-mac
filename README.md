@@ -1,34 +1,104 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-12 14:58 GMT+8  
-当前代码基线：`main`，提交 `eac3db3`，叠加本地 Craft-grade shell、聊天工作台和设置中心改造。
+文档更新时间：2026-06-12 21:41 GMT+8  
+当前代码基线：`commercial-train-6-local-api-cli-automation-surface`，提交 `9a3945a Add local API CLI automation surface`，基于 `main` 的 Commercial Train 1-5 合并结果继续演进。
 
-Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package。项目包含本地会话运行时、SQLite temporal graph、后台图谱记忆管线、Agent runtime、Claude SDK sidecar 边界、MCP source runtime、skill runtime、automation engine、Craft 风格三栏 native UI、会话工作台、设置中心、command palette 和 deep-link resolver。
+Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package，目标是把 Connor 建成 **graph-memory-native Agent OS**：它不是“图谱编辑器”，也不是“Claude SDK 外壳”，而是以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI 和 Local Automation Surface 共同构成的本地 Agent 操作系统。
 
-产品定位上，图谱是后台记忆基础设施，不作为普通用户的主导航概念暴露；前台 UI 以会话、数据源、技能、自动化和设置为核心。
+核心产品判断：**图谱是后台记忆基础设施，不是前台主导航概念。** 普通用户面对的是 Home / Runtime Center、会话、数据源、技能、自动化、设置和本地 CLI/API 控制面；Graph Memory 在后台提供连续性、精确性、可追溯性和治理证据。
 
 ---
 
-## Package 信息
+## Current Commercial Baseline
+
+已完成的商业化列车：
+
+```text
+Commercial Train 1: Session OS Maturation
+Commercial Train 2: Claude SDK Sidecar Productionization
+Commercial Train 3: Source / MCP Platformization
+Commercial Train 4: Graph Memory as Agent Core Capability
+Commercial Train 5: Native UI Commercialization
+Commercial Train 6: Local API / CLI / Automation Surface
+```
+
+当前验证结果：
+
+```text
+swift build
+swift test
+swift run connor commands
+swift run connor readiness
+swift run connor automations evaluate --trigger sessionStatusChanged --session demo --status needs_review --dry-run
+
+377 tests in 16 suites passed (2026-06-12 21:34 GMT+8)
+```
+
+当前分支：
+
+```text
+commercial-train-6-local-api-cli-automation-surface
+```
+
+当前提交：
+
+```text
+9a3945a Add local API CLI automation surface
+```
+
+---
+
+## Product Boundaries
+
+Connor 当前坚持以下主权边界：
+
+- **Session sovereignty belongs to Connor Session OS**：会话、run、journal、pending plan、branch、restore snapshot 由 Connor 持久化与恢复。
+- **Permission sovereignty belongs to Connor Policy Engine**：Claude SDK sidecar 和 MCP servers 都不能绕过 Connor 审批、审计和执行门禁。
+- **Memory sovereignty belongs to Connor Graph Memory**：对话 LLM 不直接写图谱；Graph Memory 写入走 staging、distillation、candidate review、admission policy 与 SQLite temporal graph。
+- **Source sovereignty belongs to Connor Source Platform**：MCP servers 是外部能力提供者，不拥有 Connor source registry、permission policy、audit、graph ingestion policy 或 readiness state。
+- **UI sovereignty belongs to Swift Native Shell**：不 fork Craft UI，不引入 Electron/Web UI，不引入 Craft-style multi-workspace。
+- **Automation sovereignty belongs to Connor Local Automation Surface**：CLI/API 只能通过本地、可审计、可 dry-run、可 review 的 contract 调用 Connor runtime。
+
+明确不做：
+
+```text
+公网 API
+远程 daemon / cloud sync
+OAuth server / team auth / multi-user permissions
+Craft UI fork
+Electron/Web UI
+Craft-style multi-workspace
+CLI/API direct graph write
+MCP server owning product state
+Claude SDK owning Connor session state
+Unreviewed automation execution bypass
+```
+
+---
+
+## Package Information
 
 ```text
 Package name: ConnorGraphAgentMac
 Swift tools version: 6.0
 Platform: macOS 14+
-Executable product: connor-graph-agent-mac
 System libraries/frameworks: sqlite3, Security, WebKit
 ```
 
-Package products：
+Products：
 
 ```text
-ConnorGraphCore
-ConnorGraphMemory
-ConnorGraphStore
-ConnorGraphSearch
-ConnorGraphAgent
-ConnorGraphAppSupport
-connor-graph-agent-mac
+Libraries:
+- ConnorGraphCore
+- ConnorGraphMemory
+- ConnorGraphStore
+- ConnorGraphSearch
+- ConnorGraphAgent
+- ConnorGraphAppSupport
+
+Executables:
+- connor-graph-agent-mac
+- connor
 ```
 
 Source targets：
@@ -41,6 +111,7 @@ Sources/ConnorGraphSearch
 Sources/ConnorGraphAgent
 Sources/ConnorGraphAppSupport
 Sources/ConnorGraphAgentMac
+Sources/ConnorCLI
 ```
 
 Test targets：
@@ -62,11 +133,9 @@ sidecars/claude-agent-engine
 
 ---
 
-## 本地存储结构
+## Runtime Storage Layout
 
 运行时根目录由 `AppStoragePaths` 解析到用户 Application Support 下的 `Connor` 目录。当前实现使用单一 Home / Runtime Root。
-
-目录结构包含：
 
 ```text
 Connor/
@@ -101,7 +170,7 @@ sessions/{sessionID}/
 └── logs/
 ```
 
-主要 JSON 状态文件包括：
+主要状态文件：
 
 ```text
 config/session-governance.json
@@ -121,7 +190,21 @@ graph/evaluations/reports/*.json
 
 ---
 
-## 模块现状
+## Architecture Overview
+
+```text
+SwiftUI Native Shell
+  ↓
+ConnorGraphAppSupport
+  ↓
+Session OS / Source Platform / Skill Runtime / Automation Surface / Readiness Gate
+  ↓
+ConnorGraphAgent + Claude SDK Sidecar Boundary
+  ↓
+Graph Memory Runtime Contract
+  ↓
+SQLite Temporal Graph + Hybrid Retrieval + Memory Governance
+```
 
 ### ConnorGraphCore
 
@@ -131,6 +214,7 @@ graph/evaluations/reports/*.json
 - Agent conversation domain
 - Agent permission domain
 - Agent runtime event domain
+- Session OS domain
 - Session governance model
 - Product OS registry model
 - Product OS automation model
@@ -140,12 +224,13 @@ graph/evaluations/reports/*.json
 - Optimistic write domain
 - Self-healing domain
 
-相关文件示例：
+关键文件：
 
 ```text
 Sources/ConnorGraphCore/AgentConversation.swift
 Sources/ConnorGraphCore/AgentPermissionDomain.swift
 Sources/ConnorGraphCore/AgentRuntimeDomain.swift
+Sources/ConnorGraphCore/SessionOSDomain.swift
 Sources/ConnorGraphCore/AgentSessionGovernance.swift
 Sources/ConnorGraphCore/ProductOSRegistry.swift
 Sources/ConnorGraphCore/ProductOSAutomation.swift
@@ -169,7 +254,7 @@ Sources/ConnorGraphCore/GraphSelfHealingDomain.swift
 - Constraint validation
 - Contradiction detection
 
-相关文件示例：
+关键文件：
 
 ```text
 Sources/ConnorGraphMemory/MemoryIngestionService.swift
@@ -188,28 +273,24 @@ SQLite 持久化和后台 worker target。包含：
 
 - SQLite graph kernel store
 - SQLite temporal graph store
+- Session OS persistence tables
 - Agent runtime persistence
 - Chat session persistence
 - Audit persistence
-- Entity resolver
-- Entity resolution plan
+- Entity resolver and resolution plan
 - Conflict preview
 - Extraction prompt builder
 - LLM graph extractor
-- Extraction trace persistence
-- Extraction replay
+- Extraction trace persistence and replay
 - Graph write admission policy
 - Optimistic write service
 - Background job runner
-- Extraction worker
-- Index refresh worker
-- Grounding check worker
-- Self-healing service
+- Extraction / index refresh / grounding workers
 - Memory change log
 - Admission hold queue
 - SQLite hybrid search service
 
-相关文件示例：
+关键文件：
 
 ```text
 Sources/ConnorGraphStore/SQLiteGraphKernelStore.swift
@@ -236,14 +317,10 @@ Sources/ConnorGraphStore/GraphAdmissionHoldQueue.swift
 - Hybrid graph search service protocol
 - Reranking config
 - Embedding provider protocol
-- Retrieval evaluation cases
-- Retrieval judgments
-- Retrieval hits
-- Retrieval metrics
-- Retrieval reports
+- Retrieval evaluation cases, judgments, hits, metrics and reports
 - Retrieval evaluation harness
 
-相关文件示例：
+关键文件：
 
 ```text
 Sources/ConnorGraphSearch/GraphSearch.swift
@@ -265,20 +342,20 @@ Agent runtime target。包含：
 - Graph write tools
 - Web/search tools
 - Permission policy
-- Prompt budget estimation
-- Prompt inspection
+- Prompt budget estimation and inspection
 - Session summary strategy
-- Agent event recorder
-- Event replay
+- Agent event recorder and replayer
 - Text delta buffering
 - Runtime usage tracking
+- Graph Memory core runtime contract
 
-相关文件示例：
+关键文件：
 
 ```text
 Sources/ConnorGraphAgent/GraphAgentBackend.swift
 Sources/ConnorGraphAgent/AnyAgentBackend.swift
 Sources/ConnorGraphAgent/AgentLoopController.swift
+Sources/ConnorGraphAgent/GraphMemoryCoreRuntime.swift
 Sources/ConnorGraphAgent/AgentTool.swift
 Sources/ConnorGraphAgent/GraphReadTools.swift
 Sources/ConnorGraphAgent/GraphWriteTools.swift
@@ -293,7 +370,7 @@ Sources/ConnorGraphAgent/OpenAICompatibleProvider.swift
 
 ### ConnorGraphAppSupport
 
-App repositories、runtime factory、runtime integration 和 SwiftUI presentation model target。包含：
+App repositories、runtime factory、runtime integration、commercial readiness 和 SwiftUI presentation model target。包含：
 
 - App storage path resolution
 - SQLite bootstrap
@@ -306,8 +383,8 @@ App repositories、runtime factory、runtime integration 和 SwiftUI presentatio
 - Source runtime repository
 - Skill runtime repository
 - Automation repository
-- Automation engine
-- Automation execution history
+- Automation engine and execution history
+- Local API / CLI / Automation Surface contract
 - Retrieval evaluation repository
 - LLM settings repository
 - LLM provider health checker
@@ -330,7 +407,7 @@ App repositories、runtime factory、runtime integration 和 SwiftUI presentatio
 - Command palette presentation
 - Deep-link navigation resolver
 
-相关文件示例：
+关键文件：
 
 ```text
 Sources/ConnorGraphAppSupport/AppStoragePaths.swift
@@ -343,6 +420,7 @@ Sources/ConnorGraphAppSupport/AppMCPSourceRuntimeRepository.swift
 Sources/ConnorGraphAppSupport/AppSkillRuntimeRepository.swift
 Sources/ConnorGraphAppSupport/AppProductOSAutomationRepository.swift
 Sources/ConnorGraphAppSupport/AutomationEngine.swift
+Sources/ConnorGraphAppSupport/ConnorLocalAutomationSurface.swift
 Sources/ConnorGraphAppSupport/AppGraphRetrievalEvaluationRepository.swift
 Sources/ConnorGraphAppSupport/AppLLMSettingsRepository.swift
 Sources/ConnorGraphAppSupport/AppLLMProviderHealthChecker.swift
@@ -357,21 +435,24 @@ Sources/ConnorGraphAppSupport/MCPJSONRPCClient.swift
 Sources/ConnorGraphAppSupport/MCPSourceRuntime.swift
 Sources/ConnorGraphAppSupport/SkillRuntime.swift
 Sources/ConnorGraphAppSupport/GraphMemoryProductizationCenter.swift
+Sources/ConnorGraphAppSupport/ConnorNativeCommercialUIPresentation.swift
 Sources/ConnorGraphAppSupport/ConnorNativeShellPresentation.swift
 Sources/ConnorGraphAppSupport/ConnorRuntimeCenterPresentation.swift
 Sources/ConnorGraphAppSupport/SourceSkillAutomationUIPresentation.swift
 Sources/ConnorGraphAppSupport/ConnorCommandPalettePresentation.swift
 Sources/ConnorGraphAppSupport/ConnorDeepLinkNavigator.swift
+Sources/ConnorGraphAppSupport/CommercialReadinessGate.swift
 ```
 
 ### ConnorGraphAgentMac
 
-SwiftUI macOS executable target。当前前台体验采用 Craft Agent 风格三栏布局：左侧产品导航、中间列表/设置分类、右侧详情工作区。程序启动默认进入“所有会话 / 全部”，并自动选择最近更新的对话。普通用户主导航不暴露 graph node、write candidate、promotion queue、Runtime Center 或记忆调试中心；图谱能力作为后台记忆基础设施服务于会话和检索。
+SwiftUI macOS executable target。当前前台体验采用 Native Agent OS shell：Home / Runtime Center 默认入口，左侧产品导航，中间列表/分类，右侧详情工作区。
 
 包含：
 
 - App entry point
-- Craft-style product sidebar navigation
+- Native product sidebar navigation
+- Runtime Center home view
 - Three-column session shell
 - Conversation list with status / labels
 - Agent chat workbench
@@ -382,11 +463,11 @@ SwiftUI macOS executable target。当前前台体验采用 Craft Agent 风格三
 - Source runtime panel
 - Skill runtime panel
 - Automation runtime panel
+- Local API / CLI surface entry
 - Command Palette view
 - Browser workspace view
-- Developer/runtime diagnostics retained as data/presentation models where still used by readiness tests; Runtime Center no longer has a user-facing SwiftUI view or command entry
 
-相关文件示例：
+关键文件：
 
 ```text
 Sources/ConnorGraphAgentMac/ConnorGraphAgentMacApp.swift
@@ -397,9 +478,136 @@ Sources/ConnorGraphAgentMac/BrowserWorkspaceView.swift
 Sources/ConnorGraphAgentMac/EmptyGraphHybridSearchService.swift
 ```
 
+### ConnorCLI
+
+SwiftPM CLI executable target。当前是 local-only programmable control plane 的最小入口，不依赖远程 daemon。
+
+关键文件：
+
+```text
+Sources/ConnorCLI/main.swift
+```
+
+当前命令：
+
+```bash
+swift run connor commands
+swift run connor readiness
+swift run connor automations evaluate --trigger sessionStatusChanged --session demo --status needs_review --dry-run
+```
+
+---
+
+## Session OS
+
+Commercial Train 1 将 `NativeSessionManager` 从 turn executor 推进为持久化 Session OS runtime。
+
+当前能力：
+
+- Durable run lifecycle：queued、running、completed、failed、cancelled、waitingForApproval
+- Session journal
+- Pending approvals restore
+- Pending plans
+- Branch records
+- Restore snapshot
+- Status / label / archive / restore governance fanout
+- Runtime state metadata
+
+关键持久化表：
+
+```text
+session_pending_plans
+session_branch_records
+```
+
+关键类型：
+
+```text
+SessionOSJournalPayload
+SessionPendingPlanStatus
+SessionPendingPlan
+SessionBranchRecord
+SessionOSRestoreSnapshot
+```
+
+Session OS 的边界：Claude SDK sidecar、MCP server、CLI/API 都不拥有 Connor session state。
+
+---
+
+## Claude SDK Sidecar Runtime
+
+Commercial Train 2 将 Claude SDK 作为外部执行引擎接入，但不让它成为产品状态 owner。
+
+当前 sidecar 目录：
+
+```text
+sidecars/claude-agent-engine/claude-sidecar.mjs
+```
+
+Swift 侧关键文件：
+
+```text
+Sources/ConnorGraphAppSupport/GovernedClaudeSDKSidecarRuntime.swift
+Sources/ConnorGraphAppSupport/ClaudeSDKSidecarBackend.swift
+Sources/ConnorGraphAppSupport/AppClaudeSDKSidecarRuntimeStore.swift
+Sources/ConnorGraphAppSupport/AppGraphAgentRuntimeFactory.swift
+```
+
+当前实现包含：
+
+- `sdkSessionID` persistence
+- Sidecar runtime record
+- Sidecar runtime diagnostics
+- Sidecar heartbeat / health decoding
+- Cancel command envelope
+- Approval resolution command mapping
+- Persistent process transport
+- Factory wiring through app storage paths
+- Guardrail against routing governed Claude Sidecar mode through legacy direct model provider paths
+- `bypassPermissions` 仅用于让 Connor Policy Engine 成为唯一审批/审计层，不表示 unrestricted product authority
+
+---
+
+## Source / MCP Platform
+
+Commercial Train 3 将 MCP Source 从 config/call helper 升级为 Connor-owned source platform object。
+
+关键文件：
+
+```text
+Sources/ConnorGraphAppSupport/AppMCPSourceRuntimeRepository.swift
+Sources/ConnorGraphAppSupport/MCPJSONRPCClient.swift
+Sources/ConnorGraphAppSupport/MCPSourceRuntime.swift
+Sources/ConnorGraphAppSupport/SourceSkillAutomationUIPresentation.swift
+```
+
+当前能力：
+
+- Source runtime registry persistence
+- Stdio / HTTP transport configuration shape
+- Source ID validation
+- Tool name prefix validation
+- Unsafe graph write policy rejection
+- MCP JSON-RPC lifecycle：initialize、notifications/initialized、tools/list、tools/call、shutdown
+- Server error mapping
+- Source-prefixed tool catalog
+- Disabled-source gate
+- MCP tool call event bridge
+- Product OS registry sync event
+- Health status / lifecycle state
+- Capability snapshot
+- Health record
+- Audit record
+- Discovery snapshot
+- Per-source `health.json`、`catalog.json`、`audit.jsonl`
+
+边界：MCP servers 是能力提供者；Connor 拥有 registry、lifecycle、health、permission policy、graph ingestion policy、audit 与 readiness。
+
 ---
 
 ## Graph Memory Kernel
+
+Commercial Train 4 将 Graph Memory 从后处理能力升级为 Agent runtime 核心能力。
 
 当前图谱记忆相关类型包括：
 
@@ -412,9 +620,14 @@ GraphExtractionDraft
 GraphExtractionTrace
 GraphMemoryChangeLog
 GraphAdmissionHoldQueue
+AgentGraphMemoryUsePolicy
+AgentGraphMemoryContextItem
+AgentGraphMemoryContextContract
+AgentGraphMemoryFeedbackSignal
+AgentGraphMemoryRuntimeSnapshot
 ```
 
-当前写入路径由以下阶段组成：
+当前写入路径：
 
 ```text
 Input / Artifact / Message
@@ -432,155 +645,28 @@ Input / Artifact / Message
 → Memory Change Log
 ```
 
-Graph write candidate 或 extraction draft 可进入 admission hold queue。Review Center 通过 `GraphMemoryProductizationCenter` 聚合候选、hold queue 和 change log，并提供 approve / reject action result。
+Agent context 注入路径：
+
+```text
+User message
+→ AgentContextBuilder
+→ GraphHybridSearchService
+→ AgentGraphMemoryContextContract
+→ AgentLoopController system memory context
+→ Model response with citations/context snapshot
+→ Memory feedback signals
+→ Session OS journal
+```
+
+Graph write candidate 或 extraction draft 可进入 admission hold queue。Review Center 通过 `GraphMemoryProductizationCenter` 聚合 context use、feedback signal、distillation candidate、hold queue 和 change log，并提供 review evidence。
+
+边界：对话 LLM 不直接写图谱；Graph Memory 继续作为 Connor-owned background memory substrate 服务通用助手。
 
 ---
 
-## Agent Runtime
+## Automation Engine and Local Automation Surface
 
-Agent runtime 使用 backend/event abstraction。
-
-主要组成：
-
-```text
-AgentBackend
-AnyAgentBackend
-AgentLoopController
-NativeSessionManager
-AgentEvent
-AgentPermission
-AgentPendingApproval
-SQLiteAgentAuditLog
-AgentEventRecorder
-AgentEventReplayer
-AgentTextDeltaBuffer
-AgentRuntimeUsageTracker
-```
-
-当前 runtime event 覆盖：
-
-```text
-model message
-tool call started / finished / failed
-permission requested
-approval resolved
-graph memory proposed / committed / held
-session status changed
-session labels changed
-source registry changed
-skill registry changed
-automation triggered
-artifact created
-```
-
-`NativeSessionManager` 当前包含 processing state、active run tracking、cancel、retry last user message、runtime state metadata 等行为。
-
----
-
-## Claude SDK Sidecar Runtime
-
-当前 sidecar 相关目录：
-
-```text
-sidecars/claude-agent-engine/claude-sidecar.mjs
-```
-
-Swift 侧相关文件：
-
-```text
-Sources/ConnorGraphAppSupport/GovernedClaudeSDKSidecarRuntime.swift
-Sources/ConnorGraphAppSupport/ClaudeSDKSidecarBackend.swift
-Sources/ConnorGraphAppSupport/AppClaudeSDKSidecarRuntimeStore.swift
-Sources/ConnorGraphAppSupport/AppGraphAgentRuntimeFactory.swift
-```
-
-当前实现包含：
-
-- `sdkSessionID` persistence
-- Sidecar runtime record
-- Sidecar runtime diagnostics
-- Sidecar health event decoding
-- Cancel command envelope
-- Approval resolution command mapping
-- Persistent process transport
-- Factory wiring through app storage paths
-- Guardrail against routing governed Claude Sidecar mode through legacy direct model provider paths; Sidecar runs through `NativeSessionManager` + `ClaudeSDKSidecarBackend`.
-
----
-
-## MCP Source Runtime
-
-当前 MCP / source runtime 文件：
-
-```text
-Sources/ConnorGraphAppSupport/AppMCPSourceRuntimeRepository.swift
-Sources/ConnorGraphAppSupport/MCPJSONRPCClient.swift
-Sources/ConnorGraphAppSupport/MCPSourceRuntime.swift
-```
-
-当前实现包含：
-
-- Source runtime registry persistence
-- Stdio / HTTP transport configuration shape
-- Source ID validation
-- Tool name prefix validation
-- Unsafe graph write policy rejection
-- MCP JSON-RPC lifecycle client
-- `initialize`
-- `notifications/initialized`
-- `tools/list`
-- `tools/call`
-- `shutdown`
-- Server error mapping
-- Source-prefixed tool catalog
-- Disabled-source gate
-- MCP tool call event bridge
-- Product OS registry sync event
-
----
-
-## Skill Runtime
-
-当前 skill runtime 文件：
-
-```text
-Sources/ConnorGraphAppSupport/AppSkillRuntimeRepository.swift
-Sources/ConnorGraphAppSupport/SkillRuntime.swift
-```
-
-当前实现包含：
-
-- `SKILL.md` frontmatter parser
-- Skill manifest persistence
-- Resolution order: project > home > global
-- Trigger matching
-- Glob matching
-- Instruction bundle generation
-- Required capability propagation
-- Required source propagation
-- Permission request generation
-- Disabled-skill rejection
-- Product OS registry sync event
-
-支持的 manifest 字段包括：
-
-```text
-name
-description
-triggers
-requiredCapabilities
-requiredSources
-globs
-graphContextPolicy
-tags
-icon
-```
-
----
-
-## Automation Engine
-
-当前 automation 文件：
+Automation Engine 文件：
 
 ```text
 Sources/ConnorGraphCore/ProductOSAutomation.swift
@@ -588,7 +674,7 @@ Sources/ConnorGraphAppSupport/AppProductOSAutomationRepository.swift
 Sources/ConnorGraphAppSupport/AutomationEngine.swift
 ```
 
-当前实现包含：
+Automation Engine 当前能力：
 
 - Automation rule persistence
 - Trigger log persistence
@@ -607,65 +693,114 @@ Sources/ConnorGraphAppSupport/AutomationEngine.swift
 automations/automation-execution-history.json
 ```
 
+Commercial Train 6 新增 Local API / CLI / Automation Surface：
+
+```text
+Sources/ConnorGraphAppSupport/ConnorLocalAutomationSurface.swift
+Sources/ConnorCLI/main.swift
+```
+
+当前 Local API route catalog：
+
+```text
+GET  /v1/readiness
+GET  /v1/runtime-center
+GET  /v1/automation/rules
+POST /v1/automation/evaluate
+POST /v1/automation/execute-reviewed
+GET  /v1/commands
+```
+
+当前 CLI catalog：
+
+```text
+connor commands
+connor readiness
+connor runtime-center
+connor automations list
+connor automations evaluate --trigger <kind> --session <id> --status <status> --dry-run
+connor automations execute-reviewed --review-token <token>
+```
+
+其中当前 smoke-tested commands：
+
+```text
+connor commands
+connor readiness
+connor automations evaluate --trigger sessionStatusChanged --session demo --status needs_review --dry-run
+```
+
+Automation Surface readiness evidence：
+
+```text
+endpointCount
+cliCommandCount
+automationTriggerCount
+dryRunEvaluationReady
+reviewedExecutionGateReady
+auditSurfaceReady
+localOnlySafetyReady
+```
+
+安全边界：
+
+- Local API 是 contract/router，不默认启动长期 server。
+- CLI/API 不直接写图谱。
+- State-changing automation 必须经过 reviewed execution gate。
+- Dry-run evaluation 输出 matched rules、action plans、ready/pending/blocked counts 和 audit summary。
+- Unsafe 或 pending-review actions 不会被未审查执行。
+
 ---
 
-## Native UI 状态
+## Native UI
 
-当前主界面改为 Craft Agent 风格三栏 shell：
+Commercial Train 5 将 Native UI 从功能入口集合升级为商业级 Agent OS 控制台。
 
-```text
-左侧：产品导航
-中间：会话列表 / 数据源列表 / 技能列表 / 自动化列表 / 设置分类
-右侧：聊天详情 / 设置详情 / 运行时面板
-```
-
-默认 selection：
+当前 shell 信息架构：
 
 ```text
-agentChat
+Home
+Work
+Memory
+Governance
+Extensions
+System
 ```
 
-左侧用户主导航只保留产品级概念：
+当前主入口：
 
 ```text
-新建会话
-所有会话
-  全部
-  收件箱
-  configured statuses
-标签
-  configured labels
-数据源
-技能
-自动化
-  定时任务
-  事件触发
-  智能体
-设置
+Home / Runtime Center
 ```
 
-不再作为普通用户主导航展示的内部实现概念：
+当前 sidebar destinations：
 
 ```text
-Runtime Center
-图谱节点
-图谱搜索
-写入候选
-提升队列
-记忆变更
-记忆准入
-Graph Memory Review Center
+Home / Runtime Center
+New Session
+All Sessions
+Inbox
+Labels
+Graph Memory Review
+Approvals
+Automations
+Local API / CLI
+Sources
+Skills
+Browser Workspace
+Settings
 ```
 
-这些能力仍可作为后台基础设施、内部数据模型或开发诊断能力存在；Runtime Center 的用户界面与命令入口已删除，避免让用户把 Connor 理解成“运行时控制台”或“图谱编辑器”。
-
-当前 native panels / views 包括：
+当前 native panels / views：
 
 ```text
 CraftPrimarySidebarView
 CraftListPaneView
 CraftSessionListPane
 CraftDetailPaneView
+ConnorRuntimeCenterView
+RuntimeMetricTileView
+RuntimeCenterItemRow
 AgentChatView
 AgentChatComposerView
 AgentChatInspectorView
@@ -677,17 +812,58 @@ ConnorCommandPaletteView
 BrowserWorkspaceView
 ```
 
-聊天工作台当前特性：
+Command Palette 当前支持：
 
-- 会话列表由 shell 中间栏负责，`AgentChatView` 不再内嵌第二份会话列表。
-- 右侧常驻 inspector 已改为浮动“信息”面板。
-- Composer 底部提供附件、浏览器、token 信息、权限模式、模型选择和发送按钮。
-- 权限模式显示中文名称，并默认隐藏 `allowAll` 级别。
-- 模型选择由 `AppLLMModelCatalog` 从当前 provider mode 构建连接：OpenAI-compatible 可读取 live `/models`，Claude Sidecar 使用 sidecar 配置候选；Sidecar 执行路径通过 `NativeSessionManager` + `ClaudeSDKSidecarBackend`。产品设置不再提供模拟 provider mode。
+- command / destination entries
+- group metadata
+- risk badge
+- primary action marker
+- shortcut search
+- keyword search
+- empty state
 
-### 设置中心
+当前 command examples：
 
-设置入口位于左侧主导航底部。设置中心由中间栏分类列表和右侧设置详情组成，不包含 workspace / workplace 相关设置，因为当前应用仍是单一 Home / Runtime Root，不支持多 workspace。
+```text
+Open Home
+New Session
+Open Graph Memory Review
+Open Approvals
+Open Automations
+Open Local API / CLI
+Open Sources
+Open Skills
+Open Browser Workspace
+Open Settings
+```
+
+Deep-link resolver 文件：
+
+```text
+Sources/ConnorGraphAppSupport/ConnorDeepLinkNavigator.swift
+```
+
+支持 URL 形态：
+
+```text
+connor://open/{destination}
+connor://open/{destination}?focus={focusID}
+```
+
+示例：
+
+```text
+connor://open/home
+connor://open/sources
+connor://open/automation?focus=history
+connor://open/browserWorkspace
+```
+
+---
+
+## Settings Center
+
+设置入口位于 System / Settings。设置中心由中间栏分类列表和右侧设置详情组成，不包含 workspace / workplace 设置，因为当前应用仍是单一 Home / Runtime Root，不支持多 workspace。
 
 当前设置分类：
 
@@ -700,12 +876,6 @@ AI
 标签
 快捷键
 偏好
-```
-
-设置详情页文件：
-
-```text
-Sources/ConnorGraphAgentMac/ConnorGraphAgentMacApp.swift
 ```
 
 核心视图：
@@ -743,115 +913,22 @@ preferences
 updatedAt
 ```
 
-新增 runtime settings 分组：
+AI 设置页支持：
 
-```text
-AgentRuntimeAppSettings
-  desktopNotificationsEnabled
-  keepScreenAwake
-  internalBrowserEnabled
-  httpProxyEnabled
-  httpProxyURLString
-
-AgentRuntimeAppearanceSettings
-  mode
-
-AgentRuntimeInputSettings
-  composerSendShortcut
-  spellCheckEnabled
-  autoSaveDraftsEnabled
-
-AgentRuntimePermissionSettings
-  requireApprovalForNetwork
-  requireApprovalForShell
-
-AgentRuntimePreferenceSettings
-  displayName
-  timezone
-  city
-  country
-  notes
-
-AgentRuntimeUISettings
-  showProviderIcons
-  richToolDescriptionsEnabled
-```
-
-`AgentRuntimeSettings` 提供自定义 decode，旧版 `runtime-settings.json` 缺少新增字段时会自动补默认值，避免升级后配置解码失败。
-
-AI 设置页复用现有 LLM 设置逻辑：
-
-- provider mode：OpenAI-compatible、governed Claude Sidecar
-- model / selected model
-- base URL
+- OpenAI-compatible provider
+- Governed Claude Sidecar provider
+- Model / selected model
+- Base URL
 - API Key 输入 / 清除
 - 连接测试
 - Claude Sidecar executable / arguments / working directory
-- Sidecar mode guardrail：legacy direct LLM/model provider path 会返回明确错误，Claude Sidecar 只通过 session manager/backend 执行。
+- Sidecar mode guardrail
 
-注意：部分设置目前已完成本地持久化，但尚未全部接入实际运行时行为，例如桌面通知、保持屏幕常亮、外观模式实时切换、输入框拼写检查和网络 / Shell 审批细粒度 enforcement。
-
----
-
-## Command Palette 与 Deep Link
-
-当前 command palette 文件：
-
-```text
-Sources/ConnorGraphAppSupport/ConnorCommandPalettePresentation.swift
-Sources/ConnorGraphAgentMac/ConnorCommandPaletteView.swift
-```
-
-当前 command palette 从 `ConnorNativeShellPresentation.default` 构建 entries，entry 类型包括：
-
-```text
-command
-destination
-```
-
-当前支持按以下字段搜索：
-
-```text
-title
-subtitle
-shortcut
-target
-keywords
-```
-
-当前 deep-link resolver 文件：
-
-```text
-Sources/ConnorGraphAppSupport/ConnorDeepLinkNavigator.swift
-```
-
-当前支持 URL 形态：
-
-```text
-connor://open/{destination}
-connor://open/{destination}?focus={focusID}
-```
-
-示例：
-
-```text
-connor://open/sources
-connor://open/automation?focus=history
-connor://open/browserWorkspace
-```
-
-Resolver 输出：
-
-```text
-item
-sidebarItem
-requiresBrowserVisible
-focus
-```
+注意：部分设置已完成本地持久化，但尚未全部接入实际运行时行为，例如桌面通知、保持屏幕常亮、外观模式实时切换、输入框拼写检查和网络 / Shell 审批细粒度 enforcement。
 
 ---
 
-## Hybrid Graph Retrieval
+## Hybrid Graph Retrieval and Evaluation
 
 统一检索接口：
 
@@ -884,36 +961,14 @@ SQLiteGraphHybridSearchService
 - Graph hop metadata
 - Graph context entity IDs metadata
 
-Agent context 注入路径：
+Retrieval evaluation 持久化路径：
 
 ```text
-User message
-→ AgentContextBuilder
-→ GraphHybridSearchService
-→ GraphSearchResponse
-→ AgentContext items
-→ Prompt context
-→ Model response with citations
+graph/evaluations/retrieval-evaluation-cases.json
+graph/evaluations/reports/*.json
 ```
 
----
-
-## Retrieval Evaluation
-
-当前检索评估类型：
-
-```text
-GraphRetrievalEvaluationCase
-GraphRetrievalJudgment
-GraphRetrievalEvaluationHit
-GraphRetrievalEvaluationMetrics
-GraphRetrievalEvaluationCaseResult
-GraphRetrievalEvaluationReport
-GraphRetrievalEvaluator
-GraphRetrievalEvaluationHarness
-```
-
-当前支持指标：
+支持指标：
 
 ```text
 Precision@k
@@ -925,154 +980,112 @@ nDCG@k
 RequiredHitRate@k
 ```
 
-本地持久化路径：
+---
+
+## Commercial Readiness Gate
+
+Commercial Readiness 当前覆盖 6 个 phase：
 
 ```text
-graph/evaluations/retrieval-evaluation-cases.json
-graph/evaluations/reports/*.json
+Phase 1 · Session OS / Governance
+Phase 2 · Claude SDK Sidecar Runtime
+Phase 3 · Source / MCP Platform
+Phase 4 · Graph Memory Core Capability
+Phase 5 · Native Commercial UI
+Phase 6 · Local API / CLI / Automation Surface
+```
+
+Readiness Gate 聚合：
+
+- Session runs / journal / pending plan / branch / restore snapshot evidence
+- Claude sidecar runtime / diagnostics / permission sovereignty evidence
+- Source health / discovery / tool catalog / audit / graph write policy evidence
+- Graph Memory context / ingestion / distillation / review evidence
+- Native UI home / runtime center / command palette / settings evidence
+- Local API / CLI endpoint / command / dry-run / reviewed gate / audit / local-only evidence
+
+关键文件：
+
+```text
+Sources/ConnorGraphAppSupport/CommercialReadinessGate.swift
+Sources/ConnorGraphAppSupport/ConnorRuntimeCenterPresentation.swift
+Sources/ConnorGraphAppSupport/ConnorNativeCommercialUIPresentation.swift
 ```
 
 ---
 
-## 构建与测试
+## Build, Test and CLI Smoke
 
 Build：
 
 ```bash
 cd /Users/duanshiwen/code/agent-os/agents/connor-graph-agent-mac
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift build
+swift build
 ```
 
-Product build：
+Product builds：
 
 ```bash
-cd /Users/duanshiwen/code/agent-os/agents/connor-graph-agent-mac
 swift build --product connor-graph-agent-mac
-```
-
-最近验证结果：
-
-```text
-Build of products 'connor-graph-agent-mac' and 'connor' complete! (2026-06-12 21:34 GMT+8)
+swift build --product connor
 ```
 
 Test：
 
 ```bash
-cd /Users/duanshiwen/code/agent-os/agents/connor-graph-agent-mac
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
+swift test
 ```
 
-最近验证结果：
-
-```text
-377 tests in 16 suites passed (2026-06-12 21:34 GMT+8)
-```
-
-Phase I 专项验证：
+CLI smoke：
 
 ```bash
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --filter PhaseI
+swift run connor commands
+swift run connor readiness
+swift run connor automations evaluate --trigger sessionStatusChanged --session demo --status needs_review --dry-run
 ```
 
 最近验证结果：
 
 ```text
-4 tests passed
+Build of products 'connor-graph-agent-mac' and 'connor' succeeded.
+377 tests in 16 suites passed (2026-06-12 21:34 GMT+8).
+CLI smoke checks passed for commands, readiness and automation dry-run evaluation.
 ```
 
 ---
 
+## Test Coverage Highlights
 
-### Commercial Train 1: Session OS Maturation
+重要商业化测试：
 
-本阶段将 `NativeSessionManager` 从纯内存态 turn executor 推进为第一阶段 Session OS runtime：
+```text
+Tests/ConnorGraphAppSupportTests/NativeSessionManagerSessionOSTests.swift
+Tests/ConnorGraphAppSupportTests/CommercialTrain2ClaudeSDKSidecarTests.swift
+Tests/ConnorGraphAppSupportTests/CommercialTrain3SourceMCPPlatformTests.swift
+Tests/ConnorGraphAppSupportTests/CommercialTrain4GraphMemoryCoreTests.swift
+Tests/ConnorGraphAppSupportTests/CommercialTrain5NativeUICommercializationTests.swift
+Tests/ConnorGraphAppSupportTests/CommercialTrain6LocalAPICLIAutomationSurfaceTests.swift
+```
 
-- 新增 `SessionOSDomain`：pending plan、branch record、restore snapshot、journal payload。
-- 扩展 `AgentRunStatus`：`queued` 与 `waiting_for_approval`，用于表达 run queue / approval wait。
-- 扩展 SQLite runtime schema：`session_pending_plans`、`session_branch_records`，并补齐 run/session 查询、recent journal 查询、pending plan resolution 与 branch metadata 持久化。
-- `AppChatSessionRepository` 增加 Session OS API：run save/load、journal append/load、pending approval restore、pending plan create/resolve、session branch、restore snapshot。
-- `NativeSessionManager` 现在会在用户消息落盘后创建持久化 run record，记录 queued/running/completed/failed/cancelled 状态，pending approval 会进入可恢复 snapshot。
-- status / labels / archive / restore 变更会写入 session journal，为 automation fanout 提供稳定事件入口。
-- Commercial readiness gate 的 Session Governance card 增加 runs、journal events、pending plans、branches、restore snapshot 指标。
-- 新增 `NativeSessionManagerSessionOSTests` 覆盖 run lifecycle、failure durability、pending approval restore、pending plan、branch、governance fanout。
+其他关键测试：
 
-本阶段仍刻意不引入多 workspace；session 继续落在 single Home / Runtime Root 语义下。Claude SDK production backend、Source lifecycle platform 与 Graph Memory Review 商用 UI 留给后续 Commercial Train。
-
----
-
-
-### Commercial Train 3: Source / MCP Platformization
-
-本阶段将 MCP Source runtime 从“可配置、可调用”推进为第一阶段商业化 Source Platform：
-
-- 新增 Source 平台状态模型：health status、lifecycle state、capability snapshot、health record、audit record、discovery snapshot。
-- MCP discovery 现在会生成 Connor-owned capability snapshot 与 tool catalog：protocol version、server info、tools/resources/prompts/sampling/roots/elicitation/logging/progress/cancellation 能力标记、tool count 与 tool names。
-- Source runtime tool invocation 现在同时返回 Connor permission/tool events 与 source audit envelope，便于后续 Runtime Center、审计与 graph ingestion 串联。
-- `AppMCPSourceRuntimeRepository` 新增 per-source `health.json`、`catalog.json`、`audit.jsonl` 持久化，不破坏既有 `mcp-runtime.json` 配置兼容。
-- Source UI presentation 增加 health、lifecycle、tool count、last checked、last error、platform capabilities 与 audit count 指标。
-- Commercial Readiness Phase 3 从“有 enabled source”升级为“Source 平台具备健康发现、工具目录、审计与 Connor-governed graph write policy 证据”。
-- 新增 `CommercialTrain3SourceMCPPlatformTests` 覆盖 repository persistence、runtime discovery、tool invocation audit、UI signals 与 readiness evidence。
-
-本阶段仍不引入 Craft-style multi-workspace，不接真实第三方 OAuth，不把 MCP server 当作 Connor 权限/状态源，也不完整产品化 resources/prompts/sampling/roots/elicitation UI；这些能力先作为 capability snapshot 纳入治理面。
+```text
+Tests/ConnorGraphAgentTests/AgentLoopControllerTests.swift
+Tests/ConnorGraphAgentTests/AgentContextBuilderSQLiteSearchTests.swift
+Tests/ConnorGraphAppSupportTests/AppGraphAgentRuntimeFactoryNativeSessionManagerTests.swift
+Tests/ConnorGraphAppSupportTests/NativeSessionManagerBackendTests.swift
+Tests/ConnorGraphAppSupportTests/CommercialReadinessGateTests.swift
+Tests/ConnorGraphAppSupportTests/CommercialReadinessRuntimeCenterTests.swift
+Tests/ConnorGraphAppSupportTests/CommercialReadinessSnapshotBuilderTests.swift
+Tests/ConnorGraphAppSupportTests/CommercialReadinessReleaseGateTests.swift
+Tests/ConnorGraphAppSupportTests/PhaseGCraftGradeNativeUITests.swift
+```
 
 ---
 
+## Historical Phase Ledger
 
-
-
-### Commercial Train 6: Local API / CLI / Automation Surface
-
-本阶段为 Connor 增加本地可编程控制面，使 Native Agent OS 能被本机脚本、CLI、自动化和未来 Shortcuts/loopback API 安全调用，同时不改变 Connor 的主权边界：Session OS 仍拥有会话状态，Policy Engine 仍拥有权限治理，Graph Memory 写入仍走 staging / distillation / review，不开放无审查直写。
-
-- 新增 `ConnorLocalAutomationSurface` contract，定义 Local API endpoint catalog、CLI command catalog、automation trigger request、dry-run evaluation、reviewed execution gate、local-only/audit readiness evidence。
-- 新增 `connor` SwiftPM executable，支持最小 CLI smoke path：`connor commands`、`connor readiness`、`connor automations evaluate --trigger sessionStatusChanged --session demo --status needs_review --dry-run`。
-- Automation Surface 支持 governed dry-run evaluation：输出 matched rules、action plans、ready/pending/blocked counts 和 audit summary；未经 reviewed evidence 不执行 state-changing automation。
-- Runtime Center 增加 Local API / CLI metric 与 section，将 endpoints/commands 显示为商业控制台 evidence。
-- Native Shell / Command Palette 增加 Local API / CLI 入口，映射到现有 Automation surface，不引入新 workspace 或 Web UI。
-- Commercial Readiness Dashboard 升级为 6 phases，新增 `Phase 6 · Local API / CLI / Automation Surface`，检查 endpoint count、CLI command count、trigger coverage、dry-run、reviewed execution gate、audit surface 和 local-only 安全边界。
-- 新增 `CommercialTrain6LocalAPICLIAutomationSurfaceTests` 覆盖 Local API catalog、CLI mapping、automation dry-run/gate、runtime center、readiness gate 与 shell/command palette discovery。
-
-本阶段仍不做公网 API、远程 daemon、OAuth server、多用户权限、真实 macOS Shortcuts 集成或完整 REST server；Local API 目前是 AppSupport contract/router 与 local-only readiness evidence，为后续产品化 server 留出边界。
-
----
-
-### Commercial Train 5: Native UI Commercialization
-
-本阶段将 Connor 的 Swift Native UI 从“功能入口集合”升级为商业级 Agent OS 控制台：
-
-- 新增 `ConnorNativeCommercialUIPresentation` 与 settings presentation contract，将 shell、runtime center、command palette、settings、readiness evidence 汇总为可测试的 Native UI 商业化契约。
-- Native Shell 信息架构升级为 Home / Work / Memory / Governance / Extensions / System，并新增 Runtime Center 作为默认商业首页。
-- Sidebar item 和 command 增加 commercial metadata：primary action、risk level、empty state、group、keywords、shortcut 等。
-- Runtime Center 升级为商业首页，展示 Native UI health metric 和 Next Best Actions，优先引导 approvals、graph memory review、automation review、commercial readiness blockers。
-- Command Palette 支持 group / risk / primary action / keywords / shortcut 搜索，并在 SwiftUI 中显示 primary、group、risk badge 和空状态。
-- Commercial Readiness Gate 的 Native Commercial UI phase 升级为 Train 5 evidence：home surface、runtime center、command palette、readiness link、primary actions、empty states、keyboard shortcuts、settings sections。
-- SwiftUI app 轻量接入 Runtime Center home view，不重写整套 UI，不引入 Craft UI fork 或多 workspace。
-- 新增 `CommercialTrain5NativeUICommercializationTests` 覆盖 Native UI IA、command palette、runtime center next actions、settings/readiness aggregation 和 readiness gate evidence。
-
-本阶段仍不做 App Store packaging/notarization、完整 theme editor、复杂 onboarding、team billing、多用户协作或 Electron/Web UI；Connor 继续保持单 Home / Runtime Root 与 SwiftUI native shell。
-
----
-
-### Commercial Train 4: Graph Memory as Agent Core Capability
-
-本阶段将 Graph Memory 从后处理/Review Center 能力升级为 Agent runtime 的核心能力：
-
-- 新增 Agent Graph Memory core runtime domain：memory use policy、context item role、context contract、retrieval metrics、feedback signal、runtime snapshot。
-- `AgentContextBuilder` 新增 `memoryContextContract(...)` API，在保留旧 `context(for:)` 兼容的同时，显式输出每轮回答可追溯的 Graph Memory Contract。
-- `AgentLoopController` 现在通过 Graph Memory Context Contract 注入系统记忆上下文，保留 citation/context snapshot，并在检索失败时 graceful degradation，不阻断回答。
-- `NativeSessionManager` 在 assistant turn 进入 memory staging 后，会把 trigger reasons 转换为 Connor-owned memory feedback signals，并写入 Session OS journal，形成回答后的 Memory Feedback Loop 证据。
-- `GraphMemoryProductizationCenter` 从 Review Center 扩展为 Core Memory Surface：支持 context usage、feedback signal、distillation candidate cards，并在 summary 中暴露 context/ingestion/distillation/review readiness。
-- `CommercialReadinessGate` 的 Graph Memory Phase 从候选/hold/change 计数升级为 core memory evidence：context ready、ingestion ready、distillation ready、review ready、context item count、staged bundle count、distillation candidate count、feedback signal count。
-- 新增 `CommercialTrain4GraphMemoryCoreTests` 覆盖 context contract、graceful degradation、feedback signal、dashboard core surface 与 readiness evidence。
-
-本阶段仍不接外部 Graphiti/Neo4j/Mem0/Letta，不替换 SQLite graph kernel，不让 Claude SDK 或 MCP server 拥有 Connor memory state，也不做完整 autonomous self-editing memory UI；Graph Memory 继续作为 Connor-owned background memory substrate 服务通用助手。
-
----
-
-## 已记录的阶段性系统增量
-
-截至提交 `eac3db3` 并叠加当前本地改造，已合入 / 已完成的阶段性增量包括：
+早期阶段性增量：
 
 ```text
 Phase A: Runtime Foundation Hardening
@@ -1084,17 +1097,20 @@ Phase F: Graph Memory Productization
 Phase G: Craft-grade Native UI
 Phase H: Source / Skill / Automation UI Integration
 Phase I: Command Palette / Deep-link Navigation / Runtime Click-through
+```
+
+商业化列车：
+
+```text
 Commercial Train 1: Session OS Maturation
 Commercial Train 2: Claude SDK Sidecar Productionization
 Commercial Train 3: Source / MCP Platformization
 Commercial Train 4: Graph Memory as Agent Core Capability
 Commercial Train 5: Native UI Commercialization
 Commercial Train 6: Local API / CLI / Automation Surface
-Local UI Refresh: Craft-like three-column shell and user-facing navigation cleanup
-Local Settings Center: App / AI / Appearance / Input / Permissions / Labels / Shortcuts / Preferences
 ```
 
-对应合并提交：
+已知合并/阶段提交：
 
 ```text
 Phase A: e0b6f27
@@ -1105,15 +1121,42 @@ Phase E: 829d130
 Phase F: 9c77c85
 Phase G: 0f9c99e
 Phase I: 7d17ef8
+Commercial Train 1 merge: df44381
+Commercial Train 2 merge: ef876c6
+Commercial Train 3 merge: c82db5a
+Commercial Train 4 merge: c3265d1
+Commercial Train 5 merge: 492ea1f
+Commercial Train 6 branch commit: 9a3945a
 ```
 
-Phase H 当前在 main 历史中体现为 commits：
+Phase H 在 main 历史中体现为：
 
 ```text
 05457b3 Phase H add source runtime UI presentation
 b011671 Phase H add skill runtime UI presentation
 84271e6 Phase H wire automation source and skill UI panels
 ```
+
+---
+
+## Deferred Scope
+
+当前仍刻意延后：
+
+- Public remote API
+- Remote daemon / cloud sync
+- OAuth server / team auth / multi-user permissions
+- Full REST framework or default long-running local server
+- Real macOS Shortcuts app integration
+- App Store packaging / notarization / Sparkle updater
+- Team billing / remote collaboration
+- Full onboarding walkthrough
+- Full theme editor / design system rewrite
+- External Graphiti / Neo4j / Mem0 / Letta integrations
+- Autonomous unreviewed graph writes
+- Complex temporal conflict resolution UI
+- Multi-agent shared memory protocol
+- Multi-workspace runtime
 
 ---
 
