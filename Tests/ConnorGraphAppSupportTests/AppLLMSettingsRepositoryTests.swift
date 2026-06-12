@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import ConnorGraphAgent
 import ConnorGraphAppSupport
 
 private final class FakeCredentialStore: CredentialStore, @unchecked Sendable {
@@ -23,6 +24,16 @@ private final class FakeSettingsStore: LLMSettingsStore, @unchecked Sendable {
 
     func string(forKey key: String) -> String? { values[key] }
     func set(_ value: String, forKey key: String) { values[key] = value }
+}
+
+private struct FakeAgentHTTPClient: AgentHTTPClient, Sendable {
+    var response: AgentHTTPResponse
+    var observedRequests: [AgentHTTPRequest] = []
+
+    mutating func send(_ request: AgentHTTPRequest) async throws -> AgentHTTPResponse {
+        observedRequests.append(request)
+        return response
+    }
 }
 
 @Test func settingsRepositoryPersistsNonSecretSettings() throws {
@@ -80,6 +91,29 @@ private final class FakeSettingsStore: LLMSettingsStore, @unchecked Sendable {
     #expect(config.apiKey == "secret-key")
 }
 
+@Test func settingsRepositorySeparatesModelListFromSelectedModel() throws {
+    let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
+    try repository.save(
+        settings: AppLLMSettings(
+            baseURLString: "https://example.com/v1",
+            model: "mimo-v2.5-pro, mimo-v2.5, mimo-v2.5-tts",
+            selectedModel: "mimo-v2.5",
+            hasAPIKey: false,
+            providerMode: .openAICompatible
+        ),
+        apiKey: "secret-key"
+    )
+
+    let loaded = try repository.loadSettings()
+    let config = try #require(try repository.openAICompatibleConfig())
+
+    #expect(loaded.model == "mimo-v2.5-pro, mimo-v2.5, mimo-v2.5-tts")
+    #expect(loaded.modelOptions == ["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2.5-tts"])
+    #expect(loaded.selectedModel == "mimo-v2.5")
+    #expect(loaded.effectiveModel == "mimo-v2.5")
+    #expect(config.model == "mimo-v2.5")
+}
+
 @Test func settingsRepositoryReturnsNilConfigWhenKeyMissing() throws {
     let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
     try repository.save(settings: AppLLMSettings.default, apiKey: nil)
@@ -87,6 +121,45 @@ private final class FakeSettingsStore: LLMSettingsStore, @unchecked Sendable {
     let config = try repository.openAICompatibleConfig()
 
     #expect(config == nil)
+}
+
+@Test func modelCatalogLoadsOpenAICompatibleModelsFromProvider() async throws {
+    let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
+    try repository.save(
+        settings: AppLLMSettings(baseURLString: "https://example.com/v1", model: "gpt-current, gpt-local", selectedModel: "gpt-current", hasAPIKey: false, providerMode: .openAICompatible),
+        apiKey: "secret-key"
+    )
+    let body = #"{"data":[{"id":"gpt-z"},{"id":"gpt-a"}]}"#.data(using: .utf8)!
+    let catalog = AppLLMModelCatalog(
+        settingsRepository: repository,
+        httpClient: FakeAgentHTTPClient(response: AgentHTTPResponse(statusCode: 200, body: body))
+    )
+
+    let connections = await catalog.loadConnections()
+    let connection = try #require(connections.first)
+
+    #expect(connection.providerMode == .openAICompatible)
+    #expect(connection.isLiveCatalog == true)
+    #expect(connection.models.map(\.id) == ["gpt-current", "gpt-local", "gpt-a", "gpt-z"])
+}
+
+@Test func modelCatalogFallsBackToConfiguredModelWhenOpenAIKeyMissing() async throws {
+    let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
+    try repository.save(
+        settings: AppLLMSettings(baseURLString: "https://example.com/v1", model: "configured-model, backup-model", selectedModel: "backup-model", hasAPIKey: false, providerMode: .openAICompatible),
+        apiKey: nil
+    )
+    let catalog = AppLLMModelCatalog(
+        settingsRepository: repository,
+        httpClient: FakeAgentHTTPClient(response: AgentHTTPResponse(statusCode: 200, body: Data()))
+    )
+
+    let connections = await catalog.loadConnections()
+    let connection = try #require(connections.first)
+
+    #expect(connection.providerMode == .openAICompatible)
+    #expect(connection.isLiveCatalog == false)
+    #expect(connection.models.map(\.id) == ["configured-model", "backup-model"])
 }
 
 @Test func settingsRepositoryPersistsGovernedSidecarSettingsAndClampsAllowAll() throws {

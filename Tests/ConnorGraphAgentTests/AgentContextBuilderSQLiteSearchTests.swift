@@ -23,23 +23,6 @@ private struct SpyHybridSearchService: GraphHybridSearchService, Sendable {
     }
 }
 
-private actor HybridContextRecorder {
-    private(set) var context: AgentContext?
-
-    func record(_ context: AgentContext) {
-        self.context = context
-    }
-}
-
-private struct HybridContextCapturingProvider: LLMProvider, Sendable {
-    let recorder: HybridContextRecorder
-
-    func complete(prompt: String, context: AgentContext) async throws -> LLMResponse {
-        await recorder.record(context)
-        return LLMResponse(text: "Captured", citations: context.items.map(\.sourceID))
-    }
-}
-
 @Test func agentContextBuilderUsesHybridSearchService() async throws {
     let state = HybridSearchSpyState()
     let service = SpyHybridSearchService(
@@ -56,28 +39,6 @@ private struct HybridContextCapturingProvider: LLMProvider, Sendable {
     #expect(queries.map(\.text) == ["Agent OS"])
         #expect(context.items.map(\.sourceID) == ["statement:fact-agent-os"])
     #expect(context.renderedText.contains("Statement[works_on] 诗闻正在设计 Agent OS 图谱存储层。"))
-}
-
-@Test func graphAgentInjectsHybridSearchContextIntoProviderPrompt() async throws {
-    let recorder = HybridContextRecorder()
-    let service = SpyHybridSearchService(
-        state: HybridSearchSpyState(),
-        response: GraphSearchResponse(hits: [
-            GraphSearchHit(ownerType: .statement, ownerID: "fact-agent-os", title: "works_on", text: "诗闻正在设计 Agent OS 图谱存储层。", score: 1.0, retrievalMethod: "fts", sourceEpisodeIDs: ["episode-1"])
-        ])
-    )
-    let agent = GraphAgent(
-        session: AgentSession(id: "session-1"),
-        contextBuilder: AgentContextBuilder(hybridSearchService: service, groupID: "default"),
-        llmProvider: HybridContextCapturingProvider(recorder: recorder)
-    )
-
-    let response = try await agent.ask("Agent OS")
-    let context = try #require(await recorder.context)
-
-    #expect(context.renderedText.contains("Statement[works_on] 诗闻正在设计 Agent OS 图谱存储层。"))
-    #expect(response.answer.citations == ["statement:fact-agent-os"])
-    #expect(response.session.messages.last?.contextSnapshot?.contains("statement:fact-agent-os") == true)
 }
 
 @Test func agentContextBuilderRendersFactEndpointGraphContext() async throws {
@@ -111,8 +72,7 @@ private struct HybridContextCapturingProvider: LLMProvider, Sendable {
     #expect(context.renderedText.contains("Source: statement:fact-agent-os-context"))
 }
 
-@Test func graphAgentInjectsNodeAdjacentGraphContextIntoProviderPrompt() async throws {
-    let recorder = HybridContextRecorder()
+@Test func agentContextBuilderRendersNodeAdjacentGraphContext() async throws {
     let service = SpyHybridSearchService(
         state: HybridSearchSpyState(),
         response: GraphSearchResponse(hits: [
@@ -133,16 +93,10 @@ private struct HybridContextCapturingProvider: LLMProvider, Sendable {
             )
         ])
     )
-    let agent = GraphAgent(
-        session: AgentSession(id: "session-graph-context"),
-        contextBuilder: AgentContextBuilder(hybridSearchService: service, groupID: "default"),
-        llmProvider: HybridContextCapturingProvider(recorder: recorder)
-    )
+    let builder = AgentContextBuilder(hybridSearchService: service, groupID: "default")
 
-    let response = try await agent.ask("Agent OS")
-    let context = try #require(await recorder.context)
+    let context = try await builder.context(for: "Agent OS")
 
     #expect(context.renderedText.contains("Entity[work_object] Agent OS: 本地优先 Agent 操作系统。"))
     #expect(context.renderedText.contains("Source: entity:node-agent-os-context"))
-    #expect(response.session.messages.last?.contextSnapshot?.contains("Entity[work_object] Agent OS") == true)
 }
