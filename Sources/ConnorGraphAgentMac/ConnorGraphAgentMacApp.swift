@@ -195,6 +195,8 @@ final class AppViewModel: ObservableObject {
     @Published var llmSettingsMessage: String?
     @Published var llmHealthCheckMessage: String?
     @Published var isTestingLLMConnection: Bool = false
+    @Published var llmModelConnections: [AppLLMModelConnection] = []
+    @Published var isLoadingLLMModelConnections: Bool = false
     @Published var chatSessions: [AgentSession] = []
     @Published var selectedChatSessionID: String?
     @Published var sessionListFilter: AgentSessionListFilter = .inbox
@@ -496,6 +498,7 @@ final class AppViewModel: ObservableObject {
         self.nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: initialSession)
         self.searchResults = []
         loadLLMSettings()
+        Task { await reloadLLMModelConnections() }
         loadRuntimeSettings()
         reloadProductOSRegistry()
         reloadAutomationConfig()
@@ -830,6 +833,20 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func reloadLLMModelConnections() async {
+        isLoadingLLMModelConnections = true
+        defer { isLoadingLLMModelConnections = false }
+        let catalog = AppLLMModelCatalog(settingsRepository: llmSettingsRepository, httpClient: URLSessionAgentHTTPClient())
+        llmModelConnections = await catalog.loadConnections()
+    }
+
+    func selectLLMModel(_ modelID: String, providerMode: AppLLMProviderMode) {
+        guard !modelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        llmProviderMode = providerMode
+        llmModel = modelID
+        saveLLMSettings()
+    }
+
     func saveLLMSettings() {
         do {
             let settings = AppLLMSettings(
@@ -851,6 +868,7 @@ final class AppViewModel: ObservableObject {
             llmSettingsMessage = "模型设置已保存。"
             llmHealthCheckMessage = nil
             errorMessage = nil
+            Task { await reloadLLMModelConnections() }
         } catch {
             errorMessage = String(describing: error)
         }
