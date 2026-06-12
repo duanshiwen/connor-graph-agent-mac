@@ -12,11 +12,20 @@ public enum AgentPermissionCapability: String, Codable, Sendable, Equatable {
     case costlyModelCall
 }
 
-public enum AgentPermissionMode: String, Codable, Sendable, Equatable {
+public enum AgentPermissionMode: String, Codable, Sendable, Equatable, CaseIterable, Hashable {
     case readOnly
     case askToWrite
     case trustedWrite
     case allowAll
+
+    public var displayName: String {
+        switch self {
+        case .readOnly: "只读"
+        case .askToWrite: "询问后编辑"
+        case .trustedWrite: "信任编辑"
+        case .allowAll: "全部允许"
+        }
+    }
 }
 
 public enum AgentPermissionOutcome: String, Codable, Sendable, Equatable {
