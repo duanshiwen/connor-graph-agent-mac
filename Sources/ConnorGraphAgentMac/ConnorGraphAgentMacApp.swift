@@ -69,6 +69,82 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum ConnorSettingsSection: String, CaseIterable, Identifiable {
+    case app
+    case ai
+    case appearance
+    case input
+    case permissions
+    case labels
+    case shortcuts
+    case preferences
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .app: "应用"
+        case .ai: "AI"
+        case .appearance: "外观"
+        case .input: "输入"
+        case .permissions: "权限"
+        case .labels: "标签"
+        case .shortcuts: "快捷键"
+        case .preferences: "偏好"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .app: "通知和更新"
+        case .ai: "模型、思考、连接"
+        case .appearance: "主题、字体、工具图标"
+        case .input: "发送键、拼写检查"
+        case .permissions: "默认权限和审批"
+        case .labels: "管理会话标签"
+        case .shortcuts: "键盘快捷键"
+        case .preferences: "用户偏好"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .app: "app.badge"
+        case .ai: "sparkles"
+        case .appearance: "paintpalette"
+        case .input: "keyboard"
+        case .permissions: "shield"
+        case .labels: "tag"
+        case .shortcuts: "command"
+        case .preferences: "person.crop.circle"
+        }
+    }
+}
+
+enum ConnorAppearanceMode: String, CaseIterable, Identifiable {
+    case system
+    case light
+    case dark
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .system: "系统"
+        case .light: "浅色"
+        case .dark: "深色"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .system: "display"
+        case .light: "sun.max"
+        case .dark: "moon"
+        }
+    }
+}
+
 @MainActor
 final class AppViewModel: ObservableObject {
     @Published var selection: SidebarItem? = .runtimeCenter
@@ -129,6 +205,27 @@ final class AppViewModel: ObservableObject {
     @Published var agentEventTimeline: [AgentEventPresentation] = []
     @Published var isBrowserVisible: Bool = false
     @Published var isCommandPalettePresented: Bool = false
+    @Published var selectedSettingsSection: ConnorSettingsSection = .app
+    @Published var desktopNotificationsEnabled: Bool = true
+    @Published var keepScreenAwake: Bool = false
+    @Published var internalBrowserEnabled: Bool = true
+    @Published var httpProxyEnabled: Bool = false
+    @Published var httpProxyURLString: String = ""
+    @Published var appearanceMode: ConnorAppearanceMode = .system
+    @Published var showProviderIcons: Bool = true
+    @Published var richToolDescriptionsEnabled: Bool = true
+    @Published var composerSendShortcut: String = "return"
+    @Published var spellCheckEnabled: Bool = true
+    @Published var autoSaveDraftsEnabled: Bool = true
+    @Published var defaultPermissionMode: AgentPermissionMode = .askToWrite
+    @Published var requireApprovalForNetwork: Bool = true
+    @Published var requireApprovalForShell: Bool = true
+    @Published var userDisplayName: String = "诗闻"
+    @Published var userTimezone: String = "Asia/Shanghai"
+    @Published var userCity: String = "杭州"
+    @Published var userCountry: String = "中国"
+    @Published var userPreferenceNotes: String = ""
+    @Published var appSettingsMessage: String?
 
     private var repository: AppGraphRepository?
     private var promotionRepository: AppPromotionQueueRepository?
@@ -143,6 +240,7 @@ final class AppViewModel: ObservableObject {
     private var sourceRuntimeRepository: AppMCPSourceRuntimeRepository?
     private var skillRuntimeRepository: AppSkillRuntimeRepository?
     private var storagePaths: AppStoragePaths?
+    private var runtimeSettingsRepository: AppRuntimeSettingsRepository?
     private var llmSettingsRepository: AppLLMSettingsRepository
     private var llmProviderHealthChecker: AppLLMProviderHealthChecker
     private var agentRuntimeFactory: AppGraphAgentRuntimeFactory?
@@ -371,6 +469,9 @@ final class AppViewModel: ObservableObject {
             self.admissionHoldQueueRepository = AppGraphAdmissionHoldQueueRepository(store: repository.store)
             self.memoryChangeLogRepository = AppGraphMemoryChangeLogRepository(store: repository.store)
             self.chatSessionRepository = AppChatSessionRepository(store: repository.store, storagePaths: storagePaths, governanceConfig: governanceConfig)
+            if let storagePaths {
+                self.runtimeSettingsRepository = AppRuntimeSettingsRepository(configDirectory: storagePaths.configDirectory)
+            }
             self.agentRuntimeFactory = AppGraphAgentRuntimeFactory(store: repository.store, settingsRepository: llmSettingsRepository)
             self.hybridSearchService = SQLiteGraphHybridSearchService(store: repository.store)
             self.backgroundJobRunner = AppGraphBackgroundJobRunner(store: repository.store, settingsRepository: llmSettingsRepository)
@@ -383,6 +484,7 @@ final class AppViewModel: ObservableObject {
         self.nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: initialSession)
         self.searchResults = []
         loadLLMSettings()
+        loadRuntimeSettings()
         reloadProductOSRegistry()
         reloadAutomationConfig()
         reloadAutomationExecutionHistory()
@@ -791,6 +893,81 @@ final class AppViewModel: ObservableObject {
             errorMessage = nil
         case .notConfigured, .failed:
             errorMessage = result.message
+        }
+    }
+
+    func selectSettingsSection(_ section: ConnorSettingsSection) {
+        selectedSettingsSection = section
+        selection = .llmSettings
+    }
+
+    func loadRuntimeSettings() {
+        do {
+            let settings = try runtimeSettingsRepository?.loadOrCreateDefault() ?? .default
+            defaultPermissionMode = settings.loop.permissionMode == .allowAll ? .askToWrite : settings.loop.permissionMode
+            showProviderIcons = settings.ui.showProviderIcons
+            richToolDescriptionsEnabled = settings.ui.richToolDescriptionsEnabled
+            desktopNotificationsEnabled = settings.app.desktopNotificationsEnabled
+            keepScreenAwake = settings.app.keepScreenAwake
+            internalBrowserEnabled = settings.app.internalBrowserEnabled
+            httpProxyEnabled = settings.app.httpProxyEnabled
+            httpProxyURLString = settings.app.httpProxyURLString
+            appearanceMode = ConnorAppearanceMode(rawValue: settings.appearance.mode) ?? .system
+            spellCheckEnabled = settings.input.spellCheckEnabled
+            autoSaveDraftsEnabled = settings.input.autoSaveDraftsEnabled
+            composerSendShortcut = settings.input.composerSendShortcut
+            requireApprovalForNetwork = settings.permissions.requireApprovalForNetwork
+            requireApprovalForShell = settings.permissions.requireApprovalForShell
+            userDisplayName = settings.preferences.displayName
+            userTimezone = settings.preferences.timezone
+            userCity = settings.preferences.city
+            userCountry = settings.preferences.country
+            userPreferenceNotes = settings.preferences.notes
+            appSettingsMessage = nil
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func saveRuntimeSettings() {
+        do {
+            var settings = try runtimeSettingsRepository?.loadOrCreateDefault() ?? .default
+            settings.loop.permissionMode = defaultPermissionMode == .allowAll ? .askToWrite : defaultPermissionMode
+            settings.ui.showProviderIcons = showProviderIcons
+            settings.ui.richToolDescriptionsEnabled = richToolDescriptionsEnabled
+            settings.app.desktopNotificationsEnabled = desktopNotificationsEnabled
+            settings.app.keepScreenAwake = keepScreenAwake
+            settings.app.internalBrowserEnabled = internalBrowserEnabled
+            settings.app.httpProxyEnabled = httpProxyEnabled
+            settings.app.httpProxyURLString = httpProxyURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+            settings.appearance.mode = appearanceMode.rawValue
+            settings.input.spellCheckEnabled = spellCheckEnabled
+            settings.input.autoSaveDraftsEnabled = autoSaveDraftsEnabled
+            settings.input.composerSendShortcut = composerSendShortcut
+            settings.permissions.requireApprovalForNetwork = requireApprovalForNetwork
+            settings.permissions.requireApprovalForShell = requireApprovalForShell
+            settings.preferences.displayName = userDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            settings.preferences.timezone = userTimezone.trimmingCharacters(in: .whitespacesAndNewlines)
+            settings.preferences.city = userCity.trimmingCharacters(in: .whitespacesAndNewlines)
+            settings.preferences.country = userCountry.trimmingCharacters(in: .whitespacesAndNewlines)
+            settings.preferences.notes = userPreferenceNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+            try runtimeSettingsRepository?.save(settings)
+            appSettingsMessage = "设置已保存。"
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func resetRuntimeSettings() {
+        do {
+            try runtimeSettingsRepository?.save(.default)
+            loadRuntimeSettings()
+            appSettingsMessage = "设置已恢复默认值。"
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
         }
     }
 
@@ -1331,62 +1508,35 @@ final class AppViewModel: ObservableObject {
 
 struct AppShellView: View {
     @StateObject var viewModel: AppViewModel
-    @State private var sidebarSelection: SidebarItem? = .runtimeCenter
+    @State private var sidebarSelection: SidebarItem? = .agentChat
 
     var body: some View {
-        NavigationSplitView {
-            List(SidebarItem.allCases, selection: $sidebarSelection) { item in
-                Text(item.rawValue).tag(item)
-            }
-            .navigationTitle("Connor")
-            .onChange(of: sidebarSelection) { _, newSelection in
-                viewModel.deferViewUpdate {
-                    viewModel.selection = newSelection
-                }
-            }
-        } detail: {
-            VStack(spacing: 0) {
-                SchemaHealthBanner(viewModel: viewModel)
-                Divider()
-                Group {
-                    switch viewModel.selection ?? .runtimeCenter {
-                    case .runtimeCenter:
-                        ConnorRuntimeCenterView(viewModel: viewModel)
-                    case .entities:
-                        GraphEntitiesView(entities: viewModel.entities, statements: viewModel.statements, episodes: viewModel.episodes)
-                    case .search:
-                        SearchView(viewModel: viewModel)
-                    case .observeLog:
-                        ObserveLogView(entries: viewModel.observeLogEntries)
-                    case .agentChat:
-                        AgentChatView(viewModel: viewModel)
-                    case .promotionQueue:
-                        PromotionQueueView(viewModel: viewModel)
-                    case .graphWriteCandidates:
-                        GraphWriteCandidateReviewView(viewModel: viewModel)
-                    case .pendingApprovals:
-                        AgentPendingApprovalReviewView(viewModel: viewModel)
-                    case .memoryChangeLog:
-                        MemoryChangeLogView(viewModel: viewModel)
-                    case .extractionDiagnostics:
-                        GraphExtractionDiagnosticsView(viewModel: viewModel)
-                    case .automation:
-                        AutomationRuntimePanelView(viewModel: viewModel)
-                    case .productOS:
-                        ProductOSRegistryView(viewModel: viewModel)
-                    case .sources:
-                        SourceRuntimePanelView(viewModel: viewModel)
-                    case .skills:
-                        SkillRuntimePanelView(viewModel: viewModel)
-                    case .llmSettings:
-                        LLMSettingsView(viewModel: viewModel)
-                    }
-                }
-            }
-            .frame(minWidth: 720, minHeight: 480)
+        HStack(spacing: 0) {
+            CraftPrimarySidebarView(viewModel: viewModel, selection: $sidebarSelection)
+                .frame(width: 264)
+                .background(.bar)
+
+            Divider()
+
+            CraftListPaneView(viewModel: viewModel, selection: $sidebarSelection)
+                .frame(width: 314)
+                .background(Color(nsColor: .windowBackgroundColor).opacity(0.84))
+
+            Divider()
+
+            CraftDetailPaneView(viewModel: viewModel, selection: sidebarSelection ?? .agentChat)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
         }
+        .frame(minWidth: 1120, minHeight: 680)
         .onAppear {
-            sidebarSelection = viewModel.selection
+            sidebarSelection = viewModel.selection ?? .agentChat
+            viewModel.reloadChatSessions()
+        }
+        .onChange(of: sidebarSelection) { _, newSelection in
+            viewModel.deferViewUpdate {
+                viewModel.selection = newSelection
+            }
         }
         .onChange(of: viewModel.selection) { _, newSelection in
             if sidebarSelection != newSelection {
@@ -1396,6 +1546,465 @@ struct AppShellView: View {
         .sheet(isPresented: $viewModel.isCommandPalettePresented) {
             ConnorCommandPaletteView(viewModel: viewModel)
         }
+    }
+}
+
+private struct CraftPrimarySidebarView: View {
+    @ObservedObject var viewModel: AppViewModel
+    @Binding var selection: SidebarItem?
+    @State private var sessionsExpanded = true
+    @State private var labelsExpanded = true
+    @State private var sourcesExpanded = true
+    @State private var automationExpanded = true
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Button {
+                viewModel.newChatSession()
+                select(.agentChat)
+            } label: {
+                Label("新建会话", systemImage: "square.and.pencil")
+                    .font(.subheadline.weight(.medium))
+                    .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
+                    .padding(.horizontal, 4)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.regular)
+            .padding(.horizontal, 10)
+            .padding(.top, 10)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    SidebarDisclosure(title: "所有会话", systemImage: "tray", isExpanded: $sessionsExpanded) {
+                        SidebarRow(title: "全部", systemImage: "bubble.left.and.bubble.right", count: viewModel.chatSessions.count, isSelected: selection == .agentChat && viewModel.sessionListFilter == .all) {
+                            viewModel.setSessionListFilter(.all)
+                            select(.agentChat)
+                        }
+                        SidebarRow(title: "收件箱", systemImage: "tray.full", count: inboxCount, isSelected: selection == .agentChat && viewModel.sessionListFilter == .inbox) {
+                            viewModel.setSessionListFilter(.inbox)
+                            select(.agentChat)
+                        }
+                        ForEach(viewModel.governanceConfig.statuses.sorted { $0.sortOrder < $1.sortOrder }) { status in
+                            if let sessionStatus = AgentSessionStatus(rawValue: status.id) {
+                                SidebarRow(title: status.name, systemImage: status.systemImage, count: count(for: sessionStatus), isSelected: selection == .agentChat && viewModel.sessionListFilter == .status(sessionStatus)) {
+                                    viewModel.setSessionListFilter(.status(sessionStatus))
+                                    select(.agentChat)
+                                }
+                            }
+                        }
+                    }
+
+                    SidebarDisclosure(title: "标签", systemImage: "tag", isExpanded: $labelsExpanded) {
+                        if viewModel.governanceConfig.labels.isEmpty {
+                            SidebarMutedText("暂无标签")
+                        } else {
+                            ForEach(viewModel.governanceConfig.labels) { label in
+                                SidebarRow(title: label.name, systemImage: "tag", count: count(forLabel: label.id), isSelected: selection == .agentChat && viewModel.sessionListFilter == .label(label.id)) {
+                                    viewModel.setSessionListFilter(.label(label.id))
+                                    select(.agentChat)
+                                }
+                            }
+                        }
+                    }
+
+                    SidebarRow(title: "数据源", systemImage: "externaldrive.connected.to.line.below", count: viewModel.sourceRuntimeConfigurations.count, isSelected: selection == .sources) { select(.sources) }
+
+                    SidebarRow(title: "技能", systemImage: "bolt", count: viewModel.skillRuntimeDefinitions.count, isSelected: selection == .skills) { select(.skills) }
+
+                    SidebarDisclosure(title: "自动化", systemImage: "wand.and.stars", isExpanded: $automationExpanded) {
+                        SidebarRow(title: "定时任务", systemImage: "clock", count: viewModel.automationConfig.rules.count, isSelected: selection == .automation) { select(.automation) }
+                        SidebarRow(title: "事件触发", systemImage: "dot.radiowaves.left.and.right", count: viewModel.automationTriggerRecords.count, isSelected: selection == .automation) { select(.automation) }
+                        SidebarRow(title: "智能体", systemImage: "shippingbox", count: viewModel.productOSRegistry.skills.count, isSelected: selection == .productOS) { select(.productOS) }
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 10)
+            }
+
+            Spacer(minLength: 0)
+
+            VStack(spacing: 6) {
+                SidebarRow(title: "设置", systemImage: "gearshape", count: nil, isSelected: selection == .llmSettings) { select(.llmSettings) }
+            }
+            .padding(.horizontal, 10)
+            .padding(.bottom, 10)
+        }
+    }
+
+    private var inboxCount: Int {
+        viewModel.chatSessions.filter { !$0.governance.isArchived }.count
+    }
+
+    private func count(for status: AgentSessionStatus) -> Int {
+        viewModel.chatSessions.filter { $0.governance.status == status }.count
+    }
+
+    private func count(forLabel labelID: String) -> Int {
+        viewModel.chatSessions.filter { session in
+            session.governance.labels.contains { $0.id == labelID }
+        }.count
+    }
+
+    private func select(_ item: SidebarItem) {
+        selection = item
+        viewModel.selection = item
+    }
+}
+
+private struct CraftListPaneView: View {
+    @ObservedObject var viewModel: AppViewModel
+    @Binding var selection: SidebarItem?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            switch selection ?? .agentChat {
+            case .agentChat:
+                CraftSessionListPane(viewModel: viewModel)
+            case .llmSettings:
+                CraftSettingsListPane(viewModel: viewModel, selection: $selection)
+            case .runtimeCenter:
+                CraftSimpleListPane(title: "对话", subtitle: "会话工作区", rows: [])
+            case .sources:
+                CraftSimpleListPane(title: "数据源", subtitle: "MCP Source Runtime", rows: viewModel.sourceRuntimeConfigurations.map(\.displayName))
+            case .skills:
+                CraftSimpleListPane(title: "技能", subtitle: "Skill Runtime", rows: viewModel.skillRuntimeDefinitions.map { $0.manifest.name })
+            case .automation:
+                CraftSimpleListPane(title: "自动化", subtitle: "事件触发与执行历史", rows: viewModel.automationConfig.rules.map(\.name))
+            case .productOS:
+                CraftSimpleListPane(title: "Product OS", subtitle: "本地控制面模块", rows: viewModel.productOSRegistry.sources.map(\.displayName) + viewModel.productOSRegistry.skills.map(\.displayName))
+            default:
+                CraftSimpleListPane(title: (selection ?? .agentChat).rawValue, subtitle: "Connor 工作区", rows: [])
+            }
+        }
+    }
+}
+
+private struct CraftSessionListPane: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(sessionListTitle)
+                    .font(.headline)
+                Spacer()
+                Button(action: { viewModel.reloadChatSessions() }) {
+                    Image(systemName: "line.3.horizontal.decrease")
+                }
+                .buttonStyle(.borderless)
+                .help("刷新/过滤")
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
+
+            Divider()
+
+            ScrollView {
+                LazyVStack(spacing: 2) {
+                    ForEach(viewModel.chatSessions) { session in
+                        CraftSessionRow(row: AgentChatSessionPresentation(session: session), isSelected: session.id == viewModel.selectedChatSessionID) {
+                            viewModel.selectChatSession(session.id)
+                        }
+                    }
+                    if viewModel.chatSessions.isEmpty {
+                        ContentUnavailableView("暂无会话", systemImage: "bubble.left", description: Text("点击左上角新建会话开始。"))
+                            .padding(.top, 80)
+                    }
+                }
+                .padding(8)
+            }
+        }
+        .task { viewModel.reloadChatSessions() }
+    }
+
+    private var sessionListTitle: String {
+        switch viewModel.sessionListFilter {
+        case .inbox: "所有会话"
+        case .archived: "已归档"
+        case .all: "全部会话"
+        case .status(let status): status.displayName
+        case .label(let labelID): viewModel.governanceConfig.labels.first(where: { $0.id == labelID })?.name ?? labelID
+        }
+    }
+}
+
+private struct CraftDetailPaneView: View {
+    @ObservedObject var viewModel: AppViewModel
+    var selection: SidebarItem
+
+    var body: some View {
+        Group {
+            switch selection {
+            case .runtimeCenter:
+                ConnorRuntimeCenterView(viewModel: viewModel)
+            case .entities:
+                GraphEntitiesView(entities: viewModel.entities, statements: viewModel.statements, episodes: viewModel.episodes)
+            case .search:
+                SearchView(viewModel: viewModel)
+            case .observeLog:
+                ObserveLogView(entries: viewModel.observeLogEntries)
+            case .agentChat:
+                AgentChatView(viewModel: viewModel)
+            case .promotionQueue:
+                PromotionQueueView(viewModel: viewModel)
+            case .graphWriteCandidates:
+                GraphWriteCandidateReviewView(viewModel: viewModel)
+            case .pendingApprovals:
+                AgentPendingApprovalReviewView(viewModel: viewModel)
+            case .memoryChangeLog:
+                MemoryChangeLogView(viewModel: viewModel)
+            case .extractionDiagnostics:
+                GraphExtractionDiagnosticsView(viewModel: viewModel)
+            case .automation:
+                AutomationRuntimePanelView(viewModel: viewModel)
+            case .productOS:
+                ProductOSRegistryView(viewModel: viewModel)
+            case .sources:
+                SourceRuntimePanelView(viewModel: viewModel)
+            case .skills:
+                SkillRuntimePanelView(viewModel: viewModel)
+            case .llmSettings:
+                ConnorSettingsDetailView(viewModel: viewModel)
+            }
+        }
+    }
+}
+
+private struct CraftSessionRow: View {
+    var row: AgentChatSessionPresentation
+    var isSelected: Bool
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: row.isFlagged ? "pin.fill" : icon(for: row.status))
+                    .foregroundStyle(row.isFlagged ? .orange : (isSelected ? .accentColor : .secondary))
+                    .frame(width: 18)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(row.title)
+                            .font(.subheadline.weight(isSelected ? .semibold : .regular))
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                        Text(row.relativeUpdatedTime)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    HStack(spacing: 6) {
+                        Text(row.statusText)
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(statusColor(row.status).opacity(0.14), in: Capsule())
+                        Text("\(row.messageCount) msgs")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    if !row.labels.isEmpty {
+                        HStack(spacing: 4) {
+                            ForEach(Array(row.labels.prefix(3)), id: \.stableID) { label in
+                                Text(label.displayText)
+                                    .font(.caption2)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(.purple.opacity(0.10), in: Capsule())
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isSelected ? Color.accentColor.opacity(0.14) : Color.clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func icon(for status: AgentSessionStatus) -> String {
+        switch status {
+        case .todo: "circle"
+        case .inProgress: "play.circle"
+        case .waiting: "clock"
+        case .needsReview: "exclamationmark.bubble"
+        case .done: "checkmark.circle.fill"
+        case .blocked: "nosign"
+        case .archived: "archivebox"
+        }
+    }
+
+    private func statusColor(_ status: AgentSessionStatus) -> Color {
+        switch status {
+        case .todo: .secondary
+        case .inProgress: .blue
+        case .waiting: .orange
+        case .needsReview: .purple
+        case .done: .green
+        case .blocked: .red
+        case .archived: .gray
+        }
+    }
+}
+
+private struct CraftSettingsListPane: View {
+    @ObservedObject var viewModel: AppViewModel
+    @Binding var selection: SidebarItem?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Text("设置")
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+            Divider()
+            VStack(spacing: 0) {
+                ForEach(ConnorSettingsSection.allCases) { section in
+                    SettingsCategoryRow(
+                        title: section.title,
+                        subtitle: section.subtitle,
+                        systemImage: section.systemImage,
+                        isSelected: viewModel.selectedSettingsSection == section
+                    ) {
+                        selection = .llmSettings
+                        viewModel.selectSettingsSection(section)
+                    }
+                }
+            }
+            .padding(10)
+            Spacer()
+        }
+    }
+}
+
+private struct SettingsCategoryRow: View {
+    var title: String
+    var subtitle: String
+    var systemImage: String
+    var isSelected: Bool
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: systemImage)
+                    .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                    .frame(width: 18)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.subheadline.weight(.medium))
+                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if isSelected {
+                    Image(systemName: "ellipsis")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 10)
+            .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct CraftSimpleListPane: View {
+    var title: String
+    var subtitle: String
+    var rows: [String]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(spacing: 3) {
+                Text(title).font(.headline)
+                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            Divider()
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 6) {
+                    ForEach(rows.isEmpty ? ["在右侧查看详情"] : rows, id: \.self) { row in
+                        Text(row)
+                            .font(.subheadline)
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(10)
+                            .background(.quaternary.opacity(0.18), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                }
+                .padding(10)
+            }
+        }
+    }
+}
+
+private struct SidebarDisclosure<Content: View>: View {
+    var title: String
+    var systemImage: String
+    @Binding var isExpanded: Bool
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            VStack(alignment: .leading, spacing: 2) {
+                content
+            }
+            .padding(.leading, 12)
+            .padding(.top, 3)
+        } label: {
+            Label(title, systemImage: systemImage)
+                .font(.subheadline.weight(.medium))
+        }
+        .disclosureGroupStyle(.automatic)
+    }
+}
+
+private struct SidebarRow: View {
+    var title: String
+    var systemImage: String
+    var count: Int?
+    var isSelected: Bool
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                Image(systemName: systemImage)
+                    .frame(width: 16)
+                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                Text(title)
+                    .font(.subheadline)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                if let count {
+                    Text("\(count)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background(isSelected ? Color.accentColor.opacity(0.14) : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct SidebarMutedText: View {
+    var text: String
+
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
     }
 }
 
@@ -2534,5 +3143,477 @@ struct LLMSettingsView: View {
         }
         .padding()
         .navigationTitle("模型设置")
+    }
+}
+
+struct ConnorSettingsDetailView: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                HStack(alignment: .center) {
+                    Text(viewModel.selectedSettingsSection.title)
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                    Button(action: { viewModel.resetRuntimeSettings() }) {
+                        Image(systemName: "ellipsis")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("更多")
+                }
+
+                Group {
+                    switch viewModel.selectedSettingsSection {
+                    case .app:
+                        SettingsAppSection(viewModel: viewModel)
+                    case .ai:
+                        SettingsAISection(viewModel: viewModel)
+                    case .appearance:
+                        SettingsAppearanceSection(viewModel: viewModel)
+                    case .input:
+                        SettingsInputSection(viewModel: viewModel)
+                    case .permissions:
+                        SettingsPermissionsSection(viewModel: viewModel)
+                    case .labels:
+                        SettingsLabelsSection(viewModel: viewModel)
+                    case .shortcuts:
+                        SettingsShortcutsSection()
+                    case .preferences:
+                        SettingsPreferencesSection(viewModel: viewModel)
+                    }
+                }
+                .frame(maxWidth: 760)
+                .frame(maxWidth: .infinity, alignment: .center)
+
+                if let message = viewModel.appSettingsMessage {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: 760, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
+                if let error = viewModel.errorMessage {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: 760, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
+            }
+            .padding(.horizontal, 44)
+            .padding(.vertical, 18)
+        }
+        .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
+        .task {
+            viewModel.loadRuntimeSettings()
+        }
+    }
+}
+
+private struct SettingsAppSection: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            SettingsGroup(title: "通知") {
+                SettingsToggleRow(title: "桌面通知", subtitle: "AI 在聊天中完成工作时发送通知。", isOn: $viewModel.desktopNotificationsEnabled)
+            }
+            SettingsGroup(title: "电源") {
+                SettingsToggleRow(title: "保持屏幕常亮", subtitle: "会话运行时防止屏幕关闭。", isOn: $viewModel.keepScreenAwake)
+            }
+            SettingsGroup(title: "工具") {
+                SettingsToggleRow(title: "内置浏览器", subtitle: "如果使用外部浏览器工具，则禁用。", isOn: $viewModel.internalBrowserEnabled)
+            }
+            SettingsGroup(title: "网络") {
+                SettingsToggleRow(title: "HTTP 代理", subtitle: "通过代理服务器路由网络流量。", isOn: $viewModel.httpProxyEnabled)
+                if viewModel.httpProxyEnabled {
+                    Divider()
+                    SettingsTextFieldRow(title: "代理地址", subtitle: "例如 http://127.0.0.1:7890", text: $viewModel.httpProxyURLString)
+                }
+            }
+            SettingsGroup(title: "关于") {
+                SettingsValueRow(title: "版本", value: "0.1.0")
+                Divider()
+                HStack {
+                    Text("检查更新")
+                    Spacer()
+                    Button("立即检查") { viewModel.appSettingsMessage = "当前为本地开发版本。" }
+                }
+                .font(.subheadline)
+            }
+            SettingsSaveBar(viewModel: viewModel)
+        }
+    }
+}
+
+private struct SettingsAISection: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            SettingsGroup(title: "默认") {
+                SettingsPickerRow(title: "连接", subtitle: "新聊天的 API 连接", selection: $viewModel.llmProviderMode) {
+                    Text("模拟模式").tag(AppLLMProviderMode.stub)
+                    Text("OpenAI 兼容").tag(AppLLMProviderMode.openAICompatible)
+                    Text("Claude Sidecar").tag(AppLLMProviderMode.governedClaudeSidecar)
+                }
+                Divider()
+                SettingsTextFieldRow(title: "模型", subtitle: "新聊天的 AI 模型", text: $viewModel.llmModel)
+                Divider()
+                SettingsPickerRow(title: "权限", subtitle: "新聊天默认权限", selection: $viewModel.defaultPermissionMode) {
+                    ForEach(AgentPermissionMode.allCases.filter { $0 != .allowAll }, id: \.self) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+            }
+
+            SettingsGroup(title: "连接") {
+                SettingsTextFieldRow(title: "Base URL", subtitle: "OpenAI-compatible endpoint", text: $viewModel.llmBaseURLString)
+                Divider()
+                SecureField("API Key", text: $viewModel.llmAPIKeyInput)
+                    .textFieldStyle(.roundedBorder)
+                    .padding(.vertical, 6)
+                Divider()
+                SettingsValueRow(title: "API Key", value: viewModel.llmHasAPIKey ? "已本地加密保存" : "尚未保存")
+                Divider()
+                HStack(spacing: 10) {
+                    Button("保存 AI 设置") {
+                        viewModel.saveLLMSettings()
+                        viewModel.saveRuntimeSettings()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    Button("清除 API Key") { viewModel.clearLLMAPIKey() }
+                    Button(viewModel.isTestingLLMConnection ? "测试中…" : "测试连接") {
+                        Task { await viewModel.testLLMConnection() }
+                    }
+                    .disabled(viewModel.isTestingLLMConnection)
+                }
+                .controlSize(.regular)
+            }
+
+            if viewModel.llmProviderMode == .governedClaudeSidecar {
+                SettingsGroup(title: "Claude Sidecar") {
+                    SettingsTextFieldRow(title: "可执行文件", subtitle: "例如 /usr/local/bin/node", text: $viewModel.sidecarExecutablePath)
+                    Divider()
+                    SettingsTextFieldRow(title: "参数", subtitle: "sidecars/claude-agent-engine/claude-sidecar.mjs", text: $viewModel.sidecarArguments)
+                    Divider()
+                    SettingsTextFieldRow(title: "工作目录", subtitle: "Sidecar 运行目录", text: $viewModel.sidecarWorkingDirectoryPath)
+                }
+            }
+
+            if let message = viewModel.llmSettingsMessage {
+                Text(message).font(.caption).foregroundStyle(.secondary)
+            }
+            if let message = viewModel.llmHealthCheckMessage {
+                Text(message).font(.caption).foregroundStyle(message.contains("OK") || message.contains("available") ? .green : .secondary)
+            }
+        }
+    }
+}
+
+private struct SettingsAppearanceSection: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            SettingsGroup(title: "默认主题") {
+                HStack {
+                    Text("模式")
+                        .font(.subheadline.weight(.medium))
+                    Spacer()
+                    Picker("模式", selection: $viewModel.appearanceMode) {
+                        ForEach(ConnorAppearanceMode.allCases) { mode in
+                            Label(mode.displayName, systemImage: mode.systemImage).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 260)
+                }
+                Divider()
+                SettingsValueRow(title: "颜色主题", value: "使用默认")
+                Divider()
+                SettingsValueRow(title: "字体", value: "系统")
+                Divider()
+                SettingsValueRow(title: "语言", value: "简体中文")
+            }
+            SettingsGroup(title: "界面") {
+                SettingsToggleRow(title: "连接图标", subtitle: "在会话列表和模型选择器中显示提供商图标。", isOn: $viewModel.showProviderIcons)
+                Divider()
+                SettingsToggleRow(title: "丰富的工具描述", subtitle: "为工具调用添加操作名称和意图描述。", isOn: $viewModel.richToolDescriptionsEnabled)
+            }
+            SettingsSaveBar(viewModel: viewModel)
+        }
+    }
+}
+
+private struct SettingsInputSection: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            SettingsGroup(title: "发送") {
+                SettingsPickerRow(title: "发送消息", subtitle: "选择默认发送快捷键", selection: $viewModel.composerSendShortcut) {
+                    Text("Return").tag("return")
+                    Text("⌘ Return").tag("cmd-return")
+                }
+                Divider()
+                SettingsToggleRow(title: "自动保存草稿", subtitle: "切换会话时保留未发送输入。", isOn: $viewModel.autoSaveDraftsEnabled)
+                Divider()
+                SettingsToggleRow(title: "拼写检查", subtitle: "使用系统拼写检查。", isOn: $viewModel.spellCheckEnabled)
+            }
+            SettingsSaveBar(viewModel: viewModel)
+        }
+    }
+}
+
+private struct SettingsPermissionsSection: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            SettingsGroup(title: "默认权限") {
+                SettingsPickerRow(title: "新会话权限", subtitle: "控制工具调用和写入操作", selection: $viewModel.defaultPermissionMode) {
+                    ForEach(AgentPermissionMode.allCases.filter { $0 != .allowAll }, id: \.self) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                Divider()
+                SettingsToggleRow(title: "网络访问需要审批", subtitle: "外部网络请求默认进入审批流程。", isOn: $viewModel.requireApprovalForNetwork)
+                Divider()
+                SettingsToggleRow(title: "Shell 写入需要审批", subtitle: "本地命令涉及写入时默认要求确认。", isOn: $viewModel.requireApprovalForShell)
+            }
+            SettingsSaveBar(viewModel: viewModel)
+        }
+    }
+}
+
+private struct SettingsLabelsSection: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            SettingsGroup(title: "关于标签") {
+                Text("标签帮助你用彩色标记整理会话。布尔标签用于筛选，带值标签可表达优先级、截止日期或项目引用。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            SettingsGroup(title: "标签层级") {
+                if viewModel.governanceConfig.labels.isEmpty {
+                    Text("尚未配置标签。")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(viewModel.governanceConfig.labels) { label in
+                        HStack {
+                            Circle().fill(color(named: label.colorName)).frame(width: 7, height: 7)
+                            Text(label.name).frame(width: 180, alignment: .leading)
+                            Text(label.valueType.rawValue).foregroundStyle(.secondary)
+                            Spacer()
+                        }
+                        .font(.subheadline)
+                        .padding(.vertical, 7)
+                        if label.id != viewModel.governanceConfig.labels.last?.id { Divider() }
+                    }
+                }
+            }
+            SettingsGroup(title: "自动应用规则") {
+                Text("自动应用规则将在后续版本接入。当前标签定义来自会话治理配置。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func color(named name: String) -> Color {
+        switch name {
+        case "orange": .orange
+        case "purple": .purple
+        case "teal": .teal
+        case "red": .red
+        case "yellow": .yellow
+        case "green": .green
+        default: .blue
+        }
+    }
+}
+
+private struct SettingsShortcutsSection: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            SettingsGroup(title: "通用") {
+                ShortcutRow(title: "新建聊天", keys: ["⌘", "N"])
+                ShortcutRow(title: "设置", keys: ["⌘", ","])
+                ShortcutRow(title: "搜索", keys: ["⌘", "F"])
+                ShortcutRow(title: "命令面板", keys: ["⌘", "/"])
+            }
+            SettingsGroup(title: "导航") {
+                ShortcutRow(title: "聚焦侧栏", keys: ["⌘", "1"])
+                ShortcutRow(title: "聚焦会话列表", keys: ["⌘", "2"])
+                ShortcutRow(title: "聚焦聊天", keys: ["⌘", "3"])
+                ShortcutRow(title: "聚焦下一块区域", keys: ["Tab"])
+            }
+        }
+    }
+}
+
+private struct SettingsPreferencesSection: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            SettingsGroup(title: "基本信息") {
+                SettingsTextFieldRow(title: "名称", subtitle: "Connor 如何称呼你。", text: $viewModel.userDisplayName)
+                Divider()
+                SettingsTextFieldRow(title: "时区", subtitle: "用于相对日期和日程上下文。", text: $viewModel.userTimezone)
+            }
+            SettingsGroup(title: "位置") {
+                SettingsTextFieldRow(title: "城市", subtitle: "用于本地信息和上下文。", text: $viewModel.userCity)
+                Divider()
+                SettingsTextFieldRow(title: "国家", subtitle: "用于区域格式和上下文。", text: $viewModel.userCountry)
+            }
+            SettingsGroup(title: "备注") {
+                TextEditor(text: $viewModel.userPreferenceNotes)
+                    .font(.subheadline)
+                    .frame(minHeight: 150)
+                    .scrollContentBackground(.hidden)
+                    .padding(8)
+                    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+            SettingsSaveBar(viewModel: viewModel)
+        }
+    }
+}
+
+private struct SettingsGroup<Content: View>: View {
+    var title: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.headline)
+            VStack(spacing: 0) {
+                content
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+            }
+            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.14), lineWidth: 1)
+            )
+        }
+    }
+}
+
+private struct SettingsToggleRow: View {
+    var title: String
+    var subtitle: String
+    @Binding var isOn: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.subheadline.weight(.medium))
+                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Toggle("", isOn: $isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+        }
+        .frame(minHeight: 42)
+    }
+}
+
+private struct SettingsValueRow: View {
+    var title: String
+    var value: String
+
+    var body: some View {
+        HStack {
+            Text(title).font(.subheadline.weight(.medium))
+            Spacer()
+            Text(value).font(.subheadline).foregroundStyle(.secondary)
+        }
+        .frame(minHeight: 42)
+    }
+}
+
+private struct SettingsTextFieldRow: View {
+    var title: String
+    var subtitle: String
+    @Binding var text: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.subheadline.weight(.medium))
+            Text(subtitle).font(.caption).foregroundStyle(.secondary)
+            TextField(title, text: $text)
+                .textFieldStyle(.roundedBorder)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 4)
+    }
+}
+
+private struct SettingsPickerRow<Selection: Hashable, Content: View>: View {
+    var title: String
+    var subtitle: String
+    @Binding var selection: Selection
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.subheadline.weight(.medium))
+                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Picker(title, selection: $selection) { content }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(maxWidth: 220)
+        }
+        .frame(minHeight: 46)
+    }
+}
+
+private struct SettingsSaveBar: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        HStack {
+            Spacer()
+            Button("重新加载") { viewModel.loadRuntimeSettings() }
+            Button("保存设置") { viewModel.saveRuntimeSettings() }
+                .buttonStyle(.borderedProminent)
+        }
+        .controlSize(.regular)
+    }
+}
+
+private struct ShortcutRow: View {
+    var title: String
+    var keys: [String]
+
+    var body: some View {
+        HStack {
+            Text(title).font(.subheadline.weight(.medium))
+            Spacer()
+            HStack(spacing: 4) {
+                ForEach(keys, id: \.self) { key in
+                    Text(key)
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(.quaternary.opacity(0.30), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                }
+            }
+        }
+        .frame(minHeight: 38)
     }
 }
