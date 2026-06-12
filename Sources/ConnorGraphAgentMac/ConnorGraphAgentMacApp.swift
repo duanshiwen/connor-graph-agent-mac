@@ -44,6 +44,7 @@ private func keyEquivalent(for command: ConnorNativeShellCommand) -> KeyEquivale
     case .openSources: "4"
     case .openSkills: "5"
     case .openAutomation: "6"
+    case .openLocalAutomationSurface: "7"
     case .checkCommercialReadiness: "r"
     case .openSettings: ","
     }
@@ -310,7 +311,7 @@ final class AppViewModel: ObservableObject {
             selection = .entities
         case .approvals:
             selection = .pendingApprovals
-        case .automation:
+        case .automation, .localAutomationSurface:
             selection = .automation
         case .productOS:
             selection = .productOS
@@ -335,7 +336,7 @@ final class AppViewModel: ObservableObject {
             navigate(to: isBrowserVisible ? .browserWorkspace : .agentChat)
         case .checkCommercialReadiness:
             runCommercialReadinessReleaseGate()
-        case .openGraphMemoryReview, .openApprovals, .openSources, .openSkills, .openAutomation, .openSettings:
+        case .openGraphMemoryReview, .openApprovals, .openSources, .openSkills, .openAutomation, .openLocalAutomationSurface, .openSettings:
             if let command = ConnorNativeShellPresentation.default.command(for: commandID) {
                 navigate(to: command.target)
             }
