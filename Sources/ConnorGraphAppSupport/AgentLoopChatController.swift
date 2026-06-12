@@ -24,6 +24,7 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
     public private(set) var events: [AgentEvent]
     public private(set) var eventPresentations: [AgentEventPresentation]
     public var groupID: String
+    public var recentMessageLimit: Int
 
     private let presenter: AgentEventPresenter
     private let memoryIngestionService: MemoryIngestionService
@@ -33,6 +34,7 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
         loopController: AgentLoopController<Provider>,
         session: AgentSession = AgentSession(),
         groupID: String = "default",
+        recentMessageLimit: Int = 6,
         memoryStagingRepository: AppMemoryStagingBufferRepository? = nil,
         memoryIngestionService: MemoryIngestionService = MemoryIngestionService()
     ) {
@@ -42,6 +44,7 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
         self.events = []
         self.eventPresentations = []
         self.groupID = groupID
+        self.recentMessageLimit = recentMessageLimit
         self.presenter = AgentEventPresenter()
         self.memoryStagingRepository = memoryStagingRepository
         self.memoryIngestionService = memoryIngestionService
@@ -49,6 +52,7 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
 
     @discardableResult
     public mutating func submit(_ prompt: String) async throws -> AgentLoopChatResponse {
+        let recentMessages = Array(session.messages.suffix(max(0, recentMessageLimit)))
         let userMessage = session.appendUserMessage(prompt)
         transcript = session.messages
         try persistMemoryStagingAfterUserMessage(userMessage)
@@ -56,6 +60,7 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
             sessionID: session.id,
             groupID: groupID,
             userMessage: prompt,
+            recentMessages: recentMessages,
             permissionMode: loopController.configuration.permissionMode
         )
 

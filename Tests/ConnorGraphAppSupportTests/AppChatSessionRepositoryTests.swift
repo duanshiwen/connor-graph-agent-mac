@@ -1,10 +1,8 @@
 import Foundation
 import Testing
 import ConnorGraphCore
-import ConnorGraphAgent
 import ConnorGraphAppSupport
 import ConnorGraphStore
-import ConnorGraphSearch
 
 private func temporaryAppChatDatabaseURL(_ name: String = UUID().uuidString) -> URL {
     FileManager.default.temporaryDirectory.appendingPathComponent("\(name).sqlite")
@@ -38,7 +36,7 @@ private func temporaryAppChatDatabaseURL(_ name: String = UUID().uuidString) -> 
     #expect(sessions.map(\.id) == ["new", "old"])
 }
 
-@Test func appChatRepositorySavesGraphAgentTurn() throws {
+@Test func appChatRepositorySavesNativeSessionTurn() throws {
     let store = try SQLiteGraphKernelStore(path: temporaryAppChatDatabaseURL().path)
     try store.migrate()
     let repository = AppChatSessionRepository(store: store)
@@ -60,14 +58,7 @@ private func temporaryAppChatDatabaseURL(_ name: String = UUID().uuidString) -> 
         createdAt: Date(timeIntervalSince1970: 1_000),
         updatedAt: Date(timeIntervalSince1970: 3_000)
     )
-    let response = GraphAgentAskResponse(
-        answer: LLMResponse(text: assistant.content, citations: assistant.citations),
-        context: AgentContext(query: "memory", items: []),
-        session: responseSession,
-        observeLogEntries: []
-    )
-
-    let saved = try repository.saveTurn(previousMessageCount: 0, response: response)
+    let saved = try repository.saveSession(responseSession)
     let loaded = try #require(try repository.loadSession(id: "session-1"))
 
     #expect(saved.id == "session-1")
@@ -91,15 +82,7 @@ private func temporaryAppChatDatabaseURL(_ name: String = UUID().uuidString) -> 
         createdAt: Date(timeIntervalSince1970: 1_000),
         updatedAt: Date(timeIntervalSince1970: 3_000)
     )
-    try repository.saveTurn(
-        previousMessageCount: 0,
-        response: GraphAgentAskResponse(
-            answer: LLMResponse(text: assistant1.content, citations: []),
-            context: AgentContext(query: "你好", items: []),
-            session: firstSession,
-            observeLogEntries: []
-        )
-    )
+    try repository.saveSession(firstSession)
 
     let user2 = AgentMessage(id: "user-2", role: .user, content: "我们会说些什么呢？", createdAt: Date(timeIntervalSince1970: 4_000))
     let assistant2 = AgentMessage(id: "assistant-2", role: .assistant, content: "我们可以聊图谱。", createdAt: Date(timeIntervalSince1970: 5_000))
@@ -111,15 +94,7 @@ private func temporaryAppChatDatabaseURL(_ name: String = UUID().uuidString) -> 
         updatedAt: Date(timeIntervalSince1970: 5_000)
     )
 
-    try repository.saveTurn(
-        previousMessageCount: 2,
-        response: GraphAgentAskResponse(
-            answer: LLMResponse(text: assistant2.content, citations: []),
-            context: AgentContext(query: "我们会说些什么呢？", items: []),
-            session: secondSession,
-            observeLogEntries: []
-        )
-    )
+    try repository.saveSession(secondSession)
 
     let loaded = try #require(try repository.loadSession(id: "session-1"))
 

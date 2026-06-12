@@ -40,7 +40,7 @@ public struct ClaudeSDKSidecarRequest: Codable, Sendable, Equatable {
             connorRunID: request.runID,
             connorSessionID: request.sessionID,
             groupID: request.groupID,
-            prompt: request.userMessage,
+            prompt: request.normalizedPrompt,
             cwd: workingDirectory.path,
             permissionMode: request.permissionMode,
             sdkPermissionMode: "bypassPermissions",

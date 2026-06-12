@@ -59,12 +59,6 @@ public struct AppChatSessionRepository: Sendable {
     }
 
     @discardableResult
-    public func saveTurn(previousMessageCount: Int, response: GraphAgentAskResponse) throws -> AgentSession {
-        try store.upsertSession(response.session)
-        return response.session
-    }
-
-    @discardableResult
     public func saveSession(_ session: AgentSession, previousMessageCount: Int = 0) throws -> AgentSession {
         try store.upsertSession(session)
         _ = try storagePaths?.ensureSessionArtifactDirectories(sessionID: session.id)
