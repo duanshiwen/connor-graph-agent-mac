@@ -10,20 +10,19 @@ struct PhaseGCraftGradeNativeUITests {
         let shell = ConnorNativeShellPresentation.default
 
         #expect(shell.title == "Connor")
-        #expect(shell.defaultSelection == .runtimeCenter)
+        #expect(shell.defaultSelection == .agentChat)
         #expect(shell.sidebarGroups.map(\.title) == ["Run", "Memory", "Governance", "System"])
         #expect(shell.sidebarGroups.flatMap(\.items).map(\.id).prefix(5) == [
-            ConnorNativeShellItem.runtimeCenter,
-            .agentChat,
+            ConnorNativeShellItem.agentChat,
             .browserWorkspace,
             .graphMemory,
-            .search
+            .search,
+            .graphEntities
         ])
         #expect(shell.sidebarGroups.flatMap(\.items).allSatisfy { !$0.title.isEmpty && !$0.systemImage.isEmpty })
         #expect(shell.commands.map(\.id) == [
             .newSession,
             .toggleBrowser,
-            .openRuntimeCenter,
             .openGraphMemoryReview,
             .openApprovals,
             .openSources,
@@ -33,7 +32,7 @@ struct PhaseGCraftGradeNativeUITests {
             .openSettings
         ])
         #expect(shell.commands.first?.keyboardShortcut == "⌘N")
-        #expect(shell.commands[2].target == .runtimeCenter)
+        #expect(shell.commands[2].target == .graphMemory)
     }
 
     @Test func nativeShellFindsItemsByIdentifierForDeepLinks() {
@@ -47,7 +46,7 @@ struct PhaseGCraftGradeNativeUITests {
     @Test func nativeShellRouteResolverMapsCraftItemsToAppRoutes() {
         let resolver = ConnorNativeShellRouteResolver()
 
-        #expect(resolver.route(for: .runtimeCenter).legacySidebarID == "runtimeCenter")
+        #expect(resolver.route(for: .runtimeCenter).legacySidebarID == "agentChat")
         #expect(resolver.route(for: .agentChat).legacySidebarID == "agentChat")
         #expect(resolver.route(for: .graphMemory).legacySidebarID == "graphWriteCandidates")
         #expect(resolver.route(for: .approvals).legacySidebarID == "pendingApprovals")
