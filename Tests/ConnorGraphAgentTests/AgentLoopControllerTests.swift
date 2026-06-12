@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import ConnorGraphCore
 import ConnorGraphAgent
 import ConnorGraphSearch
 
@@ -58,6 +59,40 @@ private actor ScriptedModelProvider: AgentModelProvider {
     #expect(events.map(\.kind).contains(.toolFinished))
     #expect(events.map(\.kind).contains(.textComplete))
     #expect(events.last?.kind == .runCompleted)
+}
+
+@Test func agentLoopUsesNormalizedPromptWithSessionContext() async throws {
+    let provider = CapturingFinalAnswerProvider()
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: AgentToolRegistry()
+    )
+    let summary = AgentSessionSummary(
+        sessionID: "session-context",
+        content: "We were designing reliable session context injection.",
+        sourceMessageCount: 2
+    )
+    let recentMessages = [
+        AgentMessage(role: .user, content: "先说明当前架构问题"),
+        AgentMessage(role: .assistant, content: "主路径没有显式上传 recent messages。")
+    ]
+    let request = AgentChatRequest(
+        sessionID: "session-context",
+        userMessage: "继续",
+        sessionSummary: summary,
+        recentMessages: recentMessages
+    )
+
+    for try await _ in loop.run(request) {}
+
+    let modelRequest = await provider.lastRequest
+    let userContent = try #require(modelRequest?.messages.last(where: { $0.role == .user })?.content)
+    #expect(userContent.contains("Previous session summary:"))
+    #expect(userContent.contains("We were designing reliable session context injection."))
+    #expect(userContent.contains("Recent conversation:"))
+    #expect(userContent.contains("User: 先说明当前架构问题"))
+    #expect(userContent.contains("Assistant: 主路径没有显式上传 recent messages。"))
+    #expect(userContent.contains("Current user request:\n继续"))
 }
 
 @Test func agentLoopInjectsInitialGraphContextIntoModelRequest() async throws {
