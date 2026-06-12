@@ -38,7 +38,17 @@ public enum CommercialReadinessStatus: String, Codable, Sendable, Equatable, Has
 }
 
 public enum CommercialSessionGovernanceReadiness: Codable, Sendable, Equatable {
-    case ready(sessionCount: Int, statusDefinitionCount: Int, labelDefinitionCount: Int, artifactDirectoriesReady: Bool)
+    case ready(
+        sessionCount: Int,
+        statusDefinitionCount: Int,
+        labelDefinitionCount: Int,
+        artifactDirectoriesReady: Bool,
+        persistedRunCount: Int = 0,
+        journalEventCount: Int = 0,
+        pendingPlanCount: Int = 0,
+        branchRecordCount: Int = 0,
+        restorableSnapshotReady: Bool = true
+    )
     case missing(String)
 }
 
@@ -151,7 +161,12 @@ public struct CommercialReadinessSnapshotBuilder: Sendable, Equatable {
                 sessionCount: sessions.count,
                 statusDefinitionCount: governanceConfig.statuses.count,
                 labelDefinitionCount: governanceConfig.labels.count,
-                artifactDirectoriesReady: artifactDirectoriesReady
+                artifactDirectoriesReady: artifactDirectoriesReady,
+                persistedRunCount: 0,
+                journalEventCount: 0,
+                pendingPlanCount: 0,
+                branchRecordCount: 0,
+                restorableSnapshotReady: artifactDirectoriesReady
             )
 
         let claudeSidecar: CommercialClaudeSidecarReadiness
@@ -258,16 +273,36 @@ public struct CommercialReadinessGate: Sendable, Equatable {
 
     private func sessionGovernanceCard(_ readiness: CommercialSessionGovernanceReadiness) -> CommercialReadinessCard {
         switch readiness {
-        case .ready(let sessionCount, let statusDefinitionCount, let labelDefinitionCount, let artifactDirectoriesReady):
+        case .ready(
+            let sessionCount,
+            let statusDefinitionCount,
+            let labelDefinitionCount,
+            let artifactDirectoriesReady,
+            let persistedRunCount,
+            let journalEventCount,
+            let pendingPlanCount,
+            let branchRecordCount,
+            let restorableSnapshotReady
+        ):
+            let blockedReasons = [
+                artifactDirectoriesReady ? nil : "Session artifact directories are not ready",
+                restorableSnapshotReady ? nil : "Session OS restore snapshot is not ready"
+            ].compactMap { $0 }
             return CommercialReadinessCard(
                 phase: .sessionGovernance,
-                status: .ready,
-                evidence: "\(sessionCount) sessions · \(statusDefinitionCount) statuses · \(labelDefinitionCount) labels · artifacts \(artifactDirectoriesReady ? "ready" : "not ready")",
+                status: blockedReasons.isEmpty ? .ready : .blocked,
+                evidence: "\(sessionCount) sessions · \(statusDefinitionCount) statuses · \(labelDefinitionCount) labels · \(persistedRunCount) runs · \(journalEventCount) journal events · \(pendingPlanCount) pending plans · \(branchRecordCount) branches · artifacts \(artifactDirectoriesReady ? "ready" : "not ready") · restore \(restorableSnapshotReady ? "ready" : "not ready")",
                 metrics: [
                     "sessions": "\(sessionCount)",
                     "statuses": "\(statusDefinitionCount)",
-                    "labels": "\(labelDefinitionCount)"
-                ]
+                    "labels": "\(labelDefinitionCount)",
+                    "runs": "\(persistedRunCount)",
+                    "journalEvents": "\(journalEventCount)",
+                    "pendingPlans": "\(pendingPlanCount)",
+                    "branches": "\(branchRecordCount)",
+                    "restore": restorableSnapshotReady ? "ready" : "blocked"
+                ],
+                blockingReasons: blockedReasons
             )
         case .missing(let reason):
             return blockedCard(phase: .sessionGovernance, reason: reason)
