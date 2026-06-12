@@ -158,7 +158,7 @@ enum ConnorAppearanceMode: String, CaseIterable, Identifiable {
 
 @MainActor
 final class AppViewModel: ObservableObject {
-    @Published var selection: SidebarItem? = .runtimeCenter
+    @Published var selection: SidebarItem? = .agentChat
     @Published var query: String = "记忆"
     @Published var searchResults: [GraphSearchHit] = []
     @Published var chatInput: String = "记忆"
@@ -200,7 +200,7 @@ final class AppViewModel: ObservableObject {
     @Published var isLoadingLLMModelConnections: Bool = false
     @Published var chatSessions: [AgentSession] = []
     @Published var selectedChatSessionID: String?
-    @Published var sessionListFilter: AgentSessionListFilter = .inbox
+    @Published var sessionListFilter: AgentSessionListFilter = .all
     @Published var governanceConfig: AppSessionGovernanceConfig = .default
     @Published var productOSRegistry: ProductOSRegistrySnapshot = .default
     @Published var automationConfig: ProductOSAutomationConfig = .default
@@ -295,7 +295,9 @@ final class AppViewModel: ObservableObject {
     private func applyNavigation(to item: ConnorNativeShellItem) {
         switch item {
         case .runtimeCenter:
-            selection = .runtimeCenter
+            isBrowserVisible = false
+            sessionListFilter = .all
+            selection = .agentChat
         case .agentChat:
             isBrowserVisible = false
             selection = .agentChat
@@ -333,7 +335,10 @@ final class AppViewModel: ObservableObject {
             navigate(to: isBrowserVisible ? .browserWorkspace : .agentChat)
         case .checkCommercialReadiness:
             runCommercialReadinessReleaseGate()
-        case .openRuntimeCenter, .openGraphMemoryReview, .openApprovals, .openSources, .openSkills, .openAutomation, .openSettings:
+        case .openRuntimeCenter:
+            sessionListFilter = .all
+            navigate(to: .agentChat)
+        case .openGraphMemoryReview, .openApprovals, .openSources, .openSkills, .openAutomation, .openSettings:
             if let command = ConnorNativeShellPresentation.default.command(for: commandID) {
                 navigate(to: command.target)
             }
@@ -994,7 +999,7 @@ final class AppViewModel: ObservableObject {
         }
         do {
             var sessions = try chatSessionRepository.loadSessions(filter: sessionListFilter)
-            if sessions.isEmpty, sessionListFilter == .inbox {
+            if sessions.isEmpty, sessionListFilter == .inbox || sessionListFilter == .all {
                 let session = try chatSessionRepository.createSession()
                 sessions = [session]
             }
@@ -1673,7 +1678,7 @@ private struct CraftListPaneView: View {
             case .llmSettings:
                 CraftSettingsListPane(viewModel: viewModel, selection: $selection)
             case .runtimeCenter:
-                CraftSimpleListPane(title: "对话", subtitle: "会话工作区", rows: [])
+                CraftSessionListPane(viewModel: viewModel)
             case .sources:
                 CraftSimpleListPane(title: "数据源", subtitle: "MCP Source Runtime", rows: viewModel.sourceRuntimeConfigurations.map(\.displayName))
             case .skills:
@@ -1746,7 +1751,7 @@ private struct CraftDetailPaneView: View {
         Group {
             switch selection {
             case .runtimeCenter:
-                ConnorRuntimeCenterView(viewModel: viewModel)
+                AgentChatView(viewModel: viewModel)
             case .entities:
                 GraphEntitiesView(entities: viewModel.entities, statements: viewModel.statements, episodes: viewModel.episodes)
             case .search:
