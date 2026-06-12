@@ -1,9 +1,11 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-11 22:26 GMT+8  
-当前代码基线：`main`，提交 `7d17ef8`（Merge pull request #65 from `feature/phase-i-command-palette-deeplink-clickthrough-260611`）
+文档更新时间：2026-06-12 14:58 GMT+8  
+当前代码基线：`main`，提交 `eac3db3`，叠加本地 Craft-grade shell、聊天工作台和设置中心改造。
 
-Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package。项目包含本地会话运行时、SQLite temporal graph、图谱记忆管线、Agent runtime、Product OS 本地控制面、Claude SDK sidecar 边界、MCP source runtime、skill runtime、automation engine、native runtime UI、command palette 和 deep-link resolver。
+Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package。项目包含本地会话运行时、SQLite temporal graph、后台图谱记忆管线、Agent runtime、Claude SDK sidecar 边界、MCP source runtime、skill runtime、automation engine、Craft 风格三栏 native UI、会话工作台、设置中心、command palette 和 deep-link resolver。
+
+产品定位上，图谱是后台记忆基础设施，不作为普通用户的主导航概念暴露；前台 UI 以会话、数据源、技能、自动化和设置为核心。
 
 ---
 
@@ -104,6 +106,8 @@ sessions/{sessionID}/
 ```text
 config/session-governance.json
 config/product-os-registry.json
+config/runtime-settings.json
+config/llm-settings.json
 automations/automations.json
 automations/automation-trigger-log.json
 automations/automation-execution-history.json
@@ -112,6 +116,8 @@ statuses/statuses.json
 graph/evaluations/retrieval-evaluation-cases.json
 graph/evaluations/reports/*.json
 ```
+
+`runtime-settings.json` 保存应用、外观、输入、权限、UI 和用户偏好类设置；`llm-settings.json` 保存模型提供方、Base URL、模型名和 Claude Sidecar 配置。API Key 不写入 JSON，由本地 Keychain 凭据仓库管理。
 
 ---
 
@@ -360,26 +366,25 @@ Sources/ConnorGraphAppSupport/ConnorDeepLinkNavigator.swift
 
 ### ConnorGraphAgentMac
 
-SwiftUI macOS executable target。包含：
+SwiftUI macOS executable target。当前前台体验采用 Craft Agent 风格三栏布局：左侧产品导航、中间列表/设置分类、右侧详情工作区。普通用户主导航不暴露 graph node、write candidate、promotion queue、Runtime Center 或记忆调试中心；图谱能力作为后台记忆基础设施服务于会话和检索。
+
+包含：
 
 - App entry point
-- Sidebar navigation
-- Runtime Center view
-- Command Palette view
-- Graph overview UI
-- Graph search UI
-- Observe log UI
-- Promotion queue UI
+- Craft-style product sidebar navigation
+- Three-column session shell
+- Conversation list with status / labels
 - Agent chat workbench
-- Three-column session layout
-- Session inspector
-- Product OS views
+- Floating session info panel
+- Composer-level permission picker
+- Composer-level model picker
+- Settings center
 - Source runtime panel
 - Skill runtime panel
 - Automation runtime panel
-- Prompt inspection UI
-- Model settings UI
+- Command Palette view
 - Browser workspace view
+- Developer/runtime diagnostic views retained in code but hidden from primary user navigation
 
 相关文件示例：
 
@@ -606,75 +611,185 @@ automations/automation-execution-history.json
 
 ## Native UI 状态
 
-Native shell presentation 当前定义 sidebar groups：
+当前主界面改为 Craft Agent 风格三栏 shell：
 
 ```text
-Run
-Memory
-Governance
-System
+左侧：产品导航
+中间：会话列表 / 数据源列表 / 技能列表 / 自动化列表 / 设置分类
+右侧：聊天详情 / 设置详情 / 运行时面板
 ```
 
-Default selection：
+默认 selection：
 
 ```text
-runtimeCenter
-```
-
-当前 shell items：
-
-```text
-runtimeCenter
 agentChat
-browserWorkspace
-graphMemory
-search
-graphEntities
-approvals
-automation
-productOS
-sources
-skills
-settings
 ```
 
-当前 shell commands：
+左侧用户主导航只保留产品级概念：
 
 ```text
-newSession
-toggleBrowser
-openRuntimeCenter
-openGraphMemoryReview
-openApprovals
-openSources
-openSkills
-openAutomation
-openSettings
+新建会话
+所有会话
+  全部
+  收件箱
+  configured statuses
+标签
+  configured labels
+数据源
+技能
+自动化
+  定时任务
+  事件触发
+  智能体
+设置
 ```
+
+不再作为普通用户主导航展示的内部实现概念：
+
+```text
+Runtime Center
+图谱节点
+图谱搜索
+写入候选
+提升队列
+记忆变更
+记忆准入
+Graph Memory Review Center
+```
+
+这些能力仍可作为后台基础设施、开发诊断视图或命令入口存在，但不再放入主产品导航，避免让用户把 Connor 理解成“图谱编辑器”。
 
 当前 native panels / views 包括：
 
 ```text
-ConnorRuntimeCenterView
+CraftPrimarySidebarView
+CraftListPaneView
+CraftSessionListPane
+CraftDetailPaneView
+AgentChatView
+AgentChatComposerView
+AgentChatInspectorView
+ConnorSettingsDetailView
 SourceRuntimePanelView
 SkillRuntimePanelView
 AutomationRuntimePanelView
 ConnorCommandPaletteView
 BrowserWorkspaceView
-AgentChatView
+ConnorRuntimeCenterView
 ```
 
-Runtime Center presentation 聚合：
+聊天工作台当前特性：
+
+- 会话列表由 shell 中间栏负责，`AgentChatView` 不再内嵌第二份会话列表。
+- 右侧常驻 inspector 已改为浮动“信息”面板。
+- Composer 底部提供附件、浏览器、token 信息、权限模式、模型选择和发送按钮。
+- 权限模式显示中文名称，并默认隐藏 `allowAll` 级别。
+- 模型选择目前仍是 UI 层候选列表，后续应接入真实 provider / model registry。
+
+### 设置中心
+
+设置入口位于左侧主导航底部。设置中心由中间栏分类列表和右侧设置详情组成，不包含 workspace / workplace 相关设置，因为当前应用仍是单一 Home / Runtime Root，不支持多 workspace。
+
+当前设置分类：
 
 ```text
-sessions
-events
-pending approvals
-automation triggers
-graph memory dashboard
+应用
+AI
+外观
+输入
+权限
+标签
+快捷键
+偏好
 ```
 
-Runtime Center metric / section / row 当前包含 navigation target 字段，用于 click-through navigation。
+设置详情页文件：
+
+```text
+Sources/ConnorGraphAgentMac/ConnorGraphAgentMacApp.swift
+```
+
+核心视图：
+
+```text
+ConnorSettingsDetailView
+SettingsAppSection
+SettingsAISection
+SettingsAppearanceSection
+SettingsInputSection
+SettingsPermissionsSection
+SettingsLabelsSection
+SettingsShortcutsSection
+SettingsPreferencesSection
+```
+
+设置持久化文件：
+
+```text
+Sources/ConnorGraphAppSupport/AppRuntimeSettingsRepository.swift
+Sources/ConnorGraphAppSupport/AppLLMSettingsRepository.swift
+```
+
+`AgentRuntimeSettings` 当前包含：
+
+```text
+schemaVersion
+loop
+ui
+app
+appearance
+input
+permissions
+preferences
+updatedAt
+```
+
+新增 runtime settings 分组：
+
+```text
+AgentRuntimeAppSettings
+  desktopNotificationsEnabled
+  keepScreenAwake
+  internalBrowserEnabled
+  httpProxyEnabled
+  httpProxyURLString
+
+AgentRuntimeAppearanceSettings
+  mode
+
+AgentRuntimeInputSettings
+  composerSendShortcut
+  spellCheckEnabled
+  autoSaveDraftsEnabled
+
+AgentRuntimePermissionSettings
+  requireApprovalForNetwork
+  requireApprovalForShell
+
+AgentRuntimePreferenceSettings
+  displayName
+  timezone
+  city
+  country
+  notes
+
+AgentRuntimeUISettings
+  showProviderIcons
+  richToolDescriptionsEnabled
+```
+
+`AgentRuntimeSettings` 提供自定义 decode，旧版 `runtime-settings.json` 缺少新增字段时会自动补默认值，避免升级后配置解码失败。
+
+AI 设置页复用现有 LLM 设置逻辑：
+
+- provider mode：stub、OpenAI-compatible、governed Claude Sidecar
+- model
+- base URL
+- API Key 输入 / 清除
+- 连接测试
+- Claude Sidecar executable / arguments / working directory
+
+注意：部分设置目前已完成本地持久化，但尚未全部接入实际运行时行为，例如桌面通知、保持屏幕常亮、外观模式实时切换、输入框拼写检查和网络 / Shell 审批细粒度 enforcement。
 
 ---
 
@@ -828,10 +943,17 @@ cd /Users/duanshiwen/code/agent-os/agents/connor-graph-agent-mac
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift build
 ```
 
+Product build：
+
+```bash
+cd /Users/duanshiwen/code/agent-os/agents/connor-graph-agent-mac
+swift build --product connor-graph-agent-mac
+```
+
 最近验证结果：
 
 ```text
-build complete
+Build of product 'connor-graph-agent-mac' complete! (2026-06-12 14:58 GMT+8)
 ```
 
 Test：
@@ -863,7 +985,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --filter Pha
 
 ## 已记录的阶段性系统增量
 
-截至提交 `7d17ef8`，已合入的阶段性增量包括：
+截至提交 `eac3db3` 并叠加当前本地改造，已合入 / 已完成的阶段性增量包括：
 
 ```text
 Phase A: Runtime Foundation Hardening
@@ -875,6 +997,8 @@ Phase F: Graph Memory Productization
 Phase G: Craft-grade Native UI
 Phase H: Source / Skill / Automation UI Integration
 Phase I: Command Palette / Deep-link Navigation / Runtime Click-through
+Local UI Refresh: Craft-like three-column shell and user-facing navigation cleanup
+Local Settings Center: App / AI / Appearance / Input / Permissions / Labels / Shortcuts / Preferences
 ```
 
 对应合并提交：
