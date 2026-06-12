@@ -53,6 +53,7 @@ public struct AgentChatTurnProcessPresentation: Sendable, Equatable, Identifiabl
     public var summary: String
     public var title: String
     public var currentRequest: String?
+    public var assistantResponse: String?
     public var promptSnapshotText: String?
     public var citationIDs: [String]
     public var expandedContextItems: [AgentContextItem]
@@ -72,6 +73,7 @@ public struct AgentChatTurnProcessPresentation: Sendable, Equatable, Identifiabl
         }
         self.title = "第 \(row.turnNumber) 轮处理详情"
         self.currentRequest = row.currentRequest
+        self.assistantResponse = row.message.content
         self.promptSnapshotText = row.promptSnapshotText
         self.citationIDs = row.citationIDs
         self.expandedContextItems = row.expandedContextItems
@@ -86,6 +88,7 @@ public struct AgentChatTurnProcessPresentation: Sendable, Equatable, Identifiabl
         self.summary = "第 \(pending.turnNumber) 轮 · 正在处理 · 完整历史 \(conversationHistory.count) 条"
         self.title = "第 \(pending.turnNumber) 轮处理中…"
         self.currentRequest = conversationHistory.last(where: { $0.message.role == .user })?.message.content
+        self.assistantResponse = nil
         self.promptSnapshotText = nil
         self.citationIDs = []
         self.expandedContextItems = []
