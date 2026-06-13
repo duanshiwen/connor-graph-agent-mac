@@ -318,7 +318,13 @@ public struct LocalMultiEditTool: AgentTool {
     public let permission: AgentPermissionCapability = .editWorkspaceFile
     public let inputSchema = AgentToolInputSchema.object(properties: [
         "file_path": .string(description: "Path to edit inside the workspace."),
-        "edits": .object(properties: [:], required: [])
+        "edits": .array(
+            items: .object(properties: [
+                "old_text": .string(description: "Exact text to replace. Must occur exactly once in the original file."),
+                "new_text": .string(description: "Replacement text.")
+            ], required: ["old_text", "new_text"]),
+            description: "Ordered list of exact replacements to validate against the original file and then apply atomically."
+        )
     ], required: ["file_path", "edits"])
 
     private let policy: LocalWorkspacePolicy

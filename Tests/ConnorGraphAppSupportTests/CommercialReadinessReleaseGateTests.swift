@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import ConnorGraphAgent
 import ConnorGraphAppSupport
 
 @Suite("Commercial Readiness Release Gate Tests")
@@ -40,6 +41,33 @@ struct CommercialReadinessReleaseGateTests {
         #expect(!result.isCommercialReady)
         #expect(result.blockingCards.map(\.phase) == [.claudeSDKSidecar])
         #expect(result.summary == "BLOCKED · 5/6 commercial readiness phases ready · 1 blocked")
+    }
+
+    @Test func nativeLocalWorkspaceToolSurfaceHasCommercialGuardrails() throws {
+        let workspace = FileManager.default.temporaryDirectory
+            .appendingPathComponent("connor-readiness-local-tools-")
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        let policy = LocalWorkspacePolicy(workingDirectory: workspace)
+        let tools: [any AgentTool] = [
+            LocalReadFileTool(policy: policy),
+            LocalListDirectoryTool(policy: policy),
+            LocalGlobTool(policy: policy),
+            LocalGrepTool(policy: policy),
+            LocalWriteFileTool(policy: policy),
+            LocalEditFileTool(policy: policy),
+            LocalMultiEditTool(policy: policy),
+            LocalBashTool(policy: policy)
+        ]
+
+        #expect(tools.map(\.name) == ["Read", "LS", "Glob", "Grep", "Write", "Edit", "MultiEdit", "Bash"])
+        #expect(tools.map(\.permission).contains(.readWorkspaceFile))
+        #expect(tools.map(\.permission).contains(.writeWorkspaceFile))
+        #expect(tools.map(\.permission).contains(.editWorkspaceFile))
+        #expect(LocalShellCommandPolicy.classify("sudo rm -rf /").risk == .destructive)
+        #expect(throws: LocalWorkspacePolicyError.self) {
+            try policy.validateWritablePath(workspace.appendingPathComponent(".env"), operation: .overwriteFile)
+        }
     }
 
     @Test func commandPaletteIncludesOneClickCommercialReadinessCheck() {
