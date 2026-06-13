@@ -48,6 +48,41 @@ private struct SessionOSApprovalBackend: AgentBackend {
     }
 }
 
+private final class SessionOSBlockingBackend: AgentBackend, @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation?
+    private var abortedRunIDStorage: [String] = []
+
+    var abortedRunIDs: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return abortedRunIDStorage
+    }
+
+    func chat(_ request: AgentChatRequest) -> AsyncThrowingStream<AgentEvent, Error> {
+        AsyncThrowingStream { continuation in
+            lock.lock()
+            self.continuation = continuation
+            lock.unlock()
+            continuation.yield(.runStarted(AgentRunStartedEvent(run: AgentRun(
+                id: request.runID,
+                sessionID: request.sessionID,
+                groupID: request.groupID,
+                status: .running
+            ))))
+        }
+    }
+
+    func abort(runID: String) {
+        lock.lock()
+        abortedRunIDStorage.append(runID)
+        let continuation = self.continuation
+        lock.unlock()
+        continuation?.finish()
+    }
+}
+
+
 private func makeSessionOSStore(_ name: String = UUID().uuidString) throws -> SQLiteGraphKernelStore {
     let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(name).sqlite")
     let store = try SQLiteGraphKernelStore(path: url.path)
@@ -122,6 +157,33 @@ private func makeSessionOSStore(_ name: String = UUID().uuidString) throws -> SQ
     let snapshot = try restored.hydrateRuntimeState()
     #expect(snapshot.activeRuns.isEmpty)
     #expect(restored.runtimeState.isProcessing == false)
+}
+
+@Test func nativeSessionManagerCancelActiveRunStaysCancelledWhenBackendStreamFinishes() async throws {
+    let store = try makeSessionOSStore()
+    let repository = AppChatSessionRepository(store: store)
+    let session = AgentSession(id: "session-os-cancel", title: "Session OS Cancel")
+    try repository.saveSession(session)
+    let backend = SessionOSBlockingBackend()
+    var manager = NativeSessionManager(
+        backend: backend,
+        sessionRepository: repository,
+        session: session
+    )
+    let runID = "run-cancel-manager"
+    try repository.saveRun(AgentRun(
+        id: runID,
+        sessionID: session.id,
+        groupID: "default",
+        status: .running
+    ))
+
+    manager.cancel(runID: runID, reason: "cancelled by test")
+    let run = try #require(try repository.loadRun(id: runID))
+
+    #expect(manager.runtimeState.cancellationReason == "cancelled by test")
+    #expect(run.status == .cancelled)
+    #expect(backend.abortedRunIDs == [runID])
 }
 
 @Test func nativeSessionManagerPersistsPendingApprovalForRestore() async throws {
