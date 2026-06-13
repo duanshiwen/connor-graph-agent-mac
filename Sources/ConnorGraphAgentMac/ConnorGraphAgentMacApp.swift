@@ -349,7 +349,12 @@ final class AppViewModel: ObservableObject {
     }
 
     func openURLInCurrentChatBrowser(_ url: URL) {
-        browserTargetURLString = url.absoluteString
+        let sessionID = selectedChatSessionID ?? activeChatSession.id
+        let urlString = url.absoluteString
+        let currentSnapshot = browserWorkspaceSnapshotsBySessionID[sessionID] ?? AppBrowserStateSnapshot()
+        let plannedSnapshot = BrowserExternalOpenPlanner().open(urlString: urlString, in: currentSnapshot)
+        browserTargetURLString = urlString
+        saveBrowserWorkspaceSnapshot(plannedSnapshot, for: sessionID)
         showBrowserWorkspace()
     }
 

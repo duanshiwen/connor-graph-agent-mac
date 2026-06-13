@@ -56,6 +56,27 @@ public struct BrowserPromptFoldingParser: Sendable {
     }
 }
 
+public struct BrowserExternalOpenPlanner: Sendable {
+    public init() {}
+
+    public func open(urlString: String, in snapshot: AppBrowserStateSnapshot) -> AppBrowserStateSnapshot {
+        var planned = snapshot
+        planned.updatedAt = Date()
+        planned.selectionPopover = nil
+        let tab = AppBrowserTabSnapshot(
+            initialURLString: urlString,
+            title: "",
+            currentURLString: urlString,
+            isLoading: false,
+            canGoBack: false,
+            canGoForward: false
+        )
+        planned.tabs.append(tab)
+        planned.selectedTabID = tab.id
+        return planned
+    }
+}
+
 public struct BrowserTabStripLayout: Equatable, Sendable {
     public var tabWidth: Double
     public var requiresHorizontalScroll: Bool
