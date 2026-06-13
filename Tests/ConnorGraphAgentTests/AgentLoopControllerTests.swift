@@ -45,6 +45,13 @@ private actor SuspendingModelProvider: AgentModelProvider {
     }
 }
 
+@Test func agentLoopConfigurationDefaultsAllowDeeperSingleRunWork() {
+    let configuration = AgentLoopConfiguration()
+
+    #expect(configuration.maxToolIterations == 64)
+    #expect(configuration.maxToolCallsPerIteration == 4)
+}
+
 @Test func agentLoopAbortCancelsActiveModelRequest() async throws {
     let provider = SuspendingModelProvider()
     let loop = AgentLoopController(modelProvider: provider, toolRegistry: AgentToolRegistry())
