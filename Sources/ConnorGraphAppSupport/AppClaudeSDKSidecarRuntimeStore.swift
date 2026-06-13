@@ -143,6 +143,10 @@ public struct AppClaudeSDKSidecarRuntimeStore: @unchecked Sendable {
         try loadAll()[connorSessionID]
     }
 
+    public func loadByRunID(_ runID: String) throws -> ClaudeSDKSidecarRuntimeRecord? {
+        try loadAll().values.first { $0.lastRunID == runID }
+    }
+
     public func save(_ record: ClaudeSDKSidecarRuntimeRecord) throws {
         try fileManager.createDirectory(at: configDirectory, withIntermediateDirectories: true)
         var all = try loadAll()

@@ -105,7 +105,27 @@ public final class GovernedClaudeSDKSidecarRuntime<Transport: ClaudeSDKSidecarSe
     }
 
     public func abort(runID: String) {
-        Task { await transport.cancel() }
+        Task {
+            let record = try? runtimeStore?.loadByRunID(runID)
+            if let record {
+                try? await transport.send(.cancel(ClaudeSDKSidecarCancelCommand(
+                    connorRunID: runID,
+                    connorSessionID: record.connorSessionID,
+                    reason: "cancelled by Connor"
+                )))
+                try? updateRuntimeRecord(
+                    sessionID: record.connorSessionID,
+                    groupID: record.groupID,
+                    runID: runID,
+                    status: .cancelled,
+                    sdkSessionID: record.sdkSessionID,
+                    lastError: "cancelled by Connor",
+                    failureCode: .cancelled,
+                    recoverability: .terminal
+                )
+            }
+            await transport.cancel()
+        }
     }
 
     public func resolveApproval(
