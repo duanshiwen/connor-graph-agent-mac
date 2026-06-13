@@ -207,8 +207,6 @@ private struct AgentChatConversationView: View {
     @Binding var isSessionInfoPresented: Bool
     @State private var activityDetailEvent: AgentEventPresentation?
     @State private var focusedTurnNumber: Int?
-    @State private var isConversationBottomVisible: Bool = true
-    @State private var conversationViewportHeight: CGFloat = 0
 
     private var timelineItems: [AgentChatTurnTimelineItem] {
         AgentChatTurnTimelineItem.items(
@@ -251,8 +249,7 @@ private struct AgentChatConversationView: View {
     }
 
     private var canJumpToNextTurn: Bool {
-        guard let currentTurnIndex else { return false }
-        return currentTurnIndex < turnAnchors.count - 1 || !isConversationBottomVisible
+        currentTurnIndex != nil
     }
 
     private static func turnNumber(fromTimestampID id: String) -> Int? {
@@ -264,7 +261,7 @@ private struct AgentChatConversationView: View {
     private func jumpTurn(direction: Int, proxy: ScrollViewProxy) {
         guard !turnAnchors.isEmpty else { return }
         let currentIndex = currentTurnIndex ?? (turnAnchors.count - 1)
-        if direction > 0, currentIndex >= turnAnchors.count - 1, !isConversationBottomVisible {
+        if direction > 0, currentIndex >= turnAnchors.count - 1 {
             focusedTurnNumber = turnAnchors.last?.turnNumber
             withAnimation(.easeOut(duration: 0.22)) {
                 proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
@@ -281,47 +278,6 @@ private struct AgentChatConversationView: View {
     }
 
     private static let bottomAnchorID = "agent-chat-bottom-anchor"
-
-    private func turnAnchorPositionReporter(for itemID: String) -> some View {
-        GeometryReader { geometry in
-            Color.clear.preference(
-                key: AgentChatTurnAnchorPositionKey.self,
-                value: Self.turnNumber(fromTimestampID: itemID).map { turnNumber in
-                    [turnNumber: geometry.frame(in: .named("AgentChatScroll")).minY]
-                } ?? [:]
-            )
-        }
-    }
-
-    private func viewportHeightReporter() -> some View {
-        GeometryReader { geometry in
-            Color.clear.preference(
-                key: AgentChatViewportHeightKey.self,
-                value: geometry.size.height
-            )
-        }
-    }
-
-    private func bottomAnchorPositionReporter() -> some View {
-        GeometryReader { geometry in
-            Color.clear.preference(
-                key: AgentChatBottomAnchorPositionKey.self,
-                value: geometry.frame(in: .named("AgentChatScroll")).maxY
-            )
-        }
-    }
-
-    private func updateFocusedTurn(from positions: [Int: CGFloat]) {
-        guard !positions.isEmpty else { return }
-        let topThreshold: CGFloat = AgentChatLayout.spaceXL
-        let sorted = positions.sorted { $0.key < $1.key }
-        let visibleOrPassedTurn = sorted.last { $0.value <= topThreshold }?.key
-        let nextVisibleTurn = sorted.first { $0.value > topThreshold }?.key
-        let inferredTurn = visibleOrPassedTurn ?? nextVisibleTurn
-        if let inferredTurn, inferredTurn != focusedTurnNumber {
-            focusedTurnNumber = inferredTurn
-        }
-    }
 
     private func activityEvents(for process: AgentChatTurnProcessPresentation) -> [AgentEventPresentation] {
         if process.id == latestProcessID, !viewModel.agentEventTimeline.isEmpty {
@@ -360,7 +316,6 @@ private struct AgentChatConversationView: View {
                                 } else if let timestamp = item.timestamp {
                                     AgentChatTurnTimestampRow(timestamp: timestamp)
                                         .id(item.id)
-                                        .background(turnAnchorPositionReporter(for: item.id))
                                 }
                             }
                         }
@@ -368,22 +323,9 @@ private struct AgentChatConversationView: View {
                         Color.clear
                             .frame(height: 1)
                             .id(Self.bottomAnchorID)
-                            .background(bottomAnchorPositionReporter())
                     }
                     .padding(.horizontal, 0)
                     .padding(.vertical, AgentChatLayout.spaceXL)
-                }
-                .background(viewportHeightReporter())
-                .coordinateSpace(name: "AgentChatScroll")
-                .onPreferenceChange(AgentChatTurnAnchorPositionKey.self) { positions in
-                    updateFocusedTurn(from: positions)
-                }
-                .onPreferenceChange(AgentChatViewportHeightKey.self) { height in
-                    conversationViewportHeight = height
-                }
-                .onPreferenceChange(AgentChatBottomAnchorPositionKey.self) { bottomY in
-                    let tolerance: CGFloat = 8
-                    isConversationBottomVisible = conversationViewportHeight > 0 && bottomY <= conversationViewportHeight + tolerance
                 }
                 .onChange(of: viewModel.transcript.count) { _, _ in
                     focusedTurnNumber = turnAnchors.last?.turnNumber
@@ -421,30 +363,6 @@ private struct AgentChatConversationView: View {
         }
         .padding(.horizontal, AgentChatLayout.spaceL)
         .padding(.vertical, AgentChatLayout.spaceM)
-    }
-}
-
-private struct AgentChatTurnAnchorPositionKey: PreferenceKey {
-    static let defaultValue: [Int: CGFloat] = [:]
-
-    static func reduce(value: inout [Int: CGFloat], nextValue: () -> [Int: CGFloat]) {
-        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
-    }
-}
-
-private struct AgentChatBottomAnchorPositionKey: PreferenceKey {
-    static let defaultValue: CGFloat = .infinity
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
-
-private struct AgentChatViewportHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
     }
 }
 
