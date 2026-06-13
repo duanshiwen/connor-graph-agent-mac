@@ -866,7 +866,7 @@ private struct BrowserSelectionThreadList: View {
                         HStack(alignment: .top, spacing: 6) {
                             Text(message.role == .user ? "你" : "AI")
                                 .font(.footnote.weight(.semibold))
-                                .foregroundStyle(message.role == .user ? Color.accentColor : Color.secondary)
+                                .foregroundStyle(message.role == .user ? ConnorCraftPalette.accent : Color.secondary)
                                 .frame(width: 28, alignment: .leading)
                             if message.isPending {
                                 HStack(spacing: 6) {
@@ -950,19 +950,19 @@ private struct BrowserAskAIButtonLabel: View {
             Text("问一问 AI")
                 .font(.caption.weight(.semibold))
         }
-        .foregroundStyle(Color.accentColor)
+        .foregroundStyle(ConnorCraftPalette.accent)
         .padding(.horizontal, 11)
         .padding(.vertical, 6)
         .background(
             LinearGradient(
-                colors: [Color.accentColor.opacity(0.18), Color.accentColor.opacity(0.08)],
+                colors: [ConnorCraftPalette.accent.opacity(0.18), ConnorCraftPalette.accentSubtleFill],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             ),
             in: Capsule()
         )
-        .overlay(Capsule().stroke(Color.accentColor.opacity(0.28), lineWidth: 1))
-        .shadow(color: Color.accentColor.opacity(0.16), radius: 8, x: 0, y: 3)
+        .overlay(Capsule().stroke(ConnorCraftPalette.accentBorder, lineWidth: 1))
+        .shadow(color: ConnorCraftPalette.accent.opacity(0.16), radius: 8, x: 0, y: 3)
         .contentShape(Capsule())
     }
 }
