@@ -1298,15 +1298,7 @@ final class AppViewModel: ObservableObject {
     }
 
     private func presentations(from persistedEvents: [PersistedAgentEvent]) -> [AgentEventPresentation] {
-        let replayer = AgentEventReplayer()
-        let presenter = AgentEventPresenter()
-        let sequencedEvents = persistedEvents.filter { $0.sequence != nil }
-        let replaySource = sequencedEvents.isEmpty ? persistedEvents : sequencedEvents
-        return replaySource.compactMap { persistedEvent in
-            try? replayer.replay(persistedEvent)
-        }.map { event in
-            presenter.presentation(for: event)
-        }
+        AgentEventPresentationRestorer().presentations(from: persistedEvents)
     }
 
     private func restoreLatestAgentEventTimeline(sessionID: String) throws {
