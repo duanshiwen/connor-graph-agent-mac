@@ -213,7 +213,7 @@ public struct SearchEngineMCPTool: AgentTool {
 
     private static func requiresBrowser(engine: String) -> Bool {
         switch engine.lowercased() {
-        case "google":
+        case "google", "bing", "baidu":
             return true
         default:
             return false
