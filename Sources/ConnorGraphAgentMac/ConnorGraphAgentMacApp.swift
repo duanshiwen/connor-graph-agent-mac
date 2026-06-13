@@ -273,6 +273,7 @@ final class AppViewModel: ObservableObject {
     private var activeChatRunID: String?
     private var agentEventTimelinesBySessionID: [String: [AgentEventPresentation]] = [:]
     private var browserWorkspaceSessionBinding = BrowserWorkspaceSessionBinding()
+    private var chatSessionWorkspaceModes = ChatSessionWorkspaceModeStore()
 
     private var activeChatSession: AgentSession {
         nativeSessionManager?.session ?? fallbackChatSession
@@ -358,6 +359,7 @@ final class AppViewModel: ObservableObject {
         browserWorkspaceSessionID = browserWorkspaceSessionBinding.boundSessionID
         isBrowserVisible = true
         selection = .agentChat
+        rememberWorkspaceMode(.browser, for: sessionID)
     }
 
     func returnFromBrowserWorkspace() {
@@ -370,6 +372,7 @@ final class AppViewModel: ObservableObject {
         browserWorkspaceSessionID = targetSessionID
         isBrowserVisible = false
         selection = .agentChat
+        rememberWorkspaceMode(.conversation, for: targetSessionID)
     }
 
     func toggleBrowserWorkspaceVisibility() {
@@ -1045,6 +1048,7 @@ final class AppViewModel: ObservableObject {
                 latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: selectedID)
                 selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: selectedID)
                 try loadSessionCapsule(sessionID: selectedID)
+                restoreWorkspaceMode(for: selectedID)
             } else {
                 selectedSessionArtifactDirectories = nil
                 latestChatSummary = nil
@@ -1058,9 +1062,13 @@ final class AppViewModel: ObservableObject {
 
     func newChatSession() {
         guard let chatSessionRepository else { return }
+        rememberCurrentWorkspaceMode()
         do {
             let session = try chatSessionRepository.createSession()
             selectedChatSessionID = session.id
+            isBrowserVisible = false
+            browserWorkspaceSessionID = nil
+            rememberWorkspaceMode(.conversation, for: session.id)
             fallbackChatSession = session
             nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: session)
             transcript = []
@@ -1084,6 +1092,9 @@ final class AppViewModel: ObservableObject {
         _ = try chatSessionRepository.artifactDirectories(sessionID: sessionID)
         if let state = try chatSessionRepository.loadSessionState(sessionID: sessionID) {
             sessionStateSnapshotsBySessionID[sessionID] = state
+            if let mode = ChatSessionWorkspaceMode(rawValue: state.selectedPane ?? "") {
+                chatSessionWorkspaceModes.setMode(mode, for: sessionID)
+            }
         } else {
             let state = AppSessionStateSnapshot(sessionID: sessionID, updatedAt: Date())
             sessionStateSnapshotsBySessionID[sessionID] = state
@@ -1110,6 +1121,34 @@ final class AppViewModel: ObservableObject {
         } catch {
             errorMessage = String(describing: error)
         }
+    }
+
+    private func rememberCurrentWorkspaceMode() {
+        rememberWorkspaceMode(isBrowserVisible ? .browser : .conversation, for: selectedChatSessionID ?? activeChatSession.id)
+    }
+
+    private func rememberWorkspaceMode(_ mode: ChatSessionWorkspaceMode, for sessionID: String?) {
+        chatSessionWorkspaceModes.setMode(mode, for: sessionID)
+        guard let sessionID else { return }
+        do {
+            var state = try chatSessionRepository?.loadSessionState(sessionID: sessionID) ?? AppSessionStateSnapshot(sessionID: sessionID)
+            state.selectedPane = mode.rawValue
+            state.updatedAt = Date()
+            sessionStateSnapshotsBySessionID[sessionID] = state
+            try chatSessionRepository?.saveSessionState(state, sessionID: sessionID)
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    private func restoreWorkspaceMode(for sessionID: String) {
+        let mode = chatSessionWorkspaceModes.mode(for: sessionID)
+        isBrowserVisible = mode == .browser
+        browserWorkspaceSessionID = mode == .browser ? sessionID : nil
+        if mode == .browser {
+            browserWorkspaceSessionBinding.bindBrowserWorkspace(to: sessionID)
+        }
+        selection = .agentChat
     }
 
     func appendSessionRecord(kind: String, title: String? = nil, body: String? = nil, metadata: [String: String] = [:], sessionID: String? = nil) {
@@ -1201,6 +1240,7 @@ final class AppViewModel: ObservableObject {
 
     func selectChatSession(_ sessionID: String) {
         guard let chatSessionRepository else { return }
+        rememberCurrentWorkspaceMode()
         do {
             guard let session = try chatSessionRepository.loadSession(id: sessionID) else { return }
             selectedChatSessionID = session.id
@@ -1216,6 +1256,7 @@ final class AppViewModel: ObservableObject {
             latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: session.id)
             selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
             try loadSessionCapsule(sessionID: session.id)
+            restoreWorkspaceMode(for: session.id)
             chatSummaryMessage = nil
             lastContext = nil
             lastPromptInspection = nil

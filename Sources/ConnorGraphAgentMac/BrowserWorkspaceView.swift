@@ -75,6 +75,7 @@ struct BrowserWorkspaceView: View {
                     }
 
                     if let popover = activeSession.selectionPopover {
+                        let layout = selectionPopoverLayout(for: popover.rect, in: geometry.size)
                         BrowserSelectionPopover(
                             popover: popover,
                             thread: activeSession.thread(for: popover.threadID),
@@ -85,8 +86,9 @@ struct BrowserWorkspaceView: View {
                             },
                             onClose: closeSelectionPopover
                         )
-                        .frame(width: 420)
-                        .position(popoverPosition(for: popover.rect, in: geometry.size))
+                        .frame(width: layout.width)
+                        .frame(maxHeight: layout.maxHeight)
+                        .position(layout.position)
                         .transition(.scale(scale: 0.96).combined(with: .opacity))
                     }
                 }
@@ -142,36 +144,46 @@ struct BrowserWorkspaceView: View {
     }
 
     private var tabBar: some View {
-        HStack(spacing: 8) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 4) {
-                    ForEach(activeTabs) { tab in
-                        BrowserTabChip(
-                            title: tab.displayTitle,
-                            url: tab.displayURL,
-                            isSelected: tab.id == activeSelectedTabID,
-                            isLoading: tab.navigationState.isLoading,
-                            onSelect: { selectTab(tab.id) },
-                            onClose: { closeTab(tab.id) }
-                        )
+        GeometryReader { geometry in
+            let addButtonWidth: CGFloat = 30
+            let interItemSpacing: CGFloat = 8
+            let availableTabWidth = max(0, geometry.size.width - addButtonWidth - interItemSpacing)
+            let layout = BrowserTabStripLayoutCalculator().layout(tabCount: activeTabs.count, availableWidth: Double(availableTabWidth))
+
+            HStack(spacing: interItemSpacing) {
+                ScrollView(.horizontal, showsIndicators: layout.requiresHorizontalScroll) {
+                    HStack(spacing: 4) {
+                        ForEach(activeTabs) { tab in
+                            BrowserTabChip(
+                                title: tab.displayTitle,
+                                url: tab.displayURL,
+                                width: CGFloat(layout.tabWidth),
+                                isSelected: tab.id == activeSelectedTabID,
+                                isLoading: tab.navigationState.isLoading,
+                                onSelect: { selectTab(tab.id) },
+                                onClose: { closeTab(tab.id) }
+                            )
+                        }
                     }
                 }
-            }
+                .frame(width: availableTabWidth, alignment: .leading)
 
-            Button(action: { openNewTab(urlString: viewModel.browserTargetURLString, select: true) }) {
-                Image(systemName: "plus")
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 30, height: 26)
+                Button(action: { openNewTab(urlString: viewModel.browserTargetURLString, select: true) }) {
+                    Image(systemName: "plus")
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: addButtonWidth, height: 26)
+                }
+                .buttonStyle(.plain)
+                .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .stroke(Color.secondary.opacity(0.08), lineWidth: 1)
+                )
+                .help("新建标签页")
             }
-            .buttonStyle(.plain)
-            .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .stroke(Color.secondary.opacity(0.08), lineWidth: 1)
-            )
-            .help("新建标签页")
         }
+        .frame(height: 30)
     }
 
     private var toolbar: some View {
@@ -429,16 +441,12 @@ struct BrowserWorkspaceView: View {
         }
     }
 
-    private func popoverPosition(for rect: BrowserSelectionRect, in size: CGSize) -> CGPoint {
-        let width: CGFloat = 420
-        let height: CGFloat = 300
-        let margin: CGFloat = 14
-        let rawX = rect.x + rect.width / 2
-        let x = min(max(rawX, width / 2 + margin), max(width / 2 + margin, size.width - width / 2 - margin))
-        let belowY = rect.y + rect.height + height / 2 + 12
-        let aboveY = rect.y - height / 2 - 12
-        let y = belowY + margin < size.height ? belowY : max(aboveY, height / 2 + margin)
-        return CGPoint(x: x, y: y)
+    private func selectionPopoverLayout(for rect: BrowserSelectionRect, in size: CGSize) -> BrowserSelectionPopoverLayout {
+        BrowserSelectionPopoverLayoutCalculator().layout(
+            anchorRect: rect,
+            containerSize: size,
+            preferredSize: CGSize(width: 420, height: 520)
+        )
     }
 }
 
@@ -787,6 +795,7 @@ private struct BrowserSelectionThreadList: View {
 private struct BrowserTabChip: View {
     var title: String
     var url: String
+    var width: CGFloat
     var isSelected: Bool
     var isLoading: Bool
     var onSelect: () -> Void
@@ -802,7 +811,7 @@ private struct BrowserTabChip: View {
                 .font(.caption2.weight(isSelected ? .semibold : .regular))
                 .foregroundStyle(isSelected ? .primary : .secondary)
                 .lineLimit(1)
-                .frame(width: 112, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
             Button(action: onClose) {
                 Image(systemName: "xmark")
@@ -816,7 +825,7 @@ private struct BrowserTabChip: View {
         .padding(.leading, 8)
         .padding(.trailing, 5)
         .padding(.vertical, 4)
-        .frame(height: 25)
+        .frame(width: width, height: 25)
         .background(tabBackground, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(tabBorder, lineWidth: 1))
         .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
@@ -981,7 +990,7 @@ private struct EmbeddedWebView: NSViewRepresentable {
             let failedURLString = webView.url?.absoluteString ?? ""
             webView.loadHTMLString(
                 BrowserBuiltInPage.errorHTML(failedURLString: failedURLString, message: error.localizedDescription),
-                baseURL: URL(string: BrowserBuiltInPage.blankURLString)
+                baseURL: BrowserBuiltInPage.webViewBaseURL
             )
             publishNavigationState(webView, errorMessage: error.localizedDescription)
         }
@@ -1003,11 +1012,11 @@ private struct EmbeddedWebView: NSViewRepresentable {
 private extension WKWebView {
     func loadBrowserURLString(_ urlString: String) {
         if urlString == BrowserBuiltInPage.blankURLString || urlString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            loadHTMLString(BrowserBuiltInPage.blankHTML, baseURL: URL(string: BrowserBuiltInPage.blankURLString))
+            loadHTMLString(BrowserBuiltInPage.blankHTML, baseURL: BrowserBuiltInPage.webViewBaseURL)
             return
         }
         guard let url = URL(string: urlString) else {
-            loadHTMLString(BrowserBuiltInPage.errorHTML(failedURLString: urlString, message: "Invalid URL"), baseURL: URL(string: BrowserBuiltInPage.blankURLString))
+            loadHTMLString(BrowserBuiltInPage.errorHTML(failedURLString: urlString, message: "Invalid URL"), baseURL: BrowserBuiltInPage.webViewBaseURL)
             return
         }
         load(URLRequest(url: url))
