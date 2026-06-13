@@ -59,6 +59,8 @@ public struct AgentChatTurnProcessPresentation: Sendable, Equatable, Identifiabl
     public var expandedContextItems: [AgentContextItem]
     public var fullConversationMessageCount: Int
     public var conversationHistory: [AgentChatMessagePresentation]
+    public var sourceUserMessageID: String?
+    public var assistantMessageID: String?
 
     public init(completedAssistant row: AgentChatMessagePresentation, conversationHistory: [AgentChatMessagePresentation]) {
         self.id = "process-\(row.id)"
@@ -66,6 +68,8 @@ public struct AgentChatTurnProcessPresentation: Sendable, Equatable, Identifiabl
         self.state = .completed
         self.fullConversationMessageCount = conversationHistory.count
         self.conversationHistory = conversationHistory
+        self.sourceUserMessageID = conversationHistory.last(where: { $0.message.role == .user })?.id
+        self.assistantMessageID = row.id
         if let inspection = row.message.promptInspection {
             self.summary = Self.completedSummary(turnNumber: row.turnNumber, inspection: inspection, fullConversationMessageCount: conversationHistory.count)
         } else {
@@ -85,6 +89,8 @@ public struct AgentChatTurnProcessPresentation: Sendable, Equatable, Identifiabl
         self.state = .running
         self.fullConversationMessageCount = conversationHistory.count
         self.conversationHistory = conversationHistory
+        self.sourceUserMessageID = conversationHistory.last(where: { $0.message.role == .user })?.id
+        self.assistantMessageID = nil
         self.summary = "第 \(pending.turnNumber) 轮 · 正在处理 · 完整历史 \(conversationHistory.count) 条"
         self.title = "第 \(pending.turnNumber) 轮处理中…"
         self.currentRequest = conversationHistory.last(where: { $0.message.role == .user })?.message.content

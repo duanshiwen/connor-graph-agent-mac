@@ -182,6 +182,7 @@ public struct NativeSessionManager: Sendable {
         if let onRunStarted {
             await onRunStarted(run.id)
         }
+        try throwIfRunCancelled(runID: run.id)
         run.status = .running
         try sessionRepository.saveRun(run)
         if eventRecorder == nil {

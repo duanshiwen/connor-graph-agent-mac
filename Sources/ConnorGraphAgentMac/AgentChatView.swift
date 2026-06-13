@@ -293,6 +293,10 @@ private struct AgentChatConversationView: View {
         if process.id == latestProcessID, !viewModel.agentEventTimeline.isEmpty {
             return viewModel.agentEventTimeline
         }
+        let restoredEvents = viewModel.restoredAgentEventTimeline(for: process)
+        if !restoredEvents.isEmpty {
+            return restoredEvents
+        }
         return AgentActivityFallbackEvents.events(for: process)
     }
 
@@ -520,33 +524,11 @@ struct AgentMarkdownPreviewText: View {
     var monospacedFallback: Bool = false
     var lineLimit: Int? = nil
 
-    private enum Block: Identifiable {
-        case heading(level: Int, text: String)
-        case paragraph(String)
-        case unorderedItem(String)
-        case orderedItem(number: String, text: String)
-        case quote(String)
-        case code(String)
-        case spacer
-
-        var id: String {
-            switch self {
-            case .heading(let level, let text): return "heading-\(level)-\(text.hashValue)"
-            case .paragraph(let text): return "paragraph-\(text.hashValue)"
-            case .unorderedItem(let text): return "unordered-\(text.hashValue)"
-            case .orderedItem(let number, let text): return "ordered-\(number)-\(text.hashValue)"
-            case .quote(let text): return "quote-\(text.hashValue)"
-            case .code(let text): return "code-\(text.hashValue)"
-            case .spacer: return "spacer"
-            }
-        }
-    }
-
     @MainActor
     private final class RenderCache {
         static let shared = RenderCache()
         private var inlineCache: [String: AttributedString] = [:]
-        private var blockCache: [String: [Block]] = [:]
+        private var blockCache: [String: [AgentMarkdownBlock]] = [:]
         private let limit = 600
 
         func inline(_ markdown: String) -> AttributedString {
@@ -564,7 +546,7 @@ struct AgentMarkdownPreviewText: View {
             return rendered
         }
 
-        func blocks(_ markdown: String, parse: (String) -> [Block]) -> [Block] {
+        func blocks(_ markdown: String, parse: (String) -> [AgentMarkdownBlock]) -> [AgentMarkdownBlock] {
             if let cached = blockCache[markdown] { return cached }
             let parsed = parse(markdown)
             storeBlocks(parsed, for: markdown)
@@ -576,7 +558,7 @@ struct AgentMarkdownPreviewText: View {
             inlineCache[key] = value
         }
 
-        private func storeBlocks(_ value: [Block], for key: String) {
+        private func storeBlocks(_ value: [AgentMarkdownBlock], for key: String) {
             if blockCache.count >= limit { blockCache.removeAll(keepingCapacity: true) }
             blockCache[key] = value
         }
@@ -586,8 +568,8 @@ struct AgentMarkdownPreviewText: View {
         RenderCache.shared.inline(markdown)
     }
 
-    private var blocks: [Block] {
-        RenderCache.shared.blocks(markdown, parse: parseBlocks)
+    private var blocks: [AgentMarkdownBlock] {
+        RenderCache.shared.blocks(markdown) { AgentMarkdownBlockParser().parse($0) }
     }
 
     @ViewBuilder
@@ -615,7 +597,7 @@ struct AgentMarkdownPreviewText: View {
     }
 
     @ViewBuilder
-    private func view(for block: Block) -> some View {
+    private func view(for block: AgentMarkdownBlock) -> some View {
         switch block {
         case .heading(let level, let text):
             Text(renderInline(text))
@@ -657,14 +639,93 @@ struct AgentMarkdownPreviewText: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-        case .code(let text):
-            Text(text)
-                .font(.system(.caption, design: .monospaced))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(8)
-                .background(.quaternary.opacity(0.18), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        case .taskItem(let isCompleted, let text):
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: isCompleted ? "checkmark.square.fill" : "square")
+                    .font(font)
+                    .foregroundStyle(isCompleted ? .secondary : .tertiary)
+                    .frame(width: 14, alignment: .center)
+                Text(renderInline(text))
+                    .font(font)
+                    .foregroundStyle(isCompleted ? .secondary : .primary)
+                    .strikethrough(isCompleted, color: .secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.leading, 4)
+        case .code(let language, let text):
+            VStack(alignment: .leading, spacing: 6) {
+                if let language, !language.isEmpty {
+                    Text(language)
+                        .font(.caption2.monospaced().weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                Text(text)
+                    .font(.system(.caption, design: .monospaced))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(8)
+            .background(.quaternary.opacity(0.18), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        case .table(let table):
+            markdownTableView(table)
+        case .horizontalRule:
+            Rectangle()
+                .fill(Color.secondary.opacity(0.24))
+                .frame(height: 1)
+                .padding(.vertical, 6)
         case .spacer:
             Color.clear.frame(height: 4)
+        }
+    }
+
+    private func markdownTableView(_ table: AgentMarkdownTable) -> some View {
+        ScrollView(.horizontal, showsIndicators: true) {
+            Grid(horizontalSpacing: 0, verticalSpacing: 0) {
+                GridRow {
+                    ForEach(Array(table.headers.enumerated()), id: \.offset) { index, header in
+                        tableCell(header, isHeader: true, alignment: alignment(for: table.alignments[safe: index] ?? .leading))
+                    }
+                }
+                ForEach(Array(table.rows.enumerated()), id: \.offset) { _, row in
+                    GridRow {
+                        ForEach(Array(table.headers.indices), id: \.self) { index in
+                            tableCell(row[safe: index] ?? "", isHeader: false, alignment: alignment(for: table.alignments[safe: index] ?? .leading))
+                        }
+                    }
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+            )
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func tableCell(_ text: String, isHeader: Bool, alignment: Alignment) -> some View {
+        Text(renderInline(text))
+            .font(isHeader ? font.weight(.semibold) : font)
+            .frame(minWidth: 92, maxWidth: 220, alignment: alignment)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(isHeader ? Color.secondary.opacity(0.10) : Color.clear)
+            .overlay(alignment: .bottom) {
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.14))
+                    .frame(height: 1)
+            }
+            .overlay(alignment: .trailing) {
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.12))
+                    .frame(width: 1)
+            }
+    }
+
+    private func alignment(for tableAlignment: AgentMarkdownTableAlignment) -> Alignment {
+        switch tableAlignment {
+        case .leading: return .leading
+        case .center: return .center
+        case .trailing: return .trailing
         }
     }
 
@@ -680,92 +741,11 @@ struct AgentMarkdownPreviewText: View {
         RenderCache.shared.inline(text)
     }
 
-    private func parseBlocks(_ markdown: String) -> [Block] {
-        let lines = markdown.replacingOccurrences(of: "\r\n", with: "\n").split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-        var result: [Block] = []
-        var paragraph: [String] = []
-        var codeLines: [String] = []
-        var isInCodeBlock = false
+}
 
-        func flushParagraph() {
-            let text = paragraph.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-            if !text.isEmpty { result.append(.paragraph(text)) }
-            paragraph.removeAll()
-        }
-
-        for rawLine in lines {
-            let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
-
-            if trimmed.hasPrefix("```") {
-                if isInCodeBlock {
-                    result.append(.code(codeLines.joined(separator: "\n")))
-                    codeLines.removeAll()
-                    isInCodeBlock = false
-                } else {
-                    flushParagraph()
-                    isInCodeBlock = true
-                }
-                continue
-            }
-
-            if isInCodeBlock {
-                codeLines.append(rawLine)
-                continue
-            }
-
-            if trimmed.isEmpty {
-                flushParagraph()
-                if result.last.map({ if case .spacer = $0 { return true }; return false }) != true {
-                    result.append(.spacer)
-                }
-                continue
-            }
-
-            if let heading = parseHeading(trimmed) {
-                flushParagraph()
-                result.append(.heading(level: heading.level, text: heading.text))
-            } else if let item = parseUnorderedItem(trimmed) {
-                flushParagraph()
-                result.append(.unorderedItem(item))
-            } else if let item = parseOrderedItem(trimmed) {
-                flushParagraph()
-                result.append(.orderedItem(number: item.number, text: item.text))
-            } else if trimmed.hasPrefix(">") {
-                flushParagraph()
-                result.append(.quote(String(trimmed.dropFirst()).trimmingCharacters(in: .whitespaces)))
-            } else {
-                paragraph.append(rawLine.trimmingCharacters(in: .whitespaces))
-            }
-        }
-
-        if isInCodeBlock, !codeLines.isEmpty { result.append(.code(codeLines.joined(separator: "\n"))) }
-        flushParagraph()
-        return result.filter { block in
-            if case .spacer = block { return true }
-            return true
-        }
-    }
-
-    private func parseHeading(_ line: String) -> (level: Int, text: String)? {
-        let hashes = line.prefix { $0 == "#" }.count
-        guard hashes > 0, hashes <= 6, line.dropFirst(hashes).first == " " else { return nil }
-        return (hashes, String(line.dropFirst(hashes + 1)))
-    }
-
-    private func parseUnorderedItem(_ line: String) -> String? {
-        for marker in ["- ", "* ", "+ "] where line.hasPrefix(marker) {
-            return String(line.dropFirst(marker.count)).trimmingCharacters(in: .whitespaces)
-        }
-        return nil
-    }
-
-    private func parseOrderedItem(_ line: String) -> (number: String, text: String)? {
-        guard let dot = line.firstIndex(of: ".") else { return nil }
-        let number = String(line[..<dot])
-        guard !number.isEmpty, number.allSatisfy({ $0.isNumber }) else { return nil }
-        let rest = line[line.index(after: dot)...]
-        guard rest.first == " " else { return nil }
-        return (number, String(rest.dropFirst()).trimmingCharacters(in: .whitespaces))
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
     }
 }
 

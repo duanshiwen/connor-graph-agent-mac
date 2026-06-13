@@ -106,8 +106,12 @@ import ConnorGraphAppSupport
     #expect(items.map(\.id) == ["timestamp-turn-1", "user-1", "process-assistant-1", "assistant-1", "timestamp-turn-2", "user-2", "process-assistant-2", "assistant-2"])
     #expect(processes[0].fullConversationMessageCount == 1)
     #expect(processes[0].conversationHistory.map(\.message.content) == ["你好"])
+    #expect(processes[0].sourceUserMessageID == "user-1")
+    #expect(processes[0].assistantMessageID == "assistant-1")
     #expect(processes[1].fullConversationMessageCount == 3)
     #expect(processes[1].conversationHistory.map(\.message.content) == ["你好", "你好！", "我们会说些什么呢？"])
+    #expect(processes[1].sourceUserMessageID == "user-2")
+    #expect(processes[1].assistantMessageID == "assistant-2")
     #expect(processes[1].summary == "第 2 轮 · 本轮提示词：摘要未包含 · 对话上下文 2 条 · 完整历史 3 条 · 约 36 tokens · 安全")
 }
 
@@ -120,6 +124,8 @@ import ConnorGraphAppSupport
     #expect(items.map(\.kindLabel) == ["timestamp", "message", "process"])
     #expect(items[2].process?.turnNumber == 1)
     #expect(items[2].process?.state == .running)
+    #expect(items[2].process?.sourceUserMessageID == "user-1")
+    #expect(items[2].process?.assistantMessageID == nil)
 }
 
 @Test func agentChatAssistantTurnMetadataSummarizesPromptInspection() {

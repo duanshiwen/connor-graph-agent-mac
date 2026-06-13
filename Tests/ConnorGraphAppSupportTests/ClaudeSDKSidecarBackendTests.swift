@@ -567,6 +567,22 @@ private actor FakeClaudeSDKSidecarSessionTransport: ClaudeSDKSidecarSessionTrans
     #expect(sidecarSource.contains("toolUseCompleted"))
 }
 
+@Test func claudeSDKSidecarEngineDisallowsSDKWebToolsForConnorBrowserPolicy() throws {
+    let root = repositoryRootURL()
+    let sidecarSource = try String(
+        contentsOf: root.appendingPathComponent("sidecars/claude-agent-engine/claude-sidecar.mjs"),
+        encoding: .utf8
+    )
+
+    #expect(sidecarSource.contains("CONNOR_BROWSER_POLICY_PROMPT"))
+    #expect(sidecarSource.contains("CONNOR_DISALLOWED_SDK_WEB_TOOLS"))
+    #expect(sidecarSource.contains("'WebSearch'"))
+    #expect(sidecarSource.contains("'WebFetch'"))
+    #expect(sidecarSource.contains("disallowedTools"))
+    #expect(sidecarSource.contains("appendSystemPrompt"))
+    #expect(sidecarSource.contains("built-in Browser Workspace/background WKWebView runner"))
+}
+
 @Test func claudeSDKSidecarEngineDeclaresPersistentCommandLoopSkeleton() throws {
     let root = repositoryRootURL()
     let sidecarSource = try String(

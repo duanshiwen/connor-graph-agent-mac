@@ -68,6 +68,35 @@ public enum BrowserPopoverDismissalPolicy: Equatable, Sendable {
     }
 }
 
+public enum BrowserKeyboardShortcut: Equatable, Sendable {
+    case closeSelectionPopover
+    case closeSelectedTab
+}
+
+public struct BrowserKeyboardShortcutResolver: Sendable {
+    public init() {}
+
+    public func shortcut(
+        character: String? = nil,
+        isEscape: Bool = false,
+        isCommandDown: Bool = false,
+        isShiftDown: Bool = false,
+        isControlDown: Bool = false,
+        isOptionDown: Bool = false,
+        hasSelectionPopover: Bool = false
+    ) -> BrowserKeyboardShortcut? {
+        if isEscape, hasSelectionPopover {
+            return .closeSelectionPopover
+        }
+
+        guard isCommandDown, !isShiftDown, !isControlDown, !isOptionDown else { return nil }
+        if character?.lowercased() == "w" {
+            return .closeSelectedTab
+        }
+        return nil
+    }
+}
+
 public struct BrowserExternalOpenPlanner: Sendable {
     public init() {}
 
