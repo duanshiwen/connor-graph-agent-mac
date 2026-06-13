@@ -5,6 +5,44 @@ import ConnorGraphAgent
 import ConnorGraphSearch
 import ConnorGraphAppSupport
 
+enum ConnorCraftPalette {
+    // Mirrors Craft Agents OSS renderer tokens:
+    // --background: light oklch(0.98 0.003 265), dark oklch(0.2 0.005 270)
+    // --foreground: light oklch(0.185 0.01 270), dark oklch(0.92 0.005 270)
+    // --accent: light oklch(0.62 0.13 293), dark oklch(0.65 0.20 293)
+    static let background = dynamicColor(light: "#F7F8FA", dark: "#151618")
+    static let foreground = dynamicColor(light: "#111317", dark: "#E3E4E8")
+    static let accent = dynamicColor(light: "#8A75CD", dark: "#9770FC")
+    static let userBubble = foreground.opacity(0.05)
+    static let userBubbleDimmed = foreground.opacity(0.03)
+    static let sendButton = foreground
+    static let sendButtonForeground = background
+    static let stopButton = foreground.opacity(0.05)
+    static let accentSoftFill = accent.opacity(0.14)
+    static let accentSubtleFill = accent.opacity(0.08)
+    static let accentBorder = accent.opacity(0.28)
+
+    private static func dynamicColor(light: String, dark: String) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            if appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua {
+                return nsColor(hex: dark)
+            }
+            return nsColor(hex: light)
+        })
+    }
+
+    private static func nsColor(hex: String) -> NSColor {
+        let sanitized = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        guard sanitized.count == 6, let value = Int(sanitized, radix: 16) else {
+            return .controlAccentColor
+        }
+        let red = CGFloat((value >> 16) & 0xFF) / 255
+        let green = CGFloat((value >> 8) & 0xFF) / 255
+        let blue = CGFloat(value & 0xFF) / 255
+        return NSColor(red: red, green: green, blue: blue, alpha: 1)
+    }
+}
+
 private enum AgentChatLayout {
     static let spaceXS: CGFloat = 3
     static let spaceS: CGFloat = 6
@@ -133,7 +171,7 @@ private struct AgentChatSessionRow: View {
                 HStack(spacing: AgentChatLayout.spaceS) {
                     Image(systemName: row.isFlagged ? "flag.fill" : (isSelected ? "message.fill" : "message"))
                         .font(.caption)
-                        .foregroundStyle(row.isFlagged ? .orange : (isSelected ? .accentColor : .secondary))
+                        .foregroundStyle(row.isFlagged ? .orange : (isSelected ? ConnorCraftPalette.accent : .secondary))
                         .frame(width: 16)
                     Text(row.title)
                         .font(.subheadline.weight(isSelected ? .semibold : .regular))
@@ -157,7 +195,7 @@ private struct AgentChatSessionRow: View {
             .padding(.vertical, AgentChatLayout.spaceM)
             .background(
                 RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous)
-                    .fill(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
+                    .fill(isSelected ? ConnorCraftPalette.accentSoftFill : Color.clear)
             )
             .contentShape(RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
         }
@@ -627,6 +665,7 @@ private struct AgentChatMessageRow: View {
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                 messageContent
             }
+            .foregroundStyle(Color.primary)
             .padding(AgentChatLayout.spaceM)
             .frame(maxWidth: isUser ? AgentChatLayout.userMessageMaxWidth : AgentChatLayout.messageMaxWidth, alignment: .leading)
             .background(messageBackground, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
@@ -658,7 +697,7 @@ private struct AgentChatMessageRow: View {
     }
 
     private var messageBackground: Color {
-        if isUser { return Color.accentColor.opacity(0.88) }
+        if isUser { return ConnorCraftPalette.userBubble }
         return Color(nsColor: .controlBackgroundColor).opacity(0.85)
     }
 }
@@ -1261,10 +1300,25 @@ struct AgentSendControlButton: View {
                 .font(.system(size: 11, weight: .semibold))
                 .frame(width: 22, height: 22)
         }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.mini)
-        .clipShape(Circle())
+        .buttonStyle(.plain)
+        .foregroundStyle(isSubmitting ? ConnorCraftPalette.foreground : ConnorCraftPalette.sendButtonForeground)
+        .background(buttonBackground, in: Circle())
+        .overlay(Circle().stroke(buttonBorder, lineWidth: 1))
+        .shadow(color: buttonShadow, radius: 7, x: 0, y: 2)
+        .opacity(isDisabled ? 0.42 : 1)
         .disabled(isDisabled)
+    }
+
+    private var buttonBackground: Color {
+        isSubmitting ? ConnorCraftPalette.stopButton : ConnorCraftPalette.sendButton
+    }
+
+    private var buttonBorder: Color {
+        isSubmitting ? ConnorCraftPalette.foreground.opacity(0.10) : ConnorCraftPalette.foreground.opacity(0.08)
+    }
+
+    private var buttonShadow: Color {
+        isDisabled || isSubmitting ? Color.clear : ConnorCraftPalette.foreground.opacity(0.12)
     }
 }
 
