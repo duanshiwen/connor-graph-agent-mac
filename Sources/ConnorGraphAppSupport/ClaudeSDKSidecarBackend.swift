@@ -663,6 +663,7 @@ public final class ClaudeSDKSidecarPersistentProcessTransport: ClaudeSDKSidecarS
     private var stdinHandle: FileHandle?
     private var stderrPipe: Pipe?
     private var streamContinuation: AsyncThrowingStream<ClaudeSDKSidecarEvent, Error>.Continuation?
+    private var activeRequest: ClaudeSDKSidecarRequest?
 
     public init(
         executableURL: URL,
@@ -710,6 +711,7 @@ public final class ClaudeSDKSidecarPersistentProcessTransport: ClaudeSDKSidecarS
                 self.process = process
                 self.stdinHandle = stdin.fileHandleForWriting
                 self.stderrPipe = stderr
+                self.activeRequest = request
             }
 
             try process.run()
@@ -737,12 +739,23 @@ public final class ClaudeSDKSidecarPersistentProcessTransport: ClaudeSDKSidecarS
 
     public func cancel() async {
         let resources = withLock {
-            let resources = (process, stdinHandle, streamContinuation)
+            let resources = (process, stdinHandle, streamContinuation, activeRequest)
             process = nil
             stdinHandle = nil
             streamContinuation = nil
             stderrPipe = nil
+            activeRequest = nil
             return resources
+        }
+        if let request = resources.3 {
+            var data = try? JSONEncoder().encode(ClaudeSDKSidecarCommand.cancel(ClaudeSDKSidecarCancelCommand(
+                connorRunID: request.connorRunID,
+                connorSessionID: request.connorSessionID,
+                reason: "cancelled by Connor"
+            )))
+            data?.append(0x0A)
+            if let data { try? resources.1?.write(contentsOf: data) }
+            try? await Task.sleep(nanoseconds: 100_000_000)
         }
         try? resources.1?.close()
         if resources.0?.isRunning == true {
@@ -777,6 +790,15 @@ public final class ClaudeSDKSidecarPersistentProcessTransport: ClaudeSDKSidecarS
             stdout.fileHandleForReading.readabilityHandler = nil
             let stderrData = stderr.fileHandleForReading.readDataToEndOfFile()
             let stderrText = String(data: stderrData, encoding: .utf8) ?? ""
+            self.withLock {
+                if self.process === process {
+                    self.process = nil
+                    self.stdinHandle = nil
+                    self.streamContinuation = nil
+                    self.stderrPipe = nil
+                    self.activeRequest = nil
+                }
+            }
             if process.terminationStatus != 0 && process.terminationReason != .uncaughtSignal {
                 continuation.finish(throwing: ClaudeSDKSidecarProcessTransportError.nonZeroExit(
                     code: process.terminationStatus,
@@ -949,8 +971,8 @@ public struct ClaudeSDKSidecarSessionBackend<Transport: ClaudeSDKSidecarSessionT
         }
     }
 
-    public func abort(runID: String) async {
-        await transport.cancel()
+    public func abort(runID: String) {
+        Task { await transport.cancel() }
     }
 }
 

@@ -114,6 +114,9 @@ public struct AgentEventPresenter: Sendable {
         case .graphMemoryHeld(let payload):
             return item(event, title: "Graph memory held", detail: payload.message, severity: .warning)
         case .runFailed(let failure):
+            if failure.message.localizedCaseInsensitiveContains("cancelled") {
+                return item(event, title: "Run cancelled", detail: failure.message, severity: .warning)
+            }
             return item(event, title: "Run failed", detail: failure.message, severity: .error)
         case .runCompleted:
             return item(event, title: "Run completed", detail: "The agent run finished successfully.", severity: .success)
