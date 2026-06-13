@@ -19,6 +19,42 @@ public struct BrowserWorkspaceSessionBinding: Equatable, Sendable {
     }
 }
 
+public struct BrowserPromptFoldingParts: Equatable, Sendable {
+    public var leadingMarkdown: String
+    public var webPageBody: String
+    public var trailingMarkdown: String
+
+    public init(leadingMarkdown: String, webPageBody: String, trailingMarkdown: String) {
+        self.leadingMarkdown = leadingMarkdown
+        self.webPageBody = webPageBody
+        self.trailingMarkdown = trailingMarkdown
+    }
+}
+
+public struct BrowserPromptFoldingParser: Sendable {
+    public init() {}
+
+    public func parse(_ markdown: String) -> BrowserPromptFoldingParts? {
+        guard let headingRange = markdown.range(of: "网页正文：") else { return nil }
+        let afterHeading = markdown[headingRange.upperBound...]
+        guard let fenceStart = afterHeading.range(of: "```") else { return nil }
+        let afterFenceStart = afterHeading[fenceStart.upperBound...]
+        let bodyStart: String.Index
+        if let newline = afterFenceStart.firstIndex(of: "\n") {
+            bodyStart = markdown.index(after: newline)
+        } else {
+            bodyStart = fenceStart.upperBound
+        }
+        guard let fenceEnd = markdown[bodyStart...].range(of: "```") else { return nil }
+
+        let leading = String(markdown[..<headingRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let body = String(markdown[bodyStart..<fenceEnd.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let trailing = String(markdown[fenceEnd.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty else { return nil }
+        return BrowserPromptFoldingParts(leadingMarkdown: leading, webPageBody: body, trailingMarkdown: trailing)
+    }
+}
+
 public struct BrowserPageContext: Equatable, Sendable {
     public var url: String
     public var title: String
