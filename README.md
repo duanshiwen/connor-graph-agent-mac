@@ -1,6 +1,6 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-13 11:12 GMT+8  
+文档更新时间：2026-06-13 12:02 GMT+8  
 当前代码基线：`feature/browser-tabs`，基于 `main` 继续演进 Session Capsule 持久化、内置浏览器多标签页与网页选区浮窗能力。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package，目标是把 Connor 建成 **graph-memory-native Agent OS**：它不是“图谱编辑器”，也不是“Claude SDK 外壳”，而是以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI 和 Local Automation Surface 共同构成的本地 Agent 操作系统。
@@ -811,14 +811,15 @@ BrowserWorkspaceView
 Browser Workspace 当前支持：
 
 - SwiftUI + WKWebView 内置网页工作区
-- 轻量多标签页标签栏
-- 每个 Connor Session 拥有独立的浏览器标签页栈、选中文本浮窗和网页选择 mini-thread 记录
+- 轻量多标签页标签栏；标签过多时先自动缩窄每个标签，达到最小宽度后再横向滚动
+- 每个 Connor Session 拥有独立的浏览器标签页栈、选中文本浮窗、网页选择 mini-thread 记录和上次离开时的浏览器/对话视图模式
 - 浏览器状态是 Session Capsule 的子状态，持久化到 `sessions/{sessionID}/browser/browser-state.json`
 - 网页选择提问会同时追加到 `sessions/{sessionID}/state/records.jsonl`，作为会话记录流的一部分
 - 每个标签页独立保留 URL、标题、加载状态和前进/后退 metadata；运行期 WKWebView 缓存在 UI 层，不跨重启持久化
 - 地址栏输入 URL、域名或搜索词，按 Return 打开
 - target=_blank / 新窗口导航自动打开为新标签页
 - 用户在网页中选中文本后自动显示跟随选区的浮动窗口
+- 浮窗会根据 Browser Workspace 可视区域自动翻转、平移并限制最大高度，避免在窗口边缘、小窗口或长 mini-thread 场景下显示不全
 - 浮窗可基于选中文本提问、插入主对话输入框或保存为 Graph Evidence episode
 - 浮窗发送按钮复用主对话 composer 的原型发送按钮样式
 - 发送给 LLM 后浮窗保持打开，局部 mini-thread 显示 loading 状态、用户提问与 assistant Markdown 回复

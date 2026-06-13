@@ -129,6 +129,7 @@ public struct AppSessionRecord: Codable, Equatable, Identifiable, Sendable {
 
 public enum BrowserBuiltInPage: Sendable {
     public static let blankURLString = "connor://browser/blank"
+    public static let webViewBaseURL: URL? = nil
 
     public static var blankHTML: String {
         """

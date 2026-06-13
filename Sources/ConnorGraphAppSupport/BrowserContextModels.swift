@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import ConnorGraphCore
 
@@ -52,6 +53,156 @@ public struct BrowserPromptFoldingParser: Sendable {
         let trailing = String(markdown[fenceEnd.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty else { return nil }
         return BrowserPromptFoldingParts(leadingMarkdown: leading, webPageBody: body, trailingMarkdown: trailing)
+    }
+}
+
+public struct BrowserTabStripLayout: Equatable, Sendable {
+    public var tabWidth: Double
+    public var requiresHorizontalScroll: Bool
+
+    public init(tabWidth: Double, requiresHorizontalScroll: Bool) {
+        self.tabWidth = tabWidth
+        self.requiresHorizontalScroll = requiresHorizontalScroll
+    }
+}
+
+public struct BrowserTabStripLayoutCalculator: Sendable {
+    public var preferredTabWidth: Double
+    public var minimumTabWidth: Double
+    public var interTabSpacing: Double
+
+    public init(preferredTabWidth: Double = 150, minimumTabWidth: Double = 86, interTabSpacing: Double = 4) {
+        self.preferredTabWidth = preferredTabWidth
+        self.minimumTabWidth = minimumTabWidth
+        self.interTabSpacing = interTabSpacing
+    }
+
+    public func layout(tabCount: Int, availableWidth: Double) -> BrowserTabStripLayout {
+        guard tabCount > 0 else {
+            return BrowserTabStripLayout(tabWidth: preferredTabWidth, requiresHorizontalScroll: false)
+        }
+        let totalSpacing = interTabSpacing * Double(max(0, tabCount - 1))
+        let preferredTotalWidth = preferredTabWidth * Double(tabCount) + totalSpacing
+        guard preferredTotalWidth > availableWidth else {
+            return BrowserTabStripLayout(tabWidth: preferredTabWidth, requiresHorizontalScroll: false)
+        }
+        let fittedWidth = floor((availableWidth - totalSpacing) / Double(tabCount))
+        let tabWidth = max(minimumTabWidth, fittedWidth)
+        let minimumTotalWidth = minimumTabWidth * Double(tabCount) + totalSpacing
+        return BrowserTabStripLayout(tabWidth: tabWidth, requiresHorizontalScroll: minimumTotalWidth > availableWidth)
+    }
+}
+
+public enum ChatSessionWorkspaceMode: String, Codable, Equatable, Sendable {
+    case conversation
+    case browser
+}
+
+public struct ChatSessionWorkspaceModeStore: Equatable, Sendable {
+    private var modesBySessionID: [String: ChatSessionWorkspaceMode]
+
+    public init(modesBySessionID: [String: ChatSessionWorkspaceMode] = [:]) {
+        self.modesBySessionID = modesBySessionID
+    }
+
+    public func mode(for sessionID: String?) -> ChatSessionWorkspaceMode {
+        guard let key = normalizedSessionID(sessionID) else { return .conversation }
+        return modesBySessionID[key] ?? .conversation
+    }
+
+    public mutating func setMode(_ mode: ChatSessionWorkspaceMode, for sessionID: String?) {
+        guard let key = normalizedSessionID(sessionID) else { return }
+        modesBySessionID[key] = mode
+    }
+
+    public var snapshot: [String: ChatSessionWorkspaceMode] { modesBySessionID }
+
+    private func normalizedSessionID(_ sessionID: String?) -> String? {
+        let trimmed = sessionID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+public enum BrowserSelectionPopoverPlacement: String, Equatable, Sendable {
+    case below
+    case above
+}
+
+public struct BrowserSelectionPopoverLayout: Equatable, Sendable {
+    public var position: CGPoint
+    public var width: CGFloat
+    public var maxHeight: CGFloat
+    public var placement: BrowserSelectionPopoverPlacement
+
+    public init(position: CGPoint, width: CGFloat, maxHeight: CGFloat, placement: BrowserSelectionPopoverPlacement) {
+        self.position = position
+        self.width = width
+        self.maxHeight = maxHeight
+        self.placement = placement
+    }
+
+    public var frame: CGRect {
+        CGRect(
+            x: position.x - width / 2,
+            y: position.y - maxHeight / 2,
+            width: width,
+            height: maxHeight
+        )
+    }
+}
+
+public struct BrowserSelectionPopoverLayoutCalculator: Sendable {
+    public var margin: CGFloat
+    public var gap: CGFloat
+    public var minimumWidth: CGFloat
+    public var minimumHeight: CGFloat
+
+    public init(margin: CGFloat = 14, gap: CGFloat = 12, minimumWidth: CGFloat = 260, minimumHeight: CGFloat = 180) {
+        self.margin = margin
+        self.gap = gap
+        self.minimumWidth = minimumWidth
+        self.minimumHeight = minimumHeight
+    }
+
+    public func layout(anchorRect: AppBrowserSelectionRect, containerSize: CGSize, preferredSize: CGSize) -> BrowserSelectionPopoverLayout {
+        let usableWidth = max(1, containerSize.width - margin * 2)
+        let width = min(preferredSize.width, usableWidth)
+        let anchor = CGRect(
+            x: CGFloat(anchorRect.x),
+            y: CGFloat(anchorRect.y),
+            width: CGFloat(anchorRect.width),
+            height: CGFloat(anchorRect.height)
+        )
+
+        let spaceBelow = max(0, containerSize.height - margin - (anchor.maxY + gap))
+        let spaceAbove = max(0, anchor.minY - gap - margin)
+        let placement: BrowserSelectionPopoverPlacement = if spaceBelow >= preferredSize.height || spaceBelow >= spaceAbove {
+            .below
+        } else {
+            .above
+        }
+        let availableHeight = placement == .below ? spaceBelow : spaceAbove
+        let boundedPreferredHeight = min(preferredSize.height, max(minimumHeight, containerSize.height - margin * 2))
+        let maxHeight = min(boundedPreferredHeight, max(minimumHeight, availableHeight))
+
+        let rawX = anchor.midX
+        let halfWidth = width / 2
+        let x = clamp(rawX, lower: margin + halfWidth, upper: max(margin + halfWidth, containerSize.width - margin - halfWidth))
+
+        let rawY = switch placement {
+        case .below:
+            anchor.maxY + gap + maxHeight / 2
+        case .above:
+            anchor.minY - gap - maxHeight / 2
+        }
+        let halfHeight = maxHeight / 2
+        let y = clamp(rawY, lower: margin + halfHeight, upper: max(margin + halfHeight, containerSize.height - margin - halfHeight))
+
+        return BrowserSelectionPopoverLayout(position: CGPoint(x: x, y: y), width: width, maxHeight: maxHeight, placement: placement)
+    }
+
+    private func clamp(_ value: CGFloat, lower: CGFloat, upper: CGFloat) -> CGFloat {
+        min(max(value, lower), upper)
     }
 }
 

@@ -140,6 +140,11 @@ struct AppSessionCapsuleRepositoryTests {
         #expect(BrowserBuiltInPage.errorHTML(failedURLString: "https://bad.example", message: "offline").contains("https://bad.example"))
     }
 
+    @Test("built in pages do not expose custom URL scheme to WebKit loading")
+    func builtInPagesDoNotExposeCustomURLSchemeToWebKitLoading() {
+        #expect(BrowserBuiltInPage.webViewBaseURL == nil)
+    }
+
     @Test("different sessions have isolated capsules")
     func differentSessionsHaveIsolatedCapsules() throws {
         let fixture = try makeFixture()
