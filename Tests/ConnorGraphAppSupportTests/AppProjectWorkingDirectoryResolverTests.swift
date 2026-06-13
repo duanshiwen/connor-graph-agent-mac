@@ -62,6 +62,46 @@ struct AppProjectWorkingDirectoryResolverTests {
         #expect(resolved.source == .session)
     }
 
+    @Test("session workspace roots override runtime workspace roots")
+    func sessionWorkspaceRootsOverrideRuntimeWorkspaceRoots() throws {
+        let runtime = AgentRuntimeSettings(workspace: AgentRuntimeWorkspaceSettings(roots: [
+            AgentRuntimeWorkspaceRoot(id: "runtime", displayName: "Runtime", path: "/tmp/runtime", role: "project", isPrimary: true)
+        ]))
+        let sessionRoots = [
+            AppSessionWorkspaceRootReference(id: "docs", displayName: "Docs", path: "/tmp/docs", role: "docs", isPrimary: false),
+            AppSessionWorkspaceRootReference(id: "session", displayName: "Session", path: "/tmp/session", role: "project", isPrimary: true)
+        ]
+
+        let resolved = AppProjectWorkingDirectoryResolver.resolveWorkspace(
+            sessionWorkspaceRoots: sessionRoots,
+            runtimeSettings: runtime,
+            llmSettings: .default,
+            processCurrentDirectoryPath: "/tmp/process"
+        )
+
+        #expect(resolved.primary.url.path == "/tmp/session")
+        #expect(resolved.primary.source == .session)
+        #expect(resolved.roots.map(\.url.path) == ["/tmp/docs", "/tmp/session"])
+        #expect(resolved.additionalAllowedDirectories.map(\.path) == ["/tmp/docs"])
+    }
+
+    @Test("session workspace path is fallback when session roots are empty")
+    func sessionWorkspacePathIsFallbackWhenSessionRootsAreEmpty() throws {
+        let runtime = AgentRuntimeSettings(workspace: AgentRuntimeWorkspaceSettings(defaultWorkingDirectoryPath: "/tmp/runtime-project"))
+
+        let resolved = AppProjectWorkingDirectoryResolver.resolveWorkspace(
+            sessionWorkingDirectoryPath: "/tmp/session-project",
+            sessionWorkspaceRoots: [],
+            runtimeSettings: runtime,
+            llmSettings: .default,
+            processCurrentDirectoryPath: "/tmp/process"
+        )
+
+        #expect(resolved.primary.url.path == "/tmp/session-project")
+        #expect(resolved.primary.source == .session)
+        #expect(resolved.roots.map(\.url.path) == ["/tmp/session-project"])
+    }
+
     @Test("runtime workspace roots resolve primary and additional roots")
     func runtimeWorkspaceRootsResolvePrimaryAndAdditionalRoots() throws {
         let runtime = AgentRuntimeSettings(workspace: AgentRuntimeWorkspaceSettings(roots: [

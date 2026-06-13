@@ -799,7 +799,7 @@ final class AppViewModel: ObservableObject {
         observeLogEntries = snapshot.observeLogEntries
         let session = activeChatSession
         fallbackChatSession = session
-        nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: session)
+        nativeSessionManager = makeNativeSessionManager(for: session)
         Task { await runSearch() }
         reloadPromotionCandidates()
         reloadGraphWriteCandidates()
@@ -1023,7 +1023,7 @@ final class AppViewModel: ObservableObject {
             loadLLMSettings()
             let session = activeChatSession
             fallbackChatSession = session
-            nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: session)
+            nativeSessionManager = makeNativeSessionManager(for: session)
             llmSettingsMessage = "模型设置已保存。"
             llmHealthCheckMessage = nil
             errorMessage = nil
@@ -1039,7 +1039,7 @@ final class AppViewModel: ObservableObject {
             loadLLMSettings()
             let session = activeChatSession
             fallbackChatSession = session
-            nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: session)
+            nativeSessionManager = makeNativeSessionManager(for: session)
             llmSettingsMessage = "API Key 已清除。"
             llmHealthCheckMessage = nil
             errorMessage = nil
@@ -1067,6 +1067,78 @@ final class AppViewModel: ObservableObject {
         selection = .llmSettings
     }
 
+    private func makeNativeSessionManager(for session: AgentSession) -> NativeSessionManager? {
+        agentRuntimeFactory?.makeNativeSessionManager(
+            session: session,
+            sessionWorkspace: sessionStateSnapshotsBySessionID[session.id]?.workspace
+        )
+    }
+
+    private func rebuildNativeSessionManagerForActiveSession() {
+        let session = activeChatSession
+        fallbackChatSession = session
+        nativeSessionManager = makeNativeSessionManager(for: session)
+    }
+
+    private func syncWorkspaceDraftsFromSession(_ state: AppSessionStateSnapshot?) {
+        if let workspace = state?.workspace {
+            workspaceRoots = Self.workspaceRootDrafts(from: workspace)
+            defaultWorkingDirectoryPath = workspace.workingDirectoryPath
+            return
+        }
+        workspaceRoots = []
+        defaultWorkingDirectoryPath = ""
+    }
+
+    private func currentSessionIDForWorkspaceDrafts() -> String? {
+        selectedChatSessionID ?? activeChatSession.id
+    }
+
+    private func sessionWorkspaceReferenceFromDrafts(source: String = "session") -> AppSessionWorkspaceReference? {
+        let roots = sessionWorkspaceRootsFromDrafts()
+        let primary = roots.first(where: \.isPrimary) ?? roots.first
+        let workingDirectoryPath = primary?.path ?? defaultWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !workingDirectoryPath.isEmpty || !roots.isEmpty else { return nil }
+        return AppSessionWorkspaceReference(
+            workingDirectoryPath: workingDirectoryPath,
+            source: source,
+            roots: roots
+        )
+    }
+
+    private func sessionWorkspaceRootsFromDrafts() -> [AppSessionWorkspaceRootReference] {
+        let primaryID = workspaceRoots.first(where: \.isPrimary)?.id ?? workspaceRoots.first?.id
+        return workspaceRoots
+            .map { draft in
+                AppSessionWorkspaceRootReference(
+                    id: draft.id,
+                    displayName: draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? URL(fileURLWithPath: draft.path).lastPathComponent : draft.displayName,
+                    path: draft.path.trimmingCharacters(in: .whitespacesAndNewlines),
+                    role: draft.role.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "project" : draft.role,
+                    isPrimary: draft.id == primaryID
+                )
+            }
+            .filter { !$0.path.isEmpty }
+    }
+
+    private func saveWorkspaceDraftsToCurrentSession() {
+        guard let sessionID = currentSessionIDForWorkspaceDrafts() else { return }
+        do {
+            var state = try chatSessionRepository?.loadSessionState(sessionID: sessionID) ?? AppSessionStateSnapshot(sessionID: sessionID)
+            state.workspace = sessionWorkspaceReferenceFromDrafts()
+            state.updatedAt = Date()
+            sessionStateSnapshotsBySessionID[sessionID] = state
+            try chatSessionRepository?.saveSessionState(state, sessionID: sessionID)
+            if activeChatSession.id == sessionID || selectedChatSessionID == sessionID {
+                rebuildNativeSessionManagerForActiveSession()
+            }
+            appSettingsMessage = "当前会话 Workspace 已保存。"
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
     func loadRuntimeSettings() {
         do {
             let settings = try runtimeSettingsRepository?.loadOrCreateDefault() ?? .default
@@ -1084,8 +1156,12 @@ final class AppViewModel: ObservableObject {
             composerSendShortcut = settings.input.composerSendShortcut
             requireApprovalForNetwork = settings.permissions.requireApprovalForNetwork
             requireApprovalForShell = settings.permissions.requireApprovalForShell
-            defaultWorkingDirectoryPath = settings.workspace.defaultWorkingDirectoryPath
-            workspaceRoots = Self.workspaceRootDrafts(from: settings.workspace)
+            if let sessionID = currentSessionIDForWorkspaceDrafts() {
+                syncWorkspaceDraftsFromSession(sessionStateSnapshotsBySessionID[sessionID])
+            } else {
+                defaultWorkingDirectoryPath = ""
+                workspaceRoots = []
+            }
             userDisplayName = settings.preferences.displayName
             userTimezone = settings.preferences.timezone
             userCity = settings.preferences.city
@@ -1115,14 +1191,8 @@ final class AppViewModel: ObservableObject {
             settings.input.composerSendShortcut = composerSendShortcut
             settings.permissions.requireApprovalForNetwork = requireApprovalForNetwork
             settings.permissions.requireApprovalForShell = requireApprovalForShell
-            settings.workspace.roots = runtimeWorkspaceRootsFromDrafts()
-            if settings.workspace.roots.isEmpty {
-                settings.workspace.defaultWorkingDirectoryPath = defaultWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
-                settings.workspace.additionalAllowedDirectoryPaths = []
-            } else {
-                settings.workspace.syncLegacyFieldsFromRoots()
-                defaultWorkingDirectoryPath = settings.workspace.defaultWorkingDirectoryPath
-            }
+            // Workspace roots are session-scoped and saved into Session Capsule.
+            // Keep runtime-settings.workspace as a legacy fallback/template only.
             settings.preferences.displayName = userDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.timezone = userTimezone.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.city = userCity.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1153,6 +1223,7 @@ final class AppViewModel: ObservableObject {
         normalizeWorkspaceRootsPrimary()
         defaultWorkingDirectoryPath = workspaceRoots.first(where: \.isPrimary)?.path ?? ""
         workspaceRootPathInput = ""
+        saveWorkspaceDraftsToCurrentSession()
     }
 
     func addWorkspaceRoots(paths: [String]) {
@@ -1167,6 +1238,7 @@ final class AppViewModel: ObservableObject {
         }
         normalizeWorkspaceRootsPrimary()
         defaultWorkingDirectoryPath = workspaceRoots.first(where: \.isPrimary)?.path ?? ""
+        saveWorkspaceDraftsToCurrentSession()
     }
 
     func setPrimaryWorkspaceRoot(id: String) {
@@ -1174,6 +1246,7 @@ final class AppViewModel: ObservableObject {
             workspaceRoots[index].isPrimary = workspaceRoots[index].id == id
         }
         defaultWorkingDirectoryPath = workspaceRoots.first(where: \.isPrimary)?.path ?? ""
+        saveWorkspaceDraftsToCurrentSession()
     }
 
     private func normalizeWorkspaceRootsPrimary() {
@@ -1222,6 +1295,28 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    private static func workspaceRootDrafts(from workspace: AppSessionWorkspaceReference) -> [WorkspaceRootDraft] {
+        let primaryID = workspace.roots.first(where: \.isPrimary)?.id ?? workspace.roots.first?.id
+        if workspace.roots.isEmpty, !workspace.workingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let path = workspace.workingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+            return [WorkspaceRootDraft(
+                displayName: URL(fileURLWithPath: path).lastPathComponent,
+                path: path,
+                role: "project",
+                isPrimary: true
+            )]
+        }
+        return workspace.roots.map { root in
+            WorkspaceRootDraft(
+                id: root.id,
+                displayName: root.displayName,
+                path: root.path,
+                role: root.role,
+                isPrimary: root.id == primaryID
+            )
+        }
+    }
+
     func resetRuntimeSettings() {
         do {
             try runtimeSettingsRepository?.save(.default)
@@ -1249,8 +1344,9 @@ final class AppViewModel: ObservableObject {
             let selectedID = selectedChatSessionID ?? sessions.first?.id
             selectedChatSessionID = selectedID
             if let selectedID, let session = try chatSessionRepository.loadSession(id: selectedID) {
+                try loadSessionCapsule(sessionID: selectedID)
                 fallbackChatSession = session
-                nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: session)
+                nativeSessionManager = makeNativeSessionManager(for: session)
                 transcript = session.messages
                 isSubmittingChat = submittingChatSessionID == selectedID
                 if let cachedTimeline = agentEventTimelinesBySessionID[selectedID] {
@@ -1260,7 +1356,6 @@ final class AppViewModel: ObservableObject {
                 }
                 latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: selectedID)
                 selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: selectedID)
-                try loadSessionCapsule(sessionID: selectedID)
                 restoreWorkspaceMode(for: selectedID)
             } else {
                 selectedSessionArtifactDirectories = nil
@@ -1283,8 +1378,10 @@ final class AppViewModel: ObservableObject {
             isBrowserVisible = false
             browserWorkspaceSessionID = nil
             rememberWorkspaceMode(.conversation, for: session.id)
+            selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
+            try loadSessionCapsule(sessionID: session.id)
             fallbackChatSession = session
-            nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: session)
+            nativeSessionManager = makeNativeSessionManager(for: session)
             transcript = []
             isSubmittingChat = false
             agentEventTimeline = []
@@ -1292,8 +1389,6 @@ final class AppViewModel: ObservableObject {
             latestChatSummary = nil
             chatSummaryMessage = nil
             lastPromptInspection = nil
-            selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
-            try loadSessionCapsule(sessionID: session.id)
             reloadChatSessions()
             errorMessage = nil
         } catch {
@@ -1306,12 +1401,14 @@ final class AppViewModel: ObservableObject {
         _ = try chatSessionRepository.artifactDirectories(sessionID: sessionID)
         if let state = try chatSessionRepository.loadSessionState(sessionID: sessionID) {
             sessionStateSnapshotsBySessionID[sessionID] = state
+            if selectedChatSessionID == sessionID { syncWorkspaceDraftsFromSession(state) }
             if let mode = ChatSessionWorkspaceMode(rawValue: state.selectedPane ?? "") {
                 chatSessionWorkspaceModes.setMode(mode, for: sessionID)
             }
         } else {
             let state = AppSessionStateSnapshot(sessionID: sessionID, updatedAt: Date())
             sessionStateSnapshotsBySessionID[sessionID] = state
+            if selectedChatSessionID == sessionID { syncWorkspaceDraftsFromSession(state) }
             try chatSessionRepository.saveSessionState(state, sessionID: sessionID)
         }
         sessionRecordsBySessionID[sessionID] = try chatSessionRepository.loadSessionRecords(sessionID: sessionID, limit: nil)
@@ -1494,8 +1591,9 @@ final class AppViewModel: ObservableObject {
             guard let session = try chatSessionRepository.loadSession(id: sessionID) else { return }
             selectedChatSessionID = session.id
             agentEventTimelinesByProcessKey.removeAll(keepingCapacity: true)
+            try loadSessionCapsule(sessionID: session.id)
             fallbackChatSession = session
-            nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: session)
+            nativeSessionManager = makeNativeSessionManager(for: session)
             transcript = session.messages
             isSubmittingChat = submittingChatSessionID == session.id
             if let cachedTimeline = agentEventTimelinesBySessionID[session.id] {
@@ -1505,7 +1603,6 @@ final class AppViewModel: ObservableObject {
             }
             latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: session.id)
             selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
-            try loadSessionCapsule(sessionID: session.id)
             restoreWorkspaceMode(for: session.id)
             chatSummaryMessage = nil
             lastContext = nil
@@ -4011,7 +4108,7 @@ private struct SettingsAISection: View {
                     Divider()
                     SettingsTextFieldRow(title: "参数", subtitle: "sidecars/claude-agent-engine/claude-sidecar.mjs", text: $viewModel.sidecarArguments)
                     Divider()
-                    SettingsTextFieldRow(title: "工作目录", subtitle: "兼容旧配置；推荐优先使用 权限 / 项目工作目录 的默认项目目录", text: $viewModel.sidecarWorkingDirectoryPath)
+                    SettingsTextFieldRow(title: "工作目录", subtitle: "兼容旧配置 fallback；当前会话 Workspace 请在会话界面顶部设置", text: $viewModel.sidecarWorkingDirectoryPath)
                 }
             }
 
@@ -4096,15 +4193,15 @@ private struct SettingsPermissionsSection: View {
                 Divider()
                 SettingsToggleRow(title: "Shell 写入需要审批", subtitle: "本地命令涉及写入时默认要求确认。", isOn: $viewModel.requireApprovalForShell)
             }
-            SettingsGroup(title: "项目工作目录") {
-                WorkspaceRootsSettingsContent(viewModel: viewModel)
-            }
+            Text("项目工作目录已改为每个会话内设置：打开任意会话，在会话顶部的 ‘当前会话 Workspace’ 中配置。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             SettingsSaveBar(viewModel: viewModel)
         }
     }
 }
 
-private struct WorkspaceRootsSettingsContent: View {
+struct WorkspaceRootsSettingsContent: View {
     @ObservedObject var viewModel: AppViewModel
 
     private var primaryRoot: WorkspaceRootDraft? {
@@ -4115,7 +4212,7 @@ private struct WorkspaceRootsSettingsContent: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Workspace Roots")
+                    Text("当前会话 Workspace")
                         .font(.subheadline.weight(.medium))
                     Text(summaryText)
                         .font(.caption)
@@ -4152,7 +4249,7 @@ private struct WorkspaceRootsSettingsContent: View {
                 .buttonStyle(.bordered)
                 .disabled(viewModel.workspaceRootPathInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-            Text("Native local tools 可访问所有 roots；Claude Sidecar cwd 使用主目录。为空时兼容旧 Sidecar 目录，再回退到进程 cwd。")
+            Text("保存到当前 Session Capsule。Native local tools 可访问所有 roots；Claude Sidecar cwd 使用主目录。为空时兼容旧 Sidecar 目录，再回退到进程 cwd。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -4170,7 +4267,7 @@ private struct WorkspaceRootsSettingsContent: View {
 
     private func chooseDirectories() {
         let panel = NSOpenPanel()
-        panel.title = "选择项目工作目录"
+        panel.title = "选择当前会话项目工作目录"
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = true

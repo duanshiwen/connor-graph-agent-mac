@@ -1,7 +1,7 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-14 01:26 GMT+8  
-当前代码基线：`feature/project-working-directory-runtime`，在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface / multi-root project workspace 基础上，新增 Connor-owned Scientific Compute Runtime skeleton：`computeScientific` 权限、`ScientificComputeRequest/Result/Value` domain model、`ScientificComputeEngine` protocol、Native Swift always-on engine，以及 `science_compute` / `science_units` / `science_stats` / `science_linalg` / `science_symbolic` / `science_optimize` / `science_table_compute` AgentLoop 工具注册。
+文档更新时间：2026-06-14 01:46 GMT+8  
+当前代码基线：`feature/project-working-directory-runtime`，在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface / session-scoped multi-root project workspace 基础上，新增 Connor-owned Scientific Compute Runtime skeleton：`computeScientific` 权限、`ScientificComputeRequest/Result/Value` domain model、`ScientificComputeEngine` protocol、Native Swift always-on engine，以及 `science_compute` / `science_units` / `science_stats` / `science_linalg` / `science_symbolic` / `science_optimize` / `science_table_compute` AgentLoop 工具注册。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package，目标是把 Connor 建成 **graph-memory-native Agent OS**：它不是“图谱编辑器”，也不是“Claude SDK 外壳”，而是以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI 和 Local Automation Surface 共同构成的本地 Agent 操作系统。
 
@@ -155,7 +155,7 @@ graph/evaluations/retrieval-evaluation-cases.json
 graph/evaluations/reports/*.json
 ```
 
-`runtime-settings.json` 保存应用、外观、输入、权限、UI、workspace 和用户偏好类设置，其中 `workspace.roots` 是多工作目录的 canonical 配置；`workspace.defaultWorkingDirectoryPath` 与 `workspace.additionalAllowedDirectoryPaths` 保留为旧配置兼容字段，并由 roots 同步派生。Native local tools 可使用 multi-root allowed roots；Claude Sidecar 仍使用 primary root 作为单一 cwd。`llm-settings.json` 保存模型提供方、Base URL、模型名和 Claude Sidecar 配置。API Key 不写入 JSON，由本地 Keychain 凭据仓库管理。
+`runtime-settings.json` 保存应用、外观、输入、权限、UI 和用户偏好类设置。项目工作目录不再作为设置页里的全局主状态；每个会话在自己的 Session Capsule 中保存 `workspace` 引用和 roots。`runtime-settings.workspace` / `llm.sidecar.workingDirectoryPath` 仅保留为 legacy fallback / 新会话初始模板兼容层。Native local tools 使用当前 session 的 multi-root allowed roots；Claude Sidecar 使用当前 session primary root 作为单一 cwd。`llm-settings.json` 保存模型提供方、Base URL、模型名和 Claude Sidecar 配置。API Key 不写入 JSON，由本地 Keychain 凭据仓库管理。
 
 ---
 
@@ -851,7 +851,7 @@ connor://open/browserWorkspace
 
 ## Settings Center
 
-设置入口位于 System / Settings。设置中心由中间栏分类列表和右侧设置详情组成，不包含 workspace / workplace 设置，因为当前应用仍是单一 Home / Runtime Root，不支持多 workspace。
+设置入口位于 System / Settings。设置中心由中间栏分类列表和右侧设置详情组成，不包含项目工作目录编辑器：Workspace Roots 属于每个会话，在会话界面顶部的“当前会话 Workspace”中设置。Connor 仍是单一 Home / Runtime Root，不引入 Craft-style multi-workspace。
 
 当前设置分类：
 
@@ -939,9 +939,9 @@ Bash       dynamic shell capability 在 workspace 内执行非交互命令，按
 5. process currentDirectoryPath fallback
 ```
 
-- 默认项目目录推荐写入 `runtime-settings.json` 的 `workspace.roots`；每个 root 包含 `id`、`displayName`、`path`、`role` 和 `isPrimary`。
-- `workspace.defaultWorkingDirectoryPath` 与 `workspace.additionalAllowedDirectoryPaths` 保留为旧配置兼容字段；保存 settings 时会从 roots 派生同步。
-- 设置页的“项目工作目录”控件支持选择多个目录、添加路径、设为主目录、移除 root；样式沿用 SettingsGroup / row / badge 体系。
+- 默认项目目录推荐写入当前会话的 `sessions/{sessionID}/state/session-state.json` → `workspace.roots`；每个 root 包含 `id`、`displayName`、`path`、`role` 和 `isPrimary`。
+- `runtime-settings.json` 中的 `workspace.defaultWorkingDirectoryPath`、`workspace.additionalAllowedDirectoryPaths`、`workspace.roots` 保留为旧配置兼容 fallback / 新会话初始模板，不再是 UI 主设置。
+- 会话界面的“当前会话 Workspace”控件支持选择多个目录、添加路径、设为主目录、移除 root；样式沿用 row / badge 体系。
 - Claude Sidecar 的 cwd 仍只能是一个目录，因此使用 primary root；其他 roots 是 Connor Native tools 的允许根。
 - `llm.sidecar.workingDirectoryPath` 保留为旧配置兼容 fallback，不再是唯一 Sidecar cwd 来源。
 - 所有路径会做标准化和 symlink resolving，防止 workspace 内 symlink 逃逸到系统目录。
@@ -1005,8 +1005,9 @@ AI 设置页支持：
 - Base URL
 - API Key 输入 / 清除
 - 连接测试
-- Runtime / Workspace 默认项目目录
+- 默认权限、外观、输入和用户偏好
 - Claude Sidecar executable / arguments / legacy working directory fallback
+- 当前会话 Workspace 在会话界面内设置，不在 Settings Center 中设置
 - Sidecar mode guardrail
 
 注意：部分设置已完成本地持久化，但尚未全部接入实际运行时行为，例如桌面通知、保持屏幕常亮、外观模式实时切换、输入框拼写检查和网络 / Shell 审批细粒度 enforcement。
