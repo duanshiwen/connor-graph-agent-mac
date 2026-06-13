@@ -1,4 +1,5 @@
 import SwiftUI
+import Foundation
 import ConnorGraphCore
 import ConnorGraphAgent
 import ConnorGraphSearch
@@ -62,6 +63,10 @@ struct AgentChatView: View {
                     .padding(.trailing, AgentChatLayout.spaceL)
             }
         }
+        .environment(\.openURL, OpenURLAction { url in
+            viewModel.openURLInCurrentChatBrowser(url)
+            return .handled
+        })
         .navigationTitle("Connor Sessions")
         .task {
             viewModel.deferViewUpdate {
@@ -235,7 +240,6 @@ private struct AgentChatConversationView: View {
                     scrollToBottom(proxy: proxy)
                 }
             }
-
 
             AgentChatComposerView(viewModel: viewModel, isSessionInfoPresented: $isSessionInfoPresented)
                 .padding(.horizontal, 0)
@@ -640,6 +644,7 @@ private struct AgentChatTurnProcessRow: View {
     var events: [AgentEventPresentation]
     var onOpenDetail: (AgentEventPresentation) -> Void
     @State private var isExpanded: Bool = false
+    @State private var startedAt: Date = Date()
 
     private var visibleEvents: [AgentEventPresentation] {
         events.isEmpty ? AgentActivityFallbackEvents.events(for: process) : events
@@ -660,6 +665,9 @@ private struct AgentChatTurnProcessRow: View {
                                 AgentActivityEventRow(event: event)
                             }
                             .buttonStyle(.plain)
+                        }
+                        if process.state == .running {
+                            AgentActivityLoadingRow(startedAt: startedAt)
                         }
                     }
                     .padding(.leading, 18)
@@ -708,6 +716,43 @@ private struct AgentChatTurnProcessRow: View {
         .padding(.vertical, AgentChatLayout.spaceXS)
         .background(Color.clear)
         .contentShape(Rectangle())
+    }
+}
+
+private struct AgentActivityLoadingRow: View {
+    var startedAt: Date
+
+    var body: some View {
+        TimelineView(.periodic(from: startedAt, by: 1)) { context in
+            HStack(spacing: AgentChatLayout.spaceS) {
+                ProgressView()
+                    .controlSize(.mini)
+                    .frame(width: 12, height: 12)
+                    .fixedSize()
+                Text("忙碌中…")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+                Text(Self.elapsedText(from: startedAt, to: context.date))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, AgentChatLayout.spaceM)
+            .padding(.vertical, 3)
+            .contentShape(RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
+        }
+    }
+
+    private static func elapsedText(from start: Date, to end: Date) -> String {
+        let seconds = max(0, Int(end.timeIntervalSince(start)))
+        let minutes = seconds / 60
+        let remainder = seconds % 60
+        if minutes >= 60 {
+            let hours = minutes / 60
+            let minuteRemainder = minutes % 60
+            return "\(hours):\(String(format: "%02d", minuteRemainder)):\(String(format: "%02d", remainder))"
+        }
+        return "\(minutes):\(String(format: "%02d", remainder))"
     }
 }
 
@@ -1203,7 +1248,13 @@ private struct AgentChatComposerView: View {
 
                     modelSelectionMenu
 
-                    Button(action: { Task { await viewModel.submitChat() } }) {
+                    Button(action: {
+                        if viewModel.isSubmittingChat {
+                            viewModel.cancelActiveChatRun()
+                        } else {
+                            Task { await viewModel.submitChat() }
+                        }
+                    }) {
                         Image(systemName: viewModel.isSubmittingChat ? "stop.fill" : "arrow.up")
                             .font(.system(size: 11, weight: .semibold))
                             .frame(width: 22, height: 22)
@@ -1211,7 +1262,7 @@ private struct AgentChatComposerView: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.mini)
                     .clipShape(Circle())
-                    .disabled(viewModel.chatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.isSubmittingChat)
+                    .disabled(!viewModel.isSubmittingChat && viewModel.chatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
                 .padding(.horizontal, AgentChatLayout.spaceM)
                 .padding(.vertical, AgentChatLayout.spaceS)
