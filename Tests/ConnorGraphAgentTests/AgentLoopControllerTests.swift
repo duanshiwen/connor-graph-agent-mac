@@ -29,6 +29,46 @@ private actor ScriptedModelProvider: AgentModelProvider {
     }
 }
 
+private actor SuspendingModelProvider: AgentModelProvider {
+    let modelID = "suspending"
+    let capabilities = AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false)
+    private(set) var wasCancelled = false
+
+    func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
+        do {
+            try await Task.sleep(nanoseconds: 5_000_000_000)
+            return AgentModelResponse(text: "should not complete")
+        } catch is CancellationError {
+            wasCancelled = true
+            throw CancellationError()
+        }
+    }
+}
+
+@Test func agentLoopAbortCancelsActiveModelRequest() async throws {
+    let provider = SuspendingModelProvider()
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: AgentToolRegistry())
+    let request = AgentChatRequest(runID: "run-cancel-loop", sessionID: "session-cancel-loop", userMessage: "wait")
+
+    let task = Task { () -> [AgentEvent] in
+        var events: [AgentEvent] = []
+        do {
+            for try await event in loop.run(request) { events.append(event) }
+        } catch {
+            // Expected cancellation path.
+        }
+        return events
+    }
+
+    try await Task.sleep(nanoseconds: 100_000_000)
+    loop.abort(runID: request.runID)
+    let events = await task.value
+
+    #expect(await provider.wasCancelled == true)
+    #expect(events.map(\.kind).contains(.runStarted))
+    #expect(events.map(\.kind).contains(.runFailed))
+}
+
 @Test func agentLoopRunsGraphToolThenFinalAnswer() async throws {
     let provider = ScriptedModelProvider(responses: [
         AgentModelResponse(

@@ -15,8 +15,47 @@ const readFirstJSONLine = async () => {
 const writeEvent = (event) => stdout.write(`${JSON.stringify(event)}\n`);
 const writeDiagnostic = (message) => stderr.write(`${message}\n`);
 const SIDECAR_PROTOCOL_VERSION = 2;
-const SIDECAR_CAPABILITIES = ['resume', 'fork', 'defer-permissions', 'health', 'heartbeat', 'diagnostics', 'structured-failure'];
+const SIDECAR_CAPABILITIES = ['resume', 'fork', 'defer-permissions', 'health', 'heartbeat', 'diagnostics', 'structured-failure', 'cancel'];
 const pendingDeferredToolUses = new Map();
+let activeQuery = null;
+let activeAbortController = null;
+let activeRunID = null;
+let activeSessionID = null;
+let cancellationRequested = false;
+
+const clearActiveRun = (runID = null) => {
+  if (runID && activeRunID !== runID) return;
+  activeQuery = null;
+  activeAbortController = null;
+  activeRunID = null;
+  activeSessionID = null;
+  cancellationRequested = false;
+};
+
+const cancelActiveRun = (payload = {}) => {
+  cancellationRequested = true;
+  const reason = payload.reason ?? 'Connor cancelled Claude SDK sidecar command loop';
+  try {
+    if (typeof activeQuery?.stopTask === 'function') activeQuery.stopTask();
+  } catch (error) {
+    writeDiagnostic(`stopTask failed during cancel: ${error?.message ?? String(error)}`);
+  }
+  try {
+    if (typeof activeQuery?.interrupt === 'function') activeQuery.interrupt();
+  } catch (error) {
+    writeDiagnostic(`interrupt failed during cancel: ${error?.message ?? String(error)}`);
+  }
+  try {
+    activeAbortController?.abort(reason);
+  } catch (error) {
+    writeDiagnostic(`abortController failed during cancel: ${error?.message ?? String(error)}`);
+  }
+  try {
+    if (typeof activeQuery?.close === 'function') activeQuery.close();
+  } catch (error) {
+    writeDiagnostic(`query close failed during cancel: ${error?.message ?? String(error)}`);
+  }
+};
 
 const stableJSONString = (value) => {
   if (value === undefined) return '{}';
@@ -249,6 +288,11 @@ const runRequest = async (request) => {
   let emittedRunStarted = false;
 
   const requestOptions = request.options ?? {};
+  const abortController = new AbortController();
+  activeAbortController = abortController;
+  activeRunID = request.connorRunID;
+  activeSessionID = request.connorSessionID;
+  cancellationRequested = false;
   const options = {
     cwd: request.cwd,
     permissionMode: request.sdkPermissionMode,
@@ -260,61 +304,80 @@ const runRequest = async (request) => {
     includePartialMessages: requestOptions.includePartialMessages ?? true,
     includeHookEvents: requestOptions.includeHookEvents ?? true,
     persistSession: requestOptions.persistSession ?? true,
+    abortController,
     hooks: buildConnorDeferHooks()
   };
 
   emitDiagnostic({ status: 'starting', message: `Starting Claude SDK sidecar ${request.forkFromSDKSessionID ? 'fork' : request.sdkSessionID ? 'resume' : 'fresh'} request`, request });
   emitHeartbeat(request);
 
-  for await (const message of query(request.prompt, options)) {
-    if (!emittedRunStarted) {
-      const sdkSessionID = sessionIDFromMessage(message);
-      writeEvent({ runStarted: { sdkSessionID } });
-      emitHeartbeat(request, sdkSessionID);
-      emittedRunStarted = true;
-    }
+  const sdkQuery = query(request.prompt, options);
+  activeQuery = sdkQuery;
 
-    if (isErrorLike(message)) {
-      emitRunFailed(message?.error?.message ?? message?.message ?? 'Claude SDK sidecar error', 'sdk_error', 'retryable');
+  try {
+    for await (const message of sdkQuery) {
+      if (!emittedRunStarted) {
+        const sdkSessionID = sessionIDFromMessage(message);
+        writeEvent({ runStarted: { sdkSessionID } });
+        emitHeartbeat(request, sdkSessionID);
+        emittedRunStarted = true;
+      }
+
+      if (isErrorLike(message)) {
+        emitRunFailed(message?.error?.message ?? message?.message ?? 'Claude SDK sidecar error', 'sdk_error', 'retryable');
+        return;
+      }
+
+      if (isPermissionDeniedLike(message)) {
+        emitPermissionDenied(message);
+        continue;
+      }
+
+      if (isAssistantLike(message)) {
+        processAssistantSideEffects(message);
+        const text = textFromAssistantMessage(message);
+        if (text.length > 0) {
+          finalText += text;
+          writeEvent({ textDelta: { text } });
+        }
+        continue;
+      }
+
+      if (isUserLike(message)) {
+        processUserSideEffects(message);
+        continue;
+      }
+
+      if (isResultLike(message)) {
+        const subtype = message?.subtype ?? message?.terminal_reason ?? 'completed';
+        const terminalReason = message?.terminal_reason ?? message?.stop_reason ?? subtype;
+        if (terminalReason === 'tool_deferred' && emitPermissionRequestedFromDeferredResult(message, request)) {
+          emitRunFailed('Claude SDK deferred tool use pending Connor permission approval', 'permission_deferred', 'requires_user_action');
+          return;
+        }
+        if (emitPermissionRequestedFromDeferredResult(message, request)) {
+          emitRunFailed('Claude SDK deferred tool use pending Connor permission approval', 'permission_deferred', 'requires_user_action');
+          return;
+        }
+        if (subtype !== 'success' && subtype !== 'completed') {
+          emitRunFailed(`Claude SDK result: ${subtype}`, 'sdk_error', subtype === 'error_max_turns' ? 'resumable' : 'retryable');
+          return;
+        }
+      }
+    }
+  } catch (error) {
+    if (cancellationRequested || abortController.signal.aborted) {
+      emitRunFailed('Connor cancelled Claude SDK sidecar request', 'cancelled', 'terminal');
       return;
     }
+    throw error;
+  } finally {
+    clearActiveRun(request.connorRunID);
+  }
 
-    if (isPermissionDeniedLike(message)) {
-      emitPermissionDenied(message);
-      continue;
-    }
-
-    if (isAssistantLike(message)) {
-      processAssistantSideEffects(message);
-      const text = textFromAssistantMessage(message);
-      if (text.length > 0) {
-        finalText += text;
-        writeEvent({ textDelta: { text } });
-      }
-      continue;
-    }
-
-    if (isUserLike(message)) {
-      processUserSideEffects(message);
-      continue;
-    }
-
-    if (isResultLike(message)) {
-      const subtype = message?.subtype ?? message?.terminal_reason ?? 'completed';
-      const terminalReason = message?.terminal_reason ?? message?.stop_reason ?? subtype;
-      if (terminalReason === 'tool_deferred' && emitPermissionRequestedFromDeferredResult(message, request)) {
-        emitRunFailed('Claude SDK deferred tool use pending Connor permission approval', 'permission_deferred', 'requires_user_action');
-        return;
-      }
-      if (emitPermissionRequestedFromDeferredResult(message, request)) {
-        emitRunFailed('Claude SDK deferred tool use pending Connor permission approval', 'permission_deferred', 'requires_user_action');
-        return;
-      }
-      if (subtype !== 'success' && subtype !== 'completed') {
-        emitRunFailed(`Claude SDK result: ${subtype}`, 'sdk_error', subtype === 'error_max_turns' ? 'resumable' : 'retryable');
-        return;
-      }
-    }
+  if (cancellationRequested || abortController.signal.aborted) {
+    emitRunFailed('Connor cancelled Claude SDK sidecar request', 'cancelled', 'terminal');
+    return;
   }
 
   if (!emittedRunStarted) {
@@ -426,26 +489,39 @@ const handleApprovalResolved = async (resolution) => {
 
 const runCommandLoop = async () => {
   const rl = createInterface({ input: stdin, crlfDelay: Infinity });
+  let activeCommandTask = null;
   for await (const line of rl) {
     if (line.trim().length === 0) continue;
     const command = parseCommand(line);
     switch (command.name) {
       case 'start':
-        await runRequest(command.payload);
+        if (activeCommandTask) {
+          emitRunFailed('Claude SDK sidecar already has an active request', 'invalid_request', 'requires_user_action');
+          break;
+        }
+        activeCommandTask = runRequest(command.payload).finally(() => {
+          activeCommandTask = null;
+        });
         break;
       case 'approvalResolved':
-        await handleApprovalResolved(command.payload);
+        if (activeCommandTask) await activeCommandTask;
+        activeCommandTask = handleApprovalResolved(command.payload).finally(() => {
+          activeCommandTask = null;
+        });
         break;
       case 'health':
         emitSidecarHealth();
         break;
       case 'cancel':
-        emitRunFailed('Connor cancelled Claude SDK sidecar command loop', 'cancelled', 'terminal');
+        cancelActiveRun(command.payload);
+        if (!activeCommandTask) emitRunFailed('Connor cancelled Claude SDK sidecar command loop', 'cancelled', 'terminal');
+        await activeCommandTask;
         return;
       default:
         throw new Error(`Unsupported Connor sidecar command: ${command.name}`);
     }
   }
+  if (activeCommandTask) await activeCommandTask;
 };
 
 try {

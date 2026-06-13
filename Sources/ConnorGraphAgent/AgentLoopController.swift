@@ -37,6 +37,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
     public var auditLog: any AgentAuditLog
     public var eventRecorder: AgentEventRecorder
     public var contextBuilder: AgentContextBuilder?
+    private let cancellationRegistry: AgentLoopCancellationRegistry
 
     public init(
         modelProvider: Provider,
@@ -52,11 +53,16 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         self.auditLog = auditLog
         self.eventRecorder = eventRecorder
         self.contextBuilder = contextBuilder
+        self.cancellationRegistry = AgentLoopCancellationRegistry()
+    }
+
+    public func abort(runID: String) {
+        cancellationRegistry.cancel(runID: runID)
     }
 
     public func run(_ request: AgentChatRequest) -> AsyncThrowingStream<AgentEvent, Error> {
         AsyncThrowingStream { continuation in
-            Task {
+            let task = Task {
                 var run = AgentRun(
                     id: request.runID,
                     sessionID: request.sessionID,
@@ -65,6 +71,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     model: modelProvider.modelID,
                     metadata: ["runtime": "agent-loop-controller"]
                 )
+                defer { cancellationRegistry.unregister(runID: request.runID) }
+                try? Task.checkCancellation()
                 try? eventRecorder.recordRun(run)
                 yield(.runStarted(AgentRunStartedEvent(run: run)), to: continuation, recorder: eventRecorder)
                 let policy = AgentPolicyEngine(permissionMode: request.permissionMode, auditLog: auditLog)
@@ -82,7 +90,9 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
 
                 do {
                     for _ in 0..<configuration.maxToolIterations {
+                        try Task.checkCancellation()
                         let modelResponse = try await modelProvider.complete(AgentModelRequest(messages: messages, tools: toolRegistry.definitions))
+                        try Task.checkCancellation()
                         let budgetSnapshot = await budgetMeter.record(modelResponse.usage)
                         if budgetSnapshot.status == .warning {
                             yield(.budgetWarning(AgentBudgetWarning(
@@ -111,6 +121,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
 
                         let calls = Array(modelResponse.toolCalls.prefix(configuration.maxToolCallsPerIteration))
                         for var call in calls {
+                            try Task.checkCancellation()
                             call.runID = run.id
                             call.sessionID = run.sessionID
                             yield(.toolRequested(call), to: continuation, recorder: eventRecorder)
@@ -125,6 +136,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             )
                             do {
                                 let result = try await toolRegistry.execute(call, context: context)
+                                try Task.checkCancellation()
                                 yield(.toolFinished(result), to: continuation, recorder: eventRecorder)
                                 messages.append(AgentModelMessage(
                                     role: .assistant,
@@ -161,6 +173,12 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     try? eventRecorder.recordRun(run)
                     yield(.runFailed(failure), to: continuation, recorder: eventRecorder)
                     continuation.finish(throwing: AgentLoopError.maxToolIterationsReached)
+                } catch is CancellationError {
+                    run.status = .cancelled
+                    run.completedAt = Date()
+                    try? eventRecorder.recordRun(run)
+                    yield(.runFailed(AgentRunFailure(runID: run.id, sessionID: run.sessionID, message: "cancelled")), to: continuation, recorder: eventRecorder)
+                    continuation.finish(throwing: AgentLoopError.cancelled)
                 } catch {
                     run.status = .failed
                     run.completedAt = Date()
@@ -168,6 +186,11 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     yield(.runFailed(AgentRunFailure(runID: run.id, sessionID: run.sessionID, message: String(describing: error))), to: continuation, recorder: eventRecorder)
                     continuation.finish(throwing: error)
                 }
+            }
+            cancellationRegistry.register(task, runID: request.runID)
+            continuation.onTermination = { @Sendable _ in
+                task.cancel()
+                cancellationRegistry.unregister(runID: request.runID)
             }
         }
     }
@@ -215,4 +238,29 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
 public enum AgentLoopError: Error, Sendable, Equatable {
     case maxToolIterationsReached
     case budgetExceeded
+    case cancelled
+}
+
+private final class AgentLoopCancellationRegistry: @unchecked Sendable {
+    private let lock = NSLock()
+    private var tasks: [String: Task<Void, Never>] = [:]
+
+    func register(_ task: Task<Void, Never>, runID: String) {
+        lock.lock()
+        tasks[runID] = task
+        lock.unlock()
+    }
+
+    func cancel(runID: String) {
+        lock.lock()
+        let task = tasks[runID]
+        lock.unlock()
+        task?.cancel()
+    }
+
+    func unregister(runID: String) {
+        lock.lock()
+        tasks.removeValue(forKey: runID)
+        lock.unlock()
+    }
 }
