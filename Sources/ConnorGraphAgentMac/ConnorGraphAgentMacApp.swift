@@ -240,6 +240,7 @@ final class AppViewModel: ObservableObject {
     @Published var defaultPermissionMode: AgentPermissionMode = .askToWrite
     @Published var requireApprovalForNetwork: Bool = true
     @Published var requireApprovalForShell: Bool = true
+    @Published var defaultWorkingDirectoryPath: String = ""
     @Published var userDisplayName: String = "诗闻"
     @Published var userTimezone: String = "Asia/Shanghai"
     @Published var userCity: String = "杭州"
@@ -1058,6 +1059,7 @@ final class AppViewModel: ObservableObject {
             composerSendShortcut = settings.input.composerSendShortcut
             requireApprovalForNetwork = settings.permissions.requireApprovalForNetwork
             requireApprovalForShell = settings.permissions.requireApprovalForShell
+            defaultWorkingDirectoryPath = settings.workspace.defaultWorkingDirectoryPath
             userDisplayName = settings.preferences.displayName
             userTimezone = settings.preferences.timezone
             userCity = settings.preferences.city
@@ -1087,6 +1089,7 @@ final class AppViewModel: ObservableObject {
             settings.input.composerSendShortcut = composerSendShortcut
             settings.permissions.requireApprovalForNetwork = requireApprovalForNetwork
             settings.permissions.requireApprovalForShell = requireApprovalForShell
+            settings.workspace.defaultWorkingDirectoryPath = defaultWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.displayName = userDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.timezone = userTimezone.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.city = userCity.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3889,7 +3892,7 @@ private struct SettingsAISection: View {
                     Divider()
                     SettingsTextFieldRow(title: "参数", subtitle: "sidecars/claude-agent-engine/claude-sidecar.mjs", text: $viewModel.sidecarArguments)
                     Divider()
-                    SettingsTextFieldRow(title: "工作目录", subtitle: "Sidecar 运行目录", text: $viewModel.sidecarWorkingDirectoryPath)
+                    SettingsTextFieldRow(title: "工作目录", subtitle: "兼容旧配置；推荐优先使用 权限 / 项目工作目录 的默认项目目录", text: $viewModel.sidecarWorkingDirectoryPath)
                 }
             }
 
@@ -3973,6 +3976,13 @@ private struct SettingsPermissionsSection: View {
                 SettingsToggleRow(title: "网络访问需要审批", subtitle: "外部网络请求默认进入审批流程。", isOn: $viewModel.requireApprovalForNetwork)
                 Divider()
                 SettingsToggleRow(title: "Shell 写入需要审批", subtitle: "本地命令涉及写入时默认要求确认。", isOn: $viewModel.requireApprovalForShell)
+            }
+            SettingsGroup(title: "项目工作目录") {
+                SettingsTextFieldRow(
+                    title: "默认项目目录",
+                    subtitle: "驱动 Native local tools 与 Claude Sidecar cwd；为空时兼容旧 Sidecar 目录，再回退到进程 cwd。",
+                    text: $viewModel.defaultWorkingDirectoryPath
+                )
             }
             SettingsSaveBar(viewModel: viewModel)
         }

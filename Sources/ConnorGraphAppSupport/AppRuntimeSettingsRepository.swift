@@ -82,6 +82,19 @@ public struct AgentRuntimePermissionSettings: Codable, Sendable, Equatable {
     }
 }
 
+public struct AgentRuntimeWorkspaceSettings: Codable, Sendable, Equatable {
+    public var defaultWorkingDirectoryPath: String
+    public var additionalAllowedDirectoryPaths: [String]
+
+    public init(
+        defaultWorkingDirectoryPath: String = "",
+        additionalAllowedDirectoryPaths: [String] = []
+    ) {
+        self.defaultWorkingDirectoryPath = defaultWorkingDirectoryPath
+        self.additionalAllowedDirectoryPaths = additionalAllowedDirectoryPaths
+    }
+}
+
 public struct AgentRuntimePreferenceSettings: Codable, Sendable, Equatable {
     public var displayName: String
     public var timezone: String
@@ -112,6 +125,7 @@ public struct AgentRuntimeSettings: Codable, Sendable, Equatable {
     public var appearance: AgentRuntimeAppearanceSettings
     public var input: AgentRuntimeInputSettings
     public var permissions: AgentRuntimePermissionSettings
+    public var workspace: AgentRuntimeWorkspaceSettings
     public var preferences: AgentRuntimePreferenceSettings
     public var updatedAt: Date
 
@@ -123,6 +137,7 @@ public struct AgentRuntimeSettings: Codable, Sendable, Equatable {
         appearance: AgentRuntimeAppearanceSettings = AgentRuntimeAppearanceSettings(),
         input: AgentRuntimeInputSettings = AgentRuntimeInputSettings(),
         permissions: AgentRuntimePermissionSettings = AgentRuntimePermissionSettings(),
+        workspace: AgentRuntimeWorkspaceSettings = AgentRuntimeWorkspaceSettings(),
         preferences: AgentRuntimePreferenceSettings = AgentRuntimePreferenceSettings(),
         updatedAt: Date = Date()
     ) {
@@ -133,6 +148,7 @@ public struct AgentRuntimeSettings: Codable, Sendable, Equatable {
         self.appearance = appearance
         self.input = input
         self.permissions = permissions
+        self.workspace = workspace
         self.preferences = preferences
         self.updatedAt = updatedAt
     }
@@ -147,6 +163,7 @@ public struct AgentRuntimeSettings: Codable, Sendable, Equatable {
         case appearance
         case input
         case permissions
+        case workspace
         case preferences
         case updatedAt
     }
@@ -160,6 +177,7 @@ public struct AgentRuntimeSettings: Codable, Sendable, Equatable {
         self.appearance = try container.decodeIfPresent(AgentRuntimeAppearanceSettings.self, forKey: .appearance) ?? AgentRuntimeAppearanceSettings()
         self.input = try container.decodeIfPresent(AgentRuntimeInputSettings.self, forKey: .input) ?? AgentRuntimeInputSettings()
         self.permissions = try container.decodeIfPresent(AgentRuntimePermissionSettings.self, forKey: .permissions) ?? AgentRuntimePermissionSettings()
+        self.workspace = try container.decodeIfPresent(AgentRuntimeWorkspaceSettings.self, forKey: .workspace) ?? AgentRuntimeWorkspaceSettings()
         self.preferences = try container.decodeIfPresent(AgentRuntimePreferenceSettings.self, forKey: .preferences) ?? AgentRuntimePreferenceSettings()
         self.updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
     }

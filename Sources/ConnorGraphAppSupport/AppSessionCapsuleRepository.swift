@@ -62,6 +62,7 @@ public struct AppSessionCapsuleRepository: @unchecked Sendable {
         try upsertManifest(sessionID: sessionID) { manifest in
             manifest.stateFile = "state/session-state.json"
             manifest.updatedAt = state.updatedAt
+            manifest.workspace = state.workspace ?? manifest.workspace
             manifest.recordSummary = state.recordSummary ?? manifest.recordSummary
             manifest.attachmentSummary = state.attachmentSummary ?? manifest.attachmentSummary
         }
@@ -169,6 +170,7 @@ public struct AppSessionCapsuleRepository: @unchecked Sendable {
             stateFile: fileManager.fileExists(atPath: (try sessionStateURL(sessionID: sessionID)).path) ? "state/session-state.json" : nil,
             recordsFile: fileManager.fileExists(atPath: (try recordsURL(sessionID: sessionID)).path) ? "state/records.jsonl" : nil,
             browserStateFile: browser == nil ? nil : "browser/browser-state.json",
+            workspace: (try loadState(sessionID: sessionID))?.workspace,
             attachmentSummary: attachments,
             recordSummary: AppSessionRecordSummary(count: records.count, updatedAt: records.last?.createdAt)
         )

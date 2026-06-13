@@ -137,7 +137,7 @@ sessions/{sessionID}/
 └── logs/
 ```
 
-Connor 的会话持久化边界是完整 Session Capsule：SQLite 仍承担 session / run / event / graph 查询存储，但 session-local 的 UI/workspace 状态、记录流、附件、plans、data、logs 与 browser 子状态都归属于 `sessions/{sessionID}/`。`records.jsonl` 使用单行 JSONL 追加保存，读取时可跳过坏行，避免 10+ 条记录因一次异常写入或重启退化成 1 条。
+Connor 的会话持久化边界是完整 Session Capsule：SQLite 仍承担 session / run / event / graph 查询存储，但 session-local 的 UI/workspace 状态、记录流、附件、plans、data、logs 与 browser 子状态都归属于 `sessions/{sessionID}/`。`session-state.json` 可保存 `workspace` 引用，用于记录当前会话绑定的 project working directory 来源与路径；`records.jsonl` 使用单行 JSONL 追加保存，读取时可跳过坏行，避免 10+ 条记录因一次异常写入或重启退化成 1 条。
 
 主要状态文件：
 
@@ -155,7 +155,7 @@ graph/evaluations/retrieval-evaluation-cases.json
 graph/evaluations/reports/*.json
 ```
 
-`runtime-settings.json` 保存应用、外观、输入、权限、UI 和用户偏好类设置；`llm-settings.json` 保存模型提供方、Base URL、模型名和 Claude Sidecar 配置。API Key 不写入 JSON，由本地 Keychain 凭据仓库管理。
+`runtime-settings.json` 保存应用、外观、输入、权限、UI、workspace 和用户偏好类设置，其中 `workspace.defaultWorkingDirectoryPath` 是 Native local tools 与 Claude Sidecar 共享的默认项目目录；`llm-settings.json` 保存模型提供方、Base URL、模型名和 Claude Sidecar 配置。API Key 不写入 JSON，由本地 Keychain 凭据仓库管理。
 
 ---
 
@@ -895,6 +895,7 @@ app
 appearance
 input
 permissions
+workspace
 preferences
 updatedAt
 ```
@@ -926,9 +927,18 @@ MultiEdit  editWorkspaceFile       对单文件执行原子多重替换；任一
 Bash       dynamic shell capability 在 workspace 内执行非交互命令，按命令风险追加评估 shell capability
 ```
 
-本地 workspace 安全边界由 `LocalWorkspacePolicy` 负责：
+本地 workspace 安全边界由 `LocalWorkspacePolicy` 负责。Project working directory 由 `AppProjectWorkingDirectoryResolver` 统一解析，Native AgentLoop 本地工具与 Governed Claude Sidecar 共用同一解析结果：
 
-- 默认 working directory 为当前进程 working directory；后续可升级为独立 `agentLoopWorkingDirectoryPath` 设置。
+```text
+1. Session Capsule workspace reference / session override
+2. runtime-settings.json workspace.defaultWorkingDirectoryPath
+3. legacy llm-settings sidecarWorkingDirectoryPath
+4. process currentDirectoryPath fallback
+```
+
+- 默认项目目录推荐写入 `runtime-settings.json` 的 `workspace.defaultWorkingDirectoryPath`，避免 App 从 Finder / Dock / Xcode / Terminal 启动时继承到不稳定 cwd。
+- `llm.sidecar.workingDirectoryPath` 保留为旧配置兼容 fallback，不再是唯一 Sidecar cwd 来源。
+- `workspace.additionalAllowedDirectoryPaths` 可作为受控的额外允许根目录，用于共享素材目录等场景。
 - 所有路径会做标准化和 symlink resolving，防止 workspace 内 symlink 逃逸到系统目录。
 - 默认拒绝 workspace 外路径、`.git/objects` / `.git/index` 写入、`.env*` 写入、`~/.ssh` / `~/.gnupg` / `~/.aws` 等敏感路径。
 - 文件读取、写入、搜索和工具输出都有大小/数量上限，避免大结果污染模型上下文。
@@ -958,7 +968,8 @@ AI 设置页支持：
 - Base URL
 - API Key 输入 / 清除
 - 连接测试
-- Claude Sidecar executable / arguments / working directory
+- Runtime / Workspace 默认项目目录
+- Claude Sidecar executable / arguments / legacy working directory fallback
 - Sidecar mode guardrail
 
 注意：部分设置已完成本地持久化，但尚未全部接入实际运行时行为，例如桌面通知、保持屏幕常亮、外观模式实时切换、输入框拼写检查和网络 / Shell 审批细粒度 enforcement。
@@ -1083,6 +1094,15 @@ swift run connor automations evaluate --trigger sessionStatusChanged --session d
 最近验证结果：
 
 ```text
+Project Working Directory Runtime targeted tests passed (2026-06-14 00:03 GMT+8):
+- swift test --filter AppProjectWorkingDirectoryResolverTests
+- swift test --filter runtimeSettingsRepositoryPersistsWorkspaceDefaults
+- swift test --filter sessionStatePreservesWorkspaceReference
+- swift test --filter appGraphAgentRuntimeFactoryConfiguredSidecarUsesRuntimeWorkspaceBeforeLegacySidecarWorkspace
+- swift test --filter agentLoopRuntimeFactoryNativeReadUsesRuntimeWorkspace
+- swift test --filter LocalWorkspacePolicyTests
+- swift test --filter LocalWorkspaceToolsTests
+
 Native local workspace tool targeted tests passed (2026-06-13 23:31 GMT+8):
 - swift test --filter LocalWorkspacePolicyTests
 - swift test --filter LocalWorkspaceToolsTests
@@ -1090,9 +1110,9 @@ Native local workspace tool targeted tests passed (2026-06-13 23:31 GMT+8):
 - swift test --filter AppGraphAgentRuntimeFactoryLocalToolsTests
 - swift test --filter CommercialReadinessReleaseGateTests
 
-Full swift test status on feature/native-local-workspace-tools:
-- 447 / 448 tests passed.
-- 1 existing UI copy expectation failed outside the native workspace tool scope:
+Full swift test status on feature/project-working-directory-runtime:
+- 455 / 456 tests passed.
+- 1 existing UI copy expectation failed outside the project working directory runtime scope:
   PhaseGCraftGradeNativeUITests.nativeShellBuildsCraftGradeSidebarGroupsAndCommands
   expected shell.title == "Connor", actual shell.title == "康纳同学".
 ```

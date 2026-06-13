@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import ConnorGraphAgent
 import ConnorGraphAppSupport
 import ConnorGraphCore
 import ConnorGraphStore
@@ -29,6 +30,48 @@ import ConnorGraphStore
     #expect(names.contains("Edit"))
     #expect(names.contains("MultiEdit"))
     #expect(names.contains("Bash"))
+}
+
+@Test func agentLoopRuntimeFactoryNativeReadUsesRuntimeWorkspace() async throws {
+    let appDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorFactoryLocalToolsRuntimeWorkspace-", isDirectory: true)
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: appDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: appDirectory) }
+    let storagePaths = AppStoragePaths(applicationSupportDirectory: appDirectory)
+    try storagePaths.ensureDirectoryHierarchy()
+
+    let runtimeWorkspace = appDirectory.appendingPathComponent("runtime-project", isDirectory: true)
+    try FileManager.default.createDirectory(at: runtimeWorkspace, withIntermediateDirectories: true)
+    try "Runtime workspace README".write(to: runtimeWorkspace.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+
+    var runtimeSettings = AgentRuntimeSettings.default
+    runtimeSettings.workspace.defaultWorkingDirectoryPath = runtimeWorkspace.path
+    try AppRuntimeSettingsRepository(configDirectory: storagePaths.configDirectory).save(runtimeSettings)
+
+    let storeURL = appDirectory.appendingPathComponent("store.sqlite")
+    let store = try SQLiteGraphKernelStore(path: storeURL.path)
+    try store.migrate()
+    let settings = AppLLMSettingsRepository(
+        settingsStore: LocalToolsSettingsStore(),
+        credentialStore: LocalToolsCredentialStore()
+    )
+    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: settings, storagePaths: storagePaths)
+    let controller = factory.makeAgentLoopController(permissionMode: .readOnly)
+    let result = try await controller.toolRegistry.execute(
+        AgentToolCall(name: "Read", argumentsJSON: #"{"file_path":"README.md"}"#),
+        context: AgentToolExecutionContext(
+            runID: "run-local-runtime-workspace",
+            sessionID: "session-local-runtime-workspace",
+            groupID: "default",
+            userPrompt: "read README",
+            toolCallID: "read-runtime-workspace",
+            policyEngine: AgentPolicyEngine(permissionMode: .allowAll)
+        )
+    )
+
+    #expect(result.contentText.contains("Runtime workspace README"))
+    #expect(result.contentJSON?.contains("runtime-project") == true)
 }
 
 private final class LocalToolsSettingsStore: LLMSettingsStore, @unchecked Sendable {
