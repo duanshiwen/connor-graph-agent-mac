@@ -715,9 +715,7 @@ private struct AgentChatTurnTimestampRow: View {
             .font(.caption2.weight(.medium))
             .foregroundStyle(.tertiary)
             .lineLimit(1)
-            .padding(.horizontal, AgentChatLayout.spaceM)
             .padding(.vertical, 2)
-            .background(.quaternary.opacity(0.12), in: Capsule())
             .frame(maxWidth: .infinity, alignment: .center)
             .accessibilityLabel("对话时间 \(timestamp.text)")
     }
@@ -726,9 +724,51 @@ private struct AgentChatTurnTimestampRow: View {
 private struct AgentChatMessageRow: View {
     var row: AgentChatMessagePresentation
 
+    @MainActor
+    private final class BrowserPromptFoldingCache {
+        static let shared = BrowserPromptFoldingCache()
+        private var hits: [String: BrowserPromptFoldingParts] = [:]
+        private var misses = Set<String>()
+        private let limit = 600
+
+        func parts(for messageID: String, content: String) -> BrowserPromptFoldingParts? {
+            if let cached = hits[messageID] { return cached }
+            if misses.contains(messageID) { return nil }
+
+            guard content.contains("网页正文：") else {
+                storeMiss(messageID)
+                return nil
+            }
+
+            guard let parsed = BrowserPromptFoldingParser().parse(content) else {
+                storeMiss(messageID)
+                return nil
+            }
+            storeHit(parsed, for: messageID)
+            return parsed
+        }
+
+        private func storeHit(_ parts: BrowserPromptFoldingParts, for messageID: String) {
+            pruneIfNeeded()
+            hits[messageID] = parts
+        }
+
+        private func storeMiss(_ messageID: String) {
+            pruneIfNeeded()
+            misses.insert(messageID)
+        }
+
+        private func pruneIfNeeded() {
+            if hits.count + misses.count >= limit {
+                hits.removeAll(keepingCapacity: true)
+                misses.removeAll(keepingCapacity: true)
+            }
+        }
+    }
+
     private var isUser: Bool { row.message.role == .user }
     private var browserPromptFoldingParts: BrowserPromptFoldingParts? {
-        BrowserPromptFoldingParser().parse(row.message.content)
+        BrowserPromptFoldingCache.shared.parts(for: row.id, content: row.message.content)
     }
 
     var body: some View {
