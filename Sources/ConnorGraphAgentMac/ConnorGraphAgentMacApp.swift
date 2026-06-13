@@ -217,7 +217,11 @@ final class AppViewModel: ObservableObject {
     @Published var isSubmittingChat: Bool = false
     @Published var agentEventTimeline: [AgentEventPresentation] = []
     @Published var isBrowserVisible: Bool = false
-    @Published var browserTargetURLString: String = "https://www.wikipedia.org"
+    @Published var browserWorkspaceSessionID: String?
+    @Published var browserTargetURLString: String = BrowserBuiltInPage.blankURLString
+    @Published var sessionStateSnapshotsBySessionID: [String: AppSessionStateSnapshot] = [:]
+    @Published var sessionRecordsBySessionID: [String: [AppSessionRecord]] = [:]
+    @Published var browserWorkspaceSnapshotsBySessionID: [String: AppBrowserStateSnapshot] = [:]
     @Published var isCommandPalettePresented: Bool = false
     @Published var selectedSettingsSection: ConnorSettingsSection = .app
     @Published var desktopNotificationsEnabled: Bool = true
@@ -268,6 +272,8 @@ final class AppViewModel: ObservableObject {
     private var submittingChatSessionID: String?
     private var activeChatRunID: String?
     private var agentEventTimelinesBySessionID: [String: [AgentEventPresentation]] = [:]
+    private var browserWorkspaceSessionBinding = BrowserWorkspaceSessionBinding()
+    private var chatSessionWorkspaceModes = ChatSessionWorkspaceModeStore()
 
     private var activeChatSession: AgentSession {
         nativeSessionManager?.session ?? fallbackChatSession
@@ -304,8 +310,7 @@ final class AppViewModel: ObservableObject {
             isBrowserVisible = false
             selection = .agentChat
         case .browserWorkspace:
-            isBrowserVisible = true
-            selection = .agentChat
+            showBrowserWorkspace()
         case .graphMemory:
             selection = .graphWriteCandidates
         case .search:
@@ -333,8 +338,7 @@ final class AppViewModel: ObservableObject {
             newChatSession()
             navigate(to: .agentChat)
         case .toggleBrowser:
-            isBrowserVisible.toggle()
-            navigate(to: isBrowserVisible ? .browserWorkspace : .agentChat)
+            toggleBrowserWorkspaceVisibility()
         case .checkCommercialReadiness:
             runCommercialReadinessReleaseGate()
         case .openGraphMemoryReview, .openApprovals, .openSources, .openSkills, .openAutomation, .openLocalAutomationSurface, .openSettings:
@@ -345,9 +349,43 @@ final class AppViewModel: ObservableObject {
     }
 
     func openURLInCurrentChatBrowser(_ url: URL) {
-        browserTargetURLString = url.absoluteString
+        let sessionID = selectedChatSessionID ?? activeChatSession.id
+        let urlString = url.absoluteString
+        let currentSnapshot = browserWorkspaceSnapshotsBySessionID[sessionID] ?? AppBrowserStateSnapshot()
+        let plannedSnapshot = BrowserExternalOpenPlanner().open(urlString: urlString, in: currentSnapshot)
+        browserTargetURLString = urlString
+        saveBrowserWorkspaceSnapshot(plannedSnapshot, for: sessionID)
+        showBrowserWorkspace()
+    }
+
+    func showBrowserWorkspace() {
+        let sessionID = selectedChatSessionID ?? activeChatSession.id
+        browserWorkspaceSessionBinding.bindBrowserWorkspace(to: sessionID)
+        browserWorkspaceSessionID = browserWorkspaceSessionBinding.boundSessionID
         isBrowserVisible = true
         selection = .agentChat
+        rememberWorkspaceMode(.browser, for: sessionID)
+    }
+
+    func returnFromBrowserWorkspace() {
+        let targetSessionID = browserWorkspaceSessionBinding.sessionIDForReturningFromBrowser(
+            currentSelectedSessionID: selectedChatSessionID ?? activeChatSession.id
+        )
+        if let targetSessionID, targetSessionID != selectedChatSessionID {
+            selectChatSession(targetSessionID)
+        }
+        browserWorkspaceSessionID = targetSessionID
+        isBrowserVisible = false
+        selection = .agentChat
+        rememberWorkspaceMode(.conversation, for: targetSessionID)
+    }
+
+    func toggleBrowserWorkspaceVisibility() {
+        if isBrowserVisible {
+            returnFromBrowserWorkspace()
+        } else {
+            showBrowserWorkspace()
+        }
     }
 
     func openDeepLink(_ url: URL) {
@@ -1014,6 +1052,8 @@ final class AppViewModel: ObservableObject {
                 }
                 latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: selectedID)
                 selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: selectedID)
+                try loadSessionCapsule(sessionID: selectedID)
+                restoreWorkspaceMode(for: selectedID)
             } else {
                 selectedSessionArtifactDirectories = nil
                 latestChatSummary = nil
@@ -1027,9 +1067,13 @@ final class AppViewModel: ObservableObject {
 
     func newChatSession() {
         guard let chatSessionRepository else { return }
+        rememberCurrentWorkspaceMode()
         do {
             let session = try chatSessionRepository.createSession()
             selectedChatSessionID = session.id
+            isBrowserVisible = false
+            browserWorkspaceSessionID = nil
+            rememberWorkspaceMode(.conversation, for: session.id)
             fallbackChatSession = session
             nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: session)
             transcript = []
@@ -1040,7 +1084,88 @@ final class AppViewModel: ObservableObject {
             chatSummaryMessage = nil
             lastPromptInspection = nil
             selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
+            try loadSessionCapsule(sessionID: session.id)
             reloadChatSessions()
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    private func loadSessionCapsule(sessionID: String) throws {
+        guard let chatSessionRepository else { return }
+        _ = try chatSessionRepository.artifactDirectories(sessionID: sessionID)
+        if let state = try chatSessionRepository.loadSessionState(sessionID: sessionID) {
+            sessionStateSnapshotsBySessionID[sessionID] = state
+            if let mode = ChatSessionWorkspaceMode(rawValue: state.selectedPane ?? "") {
+                chatSessionWorkspaceModes.setMode(mode, for: sessionID)
+            }
+        } else {
+            let state = AppSessionStateSnapshot(sessionID: sessionID, updatedAt: Date())
+            sessionStateSnapshotsBySessionID[sessionID] = state
+            try chatSessionRepository.saveSessionState(state, sessionID: sessionID)
+        }
+        sessionRecordsBySessionID[sessionID] = try chatSessionRepository.loadSessionRecords(sessionID: sessionID, limit: nil)
+        if let browserState = try chatSessionRepository.loadBrowserState(sessionID: sessionID) {
+            browserWorkspaceSnapshotsBySessionID[sessionID] = browserState
+        }
+        _ = try chatSessionRepository.refreshSessionManifest(sessionID: sessionID)
+    }
+
+    func saveBrowserWorkspaceSnapshot(_ snapshot: AppBrowserStateSnapshot, for sessionID: String) {
+        var normalized = snapshot
+        normalized.updatedAt = Date()
+        browserWorkspaceSnapshotsBySessionID[sessionID] = normalized
+        do {
+            try chatSessionRepository?.saveBrowserState(normalized, sessionID: sessionID)
+            if let state = try chatSessionRepository?.loadSessionState(sessionID: sessionID) {
+                sessionStateSnapshotsBySessionID[sessionID] = state
+            }
+            _ = try chatSessionRepository?.refreshSessionManifest(sessionID: sessionID)
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    private func rememberCurrentWorkspaceMode() {
+        rememberWorkspaceMode(isBrowserVisible ? .browser : .conversation, for: selectedChatSessionID ?? activeChatSession.id)
+    }
+
+    private func rememberWorkspaceMode(_ mode: ChatSessionWorkspaceMode, for sessionID: String?) {
+        chatSessionWorkspaceModes.setMode(mode, for: sessionID)
+        guard let sessionID else { return }
+        do {
+            var state = try chatSessionRepository?.loadSessionState(sessionID: sessionID) ?? AppSessionStateSnapshot(sessionID: sessionID)
+            state.selectedPane = mode.rawValue
+            state.updatedAt = Date()
+            sessionStateSnapshotsBySessionID[sessionID] = state
+            try chatSessionRepository?.saveSessionState(state, sessionID: sessionID)
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    private func restoreWorkspaceMode(for sessionID: String) {
+        let mode = chatSessionWorkspaceModes.mode(for: sessionID)
+        isBrowserVisible = mode == .browser
+        browserWorkspaceSessionID = mode == .browser ? sessionID : nil
+        if mode == .browser {
+            browserWorkspaceSessionBinding.bindBrowserWorkspace(to: sessionID)
+        }
+        selection = .agentChat
+    }
+
+    func appendSessionRecord(kind: String, title: String? = nil, body: String? = nil, metadata: [String: String] = [:], sessionID: String? = nil) {
+        let targetSessionID = sessionID ?? selectedChatSessionID ?? activeChatSession.id
+        let record = AppSessionRecord(sessionID: targetSessionID, kind: kind, title: title, body: body, metadata: metadata)
+        do {
+            try chatSessionRepository?.appendSessionRecord(record, sessionID: targetSessionID)
+            sessionRecordsBySessionID[targetSessionID] = try chatSessionRepository?.loadSessionRecords(sessionID: targetSessionID, limit: nil) ?? []
+            if let state = try chatSessionRepository?.loadSessionState(sessionID: targetSessionID) {
+                sessionStateSnapshotsBySessionID[targetSessionID] = state
+            }
+            _ = try chatSessionRepository?.refreshSessionManifest(sessionID: targetSessionID)
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -1120,6 +1245,7 @@ final class AppViewModel: ObservableObject {
 
     func selectChatSession(_ sessionID: String) {
         guard let chatSessionRepository else { return }
+        rememberCurrentWorkspaceMode()
         do {
             guard let session = try chatSessionRepository.loadSession(id: sessionID) else { return }
             selectedChatSessionID = session.id
@@ -1134,6 +1260,8 @@ final class AppViewModel: ObservableObject {
             }
             latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: session.id)
             selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
+            try loadSessionCapsule(sessionID: session.id)
+            restoreWorkspaceMode(for: session.id)
             chatSummaryMessage = nil
             lastContext = nil
             lastPromptInspection = nil
@@ -1566,12 +1694,14 @@ final class AppViewModel: ObservableObject {
         isSubmittingChat = false
     }
 
-    func submitChat(prompt rawPrompt: String, clearComposer: Bool = false) async {
+    @discardableResult
+    func submitChat(prompt rawPrompt: String, clearComposer: Bool = false, displayPrompt rawDisplayPrompt: String? = nil) async -> String? {
         let prompt = rawPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !prompt.isEmpty, submittingChatSessionID == nil else { return }
+        let displayPrompt = rawDisplayPrompt?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty, submittingChatSessionID == nil else { return nil }
         guard var manager = nativeSessionManager else {
             errorMessage = String(describing: AppChatRuntimeUnavailableError.nativeSessionManagerUnavailable)
-            return
+            return nil
         }
         let submittingSessionID = manager.session.id
         if clearComposer { chatInput = "" }
@@ -1581,7 +1711,8 @@ final class AppViewModel: ObservableObject {
         activeChatRunID = nil
         isSubmittingChat = selectedChatSessionID == submittingSessionID
         let optimisticTranscript = transcript
-        let optimisticUserMessage = AgentMessage(role: .user, content: prompt)
+        let baselineMessageCount = manager.session.messages.count
+        let optimisticUserMessage = AgentMessage(role: .user, content: displayPrompt?.isEmpty == false ? displayPrompt! : prompt)
         if selectedChatSessionID == submittingSessionID {
             transcript = optimisticTranscript + [optimisticUserMessage]
         }
@@ -1605,6 +1736,7 @@ final class AppViewModel: ObservableObject {
             let response = try await manager.submit(
                 prompt,
                 sessionSummary: sessionSummary,
+                displayPrompt: displayPrompt?.isEmpty == false ? displayPrompt : nil,
                 onRunStarted: { [weak self] runID in
                     guard let self else { return }
                     if self.submittingChatSessionID == submittingSessionID {
@@ -1640,12 +1772,17 @@ final class AppViewModel: ObservableObject {
             }
             errorMessage = nil
             Task { await runBackgroundJobs() }
+            return response.session.messages
+                .dropFirst(baselineMessageCount)
+                .last(where: { $0.role == .assistant })?
+                .content
         } catch {
             if selectedChatSessionID == submittingSessionID {
                 transcript = optimisticTranscript + [optimisticUserMessage]
             }
             reloadPendingApprovals()
             errorMessage = String(describing: error)
+            return nil
         }
     }
 
@@ -1710,6 +1847,60 @@ struct AppShellView: View {
     }
 }
 
+struct SidebarActionButtonLabel: View {
+    var title: String
+    var systemImage: String
+    var fillsWidth: Bool = true
+    var titleFont: Font = .system(size: 12, weight: .regular)
+    var iconFont: Font = .system(size: 13, weight: .medium)
+
+    var body: some View {
+        Label {
+            Text(title)
+                .font(titleFont)
+                .lineLimit(1)
+        } icon: {
+            Image(systemName: systemImage)
+                .font(iconFont)
+                .symbolRenderingMode(.monochrome)
+                .frame(width: 15, alignment: .center)
+        }
+        .foregroundStyle(Color.primary)
+        .labelStyle(.titleAndIcon)
+        .frame(maxWidth: fillsWidth ? .infinity : nil, minHeight: 24, alignment: .leading)
+        .padding(.horizontal, 7)
+        .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+    }
+}
+
+struct SidebarActionButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(backgroundColor(isPressed: configuration.isPressed), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .stroke(borderColor(isPressed: configuration.isPressed), lineWidth: 1)
+            )
+            .shadow(color: shadowColor(isPressed: configuration.isPressed), radius: configuration.isPressed ? 0 : 0.5, x: 0, y: configuration.isPressed ? 0 : 0.5)
+            .scaleEffect(configuration.isPressed ? 0.992 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+
+    private func backgroundColor(isPressed: Bool) -> Color {
+        Color(nsColor: .controlBackgroundColor)
+            .opacity(isPressed ? 0.78 : 0.96)
+    }
+
+    private func borderColor(isPressed: Bool) -> Color {
+        Color(nsColor: .separatorColor)
+            .opacity(isPressed ? 0.42 : 0.28)
+    }
+
+    private func shadowColor(isPressed: Bool) -> Color {
+        Color.black.opacity(isPressed ? 0.04 : 0.08)
+    }
+}
+
 private struct CraftPrimarySidebarView: View {
     @ObservedObject var viewModel: AppViewModel
     @Binding var selection: SidebarItem?
@@ -1724,13 +1915,9 @@ private struct CraftPrimarySidebarView: View {
                 viewModel.newChatSession()
                 select(.agentChat)
             } label: {
-                Label("新建会话", systemImage: "square.and.pencil")
-                    .font(.subheadline.weight(.medium))
-                    .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
-                    .padding(.horizontal, 4)
+                SidebarActionButtonLabel(title: "新建会话", systemImage: "square.and.pencil")
             }
-            .buttonStyle(.bordered)
-            .controlSize(.regular)
+            .buttonStyle(SidebarActionButtonStyle())
             .padding(.horizontal, 10)
             .padding(.top, 10)
 

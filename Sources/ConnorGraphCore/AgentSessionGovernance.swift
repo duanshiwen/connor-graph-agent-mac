@@ -129,6 +129,8 @@ public enum AgentSessionListFilter: Sendable, Equatable {
 
 public struct AgentSessionArtifactDirectories: Sendable, Equatable {
     public var root: URL
+    public var state: URL
+    public var browser: URL
     public var plans: URL
     public var data: URL
     public var attachments: URL
@@ -137,6 +139,8 @@ public struct AgentSessionArtifactDirectories: Sendable, Equatable {
 
     public init(root: URL) {
         self.root = root
+        self.state = root.appendingPathComponent("state", isDirectory: true)
+        self.browser = root.appendingPathComponent("browser", isDirectory: true)
         self.plans = root.appendingPathComponent("plans", isDirectory: true)
         self.data = root.appendingPathComponent("data", isDirectory: true)
         self.attachments = root.appendingPathComponent("attachments", isDirectory: true)
@@ -144,5 +148,5 @@ public struct AgentSessionArtifactDirectories: Sendable, Equatable {
         self.logs = root.appendingPathComponent("logs", isDirectory: true)
     }
 
-    public var all: [URL] { [root, plans, data, attachments, exports, logs] }
+    public var all: [URL] { [root, state, browser, plans, data, attachments, exports, logs] }
 }

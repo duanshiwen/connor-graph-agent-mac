@@ -83,11 +83,9 @@ private struct AgentChatSessionListView: View {
     var body: some View {
         VStack(spacing: AgentChatLayout.spaceM) {
             Button(action: { viewModel.newChatSession() }) {
-                Label("新建对话", systemImage: "square.and.pencil")
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                SidebarActionButtonLabel(title: "新建对话", systemImage: "square.and.pencil")
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
+            .buttonStyle(SidebarActionButtonStyle())
 
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                 HStack {
@@ -384,7 +382,7 @@ private struct AgentChatEmptyStateView: View {
     }
 }
 
-private struct AgentMarkdownPreviewText: View {
+struct AgentMarkdownPreviewText: View {
     var markdown: String
     var font: Font = .body
     var monospacedFallback: Bool = false
@@ -599,6 +597,9 @@ private struct AgentChatMessageRow: View {
     var row: AgentChatMessagePresentation
 
     private var isUser: Bool { row.message.role == .user }
+    private var browserPromptFoldingParts: BrowserPromptFoldingParts? {
+        BrowserPromptFoldingParser().parse(row.message.content)
+    }
 
     var body: some View {
         HStack(alignment: .top) {
@@ -623,7 +624,11 @@ private struct AgentChatMessageRow: View {
     @ViewBuilder
     private var messageContent: some View {
         if isUser {
-            AgentMarkdownPreviewText(markdown: row.message.content, font: .body)
+            if let browserPromptFoldingParts {
+                BrowserPromptFoldedMessageView(parts: browserPromptFoldingParts)
+            } else {
+                AgentMarkdownPreviewText(markdown: row.message.content, font: .body)
+            }
         } else {
             ScrollView {
                 AgentMarkdownPreviewText(markdown: row.message.content, font: .body)
@@ -636,6 +641,39 @@ private struct AgentChatMessageRow: View {
     private var messageBackground: Color {
         if isUser { return Color.accentColor.opacity(0.88) }
         return Color(nsColor: .controlBackgroundColor).opacity(0.85)
+    }
+}
+
+private struct BrowserPromptFoldedMessageView: View {
+    var parts: BrowserPromptFoldingParts
+    @State private var isWebPageBodyExpanded: Bool = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+            if !parts.leadingMarkdown.isEmpty {
+                AgentMarkdownPreviewText(markdown: parts.leadingMarkdown, font: .body)
+            }
+
+            DisclosureGroup(isExpanded: $isWebPageBodyExpanded) {
+                ScrollView {
+                    Text(parts.webPageBody)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(AgentChatLayout.spaceS)
+                }
+                .frame(maxHeight: 220, alignment: .top)
+                .background(Color.black.opacity(0.05), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
+            } label: {
+                Label("网页正文", systemImage: "doc.text.magnifyingglass")
+                    .font(.caption.weight(.semibold))
+            }
+            .tint(.primary)
+
+            if !parts.trailingMarkdown.isEmpty {
+                AgentMarkdownPreviewText(markdown: parts.trailingMarkdown, font: .body)
+            }
+        }
     }
 }
 
@@ -1193,6 +1231,24 @@ private struct AgentChatPermissionRequestCard: View {
     }
 }
 
+struct AgentSendControlButton: View {
+    var isSubmitting: Bool
+    var isDisabled: Bool
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: isSubmitting ? "stop.fill" : "arrow.up")
+                .font(.system(size: 11, weight: .semibold))
+                .frame(width: 22, height: 22)
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.mini)
+        .clipShape(Circle())
+        .disabled(isDisabled)
+    }
+}
+
 private struct AgentChatComposerView: View {
     @ObservedObject var viewModel: AppViewModel
     @Binding var isSessionInfoPresented: Bool
@@ -1226,7 +1282,7 @@ private struct AgentChatComposerView: View {
                     .buttonStyle(.plain)
                     .help("添加附件")
 
-                    Button(action: { viewModel.isBrowserVisible.toggle() }) {
+                    Button(action: { viewModel.toggleBrowserWorkspaceVisibility() }) {
                         AgentComposerOptionBadge(
                             title: viewModel.isBrowserVisible ? "隐藏浏览器" : "浏览器",
                             systemImage: "safari",
@@ -1248,21 +1304,17 @@ private struct AgentChatComposerView: View {
 
                     modelSelectionMenu
 
-                    Button(action: {
-                        if viewModel.isSubmittingChat {
-                            viewModel.cancelActiveChatRun()
-                        } else {
-                            Task { await viewModel.submitChat() }
+                    AgentSendControlButton(
+                        isSubmitting: viewModel.isSubmittingChat,
+                        isDisabled: !viewModel.isSubmittingChat && viewModel.chatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                        action: {
+                            if viewModel.isSubmittingChat {
+                                viewModel.cancelActiveChatRun()
+                            } else {
+                                Task { await viewModel.submitChat() }
+                            }
                         }
-                    }) {
-                        Image(systemName: viewModel.isSubmittingChat ? "stop.fill" : "arrow.up")
-                            .font(.system(size: 11, weight: .semibold))
-                            .frame(width: 22, height: 22)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.mini)
-                    .clipShape(Circle())
-                    .disabled(!viewModel.isSubmittingChat && viewModel.chatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    )
                 }
                 .padding(.horizontal, AgentChatLayout.spaceM)
                 .padding(.vertical, AgentChatLayout.spaceS)
