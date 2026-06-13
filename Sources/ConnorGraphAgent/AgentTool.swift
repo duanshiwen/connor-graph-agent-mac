@@ -6,6 +6,7 @@ public indirect enum AgentToolInputSchema: Sendable, Equatable {
     case integer(description: String)
     case number(description: String)
     case boolean(description: String)
+    case array(items: AgentToolInputSchema, description: String)
     case object(properties: [String: AgentToolInputSchema], required: [String])
 
     public var jsonObject: [String: Any] {
@@ -18,6 +19,8 @@ public indirect enum AgentToolInputSchema: Sendable, Equatable {
             return ["type": "number", "description": description]
         case .boolean(let description):
             return ["type": "boolean", "description": description]
+        case .array(let items, let description):
+            return ["type": "array", "description": description, "items": items.jsonObject]
         case .object(let properties, let required):
             return [
                 "type": "object",

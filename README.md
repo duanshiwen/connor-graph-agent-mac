@@ -310,6 +310,7 @@ Agent runtime target。包含：
 - Graph read tools
 - Graph write tools
 - Web/search tools
+- Native local workspace tools
 - Permission policy
 - Prompt budget estimation and inspection
 - Session summary strategy
@@ -328,6 +329,8 @@ Sources/ConnorGraphAgent/GraphMemoryCoreRuntime.swift
 Sources/ConnorGraphAgent/AgentTool.swift
 Sources/ConnorGraphAgent/GraphReadTools.swift
 Sources/ConnorGraphAgent/GraphWriteTools.swift
+Sources/ConnorGraphAgent/LocalWorkspacePolicy.swift
+Sources/ConnorGraphAgent/LocalWorkspaceTools.swift
 Sources/ConnorGraphAgent/AgentPermission.swift
 Sources/ConnorGraphAgent/AgentEvent.swift
 Sources/ConnorGraphAgent/AgentEventRecorder.swift
@@ -907,6 +910,45 @@ allowParallelToolCalls: false
 ```
 
 因此单轮 agent run 默认最多允许 64 个 tool iteration；每个 iteration 最多消费 4 个 tool calls，理论工具调用上限为 256 次。模型提前给出 final answer 时会提前结束；达到最大 iteration 后 run 会以 `maxToolIterationsReached` 失败。
+
+### Native Local Workspace Tools
+
+Connor 原生 AgentLoop 注册一组由 Connor 自己治理的本地 workspace 工具，而不是依赖 Claude SDK sidecar 才能读写文件。这使 OpenAI-compatible / 国产模型 / 私有模型也能在 Connor Policy Engine 下理解和修改本地项目。
+
+```text
+Read       readWorkspaceFile       读取 workspace 内文本文件，支持 offset/limit 和大文件限制
+LS         listWorkspaceFiles      列出 workspace 内目录，目录以 / 结尾
+Glob       listWorkspaceFiles      在 workspace 内执行 glob 文件发现，默认跳过 .git/node_modules/.build 等噪音目录
+Grep       searchWorkspaceFiles    在 workspace 内执行 literal/regex 搜索，支持 context 和结果截断
+Write      writeWorkspaceFile      创建或覆盖 workspace 内文本文件，受 protected path 和大小限制保护
+Edit       editWorkspaceFile       对唯一 old_text 做精确替换；缺失或多重匹配会失败
+MultiEdit  editWorkspaceFile       对单文件执行原子多重替换；任一 edit 无效则不写入
+Bash       dynamic shell capability 在 workspace 内执行非交互命令，按命令风险追加评估 shell capability
+```
+
+本地 workspace 安全边界由 `LocalWorkspacePolicy` 负责：
+
+- 默认 working directory 为当前进程 working directory；后续可升级为独立 `agentLoopWorkingDirectoryPath` 设置。
+- 所有路径会做标准化和 symlink resolving，防止 workspace 内 symlink 逃逸到系统目录。
+- 默认拒绝 workspace 外路径、`.git/objects` / `.git/index` 写入、`.env*` 写入、`~/.ssh` / `~/.gnupg` / `~/.aws` 等敏感路径。
+- 文件读取、写入、搜索和工具输出都有大小/数量上限，避免大结果污染模型上下文。
+- `Edit` 要求 `old_text` 在原始文件中唯一匹配；`MultiEdit` 先完整验证全部 edits，再一次性写入，避免部分修改。
+- `Bash` 使用保守命令分类：`readOnly`、`workspaceWrite`、`network`、`destructive`、`unknown`。明确 destructive 命令直接拒绝；其他风险类型映射到对应 shell capability，由 `AgentPolicyEngine` 按 permission mode 决策。
+
+新增本地 workspace 权限 capability：
+
+```text
+readWorkspaceFile
+listWorkspaceFiles
+searchWorkspaceFiles
+writeWorkspaceFile
+editWorkspaceFile
+deleteWorkspaceFile
+runReadOnlyShellCommand
+runWorkspaceShellCommand
+runNetworkShellCommand
+runDestructiveShellCommand
+```
 
 AI 设置页支持：
 
