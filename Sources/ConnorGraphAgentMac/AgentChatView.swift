@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import Foundation
 import ConnorGraphCore
 import ConnorGraphAgent
@@ -413,7 +414,7 @@ private struct AgentChatConversationHeader: View {
                 WorkspaceRootsSettingsContent(viewModel: viewModel)
                     .padding(.top, AgentChatLayout.spaceS)
             } label: {
-                Label("当前会话 Workspace", systemImage: "folder")
+                Label("当前会话 Workspace 详情", systemImage: "folder.badge.gearshape")
                     .font(.caption.weight(.semibold))
             }
             .padding(AgentChatLayout.spaceM)
@@ -1522,6 +1523,8 @@ private struct AgentChatComposerView: View {
                     .buttonStyle(.plain)
                     .help("添加附件")
 
+                    workingDirectoryMenu
+
                     Button(action: { viewModel.toggleBrowserWorkspaceVisibility() }) {
                         AgentComposerOptionBadge(
                             title: viewModel.isBrowserVisible ? "隐藏浏览器" : "浏览器",
@@ -1577,6 +1580,96 @@ private struct AgentChatComposerView: View {
 
     private var selectedSession: AgentSession? {
         viewModel.chatSessions.first { $0.id == viewModel.selectedChatSessionID }
+    }
+
+    private var workingDirectoryMenu: some View {
+        Menu {
+            if viewModel.workspaceRoots.isEmpty {
+                Button("尚未设置工作目录") {}
+                    .disabled(true)
+            } else {
+                ForEach(viewModel.workspaceRoots) { root in
+                    Button {
+                        viewModel.setPrimaryWorkspaceRoot(id: root.id)
+                    } label: {
+                        Label(workspaceMenuItemTitle(for: root), systemImage: root.isPrimary ? "checkmark" : "folder")
+                    }
+                    .help(root.path)
+                }
+            }
+
+            Divider()
+
+            Button {
+                chooseWorkingDirectory()
+            } label: {
+                Label("选择文件夹…", systemImage: "folder.badge.plus")
+            }
+
+            Button {
+                viewModel.resetWorkspaceRootsForCurrentSession()
+            } label: {
+                Label("重置为默认", systemImage: "arrow.counterclockwise")
+            }
+            .disabled(viewModel.workspaceRoots.isEmpty && viewModel.defaultWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        } label: {
+            AgentComposerOptionBadge(
+                title: workingDirectoryBadgeTitle,
+                systemImage: viewModel.primaryWorkspaceRootDraft == nil ? "folder" : "folder.fill",
+                tint: viewModel.primaryWorkspaceRootDraft == nil ? .secondary : .accentColor,
+                isActive: viewModel.primaryWorkspaceRootDraft != nil,
+                style: .compact
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .help(workingDirectoryHelpText)
+    }
+
+    private var workingDirectoryBadgeTitle: String {
+        guard let root = viewModel.primaryWorkspaceRootDraft else { return "选择工作目录" }
+        return workspaceDisplayName(for: root)
+    }
+
+    private var workingDirectoryHelpText: String {
+        guard let root = viewModel.primaryWorkspaceRootDraft else {
+            return "设置当前会话工作目录；本地工具和 Claude Sidecar 将从主目录开始。"
+        }
+        return "当前会话工作目录：\(root.path)"
+    }
+
+    private func workspaceMenuItemTitle(for root: WorkspaceRootDraft) -> String {
+        let name = workspaceDisplayName(for: root)
+        let parent = workspaceParentDisplayPath(for: root.path)
+        guard !parent.isEmpty else { return name }
+        return "\(name)  in \(parent)"
+    }
+
+    private func workspaceDisplayName(for root: WorkspaceRootDraft) -> String {
+        let trimmedName = root.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedName.isEmpty { return trimmedName }
+        let url = URL(fileURLWithPath: root.path, isDirectory: true)
+        return url.lastPathComponent.isEmpty ? root.path : url.lastPathComponent
+    }
+
+    private func workspaceParentDisplayPath(for path: String) -> String {
+        let url = URL(fileURLWithPath: path, isDirectory: true)
+        let parent = url.deletingLastPathComponent().path
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        if parent == home { return "~" }
+        if parent.hasPrefix(home + "/") { return "~" + parent.dropFirst(home.count) }
+        return parent
+    }
+
+    private func chooseWorkingDirectory() {
+        let panel = NSOpenPanel()
+        panel.title = "选择当前会话工作目录"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        if panel.runModal() == .OK, let url = panel.urls.first {
+            viewModel.addWorkspaceRootAndSetPrimary(path: url.path)
+        }
     }
 
     private func menuOptionTitle(_ title: String, isSelected: Bool) -> String {
