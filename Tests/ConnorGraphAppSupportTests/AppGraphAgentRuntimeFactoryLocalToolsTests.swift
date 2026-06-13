@@ -32,6 +32,32 @@ import ConnorGraphStore
     #expect(names.contains("Bash"))
 }
 
+@Test func agentLoopRuntimeFactoryRegistersScientificComputingTools() throws {
+    let storeURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("connor-factory-science-tools-")
+        .appendingPathComponent(UUID().uuidString)
+        .appendingPathExtension("sqlite")
+    try FileManager.default.createDirectory(at: storeURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    let store = try SQLiteGraphKernelStore(path: storeURL.path)
+    try store.migrate()
+    let settings = AppLLMSettingsRepository(
+        settingsStore: LocalToolsSettingsStore(),
+        credentialStore: LocalToolsCredentialStore()
+    )
+    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: settings)
+
+    let controller = factory.makeAgentLoopController(permissionMode: .readOnly)
+    let names = controller.toolRegistry.definitions.map(\.name)
+
+    #expect(names.contains("science_compute"))
+    #expect(names.contains("science_units"))
+    #expect(names.contains("science_stats"))
+    #expect(names.contains("science_linalg"))
+    #expect(names.contains("science_symbolic"))
+    #expect(names.contains("science_optimize"))
+    #expect(names.contains("science_table_compute"))
+}
+
 @Test func agentLoopRuntimeFactoryNativeReadUsesRuntimeWorkspace() async throws {
     let appDirectory = FileManager.default.temporaryDirectory
         .appendingPathComponent("ConnorFactoryLocalToolsRuntimeWorkspace-", isDirectory: true)

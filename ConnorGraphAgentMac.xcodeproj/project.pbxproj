@@ -14,7 +14,7 @@
 		A00000000000000000000009 /* ConnorGraphSearch in Frameworks */ = {isa = PBXBuildFile; productRef = A0000000000000000000000A /* ConnorGraphSearch */; };
 		A0000000000000000000000B /* ConnorGraphAgent in Frameworks */ = {isa = PBXBuildFile; productRef = A0000000000000000000000C /* ConnorGraphAgent */; };
 		A0000000000000000000000F /* ConnorGraphAppSupport in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000010 /* ConnorGraphAppSupport */; };
-		A0000000000000000000002C /* Sources/ConnorGraphAgentMac/AgentChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000002D /* Sources/ConnorGraphAgentMac/AgentChatView.swift */; };
+		A0000000000000000000002C /* AgentChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000002D /* AgentChatView.swift */; };
 		A0000000000000000000002E /* Sources/ConnorGraphAgentMac/EmptyGraphHybridSearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000002F /* Sources/ConnorGraphAgentMac/EmptyGraphHybridSearchService.swift */; };
 		A00000000000000000000030 /* Sources/ConnorGraphAgentMac/BrowserWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000031 /* Sources/ConnorGraphAgentMac/BrowserWorkspaceView.swift */; };
 		A00000000000000000000032 /* Sources/ConnorGraphAgentMac/ConnorCommandPaletteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000033 /* Sources/ConnorGraphAgentMac/ConnorCommandPaletteView.swift */; };
@@ -26,7 +26,7 @@
 /* Begin PBXFileReference section */
 		A00000000000000000000002 /* Sources/ConnorGraphAgentMac/ConnorGraphAgentMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ConnorGraphAgentMacApp.swift; sourceTree = "<group>"; };
 		A00000000000000000000011 /* ConnorGraphAgentMacApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ConnorGraphAgentMacApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		A0000000000000000000002D /* Sources/ConnorGraphAgentMac/AgentChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AgentChatView.swift; sourceTree = "<group>"; };
+		A0000000000000000000002D /* AgentChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AgentChatView.swift; path = Sources/ConnorGraphAgentMac/AgentChatView.swift; sourceTree = "<group>"; };
 		A0000000000000000000002F /* Sources/ConnorGraphAgentMac/EmptyGraphHybridSearchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/EmptyGraphHybridSearchService.swift; sourceTree = "<group>"; };
 		A00000000000000000000031 /* Sources/ConnorGraphAgentMac/BrowserWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/BrowserWorkspaceView.swift; sourceTree = "<group>"; };
 		A00000000000000000000033 /* Sources/ConnorGraphAgentMac/ConnorCommandPaletteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ConnorCommandPaletteView.swift; sourceTree = "<group>"; };
@@ -65,13 +65,13 @@
 			children = (
 				B00000000000000000000004 /* Tests/XcodeTestBridge */,
 				A00000000000000000000002 /* Sources/ConnorGraphAgentMac/ConnorGraphAgentMacApp.swift */,
-				A0000000000000000000002D /* Sources/ConnorGraphAgentMac/AgentChatView.swift */,
 				A0000000000000000000002F /* Sources/ConnorGraphAgentMac/EmptyGraphHybridSearchService.swift */,
 				A00000000000000000000031 /* Sources/ConnorGraphAgentMac/BrowserWorkspaceView.swift */,
 				A00000000000000000000039 /* Sources/ConnorGraphAgentMac/BrowserBackgroundTaskRunnerView.swift */,
 				A00000000000000000000033 /* Sources/ConnorGraphAgentMac/ConnorCommandPaletteView.swift */,
 				A00000000000000000000037 /* Sources/ConnorGraphAgentMac/SourceSkillAutomationRuntimeViews.swift */,
 				A00000000000000000000014 /* Products */,
+				A0000000000000000000002D /* AgentChatView.swift */,
 			);
 			sourceTree = "<group>";
 		};
@@ -184,7 +184,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A00000000000000000000001 /* Sources/ConnorGraphAgentMac/ConnorGraphAgentMacApp.swift in Sources */,
-				A0000000000000000000002C /* Sources/ConnorGraphAgentMac/AgentChatView.swift in Sources */,
+				A0000000000000000000002C /* AgentChatView.swift in Sources */,
 				A0000000000000000000002E /* Sources/ConnorGraphAgentMac/EmptyGraphHybridSearchService.swift in Sources */,
 				A00000000000000000000030 /* Sources/ConnorGraphAgentMac/BrowserWorkspaceView.swift in Sources */,
 				A00000000000000000000038 /* Sources/ConnorGraphAgentMac/BrowserBackgroundTaskRunnerView.swift in Sources */,
