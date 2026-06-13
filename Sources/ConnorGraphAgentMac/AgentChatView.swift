@@ -332,6 +332,7 @@ private struct AgentChatConversationView: View {
                             }
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 0)
                     .padding(.vertical, AgentChatLayout.spaceXL)
                 }
@@ -840,7 +841,7 @@ private struct AgentChatMessageRow: View {
             }
             .foregroundStyle(Color.primary)
             .padding(AgentChatLayout.spaceM)
-            .frame(maxWidth: isUser ? AgentChatLayout.userMessageMaxWidth : AgentChatLayout.messageMaxWidth, alignment: .leading)
+            .frame(maxWidth: isUser ? AgentChatLayout.userMessageMaxWidth : .infinity, alignment: .leading)
             .background(messageBackground, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
