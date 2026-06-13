@@ -293,6 +293,10 @@ private struct AgentChatConversationView: View {
         if process.id == latestProcessID, !viewModel.agentEventTimeline.isEmpty {
             return viewModel.agentEventTimeline
         }
+        let restoredEvents = viewModel.restoredAgentEventTimeline(for: process)
+        if !restoredEvents.isEmpty {
+            return restoredEvents
+        }
         return AgentActivityFallbackEvents.events(for: process)
     }
 
