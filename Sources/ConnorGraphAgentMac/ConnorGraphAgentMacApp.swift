@@ -2126,6 +2126,9 @@ final class AppViewModel: ObservableObject {
                     if self.selectedChatSessionID == submittingSessionID {
                         self.agentEventTimeline = timeline
                     }
+                    if presentation.kind == AgentEventKind.permissionRequested.rawValue {
+                        self.reloadPendingApprovals()
+                    }
                 }
             )
             agentEventTimelinesBySessionID[submittingSessionID] = manager.eventPresentations
