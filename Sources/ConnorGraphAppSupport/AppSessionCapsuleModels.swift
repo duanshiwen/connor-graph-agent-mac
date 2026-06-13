@@ -240,11 +240,30 @@ public struct AppBrowserSelectionThreadMessageSnapshot: Codable, Equatable, Iden
     public var role: Role
     public var text: String
     public var createdAt: Date
+    public var isPending: Bool
 
-    public init(id: UUID = UUID(), role: Role, text: String, createdAt: Date = Date()) {
+    public init(id: UUID = UUID(), role: Role, text: String, createdAt: Date = Date(), isPending: Bool = false) {
         self.id = id
         self.role = role
         self.text = text
         self.createdAt = createdAt
+        self.isPending = isPending
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case role
+        case text
+        case createdAt
+        case isPending
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decode(UUID.self, forKey: .id)
+        self.role = try container.decode(Role.self, forKey: .role)
+        self.text = try container.decode(String.self, forKey: .text)
+        self.createdAt = try container.decode(Date.self, forKey: .createdAt)
+        self.isPending = try container.decodeIfPresent(Bool.self, forKey: .isPending) ?? false
     }
 }

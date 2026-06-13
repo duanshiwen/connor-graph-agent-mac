@@ -1,6 +1,6 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-13 10:53 GMT+8  
+文档更新时间：2026-06-13 11:12 GMT+8  
 当前代码基线：`feature/browser-tabs`，基于 `main` 继续演进 Session Capsule 持久化、内置浏览器多标签页与网页选区浮窗能力。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package，目标是把 Connor 建成 **graph-memory-native Agent OS**：它不是“图谱编辑器”，也不是“Claude SDK 外壳”，而是以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI 和 Local Automation Surface 共同构成的本地 Agent 操作系统。
@@ -821,7 +821,8 @@ Browser Workspace 当前支持：
 - 用户在网页中选中文本后自动显示跟随选区的浮动窗口
 - 浮窗可基于选中文本提问、插入主对话输入框或保存为 Graph Evidence episode
 - 浮窗发送按钮复用主对话 composer 的原型发送按钮样式
-- 发送给 LLM 后浮窗保持打开，局部 mini-thread 保留该网页选择的提问记录
+- 发送给 LLM 后浮窗保持打开，局部 mini-thread 显示 loading 状态、用户提问与 assistant Markdown 回复
+- 同一次网页选区提问也会同步进入主会话 transcript：主会话显示简洁可读的“网页选区提问”，LLM 实际接收完整网页上下文
 
 Command Palette 当前支持：
 

@@ -1621,12 +1621,14 @@ final class AppViewModel: ObservableObject {
         isSubmittingChat = false
     }
 
-    func submitChat(prompt rawPrompt: String, clearComposer: Bool = false) async {
+    @discardableResult
+    func submitChat(prompt rawPrompt: String, clearComposer: Bool = false, displayPrompt rawDisplayPrompt: String? = nil) async -> String? {
         let prompt = rawPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !prompt.isEmpty, submittingChatSessionID == nil else { return }
+        let displayPrompt = rawDisplayPrompt?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty, submittingChatSessionID == nil else { return nil }
         guard var manager = nativeSessionManager else {
             errorMessage = String(describing: AppChatRuntimeUnavailableError.nativeSessionManagerUnavailable)
-            return
+            return nil
         }
         let submittingSessionID = manager.session.id
         if clearComposer { chatInput = "" }
@@ -1636,7 +1638,8 @@ final class AppViewModel: ObservableObject {
         activeChatRunID = nil
         isSubmittingChat = selectedChatSessionID == submittingSessionID
         let optimisticTranscript = transcript
-        let optimisticUserMessage = AgentMessage(role: .user, content: prompt)
+        let baselineMessageCount = manager.session.messages.count
+        let optimisticUserMessage = AgentMessage(role: .user, content: displayPrompt?.isEmpty == false ? displayPrompt! : prompt)
         if selectedChatSessionID == submittingSessionID {
             transcript = optimisticTranscript + [optimisticUserMessage]
         }
@@ -1660,6 +1663,7 @@ final class AppViewModel: ObservableObject {
             let response = try await manager.submit(
                 prompt,
                 sessionSummary: sessionSummary,
+                displayPrompt: displayPrompt?.isEmpty == false ? displayPrompt : nil,
                 onRunStarted: { [weak self] runID in
                     guard let self else { return }
                     if self.submittingChatSessionID == submittingSessionID {
@@ -1695,12 +1699,17 @@ final class AppViewModel: ObservableObject {
             }
             errorMessage = nil
             Task { await runBackgroundJobs() }
+            return response.session.messages
+                .dropFirst(baselineMessageCount)
+                .last(where: { $0.role == .assistant })?
+                .content
         } catch {
             if selectedChatSessionID == submittingSessionID {
                 transcript = optimisticTranscript + [optimisticUserMessage]
             }
             reloadPendingApprovals()
             errorMessage = String(describing: error)
+            return nil
         }
     }
 

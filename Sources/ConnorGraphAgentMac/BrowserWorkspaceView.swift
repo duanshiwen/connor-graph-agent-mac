@@ -357,6 +357,7 @@ struct BrowserWorkspaceView: View {
         let question = questionText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !question.isEmpty else { return }
         appendThreadMessage(threadID: popover.threadID, role: .user, text: question)
+        let pendingMessageID = appendThreadMessage(threadID: popover.threadID, role: .assistant, text: "", isPending: true)
         viewModel.appendSessionRecord(
             kind: "browser.selection.question",
             title: popover.context.page.title.isEmpty ? "网页选择提问" : popover.context.page.title,
@@ -370,14 +371,59 @@ struct BrowserWorkspaceView: View {
             sessionID: activeSessionID
         )
         let prompt = BrowserLLMContextBuilder().makePrompt(selection: popover.context, question: question)
+        let displayPrompt = makeSelectionDisplayPrompt(selection: popover.context, question: question)
         questionText = ""
-        Task { await viewModel.submitChat(prompt: prompt) }
+        Task {
+            let answer = await viewModel.submitChat(prompt: prompt, displayPrompt: displayPrompt)
+            await MainActor.run {
+                replaceThreadMessage(
+                    threadID: popover.threadID,
+                    messageID: pendingMessageID,
+                    role: .assistant,
+                    text: answer ?? viewModel.errorMessage ?? "未能获取回复。",
+                    isPending: false
+                )
+            }
+        }
     }
 
-    private func appendThreadMessage(threadID: UUID, role: BrowserSelectionThreadMessage.Role, text: String) {
+    @discardableResult
+    private func appendThreadMessage(threadID: UUID, role: BrowserSelectionThreadMessage.Role, text: String, isPending: Bool = false) -> UUID {
+        let message = BrowserSelectionThreadMessage(role: role, text: text, createdAt: Date(), isPending: isPending)
         mutateActiveSession { session in
             guard var thread = session.threads[threadID] else { return }
-            thread.messages.append(BrowserSelectionThreadMessage(role: role, text: text, createdAt: Date()))
+            thread.messages.append(message)
+            session.threads[threadID] = thread
+        }
+        return message.id
+    }
+
+    private func makeSelectionDisplayPrompt(selection: BrowserSelectionContext, question: String) -> String {
+        let title = selection.page.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let url = selection.page.url.trimmingCharacters(in: .whitespacesAndNewlines)
+        let selectedText = selection.selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let selectedPreview = selectedText.count > 300 ? String(selectedText.prefix(300)) + "…" : selectedText
+        var lines: [String] = ["网页选区提问"]
+        if !title.isEmpty { lines.append("页面：\(title)") }
+        if !url.isEmpty { lines.append("URL：\(url)") }
+        if !selectedPreview.isEmpty {
+            lines.append("")
+            lines.append("选中文本：")
+            lines.append("> \(selectedPreview.replacingOccurrences(of: "\n", with: "\n> "))")
+        }
+        lines.append("")
+        lines.append("问题：\(question)")
+        return lines.joined(separator: "\n")
+    }
+
+    private func replaceThreadMessage(threadID: UUID, messageID: UUID, role: BrowserSelectionThreadMessage.Role, text: String, isPending: Bool) {
+        mutateActiveSession { session in
+            guard var thread = session.threads[threadID],
+                  let index = thread.messages.firstIndex(where: { $0.id == messageID })
+            else { return }
+            thread.messages[index].role = role
+            thread.messages[index].text = text
+            thread.messages[index].isPending = isPending
             session.threads[threadID] = thread
         }
     }
@@ -575,12 +621,14 @@ private struct BrowserSelectionThreadMessage: Identifiable {
     var role: Role
     var text: String
     var createdAt: Date
+    var isPending: Bool
 
-    init(id: UUID = UUID(), role: Role, text: String, createdAt: Date) {
+    init(id: UUID = UUID(), role: Role, text: String, createdAt: Date, isPending: Bool = false) {
         self.id = id
         self.role = role
         self.text = text
         self.createdAt = createdAt
+        self.isPending = isPending
     }
 
     init(snapshot: BrowserSelectionThreadMessageSnapshot) {
@@ -588,6 +636,7 @@ private struct BrowserSelectionThreadMessage: Identifiable {
         self.role = snapshot.role == .user ? .user : .assistant
         self.text = snapshot.text
         self.createdAt = snapshot.createdAt
+        self.isPending = snapshot.isPending
     }
 
     var snapshot: BrowserSelectionThreadMessageSnapshot {
@@ -595,7 +644,8 @@ private struct BrowserSelectionThreadMessage: Identifiable {
             id: id,
             role: role == .user ? .user : .assistant,
             text: text,
-            createdAt: createdAt
+            createdAt: createdAt,
+            isPending: isPending
         )
     }
 }
@@ -652,7 +702,7 @@ private struct BrowserSelectionPopover: View {
                 .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
 
             BrowserSelectionThreadList(messages: thread?.messages ?? [])
-                .frame(maxHeight: 96)
+                .frame(maxHeight: 180)
 
             HStack(spacing: 8) {
                 TextField("基于选中文本提问…", text: $question, axis: .vertical)
@@ -706,11 +756,27 @@ private struct BrowserSelectionThreadList: View {
                                 .font(.caption2.weight(.semibold))
                                 .foregroundStyle(message.role == .user ? Color.accentColor : Color.secondary)
                                 .frame(width: 22, alignment: .leading)
-                            Text(message.text)
-                                .font(.caption2)
-                                .foregroundStyle(.primary)
-                                .lineLimit(3)
+                            if message.isPending {
+                                HStack(spacing: 6) {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                        .scaleEffect(0.62)
+                                    Text("正在生成回复…")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                            } else if message.role == .assistant {
+                                AgentMarkdownPreviewText(markdown: message.text, font: .caption2, lineLimit: 8)
+                                    .foregroundStyle(.primary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            } else {
+                                Text(message.text)
+                                    .font(.caption2)
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(3)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
                         }
                     }
                 }
