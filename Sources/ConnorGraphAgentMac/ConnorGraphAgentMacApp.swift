@@ -217,6 +217,7 @@ final class AppViewModel: ObservableObject {
     @Published var isSubmittingChat: Bool = false
     @Published var agentEventTimeline: [AgentEventPresentation] = []
     @Published var isBrowserVisible: Bool = false
+    @Published var browserTargetURLString: String = "https://www.wikipedia.org"
     @Published var isCommandPalettePresented: Bool = false
     @Published var selectedSettingsSection: ConnorSettingsSection = .app
     @Published var desktopNotificationsEnabled: Bool = true
@@ -265,6 +266,7 @@ final class AppViewModel: ObservableObject {
     private var fallbackChatSession: AgentSession
     private var nativeSessionManager: NativeSessionManager?
     private var submittingChatSessionID: String?
+    private var activeChatRunID: String?
     private var agentEventTimelinesBySessionID: [String: [AgentEventPresentation]] = [:]
 
     private var activeChatSession: AgentSession {
@@ -340,6 +342,12 @@ final class AppViewModel: ObservableObject {
                 navigate(to: command.target)
             }
         }
+    }
+
+    func openURLInCurrentChatBrowser(_ url: URL) {
+        browserTargetURLString = url.absoluteString
+        isBrowserVisible = true
+        selection = .agentChat
     }
 
     func openDeepLink(_ url: URL) {
@@ -1046,6 +1054,13 @@ final class AppViewModel: ObservableObject {
             return
         }
 
+        let cachedTimeline = try chatSessionRepository.loadActivityTimelineCache(sessionID: sessionID)
+        if !cachedTimeline.isEmpty {
+            agentEventTimelinesBySessionID[sessionID] = cachedTimeline
+            agentEventTimeline = cachedTimeline
+            return
+        }
+
         let replayer = AgentEventReplayer()
         let presenter = AgentEventPresenter()
 
@@ -1068,6 +1083,7 @@ final class AppViewModel: ObservableObject {
             let restored = presentations(from: try chatSessionRepository.loadRunEvents(runID: run.id, limit: 300))
             if !restored.isEmpty {
                 agentEventTimelinesBySessionID[sessionID] = restored
+                try? chatSessionRepository.saveActivityTimelineCache(sessionID: sessionID, timeline: restored)
                 agentEventTimeline = restored
                 return
             }
@@ -1092,6 +1108,7 @@ final class AppViewModel: ObservableObject {
             let restored = presentations(from: runEvents)
             if !restored.isEmpty {
                 agentEventTimelinesBySessionID[sessionID] = restored
+                try? chatSessionRepository.saveActivityTimelineCache(sessionID: sessionID, timeline: restored)
                 agentEventTimeline = restored
                 return
             }
@@ -1522,6 +1539,33 @@ final class AppViewModel: ObservableObject {
         await submitChat(prompt: prompt, clearComposer: true)
     }
 
+    func cancelActiveChatRun() {
+        guard let submittingSessionID = submittingChatSessionID,
+              selectedChatSessionID == submittingSessionID,
+              let runID = activeChatRunID
+        else { return }
+        if var manager = nativeSessionManager {
+            manager.cancel(runID: runID, reason: "cancelled by user")
+            nativeSessionManager = manager
+        }
+        let cancellation = AgentEventPresentation(
+            kind: "run_cancelled",
+            title: "Run cancelled",
+            detail: "已手动终止本轮 agent loop。",
+            severity: .warning,
+            runID: runID,
+            sessionID: submittingSessionID
+        )
+        var timeline = agentEventTimelinesBySessionID[submittingSessionID] ?? agentEventTimeline
+        timeline.append(cancellation)
+        agentEventTimelinesBySessionID[submittingSessionID] = timeline
+        try? chatSessionRepository?.saveActivityTimelineCache(sessionID: submittingSessionID, timeline: timeline)
+        agentEventTimeline = timeline
+        submittingChatSessionID = nil
+        activeChatRunID = nil
+        isSubmittingChat = false
+    }
+
     func submitChat(prompt rawPrompt: String, clearComposer: Bool = false) async {
         let prompt = rawPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty, submittingChatSessionID == nil else { return }
@@ -1534,6 +1578,7 @@ final class AppViewModel: ObservableObject {
         agentEventTimelinesBySessionID[submittingSessionID] = []
         agentEventTimeline = []
         submittingChatSessionID = submittingSessionID
+        activeChatRunID = nil
         isSubmittingChat = selectedChatSessionID == submittingSessionID
         let optimisticTranscript = transcript
         let optimisticUserMessage = AgentMessage(role: .user, content: prompt)
@@ -1545,6 +1590,7 @@ final class AppViewModel: ObservableObject {
         defer {
             if submittingChatSessionID == submittingSessionID {
                 submittingChatSessionID = nil
+                activeChatRunID = nil
             }
             isSubmittingChat = selectedChatSessionID == submittingSessionID ? false : (submittingChatSessionID == selectedChatSessionID)
         }
@@ -1559,17 +1605,25 @@ final class AppViewModel: ObservableObject {
             let response = try await manager.submit(
                 prompt,
                 sessionSummary: sessionSummary,
+                onRunStarted: { [weak self] runID in
+                    guard let self else { return }
+                    if self.submittingChatSessionID == submittingSessionID {
+                        self.activeChatRunID = runID
+                    }
+                },
                 onEventPresentation: { [weak self] presentation in
                     guard let self else { return }
                     var timeline = self.agentEventTimelinesBySessionID[submittingSessionID] ?? []
                     timeline.append(presentation)
                     self.agentEventTimelinesBySessionID[submittingSessionID] = timeline
+                    try? self.chatSessionRepository?.saveActivityTimelineCache(sessionID: submittingSessionID, timeline: timeline)
                     if self.selectedChatSessionID == submittingSessionID {
                         self.agentEventTimeline = timeline
                     }
                 }
             )
             agentEventTimelinesBySessionID[submittingSessionID] = manager.eventPresentations
+            try? chatSessionRepository?.saveActivityTimelineCache(sessionID: submittingSessionID, timeline: manager.eventPresentations)
             if selectedChatSessionID == submittingSessionID {
                 nativeSessionManager = manager
                 fallbackChatSession = response.session

@@ -127,6 +127,7 @@ public struct NativeSessionManager: Sendable {
     public mutating func submit(
         _ prompt: String,
         sessionSummary: AgentSessionSummary?,
+        onRunStarted: (@MainActor @Sendable (String) -> Void)? = nil,
         onEventPresentation: (@MainActor @Sendable (AgentEventPresentation) -> Void)? = nil
     ) async throws -> AgentLoopChatResponse {
         let recentMessages = Array(session.messages.suffix(max(0, recentMessageLimit)))
@@ -173,6 +174,9 @@ public struct NativeSessionManager: Sendable {
             )
         }
         runtimeState.queuedRunIDs.append(run.id)
+        if let onRunStarted {
+            await onRunStarted(run.id)
+        }
         run.status = .running
         try sessionRepository.saveRun(run)
         if eventRecorder == nil {

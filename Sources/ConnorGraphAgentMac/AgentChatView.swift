@@ -63,6 +63,10 @@ struct AgentChatView: View {
                     .padding(.trailing, AgentChatLayout.spaceL)
             }
         }
+        .environment(\.openURL, OpenURLAction { url in
+            viewModel.openURLInCurrentChatBrowser(url)
+            return .handled
+        })
         .navigationTitle("Connor Sessions")
         .task {
             viewModel.deferViewUpdate {
@@ -1244,7 +1248,13 @@ private struct AgentChatComposerView: View {
 
                     modelSelectionMenu
 
-                    Button(action: { Task { await viewModel.submitChat() } }) {
+                    Button(action: {
+                        if viewModel.isSubmittingChat {
+                            viewModel.cancelActiveChatRun()
+                        } else {
+                            Task { await viewModel.submitChat() }
+                        }
+                    }) {
                         Image(systemName: viewModel.isSubmittingChat ? "stop.fill" : "arrow.up")
                             .font(.system(size: 11, weight: .semibold))
                             .frame(width: 22, height: 22)
@@ -1252,7 +1262,7 @@ private struct AgentChatComposerView: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.mini)
                     .clipShape(Circle())
-                    .disabled(viewModel.chatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.isSubmittingChat)
+                    .disabled(!viewModel.isSubmittingChat && viewModel.chatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
                 .padding(.horizontal, AgentChatLayout.spaceM)
                 .padding(.vertical, AgentChatLayout.spaceS)
