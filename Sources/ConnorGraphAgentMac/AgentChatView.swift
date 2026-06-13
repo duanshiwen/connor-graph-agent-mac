@@ -287,47 +287,34 @@ private struct AgentChatConversationView: View {
                 .padding(.bottom, AgentChatLayout.spaceL)
 
             ScrollViewReader { proxy in
-                ZStack(alignment: .topTrailing) {
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
-                            if timelineItems.isEmpty {
-                                AgentChatEmptyStateView()
-                                    .frame(maxWidth: .infinity, minHeight: 360)
-                            } else {
-                                ForEach(timelineItems) { item in
-                                    if let message = item.message {
-                                        AgentChatMessageRow(row: message)
-                                            .id(item.id)
-                                    } else if let process = item.process {
-                                        AgentChatTurnProcessRow(
-                                            process: process,
-                                            events: activityEvents(for: process),
-                                            onOpenDetail: { event in
-                                                activityDetailEvent = event
-                                            }
-                                        )
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
+                        if timelineItems.isEmpty {
+                            AgentChatEmptyStateView()
+                                .frame(maxWidth: .infinity, minHeight: 360)
+                        } else {
+                            ForEach(timelineItems) { item in
+                                if let message = item.message {
+                                    AgentChatMessageRow(row: message)
                                         .id(item.id)
-                                    } else if let timestamp = item.timestamp {
-                                        AgentChatTurnTimestampRow(timestamp: timestamp)
-                                            .id(item.id)
-                                    }
+                                } else if let process = item.process {
+                                    AgentChatTurnProcessRow(
+                                        process: process,
+                                        events: activityEvents(for: process),
+                                        onOpenDetail: { event in
+                                            activityDetailEvent = event
+                                        }
+                                    )
+                                    .id(item.id)
+                                } else if let timestamp = item.timestamp {
+                                    AgentChatTurnTimestampRow(timestamp: timestamp)
+                                        .id(item.id)
                                 }
                             }
                         }
-                        .padding(.horizontal, 0)
-                        .padding(.vertical, AgentChatLayout.spaceXL)
                     }
-
-                    if turnAnchors.count > 1 {
-                        AgentChatTurnNavigationControls(
-                            canJumpToPrevious: canJumpToPreviousTurn,
-                            canJumpToNext: canJumpToNextTurn,
-                            onPrevious: { jumpTurn(direction: -1, proxy: proxy) },
-                            onNext: { jumpTurn(direction: 1, proxy: proxy) }
-                        )
-                        .padding(.top, AgentChatLayout.spaceS)
-                        .padding(.trailing, AgentChatLayout.spaceS)
-                    }
+                    .padding(.horizontal, 0)
+                    .padding(.vertical, AgentChatLayout.spaceXL)
                 }
                 .onChange(of: viewModel.transcript.count) { _, _ in
                     focusedTurnNumber = turnAnchors.last?.turnNumber
@@ -337,11 +324,20 @@ private struct AgentChatConversationView: View {
                     focusedTurnNumber = turnAnchors.last?.turnNumber
                     scrollToBottom(proxy: proxy)
                 }
-            }
 
-            AgentChatComposerView(viewModel: viewModel, isSessionInfoPresented: $isSessionInfoPresented)
+                AgentChatComposerView(
+                    viewModel: viewModel,
+                    isSessionInfoPresented: $isSessionInfoPresented,
+                    turnNavigation: turnAnchors.count > 1 ? AgentChatTurnNavigation(
+                        canJumpToPrevious: canJumpToPreviousTurn,
+                        canJumpToNext: canJumpToNextTurn,
+                        onPrevious: { jumpTurn(direction: -1, proxy: proxy) },
+                        onNext: { jumpTurn(direction: 1, proxy: proxy) }
+                    ) : nil
+                )
                 .padding(.horizontal, 0)
                 .padding(.vertical, AgentChatLayout.spaceM)
+            }
         }
         .frame(maxWidth: AgentChatLayout.chatContentMaxWidth, maxHeight: .infinity)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -366,7 +362,7 @@ private struct AgentChatTurnNavigationControls: View {
     var onNext: () -> Void
 
     var body: some View {
-        VStack(spacing: AgentChatLayout.spaceXS) {
+        HStack(spacing: AgentChatLayout.spaceXS) {
             Button(action: onPrevious) {
                 Image(systemName: "chevron.up")
                     .font(.system(size: 11, weight: .semibold))
@@ -387,14 +383,15 @@ private struct AgentChatTurnNavigationControls: View {
             .opacity(canJumpToNext ? 1 : 0.35)
             .help("跳转到下一轮对话")
         }
-        .padding(AgentChatLayout.spaceXS)
+        .padding(.horizontal, AgentChatLayout.spaceXS)
+        .frame(height: 26)
         .foregroundStyle(.secondary)
-        .background(.regularMaterial, in: Capsule())
+        .background(Color.clear, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
         .overlay(
-            Capsule()
-                .stroke(Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1)
+            RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
+                .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.08), radius: 8, x: 0, y: 4)
+        .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
         .accessibilityElement(children: .contain)
     }
 }
@@ -787,11 +784,8 @@ private struct AgentChatMessageRow: View {
                 AgentMarkdownPreviewText(markdown: row.message.content, font: .body)
             }
         } else {
-            ScrollView {
-                AgentMarkdownPreviewText(markdown: row.message.content, font: .body)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .frame(maxHeight: AgentChatLayout.assistantMessageMaxHeight, alignment: .top)
+            AgentMarkdownPreviewText(markdown: row.message.content, font: .body)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -1421,9 +1415,17 @@ struct AgentSendControlButton: View {
     }
 }
 
+private struct AgentChatTurnNavigation {
+    var canJumpToPrevious: Bool
+    var canJumpToNext: Bool
+    var onPrevious: () -> Void
+    var onNext: () -> Void
+}
+
 private struct AgentChatComposerView: View {
     @ObservedObject var viewModel: AppViewModel
     @Binding var isSessionInfoPresented: Bool
+    var turnNavigation: AgentChatTurnNavigation? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
@@ -1524,6 +1526,15 @@ private struct AgentChatComposerView: View {
             }
 
             Spacer(minLength: AgentChatLayout.spaceS)
+
+            if let turnNavigation {
+                AgentChatTurnNavigationControls(
+                    canJumpToPrevious: turnNavigation.canJumpToPrevious,
+                    canJumpToNext: turnNavigation.canJumpToNext,
+                    onPrevious: turnNavigation.onPrevious,
+                    onNext: turnNavigation.onNext
+                )
+            }
 
             Button {
                 withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
