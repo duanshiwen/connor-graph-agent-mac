@@ -10,6 +10,16 @@ public enum AgentPermissionCapability: String, Codable, Sendable, Equatable {
     case externalNetwork
     case modelCall
     case costlyModelCall
+    case readWorkspaceFile
+    case listWorkspaceFiles
+    case searchWorkspaceFiles
+    case writeWorkspaceFile
+    case editWorkspaceFile
+    case deleteWorkspaceFile
+    case runReadOnlyShellCommand
+    case runWorkspaceShellCommand
+    case runNetworkShellCommand
+    case runDestructiveShellCommand
 }
 
 public enum AgentPermissionMode: String, Codable, Sendable, Equatable, CaseIterable, Hashable {
@@ -144,6 +154,16 @@ public enum AgentAuditEventType: String, Codable, Sendable, Equatable {
     case graphWriteCommitStarted
     case graphWriteCommitFinished
     case graphWriteCommitFailed
+    case localFileReadStarted
+    case localFileReadFinished
+    case localFileReadFailed
+    case localFileWriteStarted
+    case localFileWriteFinished
+    case localFileWriteFailed
+    case localShellStarted
+    case localShellFinished
+    case localShellFailed
+    case localWorkspacePolicyDenied
 }
 
 public struct AgentAuditEvent: Codable, Sendable, Equatable, Identifiable {

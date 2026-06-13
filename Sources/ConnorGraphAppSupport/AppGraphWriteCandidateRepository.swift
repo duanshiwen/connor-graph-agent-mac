@@ -225,6 +225,16 @@ public struct GraphWriteCandidateAuditPresentation: Sendable, Equatable, Identif
         case .graphWriteCommitStarted: "Commit started"
         case .graphWriteCommitFinished: "Commit finished"
         case .graphWriteCommitFailed: "Commit failed"
+        case .localFileReadStarted: "Local file read started"
+        case .localFileReadFinished: "Local file read finished"
+        case .localFileReadFailed: "Local file read failed"
+        case .localFileWriteStarted: "Local file write started"
+        case .localFileWriteFinished: "Local file write finished"
+        case .localFileWriteFailed: "Local file write failed"
+        case .localShellStarted: "Local shell started"
+        case .localShellFinished: "Local shell finished"
+        case .localShellFailed: "Local shell failed"
+        case .localWorkspacePolicyDenied: "Local workspace policy denied"
         }
     }
 
@@ -232,7 +242,7 @@ public struct GraphWriteCandidateAuditPresentation: Sendable, Equatable, Identif
         switch eventType {
         case .graphWriteCommitFinished, .graphWriteValidationFinished, .graphWriteCandidateApproved:
             return .success
-        case .graphWriteValidationFailed, .graphWriteCommitFailed, .graphWriteCandidateRejected, .toolFailed:
+        case .graphWriteValidationFailed, .graphWriteCommitFailed, .graphWriteCandidateRejected, .toolFailed, .localFileReadFailed, .localFileWriteFailed, .localShellFailed, .localWorkspacePolicyDenied:
             return .error
         case .permissionDecision:
             return .warning

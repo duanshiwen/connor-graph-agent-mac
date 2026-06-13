@@ -65,23 +65,23 @@ public actor AgentPolicyEngine: Sendable {
             return .approved
         case .readOnly:
             switch capability {
-            case .readGraph, .readSession, .modelCall:
+            case .readGraph, .readSession, .modelCall, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .runReadOnlyShellCommand:
                 return .approved
-            case .proposeGraphWrite, .commitGraphWrite, .invalidateGraphStatement, .deleteGraphObject, .externalNetwork, .costlyModelCall:
+            case .proposeGraphWrite, .commitGraphWrite, .invalidateGraphStatement, .deleteGraphObject, .externalNetwork, .costlyModelCall, .writeWorkspaceFile, .editWorkspaceFile, .deleteWorkspaceFile, .runWorkspaceShellCommand, .runNetworkShellCommand, .runDestructiveShellCommand:
                 return .denied
             }
         case .askToWrite:
             switch capability {
-            case .readGraph, .readSession, .modelCall, .proposeGraphWrite, .externalNetwork:
+            case .readGraph, .readSession, .modelCall, .proposeGraphWrite, .externalNetwork, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .runReadOnlyShellCommand:
                 return .approved
-            case .commitGraphWrite, .invalidateGraphStatement, .deleteGraphObject, .costlyModelCall:
+            case .commitGraphWrite, .invalidateGraphStatement, .deleteGraphObject, .costlyModelCall, .writeWorkspaceFile, .editWorkspaceFile, .deleteWorkspaceFile, .runWorkspaceShellCommand, .runNetworkShellCommand, .runDestructiveShellCommand:
                 return .needsApproval
             }
         case .trustedWrite:
             switch capability {
-            case .readGraph, .readSession, .modelCall, .proposeGraphWrite, .commitGraphWrite, .externalNetwork:
+            case .readGraph, .readSession, .modelCall, .proposeGraphWrite, .commitGraphWrite, .externalNetwork, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .writeWorkspaceFile, .editWorkspaceFile, .runReadOnlyShellCommand, .runWorkspaceShellCommand:
                 return .approved
-            case .invalidateGraphStatement, .deleteGraphObject, .costlyModelCall:
+            case .invalidateGraphStatement, .deleteGraphObject, .costlyModelCall, .deleteWorkspaceFile, .runNetworkShellCommand, .runDestructiveShellCommand:
                 return .needsApproval
             }
         }
