@@ -89,6 +89,9 @@ struct BrowserWorkspaceView: View {
                             onSummarizePage: {
                                 sendSelectionQuestion(popover, questionOverride: BrowserSelectionPopover.quickPageSummaryPrompt)
                             },
+                            onCancel: {
+                                viewModel.cancelActiveChatRun()
+                            },
                             onClose: { closeSelectionPopover(policy: .explicitClose) }
                         )
                         .frame(width: layout.width)
@@ -840,6 +843,7 @@ private struct BrowserSelectionPopover: View {
     var isSubmitting: Bool
     var onAsk: () -> Void
     var onSummarizePage: () -> Void
+    var onCancel: () -> Void
     var onClose: () -> Void
 
     static let quickPageSummaryPrompt = "总结此网页，提取概括网页主要内容、论点论据、观点或故事，信息"
@@ -906,7 +910,13 @@ private struct BrowserSelectionPopover: View {
                 AgentSendControlButton(
                     isSubmitting: isSubmitting,
                     isDisabled: !isSubmitting && question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                    action: onAsk
+                    action: {
+                        if isSubmitting {
+                            onCancel()
+                        } else {
+                            onAsk()
+                        }
+                    }
                 )
             }
 
