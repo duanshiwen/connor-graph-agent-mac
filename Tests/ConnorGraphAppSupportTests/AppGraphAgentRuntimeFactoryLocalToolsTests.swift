@@ -100,6 +100,59 @@ import ConnorGraphStore
     #expect(result.contentJSON?.contains("runtime-project") == true)
 }
 
+@Test func agentLoopRuntimeFactoryNativeReadUsesSessionWorkspaceBeforeRuntimeWorkspace() async throws {
+    let appDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorFactoryLocalToolsSessionWorkspace-", isDirectory: true)
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: appDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: appDirectory) }
+    let storagePaths = AppStoragePaths(applicationSupportDirectory: appDirectory)
+    try storagePaths.ensureDirectoryHierarchy()
+
+    let runtimeWorkspace = appDirectory.appendingPathComponent("runtime-project", isDirectory: true)
+    let sessionWorkspace = appDirectory.appendingPathComponent("session-project", isDirectory: true)
+    try FileManager.default.createDirectory(at: runtimeWorkspace, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: sessionWorkspace, withIntermediateDirectories: true)
+    try "Runtime workspace README".write(to: runtimeWorkspace.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+    try "Session workspace README".write(to: sessionWorkspace.appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+
+    var runtimeSettings = AgentRuntimeSettings.default
+    runtimeSettings.workspace.defaultWorkingDirectoryPath = runtimeWorkspace.path
+    try AppRuntimeSettingsRepository(configDirectory: storagePaths.configDirectory).save(runtimeSettings)
+
+    let storeURL = appDirectory.appendingPathComponent("store.sqlite")
+    let store = try SQLiteGraphKernelStore(path: storeURL.path)
+    try store.migrate()
+    let settings = AppLLMSettingsRepository(
+        settingsStore: LocalToolsSettingsStore(),
+        credentialStore: LocalToolsCredentialStore()
+    )
+    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: settings, storagePaths: storagePaths)
+    let sessionWorkspaceReference = AppSessionWorkspaceReference(
+        workingDirectoryPath: sessionWorkspace.path,
+        source: "session",
+        roots: [
+            AppSessionWorkspaceRootReference(id: "session", displayName: "Session", path: sessionWorkspace.path, role: "project", isPrimary: true)
+        ]
+    )
+    let controller = factory.makeAgentLoopController(permissionMode: .readOnly, sessionWorkspace: sessionWorkspaceReference)
+    let result = try await controller.toolRegistry.execute(
+        AgentToolCall(name: "Read", argumentsJSON: #"{"file_path":"README.md"}"#),
+        context: AgentToolExecutionContext(
+            runID: "run-local-session-workspace",
+            sessionID: "session-local-session-workspace",
+            groupID: "default",
+            userPrompt: "read README",
+            toolCallID: "read-session-workspace",
+            policyEngine: AgentPolicyEngine(permissionMode: .allowAll)
+        )
+    )
+
+    #expect(result.contentText.contains("Session workspace README"))
+    #expect(!result.contentText.contains("Runtime workspace README"))
+    #expect(result.contentJSON?.contains("session-project") == true)
+}
+
 @Test func agentLoopRuntimeFactoryNativeReadAllowsAdditionalWorkspaceRoot() async throws {
     let appDirectory = FileManager.default.temporaryDirectory
         .appendingPathComponent("ConnorFactoryLocalToolsMultiRootWorkspace-", isDirectory: true)
