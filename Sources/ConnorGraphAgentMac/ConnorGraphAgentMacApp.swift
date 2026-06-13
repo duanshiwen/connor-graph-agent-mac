@@ -1853,6 +1853,7 @@ struct SidebarActionButtonLabel: View {
     var fillsWidth: Bool = true
     var titleFont: Font = .system(size: 12, weight: .regular)
     var iconFont: Font = .system(size: 13, weight: .medium)
+    var minHeight: CGFloat = 24
 
     var body: some View {
         Label {
@@ -1867,7 +1868,7 @@ struct SidebarActionButtonLabel: View {
         }
         .foregroundStyle(Color.primary)
         .labelStyle(.titleAndIcon)
-        .frame(maxWidth: fillsWidth ? .infinity : nil, minHeight: 24, alignment: .leading)
+        .frame(maxWidth: fillsWidth ? .infinity : nil, minHeight: minHeight, alignment: .leading)
         .padding(.horizontal, 7)
         .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
     }
@@ -1915,7 +1916,7 @@ private struct CraftPrimarySidebarView: View {
                 viewModel.newChatSession()
                 select(.agentChat)
             } label: {
-                SidebarActionButtonLabel(title: "新建会话", systemImage: "square.and.pencil")
+                SidebarActionButtonLabel(title: "新建会话", systemImage: "square.and.pencil", minHeight: 32)
             }
             .buttonStyle(SidebarActionButtonStyle())
             .padding(.horizontal, 10)
@@ -2042,8 +2043,6 @@ private struct CraftSessionListPane: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
-
-            Divider()
 
             ScrollView {
                 LazyVStack(spacing: 2) {

@@ -121,7 +121,7 @@ private struct AgentChatSessionListView: View {
     var body: some View {
         VStack(spacing: AgentChatLayout.spaceM) {
             Button(action: { viewModel.newChatSession() }) {
-                SidebarActionButtonLabel(title: "新建对话", systemImage: "square.and.pencil")
+                SidebarActionButtonLabel(title: "新建对话", systemImage: "square.and.pencil", minHeight: 32)
             }
             .buttonStyle(SidebarActionButtonStyle())
 
@@ -240,7 +240,7 @@ private struct AgentChatConversationView: View {
             AgentChatConversationHeader(viewModel: viewModel)
                 .padding(.horizontal, AgentChatLayout.spaceL)
                 .padding(.top, AgentChatLayout.spaceS)
-                .padding(.bottom, AgentChatLayout.spaceXS)
+                .padding(.bottom, AgentChatLayout.spaceL)
 
             ScrollViewReader { proxy in
                 ScrollView {
