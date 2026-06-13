@@ -24,6 +24,36 @@ struct BrowserContextBuilderTests {
         #expect(prompt.contains("What does this imply?"))
     }
 
+    @Test func pagePromptWithoutSelectionIncludesPageBodyButNoSelectedTextBlock() throws {
+        let selection = BrowserSelectionContext(
+            page: BrowserPageContext(
+                url: "https://example.com/guide",
+                title: "Guide",
+                text: "This is the full page body used as context."
+            ),
+            selectedText: ""
+        )
+
+        let prompt = BrowserLLMContextBuilder().makePrompt(selection: selection, question: "Summarize this page")
+
+        #expect(prompt.contains("标题：Guide"))
+        #expect(prompt.contains("URL：https://example.com/guide"))
+        #expect(prompt.contains("网页正文："))
+        #expect(prompt.contains("This is the full page body used as context."))
+        #expect(prompt.contains("Summarize this page"))
+        #expect(!prompt.contains("选中文本："))
+    }
+
+    @Test func pageTextOnlyContextIsValidForPageQuestion() throws {
+        let selection = BrowserSelectionContext(
+            page: BrowserPageContext(url: "", title: "", text: "Readable article body"),
+            selectedText: ""
+        )
+
+        #expect(selection.hasPageContext)
+        #expect(!selection.hasSelectionContext)
+    }
+
     @Test func imageSelectionPromptIncludesImageMetadataAndVisionFallback() throws {
         let selection = BrowserSelectionContext(
             page: BrowserPageContext(url: "https://example.com", title: "Image Page", text: "Page body near the image."),

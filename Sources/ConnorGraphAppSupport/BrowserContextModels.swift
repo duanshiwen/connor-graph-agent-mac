@@ -1,5 +1,243 @@
+import CoreGraphics
 import Foundation
 import ConnorGraphCore
+
+public struct BrowserWorkspaceSessionBinding: Equatable, Sendable {
+    public private(set) var boundSessionID: String?
+
+    public init(boundSessionID: String? = nil) {
+        self.boundSessionID = boundSessionID
+    }
+
+    public mutating func bindBrowserWorkspace(to sessionID: String?) {
+        let trimmed = sessionID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trimmed, !trimmed.isEmpty else { return }
+        boundSessionID = trimmed
+    }
+
+    public func sessionIDForReturningFromBrowser(currentSelectedSessionID: String?) -> String? {
+        boundSessionID ?? currentSelectedSessionID
+    }
+}
+
+public struct BrowserPromptFoldingParts: Equatable, Sendable {
+    public var leadingMarkdown: String
+    public var webPageBody: String
+    public var trailingMarkdown: String
+
+    public init(leadingMarkdown: String, webPageBody: String, trailingMarkdown: String) {
+        self.leadingMarkdown = leadingMarkdown
+        self.webPageBody = webPageBody
+        self.trailingMarkdown = trailingMarkdown
+    }
+}
+
+public struct BrowserPromptFoldingParser: Sendable {
+    public init() {}
+
+    public func parse(_ markdown: String) -> BrowserPromptFoldingParts? {
+        guard let headingRange = markdown.range(of: "网页正文：") else { return nil }
+        let afterHeading = markdown[headingRange.upperBound...]
+        guard let fenceStart = afterHeading.range(of: "```") else { return nil }
+        let afterFenceStart = afterHeading[fenceStart.upperBound...]
+        let bodyStart: String.Index
+        if let newline = afterFenceStart.firstIndex(of: "\n") {
+            bodyStart = markdown.index(after: newline)
+        } else {
+            bodyStart = fenceStart.upperBound
+        }
+        guard let fenceEnd = markdown[bodyStart...].range(of: "```") else { return nil }
+
+        let leading = String(markdown[..<headingRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let body = String(markdown[bodyStart..<fenceEnd.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let trailing = String(markdown[fenceEnd.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty else { return nil }
+        return BrowserPromptFoldingParts(leadingMarkdown: leading, webPageBody: body, trailingMarkdown: trailing)
+    }
+}
+
+public enum BrowserPopoverDismissalPolicy: Equatable, Sendable {
+    case escape
+    case explicitClose
+
+    public var shouldPreserveDraftQuestion: Bool {
+        switch self {
+        case .escape: true
+        case .explicitClose: false
+        }
+    }
+}
+
+public struct BrowserExternalOpenPlanner: Sendable {
+    public init() {}
+
+    public func open(urlString: String, in snapshot: AppBrowserStateSnapshot) -> AppBrowserStateSnapshot {
+        var planned = snapshot
+        planned.updatedAt = Date()
+        planned.selectionPopover = nil
+        let tab = AppBrowserTabSnapshot(
+            initialURLString: urlString,
+            title: "",
+            currentURLString: urlString,
+            isLoading: false,
+            canGoBack: false,
+            canGoForward: false
+        )
+        planned.tabs.append(tab)
+        planned.selectedTabID = tab.id
+        return planned
+    }
+}
+
+public struct BrowserTabStripLayout: Equatable, Sendable {
+    public var tabWidth: Double
+    public var requiresHorizontalScroll: Bool
+
+    public init(tabWidth: Double, requiresHorizontalScroll: Bool) {
+        self.tabWidth = tabWidth
+        self.requiresHorizontalScroll = requiresHorizontalScroll
+    }
+}
+
+public struct BrowserTabStripLayoutCalculator: Sendable {
+    public var preferredTabWidth: Double
+    public var minimumTabWidth: Double
+    public var interTabSpacing: Double
+
+    public init(preferredTabWidth: Double = 150, minimumTabWidth: Double = 86, interTabSpacing: Double = 4) {
+        self.preferredTabWidth = preferredTabWidth
+        self.minimumTabWidth = minimumTabWidth
+        self.interTabSpacing = interTabSpacing
+    }
+
+    public func layout(tabCount: Int, availableWidth: Double) -> BrowserTabStripLayout {
+        guard tabCount > 0 else {
+            return BrowserTabStripLayout(tabWidth: preferredTabWidth, requiresHorizontalScroll: false)
+        }
+        let totalSpacing = interTabSpacing * Double(max(0, tabCount - 1))
+        let preferredTotalWidth = preferredTabWidth * Double(tabCount) + totalSpacing
+        guard preferredTotalWidth > availableWidth else {
+            return BrowserTabStripLayout(tabWidth: preferredTabWidth, requiresHorizontalScroll: false)
+        }
+        let fittedWidth = floor((availableWidth - totalSpacing) / Double(tabCount))
+        let tabWidth = max(minimumTabWidth, fittedWidth)
+        let minimumTotalWidth = minimumTabWidth * Double(tabCount) + totalSpacing
+        return BrowserTabStripLayout(tabWidth: tabWidth, requiresHorizontalScroll: minimumTotalWidth > availableWidth)
+    }
+}
+
+public enum ChatSessionWorkspaceMode: String, Codable, Equatable, Sendable {
+    case conversation
+    case browser
+}
+
+public struct ChatSessionWorkspaceModeStore: Equatable, Sendable {
+    private var modesBySessionID: [String: ChatSessionWorkspaceMode]
+
+    public init(modesBySessionID: [String: ChatSessionWorkspaceMode] = [:]) {
+        self.modesBySessionID = modesBySessionID
+    }
+
+    public func mode(for sessionID: String?) -> ChatSessionWorkspaceMode {
+        guard let key = normalizedSessionID(sessionID) else { return .conversation }
+        return modesBySessionID[key] ?? .conversation
+    }
+
+    public mutating func setMode(_ mode: ChatSessionWorkspaceMode, for sessionID: String?) {
+        guard let key = normalizedSessionID(sessionID) else { return }
+        modesBySessionID[key] = mode
+    }
+
+    public var snapshot: [String: ChatSessionWorkspaceMode] { modesBySessionID }
+
+    private func normalizedSessionID(_ sessionID: String?) -> String? {
+        let trimmed = sessionID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+public enum BrowserSelectionPopoverPlacement: String, Equatable, Sendable {
+    case below
+    case above
+}
+
+public struct BrowserSelectionPopoverLayout: Equatable, Sendable {
+    public var position: CGPoint
+    public var width: CGFloat
+    public var maxHeight: CGFloat
+    public var placement: BrowserSelectionPopoverPlacement
+
+    public init(position: CGPoint, width: CGFloat, maxHeight: CGFloat, placement: BrowserSelectionPopoverPlacement) {
+        self.position = position
+        self.width = width
+        self.maxHeight = maxHeight
+        self.placement = placement
+    }
+
+    public var frame: CGRect {
+        CGRect(
+            x: position.x - width / 2,
+            y: position.y - maxHeight / 2,
+            width: width,
+            height: maxHeight
+        )
+    }
+}
+
+public struct BrowserSelectionPopoverLayoutCalculator: Sendable {
+    public var margin: CGFloat
+    public var gap: CGFloat
+    public var minimumWidth: CGFloat
+    public var minimumHeight: CGFloat
+
+    public init(margin: CGFloat = 14, gap: CGFloat = 12, minimumWidth: CGFloat = 260, minimumHeight: CGFloat = 180) {
+        self.margin = margin
+        self.gap = gap
+        self.minimumWidth = minimumWidth
+        self.minimumHeight = minimumHeight
+    }
+
+    public func layout(anchorRect: AppBrowserSelectionRect, containerSize: CGSize, preferredSize: CGSize) -> BrowserSelectionPopoverLayout {
+        let usableWidth = max(1, containerSize.width - margin * 2)
+        let width = min(preferredSize.width, usableWidth)
+        let anchor = CGRect(
+            x: CGFloat(anchorRect.x),
+            y: CGFloat(anchorRect.y),
+            width: CGFloat(anchorRect.width),
+            height: CGFloat(anchorRect.height)
+        )
+
+        let spaceBelow = max(0, containerSize.height - margin - (anchor.maxY + gap))
+        let spaceAbove = max(0, anchor.minY - gap - margin)
+        let placement: BrowserSelectionPopoverPlacement = if spaceBelow >= preferredSize.height || spaceBelow >= spaceAbove {
+            .below
+        } else {
+            .above
+        }
+        let availableHeight = placement == .below ? spaceBelow : spaceAbove
+        let boundedPreferredHeight = min(preferredSize.height, max(minimumHeight, containerSize.height - margin * 2))
+        let maxHeight = min(boundedPreferredHeight, max(minimumHeight, availableHeight))
+
+        let rawX = anchor.midX
+        let halfWidth = width / 2
+        let x = clamp(rawX, lower: margin + halfWidth, upper: max(margin + halfWidth, containerSize.width - margin - halfWidth))
+
+        let rawY = switch placement {
+        case .below:
+            anchor.maxY + gap + maxHeight / 2
+        case .above:
+            anchor.minY - gap - maxHeight / 2
+        }
+        let halfHeight = maxHeight / 2
+        let y = clamp(rawY, lower: margin + halfHeight, upper: max(margin + halfHeight, containerSize.height - margin - halfHeight))
+
+        return BrowserSelectionPopoverLayout(position: CGPoint(x: x, y: y), width: width, maxHeight: maxHeight, placement: placement)
+    }
+
+    private func clamp(_ value: CGFloat, lower: CGFloat, upper: CGFloat) -> CGFloat {
+        min(max(value, lower), upper)
+    }
+}
 
 public struct BrowserPageContext: Equatable, Sendable {
     public var url: String
@@ -40,6 +278,12 @@ public struct BrowserSelectionContext: Equatable, Sendable {
 
     public var hasSelectionContext: Bool {
         !selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || image != nil
+    }
+
+    public var hasPageContext: Bool {
+        !page.url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !page.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !page.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 }
 

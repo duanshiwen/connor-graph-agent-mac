@@ -128,6 +128,40 @@ public struct AppChatSessionRepository: Sendable {
         try storagePaths?.ensureSessionArtifactDirectories(sessionID: sessionID)
     }
 
+    public func sessionCapsuleRepository() -> AppSessionCapsuleRepository? {
+        guard let storagePaths else { return nil }
+        return AppSessionCapsuleRepository(storagePaths: storagePaths)
+    }
+
+    public func loadSessionState(sessionID: String) throws -> AppSessionStateSnapshot? {
+        try sessionCapsuleRepository()?.loadState(sessionID: sessionID)
+    }
+
+    public func saveSessionState(_ state: AppSessionStateSnapshot, sessionID: String) throws {
+        try sessionCapsuleRepository()?.saveState(state, sessionID: sessionID)
+    }
+
+    public func appendSessionRecord(_ record: AppSessionRecord, sessionID: String) throws {
+        try sessionCapsuleRepository()?.appendRecord(record, sessionID: sessionID)
+    }
+
+    public func loadSessionRecords(sessionID: String, limit: Int? = nil) throws -> [AppSessionRecord] {
+        try sessionCapsuleRepository()?.loadRecords(sessionID: sessionID, limit: limit) ?? []
+    }
+
+    public func loadBrowserState(sessionID: String) throws -> AppBrowserStateSnapshot? {
+        try sessionCapsuleRepository()?.loadBrowserState(sessionID: sessionID)
+    }
+
+    public func saveBrowserState(_ state: AppBrowserStateSnapshot, sessionID: String) throws {
+        try sessionCapsuleRepository()?.saveBrowserState(state, sessionID: sessionID)
+    }
+
+    @discardableResult
+    public func refreshSessionManifest(sessionID: String) throws -> AppSessionManifest? {
+        try sessionCapsuleRepository()?.refreshManifest(sessionID: sessionID)
+    }
+
     public func loadActivityTimelineCache(sessionID: String) throws -> [AgentEventPresentation] {
         guard let directories = try storagePaths?.ensureSessionArtifactDirectories(sessionID: sessionID) else { return [] }
         let url = directories.logs.appendingPathComponent("activity-timeline.json")

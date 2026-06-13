@@ -1,7 +1,7 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-12 21:41 GMT+8  
-当前代码基线：`commercial-train-6-local-api-cli-automation-surface`，提交 `9a3945a Add local API CLI automation surface`，基于 `main` 的 Commercial Train 1-5 合并结果继续演进。
+文档更新时间：2026-06-13 13:53 GMT+8  
+当前代码基线：`feature/browser-tabs`，基于 `main` 继续演进 Session Capsule 持久化、内置浏览器多标签页与网页选区浮窗能力。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package，目标是把 Connor 建成 **graph-memory-native Agent OS**：它不是“图谱编辑器”，也不是“Claude SDK 外壳”，而是以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI 和 Local Automation Surface 共同构成的本地 Agent 操作系统。
 
@@ -25,19 +25,15 @@ Commercial Train 6: Local API / CLI / Automation Surface
 当前验证结果：
 
 ```text
-swift build
 swift test
-swift run connor commands
-swift run connor readiness
-swift run connor automations evaluate --trigger sessionStatusChanged --session demo --status needs_review --dry-run
 
-377 tests in 16 suites passed (2026-06-12 21:34 GMT+8)
+377 tests in 16 suites passed (2026-06-13 11:00 GMT+8)
 ```
 
 当前分支：
 
 ```text
-commercial-train-6-local-api-cli-automation-surface
+feature/browser-tabs
 ```
 
 当前提交：
@@ -159,16 +155,24 @@ Connor/
 └── sidecars/
 ```
 
-Session artifact directories：
+Session Capsule / artifact directories：
 
 ```text
 sessions/{sessionID}/
+├── manifest.json
+├── state/
+│   ├── session-state.json
+│   └── records.jsonl
+├── browser/
+│   └── browser-state.json
 ├── plans/
 ├── data/
 ├── attachments/
 ├── exports/
 └── logs/
 ```
+
+Connor 的会话持久化边界是完整 Session Capsule：SQLite 仍承担 session / run / event / graph 查询存储，但 session-local 的 UI/workspace 状态、记录流、附件、plans、data、logs 与 browser 子状态都归属于 `sessions/{sessionID}/`。`records.jsonl` 使用单行 JSONL 追加保存，读取时可跳过坏行，避免 10+ 条记录因一次异常写入或重启退化成 1 条。
 
 主要状态文件：
 
@@ -803,6 +807,26 @@ AutomationRuntimePanelView
 ConnorCommandPaletteView
 BrowserWorkspaceView
 ```
+
+Browser Workspace 当前支持：
+
+- SwiftUI + WKWebView 内置网页工作区
+- 轻量多标签页标签栏；标签过多时先自动缩窄每个标签，达到最小宽度后再横向滚动
+- 每个 Connor Session 拥有独立的浏览器标签页栈、选中文本浮窗、网页选择 mini-thread 记录和上次离开时的浏览器/对话视图模式
+- 浏览器状态是 Session Capsule 的子状态，持久化到 `sessions/{sessionID}/browser/browser-state.json`
+- 网页选择提问会同时追加到 `sessions/{sessionID}/state/records.jsonl`，作为会话记录流的一部分
+- 每个标签页独立保留 URL、标题、加载状态和前进/后退 metadata；运行期 WKWebView 缓存在 UI 层，不跨重启持久化
+- 地址栏输入 URL、域名或搜索词，按 Return 打开
+- target=_blank / 新窗口导航自动打开为新标签页
+- 从对话 transcript 中打开链接时，会写入当前会话的浏览器状态，追加并选中新标签页，同时更新地址栏目标
+- 地址栏右侧提供“问一问 AI”按钮，可基于当前网页全文打开与选区浮窗一致的整页 mini-thread 提问浮窗
+- 用户在网页中选中文本后自动显示跟随选区的浮动窗口
+- 浮窗会根据 Browser Workspace 可视区域自动翻转、平移并限制最大高度，避免在窗口边缘、小窗口或长 mini-thread 场景下显示不全
+- 浮窗可基于选中文本提问、插入主对话输入框或保存为 Graph Evidence episode
+- 浮窗打开时按 Esc 可关闭浮窗并保留当前输入草稿，便于稍后重新打开继续编辑
+- 浮窗发送按钮复用主对话 composer 的原型发送按钮样式
+- 发送给 LLM 后浮窗保持打开，局部 mini-thread 显示 loading 状态、用户提问与 assistant Markdown 回复
+- 同一次网页选区提问也会同步进入主会话 transcript：主会话显示简洁可读的“网页选区提问”，LLM 实际接收完整网页上下文
 
 Command Palette 当前支持：
 
