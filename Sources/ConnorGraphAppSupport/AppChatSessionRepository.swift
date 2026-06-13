@@ -128,6 +128,22 @@ public struct AppChatSessionRepository: Sendable {
         try storagePaths?.ensureSessionArtifactDirectories(sessionID: sessionID)
     }
 
+    public func loadActivityTimelineCache(sessionID: String) throws -> [AgentEventPresentation] {
+        guard let directories = try storagePaths?.ensureSessionArtifactDirectories(sessionID: sessionID) else { return [] }
+        let url = directories.logs.appendingPathComponent("activity-timeline.json")
+        guard FileManager.default.fileExists(atPath: url.path) else { return [] }
+        let data = try Data(contentsOf: url)
+        return try JSONDecoder().decode([AgentEventPresentation].self, from: data)
+    }
+
+    public func saveActivityTimelineCache(sessionID: String, timeline: [AgentEventPresentation]) throws {
+        guard let directories = try storagePaths?.ensureSessionArtifactDirectories(sessionID: sessionID) else { return }
+        try FileManager.default.createDirectory(at: directories.logs, withIntermediateDirectories: true)
+        let url = directories.logs.appendingPathComponent("activity-timeline.json")
+        let data = try JSONEncoder().encode(timeline)
+        try data.write(to: url, options: [.atomic])
+    }
+
 
     // MARK: - Session OS
 
