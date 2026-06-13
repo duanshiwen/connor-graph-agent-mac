@@ -1193,6 +1193,24 @@ private struct AgentChatPermissionRequestCard: View {
     }
 }
 
+struct AgentSendControlButton: View {
+    var isSubmitting: Bool
+    var isDisabled: Bool
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: isSubmitting ? "stop.fill" : "arrow.up")
+                .font(.system(size: 11, weight: .semibold))
+                .frame(width: 22, height: 22)
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.mini)
+        .clipShape(Circle())
+        .disabled(isDisabled)
+    }
+}
+
 private struct AgentChatComposerView: View {
     @ObservedObject var viewModel: AppViewModel
     @Binding var isSessionInfoPresented: Bool
@@ -1248,21 +1266,17 @@ private struct AgentChatComposerView: View {
 
                     modelSelectionMenu
 
-                    Button(action: {
-                        if viewModel.isSubmittingChat {
-                            viewModel.cancelActiveChatRun()
-                        } else {
-                            Task { await viewModel.submitChat() }
+                    AgentSendControlButton(
+                        isSubmitting: viewModel.isSubmittingChat,
+                        isDisabled: !viewModel.isSubmittingChat && viewModel.chatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                        action: {
+                            if viewModel.isSubmittingChat {
+                                viewModel.cancelActiveChatRun()
+                            } else {
+                                Task { await viewModel.submitChat() }
+                            }
                         }
-                    }) {
-                        Image(systemName: viewModel.isSubmittingChat ? "stop.fill" : "arrow.up")
-                            .font(.system(size: 11, weight: .semibold))
-                            .frame(width: 22, height: 22)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.mini)
-                    .clipShape(Circle())
-                    .disabled(!viewModel.isSubmittingChat && viewModel.chatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    )
                 }
                 .padding(.horizontal, AgentChatLayout.spaceM)
                 .padding(.vertical, AgentChatLayout.spaceS)

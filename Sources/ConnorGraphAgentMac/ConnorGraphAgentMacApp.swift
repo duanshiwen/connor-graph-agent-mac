@@ -218,6 +218,7 @@ final class AppViewModel: ObservableObject {
     @Published var agentEventTimeline: [AgentEventPresentation] = []
     @Published var isBrowserVisible: Bool = false
     @Published var browserTargetURLString: String = "https://www.wikipedia.org"
+    @Published var browserWorkspaceSnapshotsBySessionID: [String: BrowserWorkspaceSnapshot] = [:]
     @Published var isCommandPalettePresented: Bool = false
     @Published var selectedSettingsSection: ConnorSettingsSection = .app
     @Published var desktopNotificationsEnabled: Bool = true
