@@ -45,6 +45,35 @@ struct AppSessionCapsuleRepositoryTests {
         #expect(loaded?.workspace == workspace)
     }
 
+    @Test("session state preserves workspace root references")
+    func sessionStatePreservesWorkspaceRootReferences() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        let roots = [
+            AppSessionWorkspaceRootReference(id: "app", displayName: "App", path: "/tmp/session-app", role: "project", isPrimary: true, updatedAt: Date(timeIntervalSince1970: 1_900)),
+            AppSessionWorkspaceRootReference(id: "docs", displayName: "Docs", path: "/tmp/session-docs", role: "docs", isPrimary: false, updatedAt: Date(timeIntervalSince1970: 1_901))
+        ]
+        let workspace = AppSessionWorkspaceReference(
+            workingDirectoryPath: "/tmp/session-app",
+            source: "session",
+            updatedAt: Date(timeIntervalSince1970: 1_902),
+            roots: roots
+        )
+        let state = AppSessionStateSnapshot(
+            sessionID: "session-a",
+            updatedAt: Date(timeIntervalSince1970: 1_903),
+            workspace: workspace
+        )
+
+        try fixture.repository.saveState(state, sessionID: "session-a")
+
+        let loaded = try fixture.repository.loadState(sessionID: "session-a")
+        let manifest = try fixture.repository.loadManifest(sessionID: "session-a")
+        #expect(loaded?.workspace?.roots == roots)
+        #expect(manifest?.workspace?.roots == roots)
+    }
+
     @Test("append and load records preserves more than ten records")
     func appendAndLoadRecordsPreservesMoreThanTenRecords() throws {
         let fixture = try makeFixture()
