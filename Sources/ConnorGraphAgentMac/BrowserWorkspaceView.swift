@@ -15,7 +15,7 @@ struct BrowserWorkspaceView: View {
     @State private var webViewsByTabID: [UUID: WKWebView] = [:]
     @State private var addressText: String = ""
     @State private var questionText = ""
-    @State private var escapeKeyMonitor: Any?
+    @State private var browserKeyMonitor: Any?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -99,10 +99,10 @@ struct BrowserWorkspaceView: View {
         .onAppear {
             ensureInitialTab()
             navigate(to: viewModel.browserTargetURLString)
-            installEscapeKeyMonitorIfNeeded()
+            installBrowserKeyMonitorIfNeeded()
         }
         .onDisappear {
-            removeEscapeKeyMonitor()
+            removeBrowserKeyMonitor()
         }
         .onChange(of: viewModel.browserTargetURLString) { _, newValue in
             ensureInitialTab()
@@ -410,19 +410,37 @@ struct BrowserWorkspaceView: View {
         if !policy.shouldPreserveDraftQuestion { questionText = "" }
     }
 
-    private func installEscapeKeyMonitorIfNeeded() {
-        guard escapeKeyMonitor == nil else { return }
-        escapeKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            guard event.keyCode == 53, activeSession.selectionPopover != nil else { return event }
-            closeSelectionPopover(policy: .escape)
-            return nil
+    private func installBrowserKeyMonitorIfNeeded() {
+        guard browserKeyMonitor == nil else { return }
+        browserKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let shortcut = BrowserKeyboardShortcutResolver().shortcut(
+                character: event.charactersIgnoringModifiers,
+                isEscape: event.keyCode == 53,
+                isCommandDown: event.modifierFlags.contains(.command),
+                isShiftDown: event.modifierFlags.contains(.shift),
+                isControlDown: event.modifierFlags.contains(.control),
+                isOptionDown: event.modifierFlags.contains(.option),
+                hasSelectionPopover: activeSession.selectionPopover != nil
+            )
+
+            switch shortcut {
+            case .closeSelectionPopover:
+                closeSelectionPopover(policy: .escape)
+                return nil
+            case .closeSelectedTab:
+                guard let selectedTabID = activeSelectedTabID else { return event }
+                closeTab(selectedTabID)
+                return nil
+            case nil:
+                return event
+            }
         }
     }
 
-    private func removeEscapeKeyMonitor() {
-        if let escapeKeyMonitor {
-            NSEvent.removeMonitor(escapeKeyMonitor)
-            self.escapeKeyMonitor = nil
+    private func removeBrowserKeyMonitor() {
+        if let browserKeyMonitor {
+            NSEvent.removeMonitor(browserKeyMonitor)
+            self.browserKeyMonitor = nil
         }
     }
 
