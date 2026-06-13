@@ -217,6 +217,7 @@ final class AppViewModel: ObservableObject {
     @Published var isSubmittingChat: Bool = false
     @Published var agentEventTimeline: [AgentEventPresentation] = []
     @Published var isBrowserVisible: Bool = false
+    @Published var browserWorkspaceSessionID: String?
     @Published var browserTargetURLString: String = "https://www.wikipedia.org"
     @Published var sessionStateSnapshotsBySessionID: [String: AppSessionStateSnapshot] = [:]
     @Published var sessionRecordsBySessionID: [String: [AppSessionRecord]] = [:]
@@ -271,6 +272,7 @@ final class AppViewModel: ObservableObject {
     private var submittingChatSessionID: String?
     private var activeChatRunID: String?
     private var agentEventTimelinesBySessionID: [String: [AgentEventPresentation]] = [:]
+    private var browserWorkspaceSessionBinding = BrowserWorkspaceSessionBinding()
 
     private var activeChatSession: AgentSession {
         nativeSessionManager?.session ?? fallbackChatSession
@@ -307,8 +309,7 @@ final class AppViewModel: ObservableObject {
             isBrowserVisible = false
             selection = .agentChat
         case .browserWorkspace:
-            isBrowserVisible = true
-            selection = .agentChat
+            showBrowserWorkspace()
         case .graphMemory:
             selection = .graphWriteCandidates
         case .search:
@@ -336,8 +337,7 @@ final class AppViewModel: ObservableObject {
             newChatSession()
             navigate(to: .agentChat)
         case .toggleBrowser:
-            isBrowserVisible.toggle()
-            navigate(to: isBrowserVisible ? .browserWorkspace : .agentChat)
+            toggleBrowserWorkspaceVisibility()
         case .checkCommercialReadiness:
             runCommercialReadinessReleaseGate()
         case .openGraphMemoryReview, .openApprovals, .openSources, .openSkills, .openAutomation, .openLocalAutomationSurface, .openSettings:
@@ -349,8 +349,35 @@ final class AppViewModel: ObservableObject {
 
     func openURLInCurrentChatBrowser(_ url: URL) {
         browserTargetURLString = url.absoluteString
+        showBrowserWorkspace()
+    }
+
+    func showBrowserWorkspace() {
+        let sessionID = selectedChatSessionID ?? activeChatSession.id
+        browserWorkspaceSessionBinding.bindBrowserWorkspace(to: sessionID)
+        browserWorkspaceSessionID = browserWorkspaceSessionBinding.boundSessionID
         isBrowserVisible = true
         selection = .agentChat
+    }
+
+    func returnFromBrowserWorkspace() {
+        let targetSessionID = browserWorkspaceSessionBinding.sessionIDForReturningFromBrowser(
+            currentSelectedSessionID: selectedChatSessionID ?? activeChatSession.id
+        )
+        if let targetSessionID, targetSessionID != selectedChatSessionID {
+            selectChatSession(targetSessionID)
+        }
+        browserWorkspaceSessionID = targetSessionID
+        isBrowserVisible = false
+        selection = .agentChat
+    }
+
+    func toggleBrowserWorkspaceVisibility() {
+        if isBrowserVisible {
+            returnFromBrowserWorkspace()
+        } else {
+            showBrowserWorkspace()
+        }
     }
 
     func openDeepLink(_ url: URL) {

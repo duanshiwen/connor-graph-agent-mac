@@ -1,6 +1,24 @@
 import Foundation
 import ConnorGraphCore
 
+public struct BrowserWorkspaceSessionBinding: Equatable, Sendable {
+    public private(set) var boundSessionID: String?
+
+    public init(boundSessionID: String? = nil) {
+        self.boundSessionID = boundSessionID
+    }
+
+    public mutating func bindBrowserWorkspace(to sessionID: String?) {
+        let trimmed = sessionID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trimmed, !trimmed.isEmpty else { return }
+        boundSessionID = trimmed
+    }
+
+    public func sessionIDForReturningFromBrowser(currentSelectedSessionID: String?) -> String? {
+        boundSessionID ?? currentSelectedSessionID
+    }
+}
+
 public struct BrowserPageContext: Equatable, Sendable {
     public var url: String
     public var title: String

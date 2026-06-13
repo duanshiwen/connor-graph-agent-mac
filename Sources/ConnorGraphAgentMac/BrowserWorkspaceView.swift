@@ -83,12 +83,6 @@ struct BrowserWorkspaceView: View {
                             onAsk: {
                                 sendSelectionQuestion(popover)
                             },
-                            onInsert: {
-                                insertSelectionContext(popover.context)
-                            },
-                            onSaveEvidence: {
-                                Task { await viewModel.saveBrowserSelectionAsEpisode(popover.context) }
-                            },
                             onClose: closeSelectionPopover
                         )
                         .frame(width: 420)
@@ -204,10 +198,10 @@ struct BrowserWorkspaceView: View {
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { navigateFromAddressBar() }
 
-            Button(action: { viewModel.isBrowserVisible = false }) {
+            Button(action: { viewModel.returnFromBrowserWorkspace() }) {
                 Label("返回对话", systemImage: "bubble.left.and.bubble.right")
             }
-            .help("关闭网页工作区，返回对话时间线")
+            .help("关闭网页工作区，返回关联会话的对话时间线")
         }
     }
 
@@ -664,8 +658,6 @@ private struct BrowserSelectionPopover: View {
     @Binding var question: String
     var isSubmitting: Bool
     var onAsk: () -> Void
-    var onInsert: () -> Void
-    var onSaveEvidence: () -> Void
     var onClose: () -> Void
 
     var body: some View {
@@ -702,7 +694,7 @@ private struct BrowserSelectionPopover: View {
                 .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
 
             BrowserSelectionThreadList(messages: thread?.messages ?? [])
-                .frame(maxHeight: 180)
+                .frame(maxHeight: 360)
 
             HStack(spacing: 8) {
                 TextField("基于选中文本提问…", text: $question, axis: .vertical)
@@ -717,15 +709,10 @@ private struct BrowserSelectionPopover: View {
                 )
             }
 
-            HStack {
-                Button("插入到输入框", action: onInsert)
-                Button("保存为证据", action: onSaveEvidence)
-                Spacer()
-                Text("发送后浮窗保持打开")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-            .font(.caption)
+            Text("发送后浮窗保持打开")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .padding(12)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
@@ -767,7 +754,7 @@ private struct BrowserSelectionThreadList: View {
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             } else if message.role == .assistant {
-                                AgentMarkdownPreviewText(markdown: message.text, font: .caption2, lineLimit: 8)
+                                AgentMarkdownPreviewText(markdown: message.text, font: .caption2)
                                     .foregroundStyle(.primary)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             } else {
