@@ -1244,7 +1244,7 @@ private struct AgentChatComposerView: View {
                     .buttonStyle(.plain)
                     .help("添加附件")
 
-                    Button(action: { viewModel.isBrowserVisible.toggle() }) {
+                    Button(action: { viewModel.toggleBrowserWorkspaceVisibility() }) {
                         AgentComposerOptionBadge(
                             title: viewModel.isBrowserVisible ? "隐藏浏览器" : "浏览器",
                             systemImage: "safari",
