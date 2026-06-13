@@ -785,6 +785,7 @@ Browser Workspace 当前支持：
 - target=_blank / 新窗口导航自动打开为新标签页
 - Browser Workspace 可见时，按 ⌘W 关闭当前选中的浏览器标签页，而不是关闭整个 macOS 窗口
 - 从对话 transcript 中打开链接时，会写入当前会话的浏览器状态，追加并选中新标签页，同时更新地址栏目标
+- 内置搜索服务需要浏览器时，可先通过隐藏的 Browser Background Task Runner 使用同一应用级 WebKit 存储在后台加载搜索页；若流程未遇到验证/安全挑战，则后台完成不切换用户界面；若检测到 CAPTCHA、人机验证、Cloudflare challenge 等卡点，则标记为 awaiting user intervention，并显式切换到对应浏览器标签页请用户处理
 - 地址栏右侧提供“问一问 AI”按钮，可基于当前网页全文打开与选区浮窗一致的整页 mini-thread 提问浮窗
 - 用户在网页中选中文本后自动显示跟随选区的浮动窗口
 - 浮窗会根据 Browser Workspace 可视区域自动翻转、平移并限制最大高度，避免在窗口边缘、小窗口或长 mini-thread 场景下显示不全
