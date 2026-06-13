@@ -86,6 +86,9 @@ struct BrowserWorkspaceView: View {
                             onAsk: {
                                 sendSelectionQuestion(popover)
                             },
+                            onSummarizePage: {
+                                sendSelectionQuestion(popover, questionOverride: BrowserSelectionPopover.quickPageSummaryPrompt)
+                            },
                             onClose: { closeSelectionPopover(policy: .explicitClose) }
                         )
                         .frame(width: layout.width)
@@ -472,8 +475,8 @@ struct BrowserWorkspaceView: View {
             .joined(separator: "\n\n")
     }
 
-    private func sendSelectionQuestion(_ popover: BrowserSelectionPopoverState) {
-        let question = questionText.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func sendSelectionQuestion(_ popover: BrowserSelectionPopoverState, questionOverride: String? = nil) {
+        let question = (questionOverride ?? questionText).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !question.isEmpty else { return }
         appendThreadMessage(threadID: popover.threadID, role: .user, text: question)
         let pendingMessageID = appendThreadMessage(threadID: popover.threadID, role: .assistant, text: "", isPending: true)
@@ -812,20 +815,41 @@ private struct BrowserPageQuestionPayload: Decodable {
     var pageText: String
 }
 
+private enum BrowserFloatingTypography {
+    static let popoverTitle: Font = .system(size: 14, weight: .semibold)
+    static let pageTitle: Font = .system(size: 13.5, weight: .medium)
+    static let pageURL: Font = .system(size: 12.5)
+    static let selectedText: Font = .system(size: 13.5)
+    static let input: Font = .system(size: 13.5)
+    static let hint: Font = .system(size: 12.5)
+    static let messageRole: Font = .system(size: 12.5, weight: .semibold)
+    static let messageBody: Font = .system(size: 12.5)
+    static let askButton: Font = .system(size: 12.5, weight: .semibold)
+    static let askButtonIcon: Font = .system(size: 12.5, weight: .bold)
+    static let quickAction: Font = .caption2.weight(.medium)
+    static let loadingOverlay: Font = .system(size: 12.5, weight: .medium)
+    static let tabTitle: Font = .system(size: 11.5, weight: .regular)
+    static let tabTitleSelected: Font = .system(size: 11.5, weight: .semibold)
+    static let tabIcon: Font = .system(size: 11.5)
+}
+
 private struct BrowserSelectionPopover: View {
     var popover: BrowserSelectionPopoverState
     var thread: BrowserSelectionThread?
     @Binding var question: String
     var isSubmitting: Bool
     var onAsk: () -> Void
+    var onSummarizePage: () -> Void
     var onClose: () -> Void
+
+    static let quickPageSummaryPrompt = "总结此网页，提取概括网页主要内容、论点论据、观点或故事，信息"
 
     var body: some View {
         let isPageQuestion = popover.context.selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Label(isPageQuestion ? "问一问 AI" : "网页选择", systemImage: isPageQuestion ? "sparkles" : "selection.pin.in.out")
-                    .font(.subheadline.weight(.semibold))
+                    .font(BrowserFloatingTypography.popoverTitle)
                 Spacer()
                 Button(action: onClose) { Image(systemName: "xmark") }
                     .buttonStyle(.borderless)
@@ -834,12 +858,12 @@ private struct BrowserSelectionPopover: View {
             VStack(alignment: .leading, spacing: 4) {
                 if !popover.context.page.title.isEmpty {
                     Text(popover.context.page.title)
-                        .font(.subheadline.weight(.medium))
+                        .font(BrowserFloatingTypography.pageTitle)
                         .lineLimit(1)
                 }
                 if !popover.context.page.url.isEmpty {
                     Text(popover.context.page.url)
-                        .font(.footnote)
+                        .font(BrowserFloatingTypography.pageURL)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
@@ -847,7 +871,7 @@ private struct BrowserSelectionPopover: View {
 
             if !isPageQuestion {
                 Text(popover.context.selectedText)
-                    .font(.subheadline)
+                    .font(BrowserFloatingTypography.selectedText)
                     .foregroundStyle(.primary)
                     .lineLimit(4)
                     .textSelection(.enabled)
@@ -859,9 +883,22 @@ private struct BrowserSelectionPopover: View {
             BrowserSelectionThreadList(messages: thread?.messages ?? [], isPageQuestion: isPageQuestion)
                 .frame(maxHeight: 360)
 
+            if isPageQuestion {
+                HStack(spacing: 8) {
+                    Button(action: onSummarizePage) {
+                        BrowserQuickActionBadge(title: "总结网页主要内容", systemImage: "doc.text.magnifyingglass")
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isSubmitting)
+                    .help(Self.quickPageSummaryPrompt)
+
+                    Spacer(minLength: 0)
+                }
+            }
+
             HStack(spacing: 8) {
                 TextField(isPageQuestion ? "基于当前网页提问…" : "基于选中文本提问…", text: $question, axis: .vertical)
-                    .font(.subheadline)
+                    .font(BrowserFloatingTypography.input)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...3)
                     .onSubmit(onAsk)
@@ -874,7 +911,7 @@ private struct BrowserSelectionPopover: View {
             }
 
             Text("发送后浮窗保持打开")
-                .font(.footnote)
+                .font(BrowserFloatingTypography.hint)
                 .foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
@@ -897,7 +934,7 @@ private struct BrowserSelectionThreadList: View {
             LazyVStack(alignment: .leading, spacing: 6) {
                 if messages.isEmpty {
                     Text(isPageQuestion ? "这个网页还没有提问记录。" : "这个网页选择还没有提问记录。")
-                        .font(.footnote)
+                        .font(BrowserFloatingTypography.messageBody)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, 4)
@@ -905,7 +942,7 @@ private struct BrowserSelectionThreadList: View {
                     ForEach(messages) { message in
                         HStack(alignment: .top, spacing: 6) {
                             Text(message.role == .user ? "你" : "AI")
-                                .font(.footnote.weight(.semibold))
+                                .font(BrowserFloatingTypography.messageRole)
                                 .foregroundStyle(message.role == .user ? ConnorCraftPalette.accent : Color.secondary)
                                 .frame(width: 28, alignment: .leading)
                             if message.isPending {
@@ -914,17 +951,17 @@ private struct BrowserSelectionThreadList: View {
                                         .controlSize(.small)
                                         .scaleEffect(0.62)
                                     Text("正在生成回复…")
-                                        .font(.footnote)
+                                        .font(BrowserFloatingTypography.messageBody)
                                         .foregroundStyle(.secondary)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             } else if message.role == .assistant {
-                                AgentMarkdownPreviewText(markdown: message.text, font: .footnote)
+                                AgentMarkdownPreviewText(markdown: message.text, font: BrowserFloatingTypography.messageBody)
                                     .foregroundStyle(.primary)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             } else {
                                 Text(message.text)
-                                    .font(.footnote)
+                                    .font(BrowserFloatingTypography.messageBody)
                                     .foregroundStyle(.primary)
                                     .lineLimit(3)
                                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -934,6 +971,34 @@ private struct BrowserSelectionThreadList: View {
                 }
             }
         }
+    }
+}
+
+private struct BrowserQuickActionBadge: View {
+    var title: String
+    var systemImage: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: systemImage)
+                .font(.system(size: 12, weight: .semibold))
+            Text(title)
+                .font(BrowserFloatingTypography.quickAction)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 6)
+        .frame(height: 26)
+        .foregroundStyle(Color.secondary)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color.clear)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
+        .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 }
 
@@ -949,11 +1014,11 @@ private struct BrowserTabChip: View {
     var body: some View {
         HStack(spacing: 5) {
             Image(systemName: isLoading ? "arrow.triangle.2.circlepath" : "globe")
-                .font(.caption2)
+                .font(BrowserFloatingTypography.tabIcon)
                 .foregroundStyle(.secondary.opacity(isSelected ? 0.85 : 0.65))
 
             Text(title)
-                .font(.caption2.weight(isSelected ? .semibold : .regular))
+                .font(isSelected ? BrowserFloatingTypography.tabTitleSelected : BrowserFloatingTypography.tabTitle)
                 .foregroundStyle(isSelected ? .primary : .secondary)
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -986,9 +1051,9 @@ private struct BrowserAskAIButtonLabel: View {
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: "sparkles")
-                .font(.caption.weight(.bold))
+                .font(BrowserFloatingTypography.askButtonIcon)
             Text("问一问 AI")
-                .font(.caption.weight(.semibold))
+                .font(BrowserFloatingTypography.askButton)
         }
         .foregroundStyle(ConnorCraftPalette.accent)
         .padding(.horizontal, 11)
@@ -1013,7 +1078,7 @@ private struct BrowserLoadingOverlay: View {
 
     var body: some View {
         Label(message, systemImage: systemImage)
-            .font(.caption.weight(.medium))
+            .font(BrowserFloatingTypography.loadingOverlay)
             .foregroundStyle(.secondary)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
