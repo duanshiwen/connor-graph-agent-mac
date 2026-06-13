@@ -274,6 +274,7 @@ final class AppViewModel: ObservableObject {
     private var activeChatRunID: String?
     private var pendingChatCancellationReasonsBySessionID: [String: String] = [:]
     private var agentEventTimelinesBySessionID: [String: [AgentEventPresentation]] = [:]
+    private var agentEventTimelinesByProcessKey: [String: [AgentEventPresentation]] = [:]
     private var browserWorkspaceSessionBinding = BrowserWorkspaceSessionBinding()
     private var chatSessionWorkspaceModes = ChatSessionWorkspaceModeStore()
 
@@ -1150,6 +1151,7 @@ final class AppViewModel: ObservableObject {
         do {
             let session = try chatSessionRepository.createSession()
             selectedChatSessionID = session.id
+            agentEventTimelinesByProcessKey.removeAll(keepingCapacity: true)
             isBrowserVisible = false
             browserWorkspaceSessionID = nil
             rememberWorkspaceMode(.conversation, for: session.id)
@@ -1251,6 +1253,62 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func restoredAgentEventTimeline(for process: AgentChatTurnProcessPresentation) -> [AgentEventPresentation] {
+        guard process.state == .completed,
+              let chatSessionRepository,
+              let sessionID = selectedChatSessionID
+        else { return [] }
+        let cacheKey = "\(sessionID):\(process.id)"
+        if let cached = agentEventTimelinesByProcessKey[cacheKey] { return cached }
+        guard let sourceUserMessageID = process.sourceUserMessageID else {
+            agentEventTimelinesByProcessKey[cacheKey] = []
+            return []
+        }
+        do {
+            let runs = try chatSessionRepository.loadRuns(sessionID: sessionID, statuses: nil, limit: 200)
+            guard let run = runs.first(where: { $0.metadata["user_message_id"] == sourceUserMessageID }) else {
+                agentEventTimelinesByProcessKey[cacheKey] = []
+                return []
+            }
+            let restored = try restoreAgentEventTimeline(runID: run.id, sessionID: sessionID)
+            agentEventTimelinesByProcessKey[cacheKey] = restored
+            return restored
+        } catch {
+            agentEventTimelinesByProcessKey[cacheKey] = []
+            return []
+        }
+    }
+
+    private func restoreAgentEventTimeline(runID: String, sessionID: String) throws -> [AgentEventPresentation] {
+        guard let chatSessionRepository else { return [] }
+        let restored = presentations(from: try chatSessionRepository.loadRunEvents(runID: runID, limit: 300))
+        if !restored.isEmpty { return restored }
+        return presentations(
+            from: try chatSessionRepository.loadRecentJournalEvents(sessionID: sessionID, limit: 500)
+                .filter { $0.runID == runID }
+                .sorted { lhs, rhs in
+                    switch (lhs.sequence, rhs.sequence) {
+                    case let (left?, right?): return left < right
+                    case (.some, .none): return true
+                    case (.none, .some): return false
+                    case (.none, .none): return lhs.createdAt < rhs.createdAt
+                    }
+                }
+        )
+    }
+
+    private func presentations(from persistedEvents: [PersistedAgentEvent]) -> [AgentEventPresentation] {
+        let replayer = AgentEventReplayer()
+        let presenter = AgentEventPresenter()
+        let sequencedEvents = persistedEvents.filter { $0.sequence != nil }
+        let replaySource = sequencedEvents.isEmpty ? persistedEvents : sequencedEvents
+        return replaySource.compactMap { persistedEvent in
+            try? replayer.replay(persistedEvent)
+        }.map { event in
+            presenter.presentation(for: event)
+        }
+    }
+
     private func restoreLatestAgentEventTimeline(sessionID: String) throws {
         guard let chatSessionRepository else {
             agentEventTimelinesBySessionID[sessionID] = []
@@ -1263,19 +1321,6 @@ final class AppViewModel: ObservableObject {
             agentEventTimelinesBySessionID[sessionID] = cachedTimeline
             agentEventTimeline = cachedTimeline
             return
-        }
-
-        let replayer = AgentEventReplayer()
-        let presenter = AgentEventPresenter()
-
-        func presentations(from persistedEvents: [PersistedAgentEvent]) -> [AgentEventPresentation] {
-            let sequencedEvents = persistedEvents.filter { $0.sequence != nil }
-            let replaySource = sequencedEvents.isEmpty ? persistedEvents : sequencedEvents
-            return replaySource.compactMap { persistedEvent in
-                try? replayer.replay(persistedEvent)
-            }.map { event in
-                presenter.presentation(for: event)
-            }
         }
 
         let runs = try chatSessionRepository.loadRuns(
@@ -1328,6 +1373,7 @@ final class AppViewModel: ObservableObject {
         do {
             guard let session = try chatSessionRepository.loadSession(id: sessionID) else { return }
             selectedChatSessionID = session.id
+            agentEventTimelinesByProcessKey.removeAll(keepingCapacity: true)
             fallbackChatSession = session
             nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: session)
             transcript = session.messages
@@ -1813,6 +1859,7 @@ final class AppViewModel: ObservableObject {
         let submittingSessionID = manager.session.id
         if clearComposer { chatInput = "" }
         agentEventTimelinesBySessionID[submittingSessionID] = []
+        agentEventTimelinesByProcessKey = agentEventTimelinesByProcessKey.filter { key, _ in !key.hasPrefix("\(submittingSessionID):") }
         agentEventTimeline = []
         submittingChatSessionID = submittingSessionID
         activeChatRunID = nil
