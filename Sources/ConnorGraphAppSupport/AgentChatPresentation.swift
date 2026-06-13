@@ -99,28 +99,90 @@ public struct AgentChatTurnProcessPresentation: Sendable, Equatable, Identifiabl
     }
 }
 
+public struct AgentChatTurnTimestampPresentation: Sendable, Equatable {
+    public var date: Date
+    public var text: String
+
+    public init(date: Date, now: Date = Date(), calendar: Calendar = .current) {
+        self.date = date
+        self.text = Self.text(for: date, now: now, calendar: calendar)
+    }
+
+    public static func text(for date: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
+        if calendar.isDate(date, inSameDayAs: now) {
+            return dayPeriodTimeFormatter.string(from: date)
+        }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: now)),
+           calendar.isDate(date, inSameDayAs: yesterday) {
+            return "昨天"
+        }
+        if calendar.component(.year, from: date) == calendar.component(.year, from: now) {
+            return monthDayTimeFormatter.string(from: date)
+        }
+        return fullDateTimeFormatter.string(from: date)
+    }
+
+    private static let dayPeriodTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_Hans_CN")
+        formatter.dateFormat = "a h:mm"
+        return formatter
+    }()
+
+    private static let monthDayTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_Hans_CN")
+        formatter.dateFormat = "M月d日 a h:mm"
+        return formatter
+    }()
+
+    private static let fullDateTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_Hans_CN")
+        formatter.dateFormat = "yyyy年M月d日 a h:mm"
+        return formatter
+    }()
+}
+
 public struct AgentChatTurnTimelineItem: Sendable, Equatable, Identifiable {
     public var id: String
     public var message: AgentChatMessagePresentation?
     public var process: AgentChatTurnProcessPresentation?
+    public var timestamp: AgentChatTurnTimestampPresentation?
 
     public var kindLabel: String {
-        process == nil ? "message" : "process"
+        if message != nil { return "message" }
+        if process != nil { return "process" }
+        return "timestamp"
     }
 
     public static func message(_ message: AgentChatMessagePresentation) -> AgentChatTurnTimelineItem {
-        AgentChatTurnTimelineItem(id: message.id, message: message, process: nil)
+        AgentChatTurnTimelineItem(id: message.id, message: message, process: nil, timestamp: nil)
     }
 
     public static func process(_ process: AgentChatTurnProcessPresentation) -> AgentChatTurnTimelineItem {
-        AgentChatTurnTimelineItem(id: process.id, message: nil, process: process)
+        AgentChatTurnTimelineItem(id: process.id, message: nil, process: process, timestamp: nil)
     }
 
-    public static func items(messages: [AgentMessage], lastContext: AgentContext?, isSubmitting: Bool) -> [AgentChatTurnTimelineItem] {
+    public static func timestamp(turnNumber: Int, date: Date, now: Date = Date(), calendar: Calendar = .current) -> AgentChatTurnTimelineItem {
+        AgentChatTurnTimelineItem(
+            id: "timestamp-turn-\(turnNumber)",
+            message: nil,
+            process: nil,
+            timestamp: AgentChatTurnTimestampPresentation(date: date, now: now, calendar: calendar)
+        )
+    }
+
+    public static func items(messages: [AgentMessage], lastContext: AgentContext?, isSubmitting: Bool, now: Date = Date(), calendar: Calendar = .current) -> [AgentChatTurnTimelineItem] {
         let rows = AgentChatMessagePresentation.rows(messages: messages, lastContext: lastContext)
         var items: [AgentChatTurnTimelineItem] = []
         var conversationHistory: [AgentChatMessagePresentation] = []
+        var timestampedTurnNumbers = Set<Int>()
         for row in rows {
+            if row.message.role == .user, !timestampedTurnNumbers.contains(row.turnNumber) {
+                items.append(.timestamp(turnNumber: row.turnNumber, date: row.message.createdAt, now: now, calendar: calendar))
+                timestampedTurnNumbers.insert(row.turnNumber)
+            }
             if row.message.role == .assistant {
                 items.append(.process(AgentChatTurnProcessPresentation(completedAssistant: row, conversationHistory: conversationHistory)))
             }
