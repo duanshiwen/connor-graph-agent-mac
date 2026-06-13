@@ -207,6 +207,7 @@ private struct AgentChatConversationView: View {
     @ObservedObject var viewModel: AppViewModel
     @Binding var isSessionInfoPresented: Bool
     @State private var activityDetailEvent: AgentEventPresentation?
+    @State private var focusedTurnNumber: Int?
 
     private var timelineItems: [AgentChatTurnTimelineItem] {
         AgentChatTurnTimelineItem.items(
@@ -228,6 +229,49 @@ private struct AgentChatConversationView: View {
         timelineItems.last(where: { $0.process != nil })?.process?.id
     }
 
+    private var turnAnchors: [(turnNumber: Int, id: String)] {
+        timelineItems.compactMap { item in
+            guard item.timestamp != nil,
+                  let turnNumber = Self.turnNumber(fromTimestampID: item.id) else { return nil }
+            return (turnNumber, item.id)
+        }
+    }
+
+    private var currentTurnIndex: Int? {
+        guard !turnAnchors.isEmpty else { return nil }
+        let currentTurnNumber = focusedTurnNumber ?? turnAnchors.last?.turnNumber
+        guard let currentTurnNumber else { return nil }
+        return turnAnchors.lastIndex { $0.turnNumber <= currentTurnNumber }
+    }
+
+    private var canJumpToPreviousTurn: Bool {
+        guard let currentTurnIndex else { return false }
+        return currentTurnIndex > 0
+    }
+
+    private var canJumpToNextTurn: Bool {
+        guard let currentTurnIndex else { return false }
+        return currentTurnIndex < turnAnchors.count - 1
+    }
+
+    private static func turnNumber(fromTimestampID id: String) -> Int? {
+        let prefix = "timestamp-turn-"
+        guard id.hasPrefix(prefix) else { return nil }
+        return Int(id.dropFirst(prefix.count))
+    }
+
+    private func jumpTurn(direction: Int, proxy: ScrollViewProxy) {
+        guard !turnAnchors.isEmpty else { return }
+        let currentIndex = currentTurnIndex ?? (turnAnchors.count - 1)
+        let targetIndex = min(max(currentIndex + direction, 0), turnAnchors.count - 1)
+        guard targetIndex != currentIndex else { return }
+        let target = turnAnchors[targetIndex]
+        focusedTurnNumber = target.turnNumber
+        withAnimation(.easeOut(duration: 0.22)) {
+            proxy.scrollTo(target.id, anchor: .top)
+        }
+    }
+
     private func activityEvents(for process: AgentChatTurnProcessPresentation) -> [AgentEventPresentation] {
         if process.id == latestProcessID, !viewModel.agentEventTimeline.isEmpty {
             return viewModel.agentEventTimeline
@@ -243,39 +287,54 @@ private struct AgentChatConversationView: View {
                 .padding(.bottom, AgentChatLayout.spaceL)
 
             ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
-                        if timelineItems.isEmpty {
-                            AgentChatEmptyStateView()
-                                .frame(maxWidth: .infinity, minHeight: 360)
-                        } else {
-                            ForEach(timelineItems) { item in
-                                if let message = item.message {
-                                    AgentChatMessageRow(row: message)
+                ZStack(alignment: .topTrailing) {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
+                            if timelineItems.isEmpty {
+                                AgentChatEmptyStateView()
+                                    .frame(maxWidth: .infinity, minHeight: 360)
+                            } else {
+                                ForEach(timelineItems) { item in
+                                    if let message = item.message {
+                                        AgentChatMessageRow(row: message)
+                                            .id(item.id)
+                                    } else if let process = item.process {
+                                        AgentChatTurnProcessRow(
+                                            process: process,
+                                            events: activityEvents(for: process),
+                                            onOpenDetail: { event in
+                                                activityDetailEvent = event
+                                            }
+                                        )
                                         .id(item.id)
-                                } else if let process = item.process {
-                                    AgentChatTurnProcessRow(
-                                        process: process,
-                                        events: activityEvents(for: process),
-                                        onOpenDetail: { event in
-                                            activityDetailEvent = event
-                                        }
-                                    )
-                                    .id(item.id)
-                                } else if let timestamp = item.timestamp {
-                                    AgentChatTurnTimestampRow(timestamp: timestamp)
-                                        .id(item.id)
+                                    } else if let timestamp = item.timestamp {
+                                        AgentChatTurnTimestampRow(timestamp: timestamp)
+                                            .id(item.id)
+                                    }
                                 }
                             }
                         }
+                        .padding(.horizontal, 0)
+                        .padding(.vertical, AgentChatLayout.spaceXL)
                     }
-                    .padding(.horizontal, 0)
-                    .padding(.vertical, AgentChatLayout.spaceXL)
+
+                    if turnAnchors.count > 1 {
+                        AgentChatTurnNavigationControls(
+                            canJumpToPrevious: canJumpToPreviousTurn,
+                            canJumpToNext: canJumpToNextTurn,
+                            onPrevious: { jumpTurn(direction: -1, proxy: proxy) },
+                            onNext: { jumpTurn(direction: 1, proxy: proxy) }
+                        )
+                        .padding(.top, AgentChatLayout.spaceS)
+                        .padding(.trailing, AgentChatLayout.spaceS)
+                    }
                 }
                 .onChange(of: viewModel.transcript.count) { _, _ in
+                    focusedTurnNumber = turnAnchors.last?.turnNumber
                     scrollToBottom(proxy: proxy)
                 }
                 .onChange(of: viewModel.isSubmittingChat) { _, _ in
+                    focusedTurnNumber = turnAnchors.last?.turnNumber
                     scrollToBottom(proxy: proxy)
                 }
             }
@@ -297,6 +356,46 @@ private struct AgentChatConversationView: View {
         }
         .padding(.horizontal, AgentChatLayout.spaceL)
         .padding(.vertical, AgentChatLayout.spaceM)
+    }
+}
+
+private struct AgentChatTurnNavigationControls: View {
+    var canJumpToPrevious: Bool
+    var canJumpToNext: Bool
+    var onPrevious: () -> Void
+    var onNext: () -> Void
+
+    var body: some View {
+        VStack(spacing: AgentChatLayout.spaceXS) {
+            Button(action: onPrevious) {
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
+            }
+            .buttonStyle(.plain)
+            .disabled(!canJumpToPrevious)
+            .opacity(canJumpToPrevious ? 1 : 0.35)
+            .help("跳转到上一轮对话")
+
+            Button(action: onNext) {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
+            }
+            .buttonStyle(.plain)
+            .disabled(!canJumpToNext)
+            .opacity(canJumpToNext ? 1 : 0.35)
+            .help("跳转到下一轮对话")
+        }
+        .padding(AgentChatLayout.spaceXS)
+        .foregroundStyle(.secondary)
+        .background(.regularMaterial, in: Capsule())
+        .overlay(
+            Capsule()
+                .stroke(Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.08), radius: 8, x: 0, y: 4)
+        .accessibilityElement(children: .contain)
     }
 }
 
