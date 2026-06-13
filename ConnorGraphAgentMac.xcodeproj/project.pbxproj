@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A0000000000000000000003B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000003A /* Assets.xcassets */; };
 		A00000000000000000000001 /* Sources/ConnorGraphAgentMac/ConnorGraphAgentMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000002 /* Sources/ConnorGraphAgentMac/ConnorGraphAgentMacApp.swift */; };
 		A00000000000000000000003 /* ConnorGraphCore in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000004 /* ConnorGraphCore */; };
 		A00000000000000000000005 /* ConnorGraphMemory in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000006 /* ConnorGraphMemory */; };
@@ -24,6 +25,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		A0000000000000000000003A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Sources/ConnorGraphAgentMac/Assets.xcassets; sourceTree = "<group>"; };
 		A00000000000000000000002 /* Sources/ConnorGraphAgentMac/ConnorGraphAgentMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ConnorGraphAgentMacApp.swift; sourceTree = "<group>"; };
 		A00000000000000000000011 /* ConnorGraphAgentMacApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ConnorGraphAgentMacApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A0000000000000000000002D /* AgentChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AgentChatView.swift; path = Sources/ConnorGraphAgentMac/AgentChatView.swift; sourceTree = "<group>"; };
@@ -59,6 +61,17 @@
 		};
 /* End PBXFrameworksBuildPhase section */
 
+/* Begin PBXResourcesBuildPhase section */
+		A0000000000000000000003C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A0000000000000000000003B /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXGroup section */
 		A00000000000000000000013 = {
 			isa = PBXGroup;
@@ -68,6 +81,7 @@
 				A0000000000000000000002F /* Sources/ConnorGraphAgentMac/EmptyGraphHybridSearchService.swift */,
 				A00000000000000000000031 /* Sources/ConnorGraphAgentMac/BrowserWorkspaceView.swift */,
 				A00000000000000000000039 /* Sources/ConnorGraphAgentMac/BrowserBackgroundTaskRunnerView.swift */,
+				A0000000000000000000003A /* Assets.xcassets */,
 				A00000000000000000000033 /* Sources/ConnorGraphAgentMac/ConnorCommandPaletteView.swift */,
 				A00000000000000000000037 /* Sources/ConnorGraphAgentMac/SourceSkillAutomationRuntimeViews.swift */,
 				A00000000000000000000014 /* Products */,
@@ -101,6 +115,7 @@
 			buildPhases = (
 				A00000000000000000000017 /* Sources */,
 				A00000000000000000000012 /* Frameworks */,
+				A0000000000000000000003C /* Resources */,
 			);
 			buildRules = (
 			);
@@ -338,6 +353,7 @@
 				DEVELOPMENT_ASSET_PATHS = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				INFOPLIST_KEY_CFBundleDisplayName = "康纳同学";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -366,6 +382,7 @@
 				DEVELOPMENT_ASSET_PATHS = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				INFOPLIST_KEY_CFBundleDisplayName = "康纳同学";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
