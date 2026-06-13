@@ -1847,6 +1847,60 @@ struct AppShellView: View {
     }
 }
 
+struct SidebarActionButtonLabel: View {
+    var title: String
+    var systemImage: String
+    var fillsWidth: Bool = true
+    var titleFont: Font = .system(size: 12, weight: .regular)
+    var iconFont: Font = .system(size: 13, weight: .medium)
+
+    var body: some View {
+        Label {
+            Text(title)
+                .font(titleFont)
+                .lineLimit(1)
+        } icon: {
+            Image(systemName: systemImage)
+                .font(iconFont)
+                .symbolRenderingMode(.monochrome)
+                .frame(width: 15, alignment: .center)
+        }
+        .foregroundStyle(Color.primary)
+        .labelStyle(.titleAndIcon)
+        .frame(maxWidth: fillsWidth ? .infinity : nil, minHeight: 24, alignment: .leading)
+        .padding(.horizontal, 7)
+        .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+    }
+}
+
+struct SidebarActionButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(backgroundColor(isPressed: configuration.isPressed), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .stroke(borderColor(isPressed: configuration.isPressed), lineWidth: 1)
+            )
+            .shadow(color: shadowColor(isPressed: configuration.isPressed), radius: configuration.isPressed ? 0 : 0.5, x: 0, y: configuration.isPressed ? 0 : 0.5)
+            .scaleEffect(configuration.isPressed ? 0.992 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+
+    private func backgroundColor(isPressed: Bool) -> Color {
+        Color(nsColor: .controlBackgroundColor)
+            .opacity(isPressed ? 0.78 : 0.96)
+    }
+
+    private func borderColor(isPressed: Bool) -> Color {
+        Color(nsColor: .separatorColor)
+            .opacity(isPressed ? 0.42 : 0.28)
+    }
+
+    private func shadowColor(isPressed: Bool) -> Color {
+        Color.black.opacity(isPressed ? 0.04 : 0.08)
+    }
+}
+
 private struct CraftPrimarySidebarView: View {
     @ObservedObject var viewModel: AppViewModel
     @Binding var selection: SidebarItem?
@@ -1861,13 +1915,9 @@ private struct CraftPrimarySidebarView: View {
                 viewModel.newChatSession()
                 select(.agentChat)
             } label: {
-                Label("新建会话", systemImage: "square.and.pencil")
-                    .font(.subheadline.weight(.medium))
-                    .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
-                    .padding(.horizontal, 4)
+                SidebarActionButtonLabel(title: "新建会话", systemImage: "square.and.pencil")
             }
-            .buttonStyle(.bordered)
-            .controlSize(.regular)
+            .buttonStyle(SidebarActionButtonStyle())
             .padding(.horizontal, 10)
             .padding(.top, 10)
 
