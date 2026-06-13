@@ -218,7 +218,7 @@ final class AppViewModel: ObservableObject {
     @Published var agentEventTimeline: [AgentEventPresentation] = []
     @Published var isBrowserVisible: Bool = false
     @Published var browserWorkspaceSessionID: String?
-    @Published var browserTargetURLString: String = "https://www.wikipedia.org"
+    @Published var browserTargetURLString: String = BrowserBuiltInPage.blankURLString
     @Published var sessionStateSnapshotsBySessionID: [String: AppSessionStateSnapshot] = [:]
     @Published var sessionRecordsBySessionID: [String: [AppSessionRecord]] = [:]
     @Published var browserWorkspaceSnapshotsBySessionID: [String: AppBrowserStateSnapshot] = [:]
