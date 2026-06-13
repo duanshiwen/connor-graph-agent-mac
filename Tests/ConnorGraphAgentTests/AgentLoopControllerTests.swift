@@ -76,6 +76,36 @@ private actor SuspendingModelProvider: AgentModelProvider {
     #expect(events.map(\.kind).contains(.runFailed))
 }
 
+@Test func agentLoopRunsScientificToolThenFinalAnswer() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "call-science-1", name: "science_compute", argumentsJSON: #"{"operation":"add","inputs":{"values":[2,3,4]}}"#)],
+            usage: AgentModelUsage(promptTokens: 10, completionTokens: 3),
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: "2 + 3 + 4 = 9.",
+            toolCalls: [],
+            usage: AgentModelUsage(promptTokens: 20, completionTokens: 5),
+            finishReason: .stop
+        )
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(ScienceComputeTool(runtime: ScientificComputeRuntime(engines: [NativeSwiftScientificEngine()])))
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(AgentChatRequest(sessionID: "session-science-loop", userMessage: "Calculate 2+3+4")) {
+        events.append(event)
+    }
+
+    #expect(events.map(\.kind).contains(.toolStarted))
+    #expect(events.map(\.kind).contains(.toolFinished))
+    #expect(events.map(\.kind).contains(.textComplete))
+    #expect(events.last?.kind == .runCompleted)
+}
+
 @Test func agentLoopRunsGraphToolThenFinalAnswer() async throws {
     let provider = ScriptedModelProvider(responses: [
         AgentModelResponse(
