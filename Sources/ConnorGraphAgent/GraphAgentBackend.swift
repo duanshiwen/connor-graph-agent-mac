@@ -60,4 +60,8 @@ public struct AgentLoopBackend<Provider: AgentModelProvider>: AgentBackend {
     public func chat(_ request: AgentChatRequest) -> AsyncThrowingStream<AgentEvent, Error> {
         loopController.run(request)
     }
+
+    public func abort(runID: String) {
+        loopController.abort(runID: runID)
+    }
 }

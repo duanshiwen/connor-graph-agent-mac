@@ -9,41 +9,6 @@ Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package
 
 ---
 
-## Current Commercial Baseline
-
-已完成的商业化列车：
-
-```text
-Commercial Train 1: Session OS Maturation
-Commercial Train 2: Claude SDK Sidecar Productionization
-Commercial Train 3: Source / MCP Platformization
-Commercial Train 4: Graph Memory as Agent Core Capability
-Commercial Train 5: Native UI Commercialization
-Commercial Train 6: Local API / CLI / Automation Surface
-```
-
-当前验证结果：
-
-```text
-swift test
-
-377 tests in 16 suites passed (2026-06-13 11:00 GMT+8)
-```
-
-当前分支：
-
-```text
-feature/browser-tabs
-```
-
-当前提交：
-
-```text
-9a3945a Add local API CLI automation surface
-```
-
----
-
 ## Product Boundaries
 
 Connor 当前坚持以下主权边界：
