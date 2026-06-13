@@ -218,7 +218,9 @@ final class AppViewModel: ObservableObject {
     @Published var agentEventTimeline: [AgentEventPresentation] = []
     @Published var isBrowserVisible: Bool = false
     @Published var browserTargetURLString: String = "https://www.wikipedia.org"
-    @Published var browserWorkspaceSnapshotsBySessionID: [String: BrowserWorkspaceSnapshot] = [:]
+    @Published var sessionStateSnapshotsBySessionID: [String: AppSessionStateSnapshot] = [:]
+    @Published var sessionRecordsBySessionID: [String: [AppSessionRecord]] = [:]
+    @Published var browserWorkspaceSnapshotsBySessionID: [String: AppBrowserStateSnapshot] = [:]
     @Published var isCommandPalettePresented: Bool = false
     @Published var selectedSettingsSection: ConnorSettingsSection = .app
     @Published var desktopNotificationsEnabled: Bool = true
@@ -1015,6 +1017,7 @@ final class AppViewModel: ObservableObject {
                 }
                 latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: selectedID)
                 selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: selectedID)
+                try loadSessionCapsule(sessionID: selectedID)
             } else {
                 selectedSessionArtifactDirectories = nil
                 latestChatSummary = nil
@@ -1041,7 +1044,57 @@ final class AppViewModel: ObservableObject {
             chatSummaryMessage = nil
             lastPromptInspection = nil
             selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
+            try loadSessionCapsule(sessionID: session.id)
             reloadChatSessions()
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    private func loadSessionCapsule(sessionID: String) throws {
+        guard let chatSessionRepository else { return }
+        _ = try chatSessionRepository.artifactDirectories(sessionID: sessionID)
+        if let state = try chatSessionRepository.loadSessionState(sessionID: sessionID) {
+            sessionStateSnapshotsBySessionID[sessionID] = state
+        } else {
+            let state = AppSessionStateSnapshot(sessionID: sessionID, updatedAt: Date())
+            sessionStateSnapshotsBySessionID[sessionID] = state
+            try chatSessionRepository.saveSessionState(state, sessionID: sessionID)
+        }
+        sessionRecordsBySessionID[sessionID] = try chatSessionRepository.loadSessionRecords(sessionID: sessionID, limit: nil)
+        if let browserState = try chatSessionRepository.loadBrowserState(sessionID: sessionID) {
+            browserWorkspaceSnapshotsBySessionID[sessionID] = browserState
+        }
+        _ = try chatSessionRepository.refreshSessionManifest(sessionID: sessionID)
+    }
+
+    func saveBrowserWorkspaceSnapshot(_ snapshot: AppBrowserStateSnapshot, for sessionID: String) {
+        var normalized = snapshot
+        normalized.updatedAt = Date()
+        browserWorkspaceSnapshotsBySessionID[sessionID] = normalized
+        do {
+            try chatSessionRepository?.saveBrowserState(normalized, sessionID: sessionID)
+            if let state = try chatSessionRepository?.loadSessionState(sessionID: sessionID) {
+                sessionStateSnapshotsBySessionID[sessionID] = state
+            }
+            _ = try chatSessionRepository?.refreshSessionManifest(sessionID: sessionID)
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func appendSessionRecord(kind: String, title: String? = nil, body: String? = nil, metadata: [String: String] = [:], sessionID: String? = nil) {
+        let targetSessionID = sessionID ?? selectedChatSessionID ?? activeChatSession.id
+        let record = AppSessionRecord(sessionID: targetSessionID, kind: kind, title: title, body: body, metadata: metadata)
+        do {
+            try chatSessionRepository?.appendSessionRecord(record, sessionID: targetSessionID)
+            sessionRecordsBySessionID[targetSessionID] = try chatSessionRepository?.loadSessionRecords(sessionID: targetSessionID, limit: nil) ?? []
+            if let state = try chatSessionRepository?.loadSessionState(sessionID: targetSessionID) {
+                sessionStateSnapshotsBySessionID[targetSessionID] = state
+            }
+            _ = try chatSessionRepository?.refreshSessionManifest(sessionID: targetSessionID)
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -1135,6 +1188,7 @@ final class AppViewModel: ObservableObject {
             }
             latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: session.id)
             selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
+            try loadSessionCapsule(sessionID: session.id)
             chatSummaryMessage = nil
             lastContext = nil
             lastPromptInspection = nil

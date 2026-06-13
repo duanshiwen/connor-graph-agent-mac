@@ -1,7 +1,7 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-13 10:46 GMT+8  
-当前代码基线：`feature/browser-tabs`，基于 `main` 继续演进内置浏览器多标签页与网页选区浮窗能力。
+文档更新时间：2026-06-13 10:53 GMT+8  
+当前代码基线：`feature/browser-tabs`，基于 `main` 继续演进 Session Capsule 持久化、内置浏览器多标签页与网页选区浮窗能力。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package，目标是把 Connor 建成 **graph-memory-native Agent OS**：它不是“图谱编辑器”，也不是“Claude SDK 外壳”，而是以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI 和 Local Automation Surface 共同构成的本地 Agent 操作系统。
 
@@ -27,7 +27,7 @@ Commercial Train 6: Local API / CLI / Automation Surface
 ```text
 swift test
 
-372 tests in 15 suites passed (2026-06-13 10:45 GMT+8)
+377 tests in 16 suites passed (2026-06-13 11:00 GMT+8)
 ```
 
 当前分支：
@@ -155,16 +155,24 @@ Connor/
 └── sidecars/
 ```
 
-Session artifact directories：
+Session Capsule / artifact directories：
 
 ```text
 sessions/{sessionID}/
+├── manifest.json
+├── state/
+│   ├── session-state.json
+│   └── records.jsonl
+├── browser/
+│   └── browser-state.json
 ├── plans/
 ├── data/
 ├── attachments/
 ├── exports/
 └── logs/
 ```
+
+Connor 的会话持久化边界是完整 Session Capsule：SQLite 仍承担 session / run / event / graph 查询存储，但 session-local 的 UI/workspace 状态、记录流、附件、plans、data、logs 与 browser 子状态都归属于 `sessions/{sessionID}/`。`records.jsonl` 使用单行 JSONL 追加保存，读取时可跳过坏行，避免 10+ 条记录因一次异常写入或重启退化成 1 条。
 
 主要状态文件：
 
@@ -805,7 +813,9 @@ Browser Workspace 当前支持：
 - SwiftUI + WKWebView 内置网页工作区
 - 轻量多标签页标签栏
 - 每个 Connor Session 拥有独立的浏览器标签页栈、选中文本浮窗和网页选择 mini-thread 记录
-- 每个标签页独立保留 URL、标题、加载状态和前进/后退 metadata；运行期 WKWebView 缓存在 UI 层
+- 浏览器状态是 Session Capsule 的子状态，持久化到 `sessions/{sessionID}/browser/browser-state.json`
+- 网页选择提问会同时追加到 `sessions/{sessionID}/state/records.jsonl`，作为会话记录流的一部分
+- 每个标签页独立保留 URL、标题、加载状态和前进/后退 metadata；运行期 WKWebView 缓存在 UI 层，不跨重启持久化
 - 地址栏输入 URL、域名或搜索词，按 Return 打开
 - target=_blank / 新窗口导航自动打开为新标签页
 - 用户在网页中选中文本后自动显示跟随选区的浮动窗口
