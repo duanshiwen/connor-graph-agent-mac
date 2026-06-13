@@ -4,12 +4,14 @@ import ConnorGraphAppSupport
 
 struct BrowserWorkspaceView: View {
     @ObservedObject var viewModel: AppViewModel
-    @State private var addressText: String = "https://www.wikipedia.org"
+    @State private var addressText: String = ""
     @State private var webView: WKWebView?
     @State private var canGoBack = false
     @State private var canGoForward = false
     @State private var pageTitle = ""
     @State private var pageURL = ""
+    @State private var isLoadingPage = false
+    @State private var navigationErrorMessage: String?
     @State private var selectionContext: BrowserSelectionContext?
     @State private var selectionQuestion = ""
     @State private var showSelectionComposer = false
@@ -27,17 +29,32 @@ struct BrowserWorkspaceView: View {
                 EmbeddedWebView(
                     initialURLString: addressText,
                     onWebViewCreated: { webView in
-                        self.webView = webView
+                        DispatchQueue.main.async {
+                            self.webView = webView
+                            navigate(to: viewModel.browserTargetURLString)
+                        }
                     },
                     onNavigationStateChanged: { state in
                         canGoBack = state.canGoBack
                         canGoForward = state.canGoForward
                         pageTitle = state.title
                         pageURL = state.url
+                        isLoadingPage = state.isLoading
+                        navigationErrorMessage = state.errorMessage
                         if !state.url.isEmpty { addressText = state.url }
                     }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                if isLoadingPage && navigationErrorMessage == nil {
+                    BrowserLoadingOverlay(message: "加载中…")
+                        .padding(24)
+                }
+
+                if let navigationErrorMessage {
+                    BrowserLoadingOverlay(message: navigationErrorMessage, systemImage: "exclamationmark.triangle")
+                        .padding(24)
+                }
 
                 if showSelectionComposer, let selectionContext {
                     BrowserSelectionComposer(
@@ -72,8 +89,16 @@ struct BrowserWorkspaceView: View {
             }
         }
         .onAppear {
-            if let current = URL(string: addressText), webView?.url == nil {
-                webView?.load(URLRequest(url: current))
+            DispatchQueue.main.async {
+                if addressText.isEmpty {
+                    addressText = viewModel.browserTargetURLString
+                }
+                navigate(to: viewModel.browserTargetURLString)
+            }
+        }
+        .onChange(of: viewModel.browserTargetURLString) { _, newValue in
+            DispatchQueue.main.async {
+                navigate(to: newValue)
             }
         }
     }
@@ -130,6 +155,14 @@ struct BrowserWorkspaceView: View {
             urlString = "https://duckduckgo.com/?q=\(encoded)"
         }
         guard let url = URL(string: urlString) else { return }
+        viewModel.browserTargetURLString = url.absoluteString
+        navigate(to: url.absoluteString)
+    }
+
+    private func navigate(to urlString: String) {
+        guard let url = URL(string: urlString), !urlString.isEmpty else { return }
+        addressText = url.absoluteString
+        guard webView?.url?.absoluteString != url.absoluteString else { return }
         webView?.load(URLRequest(url: url))
     }
 
@@ -223,11 +256,28 @@ private struct BrowserSelectionComposer: View {
     }
 }
 
+private struct BrowserLoadingOverlay: View {
+    var message: String
+    var systemImage: String = "arrow.triangle.2.circlepath"
+
+    var body: some View {
+        Label(message, systemImage: systemImage)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(.regularMaterial, in: Capsule())
+            .overlay(Capsule().stroke(Color.secondary.opacity(0.18), lineWidth: 1))
+    }
+}
+
 private struct WebNavigationState: Equatable {
     var canGoBack: Bool
     var canGoForward: Bool
     var title: String
     var url: String
+    var isLoading: Bool = false
+    var errorMessage: String? = nil
 }
 
 private struct EmbeddedWebView: NSViewRepresentable {
@@ -244,12 +294,14 @@ private struct EmbeddedWebView: NSViewRepresentable {
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
         webView.navigationDelegate = context.coordinator
+        webView.uiDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = true
         context.coordinator.webView = webView
         onWebViewCreated(webView)
 
-        if let url = URL(string: initialURLString) {
+        if let url = URL(string: initialURLString), !initialURLString.isEmpty {
             webView.load(URLRequest(url: url))
         }
         return webView
@@ -294,7 +346,7 @@ private struct EmbeddedWebView: NSViewRepresentable {
     })();
     """
 
-    final class Coordinator: NSObject, WKNavigationDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         weak var webView: WKWebView?
         var onNavigationStateChanged: (WebNavigationState) -> Void
 
@@ -314,12 +366,34 @@ private struct EmbeddedWebView: NSViewRepresentable {
             publishNavigationState(webView)
         }
 
-        private func publishNavigationState(_ webView: WKWebView) {
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            publishNavigationState(webView, errorMessage: error.localizedDescription)
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            publishNavigationState(webView, errorMessage: error.localizedDescription)
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            createWebViewWith configuration: WKWebViewConfiguration,
+            for navigationAction: WKNavigationAction,
+            windowFeatures: WKWindowFeatures
+        ) -> WKWebView? {
+            if navigationAction.targetFrame == nil, let url = navigationAction.request.url {
+                webView.load(URLRequest(url: url))
+            }
+            return nil
+        }
+
+        private func publishNavigationState(_ webView: WKWebView, errorMessage: String? = nil) {
             let state = WebNavigationState(
                 canGoBack: webView.canGoBack,
                 canGoForward: webView.canGoForward,
                 title: webView.title ?? "",
-                url: webView.url?.absoluteString ?? ""
+                url: webView.url?.absoluteString ?? "",
+                isLoading: webView.isLoading,
+                errorMessage: errorMessage
             )
             DispatchQueue.main.async { self.onNavigationStateChanged(state) }
         }
