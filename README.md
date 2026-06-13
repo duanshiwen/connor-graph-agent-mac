@@ -896,6 +896,18 @@ preferences
 updatedAt
 ```
 
+Agent loop 默认运行边界：
+
+```text
+maxToolIterations: 64
+maxToolCallsPerIteration: 4
+maxRunDurationSeconds: 180
+maxToolResultBytes: 32768
+allowParallelToolCalls: false
+```
+
+因此单轮 agent run 默认最多允许 64 个 tool iteration；每个 iteration 最多消费 4 个 tool calls，理论工具调用上限为 256 次。模型提前给出 final answer 时会提前结束；达到最大 iteration 后 run 会以 `maxToolIterationsReached` 失败。
+
 AI 设置页支持：
 
 - OpenAI-compatible provider
