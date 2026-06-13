@@ -43,7 +43,7 @@ struct BrowserWorkspaceView: View {
                         ZStack {
                             ForEach(activeTabs) { tab in
                                 EmbeddedWebView(
-                                    initialURLString: tab.initialURLString,
+                                    initialURLString: tab.restoredURLString,
                                     onWebViewCreated: { webView in
                                         DispatchQueue.main.async { setWebView(webView, for: tab.id) }
                                     },
@@ -138,7 +138,7 @@ struct BrowserWorkspaceView: View {
     }
 
     private var defaultURLString: String {
-        viewModel.browserTargetURLString.isEmpty ? "https://www.wikipedia.org" : viewModel.browserTargetURLString
+        viewModel.browserTargetURLString.isEmpty ? BrowserBuiltInPage.blankURLString : viewModel.browserTargetURLString
     }
 
     private var tabBar: some View {
@@ -221,7 +221,7 @@ struct BrowserWorkspaceView: View {
     }
 
     private func openNewTab(urlString: String, select: Bool) {
-        let normalized = normalizedURLString(from: urlString) ?? "https://www.wikipedia.org"
+        let normalized = normalizedURLString(from: urlString) ?? BrowserBuiltInPage.blankURLString
         let tab = BrowserTabState(initialURLString: normalized)
         mutateActiveSession { session in
             session.tabs.append(tab)
@@ -270,11 +270,17 @@ struct BrowserWorkspaceView: View {
     }
 
     private func updateNavigationState(_ state: WebNavigationState, for tabID: BrowserTabState.ID) {
+        var displayURL = state.url
         mutateActiveSession { session in
             guard let index = session.tabs.firstIndex(where: { $0.id == tabID }) else { return }
-            session.tabs[index].navigationState = state
+            var normalizedState = state
+            if normalizedState.url == "about:blank", session.tabs[index].initialURLString == BrowserBuiltInPage.blankURLString {
+                normalizedState.url = BrowserBuiltInPage.blankURLString
+            }
+            displayURL = normalizedState.url
+            session.tabs[index].navigationState = normalizedState
         }
-        if tabID == activeSelectedTabID, !state.url.isEmpty { addressText = state.url }
+        if tabID == activeSelectedTabID, !displayURL.isEmpty { addressText = displayURL }
     }
 
     private func syncAddressTextWithActiveTab() {
@@ -284,21 +290,21 @@ struct BrowserWorkspaceView: View {
 
     private func navigateFromAddressBar() {
         let trimmed = addressText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let urlString = normalizedURLString(from: trimmed), let url = URL(string: urlString) else { return }
-        viewModel.browserTargetURLString = url.absoluteString
-        navigate(to: url.absoluteString)
+        guard let urlString = normalizedURLString(from: trimmed) else { return }
+        viewModel.browserTargetURLString = urlString
+        navigate(to: urlString)
     }
 
     private func navigate(to urlString: String) {
-        guard let normalized = normalizedURLString(from: urlString), let url = URL(string: normalized) else { return }
+        guard let normalized = normalizedURLString(from: urlString) else { return }
         ensureInitialTab()
-        addressText = url.absoluteString
+        addressText = normalized
         guard let selectedTabID = activeSelectedTabID else { return }
         mutateActiveSession { session in
             guard let index = session.tabs.firstIndex(where: { $0.id == selectedTabID }) else { return }
-            session.tabs[index].initialURLString = url.absoluteString
-            if session.tabs[index].webView?.url?.absoluteString != url.absoluteString {
-                session.tabs[index].webView?.load(URLRequest(url: url))
+            session.tabs[index].initialURLString = normalized
+            if session.tabs[index].webView?.url?.absoluteString != normalized {
+                session.tabs[index].webView?.loadBrowserURLString(normalized)
             }
         }
     }
@@ -306,6 +312,7 @@ struct BrowserWorkspaceView: View {
     private func normalizedURLString(from value: String) -> String? {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
+        if trimmed == BrowserBuiltInPage.blankURLString { return trimmed }
         if trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") { return trimmed }
         if trimmed.contains(".") && !trimmed.contains(" ") { return "https://\(trimmed)" }
         let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? trimmed
@@ -532,6 +539,11 @@ private struct BrowserTabState: Identifiable {
     }
 
     var displayURL: String { navigationState.url.isEmpty ? initialURLString : navigationState.url }
+
+    var restoredURLString: String {
+        let restored = displayURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        return restored.isEmpty ? BrowserBuiltInPage.blankURLString : restored
+    }
 }
 
 private struct BrowserSelectionPopoverState {
@@ -869,9 +881,7 @@ private struct EmbeddedWebView: NSViewRepresentable {
         context.coordinator.webView = webView
         onWebViewCreated(webView)
 
-        if let url = URL(string: initialURLString), !initialURLString.isEmpty {
-            webView.load(URLRequest(url: url))
-        }
+        webView.loadBrowserURLString(initialURLString)
         return webView
     }
 
@@ -957,14 +967,23 @@ private struct EmbeddedWebView: NSViewRepresentable {
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { publishNavigationState(webView) }
         func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) { publishNavigationState(webView) }
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { publishNavigationState(webView) }
-        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { publishNavigationState(webView, errorMessage: error.localizedDescription) }
-        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { publishNavigationState(webView, errorMessage: error.localizedDescription) }
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { showErrorPage(in: webView, error: error) }
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { showErrorPage(in: webView, error: error) }
 
         func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
             if navigationAction.targetFrame == nil, let url = navigationAction.request.url {
                 DispatchQueue.main.async { self.onOpenInNewTab(url) }
             }
             return nil
+        }
+
+        private func showErrorPage(in webView: WKWebView, error: Error) {
+            let failedURLString = webView.url?.absoluteString ?? ""
+            webView.loadHTMLString(
+                BrowserBuiltInPage.errorHTML(failedURLString: failedURLString, message: error.localizedDescription),
+                baseURL: URL(string: BrowserBuiltInPage.blankURLString)
+            )
+            publishNavigationState(webView, errorMessage: error.localizedDescription)
         }
 
         private func publishNavigationState(_ webView: WKWebView, errorMessage: String? = nil) {
@@ -978,6 +997,20 @@ private struct EmbeddedWebView: NSViewRepresentable {
             )
             DispatchQueue.main.async { self.onNavigationStateChanged(state) }
         }
+    }
+}
+
+private extension WKWebView {
+    func loadBrowserURLString(_ urlString: String) {
+        if urlString == BrowserBuiltInPage.blankURLString || urlString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            loadHTMLString(BrowserBuiltInPage.blankHTML, baseURL: URL(string: BrowserBuiltInPage.blankURLString))
+            return
+        }
+        guard let url = URL(string: urlString) else {
+            loadHTMLString(BrowserBuiltInPage.errorHTML(failedURLString: urlString, message: "Invalid URL"), baseURL: URL(string: BrowserBuiltInPage.blankURLString))
+            return
+        }
+        load(URLRequest(url: url))
     }
 }
 

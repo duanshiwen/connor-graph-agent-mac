@@ -120,6 +120,26 @@ struct AppSessionCapsuleRepositoryTests {
         #expect(state?.browser?.threadCount == 1)
     }
 
+    @Test("browser tab restores current URL instead of initial URL")
+    func browserTabRestoresCurrentURLInsteadOfInitialURL() {
+        let tab = AppBrowserTabSnapshot(
+            initialURLString: "https://example.com",
+            title: "Article",
+            currentURLString: "https://example.com/article"
+        )
+
+        #expect(tab.restoredURLString == "https://example.com/article")
+    }
+
+    @Test("browser tab restore falls back to blank page when URLs are empty")
+    func browserTabRestoreFallsBackToBlankPageWhenURLsAreEmpty() {
+        let tab = AppBrowserTabSnapshot(initialURLString: "", currentURLString: "")
+
+        #expect(tab.restoredURLString == BrowserBuiltInPage.blankURLString)
+        #expect(BrowserBuiltInPage.blankHTML.contains("Connor Browser"))
+        #expect(BrowserBuiltInPage.errorHTML(failedURLString: "https://bad.example", message: "offline").contains("https://bad.example"))
+    }
+
     @Test("different sessions have isolated capsules")
     func differentSessionsHaveIsolatedCapsules() throws {
         let fixture = try makeFixture()
