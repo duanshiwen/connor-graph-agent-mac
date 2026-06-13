@@ -599,6 +599,9 @@ private struct AgentChatMessageRow: View {
     var row: AgentChatMessagePresentation
 
     private var isUser: Bool { row.message.role == .user }
+    private var browserPromptFoldingParts: BrowserPromptFoldingParts? {
+        BrowserPromptFoldingParser().parse(row.message.content)
+    }
 
     var body: some View {
         HStack(alignment: .top) {
@@ -623,7 +626,11 @@ private struct AgentChatMessageRow: View {
     @ViewBuilder
     private var messageContent: some View {
         if isUser {
-            AgentMarkdownPreviewText(markdown: row.message.content, font: .body)
+            if let browserPromptFoldingParts {
+                BrowserPromptFoldedMessageView(parts: browserPromptFoldingParts)
+            } else {
+                AgentMarkdownPreviewText(markdown: row.message.content, font: .body)
+            }
         } else {
             ScrollView {
                 AgentMarkdownPreviewText(markdown: row.message.content, font: .body)
@@ -636,6 +643,39 @@ private struct AgentChatMessageRow: View {
     private var messageBackground: Color {
         if isUser { return Color.accentColor.opacity(0.88) }
         return Color(nsColor: .controlBackgroundColor).opacity(0.85)
+    }
+}
+
+private struct BrowserPromptFoldedMessageView: View {
+    var parts: BrowserPromptFoldingParts
+    @State private var isWebPageBodyExpanded: Bool = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+            if !parts.leadingMarkdown.isEmpty {
+                AgentMarkdownPreviewText(markdown: parts.leadingMarkdown, font: .body)
+            }
+
+            DisclosureGroup(isExpanded: $isWebPageBodyExpanded) {
+                ScrollView {
+                    Text(parts.webPageBody)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(AgentChatLayout.spaceS)
+                }
+                .frame(maxHeight: 220, alignment: .top)
+                .background(Color.black.opacity(0.05), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
+            } label: {
+                Label("网页正文（默认折叠）", systemImage: "doc.text.magnifyingglass")
+                    .font(.caption.weight(.semibold))
+            }
+            .tint(.primary)
+
+            if !parts.trailingMarkdown.isEmpty {
+                AgentMarkdownPreviewText(markdown: parts.trailingMarkdown, font: .body)
+            }
+        }
     }
 }
 
