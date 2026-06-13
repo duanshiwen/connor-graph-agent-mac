@@ -56,6 +56,18 @@ public struct BrowserPromptFoldingParser: Sendable {
     }
 }
 
+public enum BrowserPopoverDismissalPolicy: Equatable, Sendable {
+    case escape
+    case explicitClose
+
+    public var shouldPreserveDraftQuestion: Bool {
+        switch self {
+        case .escape: true
+        case .explicitClose: false
+        }
+    }
+}
+
 public struct BrowserExternalOpenPlanner: Sendable {
     public init() {}
 
@@ -266,6 +278,12 @@ public struct BrowserSelectionContext: Equatable, Sendable {
 
     public var hasSelectionContext: Bool {
         !selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || image != nil
+    }
+
+    public var hasPageContext: Bool {
+        !page.url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !page.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !page.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 }
 
