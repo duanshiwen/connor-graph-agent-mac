@@ -272,6 +272,7 @@ final class AppViewModel: ObservableObject {
     private var nativeSessionManager: NativeSessionManager?
     private var submittingChatSessionID: String?
     private var activeChatRunID: String?
+    private var pendingChatCancellationReasonsBySessionID: [String: String] = [:]
     private var agentEventTimelinesBySessionID: [String: [AgentEventPresentation]] = [:]
     private var browserWorkspaceSessionBinding = BrowserWorkspaceSessionBinding()
     private var chatSessionWorkspaceModes = ChatSessionWorkspaceModeStore()
@@ -1747,29 +1748,57 @@ final class AppViewModel: ObservableObject {
 
     func cancelActiveChatRun() {
         guard let submittingSessionID = submittingChatSessionID,
-              selectedChatSessionID == submittingSessionID,
-              let runID = activeChatRunID
+              selectedChatSessionID == submittingSessionID
         else { return }
+        let reason = "cancelled by user"
+        guard let runID = activeChatRunID else {
+            if pendingChatCancellationReasonsBySessionID[submittingSessionID] == nil {
+                pendingChatCancellationReasonsBySessionID[submittingSessionID] = reason
+                appendChatCancellationPresentation(
+                    sessionID: submittingSessionID,
+                    runID: nil,
+                    title: "Run cancellation requested",
+                    detail: "已请求终止本轮 agent loop，正在等待 runtime run ID。"
+                )
+            }
+            return
+        }
+        cancelRunningChatRun(sessionID: submittingSessionID, runID: runID, reason: reason)
+    }
+
+    private func cancelRunningChatRun(sessionID: String, runID: String, reason: String) {
         if var manager = nativeSessionManager {
-            manager.cancel(runID: runID, reason: "cancelled by user")
+            manager.cancel(runID: runID, reason: reason)
             nativeSessionManager = manager
         }
-        let cancellation = AgentEventPresentation(
-            kind: "run_cancelled",
-            title: "Run cancelled",
-            detail: "已手动终止本轮 agent loop。",
-            severity: .warning,
+        appendChatCancellationPresentation(
+            sessionID: sessionID,
             runID: runID,
-            sessionID: submittingSessionID
+            title: "Run cancelled",
+            detail: "已手动终止本轮 agent loop。"
         )
-        var timeline = agentEventTimelinesBySessionID[submittingSessionID] ?? agentEventTimeline
-        timeline.append(cancellation)
-        agentEventTimelinesBySessionID[submittingSessionID] = timeline
-        try? chatSessionRepository?.saveActivityTimelineCache(sessionID: submittingSessionID, timeline: timeline)
-        agentEventTimeline = timeline
+        pendingChatCancellationReasonsBySessionID.removeValue(forKey: sessionID)
         submittingChatSessionID = nil
         activeChatRunID = nil
         isSubmittingChat = false
+    }
+
+    private func appendChatCancellationPresentation(sessionID: String, runID: String?, title: String, detail: String) {
+        let cancellation = AgentEventPresentation(
+            kind: "run_cancelled",
+            title: title,
+            detail: detail,
+            severity: .warning,
+            runID: runID,
+            sessionID: sessionID
+        )
+        var timeline = agentEventTimelinesBySessionID[sessionID] ?? agentEventTimeline
+        timeline.append(cancellation)
+        agentEventTimelinesBySessionID[sessionID] = timeline
+        try? chatSessionRepository?.saveActivityTimelineCache(sessionID: sessionID, timeline: timeline)
+        if selectedChatSessionID == sessionID {
+            agentEventTimeline = timeline
+        }
     }
 
     @discardableResult
@@ -1819,6 +1848,9 @@ final class AppViewModel: ObservableObject {
                     guard let self else { return }
                     if self.submittingChatSessionID == submittingSessionID {
                         self.activeChatRunID = runID
+                        if let reason = self.pendingChatCancellationReasonsBySessionID[submittingSessionID] {
+                            self.cancelRunningChatRun(sessionID: submittingSessionID, runID: runID, reason: reason)
+                        }
                     }
                 },
                 onEventPresentation: { [weak self] presentation in
@@ -1859,7 +1891,12 @@ final class AppViewModel: ObservableObject {
                 transcript = optimisticTranscript + [optimisticUserMessage]
             }
             reloadPendingApprovals()
-            errorMessage = String(describing: error)
+            pendingChatCancellationReasonsBySessionID.removeValue(forKey: submittingSessionID)
+            if case NativeSessionManagerError.runCancelled = error {
+                errorMessage = nil
+            } else {
+                errorMessage = String(describing: error)
+            }
             return nil
         }
     }
