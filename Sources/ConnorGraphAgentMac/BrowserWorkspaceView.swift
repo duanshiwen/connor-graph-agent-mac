@@ -206,11 +206,11 @@ struct BrowserWorkspaceView: View {
             .disabled(activeTab?.navigationState.canGoForward != true)
             .help("前进")
 
-            Button(action: { activeWebView?.reload() }) {
-                Image(systemName: "arrow.clockwise")
+            Button(action: reloadOrStopActiveWebView) {
+                Image(systemName: activeTab?.navigationState.isLoading == true ? "xmark" : "arrow.clockwise")
             }
             .disabled(activeWebView == nil)
-            .help("刷新")
+            .help(activeTab?.navigationState.isLoading == true ? "停止加载" : "刷新")
 
             TextField("输入网址或搜索词，按 Return 打开", text: $addressText)
                 .textFieldStyle(.roundedBorder)
@@ -319,6 +319,28 @@ struct BrowserWorkspaceView: View {
     private func syncAddressTextWithActiveTab() {
         guard let activeTab else { return }
         addressText = activeTab.navigationState.url.isEmpty ? activeTab.initialURLString : activeTab.navigationState.url
+    }
+
+    private func reloadOrStopActiveWebView() {
+        guard let webView = activeWebView else { return }
+        if activeTab?.navigationState.isLoading == true || webView.isLoading {
+            webView.stopLoading()
+            if let selectedTabID = activeSelectedTabID {
+                updateNavigationState(
+                    WebNavigationState(
+                        canGoBack: webView.canGoBack,
+                        canGoForward: webView.canGoForward,
+                        title: webView.title ?? activeTab?.navigationState.title ?? "",
+                        url: webView.url?.absoluteString ?? activeTab?.navigationState.url ?? "",
+                        isLoading: false,
+                        errorMessage: nil
+                    ),
+                    for: selectedTabID
+                )
+            }
+        } else {
+            webView.reload()
+        }
     }
 
     private func navigateFromAddressBar() {
@@ -1124,8 +1146,8 @@ private struct EmbeddedWebView: NSViewRepresentable {
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { publishNavigationState(webView) }
         func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) { publishNavigationState(webView) }
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { publishNavigationState(webView) }
-        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { showErrorPage(in: webView, error: error) }
-        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { showErrorPage(in: webView, error: error) }
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { handleNavigationFailure(in: webView, error: error) }
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { handleNavigationFailure(in: webView, error: error) }
 
         func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
             if navigationAction.targetFrame == nil, let url = navigationAction.request.url {
@@ -1134,22 +1156,30 @@ private struct EmbeddedWebView: NSViewRepresentable {
             return nil
         }
 
+        private func handleNavigationFailure(in webView: WKWebView, error: Error) {
+            if (error as NSError).code == NSURLErrorCancelled {
+                publishNavigationState(webView, isLoadingOverride: false)
+                return
+            }
+            showErrorPage(in: webView, error: error)
+        }
+
         private func showErrorPage(in webView: WKWebView, error: Error) {
             let failedURLString = webView.url?.absoluteString ?? ""
             webView.loadHTMLString(
                 BrowserBuiltInPage.errorHTML(failedURLString: failedURLString, message: error.localizedDescription),
                 baseURL: BrowserBuiltInPage.webViewBaseURL
             )
-            publishNavigationState(webView, errorMessage: error.localizedDescription)
+            publishNavigationState(webView, errorMessage: error.localizedDescription, isLoadingOverride: false)
         }
 
-        private func publishNavigationState(_ webView: WKWebView, errorMessage: String? = nil) {
+        private func publishNavigationState(_ webView: WKWebView, errorMessage: String? = nil, isLoadingOverride: Bool? = nil) {
             let state = WebNavigationState(
                 canGoBack: webView.canGoBack,
                 canGoForward: webView.canGoForward,
                 title: webView.title ?? "",
                 url: webView.url?.absoluteString ?? "",
-                isLoading: webView.isLoading,
+                isLoading: isLoadingOverride ?? webView.isLoading,
                 errorMessage: errorMessage
             )
             DispatchQueue.main.async { self.onNavigationStateChanged(state) }
