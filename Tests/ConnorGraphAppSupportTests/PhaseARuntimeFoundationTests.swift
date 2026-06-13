@@ -139,3 +139,20 @@ private func phaseAStore() throws -> SQLiteGraphKernelStore {
     #expect(loaded.loop.budget.maxTotalTokens == 240_000)
     #expect(loaded.ui.textDeltaFlushCharacterThreshold == 120)
 }
+
+@Test func runtimeSettingsRepositoryPersistsWorkspaceDefaults() throws {
+    let root = phaseATemporaryRoot()
+    let paths = AppStoragePaths(applicationSupportDirectory: root)
+    try paths.ensureDirectoryHierarchy()
+    let repository = AppRuntimeSettingsRepository(configDirectory: paths.configDirectory)
+
+    var settings = AgentRuntimeSettings.default
+    settings.workspace.defaultWorkingDirectoryPath = "/tmp/connor-project"
+    settings.workspace.additionalAllowedDirectoryPaths = ["/tmp/shared-assets"]
+
+    try repository.save(settings)
+    let loaded = try repository.loadOrCreateDefault()
+
+    #expect(loaded.workspace.defaultWorkingDirectoryPath == "/tmp/connor-project")
+    #expect(loaded.workspace.additionalAllowedDirectoryPaths == ["/tmp/shared-assets"])
+}

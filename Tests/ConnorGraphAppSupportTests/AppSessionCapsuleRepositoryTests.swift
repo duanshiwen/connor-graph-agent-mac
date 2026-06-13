@@ -23,6 +23,28 @@ struct AppSessionCapsuleRepositoryTests {
         #expect(loaded == state)
     }
 
+    @Test("session state preserves workspace reference")
+    func sessionStatePreservesWorkspaceReference() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        let workspace = AppSessionWorkspaceReference(
+            workingDirectoryPath: "/tmp/session-project",
+            source: "runtimeSettings",
+            updatedAt: Date(timeIntervalSince1970: 1_900)
+        )
+        let state = AppSessionStateSnapshot(
+            sessionID: "session-a",
+            updatedAt: Date(timeIntervalSince1970: 1_901),
+            workspace: workspace
+        )
+
+        try fixture.repository.saveState(state, sessionID: "session-a")
+
+        let loaded = try fixture.repository.loadState(sessionID: "session-a")
+        #expect(loaded?.workspace == workspace)
+    }
+
     @Test("append and load records preserves more than ten records")
     func appendAndLoadRecordsPreservesMoreThanTenRecords() throws {
         let fixture = try makeFixture()
