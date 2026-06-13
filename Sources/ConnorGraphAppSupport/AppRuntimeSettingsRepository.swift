@@ -82,16 +82,70 @@ public struct AgentRuntimePermissionSettings: Codable, Sendable, Equatable {
     }
 }
 
+public struct AgentRuntimeWorkspaceRoot: Codable, Sendable, Equatable, Identifiable {
+    public var id: String
+    public var displayName: String
+    public var path: String
+    public var role: String
+    public var isPrimary: Bool
+
+    public init(
+        id: String = UUID().uuidString,
+        displayName: String,
+        path: String,
+        role: String = "project",
+        isPrimary: Bool = false
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.path = path
+        self.role = role
+        self.isPrimary = isPrimary
+    }
+}
+
 public struct AgentRuntimeWorkspaceSettings: Codable, Sendable, Equatable {
     public var defaultWorkingDirectoryPath: String
     public var additionalAllowedDirectoryPaths: [String]
+    public var roots: [AgentRuntimeWorkspaceRoot]
 
     public init(
         defaultWorkingDirectoryPath: String = "",
-        additionalAllowedDirectoryPaths: [String] = []
+        additionalAllowedDirectoryPaths: [String] = [],
+        roots: [AgentRuntimeWorkspaceRoot] = []
     ) {
         self.defaultWorkingDirectoryPath = defaultWorkingDirectoryPath
         self.additionalAllowedDirectoryPaths = additionalAllowedDirectoryPaths
+        self.roots = roots
+    }
+
+    public var primaryRoot: AgentRuntimeWorkspaceRoot? {
+        roots.first(where: \.isPrimary) ?? roots.first
+    }
+
+    public mutating func syncLegacyFieldsFromRoots() {
+        guard !roots.isEmpty else { return }
+        let primary = primaryRoot
+        defaultWorkingDirectoryPath = primary?.path ?? ""
+        additionalAllowedDirectoryPaths = roots
+            .filter { $0.id != primary?.id }
+            .map(\.path)
+    }
+
+    public func effectiveRoots() -> [AgentRuntimeWorkspaceRoot] {
+        if !roots.isEmpty { return roots }
+        let primaryPath = defaultWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        let additional = additionalAllowedDirectoryPaths
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        var synthesized: [AgentRuntimeWorkspaceRoot] = []
+        if !primaryPath.isEmpty {
+            synthesized.append(AgentRuntimeWorkspaceRoot(displayName: URL(fileURLWithPath: primaryPath).lastPathComponent, path: primaryPath, role: "project", isPrimary: true))
+        }
+        synthesized.append(contentsOf: additional.map { path in
+            AgentRuntimeWorkspaceRoot(displayName: URL(fileURLWithPath: path).lastPathComponent, path: path, role: "additional", isPrimary: false)
+        })
+        return synthesized
     }
 }
 

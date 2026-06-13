@@ -155,7 +155,7 @@ graph/evaluations/retrieval-evaluation-cases.json
 graph/evaluations/reports/*.json
 ```
 
-`runtime-settings.json` 保存应用、外观、输入、权限、UI、workspace 和用户偏好类设置，其中 `workspace.defaultWorkingDirectoryPath` 是 Native local tools 与 Claude Sidecar 共享的默认项目目录；`llm-settings.json` 保存模型提供方、Base URL、模型名和 Claude Sidecar 配置。API Key 不写入 JSON，由本地 Keychain 凭据仓库管理。
+`runtime-settings.json` 保存应用、外观、输入、权限、UI、workspace 和用户偏好类设置，其中 `workspace.roots` 是多工作目录的 canonical 配置；`workspace.defaultWorkingDirectoryPath` 与 `workspace.additionalAllowedDirectoryPaths` 保留为旧配置兼容字段，并由 roots 同步派生。Native local tools 可使用 multi-root allowed roots；Claude Sidecar 仍使用 primary root 作为单一 cwd。`llm-settings.json` 保存模型提供方、Base URL、模型名和 Claude Sidecar 配置。API Key 不写入 JSON，由本地 Keychain 凭据仓库管理。
 
 ---
 
@@ -927,18 +927,21 @@ MultiEdit  editWorkspaceFile       对单文件执行原子多重替换；任一
 Bash       dynamic shell capability 在 workspace 内执行非交互命令，按命令风险追加评估 shell capability
 ```
 
-本地 workspace 安全边界由 `LocalWorkspacePolicy` 负责。Project working directory 由 `AppProjectWorkingDirectoryResolver` 统一解析，Native AgentLoop 本地工具与 Governed Claude Sidecar 共用同一解析结果：
+本地 workspace 安全边界由 `LocalWorkspacePolicy` 负责。Project workspace 由 `AppProjectWorkingDirectoryResolver` 统一解析：Native AgentLoop 本地工具使用 primary root 作为相对路径基准，并把其他 roots 作为 additional allowed roots；Governed Claude Sidecar 使用同一个 primary root 作为单一 cwd。
 
 ```text
-1. Session Capsule workspace reference / session override
-2. runtime-settings.json workspace.defaultWorkingDirectoryPath
-3. legacy llm-settings sidecarWorkingDirectoryPath
-4. process currentDirectoryPath fallback
+1. Session Capsule workspace roots / session override
+2. runtime-settings.json workspace.roots primary root
+3. legacy runtime-settings.json workspace.defaultWorkingDirectoryPath + additionalAllowedDirectoryPaths
+4. legacy llm-settings sidecarWorkingDirectoryPath
+5. process currentDirectoryPath fallback
 ```
 
-- 默认项目目录推荐写入 `runtime-settings.json` 的 `workspace.defaultWorkingDirectoryPath`，避免 App 从 Finder / Dock / Xcode / Terminal 启动时继承到不稳定 cwd。
+- 默认项目目录推荐写入 `runtime-settings.json` 的 `workspace.roots`；每个 root 包含 `id`、`displayName`、`path`、`role` 和 `isPrimary`。
+- `workspace.defaultWorkingDirectoryPath` 与 `workspace.additionalAllowedDirectoryPaths` 保留为旧配置兼容字段；保存 settings 时会从 roots 派生同步。
+- 设置页的“项目工作目录”控件支持选择多个目录、添加路径、设为主目录、移除 root；样式沿用 SettingsGroup / row / badge 体系。
+- Claude Sidecar 的 cwd 仍只能是一个目录，因此使用 primary root；其他 roots 是 Connor Native tools 的允许根。
 - `llm.sidecar.workingDirectoryPath` 保留为旧配置兼容 fallback，不再是唯一 Sidecar cwd 来源。
-- `workspace.additionalAllowedDirectoryPaths` 可作为受控的额外允许根目录，用于共享素材目录等场景。
 - 所有路径会做标准化和 symlink resolving，防止 workspace 内 symlink 逃逸到系统目录。
 - 默认拒绝 workspace 外路径、`.git/objects` / `.git/index` 写入、`.env*` 写入、`~/.ssh` / `~/.gnupg` / `~/.aws` 等敏感路径。
 - 文件读取、写入、搜索和工具输出都有大小/数量上限，避免大结果污染模型上下文。
@@ -1094,12 +1097,14 @@ swift run connor automations evaluate --trigger sessionStatusChanged --session d
 最近验证结果：
 
 ```text
-Project Working Directory Runtime targeted tests passed (2026-06-14 00:03 GMT+8):
+Project Working Directory Runtime targeted tests passed (2026-06-14 01:00 GMT+8):
+- swift test --filter runtimeSettingsRepositoryPersistsWorkspaceRoots
 - swift test --filter AppProjectWorkingDirectoryResolverTests
-- swift test --filter runtimeSettingsRepositoryPersistsWorkspaceDefaults
 - swift test --filter sessionStatePreservesWorkspaceReference
+- swift test --filter sessionStatePreservesWorkspaceRootReferences
 - swift test --filter appGraphAgentRuntimeFactoryConfiguredSidecarUsesRuntimeWorkspaceBeforeLegacySidecarWorkspace
 - swift test --filter agentLoopRuntimeFactoryNativeReadUsesRuntimeWorkspace
+- swift test --filter agentLoopRuntimeFactoryNativeReadAllowsAdditionalWorkspaceRoot
 - swift test --filter LocalWorkspacePolicyTests
 - swift test --filter LocalWorkspaceToolsTests
 
@@ -1111,7 +1116,7 @@ Native local workspace tool targeted tests passed (2026-06-13 23:31 GMT+8):
 - swift test --filter CommercialReadinessReleaseGateTests
 
 Full swift test status on feature/project-working-directory-runtime:
-- 455 / 456 tests passed.
+- 461 / 462 tests passed.
 - 1 existing UI copy expectation failed outside the project working directory runtime scope:
   PhaseGCraftGradeNativeUITests.nativeShellBuildsCraftGradeSidebarGroupsAndCommands
   expected shell.title == "Connor", actual shell.title == "康纳同学".

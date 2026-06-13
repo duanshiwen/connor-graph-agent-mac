@@ -74,6 +74,56 @@ import ConnorGraphStore
     #expect(result.contentJSON?.contains("runtime-project") == true)
 }
 
+@Test func agentLoopRuntimeFactoryNativeReadAllowsAdditionalWorkspaceRoot() async throws {
+    let appDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorFactoryLocalToolsMultiRootWorkspace-", isDirectory: true)
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: appDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: appDirectory) }
+    let storagePaths = AppStoragePaths(applicationSupportDirectory: appDirectory)
+    try storagePaths.ensureDirectoryHierarchy()
+
+    let primaryWorkspace = appDirectory.appendingPathComponent("primary-project", isDirectory: true)
+    let secondaryWorkspace = appDirectory.appendingPathComponent("shared-docs", isDirectory: true)
+    try FileManager.default.createDirectory(at: primaryWorkspace, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: secondaryWorkspace, withIntermediateDirectories: true)
+    let sharedFile = secondaryWorkspace.appendingPathComponent("shared.md")
+    try "Shared workspace root content".write(to: sharedFile, atomically: true, encoding: .utf8)
+
+    var runtimeSettings = AgentRuntimeSettings.default
+    runtimeSettings.workspace.roots = [
+        AgentRuntimeWorkspaceRoot(id: "primary", displayName: "Primary", path: primaryWorkspace.path, role: "project", isPrimary: true),
+        AgentRuntimeWorkspaceRoot(id: "shared", displayName: "Shared", path: secondaryWorkspace.path, role: "docs", isPrimary: false)
+    ]
+    runtimeSettings.workspace.syncLegacyFieldsFromRoots()
+    try AppRuntimeSettingsRepository(configDirectory: storagePaths.configDirectory).save(runtimeSettings)
+
+    let storeURL = appDirectory.appendingPathComponent("store.sqlite")
+    let store = try SQLiteGraphKernelStore(path: storeURL.path)
+    try store.migrate()
+    let settings = AppLLMSettingsRepository(
+        settingsStore: LocalToolsSettingsStore(),
+        credentialStore: LocalToolsCredentialStore()
+    )
+    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: settings, storagePaths: storagePaths)
+    let controller = factory.makeAgentLoopController(permissionMode: .readOnly)
+    let arguments = #"{"file_path":"\#(sharedFile.path)"}"#
+    let result = try await controller.toolRegistry.execute(
+        AgentToolCall(name: "Read", argumentsJSON: arguments),
+        context: AgentToolExecutionContext(
+            runID: "run-local-multi-root-workspace",
+            sessionID: "session-local-multi-root-workspace",
+            groupID: "default",
+            userPrompt: "read shared root",
+            toolCallID: "read-shared-root",
+            policyEngine: AgentPolicyEngine(permissionMode: .allowAll)
+        )
+    )
+
+    #expect(result.contentText.contains("Shared workspace root content"))
+    #expect(result.contentJSON?.contains("shared-docs") == true)
+}
+
 private final class LocalToolsSettingsStore: LLMSettingsStore, @unchecked Sendable {
     private var values: [String: String] = [:]
 

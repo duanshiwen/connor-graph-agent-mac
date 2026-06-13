@@ -61,4 +61,57 @@ struct AppProjectWorkingDirectoryResolverTests {
         #expect(resolved.url.path == "/tmp/session-project")
         #expect(resolved.source == .session)
     }
+
+    @Test("runtime workspace roots resolve primary and additional roots")
+    func runtimeWorkspaceRootsResolvePrimaryAndAdditionalRoots() throws {
+        let runtime = AgentRuntimeSettings(workspace: AgentRuntimeWorkspaceSettings(roots: [
+            AgentRuntimeWorkspaceRoot(id: "app", displayName: "App", path: "/tmp/app", role: "project", isPrimary: true),
+            AgentRuntimeWorkspaceRoot(id: "docs", displayName: "Docs", path: "/tmp/docs", role: "docs", isPrimary: false)
+        ]))
+
+        let resolved = AppProjectWorkingDirectoryResolver.resolveWorkspace(
+            runtimeSettings: runtime,
+            llmSettings: .default,
+            processCurrentDirectoryPath: "/tmp/process"
+        )
+
+        #expect(resolved.primary.url.path == "/tmp/app")
+        #expect(resolved.primary.source == .runtimeSettings)
+        #expect(resolved.roots.map(\.url.path) == ["/tmp/app", "/tmp/docs"])
+        #expect(resolved.additionalAllowedDirectories.map(\.path) == ["/tmp/docs"])
+    }
+
+    @Test("runtime workspace roots prefer explicit primary over first root")
+    func runtimeWorkspaceRootsPreferExplicitPrimaryOverFirstRoot() throws {
+        let runtime = AgentRuntimeSettings(workspace: AgentRuntimeWorkspaceSettings(roots: [
+            AgentRuntimeWorkspaceRoot(id: "docs", displayName: "Docs", path: "/tmp/docs", role: "docs", isPrimary: false),
+            AgentRuntimeWorkspaceRoot(id: "app", displayName: "App", path: "/tmp/app", role: "project", isPrimary: true)
+        ]))
+
+        let resolved = AppProjectWorkingDirectoryResolver.resolveWorkspace(
+            runtimeSettings: runtime,
+            llmSettings: .default,
+            processCurrentDirectoryPath: "/tmp/process"
+        )
+
+        #expect(resolved.primary.url.path == "/tmp/app")
+        #expect(resolved.additionalAllowedDirectories.map(\.path) == ["/tmp/docs"])
+    }
+
+    @Test("legacy workspace fields still resolve when roots are empty")
+    func legacyWorkspaceFieldsStillResolveWhenRootsAreEmpty() throws {
+        let runtime = AgentRuntimeSettings(workspace: AgentRuntimeWorkspaceSettings(
+            defaultWorkingDirectoryPath: "/tmp/runtime-project",
+            additionalAllowedDirectoryPaths: ["/tmp/shared"]
+        ))
+
+        let resolved = AppProjectWorkingDirectoryResolver.resolveWorkspace(
+            runtimeSettings: runtime,
+            llmSettings: .default,
+            processCurrentDirectoryPath: "/tmp/process"
+        )
+
+        #expect(resolved.primary.url.path == "/tmp/runtime-project")
+        #expect(resolved.additionalAllowedDirectories.map(\.path) == ["/tmp/shared"])
+    }
 }

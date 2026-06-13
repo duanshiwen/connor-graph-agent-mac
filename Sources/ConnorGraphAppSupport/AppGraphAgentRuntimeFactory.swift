@@ -194,10 +194,10 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         registry.register(GraphProposeWriteTool(repository: store))
         let settings = (try? settingsRepository.loadSettings()) ?? .default
         let runtimeSettings = loadRuntimeSettings()
-        let resolvedWorkspace = AppProjectWorkingDirectoryResolver.resolve(runtimeSettings: runtimeSettings, llmSettings: settings)
+        let resolvedWorkspace = AppProjectWorkingDirectoryResolver.resolveWorkspace(runtimeSettings: runtimeSettings, llmSettings: settings)
         let localWorkspacePolicy = LocalWorkspacePolicy(
-            workingDirectory: resolvedWorkspace.url,
-            additionalAllowedDirectories: AppProjectWorkingDirectoryResolver.additionalAllowedDirectories(from: runtimeSettings)
+            workingDirectory: resolvedWorkspace.primary.url,
+            additionalAllowedDirectories: resolvedWorkspace.additionalAllowedDirectories
         )
         registry.register(LocalReadFileTool(policy: localWorkspacePolicy))
         registry.register(LocalListDirectoryTool(policy: localWorkspacePolicy))
@@ -270,7 +270,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     }
 
     private func resolvedProjectWorkingDirectory(llmSettings: AppLLMSettings) -> ResolvedProjectWorkingDirectory {
-        AppProjectWorkingDirectoryResolver.resolve(runtimeSettings: loadRuntimeSettings(), llmSettings: llmSettings)
+        AppProjectWorkingDirectoryResolver.resolveWorkspace(runtimeSettings: loadRuntimeSettings(), llmSettings: llmSettings).primary
     }
 
     private static func splitSidecarArguments(_ arguments: String) -> [String] {
