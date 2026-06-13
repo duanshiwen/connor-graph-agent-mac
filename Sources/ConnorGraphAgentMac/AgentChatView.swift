@@ -206,7 +206,10 @@ private struct AgentChatConversationView: View {
     @ObservedObject var viewModel: AppViewModel
     @Binding var isSessionInfoPresented: Bool
     @State private var activityDetailEvent: AgentEventPresentation?
-    @State private var focusedTurnNumber: Int?
+    @State private var chatScrollView: NSScrollView?
+    @State private var lastObservedSessionID: String?
+    @State private var lastObservedTranscriptCount: Int = 0
+    @State private var pendingSessionTranscriptReloadID: String?
 
     private var timelineItems: [AgentChatTurnTimelineItem] {
         AgentChatTurnTimelineItem.items(
@@ -236,20 +239,8 @@ private struct AgentChatConversationView: View {
         }
     }
 
-    private var currentTurnIndex: Int? {
-        guard !turnAnchors.isEmpty else { return nil }
-        let currentTurnNumber = focusedTurnNumber ?? turnAnchors.last?.turnNumber
-        guard let currentTurnNumber else { return nil }
-        return turnAnchors.lastIndex { $0.turnNumber <= currentTurnNumber }
-    }
-
-    private var canJumpToPreviousTurn: Bool {
-        guard let currentTurnIndex else { return false }
-        return currentTurnIndex > 0
-    }
-
-    private var canJumpToNextTurn: Bool {
-        currentTurnIndex != nil
+    private var canNavigateTurns: Bool {
+        turnAnchors.count > 1
     }
 
     private static func turnNumber(fromTimestampID id: String) -> Int? {
@@ -258,23 +249,17 @@ private struct AgentChatConversationView: View {
         return Int(id.dropFirst(prefix.count))
     }
 
-    private func jumpTurn(direction: Int, proxy: ScrollViewProxy) {
-        guard !turnAnchors.isEmpty else { return }
-        let currentIndex = currentTurnIndex ?? (turnAnchors.count - 1)
-        if direction > 0, currentIndex >= turnAnchors.count - 1 {
-            focusedTurnNumber = turnAnchors.last?.turnNumber
-            withAnimation(.easeOut(duration: 0.22)) {
-                proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
-            }
-            return
-        }
-        let targetIndex = min(max(currentIndex + direction, 0), turnAnchors.count - 1)
-        guard targetIndex != currentIndex else { return }
-        let target = turnAnchors[targetIndex]
-        focusedTurnNumber = target.turnNumber
-        withAnimation(.easeOut(duration: 0.22)) {
-            proxy.scrollTo(target.id, anchor: .top)
-        }
+    private func scrollConversation(direction: Int) {
+        guard let scrollView = chatScrollView else { return }
+        let visibleRect = scrollView.contentView.bounds
+        let documentHeight = scrollView.documentView?.bounds.height ?? visibleRect.height
+        let pageStep = max(visibleRect.height * 0.82, 180)
+        let maxY = max(documentHeight - visibleRect.height, 0)
+        let yDirection: CGFloat = scrollView.documentView?.isFlipped == true ? 1 : -1
+        let proposedY = visibleRect.origin.y + (CGFloat(direction) * yDirection * pageStep)
+        let targetY = min(max(proposedY, 0), maxY)
+        scrollView.contentView.animator().setBoundsOrigin(NSPoint(x: visibleRect.origin.x, y: targetY))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 
     private static let bottomAnchorID = "agent-chat-bottom-anchor"
@@ -327,23 +312,47 @@ private struct AgentChatConversationView: View {
                     .padding(.horizontal, 0)
                     .padding(.vertical, AgentChatLayout.spaceXL)
                 }
-                .onChange(of: viewModel.transcript.count) { _, _ in
-                    focusedTurnNumber = turnAnchors.last?.turnNumber
+                .background(AgentChatScrollViewResolver { scrollView in
+                    chatScrollView = scrollView
+                })
+                .onAppear {
+                    lastObservedSessionID = viewModel.selectedChatSessionID
+                    lastObservedTranscriptCount = viewModel.transcript.count
+                }
+                .onChange(of: viewModel.selectedChatSessionID) { _, newSessionID in
+                    pendingSessionTranscriptReloadID = newSessionID
+                    lastObservedSessionID = newSessionID
+                    lastObservedTranscriptCount = viewModel.transcript.count
+                }
+                .onChange(of: viewModel.transcript.count) { oldCount, newCount in
+                    let currentSessionID = viewModel.selectedChatSessionID
+                    defer {
+                        lastObservedSessionID = currentSessionID
+                        lastObservedTranscriptCount = newCount
+                    }
+                    if pendingSessionTranscriptReloadID == currentSessionID {
+                        pendingSessionTranscriptReloadID = nil
+                        return
+                    }
+                    guard currentSessionID == lastObservedSessionID,
+                          newCount > oldCount,
+                          newCount > lastObservedTranscriptCount
+                    else { return }
                     scrollToBottom(proxy: proxy)
                 }
-                .onChange(of: viewModel.isSubmittingChat) { _, _ in
-                    focusedTurnNumber = turnAnchors.last?.turnNumber
+                .onChange(of: viewModel.isSubmittingChat) { _, isSubmitting in
+                    guard isSubmitting else { return }
                     scrollToBottom(proxy: proxy)
                 }
 
                 AgentChatComposerView(
                     viewModel: viewModel,
                     isSessionInfoPresented: $isSessionInfoPresented,
-                    turnNavigation: turnAnchors.count > 1 ? AgentChatTurnNavigation(
-                        canJumpToPrevious: canJumpToPreviousTurn,
-                        canJumpToNext: canJumpToNextTurn,
-                        onPrevious: { jumpTurn(direction: -1, proxy: proxy) },
-                        onNext: { jumpTurn(direction: 1, proxy: proxy) }
+                    turnNavigation: canNavigateTurns ? AgentChatTurnNavigation(
+                        canJumpToPrevious: true,
+                        canJumpToNext: true,
+                        onPrevious: { scrollConversation(direction: -1) },
+                        onNext: { scrollConversation(direction: 1) }
                     ) : nil
                 )
                 .padding(.horizontal, 0)
@@ -363,6 +372,24 @@ private struct AgentChatConversationView: View {
         }
         .padding(.horizontal, AgentChatLayout.spaceL)
         .padding(.vertical, AgentChatLayout.spaceM)
+    }
+}
+
+private struct AgentChatScrollViewResolver: NSViewRepresentable {
+    var onResolve: (NSScrollView?) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        DispatchQueue.main.async {
+            onResolve(view.enclosingScrollView)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            onResolve(nsView.enclosingScrollView)
+        }
     }
 }
 
@@ -545,15 +572,65 @@ struct AgentMarkdownPreviewText: View {
         case code(String)
         case spacer
 
-        var id: String { UUID().uuidString }
+        var id: String {
+            switch self {
+            case .heading(let level, let text): return "heading-\(level)-\(text.hashValue)"
+            case .paragraph(let text): return "paragraph-\(text.hashValue)"
+            case .unorderedItem(let text): return "unordered-\(text.hashValue)"
+            case .orderedItem(let number, let text): return "ordered-\(number)-\(text.hashValue)"
+            case .quote(let text): return "quote-\(text.hashValue)"
+            case .code(let text): return "code-\(text.hashValue)"
+            case .spacer: return "spacer"
+            }
+        }
+    }
+
+    @MainActor
+    private final class RenderCache {
+        static let shared = RenderCache()
+        private var inlineCache: [String: AttributedString] = [:]
+        private var blockCache: [String: [Block]] = [:]
+        private let limit = 600
+
+        func inline(_ markdown: String) -> AttributedString {
+            if let cached = inlineCache[markdown] { return cached }
+            let rendered: AttributedString
+            if let attributed = try? AttributedString(
+                markdown: markdown,
+                options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+            ) {
+                rendered = attributed
+            } else {
+                rendered = AttributedString(markdown)
+            }
+            storeInline(rendered, for: markdown)
+            return rendered
+        }
+
+        func blocks(_ markdown: String, parse: (String) -> [Block]) -> [Block] {
+            if let cached = blockCache[markdown] { return cached }
+            let parsed = parse(markdown)
+            storeBlocks(parsed, for: markdown)
+            return parsed
+        }
+
+        private func storeInline(_ value: AttributedString, for key: String) {
+            if inlineCache.count >= limit { inlineCache.removeAll(keepingCapacity: true) }
+            inlineCache[key] = value
+        }
+
+        private func storeBlocks(_ value: [Block], for key: String) {
+            if blockCache.count >= limit { blockCache.removeAll(keepingCapacity: true) }
+            blockCache[key] = value
+        }
     }
 
     private var inlineRendered: AttributedString {
-        renderInline(markdown)
+        RenderCache.shared.inline(markdown)
     }
 
     private var blocks: [Block] {
-        parseBlocks(markdown)
+        RenderCache.shared.blocks(markdown, parse: parseBlocks)
     }
 
     @ViewBuilder
@@ -643,13 +720,7 @@ struct AgentMarkdownPreviewText: View {
     }
 
     private func renderInline(_ text: String) -> AttributedString {
-        if let attributed = try? AttributedString(
-            markdown: text,
-            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        ) {
-            return attributed
-        }
-        return AttributedString(text)
+        RenderCache.shared.inline(text)
     }
 
     private func parseBlocks(_ markdown: String) -> [Block] {
