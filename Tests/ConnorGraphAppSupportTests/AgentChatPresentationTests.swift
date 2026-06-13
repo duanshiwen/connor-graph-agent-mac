@@ -34,7 +34,7 @@ import ConnorGraphAppSupport
     #expect(rows.map(\.roleLabel) == ["用户", "助手", "用户", "助手"])
 }
 
-@Test func agentChatTurnTimelinePlacesProcessBetweenUserAndAssistant() {
+@Test func agentChatTurnTimelinePlacesTimestampAndProcessBetweenUserAndAssistant() {
     let snapshot = AgentPromptInspectionSnapshot(
         includesSummary: false,
         recentMessageCount: 2,
@@ -45,17 +45,33 @@ import ConnorGraphAppSupport
         promptBudgetStatus: .safe
     )
     let messages = [
-        AgentMessage(id: "user-1", role: .user, content: "memory"),
+        AgentMessage(id: "user-1", role: .user, content: "memory", createdAt: Date(timeIntervalSince1970: 1_000)),
         AgentMessage(id: "assistant-1", role: .assistant, content: "Answer", promptInspection: snapshot)
     ]
 
-    let items = AgentChatTurnTimelineItem.items(messages: messages, lastContext: nil, isSubmitting: false)
+    let items = AgentChatTurnTimelineItem.items(messages: messages, lastContext: nil, isSubmitting: false, now: Date(timeIntervalSince1970: 1_900))
 
-    #expect(items.map(\.id) == ["user-1", "process-assistant-1", "assistant-1"])
-    #expect(items.map(\.kindLabel) == ["message", "process", "message"])
-    #expect(items[1].process?.turnNumber == 1)
-    #expect(items[1].process?.state == .completed)
-    #expect(items[1].process?.summary == "第 1 轮 · 本轮提示词：摘要未包含 · 对话上下文 2 条 · 完整历史 1 条 · 约 30 tokens · 安全")
+    #expect(items.map(\.id) == ["timestamp-turn-1", "user-1", "process-assistant-1", "assistant-1"])
+    #expect(items.map(\.kindLabel) == ["timestamp", "message", "process", "message"])
+    #expect(items[0].timestamp?.text == "上午 8:16")
+    #expect(items[2].process?.turnNumber == 1)
+    #expect(items[2].process?.state == .completed)
+    #expect(items[2].process?.summary == "第 1 轮 · 本轮提示词：摘要未包含 · 对话上下文 2 条 · 完整历史 1 条 · 约 30 tokens · 安全")
+}
+
+@Test func agentChatTurnTimestampFormatsTodayYesterdayAndOlderDates() {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 8 * 3_600)!
+    let now = DateComponents(calendar: calendar, timeZone: calendar.timeZone, year: 2026, month: 6, day: 13, hour: 15, minute: 21).date!
+    let today = DateComponents(calendar: calendar, timeZone: calendar.timeZone, year: 2026, month: 6, day: 13, hour: 9, minute: 5).date!
+    let yesterday = DateComponents(calendar: calendar, timeZone: calendar.timeZone, year: 2026, month: 6, day: 12, hour: 22, minute: 30).date!
+    let olderSameYear = DateComponents(calendar: calendar, timeZone: calendar.timeZone, year: 2026, month: 6, day: 10, hour: 15, minute: 8).date!
+    let olderPreviousYear = DateComponents(calendar: calendar, timeZone: calendar.timeZone, year: 2025, month: 12, day: 31, hour: 23, minute: 59).date!
+
+    #expect(AgentChatTurnTimestampPresentation.text(for: today, now: now, calendar: calendar) == "上午 9:05")
+    #expect(AgentChatTurnTimestampPresentation.text(for: yesterday, now: now, calendar: calendar) == "昨天")
+    #expect(AgentChatTurnTimestampPresentation.text(for: olderSameYear, now: now, calendar: calendar) == "6月10日 下午 3:08")
+    #expect(AgentChatTurnTimestampPresentation.text(for: olderPreviousYear, now: now, calendar: calendar) == "2025年12月31日 下午 11:59")
 }
 
 @Test func agentChatTurnTimelineCarriesFullConversationHistoryForEachProcess() {
@@ -87,7 +103,7 @@ import ConnorGraphAppSupport
     let items = AgentChatTurnTimelineItem.items(messages: messages, lastContext: nil, isSubmitting: false)
     let processes = items.compactMap(\.process)
 
-    #expect(items.map(\.id) == ["user-1", "process-assistant-1", "assistant-1", "user-2", "process-assistant-2", "assistant-2"])
+    #expect(items.map(\.id) == ["timestamp-turn-1", "user-1", "process-assistant-1", "assistant-1", "timestamp-turn-2", "user-2", "process-assistant-2", "assistant-2"])
     #expect(processes[0].fullConversationMessageCount == 1)
     #expect(processes[0].conversationHistory.map(\.message.content) == ["你好"])
     #expect(processes[1].fullConversationMessageCount == 3)
@@ -100,10 +116,10 @@ import ConnorGraphAppSupport
 
     let items = AgentChatTurnTimelineItem.items(messages: messages, lastContext: nil, isSubmitting: true)
 
-    #expect(items.map(\.id) == ["user-1", "process-pending-assistant"])
-    #expect(items.map(\.kindLabel) == ["message", "process"])
-    #expect(items[1].process?.turnNumber == 1)
-    #expect(items[1].process?.state == .running)
+    #expect(items.map(\.id) == ["timestamp-turn-1", "user-1", "process-pending-assistant"])
+    #expect(items.map(\.kindLabel) == ["timestamp", "message", "process"])
+    #expect(items[2].process?.turnNumber == 1)
+    #expect(items[2].process?.state == .running)
 }
 
 @Test func agentChatAssistantTurnMetadataSummarizesPromptInspection() {
