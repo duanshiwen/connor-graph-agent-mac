@@ -224,6 +224,9 @@ private struct AgentChatConversationView: View {
                                         }
                                     )
                                     .id(item.id)
+                                } else if let timestamp = item.timestamp {
+                                    AgentChatTurnTimestampRow(timestamp: timestamp)
+                                        .id(item.id)
                                 }
                             }
                         }
@@ -590,6 +593,22 @@ struct AgentMarkdownPreviewText: View {
         let rest = line[line.index(after: dot)...]
         guard rest.first == " " else { return nil }
         return (number, String(rest.dropFirst()).trimmingCharacters(in: .whitespaces))
+    }
+}
+
+private struct AgentChatTurnTimestampRow: View {
+    var timestamp: AgentChatTurnTimestampPresentation
+
+    var body: some View {
+        Text(timestamp.text)
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(.tertiary)
+            .lineLimit(1)
+            .padding(.horizontal, AgentChatLayout.spaceM)
+            .padding(.vertical, 2)
+            .background(.quaternary.opacity(0.12), in: Capsule())
+            .frame(maxWidth: .infinity, alignment: .center)
+            .accessibilityLabel("对话时间 \(timestamp.text)")
     }
 }
 
