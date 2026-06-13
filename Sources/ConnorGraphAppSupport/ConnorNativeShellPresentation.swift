@@ -211,7 +211,7 @@ public struct ConnorNativeShellPresentation: Codable, Sendable, Equatable {
     }
 
     public static let `default` = ConnorNativeShellPresentation(
-        title: "Connor",
+        title: "康纳同学",
         defaultSelection: .agentChat,
         sidebarGroups: [
             ConnorNativeShellSidebarGroup(id: "work", title: "Work", items: [

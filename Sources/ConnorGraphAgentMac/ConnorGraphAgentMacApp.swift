@@ -15,8 +15,8 @@ struct ConnorGraphAgentMacApp: App {
             AppShellView(viewModel: viewModel)
         }
         .commands {
-            CommandMenu("Connor") {
-                Button("Open Command Palette") {
+            CommandMenu("康纳同学") {
+                Button("打开命令面板") {
                     viewModel.isCommandPalettePresented = true
                 }
                 .keyboardShortcut("k", modifiers: .command)
@@ -200,6 +200,7 @@ final class AppViewModel: ObservableObject {
     @Published var chatSessions: [AgentSession] = []
     @Published var selectedChatSessionID: String?
     @Published var sessionListFilter: AgentSessionListFilter = .all
+    @Published var sessionSearchQuery: String = ""
     @Published var governanceConfig: AppSessionGovernanceConfig = .default
     @Published var productOSRegistry: ProductOSRegistrySnapshot = .default
     @Published var automationConfig: ProductOSAutomationConfig = .default
@@ -361,6 +362,11 @@ final class AppViewModel: ObservableObject {
         showBrowserWorkspace()
     }
 
+    func openProjectGitHubHelp() {
+        guard let url = URL(string: "https://github.com/duanshiwen/connor-graph-agent-mac") else { return }
+        openURLInCurrentChatBrowser(url)
+    }
+
     @discardableResult
     func startBrowserAssistedSearch(urlString: String, title: String, revealImmediately: Bool = false) -> BrowserAssistedTaskState {
         let sessionID = selectedChatSessionID ?? activeChatSession.id
@@ -452,7 +458,7 @@ final class AppViewModel: ObservableObject {
             navigate(to: resolution.item)
             errorMessage = nil
         } catch {
-            errorMessage = "Unsupported Connor link: \(url.absoluteString)"
+            errorMessage = "不支持的康纳同学链接：\(url.absoluteString)"
         }
     }
 
@@ -682,7 +688,7 @@ final class AppViewModel: ObservableObject {
         let workObject = GraphEntity(
             id: "work-object-agent-os",
             graphID: "default",
-            name: "Agent OS",
+            name: "康纳同学",
             stableKey: "project:work_object:agent-os",
             entityKind: .workObject,
             scope: .project,
@@ -800,7 +806,7 @@ final class AppViewModel: ObservableObject {
         do {
             if let productOSRegistryRepository {
                 productOSRegistry = try productOSRegistryRepository.loadOrCreateDefault()
-                productOSRegistryMessage = "Product OS registry loaded from Connor Home."
+                productOSRegistryMessage = "Product OS 注册表已从康纳同学 Home 加载。"
             }
             errorMessage = nil
         } catch {
@@ -904,7 +910,7 @@ final class AppViewModel: ObservableObject {
         do {
             guard let productOSRegistryRepository else { return }
             productOSRegistry = try productOSRegistryRepository.setSourceStatus(id: id, status: status)
-            productOSRegistryMessage = "Source \(id) is now \(status.rawValue). Connor still owns credentials, permissions, audit, and graph ingestion."
+            productOSRegistryMessage = "Source \(id) 当前状态为 \(status.rawValue)。康纳同学仍负责凭据、权限、审计和图谱摄取治理。"
             appendProductOSRegistryEvent(kind: "source", entryID: id, status: status, message: productOSRegistryMessage ?? "Source registry changed")
             evaluateAutomation(ProductOSAutomationEventContext(triggerKind: .sourceRegistryChanged, sessionID: selectedChatSessionID ?? activeChatSession.id, registryEntryID: id))
             errorMessage = nil
@@ -1960,30 +1966,62 @@ final class AppViewModel: ObservableObject {
 struct AppShellView: View {
     @StateObject var viewModel: AppViewModel
     @State private var sidebarSelection: SidebarItem? = .agentChat
+    @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
-        HStack(spacing: 0) {
+        NavigationSplitView(columnVisibility: $splitViewVisibility) {
             CraftPrimarySidebarView(viewModel: viewModel, selection: $sidebarSelection)
-                .frame(width: 264)
+                .navigationSplitViewColumnWidth(min: 220, ideal: 264, max: 320)
                 .background(.bar)
-
-            Divider()
-
+                .controlSize(.small)
+        } content: {
             CraftListPaneView(viewModel: viewModel, selection: $sidebarSelection)
-                .frame(width: 314)
+                .navigationSplitViewColumnWidth(min: 260, ideal: 314, max: 380)
                 .background(Color(nsColor: .windowBackgroundColor).opacity(0.84))
-
-            Divider()
-
+                .controlSize(.small)
+        } detail: {
             CraftDetailPaneView(viewModel: viewModel, selection: sidebarSelection ?? .agentChat)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
+                .controlSize(.small)
+        }
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                    TextField("搜索会话标题和内容", text: $viewModel.sessionSearchQuery)
+                        .textFieldStyle(.plain)
+                        .frame(minWidth: 220, idealWidth: 320, maxWidth: 420)
+                    if !viewModel.sessionSearchQuery.isEmpty {
+                        Button(action: { viewModel.sessionSearchQuery = "" }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("清除搜索")
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color(nsColor: .separatorColor).opacity(0.32), lineWidth: 1)
+                )
+            }
+
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: { viewModel.openProjectGitHubHelp() }) {
+                    Label("帮助", systemImage: "questionmark.circle")
+                }
+                .help("用内置浏览器打开项目 GitHub 页面")
+            }
         }
         .overlay(alignment: .topLeading) {
             BrowserBackgroundTaskRunnerView(viewModel: viewModel)
         }
         .frame(minWidth: 1120, minHeight: 680)
-        .controlSize(.small)
         .onAppear {
             sidebarSelection = viewModel.selection ?? .agentChat
             viewModel.reloadChatSessions()
@@ -2002,14 +2040,26 @@ struct AppShellView: View {
             ConnorCommandPaletteView(viewModel: viewModel)
         }
     }
+
+}
+
+private enum AppListTypography {
+    static let actionTitle: Font = .system(size: 13.5, weight: .regular)
+    static let actionIcon: Font = .system(size: 14.5, weight: .medium)
+    static let header: Font = .system(size: 15.5, weight: .semibold)
+    static let rowTitle: Font = .system(size: 14.5, weight: .regular)
+    static let rowTitleSelected: Font = .system(size: 14.5, weight: .semibold)
+    static let rowSubtitle: Font = .system(size: 12.5)
+    static let rowCaption: Font = .system(size: 12.5)
+    static let rowCaptionEmphasized: Font = .system(size: 12.5, weight: .semibold)
 }
 
 struct SidebarActionButtonLabel: View {
     var title: String
     var systemImage: String
     var fillsWidth: Bool = true
-    var titleFont: Font = .system(size: 12, weight: .regular)
-    var iconFont: Font = .system(size: 13, weight: .medium)
+    var titleFont: Font = AppListTypography.actionTitle
+    var iconFont: Font = AppListTypography.actionIcon
     var minHeight: CGFloat = 24
 
     var body: some View {
@@ -2177,7 +2227,7 @@ private struct CraftListPaneView: View {
             case .productOS:
                 CraftSimpleListPane(title: "Product OS", subtitle: "本地控制面模块", rows: viewModel.productOSRegistry.sources.map(\.displayName) + viewModel.productOSRegistry.skills.map(\.displayName))
             default:
-                CraftSimpleListPane(title: (selection ?? .agentChat).rawValue, subtitle: "Connor 工作区", rows: [])
+                CraftSimpleListPane(title: (selection ?? .agentChat).rawValue, subtitle: "康纳同学工作区", rows: [])
             }
         }
     }
@@ -2190,7 +2240,7 @@ private struct CraftSessionListPane: View {
         VStack(spacing: 0) {
             ZStack {
                 Text(sessionListTitle)
-                    .font(.headline)
+                    .font(AppListTypography.header)
                     .frame(maxWidth: .infinity, alignment: .center)
 
                 HStack {
@@ -2207,7 +2257,7 @@ private struct CraftSessionListPane: View {
 
             ScrollView {
                 LazyVStack(spacing: 2) {
-                    ForEach(viewModel.chatSessions) { session in
+                    ForEach(filteredSessions) { session in
                         CraftSessionRow(row: AgentChatSessionPresentation(session: session), isSelected: session.id == viewModel.selectedChatSessionID) {
                             var transaction = Transaction()
                             transaction.disablesAnimations = true
@@ -2216,15 +2266,24 @@ private struct CraftSessionListPane: View {
                             }
                         }
                     }
-                    if viewModel.chatSessions.isEmpty {
-                        ContentUnavailableView("暂无会话", systemImage: "bubble.left", description: Text("点击左上角新建会话开始。"))
-                            .padding(.top, 80)
+                    if filteredSessions.isEmpty {
+                        if viewModel.sessionSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            ContentUnavailableView("暂无会话", systemImage: "bubble.left", description: Text("点击左上角新建会话开始。"))
+                                .padding(.top, 80)
+                        } else {
+                            ContentUnavailableView("没有匹配的会话", systemImage: "magnifyingglass", description: Text("搜索会匹配会话标题和消息内容。"))
+                                .padding(.top, 80)
+                        }
                     }
                 }
                 .padding(8)
             }
         }
         .task { viewModel.reloadChatSessions() }
+    }
+
+    private var filteredSessions: [AgentSession] {
+        AgentSessionTextSearchFilter().filter(viewModel.chatSessions, query: viewModel.sessionSearchQuery)
     }
 
     private var sessionListTitle: String {
@@ -2292,28 +2351,28 @@ private struct CraftSessionRow: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Text(row.title)
-                        .font(.subheadline.weight(isSelected ? .semibold : .regular))
+                        .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
                         .lineLimit(1)
                     Spacer(minLength: 4)
                     Text(row.relativeUpdatedTime)
-                        .font(.caption2)
+                        .font(AppListTypography.rowCaption)
                         .foregroundStyle(.secondary)
                 }
                 HStack(spacing: 6) {
                     Text(row.statusText)
-                        .font(.caption2.weight(.semibold))
+                        .font(AppListTypography.rowCaptionEmphasized)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(statusColor(row.status).opacity(0.14), in: Capsule())
                     Text("\(row.messageCount) msgs")
-                        .font(.caption2)
+                        .font(AppListTypography.rowCaption)
                         .foregroundStyle(.secondary)
                 }
                 if !row.labels.isEmpty {
                     HStack(spacing: 4) {
                         ForEach(Array(row.labels.prefix(3)), id: \.stableID) { label in
                             Text(label.displayText)
-                                .font(.caption2)
+                                .font(AppListTypography.rowCaption)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
                                 .background(.purple.opacity(0.10), in: Capsule())
@@ -2387,7 +2446,7 @@ private struct CraftSettingsListPane: View {
     var body: some View {
         VStack(spacing: 0) {
             Text("设置")
-                .font(.headline)
+                .font(AppListTypography.header)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
             Divider()
@@ -2424,8 +2483,8 @@ private struct SettingsCategoryRow: View {
                     .foregroundStyle(isSelected ? Color.primary : Color.secondary)
                     .frame(width: 18)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.subheadline.weight(.medium))
-                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                    Text(title).font(AppListTypography.rowTitleSelected)
+                    Text(subtitle).font(AppListTypography.rowSubtitle).foregroundStyle(.secondary)
                 }
                 Spacer()
                 if isSelected {
@@ -2451,8 +2510,8 @@ private struct CraftSimpleListPane: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(spacing: 3) {
-                Text(title).font(.headline)
-                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                Text(title).font(AppListTypography.header)
+                Text(subtitle).font(AppListTypography.rowSubtitle).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 14)
@@ -2461,7 +2520,7 @@ private struct CraftSimpleListPane: View {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(rows.isEmpty ? ["在右侧查看详情"] : rows, id: \.self) { row in
                         Text(row)
-                            .font(.subheadline)
+                            .font(AppListTypography.rowTitle)
                             .lineLimit(1)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(10)
@@ -2489,7 +2548,7 @@ private struct SidebarDisclosure<Content: View>: View {
             .padding(.top, 3)
         } label: {
             Label(title, systemImage: systemImage)
-                .font(.subheadline.weight(.medium))
+                .font(AppListTypography.rowTitleSelected)
         }
         .disclosureGroupStyle(.automatic)
     }
@@ -2509,12 +2568,12 @@ private struct SidebarRow: View {
                     .frame(width: 16)
                     .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
                 Text(title)
-                    .font(.subheadline)
+                    .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 if let count {
                     Text("\(count)")
-                        .font(.caption2.monospacedDigit())
+                        .font(AppListTypography.rowCaption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
             }
@@ -2534,7 +2593,7 @@ private struct SidebarMutedText: View {
 
     var body: some View {
         Text(text)
-            .font(.caption)
+            .font(AppListTypography.rowSubtitle)
             .foregroundStyle(.secondary)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -2756,7 +2815,7 @@ struct AgentPendingApprovalReviewView: View {
             }
 
             if viewModel.pendingApprovals.isEmpty {
-                Text("暂无待审批权限请求。Sidecar 只能请求权限，Connor 负责审批、审计和 timeline。")
+                Text("暂无待审批权限请求。Sidecar 只能请求权限，康纳同学负责审批、审计和 timeline。")
                     .foregroundStyle(.secondary)
                 Spacer()
             } else {
@@ -3213,7 +3272,7 @@ struct ProductOSRegistryView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Product OS Registry")
                             .font(.largeTitle.bold())
-                        Text("Phase 5 将 Automation / Labels / Statuses 纳入 Connor-owned 控制平面：自动化只能记录和建议，不能绕过权限、审计和图谱准入。")
+                        Text("Phase 5 将 Automation / Labels / Statuses 纳入康纳同学控制平面：自动化只能记录和建议，不能绕过权限、审计和图谱准入。")
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
@@ -3322,7 +3381,7 @@ struct ProductOSRegistryView: View {
                 GroupBox("Phase 5 Guardrails") {
                     VStack(alignment: .leading, spacing: 8) {
                         Label("Single Home Root: no multi-workspace abstraction is introduced.", systemImage: "house")
-                        Label("Source credentials and connector execution remain governed by Connor.", systemImage: "lock.shield")
+                        Label("数据源凭据和连接器执行仍由康纳同学治理。", systemImage: "lock.shield")
                         Label("Skills are instruction profiles; they cannot bypass graph admission or audit.", systemImage: "checkmark.seal")
                         Label("Graph memory stays a kernel, not a normal RAG/source plugin.", systemImage: "brain.head.profile")
                         Label("Automation execution is audit-first: actions are recorded for review before becoming background execution.", systemImage: "bolt.badge.clock")
@@ -3617,13 +3676,13 @@ struct LLMSettingsView: View {
                             .textFieldStyle(.roundedBorder)
                         TextField("Working directory", text: $viewModel.sidecarWorkingDirectoryPath)
                             .textFieldStyle(.roundedBorder)
-                        Picker("Connor 权限模式", selection: $viewModel.sidecarPermissionMode) {
+                        Picker("康纳同学权限模式", selection: $viewModel.sidecarPermissionMode) {
                             Text("只读").tag(AgentPermissionMode.readOnly)
                             Text("写入需审批").tag(AgentPermissionMode.askToWrite)
                             Text("受信写入").tag(AgentPermissionMode.trustedWrite)
                         }
                         .pickerStyle(.segmented)
-                        Text("安全边界：SDK permissionMode 固定为 bypassPermissions；Connor 保留 session、pending approval、audit、graph memory 和 product state 主权。Sidecar 模式不允许 allowAll。")
+                        Text("安全边界：SDK permissionMode 固定为 bypassPermissions；康纳同学保留 session、pending approval、audit、graph memory 和 product state 主权。Sidecar 模式不允许 allowAll。")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -3652,9 +3711,9 @@ struct LLMSettingsView: View {
 
             GroupBox {
                 VStack(alignment: .leading, spacing: 6) {
-                    Label("安全提示：API Key 会保存到 Connor Home 的本地加密凭据文件", systemImage: "lock.shield")
+                    Label("安全提示：API Key 会保存到康纳同学 Home 的本地加密凭据文件", systemImage: "lock.shield")
                         .font(.caption.weight(.semibold))
-                    Text("为减少钥匙串弹窗，Connor Graph Agent 会使用本机生成的 master key 对 API Key 进行 AES-GCM 加密，并写入 Application Support/Connor/config/credentials。")
+                    Text("为减少钥匙串弹窗，康纳同学会使用本机生成的 master key 对 API Key 进行 AES-GCM 加密，并写入 Application Support/Connor/config/credentials。")
                     Text("API Key 不会以明文写入应用设置、项目文件或 Git 仓库；删除 API Key 会移除对应加密凭据文件。")
                     Text("这是本机本地加密存储，不依赖 macOS 钥匙串授权弹窗。")
                 }
@@ -3996,7 +4055,7 @@ private struct SettingsPreferencesSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsGroup(title: "基本信息") {
-                SettingsTextFieldRow(title: "名称", subtitle: "Connor 如何称呼你。", text: $viewModel.userDisplayName)
+                SettingsTextFieldRow(title: "名称", subtitle: "康纳同学如何称呼你。", text: $viewModel.userDisplayName)
                 Divider()
                 SettingsTextFieldRow(title: "时区", subtitle: "用于相对日期和日程上下文。", text: $viewModel.userTimezone)
             }
