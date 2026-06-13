@@ -2031,15 +2031,19 @@ private struct CraftSessionListPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
+            ZStack {
                 Text(sessionListTitle)
                     .font(.headline)
-                Spacer()
-                Button(action: { viewModel.reloadChatSessions() }) {
-                    Image(systemName: "line.3.horizontal.decrease")
+                    .frame(maxWidth: .infinity, alignment: .center)
+
+                HStack {
+                    Spacer()
+                    Button(action: { viewModel.reloadChatSessions() }) {
+                        Image(systemName: "line.3.horizontal.decrease")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("刷新/过滤")
                 }
-                .buttonStyle(.borderless)
-                .help("刷新/过滤")
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
