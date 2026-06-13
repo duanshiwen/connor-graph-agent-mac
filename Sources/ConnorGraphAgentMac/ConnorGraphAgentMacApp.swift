@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import ConnorGraphCore
 import ConnorGraphMemory
 import ConnorGraphSearch
@@ -66,6 +67,28 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case llmSettings = "模型设置"
 
     var id: String { rawValue }
+}
+
+struct WorkspaceRootDraft: Identifiable, Equatable {
+    var id: String
+    var displayName: String
+    var path: String
+    var role: String
+    var isPrimary: Bool
+
+    init(
+        id: String = UUID().uuidString,
+        displayName: String,
+        path: String,
+        role: String = "project",
+        isPrimary: Bool = false
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.path = path
+        self.role = role
+        self.isPrimary = isPrimary
+    }
 }
 
 enum ConnorSettingsSection: String, CaseIterable, Identifiable {
@@ -241,6 +264,8 @@ final class AppViewModel: ObservableObject {
     @Published var requireApprovalForNetwork: Bool = true
     @Published var requireApprovalForShell: Bool = true
     @Published var defaultWorkingDirectoryPath: String = ""
+    @Published var workspaceRoots: [WorkspaceRootDraft] = []
+    @Published var workspaceRootPathInput: String = ""
     @Published var userDisplayName: String = "诗闻"
     @Published var userTimezone: String = "Asia/Shanghai"
     @Published var userCity: String = "杭州"
@@ -1060,6 +1085,7 @@ final class AppViewModel: ObservableObject {
             requireApprovalForNetwork = settings.permissions.requireApprovalForNetwork
             requireApprovalForShell = settings.permissions.requireApprovalForShell
             defaultWorkingDirectoryPath = settings.workspace.defaultWorkingDirectoryPath
+            workspaceRoots = Self.workspaceRootDrafts(from: settings.workspace)
             userDisplayName = settings.preferences.displayName
             userTimezone = settings.preferences.timezone
             userCity = settings.preferences.city
@@ -1089,7 +1115,14 @@ final class AppViewModel: ObservableObject {
             settings.input.composerSendShortcut = composerSendShortcut
             settings.permissions.requireApprovalForNetwork = requireApprovalForNetwork
             settings.permissions.requireApprovalForShell = requireApprovalForShell
-            settings.workspace.defaultWorkingDirectoryPath = defaultWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+            settings.workspace.roots = runtimeWorkspaceRootsFromDrafts()
+            if settings.workspace.roots.isEmpty {
+                settings.workspace.defaultWorkingDirectoryPath = defaultWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+                settings.workspace.additionalAllowedDirectoryPaths = []
+            } else {
+                settings.workspace.syncLegacyFieldsFromRoots()
+                defaultWorkingDirectoryPath = settings.workspace.defaultWorkingDirectoryPath
+            }
             settings.preferences.displayName = userDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.timezone = userTimezone.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.city = userCity.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1100,6 +1133,92 @@ final class AppViewModel: ObservableObject {
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
+        }
+    }
+
+    func addWorkspaceRoot(path rawPath: String) {
+        let path = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !path.isEmpty else { return }
+        guard !workspaceRoots.contains(where: { $0.path == path }) else {
+            workspaceRootPathInput = ""
+            return
+        }
+        let url = URL(fileURLWithPath: path, isDirectory: true)
+        workspaceRoots.append(WorkspaceRootDraft(
+            displayName: url.lastPathComponent.isEmpty ? path : url.lastPathComponent,
+            path: path,
+            role: workspaceRoots.isEmpty ? "project" : "additional",
+            isPrimary: workspaceRoots.isEmpty
+        ))
+        normalizeWorkspaceRootsPrimary()
+        defaultWorkingDirectoryPath = workspaceRoots.first(where: \.isPrimary)?.path ?? ""
+        workspaceRootPathInput = ""
+    }
+
+    func addWorkspaceRoots(paths: [String]) {
+        for path in paths { addWorkspaceRoot(path: path) }
+    }
+
+    func removeWorkspaceRoot(id: String) {
+        let removedWasPrimary = workspaceRoots.first(where: { $0.id == id })?.isPrimary == true
+        workspaceRoots.removeAll { $0.id == id }
+        if removedWasPrimary, !workspaceRoots.isEmpty {
+            workspaceRoots[0].isPrimary = true
+        }
+        normalizeWorkspaceRootsPrimary()
+        defaultWorkingDirectoryPath = workspaceRoots.first(where: \.isPrimary)?.path ?? ""
+    }
+
+    func setPrimaryWorkspaceRoot(id: String) {
+        for index in workspaceRoots.indices {
+            workspaceRoots[index].isPrimary = workspaceRoots[index].id == id
+        }
+        defaultWorkingDirectoryPath = workspaceRoots.first(where: \.isPrimary)?.path ?? ""
+    }
+
+    private func normalizeWorkspaceRootsPrimary() {
+        guard !workspaceRoots.isEmpty else { return }
+        let primaryIDs = workspaceRoots.filter(\.isPrimary).map(\.id)
+        let primaryID = primaryIDs.first ?? workspaceRoots[0].id
+        for index in workspaceRoots.indices {
+            workspaceRoots[index].isPrimary = workspaceRoots[index].id == primaryID
+        }
+    }
+
+    private func runtimeWorkspaceRootsFromDrafts() -> [AgentRuntimeWorkspaceRoot] {
+        var drafts = workspaceRoots
+        if drafts.isEmpty {
+            let path = defaultWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !path.isEmpty {
+                let url = URL(fileURLWithPath: path, isDirectory: true)
+                drafts = [WorkspaceRootDraft(displayName: url.lastPathComponent, path: path, role: "project", isPrimary: true)]
+            }
+        }
+        let primaryID = drafts.first(where: \.isPrimary)?.id ?? drafts.first?.id
+        return drafts
+            .map { draft in
+                AgentRuntimeWorkspaceRoot(
+                    id: draft.id,
+                    displayName: draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? URL(fileURLWithPath: draft.path).lastPathComponent : draft.displayName,
+                    path: draft.path.trimmingCharacters(in: .whitespacesAndNewlines),
+                    role: draft.role.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "project" : draft.role,
+                    isPrimary: draft.id == primaryID
+                )
+            }
+            .filter { !$0.path.isEmpty }
+    }
+
+    private static func workspaceRootDrafts(from settings: AgentRuntimeWorkspaceSettings) -> [WorkspaceRootDraft] {
+        let roots = settings.effectiveRoots()
+        let primaryID = roots.first(where: \.isPrimary)?.id ?? roots.first?.id
+        return roots.map { root in
+            WorkspaceRootDraft(
+                id: root.id,
+                displayName: root.displayName,
+                path: root.path,
+                role: root.role,
+                isPrimary: root.id == primaryID
+            )
         }
     }
 
@@ -3978,14 +4097,134 @@ private struct SettingsPermissionsSection: View {
                 SettingsToggleRow(title: "Shell 写入需要审批", subtitle: "本地命令涉及写入时默认要求确认。", isOn: $viewModel.requireApprovalForShell)
             }
             SettingsGroup(title: "项目工作目录") {
-                SettingsTextFieldRow(
-                    title: "默认项目目录",
-                    subtitle: "驱动 Native local tools 与 Claude Sidecar cwd；为空时兼容旧 Sidecar 目录，再回退到进程 cwd。",
-                    text: $viewModel.defaultWorkingDirectoryPath
-                )
+                WorkspaceRootsSettingsContent(viewModel: viewModel)
             }
             SettingsSaveBar(viewModel: viewModel)
         }
+    }
+}
+
+private struct WorkspaceRootsSettingsContent: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    private var primaryRoot: WorkspaceRootDraft? {
+        viewModel.workspaceRoots.first(where: \.isPrimary) ?? viewModel.workspaceRoots.first
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Workspace Roots")
+                        .font(.subheadline.weight(.medium))
+                    Text(summaryText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                Spacer()
+                Button("选择目录…") { chooseDirectories() }
+                    .buttonStyle(.bordered)
+            }
+            .frame(minHeight: 42)
+
+            if !viewModel.workspaceRoots.isEmpty {
+                Divider()
+                VStack(spacing: 0) {
+                    ForEach(viewModel.workspaceRoots) { root in
+                        WorkspaceRootRow(
+                            root: root,
+                            setPrimary: { viewModel.setPrimaryWorkspaceRoot(id: root.id) },
+                            remove: { viewModel.removeWorkspaceRoot(id: root.id) }
+                        )
+                        if root.id != viewModel.workspaceRoots.last?.id { Divider() }
+                    }
+                }
+            }
+
+            Divider()
+            HStack(spacing: 8) {
+                TextField("输入目录路径", text: $viewModel.workspaceRootPathInput)
+                    .textFieldStyle(.roundedBorder)
+                Button("添加路径") {
+                    viewModel.addWorkspaceRoot(path: viewModel.workspaceRootPathInput)
+                }
+                .buttonStyle(.bordered)
+                .disabled(viewModel.workspaceRootPathInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            Text("Native local tools 可访问所有 roots；Claude Sidecar cwd 使用主目录。为空时兼容旧 Sidecar 目录，再回退到进程 cwd。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var summaryText: String {
+        if let primaryRoot {
+            return "主目录：\(primaryRoot.path) · 共 \(viewModel.workspaceRoots.count) 个 root"
+        }
+        let fallback = viewModel.defaultWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !fallback.isEmpty { return "默认项目目录：\(fallback)" }
+        return "尚未设置；将使用旧 Sidecar 工作目录或进程 cwd。"
+    }
+
+    private func chooseDirectories() {
+        let panel = NSOpenPanel()
+        panel.title = "选择项目工作目录"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = true
+        panel.canCreateDirectories = true
+        if panel.runModal() == .OK {
+            viewModel.addWorkspaceRoots(paths: panel.urls.map(\.path))
+        }
+    }
+}
+
+private struct WorkspaceRootRow: View {
+    var root: WorkspaceRootDraft
+    var setPrimary: () -> Void
+    var remove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(root.displayName.isEmpty ? URL(fileURLWithPath: root.path).lastPathComponent : root.displayName)
+                        .font(.subheadline.weight(.medium))
+                    Text(root.role)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Color.secondary.opacity(0.10), in: Capsule())
+                    if root.isPrimary {
+                        Text("主目录")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.orange)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(Color.orange.opacity(0.12), in: Capsule())
+                    }
+                }
+                Text(root.path)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer()
+            if !root.isPrimary {
+                Button("设为主目录", action: setPrimary)
+                    .buttonStyle(.bordered)
+            }
+            Button(role: .destructive, action: remove) {
+                Image(systemName: "minus.circle")
+            }
+            .buttonStyle(.borderless)
+        }
+        .frame(minHeight: 50)
+        .padding(.vertical, 6)
     }
 }
 

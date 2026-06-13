@@ -69,15 +69,47 @@ public struct AppSessionStateSnapshot: Codable, Equatable, Sendable {
     }
 }
 
+public struct AppSessionWorkspaceRootReference: Codable, Equatable, Sendable, Identifiable {
+    public var id: String
+    public var displayName: String
+    public var path: String
+    public var role: String
+    public var isPrimary: Bool
+    public var updatedAt: Date
+
+    public init(
+        id: String = UUID().uuidString,
+        displayName: String,
+        path: String,
+        role: String = "project",
+        isPrimary: Bool = false,
+        updatedAt: Date = Date()
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.path = path
+        self.role = role
+        self.isPrimary = isPrimary
+        self.updatedAt = updatedAt
+    }
+}
+
 public struct AppSessionWorkspaceReference: Codable, Equatable, Sendable {
     public var workingDirectoryPath: String
     public var source: String
     public var updatedAt: Date
+    public var roots: [AppSessionWorkspaceRootReference]
 
-    public init(workingDirectoryPath: String, source: String, updatedAt: Date = Date()) {
+    public init(
+        workingDirectoryPath: String,
+        source: String,
+        updatedAt: Date = Date(),
+        roots: [AppSessionWorkspaceRootReference] = []
+    ) {
         self.workingDirectoryPath = workingDirectoryPath
         self.source = source
         self.updatedAt = updatedAt
+        self.roots = roots
     }
 }
 
