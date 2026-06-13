@@ -201,14 +201,49 @@ public struct AgentToolExecutionContext: Sendable {
     public var userPrompt: String
     public var toolCallID: String
     public var policyEngine: AgentPolicyEngine
+    public var approvedCapabilities: Set<AgentPermissionCapability>
 
-    public init(runID: String, sessionID: String, groupID: String, userPrompt: String, toolCallID: String, policyEngine: AgentPolicyEngine) {
+    public init(
+        runID: String,
+        sessionID: String,
+        groupID: String,
+        userPrompt: String,
+        toolCallID: String,
+        policyEngine: AgentPolicyEngine
+    ) {
+        self.init(
+            runID: runID,
+            sessionID: sessionID,
+            groupID: groupID,
+            userPrompt: userPrompt,
+            toolCallID: toolCallID,
+            policyEngine: policyEngine,
+            approvedCapabilities: []
+        )
+    }
+
+    public init(
+        runID: String,
+        sessionID: String,
+        groupID: String,
+        userPrompt: String,
+        toolCallID: String,
+        policyEngine: AgentPolicyEngine,
+        approvedCapabilities: Set<AgentPermissionCapability>
+    ) {
         self.runID = runID
         self.sessionID = sessionID
         self.groupID = groupID
         self.userPrompt = userPrompt
         self.toolCallID = toolCallID
         self.policyEngine = policyEngine
+        self.approvedCapabilities = approvedCapabilities
+    }
+
+    public func approving(_ capability: AgentPermissionCapability) -> AgentToolExecutionContext {
+        var copy = self
+        copy.approvedCapabilities.insert(capability)
+        return copy
     }
 }
 
@@ -225,12 +260,14 @@ public enum AgentToolError: Error, Equatable, Sendable, CustomStringConvertible 
     case unknownTool(String)
     case invalidArguments(String)
     case permissionDenied(String)
+    case permissionNeedsApproval(AgentPermissionRequest)
 
     public var description: String {
         switch self {
         case .unknownTool(let name): return "Unknown tool: \(name)"
         case .invalidArguments(let message): return "Invalid arguments: \(message)"
         case .permissionDenied(let message): return "Permission denied: \(message)"
+        case .permissionNeedsApproval(let request): return "Permission needs approval: \(request.capability.rawValue)"
         }
     }
 }
@@ -260,15 +297,29 @@ public struct AgentToolRegistry: Sendable {
         guard let tool = tools[call.name] else {
             throw AgentToolError.unknownTool(call.name)
         }
-        let decision = await context.policyEngine.evaluate(
-            capability: tool.permission,
-            runID: context.runID,
-            sessionID: context.sessionID,
-            toolName: tool.name,
-            payloadJSON: call.argumentsJSON
-        )
-        guard decision.outcome == .approved else {
-            throw AgentToolError.permissionDenied(decision.reason)
+        if !context.approvedCapabilities.contains(tool.permission) {
+            let decision = await context.policyEngine.evaluate(
+                capability: tool.permission,
+                runID: context.runID,
+                sessionID: context.sessionID,
+                toolName: tool.name,
+                payloadJSON: call.argumentsJSON
+            )
+            switch decision.outcome {
+            case .approved:
+                break
+            case .needsApproval:
+                throw AgentToolError.permissionNeedsApproval(AgentPermissionRequest(
+                    id: decision.requestID,
+                    runID: context.runID,
+                    sessionID: context.sessionID,
+                    capability: tool.permission,
+                    toolName: tool.name,
+                    payloadJSON: call.argumentsJSON
+                ))
+            case .denied:
+                throw AgentToolError.permissionDenied(decision.reason)
+            }
         }
         let arguments = try AgentToolArguments(json: call.argumentsJSON)
         var result = try await tool.execute(arguments: arguments, context: context)

@@ -64,4 +64,8 @@ public struct AgentLoopBackend<Provider: AgentModelProvider>: AgentBackend {
     public func abort(runID: String) {
         loopController.abort(runID: runID)
     }
+
+    public func resolveApproval(_ approval: AgentPendingApproval, status: AgentPendingApprovalStatus, reason _: String, actor _: String) async throws {
+        await loopController.resolveApproval(approval, status: status)
+    }
 }
