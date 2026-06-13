@@ -2,48 +2,12 @@ import SwiftUI
 import WebKit
 import ConnorGraphAppSupport
 
-struct BrowserWorkspaceSnapshot: Equatable {
-    var tabs: [BrowserTabSnapshot]
-    var selectedTabID: UUID?
-    var selectionPopover: BrowserSelectionPopoverSnapshot?
-    var threads: [UUID: BrowserSelectionThreadSnapshot]
-}
-
-struct BrowserTabSnapshot: Identifiable, Equatable {
-    var id: UUID
-    var initialURLString: String
-    var title: String
-    var currentURLString: String
-    var isLoading: Bool
-    var canGoBack: Bool
-    var canGoForward: Bool
-}
-
-struct BrowserSelectionPopoverSnapshot: Equatable {
-    var tabID: UUID
-    var pageURL: String
-    var pageTitle: String
-    var pageText: String
-    var selectedText: String
-    var rect: BrowserSelectionRect
-    var threadID: UUID
-}
-
-struct BrowserSelectionThreadSnapshot: Identifiable, Equatable {
-    var id: UUID
-    var tabID: UUID
-    var pageURL: String
-    var selectedText: String
-    var messages: [BrowserSelectionThreadMessageSnapshot]
-}
-
-struct BrowserSelectionThreadMessageSnapshot: Identifiable, Equatable {
-    enum Role: Equatable { case user, assistant }
-    var id: UUID
-    var role: Role
-    var text: String
-    var createdAt: Date
-}
+typealias BrowserWorkspaceSnapshot = AppBrowserStateSnapshot
+typealias BrowserTabSnapshot = AppBrowserTabSnapshot
+typealias BrowserSelectionPopoverSnapshot = AppBrowserSelectionPopoverSnapshot
+typealias BrowserSelectionThreadSnapshot = AppBrowserSelectionThreadSnapshot
+typealias BrowserSelectionThreadMessageSnapshot = AppBrowserSelectionThreadMessageSnapshot
+typealias BrowserSelectionRect = AppBrowserSelectionRect
 
 struct BrowserWorkspaceView: View {
     @ObservedObject var viewModel: AppViewModel
@@ -250,7 +214,7 @@ struct BrowserWorkspaceView: View {
     private func ensureInitialTab() {
         if viewModel.browserWorkspaceSnapshotsBySessionID[activeSessionID] == nil {
             let session = BrowserSessionState.default(urlString: defaultURLString)
-            viewModel.browserWorkspaceSnapshotsBySessionID[activeSessionID] = session.snapshot
+            viewModel.saveBrowserWorkspaceSnapshot(session.snapshot, for: activeSessionID)
             addressText = defaultURLString
         }
     }
@@ -258,7 +222,7 @@ struct BrowserWorkspaceView: View {
     private func mutateActiveSession(_ update: (inout BrowserSessionState) -> Void) {
         var session = activeSession
         update(&session)
-        viewModel.browserWorkspaceSnapshotsBySessionID[activeSessionID] = session.snapshot
+        viewModel.saveBrowserWorkspaceSnapshot(session.snapshot, for: activeSessionID)
         webViewsByTabID = session.webViewsByTabID
     }
 
@@ -393,6 +357,18 @@ struct BrowserWorkspaceView: View {
         let question = questionText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !question.isEmpty else { return }
         appendThreadMessage(threadID: popover.threadID, role: .user, text: question)
+        viewModel.appendSessionRecord(
+            kind: "browser.selection.question",
+            title: popover.context.page.title.isEmpty ? "网页选择提问" : popover.context.page.title,
+            body: question,
+            metadata: [
+                "pageURL": popover.context.page.url,
+                "selectedText": String(popover.context.selectedText.prefix(500)),
+                "threadID": popover.threadID.uuidString,
+                "tabID": popover.tabID.uuidString
+            ],
+            sessionID: activeSessionID
+        )
         let prompt = BrowserLLMContextBuilder().makePrompt(selection: popover.context, question: question)
         questionText = ""
         Task { await viewModel.submitChat(prompt: prompt) }
@@ -622,13 +598,6 @@ private struct BrowserSelectionThreadMessage: Identifiable {
             createdAt: createdAt
         )
     }
-}
-
-struct BrowserSelectionRect: Decodable, Equatable {
-    var x: CGFloat
-    var y: CGFloat
-    var width: CGFloat
-    var height: CGFloat
 }
 
 private struct BrowserSelectionPayload: Decodable {
