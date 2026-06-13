@@ -667,7 +667,7 @@ private struct BrowserPromptFoldedMessageView: View {
                 .frame(maxHeight: 220, alignment: .top)
                 .background(Color.black.opacity(0.05), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
             } label: {
-                Label("网页正文（默认折叠）", systemImage: "doc.text.magnifyingglass")
+                Label("网页正文", systemImage: "doc.text.magnifyingglass")
                     .font(.caption.weight(.semibold))
             }
             .tint(.primary)
