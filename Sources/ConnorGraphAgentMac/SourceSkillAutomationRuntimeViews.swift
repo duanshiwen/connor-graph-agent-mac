@@ -11,7 +11,7 @@ struct SourceRuntimePanelView: View {
     var body: some View {
         RuntimePanelScaffold(
             title: "Sources",
-            subtitle: "MCP source runtime: tools, credentials, permissions, audit, and graph ingestion stay Connor-owned.",
+            subtitle: "MCP source runtime：工具、凭据、权限、审计和图谱摄取由康纳同学治理。",
             metrics: [
                 ("Total", "\(presentation.summary.totalCount)"),
                 ("Enabled", "\(presentation.summary.enabledCount)"),
@@ -47,7 +47,7 @@ struct SkillRuntimePanelView: View {
     var body: some View {
         RuntimePanelScaffold(
             title: "Skills",
-            subtitle: "Governed instruction profiles. Skills may request capabilities and sources, but do not bypass Connor permissions.",
+            subtitle: "受治理的指令配置。技能可以请求能力和数据源，但不能绕过康纳同学权限。",
             metrics: [
                 ("Total", "\(presentation.summary.totalCount)"),
                 ("Project", "\(presentation.summary.projectScopedCount)"),
@@ -87,7 +87,7 @@ struct AutomationRuntimePanelView: View {
     var body: some View {
         RuntimePanelScaffold(
             title: "Automation",
-            subtitle: "Connor-owned event/action governance. Ready actions may execute; pending-review actions remain human-gated.",
+            subtitle: "康纳同学负责事件/动作治理。Ready 动作可执行，待审核动作仍由人确认。",
             metrics: [
                 ("Rules", "\(presentation.summary.totalRuleCount)"),
                 ("Enabled", "\(presentation.summary.enabledRuleCount)"),
