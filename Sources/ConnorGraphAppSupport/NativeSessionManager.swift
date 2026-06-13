@@ -9,10 +9,14 @@ public protocol AgentPendingApprovalRepository: Sendable {
 
 public enum NativeSessionManagerError: Error, Sendable, Equatable, LocalizedError {
     case noUserMessageToRetry
+    case runCancelled(String)
 
     public var errorDescription: String? {
         switch self {
-        case .noUserMessageToRetry: "No user message is available to retry."
+        case .noUserMessageToRetry:
+            "No user message is available to retry."
+        case .runCancelled(let reason):
+            reason
         }
     }
 }
@@ -205,6 +209,7 @@ public struct NativeSessionManager: Sendable {
 
         do {
             for try await event in backend.chat(request) {
+                try throwIfRunCancelled(runID: run.id)
                 collectedEvents.append(event)
                 events.append(event)
 
@@ -246,6 +251,7 @@ public struct NativeSessionManager: Sendable {
                 }
             }
 
+            try throwIfRunCancelled(runID: run.id)
             runtimeState.isProcessing = false
             runtimeState.activeRunID = nil
             runtimeState.lastCompletedAt = Date()
@@ -268,11 +274,30 @@ public struct NativeSessionManager: Sendable {
                 eventPresentations: collectedPresentations,
                 assistantMessage: assistantMessage
             )
+        } catch NativeSessionManagerError.runCancelled(let reason) {
+            runtimeState.isProcessing = false
+            runtimeState.activeRunID = nil
+            runtimeState.lastCompletedAt = Date()
+            runtimeState.cancellationReason = reason
+            if var cancelledRun = try? sessionRepository.loadRun(id: run.id) {
+                cancelledRun.status = .cancelled
+                cancelledRun.completedAt = cancelledRun.completedAt ?? runtimeState.lastCompletedAt
+                cancelledRun.metadata["cancellation_reason"] = cancelledRun.metadata["cancellation_reason"] ?? reason
+                try? sessionRepository.saveRun(cancelledRun)
+            }
+            try persistSession()
+            throw NativeSessionManagerError.runCancelled(reason)
         } catch {
             runtimeState.isProcessing = false
             runtimeState.activeRunID = nil
             runtimeState.lastCompletedAt = Date()
             runtimeState.lastFailureMessage = String(describing: error)
+            if let existingRun = try? sessionRepository.loadRun(id: run.id), existingRun.status == .cancelled {
+                let reason = existingRun.metadata["cancellation_reason"] ?? "cancelled by user"
+                runtimeState.cancellationReason = reason
+                try persistSession()
+                throw NativeSessionManagerError.runCancelled(reason)
+            }
             var failedRun = run
             failedRun.status = .failed
             failedRun.completedAt = runtimeState.lastCompletedAt
@@ -345,6 +370,11 @@ public struct NativeSessionManager: Sendable {
 
     private func persistSession() throws {
         try sessionRepository.saveSession(session)
+    }
+
+    private func throwIfRunCancelled(runID: String) throws {
+        guard let run = try? sessionRepository.loadRun(id: runID), run.status == .cancelled else { return }
+        throw NativeSessionManagerError.runCancelled(run.metadata["cancellation_reason"] ?? "cancelled by user")
     }
 
     private func recordBackendEvent(_ event: AgentEvent, sequence: Int) throws {

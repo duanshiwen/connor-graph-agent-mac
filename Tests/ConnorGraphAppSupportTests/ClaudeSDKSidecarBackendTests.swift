@@ -412,7 +412,11 @@ private actor FakeClaudeSDKSidecarSessionTransport: ClaudeSDKSidecarSessionTrans
         .map(String.init)
     let decoder = JSONDecoder()
     let commands = try capturedLines.map { try decoder.decode(ClaudeSDKSidecarCommand.self, from: Data($0.utf8)) }
-    #expect(commands == [.start(request), .approvalResolved(resolution)])
+    #expect(commands == [.start(request), .approvalResolved(resolution), .cancel(ClaudeSDKSidecarCancelCommand(
+        connorRunID: request.connorRunID,
+        connorSessionID: request.connorSessionID,
+        reason: "cancelled by Connor"
+    ))])
 }
 
 @Test func claudeSDKSidecarProcessTransportSupportsStartCommandBoundaryWithoutChangingLegacyRequestShape() async throws {

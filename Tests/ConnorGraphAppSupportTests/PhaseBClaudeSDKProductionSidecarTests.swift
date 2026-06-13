@@ -7,6 +7,7 @@ import ConnorGraphCore
 private actor PhaseBRecordingSessionTransport: ClaudeSDKSidecarSessionTransport {
     private(set) var startRequests: [ClaudeSDKSidecarRequest] = []
     private(set) var commands: [ClaudeSDKSidecarCommand] = []
+    private(set) var cancelCallCount = 0
     var sdkSessionIDToEmit: String?
     var terminalEvent: ClaudeSDKSidecarEvent
 
@@ -31,10 +32,11 @@ private actor PhaseBRecordingSessionTransport: ClaudeSDKSidecarSessionTransport 
         commands.append(command)
     }
 
-    func cancel() async {}
+    func cancel() async { cancelCallCount += 1 }
 
     func recordedStartRequests() -> [ClaudeSDKSidecarRequest] { startRequests }
     func recordedCommands() -> [ClaudeSDKSidecarCommand] { commands }
+    func recordedCancelCallCount() -> Int { cancelCallCount }
 }
 
 private func phaseBTemporaryDirectory(_ name: String) throws -> URL {
@@ -134,6 +136,42 @@ private func phaseBRepositoryRootURL() -> URL {
     #expect(record?.lastRunID == "run-fail")
     #expect(record?.status == .failed)
     #expect(record?.lastError == "boom")
+}
+
+@Test func governedClaudeSidecarRuntimeAbortSendsCancelCommandAndMarksRecordCancelled() async throws {
+    let directory = try phaseBTemporaryDirectory("GovernedRuntimeAbort")
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let store = AppClaudeSDKSidecarRuntimeStore(configDirectory: directory)
+    try store.save(ClaudeSDKSidecarRuntimeRecord(
+        connorSessionID: "connor-session-abort",
+        groupID: "default",
+        sdkSessionID: "sdk-session-abort",
+        lastRunID: "run-abort",
+        status: .running
+    ))
+    let transport = PhaseBRecordingSessionTransport()
+    let runtime = try GovernedClaudeSDKSidecarRuntime(
+        transport: transport,
+        workingDirectory: URL(fileURLWithPath: "/tmp/project"),
+        permissionMode: .askToWrite,
+        runtimeStore: store
+    )
+
+    runtime.abort(runID: "run-abort")
+    try await Task.sleep(nanoseconds: 100_000_000)
+
+    let commands = await transport.recordedCommands()
+    let record = try store.load(connorSessionID: "connor-session-abort")
+    #expect(commands.contains { command in
+        if case .cancel(let payload) = command {
+            return payload.connorRunID == "run-abort" && payload.connorSessionID == "connor-session-abort"
+        }
+        return false
+    })
+    #expect(await transport.recordedCancelCallCount() == 1)
+    #expect(record?.status == .cancelled)
+    #expect(record?.failureCode == .cancelled)
 }
 
 @Test func claudeSDKSidecarCommandEncodesCancelEnvelope() throws {
