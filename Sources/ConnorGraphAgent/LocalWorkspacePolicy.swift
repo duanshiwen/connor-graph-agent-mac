@@ -133,8 +133,18 @@ public struct LocalWorkspacePolicy: Sendable, Equatable {
         try rejectProtectedPath(canonical, operation: operation)
         let parent = canonical.deletingLastPathComponent()
         var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: parent.path, isDirectory: &isDirectory), isDirectory.boolValue else {
-            throw LocalWorkspacePolicyError.missingParentDirectory(parent.path)
+        if FileManager.default.fileExists(atPath: parent.path, isDirectory: &isDirectory) {
+            guard isDirectory.boolValue else { throw LocalWorkspacePolicyError.notDirectory(parent.path) }
+        } else {
+            let existingAncestor = nearestExistingAncestor(parent)
+            var ancestorIsDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: existingAncestor.path, isDirectory: &ancestorIsDirectory), ancestorIsDirectory.boolValue else {
+                throw LocalWorkspacePolicyError.missingParentDirectory(parent.path)
+            }
+            guard isInsideAllowedRoots(existingAncestor) else {
+                throw LocalWorkspacePolicyError.pathEscapesAllowedRoots(parent.path)
+            }
+            try rejectProtectedPath(parent, operation: operation)
         }
     }
 
@@ -182,6 +192,17 @@ public struct LocalWorkspacePolicy: Sendable, Equatable {
         if protectedHomeFragments.contains(where: { path.contains($0) }) {
             throw LocalWorkspacePolicyError.protectedPath(path)
         }
+    }
+
+    private func nearestExistingAncestor(_ url: URL) -> URL {
+        var current = url.standardizedFileURL
+        while current.path != "/" {
+            if FileManager.default.fileExists(atPath: current.path) {
+                return current.resolvingSymlinksInPath().standardizedFileURL
+            }
+            current.deleteLastPathComponent()
+        }
+        return URL(fileURLWithPath: "/")
     }
 
     private func canonicalURLForExistingPathOrParent(_ url: URL) -> URL {

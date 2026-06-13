@@ -185,6 +185,164 @@ public struct LocalGrepTool: AgentTool {
     }
 }
 
+public struct LocalWriteFileTool: AgentTool {
+    public let name = "Write"
+    public let description = "Create or overwrite a text file inside the configured local workspace. Protected paths are denied."
+    public let permission: AgentPermissionCapability = .writeWorkspaceFile
+    public let inputSchema = AgentToolInputSchema.object(properties: [
+        "file_path": .string(description: "Path to write inside the workspace."),
+        "content": .string(description: "Complete file content to write.")
+    ], required: ["file_path", "content"])
+
+    private let policy: LocalWorkspacePolicy
+
+    public init(policy: LocalWorkspacePolicy) { self.policy = policy }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        guard let rawPath = arguments.string("file_path"), let content = arguments.string("content") else {
+            throw AgentToolError.invalidArguments("file_path and content are required")
+        }
+        let path = try policy.resolvePath(rawPath)
+        let existed = FileManager.default.fileExists(atPath: path.path)
+        try policy.validateWritablePath(path, operation: existed ? .overwriteFile : .createFile)
+        try policy.validateWritableSize(path: path, content: content)
+        try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try content.write(to: path, atomically: true, encoding: .utf8)
+        let json = LocalToolJSON.encode([
+            "path": path.path,
+            "operation": existed ? "overwritten" : "created",
+            "bytesWritten": content.utf8.count,
+            "afterHash": LocalFileHash.sha256(content)
+        ])
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "File \(existed ? "overwritten" : "created"): \(path.path)", contentJSON: json)
+    }
+}
+
+public struct LocalEditFileTool: AgentTool {
+    public let name = "Edit"
+    public let description = "Replace a unique old_text occurrence in a text file inside the configured local workspace. Fails if old_text is missing or not unique."
+    public let permission: AgentPermissionCapability = .editWorkspaceFile
+    public let inputSchema = AgentToolInputSchema.object(properties: [
+        "file_path": .string(description: "Path to edit inside the workspace."),
+        "old_text": .string(description: "Exact text to replace. Must occur exactly once."),
+        "new_text": .string(description: "Replacement text.")
+    ], required: ["file_path", "old_text", "new_text"])
+
+    private let policy: LocalWorkspacePolicy
+
+    public init(policy: LocalWorkspacePolicy) { self.policy = policy }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        guard let rawPath = arguments.string("file_path"), let oldText = arguments.string("old_text"), let newText = arguments.string("new_text") else {
+            throw AgentToolError.invalidArguments("file_path, old_text, and new_text are required")
+        }
+        let path = try policy.resolvePath(rawPath)
+        try policy.validateReadablePath(path)
+        try policy.validateWritablePath(path, operation: .editFile)
+        let original = try String(contentsOf: path, encoding: .utf8)
+        let updated = try LocalTextEditor.replacingUnique(original: original, oldText: oldText, newText: newText)
+        try policy.validateWritableSize(path: path, content: updated)
+        try updated.write(to: path, atomically: true, encoding: .utf8)
+        let json = LocalToolJSON.encode([
+            "path": path.path,
+            "beforeHash": LocalFileHash.sha256(original),
+            "afterHash": LocalFileHash.sha256(updated),
+            "edits": 1
+        ])
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Edited file: \(path.path)", contentJSON: json)
+    }
+}
+
+public struct LocalMultiEditTool: AgentTool {
+    public let name = "MultiEdit"
+    public let description = "Apply multiple exact text replacements atomically to one workspace file. Every old_text must occur exactly once in the original file."
+    public let permission: AgentPermissionCapability = .editWorkspaceFile
+    public let inputSchema = AgentToolInputSchema.object(properties: [
+        "file_path": .string(description: "Path to edit inside the workspace."),
+        "edits": .object(properties: [:], required: [])
+    ], required: ["file_path", "edits"])
+
+    private let policy: LocalWorkspacePolicy
+
+    public init(policy: LocalWorkspacePolicy) { self.policy = policy }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        guard let rawPath = arguments.string("file_path"), let rawEdits = arguments.array("edits") else {
+            throw AgentToolError.invalidArguments("file_path and edits are required")
+        }
+        let edits: [(oldText: String, newText: String)] = try rawEdits.map { value in
+            guard let object = value.objectValue,
+                  let oldText = object["old_text"]?.stringValue,
+                  let newText = object["new_text"]?.stringValue else {
+                throw AgentToolError.invalidArguments("Each edit requires old_text and new_text")
+            }
+            return (oldText, newText)
+        }
+        guard !edits.isEmpty else { throw AgentToolError.invalidArguments("edits must not be empty") }
+        let path = try policy.resolvePath(rawPath)
+        try policy.validateReadablePath(path)
+        try policy.validateWritablePath(path, operation: .editFile)
+        let original = try String(contentsOf: path, encoding: .utf8)
+        let updated = try LocalTextEditor.applyingAtomicEdits(original: original, edits: edits)
+        try policy.validateWritableSize(path: path, content: updated)
+        try updated.write(to: path, atomically: true, encoding: .utf8)
+        let json = LocalToolJSON.encode([
+            "path": path.path,
+            "beforeHash": LocalFileHash.sha256(original),
+            "afterHash": LocalFileHash.sha256(updated),
+            "edits": edits.count
+        ])
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Applied \(edits.count) edits to file: \(path.path)", contentJSON: json)
+    }
+}
+
+enum LocalTextEditor {
+    static func replacingUnique(original: String, oldText: String, newText: String) throws -> String {
+        guard !oldText.isEmpty else { throw AgentToolError.invalidArguments("old_text must not be empty") }
+        let ranges = ranges(of: oldText, in: original)
+        guard ranges.count == 1 else {
+            throw AgentToolError.invalidArguments("old_text must occur exactly once; found \(ranges.count)")
+        }
+        return original.replacingCharacters(in: ranges[0], with: newText)
+    }
+
+    static func applyingAtomicEdits(original: String, edits: [(oldText: String, newText: String)]) throws -> String {
+        for edit in edits {
+            let ranges = ranges(of: edit.oldText, in: original)
+            guard ranges.count == 1 else {
+                throw AgentToolError.invalidArguments("old_text must occur exactly once; found \(ranges.count): \(edit.oldText)")
+            }
+        }
+        var updated = original
+        for edit in edits {
+            updated = try replacingUnique(original: updated, oldText: edit.oldText, newText: edit.newText)
+        }
+        return updated
+    }
+
+    private static func ranges(of needle: String, in haystack: String) -> [Range<String.Index>] {
+        var ranges: [Range<String.Index>] = []
+        var searchStart = haystack.startIndex
+        while searchStart < haystack.endIndex, let range = haystack.range(of: needle, range: searchStart..<haystack.endIndex) {
+            ranges.append(range)
+            searchStart = range.upperBound
+        }
+        return ranges
+    }
+}
+
+enum LocalFileHash {
+    static func sha256(_ text: String) -> String {
+        // FNV-1a 64-bit is sufficient here as a stable lightweight audit fingerprint without adding CryptoKit platform constraints.
+        var hash: UInt64 = 0xcbf29ce484222325
+        for byte in text.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 0x100000001b3
+        }
+        return String(format: "%016llx", hash)
+    }
+}
+
 enum LocalWorkspaceScanner {
     static func files(under root: URL, relativeTo base: URL) throws -> [String] {
         guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey], options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { return [] }

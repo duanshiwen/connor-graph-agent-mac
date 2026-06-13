@@ -70,6 +70,23 @@ public struct AgentToolArguments: Sendable, Equatable {
         if case .bool(let value) = values[key] { return value }
         return nil
     }
+
+    public func array(_ key: String) -> [SendableJSONValue]? {
+        if case .array(let value) = values[key] { return value }
+        return nil
+    }
+}
+
+public extension SendableJSONValue {
+    var objectValue: [String: SendableJSONValue]? {
+        if case .object(let value) = self { return value }
+        return nil
+    }
+
+    var stringValue: String? {
+        if case .string(let value) = self { return value }
+        return nil
+    }
 }
 
 public enum SendableJSONValue: Sendable, Equatable {

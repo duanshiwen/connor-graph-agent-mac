@@ -25,6 +25,9 @@ import ConnorGraphStore
     #expect(names.contains("LS"))
     #expect(names.contains("Glob"))
     #expect(names.contains("Grep"))
+    #expect(names.contains("Write"))
+    #expect(names.contains("Edit"))
+    #expect(names.contains("MultiEdit"))
 }
 
 private final class LocalToolsSettingsStore: LLMSettingsStore, @unchecked Sendable {
