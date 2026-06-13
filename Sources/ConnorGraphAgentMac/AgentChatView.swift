@@ -147,7 +147,11 @@ private struct AgentChatSessionListView: View {
                             row: row,
                             isSelected: session.id == viewModel.selectedChatSessionID
                         ) {
-                            viewModel.selectChatSession(session.id)
+                            var transaction = Transaction()
+                            transaction.disablesAnimations = true
+                            withTransaction(transaction) {
+                                viewModel.selectChatSession(session.id)
+                            }
                         }
                     }
                 }
@@ -227,11 +231,7 @@ private struct AgentChatConversationView: View {
         }
     }
 
-    private var latestProcessID: String? {
-        timelineItems.last(where: { $0.process != nil })?.process?.id
-    }
-
-    private func activityEvents(for process: AgentChatTurnProcessPresentation) -> [AgentEventPresentation] {
+    private func activityEvents(for process: AgentChatTurnProcessPresentation, latestProcessID: String?) -> [AgentEventPresentation] {
         if process.id == latestProcessID, !viewModel.agentEventTimeline.isEmpty {
             return viewModel.agentEventTimeline
         }
@@ -239,6 +239,9 @@ private struct AgentChatConversationView: View {
     }
 
     var body: some View {
+        let timelineSnapshot = timelineItems
+        let latestProcessID = timelineSnapshot.last(where: { $0.process != nil })?.process?.id
+
         VStack(spacing: 0) {
             AgentChatConversationHeader(viewModel: viewModel)
                 .padding(.horizontal, AgentChatLayout.spaceL)
@@ -248,18 +251,18 @@ private struct AgentChatConversationView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
-                        if timelineItems.isEmpty {
+                        if timelineSnapshot.isEmpty {
                             AgentChatEmptyStateView()
                                 .frame(maxWidth: .infinity, minHeight: 360)
                         } else {
-                            ForEach(timelineItems) { item in
+                            ForEach(timelineSnapshot) { item in
                                 if let message = item.message {
                                     AgentChatMessageRow(row: message)
                                         .id(item.id)
                                 } else if let process = item.process {
                                     AgentChatTurnProcessRow(
                                         process: process,
-                                        events: activityEvents(for: process),
+                                        events: activityEvents(for: process, latestProcessID: latestProcessID),
                                         onOpenDetail: { event in
                                             activityDetailEvent = event
                                         }
