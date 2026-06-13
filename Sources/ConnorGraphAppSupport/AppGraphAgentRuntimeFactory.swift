@@ -83,7 +83,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             session: session,
             sidecarExecutableURL: URL(fileURLWithPath: executablePath),
             sidecarArguments: Self.splitSidecarArguments(settings.sidecarArguments),
-            workingDirectory: Self.sidecarWorkingDirectory(from: settings),
+            workingDirectory: resolvedProjectWorkingDirectory(llmSettings: settings).url,
             permissionMode: settings.sidecarPermissionMode
         )
     }
@@ -96,7 +96,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         guard settings.sidecarPermissionMode != .allowAll else {
             throw AppGraphAgentRuntimeFactoryError.unsafeSidecarPermissionMode(settings.sidecarPermissionMode)
         }
-        let workingDirectory = Self.sidecarWorkingDirectory(from: settings)
+        let workingDirectory = resolvedProjectWorkingDirectory(llmSettings: settings).url
         let transport = ClaudeSDKSidecarPersistentProcessTransport(
             executableURL: URL(fileURLWithPath: executablePath),
             arguments: Self.splitSidecarArguments(settings.sidecarArguments),
@@ -192,7 +192,13 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         registry.register(GraphSearchTool(searchService: searchService))
         registry.register(GraphIngestEpisodeTool(repository: store))
         registry.register(GraphProposeWriteTool(repository: store))
-        let localWorkspacePolicy = LocalWorkspacePolicy(workingDirectory: Self.nativeAgentLoopWorkingDirectory())
+        let settings = (try? settingsRepository.loadSettings()) ?? .default
+        let runtimeSettings = loadRuntimeSettings()
+        let resolvedWorkspace = AppProjectWorkingDirectoryResolver.resolve(runtimeSettings: runtimeSettings, llmSettings: settings)
+        let localWorkspacePolicy = LocalWorkspacePolicy(
+            workingDirectory: resolvedWorkspace.url,
+            additionalAllowedDirectories: AppProjectWorkingDirectoryResolver.additionalAllowedDirectories(from: runtimeSettings)
+        )
         registry.register(LocalReadFileTool(policy: localWorkspacePolicy))
         registry.register(LocalListDirectoryTool(policy: localWorkspacePolicy))
         registry.register(LocalGlobTool(policy: localWorkspacePolicy))
@@ -258,8 +264,13 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         }
     }
 
-    private static func nativeAgentLoopWorkingDirectory() -> URL {
-        URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+    private func loadRuntimeSettings() -> AgentRuntimeSettings {
+        guard let storagePaths else { return .default }
+        return (try? AppRuntimeSettingsRepository(configDirectory: storagePaths.configDirectory).loadOrCreateDefault()) ?? .default
+    }
+
+    private func resolvedProjectWorkingDirectory(llmSettings: AppLLMSettings) -> ResolvedProjectWorkingDirectory {
+        AppProjectWorkingDirectoryResolver.resolve(runtimeSettings: loadRuntimeSettings(), llmSettings: llmSettings)
     }
 
     private static func splitSidecarArguments(_ arguments: String) -> [String] {
@@ -268,11 +279,4 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             .map(String.init)
     }
 
-    private static func sidecarWorkingDirectory(from settings: AppLLMSettings) -> URL {
-        let path = settings.sidecarWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        if path.isEmpty {
-            return URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-        }
-        return URL(fileURLWithPath: path, isDirectory: true)
-    }
 }
