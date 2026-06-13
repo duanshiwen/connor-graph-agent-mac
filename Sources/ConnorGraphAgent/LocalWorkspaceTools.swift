@@ -185,6 +185,65 @@ public struct LocalGrepTool: AgentTool {
     }
 }
 
+public struct LocalBashTool: AgentTool {
+    public let name = "Bash"
+    public let description = "Execute a non-interactive shell command in the configured local workspace with policy classification, timeout, stdout/stderr capture, and output truncation."
+    public let permission: AgentPermissionCapability = .runReadOnlyShellCommand
+    public let inputSchema = AgentToolInputSchema.object(properties: [
+        "command": .string(description: "Shell command to execute."),
+        "timeout_seconds": .integer(description: "Optional timeout in seconds. Defaults to 30, max 120."),
+        "working_directory": .string(description: "Optional workspace-relative directory to run in.")
+    ], required: ["command"])
+
+    private let policy: LocalWorkspacePolicy
+
+    public init(policy: LocalWorkspacePolicy) { self.policy = policy }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        guard let command = arguments.string("command"), !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw AgentToolError.invalidArguments("command is required")
+        }
+        let classification = policy.classifyCommand(command)
+        if classification.risk == .destructive {
+            throw LocalWorkspacePolicyError.commandDenied(classification.reason)
+        }
+        let requiredCapability = Self.capability(for: classification.risk)
+        let permissionDecision = await context.policyEngine.evaluate(
+            capability: requiredCapability,
+            runID: context.runID,
+            sessionID: context.sessionID,
+            toolName: name,
+            payloadJSON: LocalToolJSON.encode(["command": command, "classification": classification.risk.rawValue]) ?? "{}"
+        )
+        guard permissionDecision.outcome == .approved else {
+            throw AgentToolError.permissionDenied(permissionDecision.reason)
+        }
+        let workingDirectory = try policy.resolvePath(arguments.string("working_directory") ?? ".")
+        try policy.validateSearchScope(workingDirectory)
+        let timeout = min(max(arguments.int("timeout_seconds") ?? 30, 1), 120)
+        let execution = try await LocalShellExecutor.run(command: command, workingDirectory: workingDirectory, timeoutSeconds: timeout, maxOutputBytes: policy.maxToolOutputBytes)
+        let json = LocalToolJSON.encode([
+            "command": command,
+            "classification": classification.risk.rawValue,
+            "exitCode": execution.exitCode,
+            "timedOut": execution.timedOut,
+            "truncated": execution.truncated
+        ])
+        let text = "exitCode: \(execution.exitCode)\nstdout:\n\(execution.stdout)\n\nstderr:\n\(execution.stderr)"
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: text, contentJSON: json, error: execution.exitCode == 0 ? nil : "Command exited with code \(execution.exitCode)")
+    }
+
+    private static func capability(for risk: ShellCommandRisk) -> AgentPermissionCapability {
+        switch risk {
+        case .readOnly: return .runReadOnlyShellCommand
+        case .workspaceWrite: return .runWorkspaceShellCommand
+        case .network: return .runNetworkShellCommand
+        case .destructive: return .runDestructiveShellCommand
+        case .unknown: return .runWorkspaceShellCommand
+        }
+    }
+}
+
 public struct LocalWriteFileTool: AgentTool {
     public let name = "Write"
     public let description = "Create or overwrite a text file inside the configured local workspace. Protected paths are denied."
@@ -340,6 +399,74 @@ enum LocalFileHash {
             hash &*= 0x100000001b3
         }
         return String(format: "%016llx", hash)
+    }
+}
+
+struct LocalShellExecution: Sendable, Equatable {
+    var stdout: String
+    var stderr: String
+    var exitCode: Int32
+    var timedOut: Bool
+    var truncated: Bool
+}
+
+enum LocalShellExecutor {
+    static func run(command: String, workingDirectory: URL, timeoutSeconds: Int, maxOutputBytes: Int) async throws -> LocalShellExecution {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = ["-lc", command]
+        process.currentDirectoryURL = workingDirectory
+
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+
+        try process.run()
+
+        let timedOut = await withTaskGroup(of: Bool.self, returning: Bool.self) { group in
+            group.addTask {
+                while process.isRunning {
+                    try? await Task.sleep(nanoseconds: 20_000_000)
+                }
+                return false
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(timeoutSeconds) * 1_000_000_000)
+                if process.isRunning {
+                    process.terminate()
+                    return true
+                }
+                return false
+            }
+            let result = await group.next() ?? false
+            group.cancelAll()
+            return result
+        }
+        if timedOut {
+            throw LocalWorkspacePolicyError.commandTimedOut(command)
+        }
+        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
+        let stderr = String(data: stderrData, encoding: .utf8) ?? ""
+        let truncatedStdout = truncate(stdout, maxBytes: maxOutputBytes)
+        let truncatedStderr = truncate(stderr, maxBytes: maxOutputBytes)
+        return LocalShellExecution(
+            stdout: truncatedStdout.text,
+            stderr: truncatedStderr.text,
+            exitCode: process.terminationStatus,
+            timedOut: false,
+            truncated: truncatedStdout.truncated || truncatedStderr.truncated
+        )
+    }
+
+    private static func truncate(_ text: String, maxBytes: Int) -> (text: String, truncated: Bool) {
+        let bytes = Array(text.utf8)
+        guard bytes.count > maxBytes else { return (text, false) }
+        let prefix = Data(bytes.prefix(maxBytes))
+        let truncated = String(data: prefix, encoding: .utf8) ?? String(decoding: bytes.prefix(maxBytes), as: UTF8.self)
+        return (truncated + "\n[truncated to \(maxBytes) bytes]", true)
     }
 }
 

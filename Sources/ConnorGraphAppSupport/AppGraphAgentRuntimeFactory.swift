@@ -200,6 +200,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         registry.register(LocalWriteFileTool(policy: localWorkspacePolicy))
         registry.register(LocalEditFileTool(policy: localWorkspacePolicy))
         registry.register(LocalMultiEditTool(policy: localWorkspacePolicy))
+        registry.register(LocalBashTool(policy: localWorkspacePolicy))
         registry.register(BrowserFetchTool())
         registry.register(SearchEngineMCPTool(browserAssistedSearchHandler: browserAssistedSearchHandler))
         registry.register(SearchEngineMCPWebFetchTool(browserAssistedSearchHandler: browserAssistedSearchHandler))
