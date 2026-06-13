@@ -83,11 +83,9 @@ private struct AgentChatSessionListView: View {
     var body: some View {
         VStack(spacing: AgentChatLayout.spaceM) {
             Button(action: { viewModel.newChatSession() }) {
-                Label("新建对话", systemImage: "square.and.pencil")
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                SidebarActionButtonLabel(title: "新建对话", systemImage: "square.and.pencil")
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
+            .buttonStyle(SidebarActionButtonStyle())
 
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                 HStack {

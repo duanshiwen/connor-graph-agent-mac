@@ -225,8 +225,15 @@ struct BrowserWorkspaceView: View {
             .help("基于当前网页全文提问")
 
             Button(action: { viewModel.returnFromBrowserWorkspace() }) {
-                Label("返回对话", systemImage: "bubble.left.and.bubble.right")
+                SidebarActionButtonLabel(
+                    title: "返回对话",
+                    systemImage: "bubble.left.and.bubble.right",
+                    fillsWidth: false,
+                    titleFont: .caption.weight(.semibold),
+                    iconFont: .caption.weight(.bold)
+                )
             }
+            .buttonStyle(SidebarActionButtonStyle())
             .help("关闭网页工作区，返回关联会话的对话时间线")
         }
     }
@@ -342,7 +349,7 @@ struct BrowserWorkspaceView: View {
         if trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") { return trimmed }
         if trimmed.contains(".") && !trimmed.contains(" ") { return "https://\(trimmed)" }
         let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? trimmed
-        return "https://duckduckgo.com/?q=\(encoded)"
+        return "https://cn.bing.com/search?q=\(encoded)"
     }
 
     private func showSelectionPopover(_ payload: BrowserSelectionPayload, tabID: BrowserTabState.ID) {
@@ -778,7 +785,7 @@ private struct BrowserSelectionPopover: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Label(isPageQuestion ? "问一问 AI" : "网页选择", systemImage: isPageQuestion ? "sparkles" : "selection.pin.in.out")
-                    .font(.caption.weight(.semibold))
+                    .font(.subheadline.weight(.semibold))
                 Spacer()
                 Button(action: onClose) { Image(systemName: "xmark") }
                     .buttonStyle(.borderless)
@@ -787,12 +794,12 @@ private struct BrowserSelectionPopover: View {
             VStack(alignment: .leading, spacing: 4) {
                 if !popover.context.page.title.isEmpty {
                     Text(popover.context.page.title)
-                        .font(.caption.weight(.medium))
+                        .font(.subheadline.weight(.medium))
                         .lineLimit(1)
                 }
                 if !popover.context.page.url.isEmpty {
                     Text(popover.context.page.url)
-                        .font(.caption2)
+                        .font(.footnote)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
@@ -800,7 +807,7 @@ private struct BrowserSelectionPopover: View {
 
             if !isPageQuestion {
                 Text(popover.context.selectedText)
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.primary)
                     .lineLimit(4)
                     .textSelection(.enabled)
@@ -814,6 +821,7 @@ private struct BrowserSelectionPopover: View {
 
             HStack(spacing: 8) {
                 TextField(isPageQuestion ? "基于当前网页提问…" : "基于选中文本提问…", text: $question, axis: .vertical)
+                    .font(.subheadline)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...3)
                     .onSubmit(onAsk)
@@ -826,7 +834,7 @@ private struct BrowserSelectionPopover: View {
             }
 
             Text("发送后浮窗保持打开")
-                .font(.caption2)
+                .font(.footnote)
                 .foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
@@ -849,7 +857,7 @@ private struct BrowserSelectionThreadList: View {
             LazyVStack(alignment: .leading, spacing: 6) {
                 if messages.isEmpty {
                     Text(isPageQuestion ? "这个网页还没有提问记录。" : "这个网页选择还没有提问记录。")
-                        .font(.caption2)
+                        .font(.footnote)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, 4)
@@ -857,26 +865,26 @@ private struct BrowserSelectionThreadList: View {
                     ForEach(messages) { message in
                         HStack(alignment: .top, spacing: 6) {
                             Text(message.role == .user ? "你" : "AI")
-                                .font(.caption2.weight(.semibold))
+                                .font(.footnote.weight(.semibold))
                                 .foregroundStyle(message.role == .user ? Color.accentColor : Color.secondary)
-                                .frame(width: 22, alignment: .leading)
+                                .frame(width: 28, alignment: .leading)
                             if message.isPending {
                                 HStack(spacing: 6) {
                                     ProgressView()
                                         .controlSize(.small)
                                         .scaleEffect(0.62)
                                     Text("正在生成回复…")
-                                        .font(.caption2)
+                                        .font(.footnote)
                                         .foregroundStyle(.secondary)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             } else if message.role == .assistant {
-                                AgentMarkdownPreviewText(markdown: message.text, font: .caption2)
+                                AgentMarkdownPreviewText(markdown: message.text, font: .footnote)
                                     .foregroundStyle(.primary)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             } else {
                                 Text(message.text)
-                                    .font(.caption2)
+                                    .font(.footnote)
                                     .foregroundStyle(.primary)
                                     .lineLimit(3)
                                     .frame(maxWidth: .infinity, alignment: .leading)
