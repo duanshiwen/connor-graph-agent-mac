@@ -215,8 +215,65 @@ private struct AgentChatConversationView: View {
     @State private var lastObservedTranscriptCount: Int = 0
     @State private var pendingSessionTranscriptReloadID: String?
 
+    @MainActor
+    private final class TimelineCache {
+        struct Key: Hashable {
+            var sessionID: String?
+            var messageCount: Int
+            var messageSignature: Int
+            var contextSignature: Int
+            var isSubmitting: Bool
+        }
+
+        static let shared = TimelineCache()
+        private var entries: [Key: [AgentChatTurnTimelineItem]] = [:]
+        private let limit = 24
+
+        func items(
+            key: Key,
+            messages: [AgentMessage],
+            lastContext: AgentContext?,
+            isSubmitting: Bool
+        ) -> [AgentChatTurnTimelineItem] {
+            if let cached = entries[key] { return cached }
+            let built = AgentChatTurnTimelineItem.items(
+                messages: messages,
+                lastContext: lastContext,
+                isSubmitting: isSubmitting
+            )
+            if entries.count >= limit {
+                entries.removeAll(keepingCapacity: true)
+            }
+            entries[key] = built
+            return built
+        }
+    }
+
+    private var timelineCacheKey: TimelineCache.Key {
+        let messageSignature = viewModel.transcript.reduce(into: 0) { result, message in
+            result &+= message.id.hashValue
+            result &*= 31
+            result &+= message.content.count
+            result &*= 31
+            result &+= message.citations.count
+        }
+        let contextSignature = (viewModel.lastContext?.query.hashValue ?? 0) ^ (viewModel.lastContext?.items.reduce(into: 0) { result, item in
+            result &+= item.sourceID.hashValue
+            result &*= 31
+            result &+= item.content.count
+        } ?? 0)
+        return TimelineCache.Key(
+            sessionID: viewModel.selectedChatSessionID,
+            messageCount: viewModel.transcript.count,
+            messageSignature: messageSignature,
+            contextSignature: contextSignature,
+            isSubmitting: viewModel.isSubmittingChat
+        )
+    }
+
     private var timelineItems: [AgentChatTurnTimelineItem] {
-        AgentChatTurnTimelineItem.items(
+        TimelineCache.shared.items(
+            key: timelineCacheKey,
             messages: viewModel.transcript,
             lastContext: viewModel.lastContext,
             isSubmitting: viewModel.isSubmittingChat

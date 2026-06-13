@@ -2128,50 +2128,50 @@ private struct CraftSessionRow: View {
     var action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: row.isFlagged ? "pin.fill" : icon(for: row.status))
-                    .foregroundStyle(row.isFlagged ? .orange : (isSelected ? .accentColor : .secondary))
-                    .frame(width: 18)
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text(row.title)
-                            .font(.subheadline.weight(isSelected ? .semibold : .regular))
-                            .lineLimit(1)
-                        Spacer(minLength: 4)
-                        Text(row.relativeUpdatedTime)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    HStack(spacing: 6) {
-                        Text(row.statusText)
-                            .font(.caption2.weight(.semibold))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(statusColor(row.status).opacity(0.14), in: Capsule())
-                        Text("\(row.messageCount) msgs")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    if !row.labels.isEmpty {
-                        HStack(spacing: 4) {
-                            ForEach(Array(row.labels.prefix(3)), id: \.stableID) { label in
-                                Text(label.displayText)
-                                    .font(.caption2)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(.purple.opacity(0.10), in: Capsule())
-                            }
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: row.isFlagged ? "pin.fill" : icon(for: row.status))
+                .foregroundStyle(row.isFlagged ? .orange : (isSelected ? .accentColor : .secondary))
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(row.title)
+                        .font(.subheadline.weight(isSelected ? .semibold : .regular))
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    Text(row.relativeUpdatedTime)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                HStack(spacing: 6) {
+                    Text(row.statusText)
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(statusColor(row.status).opacity(0.14), in: Capsule())
+                    Text("\(row.messageCount) msgs")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                if !row.labels.isEmpty {
+                    HStack(spacing: 4) {
+                        ForEach(Array(row.labels.prefix(3)), id: \.stableID) { label in
+                            Text(label.displayText)
+                                .font(.caption2)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(.purple.opacity(0.10), in: Capsule())
                         }
                     }
                 }
             }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(isSelected ? Color.accentColor.opacity(0.14) : Color.clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(isSelected ? Color.accentColor.opacity(0.14) : Color.clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(SessionMouseDownHandler(action: action))
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
     }
 
     private func icon(for status: AgentSessionStatus) -> String {
@@ -2195,6 +2195,30 @@ private struct CraftSessionRow: View {
         case .done: .green
         case .blocked: .red
         case .archived: .gray
+        }
+    }
+}
+
+private struct SessionMouseDownHandler: NSViewRepresentable {
+    var action: () -> Void
+
+    func makeNSView(context: Context) -> MouseDownView {
+        let view = MouseDownView(frame: .zero)
+        view.action = action
+        return view
+    }
+
+    func updateNSView(_ nsView: MouseDownView, context: Context) {
+        nsView.action = action
+    }
+
+    final class MouseDownView: NSView {
+        var action: (() -> Void)?
+
+        override var acceptsFirstResponder: Bool { true }
+
+        override func mouseDown(with event: NSEvent) {
+            action?()
         }
     }
 }
