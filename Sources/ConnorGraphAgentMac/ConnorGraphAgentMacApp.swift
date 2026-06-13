@@ -2052,7 +2052,11 @@ private struct CraftSessionListPane: View {
                 LazyVStack(spacing: 2) {
                     ForEach(viewModel.chatSessions) { session in
                         CraftSessionRow(row: AgentChatSessionPresentation(session: session), isSelected: session.id == viewModel.selectedChatSessionID) {
-                            viewModel.selectChatSession(session.id)
+                            var transaction = Transaction()
+                            transaction.disablesAnimations = true
+                            withTransaction(transaction) {
+                                viewModel.selectChatSession(session.id)
+                            }
                         }
                     }
                     if viewModel.chatSessions.isEmpty {
