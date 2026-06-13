@@ -1,7 +1,7 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-13 23:31 GMT+8  
-当前代码基线：`feature/native-local-workspace-tools`，在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface 基础上，新增 Connor-owned native local workspace tool surface：`Read`、`LS`、`Glob`、`Grep`、`Write`、`Edit`、`MultiEdit`、`Bash`，并纳入 Connor Policy Engine、audit domain、release gate 与 Swift 测试覆盖。
+文档更新时间：2026-06-14 01:26 GMT+8  
+当前代码基线：`feature/project-working-directory-runtime`，在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface / multi-root project workspace 基础上，新增 Connor-owned Scientific Compute Runtime skeleton：`computeScientific` 权限、`ScientificComputeRequest/Result/Value` domain model、`ScientificComputeEngine` protocol、Native Swift always-on engine，以及 `science_compute` / `science_units` / `science_stats` / `science_linalg` / `science_symbolic` / `science_optimize` / `science_table_compute` AgentLoop 工具注册。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package，目标是把 Connor 建成 **graph-memory-native Agent OS**：它不是“图谱编辑器”，也不是“Claude SDK 外壳”，而是以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI 和 Local Automation Surface 共同构成的本地 Agent 操作系统。
 
@@ -311,6 +311,7 @@ Agent runtime target。包含：
 - Graph write tools
 - Web/search tools
 - Native local workspace tools
+- Scientific Compute Runtime tools
 - Permission policy
 - Prompt budget estimation and inspection
 - Session summary strategy
@@ -331,6 +332,7 @@ Sources/ConnorGraphAgent/GraphReadTools.swift
 Sources/ConnorGraphAgent/GraphWriteTools.swift
 Sources/ConnorGraphAgent/LocalWorkspacePolicy.swift
 Sources/ConnorGraphAgent/LocalWorkspaceTools.swift
+Sources/ConnorGraphAgent/ScientificComputeRuntime.swift
 Sources/ConnorGraphAgent/AgentPermission.swift
 Sources/ConnorGraphAgent/AgentEvent.swift
 Sources/ConnorGraphAgent/AgentEventRecorder.swift
@@ -961,7 +963,39 @@ runReadOnlyShellCommand
 runWorkspaceShellCommand
 runNetworkShellCommand
 runDestructiveShellCommand
+computeScientific
 ```
+
+### Scientific Compute Runtime
+
+Connor 原生 AgentLoop 现在有一个商用级 Scientific Compute Runtime 骨架，而不是把模型暴露给任意 eval / shell / Python 代码。模型只能通过声明式 operation JSON 调用白名单计算能力；结果带 `engine`、`method`、`tolerance`、`warnings`、`elapsedMilliseconds` 等 diagnostics，便于审计、复现和后续多引擎路由。
+
+当前注册工具：
+
+```text
+science_compute        computeScientific    通用科学计算入口：算术、比较、单位、统计、小型线代
+science_units          computeScientific    单位换算与量纲校验入口，当前委托 Native runtime
+science_stats          computeScientific    统计入口，当前委托 Native runtime
+science_linalg         computeScientific    线性代数入口，当前委托 Native runtime
+science_symbolic       computeScientific    符号数学入口；等待 Python/SymPy sidecar engine
+science_optimize       computeScientific    优化入口；等待 SciPy/Accelerate engine
+science_table_compute  computeScientific    表格科学计算入口；等待 DataFrame/table engine
+```
+
+当前 Native Swift engine 是 always-on reliability core，覆盖：
+
+```text
+add / subtract / multiply / divide
+compare / equal / not_equal / greater_than / less_than / greater_than_or_equal / less_than_or_equal
+approximate equality via absolute_tolerance / relative_tolerance
+summary statistics: count / sum / mean / median / min / max / sample_standard_deviation
+unit_convert: m / cm / km / s / min / h / m/s / km/h
+solve_linear_system for small square systems via Gaussian elimination with pivoting
+```
+
+比较大小是一级能力，不允许把浮点 `==` 静默伪装成可靠事实。若浮点相等/compare 没有显式 tolerance，Native engine 会在 diagnostics warnings 中记录 `Floating equality used without explicit tolerance policy.`。带单位比较和更完整单位制、符号正负判断、高精度 decimal/rational、概率分布、优化、积分、ODE、SVD/eigen 等属于后续 Python Scientific Sidecar / Accelerate engine 扩展范围。
+
+`computeScientific` 是纯本地确定性计算 capability，在 read-only / ask-to-write / trusted-write / allow-all 下默认批准；它不读写 workspace、不访问网络、不 shell out。
 
 AI 设置页支持：
 
@@ -1115,9 +1149,14 @@ Native local workspace tool targeted tests passed (2026-06-13 23:31 GMT+8):
 - swift test --filter AppGraphAgentRuntimeFactoryLocalToolsTests
 - swift test --filter CommercialReadinessReleaseGateTests
 
-Full swift test status on feature/project-working-directory-runtime:
-- 461 / 462 tests passed.
-- 1 existing UI copy expectation failed outside the project working directory runtime scope:
+Scientific Compute Runtime targeted tests passed (2026-06-14 01:26 GMT+8):
+- swift test --filter ScientificComputeRuntimeTests
+- swift test --filter agentLoopRunsScientificToolThenFinalAnswer
+- swift test --filter agentLoopRuntimeFactoryRegistersScientificComputingTools
+
+Full swift test status on feature/project-working-directory-runtime after Scientific Compute Runtime skeleton (2026-06-14 01:26 GMT+8):
+- 467 / 468 tests passed.
+- 1 existing UI copy expectation failed outside the Scientific Compute Runtime and project working directory runtime scope:
   PhaseGCraftGradeNativeUITests.nativeShellBuildsCraftGradeSidebarGroupsAndCommands
   expected shell.title == "Connor", actual shell.title == "康纳同学".
 ```
@@ -1145,6 +1184,7 @@ Tests/ConnorGraphAgentTests/AgentContextBuilderSQLiteSearchTests.swift
 Tests/ConnorGraphAgentTests/LocalWorkspacePolicyTests.swift
 Tests/ConnorGraphAgentTests/LocalWorkspaceToolsTests.swift
 Tests/ConnorGraphAgentTests/LocalShellCommandPolicyTests.swift
+Tests/ConnorGraphAgentTests/ScientificComputeRuntimeTests.swift
 Tests/ConnorGraphAppSupportTests/AppGraphAgentRuntimeFactoryLocalToolsTests.swift
 Tests/ConnorGraphAppSupportTests/AppGraphAgentRuntimeFactoryNativeSessionManagerTests.swift
 Tests/ConnorGraphAppSupportTests/NativeSessionManagerBackendTests.swift
