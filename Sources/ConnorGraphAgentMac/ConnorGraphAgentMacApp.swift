@@ -1853,6 +1853,7 @@ struct SidebarActionButtonLabel: View {
     var fillsWidth: Bool = true
     var titleFont: Font = .system(size: 12, weight: .regular)
     var iconFont: Font = .system(size: 13, weight: .medium)
+    var minHeight: CGFloat = 24
 
     var body: some View {
         Label {
@@ -1867,7 +1868,7 @@ struct SidebarActionButtonLabel: View {
         }
         .foregroundStyle(Color.primary)
         .labelStyle(.titleAndIcon)
-        .frame(maxWidth: fillsWidth ? .infinity : nil, minHeight: 24, alignment: .leading)
+        .frame(maxWidth: fillsWidth ? .infinity : nil, minHeight: minHeight, alignment: .leading)
         .padding(.horizontal, 7)
         .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
     }
@@ -1915,7 +1916,7 @@ private struct CraftPrimarySidebarView: View {
                 viewModel.newChatSession()
                 select(.agentChat)
             } label: {
-                SidebarActionButtonLabel(title: "新建会话", systemImage: "square.and.pencil")
+                SidebarActionButtonLabel(title: "新建会话", systemImage: "square.and.pencil", minHeight: 32)
             }
             .buttonStyle(SidebarActionButtonStyle())
             .padding(.horizontal, 10)
@@ -2030,26 +2031,32 @@ private struct CraftSessionListPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
+            ZStack {
                 Text(sessionListTitle)
                     .font(.headline)
-                Spacer()
-                Button(action: { viewModel.reloadChatSessions() }) {
-                    Image(systemName: "line.3.horizontal.decrease")
+                    .frame(maxWidth: .infinity, alignment: .center)
+
+                HStack {
+                    Spacer()
+                    Button(action: { viewModel.reloadChatSessions() }) {
+                        Image(systemName: "line.3.horizontal.decrease")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("刷新/过滤")
                 }
-                .buttonStyle(.borderless)
-                .help("刷新/过滤")
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
-
-            Divider()
 
             ScrollView {
                 LazyVStack(spacing: 2) {
                     ForEach(viewModel.chatSessions) { session in
                         CraftSessionRow(row: AgentChatSessionPresentation(session: session), isSelected: session.id == viewModel.selectedChatSessionID) {
-                            viewModel.selectChatSession(session.id)
+                            var transaction = Transaction()
+                            transaction.disablesAnimations = true
+                            withTransaction(transaction) {
+                                viewModel.selectChatSession(session.id)
+                            }
                         }
                     }
                     if viewModel.chatSessions.isEmpty {
@@ -2121,50 +2128,50 @@ private struct CraftSessionRow: View {
     var action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: row.isFlagged ? "pin.fill" : icon(for: row.status))
-                    .foregroundStyle(row.isFlagged ? .orange : (isSelected ? .accentColor : .secondary))
-                    .frame(width: 18)
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text(row.title)
-                            .font(.subheadline.weight(isSelected ? .semibold : .regular))
-                            .lineLimit(1)
-                        Spacer(minLength: 4)
-                        Text(row.relativeUpdatedTime)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    HStack(spacing: 6) {
-                        Text(row.statusText)
-                            .font(.caption2.weight(.semibold))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(statusColor(row.status).opacity(0.14), in: Capsule())
-                        Text("\(row.messageCount) msgs")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    if !row.labels.isEmpty {
-                        HStack(spacing: 4) {
-                            ForEach(Array(row.labels.prefix(3)), id: \.stableID) { label in
-                                Text(label.displayText)
-                                    .font(.caption2)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(.purple.opacity(0.10), in: Capsule())
-                            }
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: row.isFlagged ? "pin.fill" : icon(for: row.status))
+                .foregroundStyle(row.isFlagged ? .orange : (isSelected ? .accentColor : .secondary))
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(row.title)
+                        .font(.subheadline.weight(isSelected ? .semibold : .regular))
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    Text(row.relativeUpdatedTime)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                HStack(spacing: 6) {
+                    Text(row.statusText)
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(statusColor(row.status).opacity(0.14), in: Capsule())
+                    Text("\(row.messageCount) msgs")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                if !row.labels.isEmpty {
+                    HStack(spacing: 4) {
+                        ForEach(Array(row.labels.prefix(3)), id: \.stableID) { label in
+                            Text(label.displayText)
+                                .font(.caption2)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(.purple.opacity(0.10), in: Capsule())
                         }
                     }
                 }
             }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(isSelected ? Color.accentColor.opacity(0.14) : Color.clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(isSelected ? Color.accentColor.opacity(0.14) : Color.clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(SessionMouseDownHandler(action: action))
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
     }
 
     private func icon(for status: AgentSessionStatus) -> String {
@@ -2188,6 +2195,30 @@ private struct CraftSessionRow: View {
         case .done: .green
         case .blocked: .red
         case .archived: .gray
+        }
+    }
+}
+
+private struct SessionMouseDownHandler: NSViewRepresentable {
+    var action: () -> Void
+
+    func makeNSView(context: Context) -> MouseDownView {
+        let view = MouseDownView(frame: .zero)
+        view.action = action
+        return view
+    }
+
+    func updateNSView(_ nsView: MouseDownView, context: Context) {
+        nsView.action = action
+    }
+
+    final class MouseDownView: NSView {
+        var action: (() -> Void)?
+
+        override var acceptsFirstResponder: Bool { true }
+
+        override func mouseDown(with event: NSEvent) {
+            action?()
         }
     }
 }

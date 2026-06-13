@@ -5,6 +5,44 @@ import ConnorGraphAgent
 import ConnorGraphSearch
 import ConnorGraphAppSupport
 
+enum ConnorCraftPalette {
+    // Mirrors Craft Agents OSS renderer tokens:
+    // --background: light oklch(0.98 0.003 265), dark oklch(0.2 0.005 270)
+    // --foreground: light oklch(0.185 0.01 270), dark oklch(0.92 0.005 270)
+    // --accent: light oklch(0.62 0.13 293), dark oklch(0.65 0.20 293)
+    static let background = dynamicColor(light: "#F7F8FA", dark: "#151618")
+    static let foreground = dynamicColor(light: "#111317", dark: "#E3E4E8")
+    static let accent = dynamicColor(light: "#8A75CD", dark: "#9770FC")
+    static let userBubble = foreground.opacity(0.05)
+    static let userBubbleDimmed = foreground.opacity(0.03)
+    static let sendButton = foreground
+    static let sendButtonForeground = background
+    static let stopButton = foreground.opacity(0.05)
+    static let accentSoftFill = accent.opacity(0.14)
+    static let accentSubtleFill = accent.opacity(0.08)
+    static let accentBorder = accent.opacity(0.28)
+
+    private static func dynamicColor(light: String, dark: String) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            if appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua {
+                return nsColor(hex: dark)
+            }
+            return nsColor(hex: light)
+        })
+    }
+
+    private static func nsColor(hex: String) -> NSColor {
+        let sanitized = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        guard sanitized.count == 6, let value = Int(sanitized, radix: 16) else {
+            return .controlAccentColor
+        }
+        let red = CGFloat((value >> 16) & 0xFF) / 255
+        let green = CGFloat((value >> 8) & 0xFF) / 255
+        let blue = CGFloat(value & 0xFF) / 255
+        return NSColor(red: red, green: green, blue: blue, alpha: 1)
+    }
+}
+
 private enum AgentChatLayout {
     static let spaceXS: CGFloat = 3
     static let spaceS: CGFloat = 6
@@ -29,7 +67,8 @@ private enum AgentChatLayout {
     static let chatContentMaxWidth: CGFloat = 720
     static let messageMaxWidth: CGFloat = chatContentMaxWidth
     static let userMessageMaxWidth: CGFloat = chatContentMaxWidth * 0.72
-    static let assistantMessageMaxHeight: CGFloat = 800
+    static let assistantMessageMaxHeight: CGFloat = 600
+    static let assistantMessageScrollbarGutter: CGFloat = 28
     static let processMaxWidth: CGFloat = chatContentMaxWidth
     static let messageSideInset: CGFloat = 0
 }
@@ -83,7 +122,7 @@ private struct AgentChatSessionListView: View {
     var body: some View {
         VStack(spacing: AgentChatLayout.spaceM) {
             Button(action: { viewModel.newChatSession() }) {
-                SidebarActionButtonLabel(title: "新建对话", systemImage: "square.and.pencil")
+                SidebarActionButtonLabel(title: "新建对话", systemImage: "square.and.pencil", minHeight: 32)
             }
             .buttonStyle(SidebarActionButtonStyle())
 
@@ -109,7 +148,11 @@ private struct AgentChatSessionListView: View {
                             row: row,
                             isSelected: session.id == viewModel.selectedChatSessionID
                         ) {
-                            viewModel.selectChatSession(session.id)
+                            var transaction = Transaction()
+                            transaction.disablesAnimations = true
+                            withTransaction(transaction) {
+                                viewModel.selectChatSession(session.id)
+                            }
                         }
                     }
                 }
@@ -133,7 +176,7 @@ private struct AgentChatSessionRow: View {
                 HStack(spacing: AgentChatLayout.spaceS) {
                     Image(systemName: row.isFlagged ? "flag.fill" : (isSelected ? "message.fill" : "message"))
                         .font(.caption)
-                        .foregroundStyle(row.isFlagged ? .orange : (isSelected ? .accentColor : .secondary))
+                        .foregroundStyle(row.isFlagged ? .orange : (isSelected ? ConnorCraftPalette.accent : .secondary))
                         .frame(width: 16)
                     Text(row.title)
                         .font(.subheadline.weight(isSelected ? .semibold : .regular))
@@ -157,7 +200,7 @@ private struct AgentChatSessionRow: View {
             .padding(.vertical, AgentChatLayout.spaceM)
             .background(
                 RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous)
-                    .fill(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
+                    .fill(isSelected ? ConnorCraftPalette.accentSoftFill : Color.clear)
             )
             .contentShape(RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
         }
@@ -169,9 +212,69 @@ private struct AgentChatConversationView: View {
     @ObservedObject var viewModel: AppViewModel
     @Binding var isSessionInfoPresented: Bool
     @State private var activityDetailEvent: AgentEventPresentation?
+    @State private var lastObservedSessionID: String?
+    @State private var lastObservedTranscriptCount: Int = 0
+    @State private var pendingSessionTranscriptReloadID: String?
+
+    @MainActor
+    private final class TimelineCache {
+        struct Key: Hashable {
+            var sessionID: String?
+            var messageCount: Int
+            var messageSignature: Int
+            var contextSignature: Int
+            var isSubmitting: Bool
+        }
+
+        static let shared = TimelineCache()
+        private var entries: [Key: [AgentChatTurnTimelineItem]] = [:]
+        private let limit = 24
+
+        func items(
+            key: Key,
+            messages: [AgentMessage],
+            lastContext: AgentContext?,
+            isSubmitting: Bool
+        ) -> [AgentChatTurnTimelineItem] {
+            if let cached = entries[key] { return cached }
+            let built = AgentChatTurnTimelineItem.items(
+                messages: messages,
+                lastContext: lastContext,
+                isSubmitting: isSubmitting
+            )
+            if entries.count >= limit {
+                entries.removeAll(keepingCapacity: true)
+            }
+            entries[key] = built
+            return built
+        }
+    }
+
+    private var timelineCacheKey: TimelineCache.Key {
+        let messageSignature = viewModel.transcript.reduce(into: 0) { result, message in
+            result &+= message.id.hashValue
+            result &*= 31
+            result &+= message.content.count
+            result &*= 31
+            result &+= message.citations.count
+        }
+        let contextSignature = (viewModel.lastContext?.query.hashValue ?? 0) ^ (viewModel.lastContext?.items.reduce(into: 0) { result, item in
+            result &+= item.sourceID.hashValue
+            result &*= 31
+            result &+= item.content.count
+        } ?? 0)
+        return TimelineCache.Key(
+            sessionID: viewModel.selectedChatSessionID,
+            messageCount: viewModel.transcript.count,
+            messageSignature: messageSignature,
+            contextSignature: contextSignature,
+            isSubmitting: viewModel.isSubmittingChat
+        )
+    }
 
     private var timelineItems: [AgentChatTurnTimelineItem] {
-        AgentChatTurnTimelineItem.items(
+        TimelineCache.shared.items(
+            key: timelineCacheKey,
             messages: viewModel.transcript,
             lastContext: viewModel.lastContext,
             isSubmitting: viewModel.isSubmittingChat
@@ -186,11 +289,7 @@ private struct AgentChatConversationView: View {
         }
     }
 
-    private var latestProcessID: String? {
-        timelineItems.last(where: { $0.process != nil })?.process?.id
-    }
-
-    private func activityEvents(for process: AgentChatTurnProcessPresentation) -> [AgentEventPresentation] {
+    private func activityEvents(for process: AgentChatTurnProcessPresentation, latestProcessID: String?) -> [AgentEventPresentation] {
         if process.id == latestProcessID, !viewModel.agentEventTimeline.isEmpty {
             return viewModel.agentEventTimeline
         }
@@ -198,27 +297,30 @@ private struct AgentChatConversationView: View {
     }
 
     var body: some View {
+        let timelineSnapshot = timelineItems
+        let latestProcessID = timelineSnapshot.last(where: { $0.process != nil })?.process?.id
+
         VStack(spacing: 0) {
             AgentChatConversationHeader(viewModel: viewModel)
                 .padding(.horizontal, AgentChatLayout.spaceL)
                 .padding(.top, AgentChatLayout.spaceS)
-                .padding(.bottom, AgentChatLayout.spaceXS)
+                .padding(.bottom, AgentChatLayout.spaceL)
 
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
-                        if timelineItems.isEmpty {
+                        if timelineSnapshot.isEmpty {
                             AgentChatEmptyStateView()
                                 .frame(maxWidth: .infinity, minHeight: 360)
                         } else {
-                            ForEach(timelineItems) { item in
+                            ForEach(timelineSnapshot) { item in
                                 if let message = item.message {
                                     AgentChatMessageRow(row: message)
                                         .id(item.id)
                                 } else if let process = item.process {
                                     AgentChatTurnProcessRow(
                                         process: process,
-                                        events: activityEvents(for: process),
+                                        events: activityEvents(for: process, latestProcessID: latestProcessID),
                                         onOpenDetail: { event in
                                             activityDetailEvent = event
                                         }
@@ -231,20 +333,47 @@ private struct AgentChatConversationView: View {
                             }
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 0)
                     .padding(.vertical, AgentChatLayout.spaceXL)
                 }
-                .onChange(of: viewModel.transcript.count) { _, _ in
+                .onAppear {
+                    lastObservedSessionID = viewModel.selectedChatSessionID
+                    lastObservedTranscriptCount = viewModel.transcript.count
+                }
+                .onChange(of: viewModel.selectedChatSessionID) { _, newSessionID in
+                    pendingSessionTranscriptReloadID = newSessionID
+                    lastObservedSessionID = newSessionID
+                    lastObservedTranscriptCount = viewModel.transcript.count
+                }
+                .onChange(of: viewModel.transcript.count) { oldCount, newCount in
+                    let currentSessionID = viewModel.selectedChatSessionID
+                    defer {
+                        lastObservedSessionID = currentSessionID
+                        lastObservedTranscriptCount = newCount
+                    }
+                    if pendingSessionTranscriptReloadID == currentSessionID {
+                        pendingSessionTranscriptReloadID = nil
+                        return
+                    }
+                    guard currentSessionID == lastObservedSessionID,
+                          newCount > oldCount,
+                          newCount > lastObservedTranscriptCount
+                    else { return }
                     scrollToBottom(proxy: proxy)
                 }
-                .onChange(of: viewModel.isSubmittingChat) { _, _ in
+                .onChange(of: viewModel.isSubmittingChat) { _, isSubmitting in
+                    guard isSubmitting else { return }
                     scrollToBottom(proxy: proxy)
                 }
-            }
 
-            AgentChatComposerView(viewModel: viewModel, isSessionInfoPresented: $isSessionInfoPresented)
+                AgentChatComposerView(
+                    viewModel: viewModel,
+                    isSessionInfoPresented: $isSessionInfoPresented
+                )
                 .padding(.horizontal, 0)
                 .padding(.vertical, AgentChatLayout.spaceM)
+            }
         }
         .frame(maxWidth: AgentChatLayout.chatContentMaxWidth, maxHeight: .infinity)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -400,15 +529,65 @@ struct AgentMarkdownPreviewText: View {
         case code(String)
         case spacer
 
-        var id: String { UUID().uuidString }
+        var id: String {
+            switch self {
+            case .heading(let level, let text): return "heading-\(level)-\(text.hashValue)"
+            case .paragraph(let text): return "paragraph-\(text.hashValue)"
+            case .unorderedItem(let text): return "unordered-\(text.hashValue)"
+            case .orderedItem(let number, let text): return "ordered-\(number)-\(text.hashValue)"
+            case .quote(let text): return "quote-\(text.hashValue)"
+            case .code(let text): return "code-\(text.hashValue)"
+            case .spacer: return "spacer"
+            }
+        }
+    }
+
+    @MainActor
+    private final class RenderCache {
+        static let shared = RenderCache()
+        private var inlineCache: [String: AttributedString] = [:]
+        private var blockCache: [String: [Block]] = [:]
+        private let limit = 600
+
+        func inline(_ markdown: String) -> AttributedString {
+            if let cached = inlineCache[markdown] { return cached }
+            let rendered: AttributedString
+            if let attributed = try? AttributedString(
+                markdown: markdown,
+                options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+            ) {
+                rendered = attributed
+            } else {
+                rendered = AttributedString(markdown)
+            }
+            storeInline(rendered, for: markdown)
+            return rendered
+        }
+
+        func blocks(_ markdown: String, parse: (String) -> [Block]) -> [Block] {
+            if let cached = blockCache[markdown] { return cached }
+            let parsed = parse(markdown)
+            storeBlocks(parsed, for: markdown)
+            return parsed
+        }
+
+        private func storeInline(_ value: AttributedString, for key: String) {
+            if inlineCache.count >= limit { inlineCache.removeAll(keepingCapacity: true) }
+            inlineCache[key] = value
+        }
+
+        private func storeBlocks(_ value: [Block], for key: String) {
+            if blockCache.count >= limit { blockCache.removeAll(keepingCapacity: true) }
+            blockCache[key] = value
+        }
     }
 
     private var inlineRendered: AttributedString {
-        renderInline(markdown)
+        RenderCache.shared.inline(markdown)
     }
 
     private var blocks: [Block] {
-        parseBlocks(markdown)
+        RenderCache.shared.blocks(markdown, parse: parseBlocks)
     }
 
     @ViewBuilder
@@ -498,13 +677,7 @@ struct AgentMarkdownPreviewText: View {
     }
 
     private func renderInline(_ text: String) -> AttributedString {
-        if let attributed = try? AttributedString(
-            markdown: text,
-            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        ) {
-            return attributed
-        }
-        return AttributedString(text)
+        RenderCache.shared.inline(text)
     }
 
     private func parseBlocks(_ markdown: String) -> [Block] {
@@ -604,9 +777,7 @@ private struct AgentChatTurnTimestampRow: View {
             .font(.caption2.weight(.medium))
             .foregroundStyle(.tertiary)
             .lineLimit(1)
-            .padding(.horizontal, AgentChatLayout.spaceM)
             .padding(.vertical, 2)
-            .background(.quaternary.opacity(0.12), in: Capsule())
             .frame(maxWidth: .infinity, alignment: .center)
             .accessibilityLabel("对话时间 \(timestamp.text)")
     }
@@ -615,9 +786,51 @@ private struct AgentChatTurnTimestampRow: View {
 private struct AgentChatMessageRow: View {
     var row: AgentChatMessagePresentation
 
+    @MainActor
+    private final class BrowserPromptFoldingCache {
+        static let shared = BrowserPromptFoldingCache()
+        private var hits: [String: BrowserPromptFoldingParts] = [:]
+        private var misses = Set<String>()
+        private let limit = 600
+
+        func parts(for messageID: String, content: String) -> BrowserPromptFoldingParts? {
+            if let cached = hits[messageID] { return cached }
+            if misses.contains(messageID) { return nil }
+
+            guard content.contains("网页正文：") else {
+                storeMiss(messageID)
+                return nil
+            }
+
+            guard let parsed = BrowserPromptFoldingParser().parse(content) else {
+                storeMiss(messageID)
+                return nil
+            }
+            storeHit(parsed, for: messageID)
+            return parsed
+        }
+
+        private func storeHit(_ parts: BrowserPromptFoldingParts, for messageID: String) {
+            pruneIfNeeded()
+            hits[messageID] = parts
+        }
+
+        private func storeMiss(_ messageID: String) {
+            pruneIfNeeded()
+            misses.insert(messageID)
+        }
+
+        private func pruneIfNeeded() {
+            if hits.count + misses.count >= limit {
+                hits.removeAll(keepingCapacity: true)
+                misses.removeAll(keepingCapacity: true)
+            }
+        }
+    }
+
     private var isUser: Bool { row.message.role == .user }
     private var browserPromptFoldingParts: BrowserPromptFoldingParts? {
-        BrowserPromptFoldingParser().parse(row.message.content)
+        BrowserPromptFoldingCache.shared.parts(for: row.id, content: row.message.content)
     }
 
     var body: some View {
@@ -627,8 +840,9 @@ private struct AgentChatMessageRow: View {
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                 messageContent
             }
+            .foregroundStyle(Color.primary)
             .padding(AgentChatLayout.spaceM)
-            .frame(maxWidth: isUser ? AgentChatLayout.userMessageMaxWidth : AgentChatLayout.messageMaxWidth, alignment: .leading)
+            .frame(maxWidth: isUser ? AgentChatLayout.userMessageMaxWidth : .infinity, alignment: .leading)
             .background(messageBackground, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
@@ -637,6 +851,7 @@ private struct AgentChatMessageRow: View {
 
             if !isUser { Spacer(minLength: AgentChatLayout.messageSideInset) }
         }
+        .padding(.trailing, isUser ? 0 : AgentChatLayout.assistantMessageScrollbarGutter)
         .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
     }
 
@@ -652,13 +867,14 @@ private struct AgentChatMessageRow: View {
             ScrollView {
                 AgentMarkdownPreviewText(markdown: row.message.content, font: .body)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.trailing, AgentChatLayout.spaceXS)
             }
             .frame(maxHeight: AgentChatLayout.assistantMessageMaxHeight, alignment: .top)
         }
     }
 
     private var messageBackground: Color {
-        if isUser { return Color.accentColor.opacity(0.88) }
+        if isUser { return ConnorCraftPalette.userBubble }
         return Color(nsColor: .controlBackgroundColor).opacity(0.85)
     }
 }
@@ -1261,10 +1477,25 @@ struct AgentSendControlButton: View {
                 .font(.system(size: 11, weight: .semibold))
                 .frame(width: 22, height: 22)
         }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.mini)
-        .clipShape(Circle())
+        .buttonStyle(.plain)
+        .foregroundStyle(isSubmitting ? ConnorCraftPalette.foreground : ConnorCraftPalette.sendButtonForeground)
+        .background(buttonBackground, in: Circle())
+        .overlay(Circle().stroke(buttonBorder, lineWidth: 1))
+        .shadow(color: buttonShadow, radius: 7, x: 0, y: 2)
+        .opacity(isDisabled ? 0.42 : 1)
         .disabled(isDisabled)
+    }
+
+    private var buttonBackground: Color {
+        isSubmitting ? ConnorCraftPalette.stopButton : ConnorCraftPalette.sendButton
+    }
+
+    private var buttonBorder: Color {
+        isSubmitting ? ConnorCraftPalette.foreground.opacity(0.10) : ConnorCraftPalette.foreground.opacity(0.08)
+    }
+
+    private var buttonShadow: Color {
+        isDisabled || isSubmitting ? Color.clear : ConnorCraftPalette.foreground.opacity(0.12)
     }
 }
 
