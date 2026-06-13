@@ -1206,6 +1206,10 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    var primaryWorkspaceRootDraft: WorkspaceRootDraft? {
+        workspaceRoots.first(where: \.isPrimary) ?? workspaceRoots.first
+    }
+
     func addWorkspaceRoot(path rawPath: String) {
         let path = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !path.isEmpty else { return }
@@ -1226,8 +1230,39 @@ final class AppViewModel: ObservableObject {
         saveWorkspaceDraftsToCurrentSession()
     }
 
+    func addWorkspaceRootAndSetPrimary(path rawPath: String) {
+        let path = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !path.isEmpty else { return }
+        if let existing = workspaceRoots.first(where: { $0.path == path }) {
+            setPrimaryWorkspaceRoot(id: existing.id)
+            workspaceRootPathInput = ""
+            return
+        }
+        let url = URL(fileURLWithPath: path, isDirectory: true)
+        for index in workspaceRoots.indices {
+            workspaceRoots[index].isPrimary = false
+        }
+        workspaceRoots.append(WorkspaceRootDraft(
+            displayName: url.lastPathComponent.isEmpty ? path : url.lastPathComponent,
+            path: path,
+            role: workspaceRoots.isEmpty ? "project" : "additional",
+            isPrimary: true
+        ))
+        normalizeWorkspaceRootsPrimary()
+        defaultWorkingDirectoryPath = path
+        workspaceRootPathInput = ""
+        saveWorkspaceDraftsToCurrentSession()
+    }
+
     func addWorkspaceRoots(paths: [String]) {
         for path in paths { addWorkspaceRoot(path: path) }
+    }
+
+    func resetWorkspaceRootsForCurrentSession() {
+        workspaceRoots = []
+        defaultWorkingDirectoryPath = ""
+        workspaceRootPathInput = ""
+        saveWorkspaceDraftsToCurrentSession()
     }
 
     func removeWorkspaceRoot(id: String) {
