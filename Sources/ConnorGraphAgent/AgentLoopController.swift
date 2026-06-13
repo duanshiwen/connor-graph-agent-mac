@@ -12,7 +12,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
     public var budget: AgentBudgetConfiguration
 
     public init(
-        maxToolIterations: Int = 8,
+        maxToolIterations: Int = 64,
         maxToolCallsPerIteration: Int = 4,
         maxRunDurationSeconds: Int = 180,
         maxToolResultBytes: Int = 32 * 1024,
