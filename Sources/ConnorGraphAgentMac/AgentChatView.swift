@@ -106,7 +106,7 @@ struct AgentChatView: View {
             viewModel.openURLInCurrentChatBrowser(url)
             return .handled
         })
-        .navigationTitle("Connor Sessions")
+        .navigationTitle("康纳同学会话")
         .task {
             viewModel.deferViewUpdate {
                 viewModel.reloadChatSessions()
