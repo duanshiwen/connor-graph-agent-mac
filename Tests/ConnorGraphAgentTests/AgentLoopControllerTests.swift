@@ -76,6 +76,122 @@ private actor SuspendingModelProvider: AgentModelProvider {
     #expect(events.map(\.kind).contains(.runFailed))
 }
 
+@Test func agentLoopRequestsApprovalForAskToWriteToolAndContinuesAfterApproval() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "call-write-approval", name: "Write", argumentsJSON: #"{"file_path":"note.txt","content":"approved"}"#)],
+            usage: AgentModelUsage(promptTokens: 10, completionTokens: 3),
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: "Write completed.",
+            toolCalls: [],
+            usage: AgentModelUsage(promptTokens: 20, completionTokens: 5),
+            finishReason: .stop
+        )
+    ])
+    let workspace = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorAgentLoopApproval-")
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: workspace) }
+    var registry = AgentToolRegistry()
+    registry.register(LocalWriteFileTool(policy: LocalWorkspacePolicy(workingDirectory: workspace)))
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        configuration: AgentLoopConfiguration(permissionMode: .askToWrite)
+    )
+    let request = AgentChatRequest(runID: "run-write-approval", sessionID: "session-write-approval", userMessage: "Write note", permissionMode: .askToWrite)
+
+    let task = Task { () throws -> [AgentEvent] in
+        var events: [AgentEvent] = []
+        for try await event in loop.run(request) {
+            events.append(event)
+            if case .permissionRequested(let approvalRequest) = event {
+                Task {
+                    await loop.resolveApproval(AgentPendingApproval(
+                        requestID: approvalRequest.id,
+                        runID: approvalRequest.runID,
+                        sessionID: approvalRequest.sessionID,
+                        capability: approvalRequest.capability,
+                        toolName: approvalRequest.toolName,
+                        payloadJSON: approvalRequest.payloadJSON
+                    ), status: .approved)
+                }
+            }
+        }
+        return events
+    }
+
+    let events = try await task.value
+
+    #expect(events.map(\.kind).contains(.permissionRequested))
+    #expect(events.map(\.kind).contains(.permissionResolved))
+    #expect(events.map(\.kind).contains(.toolFinished))
+    #expect(events.map(\.kind).contains(.textComplete))
+    #expect(events.last?.kind == .runCompleted)
+    #expect(try String(contentsOf: workspace.appendingPathComponent("note.txt"), encoding: .utf8) == "approved")
+}
+
+@Test func agentLoopRequestsApprovalForWorkspaceShellCommand() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "call-bash-approval", name: "Bash", argumentsJSON: #"{"command":"touch shell-created.txt"}"#)],
+            usage: AgentModelUsage(promptTokens: 10, completionTokens: 3),
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: "Shell command completed.",
+            toolCalls: [],
+            usage: AgentModelUsage(promptTokens: 20, completionTokens: 5),
+            finishReason: .stop
+        )
+    ])
+    let workspace = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorAgentLoopShellApproval-")
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: workspace) }
+    var registry = AgentToolRegistry()
+    registry.register(LocalBashTool(policy: LocalWorkspacePolicy(workingDirectory: workspace)))
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        configuration: AgentLoopConfiguration(permissionMode: .askToWrite)
+    )
+    let request = AgentChatRequest(runID: "run-bash-approval", sessionID: "session-bash-approval", userMessage: "Touch file", permissionMode: .askToWrite)
+
+    let task = Task { () throws -> [AgentEvent] in
+        var events: [AgentEvent] = []
+        for try await event in loop.run(request) {
+            events.append(event)
+            if case .permissionRequested(let approvalRequest) = event {
+                #expect(approvalRequest.capability == .runWorkspaceShellCommand)
+                Task {
+                    await loop.resolveApproval(AgentPendingApproval(
+                        requestID: approvalRequest.id,
+                        runID: approvalRequest.runID,
+                        sessionID: approvalRequest.sessionID,
+                        capability: approvalRequest.capability,
+                        toolName: approvalRequest.toolName,
+                        payloadJSON: approvalRequest.payloadJSON
+                    ), status: .approved)
+                }
+            }
+        }
+        return events
+    }
+
+    let events = try await task.value
+
+    #expect(events.map(\.kind).contains(.permissionRequested))
+    #expect(events.map(\.kind).contains(.toolFinished))
+    #expect(FileManager.default.fileExists(atPath: workspace.appendingPathComponent("shell-created.txt").path))
+}
+
 @Test func agentLoopRunsScientificToolThenFinalAnswer() async throws {
     let provider = ScriptedModelProvider(responses: [
         AgentModelResponse(

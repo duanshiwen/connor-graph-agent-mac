@@ -42,6 +42,26 @@ private actor NativeSessionFailingProvider: AgentModelProvider {
     }
 }
 
+private actor NativeSessionScriptedProvider: AgentModelProvider {
+    let modelID = "native-session-scripted"
+    let capabilities = AgentModelCapabilities(
+        supportsStreaming: false,
+        supportsToolCalling: true,
+        supportsParallelToolCalls: false,
+        supportsStructuredOutput: false,
+        supportsVision: false
+    )
+    private var responses: [AgentModelResponse]
+
+    init(responses: [AgentModelResponse]) {
+        self.responses = responses
+    }
+
+    func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
+        responses.removeFirst()
+    }
+}
+
 private func temporaryNativeSessionManagerDatabaseURL(_ name: String = UUID().uuidString) -> URL {
     FileManager.default.temporaryDirectory.appendingPathComponent("\(name).sqlite")
 }
@@ -70,6 +90,65 @@ private func makeNativeSessionStore() throws -> SQLiteGraphKernelStore {
     #expect(manager.session.messages.map(\.id) == loaded.messages.map(\.id))
     #expect(manager.session.messages.map(\.role) == loaded.messages.map(\.role))
     #expect(manager.session.messages.map(\.content) == loaded.messages.map(\.content))
+}
+
+@Test func nativeSessionManagerPersistsAskToWritePendingApprovalAndContinuesAfterApproval() async throws {
+    let store = try makeNativeSessionStore()
+    let repository = AppChatSessionRepository(store: store)
+    let session = AgentSession(id: "native-session-approval", title: "Approval Chat", createdAt: Date(timeIntervalSince1970: 1_000))
+    try repository.saveSession(session)
+    let workspace = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorNativeSessionApproval-")
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: workspace) }
+    var registry = AgentToolRegistry()
+    registry.register(LocalWriteFileTool(policy: LocalWorkspacePolicy(workingDirectory: workspace)))
+    let loop = AgentLoopController(
+        modelProvider: NativeSessionScriptedProvider(responses: [
+            AgentModelResponse(
+                text: nil,
+                toolCalls: [AgentToolCall(id: "native-write-call", name: "Write", argumentsJSON: #"{"file_path":"approved.txt","content":"ok"}"#)],
+                usage: AgentModelUsage(promptTokens: 10, completionTokens: 3),
+                finishReason: .toolCalls
+            ),
+            AgentModelResponse(
+                text: "Approved write completed.",
+                toolCalls: [],
+                usage: AgentModelUsage(promptTokens: 20, completionTokens: 5),
+                finishReason: .stop
+            )
+        ]),
+        toolRegistry: registry,
+        configuration: AgentLoopConfiguration(permissionMode: .askToWrite)
+    )
+    var manager = NativeSessionManager(loopController: loop, sessionRepository: repository, session: session)
+
+    let approvalTask = Task {
+        var approval: AgentPendingApproval?
+        for _ in 0..<100 {
+            if let pending = try store.pendingApprovals(status: .pending, limit: 10).first {
+                approval = pending
+                break
+            }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        let pending = try #require(approval)
+        #expect(pending.capability == .writeWorkspaceFile)
+        #expect(pending.toolName == "Write")
+        await loop.resolveApproval(pending, status: .approved)
+    }
+
+    let response = try await manager.submit("Write with approval")
+    try await approvalTask.value
+    let approvals = try store.pendingApprovals(runID: try #require(response.events.first?.runID))
+
+    #expect(response.events.map(\.kind).contains(.permissionRequested))
+    #expect(response.events.map(\.kind).contains(.permissionResolved))
+    #expect(response.assistantMessage?.content == "Approved write completed.")
+    #expect(approvals.count == 1)
+    #expect(approvals.first?.status == .pending)
+    #expect(try String(contentsOf: workspace.appendingPathComponent("approved.txt"), encoding: .utf8) == "ok")
 }
 
 @Test func nativeSessionManagerPreservesUserMessageWhenBackendFails() async throws {
