@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import WebKit
 import ConnorGraphAppSupport
@@ -14,6 +15,7 @@ struct BrowserWorkspaceView: View {
     @State private var webViewsByTabID: [UUID: WKWebView] = [:]
     @State private var addressText: String = ""
     @State private var questionText = ""
+    @State private var escapeKeyMonitor: Any?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -84,7 +86,7 @@ struct BrowserWorkspaceView: View {
                             onAsk: {
                                 sendSelectionQuestion(popover)
                             },
-                            onClose: closeSelectionPopover
+                            onClose: { closeSelectionPopover(policy: .explicitClose) }
                         )
                         .frame(width: layout.width)
                         .frame(maxHeight: layout.maxHeight)
@@ -97,6 +99,10 @@ struct BrowserWorkspaceView: View {
         .onAppear {
             ensureInitialTab()
             navigate(to: viewModel.browserTargetURLString)
+            installEscapeKeyMonitorIfNeeded()
+        }
+        .onDisappear {
+            removeEscapeKeyMonitor()
         }
         .onChange(of: viewModel.browserTargetURLString) { _, newValue in
             ensureInitialTab()
@@ -209,6 +215,14 @@ struct BrowserWorkspaceView: View {
             TextField("输入网址或搜索词，按 Return 打开", text: $addressText)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { navigateFromAddressBar() }
+
+            Button(action: showPageQuestionPopover) {
+                BrowserAskAIButtonLabel()
+            }
+            .buttonStyle(.plain)
+            .disabled(activeWebView == nil || activeTab?.navigationState.isLoading == true)
+            .opacity(activeWebView == nil || activeTab?.navigationState.isLoading == true ? 0.48 : 1)
+            .help("基于当前网页全文提问")
 
             Button(action: { viewModel.returnFromBrowserWorkspace() }) {
                 Label("返回对话", systemImage: "bubble.left.and.bubble.right")
@@ -336,28 +350,73 @@ struct BrowserWorkspaceView: View {
         let context = BrowserSelectionContext(page: page, selectedText: payload.selectedText)
         guard context.hasSelectionContext else { return }
         let threadID = BrowserSelectionThread.stableID(tabID: tabID, pageURL: payload.pageURL, selectedText: payload.selectedText)
+        showContextPopover(context, tabID: tabID, rect: payload.rect, threadID: threadID, threadSelectedText: payload.selectedText)
+    }
+
+    private func showPageQuestionPopover() {
+        guard let webView = activeWebView, let tabID = activeSelectedTabID else { return }
+        webView.evaluateJavaScript(Self.pageContextScript) { result, error in
+            if let error {
+                DispatchQueue.main.async { viewModel.errorMessage = error.localizedDescription }
+                return
+            }
+            guard let json = result as? String,
+                  let data = json.data(using: .utf8),
+                  let payload = try? JSONDecoder().decode(BrowserPageQuestionPayload.self, from: data)
+            else { return }
+            let context = BrowserSelectionContext(
+                page: BrowserPageContext(url: payload.pageURL, title: payload.pageTitle, text: payload.pageText),
+                selectedText: ""
+            )
+            guard context.hasPageContext else { return }
+            let width = max(420, webView.bounds.width)
+            let rect = BrowserSelectionRect(x: max(24, width - 260), y: 16, width: 220, height: 28)
+            let threadID = BrowserSelectionThread.stablePageID(tabID: tabID, pageURL: payload.pageURL)
+            DispatchQueue.main.async {
+                showContextPopover(context, tabID: tabID, rect: rect, threadID: threadID, threadSelectedText: "")
+            }
+        }
+    }
+
+    private func showContextPopover(_ context: BrowserSelectionContext, tabID: BrowserTabState.ID, rect: BrowserSelectionRect, threadID: UUID, threadSelectedText: String) {
         mutateActiveSession { session in
             if session.threads[threadID] == nil {
                 session.threads[threadID] = BrowserSelectionThread(
                     id: threadID,
                     tabID: tabID,
-                    pageURL: payload.pageURL,
-                    selectedText: payload.selectedText,
+                    pageURL: context.page.url,
+                    selectedText: threadSelectedText,
                     messages: []
                 )
             }
             session.selectionPopover = BrowserSelectionPopoverState(
                 tabID: tabID,
                 context: context,
-                rect: payload.rect,
+                rect: rect,
                 threadID: threadID
             )
         }
     }
 
-    private func closeSelectionPopover() {
+    private func closeSelectionPopover(policy: BrowserPopoverDismissalPolicy) {
         mutateActiveSession { session in session.selectionPopover = nil }
-        questionText = ""
+        if !policy.shouldPreserveDraftQuestion { questionText = "" }
+    }
+
+    private func installEscapeKeyMonitorIfNeeded() {
+        guard escapeKeyMonitor == nil else { return }
+        escapeKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard event.keyCode == 53, activeSession.selectionPopover != nil else { return event }
+            closeSelectionPopover(policy: .escape)
+            return nil
+        }
+    }
+
+    private func removeEscapeKeyMonitor() {
+        if let escapeKeyMonitor {
+            NSEvent.removeMonitor(escapeKeyMonitor)
+            self.escapeKeyMonitor = nil
+        }
     }
 
     private func insertSelectionContext(_ context: BrowserSelectionContext) {
@@ -371,13 +430,15 @@ struct BrowserWorkspaceView: View {
         guard !question.isEmpty else { return }
         appendThreadMessage(threadID: popover.threadID, role: .user, text: question)
         let pendingMessageID = appendThreadMessage(threadID: popover.threadID, role: .assistant, text: "", isPending: true)
+        let isPageQuestion = popover.context.selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         viewModel.appendSessionRecord(
-            kind: "browser.selection.question",
-            title: popover.context.page.title.isEmpty ? "网页选择提问" : popover.context.page.title,
+            kind: isPageQuestion ? "browser.page.question" : "browser.selection.question",
+            title: popover.context.page.title.isEmpty ? (isPageQuestion ? "网页提问" : "网页选择提问") : popover.context.page.title,
             body: question,
             metadata: [
                 "pageURL": popover.context.page.url,
                 "selectedText": String(popover.context.selectedText.prefix(500)),
+                "contextScope": isPageQuestion ? "page" : "selection",
                 "threadID": popover.threadID.uuidString,
                 "tabID": popover.tabID.uuidString
             ],
@@ -415,8 +476,9 @@ struct BrowserWorkspaceView: View {
         let title = selection.page.title.trimmingCharacters(in: .whitespacesAndNewlines)
         let url = selection.page.url.trimmingCharacters(in: .whitespacesAndNewlines)
         let selectedText = selection.selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isPageQuestion = selectedText.isEmpty
         let selectedPreview = selectedText.count > 300 ? String(selectedText.prefix(300)) + "…" : selectedText
-        var lines: [String] = ["网页选区提问"]
+        var lines: [String] = [isPageQuestion ? "网页提问" : "网页选区提问"]
         if !title.isEmpty { lines.append("页面：\(title)") }
         if !url.isEmpty { lines.append("URL：\(url)") }
         if !selectedPreview.isEmpty {
@@ -448,6 +510,26 @@ struct BrowserWorkspaceView: View {
             preferredSize: CGSize(width: 420, height: 520)
         )
     }
+
+    private static let pageContextScript = """
+    (function() {
+      function readablePageText() {
+        var candidates = [];
+        var article = document.querySelector('article');
+        if (article && article.innerText) { candidates.push(article.innerText); }
+        var main = document.querySelector('main');
+        if (main && main.innerText) { candidates.push(main.innerText); }
+        if (document.body && document.body.innerText) { candidates.push(document.body.innerText); }
+        var text = candidates.find(function(value) { return value && value.trim().length > 0; }) || '';
+        return text.replace(/[ \\t]+/g, ' ').replace(/\\n{3,}/g, '\\n\\n').trim().slice(0, 60000);
+      }
+      return JSON.stringify({
+        pageURL: location.href || '',
+        pageTitle: document.title || '',
+        pageText: readablePageText()
+      });
+    })();
+    """
 }
 
 private struct BrowserSessionState {
@@ -627,6 +709,11 @@ private struct BrowserSelectionThread: Identifiable {
         let key = "\(tabID.uuidString)|\(pageURL)|\(selectedText.prefix(120))"
         return UUID(uuidString: UUID.nameUUIDFromBytes(key)) ?? UUID()
     }
+
+    static func stablePageID(tabID: UUID, pageURL: String) -> UUID {
+        let key = "\(tabID.uuidString)|\(pageURL)|__page__"
+        return UUID(uuidString: UUID.nameUUIDFromBytes(key)) ?? UUID()
+    }
 }
 
 private struct BrowserSelectionThreadMessage: Identifiable {
@@ -672,6 +759,12 @@ private struct BrowserSelectionPayload: Decodable {
     var rect: BrowserSelectionRect
 }
 
+private struct BrowserPageQuestionPayload: Decodable {
+    var pageURL: String
+    var pageTitle: String
+    var pageText: String
+}
+
 private struct BrowserSelectionPopover: View {
     var popover: BrowserSelectionPopoverState
     var thread: BrowserSelectionThread?
@@ -681,9 +774,10 @@ private struct BrowserSelectionPopover: View {
     var onClose: () -> Void
 
     var body: some View {
+        let isPageQuestion = popover.context.selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Label("网页选择", systemImage: "selection.pin.in.out")
+                Label(isPageQuestion ? "问一问 AI" : "网页选择", systemImage: isPageQuestion ? "sparkles" : "selection.pin.in.out")
                     .font(.caption.weight(.semibold))
                 Spacer()
                 Button(action: onClose) { Image(systemName: "xmark") }
@@ -704,20 +798,22 @@ private struct BrowserSelectionPopover: View {
                 }
             }
 
-            Text(popover.context.selectedText)
-                .font(.caption)
-                .foregroundStyle(.primary)
-                .lineLimit(4)
-                .textSelection(.enabled)
-                .padding(8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            if !isPageQuestion {
+                Text(popover.context.selectedText)
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+                    .lineLimit(4)
+                    .textSelection(.enabled)
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            }
 
-            BrowserSelectionThreadList(messages: thread?.messages ?? [])
+            BrowserSelectionThreadList(messages: thread?.messages ?? [], isPageQuestion: isPageQuestion)
                 .frame(maxHeight: 360)
 
             HStack(spacing: 8) {
-                TextField("基于选中文本提问…", text: $question, axis: .vertical)
+                TextField(isPageQuestion ? "基于当前网页提问…" : "基于选中文本提问…", text: $question, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...3)
                     .onSubmit(onAsk)
@@ -746,12 +842,13 @@ private struct BrowserSelectionPopover: View {
 
 private struct BrowserSelectionThreadList: View {
     var messages: [BrowserSelectionThreadMessage]
+    var isPageQuestion: Bool = false
 
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 6) {
                 if messages.isEmpty {
-                    Text("这个网页选择还没有提问记录。")
+                    Text(isPageQuestion ? "这个网页还没有提问记录。" : "这个网页选择还没有提问记录。")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -835,6 +932,31 @@ private struct BrowserTabChip: View {
 
     private var tabBackground: Color { isSelected ? Color(nsColor: .controlBackgroundColor) : Color.secondary.opacity(0.045) }
     private var tabBorder: Color { isSelected ? Color.secondary.opacity(0.18) : Color.secondary.opacity(0.07) }
+}
+
+private struct BrowserAskAIButtonLabel: View {
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "sparkles")
+                .font(.caption.weight(.bold))
+            Text("问一问 AI")
+                .font(.caption.weight(.semibold))
+        }
+        .foregroundStyle(Color.accentColor)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 6)
+        .background(
+            LinearGradient(
+                colors: [Color.accentColor.opacity(0.18), Color.accentColor.opacity(0.08)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: Capsule()
+        )
+        .overlay(Capsule().stroke(Color.accentColor.opacity(0.28), lineWidth: 1))
+        .shadow(color: Color.accentColor.opacity(0.16), radius: 8, x: 0, y: 3)
+        .contentShape(Capsule())
+    }
 }
 
 private struct BrowserLoadingOverlay: View {
