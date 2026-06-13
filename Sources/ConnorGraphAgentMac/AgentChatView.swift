@@ -384,7 +384,7 @@ private struct AgentChatEmptyStateView: View {
     }
 }
 
-private struct AgentMarkdownPreviewText: View {
+struct AgentMarkdownPreviewText: View {
     var markdown: String
     var font: Font = .body
     var monospacedFallback: Bool = false

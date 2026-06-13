@@ -127,11 +127,12 @@ public struct NativeSessionManager: Sendable {
     public mutating func submit(
         _ prompt: String,
         sessionSummary: AgentSessionSummary?,
+        displayPrompt: String? = nil,
         onRunStarted: (@MainActor @Sendable (String) -> Void)? = nil,
         onEventPresentation: (@MainActor @Sendable (AgentEventPresentation) -> Void)? = nil
     ) async throws -> AgentLoopChatResponse {
         let recentMessages = Array(session.messages.suffix(max(0, recentMessageLimit)))
-        let userMessage = session.appendUserMessage(prompt)
+        let userMessage = session.appendUserMessage(displayPrompt ?? prompt)
         try persistSession()
         try persistMemoryStagingAfterUserMessage(userMessage)
 
