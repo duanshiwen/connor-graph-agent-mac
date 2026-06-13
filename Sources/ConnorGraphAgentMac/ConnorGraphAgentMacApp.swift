@@ -222,6 +222,7 @@ final class AppViewModel: ObservableObject {
     @Published var sessionStateSnapshotsBySessionID: [String: AppSessionStateSnapshot] = [:]
     @Published var sessionRecordsBySessionID: [String: [AppSessionRecord]] = [:]
     @Published var browserWorkspaceSnapshotsBySessionID: [String: AppBrowserStateSnapshot] = [:]
+    @Published var browserAssistedTasksByID: [UUID: BrowserAssistedTaskState] = [:]
     @Published var isCommandPalettePresented: Bool = false
     @Published var selectedSettingsSection: ConnorSettingsSection = .app
     @Published var desktopNotificationsEnabled: Bool = true
@@ -358,12 +359,67 @@ final class AppViewModel: ObservableObject {
         showBrowserWorkspace()
     }
 
+    @discardableResult
+    func startBrowserAssistedSearch(urlString: String, title: String, revealImmediately: Bool = false) -> BrowserAssistedTaskState {
+        let sessionID = selectedChatSessionID ?? activeChatSession.id
+        let currentSnapshot = browserWorkspaceSnapshotsBySessionID[sessionID] ?? AppBrowserStateSnapshot()
+        let request = BrowserAssistedTaskRequest(
+            kind: .search,
+            sessionID: sessionID,
+            urlString: urlString,
+            title: title,
+            visibility: revealImmediately ? .foreground : .background
+        )
+        let plan = BrowserAssistedTaskPlanner().start(request, in: currentSnapshot)
+        browserAssistedTasksByID[plan.task.id] = plan.task
+        browserTargetURLString = urlString
+        saveBrowserWorkspaceSnapshot(plan.snapshot, for: sessionID)
+        if plan.shouldRevealBrowser { showBrowserWorkspace(for: sessionID) }
+        return plan.task
+    }
+
+    func revealBrowserAssistedTask(_ taskID: UUID, reason: String) {
+        guard let task = browserAssistedTasksByID[taskID] else { return }
+        let updated = BrowserAssistedTaskPlanner().requireUserIntervention(task, reason: reason)
+        browserAssistedTasksByID[taskID] = updated
+        focusBrowserTab(updated.tabID, in: updated.sessionID, urlString: updated.urlString)
+        showBrowserWorkspace(for: updated.sessionID)
+    }
+
+    func completeBrowserAssistedTask(_ taskID: UUID, message: String) {
+        guard let task = browserAssistedTasksByID[taskID] else { return }
+        browserAssistedTasksByID[taskID] = BrowserAssistedTaskPlanner().complete(task, message: message)
+    }
+
+    func failBrowserAssistedTask(_ taskID: UUID, message: String) {
+        guard let task = browserAssistedTasksByID[taskID] else { return }
+        browserAssistedTasksByID[taskID] = BrowserAssistedTaskPlanner().fail(task, message: message)
+    }
+
+    private func focusBrowserTab(_ tabID: UUID, in sessionID: String, urlString: String) {
+        var snapshot = browserWorkspaceSnapshotsBySessionID[sessionID] ?? AppBrowserStateSnapshot()
+        if snapshot.tabs.contains(where: { $0.id == tabID }) {
+            snapshot.selectedTabID = tabID
+        } else {
+            snapshot = BrowserExternalOpenPlanner().open(urlString: urlString, in: snapshot)
+        }
+        browserTargetURLString = urlString
+        saveBrowserWorkspaceSnapshot(snapshot, for: sessionID)
+    }
+
     func showBrowserWorkspace() {
         let sessionID = selectedChatSessionID ?? activeChatSession.id
+        showBrowserWorkspace(for: sessionID)
+    }
+
+    private func showBrowserWorkspace(for sessionID: String) {
         browserWorkspaceSessionBinding.bindBrowserWorkspace(to: sessionID)
         browserWorkspaceSessionID = browserWorkspaceSessionBinding.boundSessionID
         isBrowserVisible = true
         selection = .agentChat
+        if selectedChatSessionID != sessionID {
+            selectChatSession(sessionID)
+        }
         rememberWorkspaceMode(.browser, for: sessionID)
     }
 
@@ -512,6 +568,8 @@ final class AppViewModel: ObservableObject {
         self.governanceConfig = governanceConfig
         self.productOSRegistry = productOSRegistry
         self.automationConfig = automationConfig
+        self.llmSettingsRepository = llmSettingsRepository
+        self.llmProviderHealthChecker = AppLLMProviderHealthChecker(settingsRepository: llmSettingsRepository)
         if let storagePaths {
             self.productOSRegistryRepository = AppProductOSRegistryRepository(storagePaths: storagePaths)
             self.automationRepository = AppProductOSAutomationRepository(storagePaths: storagePaths)
@@ -529,15 +587,35 @@ final class AppViewModel: ObservableObject {
             if let storagePaths {
                 self.runtimeSettingsRepository = AppRuntimeSettingsRepository(configDirectory: storagePaths.configDirectory)
             }
-            self.agentRuntimeFactory = AppGraphAgentRuntimeFactory(store: repository.store, settingsRepository: llmSettingsRepository)
             self.hybridSearchService = SQLiteGraphHybridSearchService(store: repository.store)
             self.backgroundJobRunner = AppGraphBackgroundJobRunner(store: repository.store, settingsRepository: llmSettingsRepository)
         }
-        self.llmSettingsRepository = llmSettingsRepository
-        self.llmProviderHealthChecker = AppLLMProviderHealthChecker(settingsRepository: llmSettingsRepository)
         self.databasePath = databasePath
         let initialSession = AgentSession(id: "app-session")
         self.fallbackChatSession = initialSession
+        if let repository {
+            self.agentRuntimeFactory = AppGraphAgentRuntimeFactory(
+                store: repository.store,
+                settingsRepository: llmSettingsRepository,
+                browserAssistedSearchHandler: { [weak self] request in
+                    await MainActor.run {
+                        guard let self else { return nil }
+                        let state = self.startBrowserAssistedSearch(
+                            urlString: request.urlString,
+                            title: request.title,
+                            revealImmediately: request.revealImmediately
+                        )
+                        return BrowserAssistedSearchResult(
+                            taskID: state.id.uuidString,
+                            sessionID: state.sessionID,
+                            tabID: state.tabID.uuidString,
+                            urlString: state.urlString,
+                            status: state.status.rawValue
+                        )
+                    }
+                }
+            )
+        }
         self.nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: initialSession)
         self.searchResults = []
         loadLLMSettings()
@@ -1824,6 +1902,9 @@ struct AppShellView: View {
             CraftDetailPaneView(viewModel: viewModel, selection: sidebarSelection ?? .agentChat)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
+        }
+        .overlay(alignment: .topLeading) {
+            BrowserBackgroundTaskRunnerView(viewModel: viewModel)
         }
         .frame(minWidth: 1120, minHeight: 680)
         .controlSize(.small)
