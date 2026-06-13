@@ -192,6 +192,15 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         registry.register(GraphSearchTool(searchService: searchService))
         registry.register(GraphIngestEpisodeTool(repository: store))
         registry.register(GraphProposeWriteTool(repository: store))
+        let localWorkspacePolicy = LocalWorkspacePolicy(workingDirectory: Self.nativeAgentLoopWorkingDirectory())
+        registry.register(LocalReadFileTool(policy: localWorkspacePolicy))
+        registry.register(LocalListDirectoryTool(policy: localWorkspacePolicy))
+        registry.register(LocalGlobTool(policy: localWorkspacePolicy))
+        registry.register(LocalGrepTool(policy: localWorkspacePolicy))
+        registry.register(LocalWriteFileTool(policy: localWorkspacePolicy))
+        registry.register(LocalEditFileTool(policy: localWorkspacePolicy))
+        registry.register(LocalMultiEditTool(policy: localWorkspacePolicy))
+        registry.register(LocalBashTool(policy: localWorkspacePolicy))
         registry.register(BrowserFetchTool())
         registry.register(SearchEngineMCPTool(browserAssistedSearchHandler: browserAssistedSearchHandler))
         registry.register(SearchEngineMCPWebFetchTool(browserAssistedSearchHandler: browserAssistedSearchHandler))
@@ -247,6 +256,10 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         } catch {
             return AnyLLMProvider { _, _ in throw error }
         }
+    }
+
+    private static func nativeAgentLoopWorkingDirectory() -> URL {
+        URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
     }
 
     private static func splitSidecarArguments(_ arguments: String) -> [String] {
