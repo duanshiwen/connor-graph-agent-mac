@@ -67,6 +67,7 @@ private enum AgentChatLayout {
     static let chatContentMaxWidth: CGFloat = 720
     static let messageMaxWidth: CGFloat = chatContentMaxWidth
     static let userMessageMaxWidth: CGFloat = chatContentMaxWidth * 0.72
+    static let assistantMessageMaxHeight: CGFloat = 600
     static let processMaxWidth: CGFloat = chatContentMaxWidth
     static let messageSideInset: CGFloat = 0
 }
@@ -206,7 +207,6 @@ private struct AgentChatConversationView: View {
     @ObservedObject var viewModel: AppViewModel
     @Binding var isSessionInfoPresented: Bool
     @State private var activityDetailEvent: AgentEventPresentation?
-    @State private var chatScrollView: NSScrollView?
     @State private var lastObservedSessionID: String?
     @State private var lastObservedTranscriptCount: Int = 0
     @State private var pendingSessionTranscriptReloadID: String?
@@ -230,39 +230,6 @@ private struct AgentChatConversationView: View {
     private var latestProcessID: String? {
         timelineItems.last(where: { $0.process != nil })?.process?.id
     }
-
-    private var turnAnchors: [(turnNumber: Int, id: String)] {
-        timelineItems.compactMap { item in
-            guard item.timestamp != nil,
-                  let turnNumber = Self.turnNumber(fromTimestampID: item.id) else { return nil }
-            return (turnNumber, item.id)
-        }
-    }
-
-    private var canNavigateTurns: Bool {
-        turnAnchors.count > 1
-    }
-
-    private static func turnNumber(fromTimestampID id: String) -> Int? {
-        let prefix = "timestamp-turn-"
-        guard id.hasPrefix(prefix) else { return nil }
-        return Int(id.dropFirst(prefix.count))
-    }
-
-    private func scrollConversation(direction: Int) {
-        guard let scrollView = chatScrollView else { return }
-        let visibleRect = scrollView.contentView.bounds
-        let documentHeight = scrollView.documentView?.bounds.height ?? visibleRect.height
-        let pageStep = max(visibleRect.height * 0.82, 180)
-        let maxY = max(documentHeight - visibleRect.height, 0)
-        let yDirection: CGFloat = scrollView.documentView?.isFlipped == true ? 1 : -1
-        let proposedY = visibleRect.origin.y + (CGFloat(direction) * yDirection * pageStep)
-        let targetY = min(max(proposedY, 0), maxY)
-        scrollView.contentView.animator().setBoundsOrigin(NSPoint(x: visibleRect.origin.x, y: targetY))
-        scrollView.reflectScrolledClipView(scrollView.contentView)
-    }
-
-    private static let bottomAnchorID = "agent-chat-bottom-anchor"
 
     private func activityEvents(for process: AgentChatTurnProcessPresentation) -> [AgentEventPresentation] {
         if process.id == latestProcessID, !viewModel.agentEventTimeline.isEmpty {
@@ -304,17 +271,10 @@ private struct AgentChatConversationView: View {
                                 }
                             }
                         }
-
-                        Color.clear
-                            .frame(height: 1)
-                            .id(Self.bottomAnchorID)
                     }
                     .padding(.horizontal, 0)
                     .padding(.vertical, AgentChatLayout.spaceXL)
                 }
-                .background(AgentChatScrollViewResolver { scrollView in
-                    chatScrollView = scrollView
-                })
                 .onAppear {
                     lastObservedSessionID = viewModel.selectedChatSessionID
                     lastObservedTranscriptCount = viewModel.transcript.count
@@ -347,13 +307,7 @@ private struct AgentChatConversationView: View {
 
                 AgentChatComposerView(
                     viewModel: viewModel,
-                    isSessionInfoPresented: $isSessionInfoPresented,
-                    turnNavigation: canNavigateTurns ? AgentChatTurnNavigation(
-                        canJumpToPrevious: true,
-                        canJumpToNext: true,
-                        onPrevious: { scrollConversation(direction: -1) },
-                        onNext: { scrollConversation(direction: 1) }
-                    ) : nil
+                    isSessionInfoPresented: $isSessionInfoPresented
                 )
                 .padding(.horizontal, 0)
                 .padding(.vertical, AgentChatLayout.spaceM)
@@ -372,65 +326,6 @@ private struct AgentChatConversationView: View {
         }
         .padding(.horizontal, AgentChatLayout.spaceL)
         .padding(.vertical, AgentChatLayout.spaceM)
-    }
-}
-
-private struct AgentChatScrollViewResolver: NSViewRepresentable {
-    var onResolve: (NSScrollView?) -> Void
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView(frame: .zero)
-        DispatchQueue.main.async {
-            onResolve(view.enclosingScrollView)
-        }
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async {
-            onResolve(nsView.enclosingScrollView)
-        }
-    }
-}
-
-private struct AgentChatTurnNavigationControls: View {
-    var canJumpToPrevious: Bool
-    var canJumpToNext: Bool
-    var onPrevious: () -> Void
-    var onNext: () -> Void
-
-    var body: some View {
-        HStack(spacing: AgentChatLayout.spaceXS) {
-            Button(action: onPrevious) {
-                Image(systemName: "chevron.up")
-                    .font(.system(size: 11, weight: .semibold))
-                    .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
-            }
-            .buttonStyle(.plain)
-            .disabled(!canJumpToPrevious)
-            .opacity(canJumpToPrevious ? 1 : 0.35)
-            .help("跳转到上一轮对话")
-
-            Button(action: onNext) {
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 11, weight: .semibold))
-                    .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
-            }
-            .buttonStyle(.plain)
-            .disabled(!canJumpToNext)
-            .opacity(canJumpToNext ? 1 : 0.35)
-            .help("跳转到下一轮对话")
-        }
-        .padding(.horizontal, AgentChatLayout.spaceXS)
-        .frame(height: 26)
-        .foregroundStyle(.secondary)
-        .background(Color.clear, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
-                .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
-        .accessibilityElement(children: .contain)
     }
 }
 
@@ -866,8 +761,12 @@ private struct AgentChatMessageRow: View {
                 AgentMarkdownPreviewText(markdown: row.message.content, font: .body)
             }
         } else {
-            AgentMarkdownPreviewText(markdown: row.message.content, font: .body)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            ScrollView {
+                AgentMarkdownPreviewText(markdown: row.message.content, font: .body)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.trailing, AgentChatLayout.spaceXS)
+            }
+            .frame(maxHeight: AgentChatLayout.assistantMessageMaxHeight, alignment: .top)
         }
     }
 
@@ -1497,17 +1396,9 @@ struct AgentSendControlButton: View {
     }
 }
 
-private struct AgentChatTurnNavigation {
-    var canJumpToPrevious: Bool
-    var canJumpToNext: Bool
-    var onPrevious: () -> Void
-    var onNext: () -> Void
-}
-
 private struct AgentChatComposerView: View {
     @ObservedObject var viewModel: AppViewModel
     @Binding var isSessionInfoPresented: Bool
-    var turnNavigation: AgentChatTurnNavigation? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
@@ -1608,15 +1499,6 @@ private struct AgentChatComposerView: View {
             }
 
             Spacer(minLength: AgentChatLayout.spaceS)
-
-            if let turnNavigation {
-                AgentChatTurnNavigationControls(
-                    canJumpToPrevious: turnNavigation.canJumpToPrevious,
-                    canJumpToNext: turnNavigation.canJumpToNext,
-                    onPrevious: turnNavigation.onPrevious,
-                    onNext: turnNavigation.onNext
-                )
-            }
 
             Button {
                 withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
