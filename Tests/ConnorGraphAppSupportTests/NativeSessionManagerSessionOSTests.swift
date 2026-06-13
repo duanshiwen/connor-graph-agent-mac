@@ -48,6 +48,48 @@ private struct SessionOSApprovalBackend: AgentBackend {
     }
 }
 
+private final class SessionOSRunIDBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var valueStorage: String?
+
+    var value: String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return valueStorage
+    }
+
+    func set(_ value: String) {
+        lock.lock()
+        valueStorage = value
+        lock.unlock()
+    }
+}
+
+private final class SessionOSChatStartRecordingBackend: AgentBackend, @unchecked Sendable {
+    private let lock = NSLock()
+    private var chatStartedCountStorage = 0
+
+    var chatStartedCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return chatStartedCountStorage
+    }
+
+    func chat(_ request: AgentChatRequest) -> AsyncThrowingStream<AgentEvent, Error> {
+        lock.lock()
+        chatStartedCountStorage += 1
+        lock.unlock()
+        return AsyncThrowingStream { continuation in
+            continuation.yield(.textComplete(AgentTextCompleteEvent(
+                runID: request.runID,
+                sessionID: request.sessionID,
+                text: "should not run"
+            )))
+            continuation.finish()
+        }
+    }
+}
+
 private final class SessionOSBlockingBackend: AgentBackend, @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation?
@@ -157,6 +199,42 @@ private func makeSessionOSStore(_ name: String = UUID().uuidString) throws -> SQ
     let snapshot = try restored.hydrateRuntimeState()
     #expect(snapshot.activeRuns.isEmpty)
     #expect(restored.runtimeState.isProcessing == false)
+}
+
+@Test func nativeSessionManagerStopsBeforeBackendWhenRunIsCancelledDuringRunStartedCallback() async throws {
+    let store = try makeSessionOSStore()
+    let repository = AppChatSessionRepository(store: store)
+    let session = AgentSession(id: "session-os-cancel-before-backend", title: "Session OS Cancel Before Backend")
+    try repository.saveSession(session)
+    let backend = SessionOSChatStartRecordingBackend()
+    var manager = NativeSessionManager(
+        backend: backend,
+        sessionRepository: repository,
+        session: session
+    )
+
+    let capturedRunID = SessionOSRunIDBox()
+    do {
+        _ = try await manager.submit("Cancel immediately", sessionSummary: nil, onRunStarted: { runID in
+            capturedRunID.set(runID)
+            guard var run = try? repository.loadRun(id: runID) else {
+                Issue.record("Expected run to be persisted before onRunStarted")
+                return
+            }
+            run.status = .cancelled
+            run.completedAt = Date()
+            run.metadata["cancellation_reason"] = "cancelled before backend"
+            try? repository.saveRun(run)
+        })
+        Issue.record("Expected submit to throw runCancelled")
+    } catch NativeSessionManagerError.runCancelled(let reason) {
+        #expect(reason == "cancelled before backend")
+    }
+
+    let runID = try #require(capturedRunID.value)
+    let run = try #require(try repository.loadRun(id: runID))
+    #expect(run.status == .cancelled)
+    #expect(backend.chatStartedCount == 0)
 }
 
 @Test func nativeSessionManagerCancelActiveRunStaysCancelledWhenBackendStreamFinishes() async throws {

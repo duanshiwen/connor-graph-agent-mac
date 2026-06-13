@@ -222,6 +222,7 @@ final class AppViewModel: ObservableObject {
     @Published var sessionStateSnapshotsBySessionID: [String: AppSessionStateSnapshot] = [:]
     @Published var sessionRecordsBySessionID: [String: [AppSessionRecord]] = [:]
     @Published var browserWorkspaceSnapshotsBySessionID: [String: AppBrowserStateSnapshot] = [:]
+    @Published var browserAssistedTasksByID: [UUID: BrowserAssistedTaskState] = [:]
     @Published var isCommandPalettePresented: Bool = false
     @Published var selectedSettingsSection: ConnorSettingsSection = .app
     @Published var desktopNotificationsEnabled: Bool = true
@@ -271,7 +272,9 @@ final class AppViewModel: ObservableObject {
     private var nativeSessionManager: NativeSessionManager?
     private var submittingChatSessionID: String?
     private var activeChatRunID: String?
+    private var pendingChatCancellationReasonsBySessionID: [String: String] = [:]
     private var agentEventTimelinesBySessionID: [String: [AgentEventPresentation]] = [:]
+    private var agentEventTimelinesByProcessKey: [String: [AgentEventPresentation]] = [:]
     private var browserWorkspaceSessionBinding = BrowserWorkspaceSessionBinding()
     private var chatSessionWorkspaceModes = ChatSessionWorkspaceModeStore()
 
@@ -358,12 +361,67 @@ final class AppViewModel: ObservableObject {
         showBrowserWorkspace()
     }
 
+    @discardableResult
+    func startBrowserAssistedSearch(urlString: String, title: String, revealImmediately: Bool = false) -> BrowserAssistedTaskState {
+        let sessionID = selectedChatSessionID ?? activeChatSession.id
+        let currentSnapshot = browserWorkspaceSnapshotsBySessionID[sessionID] ?? AppBrowserStateSnapshot()
+        let request = BrowserAssistedTaskRequest(
+            kind: .search,
+            sessionID: sessionID,
+            urlString: urlString,
+            title: title,
+            visibility: revealImmediately ? .foreground : .background
+        )
+        let plan = BrowserAssistedTaskPlanner().start(request, in: currentSnapshot)
+        browserAssistedTasksByID[plan.task.id] = plan.task
+        browserTargetURLString = urlString
+        saveBrowserWorkspaceSnapshot(plan.snapshot, for: sessionID)
+        if plan.shouldRevealBrowser { showBrowserWorkspace(for: sessionID) }
+        return plan.task
+    }
+
+    func revealBrowserAssistedTask(_ taskID: UUID, reason: String) {
+        guard let task = browserAssistedTasksByID[taskID] else { return }
+        let updated = BrowserAssistedTaskPlanner().requireUserIntervention(task, reason: reason)
+        browserAssistedTasksByID[taskID] = updated
+        focusBrowserTab(updated.tabID, in: updated.sessionID, urlString: updated.urlString)
+        showBrowserWorkspace(for: updated.sessionID)
+    }
+
+    func completeBrowserAssistedTask(_ taskID: UUID, message: String) {
+        guard let task = browserAssistedTasksByID[taskID] else { return }
+        browserAssistedTasksByID[taskID] = BrowserAssistedTaskPlanner().complete(task, message: message)
+    }
+
+    func failBrowserAssistedTask(_ taskID: UUID, message: String) {
+        guard let task = browserAssistedTasksByID[taskID] else { return }
+        browserAssistedTasksByID[taskID] = BrowserAssistedTaskPlanner().fail(task, message: message)
+    }
+
+    private func focusBrowserTab(_ tabID: UUID, in sessionID: String, urlString: String) {
+        var snapshot = browserWorkspaceSnapshotsBySessionID[sessionID] ?? AppBrowserStateSnapshot()
+        if snapshot.tabs.contains(where: { $0.id == tabID }) {
+            snapshot.selectedTabID = tabID
+        } else {
+            snapshot = BrowserExternalOpenPlanner().open(urlString: urlString, in: snapshot)
+        }
+        browserTargetURLString = urlString
+        saveBrowserWorkspaceSnapshot(snapshot, for: sessionID)
+    }
+
     func showBrowserWorkspace() {
         let sessionID = selectedChatSessionID ?? activeChatSession.id
+        showBrowserWorkspace(for: sessionID)
+    }
+
+    private func showBrowserWorkspace(for sessionID: String) {
         browserWorkspaceSessionBinding.bindBrowserWorkspace(to: sessionID)
         browserWorkspaceSessionID = browserWorkspaceSessionBinding.boundSessionID
         isBrowserVisible = true
         selection = .agentChat
+        if selectedChatSessionID != sessionID {
+            selectChatSession(sessionID)
+        }
         rememberWorkspaceMode(.browser, for: sessionID)
     }
 
@@ -512,6 +570,8 @@ final class AppViewModel: ObservableObject {
         self.governanceConfig = governanceConfig
         self.productOSRegistry = productOSRegistry
         self.automationConfig = automationConfig
+        self.llmSettingsRepository = llmSettingsRepository
+        self.llmProviderHealthChecker = AppLLMProviderHealthChecker(settingsRepository: llmSettingsRepository)
         if let storagePaths {
             self.productOSRegistryRepository = AppProductOSRegistryRepository(storagePaths: storagePaths)
             self.automationRepository = AppProductOSAutomationRepository(storagePaths: storagePaths)
@@ -529,15 +589,35 @@ final class AppViewModel: ObservableObject {
             if let storagePaths {
                 self.runtimeSettingsRepository = AppRuntimeSettingsRepository(configDirectory: storagePaths.configDirectory)
             }
-            self.agentRuntimeFactory = AppGraphAgentRuntimeFactory(store: repository.store, settingsRepository: llmSettingsRepository)
             self.hybridSearchService = SQLiteGraphHybridSearchService(store: repository.store)
             self.backgroundJobRunner = AppGraphBackgroundJobRunner(store: repository.store, settingsRepository: llmSettingsRepository)
         }
-        self.llmSettingsRepository = llmSettingsRepository
-        self.llmProviderHealthChecker = AppLLMProviderHealthChecker(settingsRepository: llmSettingsRepository)
         self.databasePath = databasePath
         let initialSession = AgentSession(id: "app-session")
         self.fallbackChatSession = initialSession
+        if let repository {
+            self.agentRuntimeFactory = AppGraphAgentRuntimeFactory(
+                store: repository.store,
+                settingsRepository: llmSettingsRepository,
+                browserAssistedSearchHandler: { [weak self] request in
+                    await MainActor.run {
+                        guard let self else { return nil }
+                        let state = self.startBrowserAssistedSearch(
+                            urlString: request.urlString,
+                            title: request.title,
+                            revealImmediately: request.revealImmediately
+                        )
+                        return BrowserAssistedSearchResult(
+                            taskID: state.id.uuidString,
+                            sessionID: state.sessionID,
+                            tabID: state.tabID.uuidString,
+                            urlString: state.urlString,
+                            status: state.status.rawValue
+                        )
+                    }
+                }
+            )
+        }
         self.nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: initialSession)
         self.searchResults = []
         loadLLMSettings()
@@ -1071,6 +1151,7 @@ final class AppViewModel: ObservableObject {
         do {
             let session = try chatSessionRepository.createSession()
             selectedChatSessionID = session.id
+            agentEventTimelinesByProcessKey.removeAll(keepingCapacity: true)
             isBrowserVisible = false
             browserWorkspaceSessionID = nil
             rememberWorkspaceMode(.conversation, for: session.id)
@@ -1172,6 +1253,54 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func restoredAgentEventTimeline(for process: AgentChatTurnProcessPresentation) -> [AgentEventPresentation] {
+        guard process.state == .completed,
+              let chatSessionRepository,
+              let sessionID = selectedChatSessionID
+        else { return [] }
+        let cacheKey = "\(sessionID):\(process.id)"
+        if let cached = agentEventTimelinesByProcessKey[cacheKey] { return cached }
+        guard let sourceUserMessageID = process.sourceUserMessageID else {
+            agentEventTimelinesByProcessKey[cacheKey] = []
+            return []
+        }
+        do {
+            let runs = try chatSessionRepository.loadRuns(sessionID: sessionID, statuses: nil, limit: 200)
+            guard let run = runs.first(where: { $0.metadata["user_message_id"] == sourceUserMessageID }) else {
+                agentEventTimelinesByProcessKey[cacheKey] = []
+                return []
+            }
+            let restored = try restoreAgentEventTimeline(runID: run.id, sessionID: sessionID)
+            agentEventTimelinesByProcessKey[cacheKey] = restored
+            return restored
+        } catch {
+            agentEventTimelinesByProcessKey[cacheKey] = []
+            return []
+        }
+    }
+
+    private func restoreAgentEventTimeline(runID: String, sessionID: String) throws -> [AgentEventPresentation] {
+        guard let chatSessionRepository else { return [] }
+        let restored = presentations(from: try chatSessionRepository.loadRunEvents(runID: runID, limit: 300))
+        if !restored.isEmpty { return restored }
+        return presentations(
+            from: try chatSessionRepository.loadRecentJournalEvents(sessionID: sessionID, limit: 500)
+                .filter { $0.runID == runID }
+                .sorted { lhs, rhs in
+                    switch (lhs.sequence, rhs.sequence) {
+                    case let (left?, right?): return left < right
+                    case (.some, .none): return true
+                    case (.none, .some): return false
+                    case (.none, .none): return lhs.createdAt < rhs.createdAt
+                    }
+                }
+        )
+    }
+
+    private func presentations(from persistedEvents: [PersistedAgentEvent]) -> [AgentEventPresentation] {
+        AgentEventPresentationRestorer().presentations(from: persistedEvents)
+    }
+
     private func restoreLatestAgentEventTimeline(sessionID: String) throws {
         guard let chatSessionRepository else {
             agentEventTimelinesBySessionID[sessionID] = []
@@ -1184,19 +1313,6 @@ final class AppViewModel: ObservableObject {
             agentEventTimelinesBySessionID[sessionID] = cachedTimeline
             agentEventTimeline = cachedTimeline
             return
-        }
-
-        let replayer = AgentEventReplayer()
-        let presenter = AgentEventPresenter()
-
-        func presentations(from persistedEvents: [PersistedAgentEvent]) -> [AgentEventPresentation] {
-            let sequencedEvents = persistedEvents.filter { $0.sequence != nil }
-            let replaySource = sequencedEvents.isEmpty ? persistedEvents : sequencedEvents
-            return replaySource.compactMap { persistedEvent in
-                try? replayer.replay(persistedEvent)
-            }.map { event in
-                presenter.presentation(for: event)
-            }
         }
 
         let runs = try chatSessionRepository.loadRuns(
@@ -1249,6 +1365,7 @@ final class AppViewModel: ObservableObject {
         do {
             guard let session = try chatSessionRepository.loadSession(id: sessionID) else { return }
             selectedChatSessionID = session.id
+            agentEventTimelinesByProcessKey.removeAll(keepingCapacity: true)
             fallbackChatSession = session
             nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: session)
             transcript = session.messages
@@ -1669,29 +1786,57 @@ final class AppViewModel: ObservableObject {
 
     func cancelActiveChatRun() {
         guard let submittingSessionID = submittingChatSessionID,
-              selectedChatSessionID == submittingSessionID,
-              let runID = activeChatRunID
+              selectedChatSessionID == submittingSessionID
         else { return }
+        let reason = "cancelled by user"
+        guard let runID = activeChatRunID else {
+            if pendingChatCancellationReasonsBySessionID[submittingSessionID] == nil {
+                pendingChatCancellationReasonsBySessionID[submittingSessionID] = reason
+                appendChatCancellationPresentation(
+                    sessionID: submittingSessionID,
+                    runID: nil,
+                    title: "Run cancellation requested",
+                    detail: "已请求终止本轮 agent loop，正在等待 runtime run ID。"
+                )
+            }
+            return
+        }
+        cancelRunningChatRun(sessionID: submittingSessionID, runID: runID, reason: reason)
+    }
+
+    private func cancelRunningChatRun(sessionID: String, runID: String, reason: String) {
         if var manager = nativeSessionManager {
-            manager.cancel(runID: runID, reason: "cancelled by user")
+            manager.cancel(runID: runID, reason: reason)
             nativeSessionManager = manager
         }
-        let cancellation = AgentEventPresentation(
-            kind: "run_cancelled",
-            title: "Run cancelled",
-            detail: "已手动终止本轮 agent loop。",
-            severity: .warning,
+        appendChatCancellationPresentation(
+            sessionID: sessionID,
             runID: runID,
-            sessionID: submittingSessionID
+            title: "Run cancelled",
+            detail: "已手动终止本轮 agent loop。"
         )
-        var timeline = agentEventTimelinesBySessionID[submittingSessionID] ?? agentEventTimeline
-        timeline.append(cancellation)
-        agentEventTimelinesBySessionID[submittingSessionID] = timeline
-        try? chatSessionRepository?.saveActivityTimelineCache(sessionID: submittingSessionID, timeline: timeline)
-        agentEventTimeline = timeline
+        pendingChatCancellationReasonsBySessionID.removeValue(forKey: sessionID)
         submittingChatSessionID = nil
         activeChatRunID = nil
         isSubmittingChat = false
+    }
+
+    private func appendChatCancellationPresentation(sessionID: String, runID: String?, title: String, detail: String) {
+        let cancellation = AgentEventPresentation(
+            kind: "run_cancelled",
+            title: title,
+            detail: detail,
+            severity: .warning,
+            runID: runID,
+            sessionID: sessionID
+        )
+        var timeline = agentEventTimelinesBySessionID[sessionID] ?? agentEventTimeline
+        timeline.append(cancellation)
+        agentEventTimelinesBySessionID[sessionID] = timeline
+        try? chatSessionRepository?.saveActivityTimelineCache(sessionID: sessionID, timeline: timeline)
+        if selectedChatSessionID == sessionID {
+            agentEventTimeline = timeline
+        }
     }
 
     @discardableResult
@@ -1706,6 +1851,7 @@ final class AppViewModel: ObservableObject {
         let submittingSessionID = manager.session.id
         if clearComposer { chatInput = "" }
         agentEventTimelinesBySessionID[submittingSessionID] = []
+        agentEventTimelinesByProcessKey = agentEventTimelinesByProcessKey.filter { key, _ in !key.hasPrefix("\(submittingSessionID):") }
         agentEventTimeline = []
         submittingChatSessionID = submittingSessionID
         activeChatRunID = nil
@@ -1741,6 +1887,9 @@ final class AppViewModel: ObservableObject {
                     guard let self else { return }
                     if self.submittingChatSessionID == submittingSessionID {
                         self.activeChatRunID = runID
+                        if let reason = self.pendingChatCancellationReasonsBySessionID[submittingSessionID] {
+                            self.cancelRunningChatRun(sessionID: submittingSessionID, runID: runID, reason: reason)
+                        }
                     }
                 },
                 onEventPresentation: { [weak self] presentation in
@@ -1781,7 +1930,12 @@ final class AppViewModel: ObservableObject {
                 transcript = optimisticTranscript + [optimisticUserMessage]
             }
             reloadPendingApprovals()
-            errorMessage = String(describing: error)
+            pendingChatCancellationReasonsBySessionID.removeValue(forKey: submittingSessionID)
+            if case NativeSessionManagerError.runCancelled = error {
+                errorMessage = nil
+            } else {
+                errorMessage = String(describing: error)
+            }
             return nil
         }
     }
@@ -1824,6 +1978,9 @@ struct AppShellView: View {
             CraftDetailPaneView(viewModel: viewModel, selection: sidebarSelection ?? .agentChat)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
+        }
+        .overlay(alignment: .topLeading) {
+            BrowserBackgroundTaskRunnerView(viewModel: viewModel)
         }
         .frame(minWidth: 1120, minHeight: 680)
         .controlSize(.small)

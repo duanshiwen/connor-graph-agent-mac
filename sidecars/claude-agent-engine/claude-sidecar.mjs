@@ -270,6 +270,9 @@ const buildConnorDeferHooks = () => ({
   ]
 });
 
+const CONNOR_BROWSER_POLICY_PROMPT = `Connor browser policy: Do not use Claude SDK built-in WebSearch, WebFetch, browser, or external-browser tools. If web browsing/search requires a real browser, explain that Connor will route it through the app's built-in Browser Workspace/background WKWebView runner. Do not launch or request a system/default browser window.`;
+const CONNOR_DISALLOWED_SDK_WEB_TOOLS = ['WebSearch', 'WebFetch'];
+
 const buildDeferredResumeHooks = (deferred, resolution) => ({
   PreToolUse: [
     async () => ({
@@ -304,6 +307,8 @@ const runRequest = async (request) => {
     includePartialMessages: requestOptions.includePartialMessages ?? true,
     includeHookEvents: requestOptions.includeHookEvents ?? true,
     persistSession: requestOptions.persistSession ?? true,
+    disallowedTools: Array.from(new Set([...(requestOptions.disallowedTools ?? []), ...CONNOR_DISALLOWED_SDK_WEB_TOOLS])),
+    appendSystemPrompt: [requestOptions.appendSystemPrompt, CONNOR_BROWSER_POLICY_PROMPT].filter(Boolean).join('\n\n'),
     abortController,
     hooks: buildConnorDeferHooks()
   };
@@ -403,6 +408,8 @@ const runDeferredResume = async (deferred, resolution) => {
     resume: deferred.sdkSessionID,
     includePartialMessages: true,
     includeHookEvents: true,
+    disallowedTools: CONNOR_DISALLOWED_SDK_WEB_TOOLS,
+    appendSystemPrompt: CONNOR_BROWSER_POLICY_PROMPT,
     hooks: buildDeferredResumeHooks(deferred, resolution)
   };
 
