@@ -44,6 +44,7 @@ public struct AgentChatSessionPresentation: Sendable, Equatable, Identifiable {
 public enum AgentChatTurnProcessState: String, Sendable, Equatable {
     case running
     case completed
+    case cancelled
 }
 
 public struct AgentChatTurnProcessPresentation: Sendable, Equatable, Identifiable {
@@ -83,16 +84,25 @@ public struct AgentChatTurnProcessPresentation: Sendable, Equatable, Identifiabl
         self.expandedContextItems = row.expandedContextItems
     }
 
-    public init(pending: AgentChatPendingAssistantPresentation, conversationHistory: [AgentChatMessagePresentation]) {
+    public init(pending: AgentChatPendingAssistantPresentation, conversationHistory: [AgentChatMessagePresentation], state: AgentChatTurnProcessState = .running) {
         self.id = "process-\(pending.id)"
         self.turnNumber = pending.turnNumber
-        self.state = .running
+        self.state = state
         self.fullConversationMessageCount = conversationHistory.count
         self.conversationHistory = conversationHistory
         self.sourceUserMessageID = conversationHistory.last(where: { $0.message.role == .user })?.id
         self.assistantMessageID = nil
-        self.summary = "第 \(pending.turnNumber) 轮 · 正在处理 · 完整历史 \(conversationHistory.count) 条"
-        self.title = "第 \(pending.turnNumber) 轮处理中…"
+        switch state {
+        case .running:
+            self.summary = "第 \(pending.turnNumber) 轮 · 正在处理 · 完整历史 \(conversationHistory.count) 条"
+            self.title = "第 \(pending.turnNumber) 轮处理中…"
+        case .cancelled:
+            self.summary = "第 \(pending.turnNumber) 轮 · 已取消 · 已保留收到的运行记录"
+            self.title = "第 \(pending.turnNumber) 轮已取消"
+        case .completed:
+            self.summary = "第 \(pending.turnNumber) 轮 · 已记录 · 完整历史 \(conversationHistory.count) 条"
+            self.title = "第 \(pending.turnNumber) 轮处理详情"
+        }
         self.currentRequest = conversationHistory.last(where: { $0.message.role == .user })?.message.content
         self.assistantResponse = nil
         self.promptSnapshotText = nil
@@ -179,7 +189,7 @@ public struct AgentChatTurnTimelineItem: Sendable, Equatable, Identifiable {
         )
     }
 
-    public static func items(messages: [AgentMessage], lastContext: AgentContext?, isSubmitting: Bool, now: Date = Date(), calendar: Calendar = .current) -> [AgentChatTurnTimelineItem] {
+    public static func items(messages: [AgentMessage], lastContext: AgentContext?, isSubmitting: Bool, preservesOpenProcess: Bool = false, now: Date = Date(), calendar: Calendar = .current) -> [AgentChatTurnTimelineItem] {
         let rows = AgentChatMessagePresentation.rows(messages: messages, lastContext: lastContext)
         var items: [AgentChatTurnTimelineItem] = []
         var conversationHistory: [AgentChatMessagePresentation] = []
@@ -195,8 +205,9 @@ public struct AgentChatTurnTimelineItem: Sendable, Equatable, Identifiable {
             items.append(.message(row))
             conversationHistory.append(row)
         }
-        if isSubmitting {
-            items.append(.process(AgentChatTurnProcessPresentation(pending: AgentChatPendingAssistantPresentation(messages: messages), conversationHistory: conversationHistory)))
+        if isSubmitting || preservesOpenProcess {
+            let state: AgentChatTurnProcessState = isSubmitting ? .running : .cancelled
+            items.append(.process(AgentChatTurnProcessPresentation(pending: AgentChatPendingAssistantPresentation(messages: messages), conversationHistory: conversationHistory, state: state)))
         }
         return items
     }

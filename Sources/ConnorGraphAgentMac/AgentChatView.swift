@@ -225,6 +225,7 @@ private struct AgentChatConversationView: View {
             var messageSignature: Int
             var contextSignature: Int
             var isSubmitting: Bool
+            var preservesOpenProcess: Bool
         }
 
         static let shared = TimelineCache()
@@ -235,13 +236,15 @@ private struct AgentChatConversationView: View {
             key: Key,
             messages: [AgentMessage],
             lastContext: AgentContext?,
-            isSubmitting: Bool
+            isSubmitting: Bool,
+            preservesOpenProcess: Bool
         ) -> [AgentChatTurnTimelineItem] {
             if let cached = entries[key] { return cached }
             let built = AgentChatTurnTimelineItem.items(
                 messages: messages,
                 lastContext: lastContext,
-                isSubmitting: isSubmitting
+                isSubmitting: isSubmitting,
+                preservesOpenProcess: preservesOpenProcess
             )
             if entries.count >= limit {
                 entries.removeAll(keepingCapacity: true)
@@ -249,6 +252,14 @@ private struct AgentChatConversationView: View {
             entries[key] = built
             return built
         }
+    }
+
+    private var shouldPreserveOpenProcess: Bool {
+        guard !viewModel.isSubmittingChat,
+              !viewModel.agentEventTimeline.isEmpty,
+              viewModel.transcript.last?.role == .user
+        else { return false }
+        return true
     }
 
     private var timelineCacheKey: TimelineCache.Key {
@@ -269,7 +280,8 @@ private struct AgentChatConversationView: View {
             messageCount: viewModel.transcript.count,
             messageSignature: messageSignature,
             contextSignature: contextSignature,
-            isSubmitting: viewModel.isSubmittingChat
+            isSubmitting: viewModel.isSubmittingChat,
+            preservesOpenProcess: shouldPreserveOpenProcess
         )
     }
 
@@ -278,7 +290,8 @@ private struct AgentChatConversationView: View {
             key: timelineCacheKey,
             messages: viewModel.transcript,
             lastContext: viewModel.lastContext,
-            isSubmitting: viewModel.isSubmittingChat
+            isSubmitting: viewModel.isSubmittingChat,
+            preservesOpenProcess: shouldPreserveOpenProcess
         )
     }
 
