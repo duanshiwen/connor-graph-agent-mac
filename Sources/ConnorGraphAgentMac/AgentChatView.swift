@@ -130,21 +130,61 @@ struct AgentChatView: View {
                     .padding(.top, AgentChatLayout.spaceL)
                     .padding(.trailing, AgentChatLayout.spaceL)
             }
+
+            if let model = viewModel.attachmentPreviewModel {
+                AgentAttachmentPreviewOverlay(model: model) {
+                    viewModel.attachmentPreviewModel = nil
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                .zIndex(10)
+            }
         }
         .environment(\.openURL, OpenURLAction { url in
             viewModel.openURLInCurrentChatBrowser(url)
             return .handled
         })
         .navigationTitle("康纳同学会话")
-        .sheet(item: $viewModel.attachmentPreviewModel) { model in
-            AgentAttachmentPreviewSheetView(model: model)
-        }
         .task {
             viewModel.deferViewUpdate {
                 viewModel.reloadChatSessions()
                 viewModel.reloadPendingApprovals()
             }
         }
+    }
+}
+
+private struct AgentAttachmentPreviewOverlay: View {
+    var model: AttachmentPreviewModel
+    var onClose: () -> Void
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color(nsColor: .windowBackgroundColor)
+                .opacity(0.98)
+                .ignoresSafeArea()
+
+            AgentAttachmentPreviewSheetView(model: model)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding(.top, AgentChatLayout.spaceXL)
+                .padding(.horizontal, AgentChatLayout.spaceXL)
+                .padding(.bottom, AgentChatLayout.spaceXL)
+
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: AgentChatTypography.controlIconSize, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+                    .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
+                    .background(.regularMaterial, in: Circle())
+                    .overlay(Circle().stroke(Color.secondary.opacity(0.18), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut(.cancelAction)
+            .accessibilityLabel("关闭附件预览")
+            .help("关闭预览")
+            .padding(.top, AgentChatLayout.spaceL)
+            .padding(.trailing, AgentChatLayout.spaceL)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
