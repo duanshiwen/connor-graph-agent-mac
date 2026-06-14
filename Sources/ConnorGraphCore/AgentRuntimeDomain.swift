@@ -43,6 +43,8 @@ public struct AgentRun: Codable, Sendable, Equatable, Identifiable {
 
 public enum AgentEventKind: String, Codable, Sendable, Equatable {
     case runStarted
+    case turnStarted
+    case turnCompleted
     case textDelta
     case textComplete
     case assistantMessageCreated
@@ -102,6 +104,46 @@ public struct AgentRunStartedEvent: Codable, Sendable, Equatable {
 
     public init(run: AgentRun) {
         self.run = run
+    }
+}
+
+public struct AgentTurnStartedEvent: Codable, Sendable, Equatable {
+    public var runID: String
+    public var sessionID: String
+    public var turnIndex: Int
+
+    public init(runID: String, sessionID: String, turnIndex: Int) {
+        self.runID = runID
+        self.sessionID = sessionID
+        self.turnIndex = turnIndex
+    }
+}
+
+public struct AgentTurnCompletedEvent: Codable, Sendable, Equatable {
+    public var runID: String
+    public var sessionID: String
+    public var turnIndex: Int
+    public var assistantText: String?
+    public var toolCallCount: Int
+    public var toolResultCount: Int
+    public var stoppedAfterTurn: Bool
+
+    public init(
+        runID: String,
+        sessionID: String,
+        turnIndex: Int,
+        assistantText: String? = nil,
+        toolCallCount: Int = 0,
+        toolResultCount: Int = 0,
+        stoppedAfterTurn: Bool = false
+    ) {
+        self.runID = runID
+        self.sessionID = sessionID
+        self.turnIndex = turnIndex
+        self.assistantText = assistantText
+        self.toolCallCount = toolCallCount
+        self.toolResultCount = toolResultCount
+        self.stoppedAfterTurn = stoppedAfterTurn
     }
 }
 
