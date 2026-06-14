@@ -38,6 +38,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
     public var eventRecorder: AgentEventRecorder
     public var contextBuilder: AgentContextBuilder?
     private let cancellationRegistry: AgentLoopCancellationRegistry
+    private let approvalRegistry: AgentLoopApprovalRegistry
 
     public init(
         modelProvider: Provider,
@@ -54,10 +55,16 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         self.eventRecorder = eventRecorder
         self.contextBuilder = contextBuilder
         self.cancellationRegistry = AgentLoopCancellationRegistry()
+        self.approvalRegistry = AgentLoopApprovalRegistry()
     }
 
     public func abort(runID: String) {
         cancellationRegistry.cancel(runID: runID)
+        Task { await approvalRegistry.cancel(runID: runID) }
+    }
+
+    public func resolveApproval(_ approval: AgentPendingApproval, status: AgentPendingApprovalStatus) async {
+        await approvalRegistry.resolve(requestID: approval.requestID, status: status)
     }
 
     public func run(_ request: AgentChatRequest) -> AsyncThrowingStream<AgentEvent, Error> {
@@ -94,14 +101,13 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         let modelResponse = try await modelProvider.complete(AgentModelRequest(messages: messages, tools: toolRegistry.definitions))
                         try Task.checkCancellation()
                         let budgetSnapshot = await budgetMeter.record(modelResponse.usage)
-                        if budgetSnapshot.status == .warning {
+                        if budgetSnapshot.status == .warning || budgetSnapshot.status == .exceeded {
+                            let label = budgetSnapshot.status == .exceeded ? "Token budget exceeded" : "Token budget warning"
                             yield(.budgetWarning(AgentBudgetWarning(
                                 runID: run.id,
                                 sessionID: run.sessionID,
-                                message: "Token budget warning: \(budgetSnapshot.totalTokens)/\(budgetSnapshot.maxTotalTokens) tokens used."
+                                message: "\(label): \(budgetSnapshot.totalTokens)/\(budgetSnapshot.maxTotalTokens) tokens used. Continuing without automatic stop."
                             )), to: continuation, recorder: eventRecorder)
-                        } else if budgetSnapshot.status == .exceeded {
-                            throw AgentLoopError.budgetExceeded
                         }
                         if let text = modelResponse.text, modelResponse.toolCalls.isEmpty {
                             yield(.textComplete(AgentTextCompleteEvent(
@@ -135,7 +141,12 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 policyEngine: policy
                             )
                             do {
-                                let result = try await toolRegistry.execute(call, context: context)
+                                let result = try await executeToolWithApprovalIfNeeded(
+                                    call: call,
+                                    context: context,
+                                    run: &run,
+                                    continuation: continuation
+                                )
                                 try Task.checkCancellation()
                                 yield(.toolFinished(result), to: continuation, recorder: eventRecorder)
                                 messages.append(AgentModelMessage(
@@ -195,6 +206,40 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         }
     }
 
+    private func executeToolWithApprovalIfNeeded(
+        call: AgentToolCall,
+        context: AgentToolExecutionContext,
+        run: inout AgentRun,
+        continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
+    ) async throws -> AgentToolResult {
+        do {
+            return try await toolRegistry.execute(call, context: context)
+        } catch AgentToolError.permissionNeedsApproval(let request) {
+            await approvalRegistry.register(requestID: request.id, runID: run.id)
+            yield(.permissionRequested(request), to: continuation, recorder: eventRecorder)
+            run.status = .waitingForApproval
+            try? eventRecorder.recordRun(run)
+            let status = await approvalRegistry.waitForResolution(requestID: request.id)
+            let outcome: AgentPermissionOutcome = status == .approved ? .approved : .denied
+            let decision = AgentPermissionDecision(
+                requestID: request.id,
+                runID: request.runID,
+                sessionID: request.sessionID,
+                capability: request.capability,
+                outcome: outcome,
+                reason: status == .approved ? "Approved by reviewer" : "Denied by reviewer"
+            )
+            yield(.permissionResolved(decision), to: continuation, recorder: eventRecorder)
+            guard status == .approved else {
+                throw AgentToolError.permissionDenied(decision.reason)
+            }
+            run.status = .running
+            try? eventRecorder.recordRun(run)
+            let approvedContext = context.approving(request.capability)
+            return try await toolRegistry.execute(call, context: approvedContext)
+        }
+    }
+
     private func yield(_ event: AgentEvent, to continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation, recorder: AgentEventRecorder) {
         try? recorder.record(event)
         continuation.yield(event)
@@ -239,6 +284,42 @@ public enum AgentLoopError: Error, Sendable, Equatable {
     case maxToolIterationsReached
     case budgetExceeded
     case cancelled
+}
+
+private actor AgentLoopApprovalRegistry {
+    private var continuations: [String: CheckedContinuation<AgentPendingApprovalStatus, Never>] = [:]
+    private var resolvedStatuses: [String: AgentPendingApprovalStatus] = [:]
+    private var runIDsByRequestID: [String: String] = [:]
+
+    func register(requestID: String, runID: String) {
+        runIDsByRequestID[requestID] = runID
+        if resolvedStatuses[requestID] == nil {
+            resolvedStatuses[requestID] = .pending
+        }
+    }
+
+    func waitForResolution(requestID: String) async -> AgentPendingApprovalStatus {
+        if let status = resolvedStatuses[requestID], status != .pending {
+            return status
+        }
+        return await withCheckedContinuation { continuation in
+            continuations[requestID] = continuation
+        }
+    }
+
+    func resolve(requestID: String, status: AgentPendingApprovalStatus) {
+        resolvedStatuses[requestID] = status
+        continuations.removeValue(forKey: requestID)?.resume(returning: status)
+    }
+
+    func cancel(runID: String) {
+        let requestIDs = runIDsByRequestID.compactMap { requestID, mappedRunID in
+            mappedRunID == runID ? requestID : nil
+        }
+        for requestID in requestIDs {
+            resolve(requestID: requestID, status: .cancelled)
+        }
+    }
 }
 
 private final class AgentLoopCancellationRegistry: @unchecked Sendable {

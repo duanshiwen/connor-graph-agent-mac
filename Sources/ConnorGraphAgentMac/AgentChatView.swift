@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import Foundation
 import ConnorGraphCore
 import ConnorGraphAgent
@@ -224,6 +225,7 @@ private struct AgentChatConversationView: View {
             var messageSignature: Int
             var contextSignature: Int
             var isSubmitting: Bool
+            var preservesOpenProcess: Bool
         }
 
         static let shared = TimelineCache()
@@ -234,13 +236,15 @@ private struct AgentChatConversationView: View {
             key: Key,
             messages: [AgentMessage],
             lastContext: AgentContext?,
-            isSubmitting: Bool
+            isSubmitting: Bool,
+            preservesOpenProcess: Bool
         ) -> [AgentChatTurnTimelineItem] {
             if let cached = entries[key] { return cached }
             let built = AgentChatTurnTimelineItem.items(
                 messages: messages,
                 lastContext: lastContext,
-                isSubmitting: isSubmitting
+                isSubmitting: isSubmitting,
+                preservesOpenProcess: preservesOpenProcess
             )
             if entries.count >= limit {
                 entries.removeAll(keepingCapacity: true)
@@ -248,6 +252,14 @@ private struct AgentChatConversationView: View {
             entries[key] = built
             return built
         }
+    }
+
+    private var shouldPreserveOpenProcess: Bool {
+        guard !viewModel.isSubmittingChat,
+              !viewModel.agentEventTimeline.isEmpty,
+              viewModel.transcript.last?.role == .user
+        else { return false }
+        return true
     }
 
     private var timelineCacheKey: TimelineCache.Key {
@@ -268,7 +280,8 @@ private struct AgentChatConversationView: View {
             messageCount: viewModel.transcript.count,
             messageSignature: messageSignature,
             contextSignature: contextSignature,
-            isSubmitting: viewModel.isSubmittingChat
+            isSubmitting: viewModel.isSubmittingChat,
+            preservesOpenProcess: shouldPreserveOpenProcess
         )
     }
 
@@ -277,7 +290,8 @@ private struct AgentChatConversationView: View {
             key: timelineCacheKey,
             messages: viewModel.transcript,
             lastContext: viewModel.lastContext,
-            isSubmitting: viewModel.isSubmittingChat
+            isSubmitting: viewModel.isSubmittingChat,
+            preservesOpenProcess: shouldPreserveOpenProcess
         )
     }
 
@@ -1485,11 +1499,6 @@ private struct AgentChatComposerView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
-            if let approval = viewModel.activeChatPendingApprovals.first {
-                AgentChatPermissionRequestCard(approval: approval, viewModel: viewModel)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-
             optionBadgeRow
 
             VStack(spacing: 0) {
@@ -1511,6 +1520,8 @@ private struct AgentChatComposerView: View {
                     }
                     .buttonStyle(.plain)
                     .help("添加附件")
+
+                    workingDirectoryMenu
 
                     Button(action: { viewModel.toggleBrowserWorkspaceVisibility() }) {
                         AgentComposerOptionBadge(
@@ -1555,6 +1566,18 @@ private struct AgentChatComposerView: View {
                 RoundedRectangle(cornerRadius: AgentChatLayout.radiusXL, style: .continuous)
                     .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
             )
+            .overlay {
+                if let approval = viewModel.activeChatPendingApprovals.first {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: AgentChatLayout.radiusXL, style: .continuous)
+                            .fill(Color(nsColor: .controlBackgroundColor).opacity(0.96))
+
+                        AgentChatPermissionRequestCard(approval: approval, viewModel: viewModel)
+                            .padding(AgentChatLayout.spaceM)
+                    }
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                }
+            }
 
             if let error = viewModel.errorMessage {
                 AgentMarkdownPreviewText(markdown: error, font: .caption)
@@ -1567,6 +1590,96 @@ private struct AgentChatComposerView: View {
 
     private var selectedSession: AgentSession? {
         viewModel.chatSessions.first { $0.id == viewModel.selectedChatSessionID }
+    }
+
+    private var workingDirectoryMenu: some View {
+        Menu {
+            if viewModel.workspaceRoots.isEmpty {
+                Button("尚未设置工作目录") {}
+                    .disabled(true)
+            } else {
+                ForEach(viewModel.workspaceRoots) { root in
+                    Button {
+                        viewModel.setPrimaryWorkspaceRoot(id: root.id)
+                    } label: {
+                        Label(workspaceMenuItemTitle(for: root), systemImage: root.isPrimary ? "checkmark" : "folder")
+                    }
+                    .help(root.path)
+                }
+            }
+
+            Divider()
+
+            Button {
+                chooseWorkingDirectory()
+            } label: {
+                Label("选择文件夹…", systemImage: "folder.badge.plus")
+            }
+
+            Button {
+                viewModel.resetWorkspaceRootsForCurrentSession()
+            } label: {
+                Label("重置为默认", systemImage: "arrow.counterclockwise")
+            }
+            .disabled(viewModel.workspaceRoots.isEmpty && viewModel.defaultWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        } label: {
+            AgentComposerOptionBadge(
+                title: workingDirectoryBadgeTitle,
+                systemImage: viewModel.primaryWorkspaceRootDraft == nil ? "folder" : "folder.fill",
+                tint: viewModel.primaryWorkspaceRootDraft == nil ? .secondary : .accentColor,
+                isActive: viewModel.primaryWorkspaceRootDraft != nil,
+                style: .compact
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .help(workingDirectoryHelpText)
+    }
+
+    private var workingDirectoryBadgeTitle: String {
+        guard let root = viewModel.primaryWorkspaceRootDraft else { return "选择工作目录" }
+        return workspaceDisplayName(for: root)
+    }
+
+    private var workingDirectoryHelpText: String {
+        guard let root = viewModel.primaryWorkspaceRootDraft else {
+            return "设置当前会话工作目录；本地工具和 Claude Sidecar 将从主目录开始。"
+        }
+        return "当前会话工作目录：\(root.path)"
+    }
+
+    private func workspaceMenuItemTitle(for root: WorkspaceRootDraft) -> String {
+        let name = workspaceDisplayName(for: root)
+        let parent = workspaceParentDisplayPath(for: root.path)
+        guard !parent.isEmpty else { return name }
+        return "\(name)  in \(parent)"
+    }
+
+    private func workspaceDisplayName(for root: WorkspaceRootDraft) -> String {
+        let trimmedName = root.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedName.isEmpty { return trimmedName }
+        let url = URL(fileURLWithPath: root.path, isDirectory: true)
+        return url.lastPathComponent.isEmpty ? root.path : url.lastPathComponent
+    }
+
+    private func workspaceParentDisplayPath(for path: String) -> String {
+        let url = URL(fileURLWithPath: path, isDirectory: true)
+        let parent = url.deletingLastPathComponent().path
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        if parent == home { return "~" }
+        if parent.hasPrefix(home + "/") { return "~" + parent.dropFirst(home.count) }
+        return parent
+    }
+
+    private func chooseWorkingDirectory() {
+        let panel = NSOpenPanel()
+        panel.title = "选择当前会话工作目录"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        if panel.runModal() == .OK, let url = panel.urls.first {
+            viewModel.addWorkspaceRootAndSetPrimary(path: url.path)
+        }
     }
 
     private func menuOptionTitle(_ title: String, isSelected: Bool) -> String {
