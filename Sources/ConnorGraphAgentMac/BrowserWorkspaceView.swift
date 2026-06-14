@@ -182,7 +182,7 @@ struct BrowserWorkspaceView: View {
 
                 Button(action: { openNewTab(urlString: viewModel.browserTargetURLString, select: true) }) {
                     Image(systemName: "plus")
-                        .font(.callout.weight(.semibold))
+                        .font(BrowserFloatingTypography.toolbarIcon)
                         .foregroundStyle(.secondary)
                         .frame(width: addButtonWidth, height: 26)
                 }
@@ -202,23 +202,27 @@ struct BrowserWorkspaceView: View {
         HStack(spacing: 8) {
             Button(action: { activeWebView?.goBack() }) {
                 Image(systemName: "chevron.left")
+                    .font(BrowserFloatingTypography.toolbarIcon)
             }
             .disabled(activeTab?.navigationState.canGoBack != true)
             .help("后退")
 
             Button(action: { activeWebView?.goForward() }) {
                 Image(systemName: "chevron.right")
+                    .font(BrowserFloatingTypography.toolbarIcon)
             }
             .disabled(activeTab?.navigationState.canGoForward != true)
             .help("前进")
 
             Button(action: reloadOrStopActiveWebView) {
                 Image(systemName: activeTab?.navigationState.isLoading == true ? "xmark" : "arrow.clockwise")
+                    .font(BrowserFloatingTypography.toolbarIcon)
             }
             .disabled(activeWebView == nil)
             .help(activeTab?.navigationState.isLoading == true ? "停止加载" : "刷新")
 
             TextField("输入网址或搜索词，按 Return 打开", text: $addressText)
+                .font(BrowserFloatingTypography.input)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { navigateFromAddressBar() }
 
@@ -235,8 +239,8 @@ struct BrowserWorkspaceView: View {
                     title: "返回对话",
                     systemImage: "bubble.left.and.bubble.right",
                     fillsWidth: false,
-                    titleFont: .caption.weight(.semibold),
-                    iconFont: .caption.weight(.bold)
+                    titleFont: BrowserFloatingTypography.askButton,
+                    iconFont: BrowserFloatingTypography.askButtonIcon
                 )
             }
             .buttonStyle(SidebarActionButtonStyle())

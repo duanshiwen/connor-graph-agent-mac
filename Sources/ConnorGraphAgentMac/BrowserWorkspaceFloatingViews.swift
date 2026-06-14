@@ -1,21 +1,26 @@
 import SwiftUI
 
 enum BrowserFloatingTypography {
+    // Browser chrome follows a compact macOS semantic scale: clear hierarchy,
+    // consistent controls, and legible 12–14 pt text instead of one-off sizes.
     static let popoverTitle: Font = .system(size: 14, weight: .semibold)
-    static let pageTitle: Font = .system(size: 13.5, weight: .medium)
-    static let pageURL: Font = .system(size: 12.5)
-    static let selectedText: Font = .system(size: 13.5)
-    static let input: Font = .system(size: 13.5)
-    static let hint: Font = .system(size: 12.5)
-    static let messageRole: Font = .system(size: 12.5, weight: .semibold)
-    static let messageBody: Font = .system(size: 12.5)
-    static let askButton: Font = .system(size: 12.5, weight: .semibold)
-    static let askButtonIcon: Font = .system(size: 12.5, weight: .bold)
-    static let quickAction: Font = .caption2.weight(.medium)
-    static let loadingOverlay: Font = .system(size: 12.5, weight: .medium)
-    static let tabTitle: Font = .system(size: 11.5, weight: .regular)
-    static let tabTitleSelected: Font = .system(size: 11.5, weight: .semibold)
-    static let tabIcon: Font = .system(size: 11.5)
+    static let pageTitle: Font = .system(size: 13, weight: .semibold)
+    static let pageURL: Font = .system(size: 12, weight: .regular)
+    static let selectedText: Font = .system(size: 13, weight: .regular)
+    static let input: Font = .system(size: 13, weight: .regular)
+    static let hint: Font = .system(size: 12, weight: .regular)
+    static let messageRole: Font = .system(size: 12, weight: .semibold)
+    static let messageBody: Font = .system(size: 13, weight: .regular)
+    static let askButton: Font = .system(size: 13, weight: .semibold)
+    static let askButtonIcon: Font = .system(size: 13, weight: .semibold)
+    static let quickAction: Font = .system(size: 12, weight: .medium)
+    static let quickActionIcon: Font = .system(size: 12, weight: .semibold)
+    static let loadingOverlay: Font = .system(size: 12, weight: .medium)
+    static let toolbarIcon: Font = .system(size: 13, weight: .medium)
+    static let tabTitle: Font = .system(size: 12, weight: .regular)
+    static let tabTitleSelected: Font = .system(size: 12, weight: .semibold)
+    static let tabIcon: Font = .system(size: 12, weight: .regular)
+    static let tabCloseIcon: Font = .system(size: 10, weight: .semibold)
 }
 
 struct BrowserSelectionPopover: View {
@@ -37,8 +42,11 @@ struct BrowserSelectionPopover: View {
                 Label(isPageQuestion ? "问一问 AI" : "网页选择", systemImage: isPageQuestion ? "sparkles" : "selection.pin.in.out")
                     .font(BrowserFloatingTypography.popoverTitle)
                 Spacer()
-                Button(action: onClose) { Image(systemName: "xmark") }
-                    .buttonStyle(.borderless)
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(BrowserFloatingTypography.toolbarIcon)
+                }
+                .buttonStyle(.borderless)
             }
 
             VStack(alignment: .leading, spacing: 4) {
@@ -173,7 +181,7 @@ struct BrowserQuickActionBadge: View {
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: systemImage)
-                .font(.system(size: 12, weight: .semibold))
+                .font(BrowserFloatingTypography.quickActionIcon)
             Text(title)
                 .font(BrowserFloatingTypography.quickAction)
                 .lineLimit(1)
@@ -217,8 +225,8 @@ struct BrowserTabChip: View {
 
             Button(action: onClose) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 8, weight: .semibold))
-                    .frame(width: 13, height: 13)
+                    .font(BrowserFloatingTypography.tabCloseIcon)
+                    .frame(width: 14, height: 14)
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary.opacity(0.72))
