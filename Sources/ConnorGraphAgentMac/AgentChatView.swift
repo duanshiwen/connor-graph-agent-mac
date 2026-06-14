@@ -336,6 +336,15 @@ private struct AgentChatConversationView: View {
         }
     }
 
+    private func scrollToBottomAfterCollapsedMessageLayout(proxy: ScrollViewProxy) {
+        let delays: [TimeInterval] = [0, 0.2]
+        for delay in delays {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                scrollToBottom(proxy: proxy)
+            }
+        }
+    }
+
     private func activityEvents(for process: AgentChatTurnProcessPresentation, latestProcessID: String?) -> [AgentEventPresentation] {
         if process.id == latestProcessID, !viewModel.agentEventTimeline.isEmpty {
             return viewModel.agentEventTimeline
@@ -366,8 +375,13 @@ private struct AgentChatConversationView: View {
                         } else {
                             ForEach(timelineSnapshot) { item in
                                 if let message = item.message {
-                                    AgentChatMessageRow(row: message)
-                                        .id(item.id)
+                                    AgentChatMessageRow(
+                                        row: message,
+                                        onAssistantMessageCollapsed: {
+                                            scrollToBottomAfterCollapsedMessageLayout(proxy: proxy)
+                                        }
+                                    )
+                                    .id(item.id)
                                 } else if let process = item.process {
                                     AgentChatTurnProcessRow(
                                         process: process,
