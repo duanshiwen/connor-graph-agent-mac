@@ -150,7 +150,7 @@ struct AgentChatComposerView: View {
                     Button {
                         viewModel.setPrimaryWorkspaceRoot(id: root.id)
                     } label: {
-                        Label(workspaceMenuItemTitle(for: root), systemImage: root.isPrimary ? "checkmark" : "folder")
+                        Label(workspaceMenuItemTitle(for: root), systemImage: "folder")
                     }
                     .help(root.path)
                 }
@@ -167,7 +167,7 @@ struct AgentChatComposerView: View {
                         Button {
                             viewModel.addWorkspaceRootAndSetPrimary(path: path)
                         } label: {
-                            Label(workspaceMenuItemTitle(forPath: path), systemImage: isCurrentPrimaryWorkspacePath(path) ? "checkmark" : "clock.arrow.circlepath")
+                            Label(workspaceMenuItemTitle(forPath: path), systemImage: "clock.arrow.circlepath")
                         }
                         .help(path)
                     }
@@ -227,10 +227,6 @@ struct AgentChatComposerView: View {
         let parent = workspaceParentDisplayPath(for: path)
         guard !parent.isEmpty else { return name }
         return "\(name)  in \(parent)"
-    }
-
-    private func isCurrentPrimaryWorkspacePath(_ path: String) -> Bool {
-        viewModel.primaryWorkspaceRootDraft?.path == path
     }
 
     private func workspaceDisplayName(for root: WorkspaceRootDraft) -> String {
