@@ -148,6 +148,9 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 let usableInitialContext = usableMemoryContract?.agentContext
                 let promptAssembly = await buildPromptAssembly(for: request, memoryContract: usableMemoryContract)
                 let promptProjector = AgentTranscriptProjector(projectionMode: configuration.promptProjectionMode)
+                let toolResultGate = AgentToolResultGate(configuration: AgentToolResultGateConfiguration(
+                    maxResultCharacters: configuration.maxToolResultBytes
+                ))
                 var modelRequest = promptProjector.project(promptAssembly, tools: toolRegistry.definitions)
                 var messages = modelRequest.messages
                 if let diagnostics = modelRequest.promptDiagnostics {
@@ -279,7 +282,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             }
                             messages.append(AgentModelMessage(
                                 role: .tool,
-                                content: compactToolResult(batchResult.result),
+                                content: toolResultGate.gatedContent(for: batchResult.result),
                                 toolCallID: batchResult.call.id,
                                 name: batchResult.call.name
                             ))
@@ -590,11 +593,6 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         }
     }
 
-    private func compactToolResult(_ result: AgentToolResult) -> String {
-        let base = result.contentJSON ?? result.contentText
-        if base.count <= configuration.maxToolResultBytes { return base }
-        return String(base.prefix(configuration.maxToolResultBytes)) + "\n...[truncated]"
-    }
 }
 
 public enum AgentLoopError: Error, Sendable, Equatable {
