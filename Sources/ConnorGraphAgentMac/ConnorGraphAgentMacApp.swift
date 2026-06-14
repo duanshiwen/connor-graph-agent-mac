@@ -793,7 +793,7 @@ final class AppViewModel: ObservableObject {
 
     private func syncWorkspaceDraftsFromSession(_ state: AppSessionStateSnapshot?) {
         if let workspace = state?.workspace {
-            workspaceRoots = Self.workspaceRootDrafts(from: workspace)
+            workspaceRoots = AppWorkspaceRootDraftMapper.drafts(from: workspace)
             defaultWorkingDirectoryPath = workspace.workingDirectoryPath
             return
         }
@@ -1001,65 +1001,6 @@ final class AppViewModel: ObservableObject {
         let primaryID = primaryIDs.first ?? workspaceRoots[0].id
         for index in workspaceRoots.indices {
             workspaceRoots[index].isPrimary = workspaceRoots[index].id == primaryID
-        }
-    }
-
-    private func runtimeWorkspaceRootsFromDrafts() -> [AgentRuntimeWorkspaceRoot] {
-        var drafts = workspaceRoots
-        if drafts.isEmpty {
-            let path = defaultWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !path.isEmpty {
-                let url = URL(fileURLWithPath: path, isDirectory: true)
-                drafts = [WorkspaceRootDraft(displayName: url.lastPathComponent, path: path, role: "project", isPrimary: true)]
-            }
-        }
-        let primaryID = drafts.first(where: \.isPrimary)?.id ?? drafts.first?.id
-        return drafts
-            .map { draft in
-                AgentRuntimeWorkspaceRoot(
-                    id: draft.id,
-                    displayName: draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? URL(fileURLWithPath: draft.path).lastPathComponent : draft.displayName,
-                    path: draft.path.trimmingCharacters(in: .whitespacesAndNewlines),
-                    role: draft.role.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "project" : draft.role,
-                    isPrimary: draft.id == primaryID
-                )
-            }
-            .filter { !$0.path.isEmpty }
-    }
-
-    private static func workspaceRootDrafts(from settings: AgentRuntimeWorkspaceSettings) -> [WorkspaceRootDraft] {
-        let roots = settings.effectiveRoots()
-        let primaryID = roots.first(where: \.isPrimary)?.id ?? roots.first?.id
-        return roots.map { root in
-            WorkspaceRootDraft(
-                id: root.id,
-                displayName: root.displayName,
-                path: root.path,
-                role: root.role,
-                isPrimary: root.id == primaryID
-            )
-        }
-    }
-
-    private static func workspaceRootDrafts(from workspace: AppSessionWorkspaceReference) -> [WorkspaceRootDraft] {
-        let primaryID = workspace.roots.first(where: \.isPrimary)?.id ?? workspace.roots.first?.id
-        if workspace.roots.isEmpty, !workspace.workingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let path = workspace.workingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
-            return [WorkspaceRootDraft(
-                displayName: URL(fileURLWithPath: path).lastPathComponent,
-                path: path,
-                role: "project",
-                isPrimary: true
-            )]
-        }
-        return workspace.roots.map { root in
-            WorkspaceRootDraft(
-                id: root.id,
-                displayName: root.displayName,
-                path: root.path,
-                role: root.role,
-                isPrimary: root.id == primaryID
-            )
         }
     }
 
