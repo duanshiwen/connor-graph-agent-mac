@@ -282,11 +282,22 @@ public struct AgentPromptBudgetTransformer: AgentContextTransformer, Sendable {
             return transformed
         }
 
-        // Conservative first version: remove recent conversation before touching memory.
         // Core instruction and latest user request are never trimmed.
-        if !transformed.conversation.recentMessages.isEmpty {
-            transformed.conversation.recentMessages = []
+        // Trim conversation history from oldest to newest while preserving as much
+        // recent continuity as fits in the remaining prompt budget.
+        let estimator = AgentPromptBudgetEstimator()
+        let fixedTokenEstimate = estimator.estimate(transformed.instruction.text).estimatedTokenCount
+            + (transformed.memory.map { estimator.estimate($0.renderedText).estimatedTokenCount } ?? 0)
+            + estimator.estimate(transformed.userRequest.text).estimatedTokenCount
+        let conversationBudget = max(0, maxEstimatedTokens - fixedTokenEstimate)
+        let originalRecentMessages = transformed.conversation.recentMessages
+        if !originalRecentMessages.isEmpty {
+            transformed.conversation.recentMessages = AgentPromptRecentMessageTrimmer(
+                maxConversationTokens: conversationBudget,
+                estimator: estimator
+            ).trim(originalRecentMessages)
         }
+        let didTrimConversation = transformed.conversation.recentMessages.count != originalRecentMessages.count
 
         var updated = AgentPromptDiagnosticsTransformer.diagnostics(
             for: transformed,
@@ -295,9 +306,9 @@ public struct AgentPromptBudgetTransformer: AgentContextTransformer, Sendable {
         )
         updated.sections = updated.sections.map { section in
             var copy = section
-            if section.id == "conversation" {
+            if section.id == "conversation", didTrimConversation {
                 copy.wasTrimmed = true
-                copy.notes.append("recent messages trimmed first")
+                copy.notes.append("oldest recent messages trimmed to fit prompt budget")
             }
             return copy
         }
@@ -307,16 +318,74 @@ public struct AgentPromptBudgetTransformer: AgentContextTransformer, Sendable {
 }
 
 public struct AgentPromptDedupeTransformer: AgentContextTransformer, Sendable {
-    public init() {}
+    public var fingerprintCharacters: Int
+    public var minParagraphCharacters: Int
+
+    public init(
+        fingerprintCharacters: Int = 256,
+        minParagraphCharacters: Int = 80
+    ) {
+        self.fingerprintCharacters = max(16, fingerprintCharacters)
+        self.minParagraphCharacters = max(1, minParagraphCharacters)
+    }
 
     public func transform(_ assembly: AgentPromptAssembly, projectionMode: AgentPromptProjectionMode) async throws -> AgentPromptAssembly {
         var transformed = assembly
+        var seenFingerprints = Set<String>()
+        var removedParagraphCount = 0
+
+        if let memory = transformed.memory {
+            let result = deduplicateText(memory.renderedText, seenFingerprints: &seenFingerprints)
+            removedParagraphCount += result.removedParagraphCount
+            // The memory section is rendered from its contract, so first version only uses
+            // memory to seed fingerprints. Conversation text is the mutable section.
+        }
+
+        transformed.conversation.recentMessages = transformed.conversation.recentMessages.map { message in
+            let result = deduplicateText(message.content, seenFingerprints: &seenFingerprints)
+            removedParagraphCount += result.removedParagraphCount
+            var copy = message
+            copy.content = result.text
+            return copy
+        }
+
         transformed.diagnostics = AgentPromptDiagnosticsTransformer.diagnostics(
             for: transformed,
             projectionMode: projectionMode,
-            appliedTransformers: transformed.diagnostics.appliedTransformers + ["dedupe:no-op"]
+            appliedTransformers: transformed.diagnostics.appliedTransformers + [removedParagraphCount > 0 ? "dedupe" : "dedupe:no-op"]
         )
         return transformed
+    }
+
+    private func deduplicateText(
+        _ text: String,
+        seenFingerprints: inout Set<String>
+    ) -> (text: String, removedParagraphCount: Int) {
+        let paragraphs = text.components(separatedBy: "\n\n")
+        var kept: [String] = []
+        var removed = 0
+        for paragraph in paragraphs {
+            let trimmed = paragraph.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard shouldConsiderForDedupe(trimmed) else {
+                kept.append(paragraph)
+                continue
+            }
+            let fingerprint = String(trimmed.prefix(fingerprintCharacters))
+            if seenFingerprints.contains(fingerprint) {
+                removed += 1
+                continue
+            }
+            seenFingerprints.insert(fingerprint)
+            kept.append(paragraph)
+        }
+        return (kept.joined(separator: "\n\n"), removed)
+    }
+
+    private func shouldConsiderForDedupe(_ paragraph: String) -> Bool {
+        guard paragraph.count >= minParagraphCharacters else { return false }
+        if paragraph.hasPrefix("```") { return false }
+        if paragraph.contains("\n```") || paragraph.contains("```\n") { return false }
+        return true
     }
 }
 
