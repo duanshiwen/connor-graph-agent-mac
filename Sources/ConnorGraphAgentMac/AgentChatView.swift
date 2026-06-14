@@ -53,7 +53,7 @@ enum AgentChatTypography {
     static let chevronIconSize: CGFloat = 13
     static let sendIconSize: CGFloat = 15
 
-    static let title: Font = .title3.weight(.semibold)
+    static let title: Font = .system(size: 15.5, weight: .semibold)
     static let sectionTitle: Font = .headline.weight(.semibold)
     static let sessionTitle: Font = .system(size: 15, weight: .regular)
     static let sessionTitleEmphasis: Font = .system(size: 15, weight: .semibold)
