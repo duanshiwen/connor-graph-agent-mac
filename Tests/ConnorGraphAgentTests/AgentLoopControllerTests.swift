@@ -224,19 +224,18 @@ private actor SuspendingModelProvider: AgentModelProvider {
 }
 
 private struct EchoArgumentsTool: AgentTool {
-    let definition = AgentToolDefinition(
-        name: "echo_args",
-        description: "Echo arguments",
-        inputSchema: .object(properties: ["value": .string(description: "Value")], required: ["value"])
-    )
+    let name = "echo_args"
+    let description = "Echo arguments"
+    let permission = AgentPermissionCapability.readSession
+    let inputSchema = AgentToolInputSchema.object(properties: ["value": .string(description: "Value")], required: ["value"])
 
     func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        let value = arguments.object["value"]?.stringValue ?? ""
+        let value = arguments.string("value") ?? ""
         return AgentToolResult(
             runID: context.runID,
             sessionID: context.sessionID,
             toolCallID: context.toolCallID,
-            toolName: definition.name,
+            toolName: name,
             contentText: value
         )
     }
@@ -246,7 +245,7 @@ private struct EchoArgumentsTool: AgentTool {
     let toolResponses = (1...12).map { index in
         AgentModelResponse(
             text: nil,
-            toolCalls: [AgentToolCall(id: "call-echo-\(index)", name: "echo_args", argumentsJSON: #"{"value":"step-\\#(index)"}"#)],
+            toolCalls: [AgentToolCall(id: "call-echo-\(index)", name: "echo_args", argumentsJSON: #"{"value":"step-\#(index)"}"#)],
             usage: AgentModelUsage(promptTokens: 1, completionTokens: 1),
             finishReason: .toolCalls
         )
