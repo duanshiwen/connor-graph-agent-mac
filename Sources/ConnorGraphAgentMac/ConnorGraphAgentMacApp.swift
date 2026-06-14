@@ -783,7 +783,21 @@ final class AppViewModel: ObservableObject {
         guard !modelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         llmProviderMode = providerMode
         llmSelectedModel = modelID
-        saveLLMSettings()
+
+        // Write session-level override (not global)
+        let sessionID = selectedChatSessionID ?? activeChatSession.id
+        var state = sessionStateSnapshotsBySessionID[sessionID]
+            ?? AppSessionStateSnapshot(sessionID: sessionID)
+        state.llmOverride = SessionLLMOverride(
+            providerMode: providerMode.rawValue,
+            model: modelID
+        )
+        state.updatedAt = Date()
+        sessionStateSnapshotsBySessionID[sessionID] = state
+        try? chatSessionRepository?.saveSessionState(state, sessionID: sessionID)
+
+        rebuildNativeSessionManagerForActiveSession()
+        Task { await reloadLLMModelConnections() }
     }
 
     func saveLLMSettings() {
@@ -859,7 +873,8 @@ final class AppViewModel: ObservableObject {
     private func makeNativeSessionManager(for session: AgentSession) -> NativeSessionManager? {
         agentRuntimeFactory?.makeNativeSessionManager(
             session: session,
-            sessionWorkspace: sessionStateSnapshotsBySessionID[session.id]?.workspace
+            sessionWorkspace: sessionStateSnapshotsBySessionID[session.id]?.workspace,
+            sessionLLMOverride: sessionStateSnapshotsBySessionID[session.id]?.llmOverride
         )
     }
 
@@ -867,6 +882,42 @@ final class AppViewModel: ObservableObject {
         let session = activeChatSession
         fallbackChatSession = session
         nativeSessionManager = makeNativeSessionManager(for: session)
+    }
+
+    private func syncLLMModelDisplayFromSession(_ sessionID: String) {
+        if let override = sessionStateSnapshotsBySessionID[sessionID]?.llmOverride {
+            llmSelectedModel = override.model
+            if let overrideMode = AppLLMProviderMode(rawValue: override.providerMode) {
+                llmProviderMode = overrideMode
+            }
+        } else {
+            let settings = try? llmSettingsRepository.loadSettings()
+            llmSelectedModel = settings?.effectiveModel ?? llmSelectedModel
+            llmProviderMode = settings?.providerMode ?? llmProviderMode
+        }
+    }
+
+    var sessionHasLLMOverride: Bool {
+        let sessionID = selectedChatSessionID ?? activeChatSession.id
+        return sessionStateSnapshotsBySessionID[sessionID]?.llmOverride != nil
+    }
+
+    func clearSessionLLMOverride() {
+        let sessionID = selectedChatSessionID ?? activeChatSession.id
+        var state = sessionStateSnapshotsBySessionID[sessionID]
+            ?? AppSessionStateSnapshot(sessionID: sessionID)
+        state.llmOverride = nil
+        state.updatedAt = Date()
+        sessionStateSnapshotsBySessionID[sessionID] = state
+        try? chatSessionRepository?.saveSessionState(state, sessionID: sessionID)
+
+        // Fall back to global settings for UI display
+        let settings = try? llmSettingsRepository.loadSettings()
+        llmSelectedModel = settings?.effectiveModel ?? llmSelectedModel
+        llmProviderMode = settings?.providerMode ?? llmProviderMode
+
+        rebuildNativeSessionManagerForActiveSession()
+        Task { await reloadLLMModelConnections() }
     }
 
     private func syncWorkspaceDraftsFromSession(_ state: AppSessionStateSnapshot?) {
@@ -1349,6 +1400,7 @@ final class AppViewModel: ObservableObject {
             latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: session.id)
             selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
             restoreWorkspaceMode(for: session.id)
+            syncLLMModelDisplayFromSession(sessionID)
             chatSummaryMessage = nil
             lastContext = nil
             lastPromptInspection = nil
