@@ -1301,10 +1301,10 @@ final class AppViewModel: ObservableObject {
 
     private func restoreAgentEventTimeline(runID: String, sessionID: String) throws -> [AgentEventPresentation] {
         guard let chatSessionRepository else { return [] }
-        let restored = presentations(from: try chatSessionRepository.loadRunEvents(runID: runID, limit: 300))
+        let restored = presentations(from: try chatSessionRepository.loadRunEvents(runID: runID, limit: nil))
         if !restored.isEmpty { return restored }
         return presentations(
-            from: try chatSessionRepository.loadRecentJournalEvents(sessionID: sessionID, limit: 500)
+            from: try chatSessionRepository.loadRecentJournalEvents(sessionID: sessionID, limit: nil)
                 .filter { $0.runID == runID }
                 .sorted { lhs, rhs in
                     switch (lhs.sequence, rhs.sequence) {
@@ -1328,20 +1328,13 @@ final class AppViewModel: ObservableObject {
             return
         }
 
-        let cachedTimeline = try chatSessionRepository.loadActivityTimelineCache(sessionID: sessionID)
-        if !cachedTimeline.isEmpty {
-            agentEventTimelinesBySessionID[sessionID] = cachedTimeline
-            agentEventTimeline = cachedTimeline
-            return
-        }
-
         let runs = try chatSessionRepository.loadRuns(
             sessionID: sessionID,
             statuses: [.completed, .failed, .cancelled],
             limit: 10
         )
         for run in runs {
-            let restored = presentations(from: try chatSessionRepository.loadRunEvents(runID: run.id, limit: 300))
+            let restored = presentations(from: try chatSessionRepository.loadRunEvents(runID: run.id, limit: nil))
             if !restored.isEmpty {
                 agentEventTimelinesBySessionID[sessionID] = restored
                 try? chatSessionRepository.saveActivityTimelineCache(sessionID: sessionID, timeline: restored)
@@ -1350,7 +1343,14 @@ final class AppViewModel: ObservableObject {
             }
         }
 
-        let recentEvents = try chatSessionRepository.loadRecentJournalEvents(sessionID: sessionID, limit: 300)
+        let cachedTimeline = try chatSessionRepository.loadActivityTimelineCache(sessionID: sessionID)
+        if !cachedTimeline.isEmpty {
+            agentEventTimelinesBySessionID[sessionID] = cachedTimeline
+            agentEventTimeline = cachedTimeline
+            return
+        }
+
+        let recentEvents = try chatSessionRepository.loadRecentJournalEvents(sessionID: sessionID, limit: nil)
         var seenRunIDs: [String] = []
         for event in recentEvents where !seenRunIDs.contains(event.runID) {
             seenRunIDs.append(event.runID)
@@ -1420,6 +1420,7 @@ final class AppViewModel: ObservableObject {
         do {
             let session = try chatSessionRepository.setStatus(sessionID: selectedChatSessionID, status: status)
             self.selectedChatSessionID = session.id
+            fallbackChatSession = session
             reloadChatSessions()
             appendGovernanceEvent(.sessionStatusChanged(AgentSessionGovernanceEvent(sessionID: session.id, message: "状态已更新为 \(status.displayName)", status: status)))
             evaluateAutomation(ProductOSAutomationEventContext(triggerKind: .sessionStatusChanged, sessionID: session.id, status: status))
@@ -1455,6 +1456,7 @@ final class AppViewModel: ObservableObject {
                 didRemove = false
             }
             let updated = try chatSessionRepository.setLabels(sessionID: selectedChatSessionID, labels: labels)
+            fallbackChatSession = updated
             reloadChatSessions()
             appendGovernanceEvent(.sessionLabelsChanged(AgentSessionGovernanceEvent(sessionID: updated.id, message: "标签已更新：\(updated.governance.labels.map(\.displayText).joined(separator: ", "))", labels: updated.governance.labels)))
             evaluateAutomation(ProductOSAutomationEventContext(triggerKind: didRemove ? .sessionLabelRemoved : .sessionLabelAdded, sessionID: updated.id, labelID: labelID))
