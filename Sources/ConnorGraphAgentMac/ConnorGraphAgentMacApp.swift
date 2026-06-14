@@ -152,6 +152,7 @@ final class AppViewModel: ObservableObject {
     @Published var userPreferenceNotes: String = ""
     @Published var appSettingsMessage: String?
     @Published var pendingAttachmentRefs: [AgentMessageAttachmentRef] = []
+    @Published var attachmentPreviewModel: AttachmentPreviewModel?
 
     private var repository: AppGraphRepository?
     private var promotionRepository: AppPromotionQueueRepository?
@@ -268,6 +269,15 @@ final class AppViewModel: ObservableObject {
         if let selectedChatSessionID {
             pendingAttachmentRefsBySessionID[selectedChatSessionID] = pendingAttachmentRefs
         }
+    }
+
+    func previewAttachment(_ attachment: AgentMessageAttachmentRef) {
+        guard let selectedChatSessionID, let storagePaths else { return }
+        let store = AppSessionAttachmentStore(paths: storagePaths)
+        attachmentPreviewModel = AttachmentPreviewLoader(store: store).load(
+            sessionID: selectedChatSessionID,
+            attachment: attachment
+        )
     }
 
     @discardableResult

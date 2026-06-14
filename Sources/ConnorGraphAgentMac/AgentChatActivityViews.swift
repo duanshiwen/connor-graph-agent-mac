@@ -327,8 +327,8 @@ struct AgentChatTurnTimestampRow: View {
 struct AgentChatMessageRow: View {
     var row: AgentChatMessagePresentation
     var onAssistantMessageCollapsed: (() -> Void)? = nil
+    var onPreviewAttachment: (AgentMessageAttachmentRef) -> Void = { _ in }
     @State private var isAssistantMessageExpanded = false
-    @State private var inspectedAttachment: AgentMessageAttachmentRef?
 
     @MainActor
     private final class BrowserPromptFoldingCache {
@@ -394,7 +394,7 @@ struct AgentChatMessageRow: View {
                 messageContent
                 if !row.attachments.isEmpty {
                     AgentMessageAttachmentRefsView(attachments: row.attachments) { attachment in
-                        inspectedAttachment = attachment
+                        onPreviewAttachment(attachment)
                     }
                 }
             }
@@ -408,9 +408,6 @@ struct AgentChatMessageRow: View {
             )
         }
         .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
-        .sheet(item: $inspectedAttachment) { attachment in
-            AgentAttachmentInspectorView(attachment: attachment)
-        }
     }
 
     @ViewBuilder
@@ -485,13 +482,13 @@ struct AgentChatMessageRow: View {
 
 private struct AgentMessageAttachmentRefsView: View {
     var attachments: [AgentMessageAttachmentRef]
-    var onInspect: (AgentMessageAttachmentRef) -> Void
+    var onPreview: (AgentMessageAttachmentRef) -> Void
 
     var body: some View {
         HStack(spacing: AgentChatLayout.spaceS) {
             ForEach(attachments) { attachment in
                 Button {
-                    onInspect(attachment)
+                    onPreview(attachment)
                 } label: {
                     Text("\(iconPrefix(for: attachment.kind)) \(attachment.displayName)")
                         .font(AgentChatTypography.meta)
@@ -502,7 +499,7 @@ private struct AgentMessageAttachmentRefsView: View {
                         .overlay(Capsule().stroke(ConnorCraftPalette.accentBorder, lineWidth: 1))
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("检查附件 \(attachment.displayName)")
+                .accessibilityLabel("预览附件 \(attachment.displayName)")
             }
         }
         .accessibilityLabel("消息附件 \(attachments.count) 个")
