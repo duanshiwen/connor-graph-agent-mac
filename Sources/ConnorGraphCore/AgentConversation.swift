@@ -48,6 +48,7 @@ public struct AgentMessage: Codable, Sendable, Equatable, Identifiable {
     public var citations: [String]
     public var contextSnapshot: String?
     public var promptInspection: AgentPromptInspectionSnapshot?
+    public var attachments: [AgentMessageAttachmentRef]
 
     public init(
         id: String = UUID().uuidString,
@@ -57,13 +58,15 @@ public struct AgentMessage: Codable, Sendable, Equatable, Identifiable {
         citations: [String] = [],
         contextSnapshot: String? = nil
     ) {
-        self.id = id
-        self.role = role
-        self.content = content
-        self.createdAt = createdAt
-        self.citations = citations
-        self.contextSnapshot = contextSnapshot
-        self.promptInspection = nil
+        self.init(
+            id: id,
+            role: role,
+            content: content,
+            createdAt: createdAt,
+            citations: citations,
+            contextSnapshot: contextSnapshot,
+            attachments: []
+        )
     }
 
     public init(
@@ -73,6 +76,26 @@ public struct AgentMessage: Codable, Sendable, Equatable, Identifiable {
         createdAt: Date = Date(),
         citations: [String] = [],
         contextSnapshot: String? = nil,
+        attachments: [AgentMessageAttachmentRef]
+    ) {
+        self.id = id
+        self.role = role
+        self.content = content
+        self.createdAt = createdAt
+        self.citations = citations
+        self.contextSnapshot = contextSnapshot
+        self.promptInspection = nil
+        self.attachments = attachments
+    }
+
+    public init(
+        id: String = UUID().uuidString,
+        role: AgentRole,
+        content: String,
+        createdAt: Date = Date(),
+        citations: [String] = [],
+        contextSnapshot: String? = nil,
+        attachments: [AgentMessageAttachmentRef] = [],
         promptInspection: AgentPromptInspectionSnapshot?
     ) {
         self.id = id
@@ -82,6 +105,30 @@ public struct AgentMessage: Codable, Sendable, Equatable, Identifiable {
         self.citations = citations
         self.contextSnapshot = contextSnapshot
         self.promptInspection = promptInspection
+        self.attachments = attachments
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case role
+        case content
+        case createdAt
+        case citations
+        case contextSnapshot
+        case promptInspection
+        case attachments
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        role = try container.decode(AgentRole.self, forKey: .role)
+        content = try container.decode(String.self, forKey: .content)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        citations = try container.decodeIfPresent([String].self, forKey: .citations) ?? []
+        contextSnapshot = try container.decodeIfPresent(String.self, forKey: .contextSnapshot)
+        promptInspection = try container.decodeIfPresent(AgentPromptInspectionSnapshot.self, forKey: .promptInspection)
+        attachments = try container.decodeIfPresent([AgentMessageAttachmentRef].self, forKey: .attachments) ?? []
     }
 }
 
@@ -199,12 +246,18 @@ public struct AgentSession: Codable, Sendable, Equatable, Identifiable {
     }
 
     @discardableResult
-    public mutating func appendUserMessage(_ content: String) -> AgentMessage {
-        let message = AgentMessage(role: .user, content: content)
+    public mutating func appendUserMessage(
+        _ content: String,
+        attachments: [AgentMessageAttachmentRef] = []
+    ) -> AgentMessage {
+        let message = AgentMessage(role: .user, content: content, attachments: attachments)
         messages.append(message)
         updatedAt = message.createdAt
         if title == "New Chat" {
-            title = String(content.prefix(40))
+            let titleSource = content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? attachments.first?.displayName ?? content
+                : content
+            title = String(titleSource.prefix(40))
         }
         return message
     }

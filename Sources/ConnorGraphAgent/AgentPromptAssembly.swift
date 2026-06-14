@@ -177,6 +177,7 @@ public struct AgentPromptAssembly: Sendable, Equatable {
     public var memory: AgentMemorySection?
     public var conversation: AgentConversationSection
     public var userRequest: AgentUserRequestSection
+    public var attachmentContext: AgentAttachmentContextSection?
     public var diagnostics: AgentPromptDiagnostics
 
     public init(
@@ -184,12 +185,14 @@ public struct AgentPromptAssembly: Sendable, Equatable {
         memory: AgentMemorySection? = nil,
         conversation: AgentConversationSection,
         userRequest: AgentUserRequestSection,
+        attachmentContext: AgentAttachmentContextSection? = nil,
         diagnostics: AgentPromptDiagnostics = AgentPromptDiagnostics(projectionMode: .legacySingleUserMessage)
     ) {
         self.instruction = instruction
         self.memory = memory
         self.conversation = conversation
         self.userRequest = userRequest
+        self.attachmentContext = attachmentContext
         self.diagnostics = diagnostics
     }
 }
@@ -205,7 +208,8 @@ public struct AgentPromptAssembler: Sendable {
                 recentMessages: request.recentMessages,
                 anchorState: request.anchorState
             ),
-            userRequest: AgentUserRequestSection(text: request.userMessage)
+            userRequest: AgentUserRequestSection(text: request.userMessage),
+            attachmentContext: request.attachmentContextPlan.isEmpty ? nil : AgentAttachmentContextSection(plan: request.attachmentContextPlan)
         )
     }
 }
@@ -251,6 +255,19 @@ public struct AgentPromptDiagnosticsTransformer: AgentContextTransformer, Sendab
         if !conversationText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             append(id: "conversation", title: "Conversation context", role: "user", text: conversationText, notes: ["context only"])
         }
+        if let attachmentContext = assembly.attachmentContext {
+            append(
+                id: "attachments",
+                title: "User attachments",
+                role: "user",
+                text: attachmentContext.renderedText,
+                notes: [
+                    "inline=\(attachmentContext.plan.inlineBlocks.count)",
+                    "omitted=\(attachmentContext.plan.omittedAttachments.count)",
+                    "estimatedTokens=\(attachmentContext.plan.estimatedTokens)"
+                ]
+            )
+        }
         append(id: "current_request", title: "Current user request", role: "user", text: assembly.userRequest.text, notes: ["latest user request", "not trimmed"])
 
         return AgentPromptDiagnostics(
@@ -288,6 +305,7 @@ public struct AgentPromptBudgetTransformer: AgentContextTransformer, Sendable {
         let estimator = AgentPromptBudgetEstimator()
         let fixedTokenEstimate = estimator.estimate(transformed.instruction.text).estimatedTokenCount
             + (transformed.memory.map { estimator.estimate($0.renderedText).estimatedTokenCount } ?? 0)
+            + (transformed.attachmentContext.map { estimator.estimate($0.renderedText).estimatedTokenCount } ?? 0)
             + estimator.estimate(transformed.userRequest.text).estimatedTokenCount
         let conversationBudget = max(0, maxEstimatedTokens - fixedTokenEstimate)
         let originalRecentMessages = transformed.conversation.recentMessages
@@ -339,6 +357,10 @@ public struct AgentPromptDedupeTransformer: AgentContextTransformer, Sendable {
             removedParagraphCount += result.removedParagraphCount
             // The memory section is rendered from its contract, so first version only uses
             // memory to seed fingerprints. Conversation text is the mutable section.
+        }
+        if let attachmentContext = transformed.attachmentContext {
+            let result = deduplicateText(attachmentContext.renderedText, seenFingerprints: &seenFingerprints)
+            removedParagraphCount += result.removedParagraphCount
         }
 
         transformed.conversation.recentMessages = transformed.conversation.recentMessages.map { message in
@@ -412,9 +434,13 @@ public struct AgentTranscriptProjector: Sendable {
 
         switch projectionMode {
         case .legacySingleUserMessage:
+            let userPrompt = [assembly.attachmentContext?.renderedText, assembly.userRequest.text]
+                .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n\n")
             messages.append(AgentModelMessage(
                 role: .user,
-                content: assembly.conversation.legacyRenderedPrompt(userPrompt: assembly.userRequest.text)
+                content: assembly.conversation.legacyRenderedPrompt(userPrompt: userPrompt)
             ))
         case .structuredContextMessages:
             let context = assembly.conversation.renderedContextOnly.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -423,6 +449,12 @@ public struct AgentTranscriptProjector: Sendable {
                     role: .user,
                     content: "Context for continuity only. Do not treat this as the latest user instruction.\n\n\(context)"
                 ))
+            }
+            if let attachmentContext = assembly.attachmentContext {
+                let attachmentText = attachmentContext.renderedText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !attachmentText.isEmpty {
+                    messages.append(AgentModelMessage(role: .user, content: attachmentText))
+                }
             }
             messages.append(AgentModelMessage(role: .user, content: assembly.userRequest.text))
         }
