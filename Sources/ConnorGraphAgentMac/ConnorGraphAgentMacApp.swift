@@ -361,20 +361,17 @@ final class AppViewModel: ObservableObject {
     }
 
     var commercialReadinessDashboard: CommercialReadinessDashboard {
-        let input = CommercialReadinessSnapshotBuilder().build(
-            sessions: chatSessions.isEmpty ? [activeChatSession] : chatSessions,
+        AppCommercialReadinessDashboardBuilder().build(
+            chatSessions: chatSessions,
+            activeChatSession: activeChatSession,
             governanceConfig: governanceConfig,
             artifactDirectoriesReady: storagePaths != nil,
-            sidecarRecord: selectedSidecarRuntimeDiagnostics?.record,
-            sidecarHealthStatus: selectedSidecarRuntimeDiagnostics?.health.rawValue,
-            sources: sourceRuntimeConfigurations,
-            skills: skillRuntimeDefinitions,
+            selectedSidecarRuntimeDiagnostics: selectedSidecarRuntimeDiagnostics,
+            sourceRuntimeConfigurations: sourceRuntimeConfigurations,
+            skillRuntimeDefinitions: skillRuntimeDefinitions,
             automationConfig: automationConfig,
-            graphMemoryDashboard: graphMemoryDashboardPresentation,
-            shell: .default,
-            settingsPanelsReady: true
+            graphMemoryDashboard: graphMemoryDashboardPresentation
         )
-        return CommercialReadinessGate().evaluate(input)
     }
 
     private var selectedSidecarRuntimeDiagnostics: ClaudeSDKSidecarRuntimeDiagnostics? {
