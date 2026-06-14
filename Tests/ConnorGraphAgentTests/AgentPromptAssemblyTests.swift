@@ -58,22 +58,50 @@ import ConnorGraphAgent
     #expect(modelRequest.messages.last?.content == "Current task")
 }
 
-@Test func agentPromptBudgetTransformerTrimsRecentMessagesBeforeCurrentRequest() async throws {
-    let longRecent = String(repeating: "old context ", count: 600)
+@Test func agentPromptDedupeTransformerRemovesRepeatedConversationParagraphsOnly() async throws {
+    let repeated = "This paragraph is intentionally long enough to be deduplicated because it repeats exactly across recent messages."
     let request = AgentChatRequest(
-        sessionID: "session-prompt",
-        userMessage: "Do not trim me",
-        recentMessages: [AgentMessage(id: "message-1", role: .assistant, content: longRecent)]
+        sessionID: "session-dedupe",
+        userMessage: "Keep current request even if it repeats: \(repeated)",
+        recentMessages: [
+            AgentMessage(id: "message-1", role: .assistant, content: "\(repeated)\n\nUnique assistant detail."),
+            AgentMessage(id: "message-2", role: .user, content: "\(repeated)\n\nUnique user detail.")
+        ]
     )
     let assembly = AgentPromptAssembler().assemble(request: request, memoryContract: nil)
 
-    let transformed = try await AgentPromptBudgetTransformer(maxEstimatedTokens: 100).transform(
+    let transformed = try await AgentPromptDedupeTransformer(minParagraphCharacters: 40).transform(
         assembly,
         projectionMode: .structuredContextMessages
     )
 
-    #expect(transformed.conversation.recentMessages.isEmpty)
+    #expect(transformed.conversation.recentMessages[0].content.contains(repeated))
+    #expect(!transformed.conversation.recentMessages[1].content.contains(repeated))
+    #expect(transformed.conversation.recentMessages[1].content.contains("Unique user detail."))
+    #expect(transformed.userRequest.text.contains(repeated))
+    #expect(transformed.diagnostics.appliedTransformers.contains("dedupe"))
+}
+
+@Test func agentPromptBudgetTransformerTrimsOldRecentMessagesBeforeCurrentRequest() async throws {
+    let oldRecent = String(repeating: "old context ", count: 600)
+    let request = AgentChatRequest(
+        sessionID: "session-prompt",
+        userMessage: "Do not trim me",
+        recentMessages: [
+            AgentMessage(id: "message-1", role: .assistant, content: oldRecent),
+            AgentMessage(id: "message-2", role: .user, content: "Keep this recent message")
+        ]
+    )
+    let assembly = AgentPromptAssembler().assemble(request: request, memoryContract: nil)
+
+    let transformed = try await AgentPromptBudgetTransformer(maxEstimatedTokens: 550).transform(
+        assembly,
+        projectionMode: .structuredContextMessages
+    )
+
+    #expect(transformed.conversation.recentMessages.map(\.id) == ["message-2"])
     #expect(transformed.userRequest.text == "Do not trim me")
     #expect(transformed.instruction.text.contains("general-purpose local AI assistant"))
     #expect(transformed.diagnostics.appliedTransformers.contains("budget"))
+    #expect(transformed.diagnostics.sections.first(where: { $0.id == "conversation" })?.wasTrimmed == true)
 }

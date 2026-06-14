@@ -15,18 +15,31 @@ import ConnorGraphAgent
     #expect(estimate.estimatedTokenCount == 1)
 }
 
-@Test func agentPromptBudgetEstimatorCountsFourCharactersAsOneToken() {
-    let estimate = AgentPromptBudgetEstimator().estimate("abcd")
+@Test func agentPromptBudgetEstimatorUsesEnglishHeuristicForLatinText() {
+    let estimate = AgentPromptBudgetEstimator().estimate("abcdefgh")
 
-    #expect(estimate.characterCount == 4)
-    #expect(estimate.estimatedTokenCount == 1)
+    #expect(estimate.characterCount == 8)
+    #expect(estimate.estimatedTokenCount == 3)
 }
 
-@Test func agentPromptBudgetEstimatorRoundsFiveCharactersUpToTwoTokens() {
-    let estimate = AgentPromptBudgetEstimator().estimate("abcde")
+@Test func agentPromptBudgetEstimatorUsesCJKAwareHeuristicForChineseText() {
+    let estimate = AgentPromptBudgetEstimator().estimate("继续推进上下文治理")
 
-    #expect(estimate.characterCount == 5)
-    #expect(estimate.estimatedTokenCount == 2)
+    #expect(estimate.characterCount == 9)
+    #expect(estimate.estimatedTokenCount == 5)
+}
+
+@Test func sessionTokenCounterUsesPromptBudgetEstimatorForMessages() {
+    let messages = [
+        AgentMessage(role: .user, content: "abcdefgh"),
+        AgentMessage(role: .assistant, content: "继续推进上下文治理")
+    ]
+
+    let estimate = SessionTokenCounter().estimate(messages: messages)
+
+    #expect(estimate.messageCount == 2)
+    #expect(estimate.totalTokenCount == 8)
+    #expect(estimate.lastMessageTokenCount == 5)
 }
 
 @Test func agentPromptBudgetEstimatorClassifiesBudgetStatusThresholds() {
