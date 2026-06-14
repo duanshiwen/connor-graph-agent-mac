@@ -680,11 +680,6 @@ struct AgentActivityDetailOverlay: View {
                     .frame(width: AgentChatLayout.hitTargetSize, height: AgentChatLayout.hitTargetSize)
                     .contentShape(Rectangle())
                     .keyboardShortcut(.escape, modifiers: [])
-                    .background(Color.clear, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
-                            .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
-                    )
                 }
                 .padding(AgentChatLayout.spaceM)
 
