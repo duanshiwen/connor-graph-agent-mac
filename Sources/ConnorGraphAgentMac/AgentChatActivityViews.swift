@@ -326,6 +326,7 @@ struct AgentChatTurnTimestampRow: View {
 
 struct AgentChatMessageRow: View {
     var row: AgentChatMessagePresentation
+    @State private var isAssistantMessageExpanded = false
 
     @MainActor
     private final class BrowserPromptFoldingCache {
@@ -370,6 +371,15 @@ struct AgentChatMessageRow: View {
     }
 
     private var isUser: Bool { row.message.role == .user }
+    private var shouldFoldAssistantMessage: Bool {
+        guard !isUser else { return false }
+        let content = row.message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lineCount = content.components(separatedBy: .newlines).count
+        return content.count > 1_200 || lineCount > 18
+    }
+
+    private var assistantCollapsedMaxHeight: CGFloat { 260 }
+
     private var browserPromptFoldingParts: BrowserPromptFoldingParts? {
         BrowserPromptFoldingCache.shared.parts(for: row.id, content: row.message.content)
     }
@@ -405,13 +415,55 @@ struct AgentChatMessageRow: View {
                 AgentMarkdownPreviewText(markdown: row.message.content, font: AgentChatTypography.body)
             }
         } else {
-            ScrollView {
-                AgentMarkdownPreviewText(markdown: row.message.content, font: AgentChatTypography.body)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.trailing, AgentChatLayout.spaceXS)
-            }
-            .frame(maxHeight: AgentChatLayout.assistantMessageMaxHeight, alignment: .top)
+            assistantMessageContent
         }
+    }
+
+    @ViewBuilder
+    private var assistantMessageContent: some View {
+        if shouldFoldAssistantMessage {
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+                if isAssistantMessageExpanded {
+                    assistantMarkdownBody
+                } else {
+                    assistantMarkdownBody
+                        .frame(maxHeight: assistantCollapsedMaxHeight, alignment: .top)
+                        .clipped()
+                        .overlay(alignment: .bottom) {
+                            LinearGradient(
+                                colors: [
+                                    Color(nsColor: .controlBackgroundColor).opacity(0),
+                                    Color(nsColor: .controlBackgroundColor).opacity(0.92)
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                            .frame(height: 56)
+                            .allowsHitTesting(false)
+                        }
+                }
+
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        isAssistantMessageExpanded.toggle()
+                    }
+                } label: {
+                    Label(isAssistantMessageExpanded ? "收起回答" : "展开完整回答", systemImage: isAssistantMessageExpanded ? "chevron.up" : "chevron.down")
+                        .font(AgentChatTypography.metaEmphasis)
+                        .foregroundStyle(ConnorCraftPalette.accent)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isAssistantMessageExpanded ? "收起助手回答" : "展开助手完整回答")
+            }
+        } else {
+            assistantMarkdownBody
+        }
+    }
+
+    private var assistantMarkdownBody: some View {
+        AgentMarkdownPreviewText(markdown: row.message.content, font: AgentChatTypography.body)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.trailing, AgentChatLayout.spaceXS)
     }
 
     private var messageBackground: Color {
