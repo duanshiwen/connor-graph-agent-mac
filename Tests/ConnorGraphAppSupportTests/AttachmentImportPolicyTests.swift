@@ -14,6 +14,10 @@ struct AttachmentImportPolicyTests {
             ("rows.csv", .csv),
             ("config.yaml", .code),
             ("schema.xml", .code),
+            ("photo.png", .image),
+            ("photo.jpg", .image),
+            ("photo.webp", .image),
+            ("photo.heic", .image),
             ("main.swift", .code),
             ("script.py", .code),
             ("style.scss", .code)
@@ -27,8 +31,6 @@ struct AttachmentImportPolicyTests {
         let rejected: [(String, AttachmentImportRejectionReason)] = [
             ("page.html", .unsupportedHTML),
             ("page.htm", .unsupportedHTML),
-            ("image.png", .unsupportedImage),
-            ("photo.jpg", .unsupportedImage),
             ("vector.svg", .unsupportedSVG),
             ("paper.pdf", .unsupportedPDF),
             ("audio.mp3", .unsupportedAudio),
@@ -45,6 +47,20 @@ struct AttachmentImportPolicyTests {
         for (filename, expectedReason) in rejected {
             #expect(AttachmentImportPolicy.rejectionReason(forExtension: URL(fileURLWithPath: filename).pathExtension) == expectedReason)
         }
+    }
+
+    @Test func appliesSeparateImageSizeLimit() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let text = root.appendingPathComponent("large.json")
+        let image = root.appendingPathComponent("large.png")
+        try Data(repeating: 0, count: 600_000).write(to: text)
+        try Data(repeating: 0, count: 600_000).write(to: image)
+
+        let policy = AttachmentImportPolicy(maxAcceptedBytes: 512_000, maxImageBytes: 10_000_000)
+
+        #expect(policy.validate(url: text) == .rejected(.fileTooLarge(512_000)))
+        #expect(policy.validate(url: image) == .accepted(kind: .image))
     }
 
     @Test func rejectsMissingAndUnknownExtensions() {
