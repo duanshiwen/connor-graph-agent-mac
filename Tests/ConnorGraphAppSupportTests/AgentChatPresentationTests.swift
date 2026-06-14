@@ -128,6 +128,20 @@ import ConnorGraphAppSupport
     #expect(items[2].process?.assistantMessageID == nil)
 }
 
+@Test func agentChatTurnTimelinePreservesOpenProcessAfterCancellation() {
+    let messages = [AgentMessage(id: "user-1", role: .user, content: "cancel midway")]
+
+    let items = AgentChatTurnTimelineItem.items(messages: messages, lastContext: nil, isSubmitting: false, preservesOpenProcess: true)
+
+    #expect(items.map(\.id) == ["timestamp-turn-1", "user-1", "process-pending-assistant"])
+    #expect(items.map(\.kindLabel) == ["timestamp", "message", "process"])
+    #expect(items[2].process?.turnNumber == 1)
+    #expect(items[2].process?.state == .cancelled)
+    #expect(items[2].process?.title == "第 1 轮已取消")
+    #expect(items[2].process?.sourceUserMessageID == "user-1")
+    #expect(items[2].process?.assistantMessageID == nil)
+}
+
 @Test func agentChatAssistantTurnMetadataSummarizesPromptInspection() {
     let snapshot = AgentPromptInspectionSnapshot(
         includesSummary: true,
