@@ -120,7 +120,7 @@ struct AgentChatView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if isSessionInfoPresented {
-                AgentChatInspectorView(viewModel: viewModel)
+                AgentChatInspectorView(viewModel: viewModel, isPresented: $isSessionInfoPresented)
                     .frame(width: 360, height: 420)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusXL, style: .continuous))
                     .overlay(
@@ -584,20 +584,40 @@ private struct AgentLabelPill: View {
 
 private struct AgentChatInspectorView: View {
     @ObservedObject var viewModel: AppViewModel
+    @Binding var isPresented: Bool
 
     private var selectedSession: AgentSession? {
-        viewModel.chatSessions.first { $0.id == viewModel.selectedChatSessionID }
+        guard let selectedID = viewModel.selectedChatSessionID else { return nil }
+        return viewModel.allChatSessions.first { $0.id == selectedID }
+            ?? viewModel.chatSessions.first { $0.id == selectedID }
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
-                VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
-                    Text("信息")
-                        .font(AgentChatTypography.sectionTitle)
-                    Text("会话设置、标签和文件")
-                        .font(AgentChatTypography.meta)
-                        .foregroundStyle(.secondary)
+                HStack(alignment: .top, spacing: AgentChatLayout.spaceM) {
+                    VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
+                        Text("信息")
+                            .font(AgentChatTypography.sectionTitle)
+                        Text("会话设置、标签和文件")
+                            .font(AgentChatTypography.meta)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer(minLength: AgentChatLayout.spaceM)
+
+                    Button {
+                        isPresented = false
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: AgentChatTypography.controlIconSize, weight: .semibold))
+                            .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
+                    }
+                    .buttonStyle(.plain)
+                    .frame(width: AgentChatLayout.hitTargetSize, height: AgentChatLayout.hitTargetSize)
+                    .contentShape(Rectangle())
+                    .keyboardShortcut(.escape, modifiers: [])
+                    .accessibilityLabel("关闭信息面板")
                 }
 
                 if let session = selectedSession {
