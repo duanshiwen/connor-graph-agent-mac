@@ -2,15 +2,12 @@ import Foundation
 import ConnorGraphAppSupport
 import ConnorGraphCore
 
-@main
-struct ConnorCLI {
-    static func main() throws {
-        let args = Array(CommandLine.arguments.dropFirst())
-        let output = try route(args: args)
-        print(output)
-    }
+let args = Array(CommandLine.arguments.dropFirst())
+let output = try ConnorCLI.route(args: args)
+print(output)
 
-    private static func route(args: [String]) throws -> String {
+struct ConnorCLI {
+    static func route(args: [String]) throws -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         if args.isEmpty || args == ["commands"] || args == ["--help"] {

@@ -1,6 +1,6 @@
 import Foundation
 
-public enum AgentPermissionCapability: String, Codable, Sendable, Equatable {
+public enum AgentPermissionCapability: String, Codable, Sendable, Equatable, Hashable {
     case readGraph
     case readSession
     case proposeGraphWrite
@@ -16,6 +16,7 @@ public enum AgentPermissionCapability: String, Codable, Sendable, Equatable {
     case writeWorkspaceFile
     case editWorkspaceFile
     case deleteWorkspaceFile
+    case computeScientific
     case runReadOnlyShellCommand
     case runWorkspaceShellCommand
     case runNetworkShellCommand

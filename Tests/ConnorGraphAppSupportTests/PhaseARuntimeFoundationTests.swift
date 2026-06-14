@@ -139,3 +139,43 @@ private func phaseAStore() throws -> SQLiteGraphKernelStore {
     #expect(loaded.loop.budget.maxTotalTokens == 240_000)
     #expect(loaded.ui.textDeltaFlushCharacterThreshold == 120)
 }
+
+@Test func runtimeSettingsRepositoryPersistsWorkspaceDefaults() throws {
+    let root = phaseATemporaryRoot()
+    let paths = AppStoragePaths(applicationSupportDirectory: root)
+    try paths.ensureDirectoryHierarchy()
+    let repository = AppRuntimeSettingsRepository(configDirectory: paths.configDirectory)
+
+    var settings = AgentRuntimeSettings.default
+    settings.workspace.defaultWorkingDirectoryPath = "/tmp/connor-project"
+    settings.workspace.additionalAllowedDirectoryPaths = ["/tmp/shared-assets"]
+
+    try repository.save(settings)
+    let loaded = try repository.loadOrCreateDefault()
+
+    #expect(loaded.workspace.defaultWorkingDirectoryPath == "/tmp/connor-project")
+    #expect(loaded.workspace.additionalAllowedDirectoryPaths == ["/tmp/shared-assets"])
+}
+
+@Test func runtimeSettingsRepositoryPersistsWorkspaceRoots() throws {
+    let root = phaseATemporaryRoot()
+    let paths = AppStoragePaths(applicationSupportDirectory: root)
+    try paths.ensureDirectoryHierarchy()
+    let repository = AppRuntimeSettingsRepository(configDirectory: paths.configDirectory)
+
+    var settings = AgentRuntimeSettings.default
+    settings.workspace.roots = [
+        AgentRuntimeWorkspaceRoot(id: "app", displayName: "App", path: "/tmp/connor-app", role: "project", isPrimary: true),
+        AgentRuntimeWorkspaceRoot(id: "shared", displayName: "Shared", path: "/tmp/connor-shared", role: "dependency", isPrimary: false)
+    ]
+    settings.workspace.syncLegacyFieldsFromRoots()
+
+    try repository.save(settings)
+    let loaded = try repository.loadOrCreateDefault()
+
+    #expect(loaded.workspace.roots.count == 2)
+    #expect(loaded.workspace.roots.first?.id == "app")
+    #expect(loaded.workspace.roots.first?.isPrimary == true)
+    #expect(loaded.workspace.defaultWorkingDirectoryPath == "/tmp/connor-app")
+    #expect(loaded.workspace.additionalAllowedDirectoryPaths == ["/tmp/connor-shared"])
+}

@@ -1,7 +1,7 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-13 23:31 GMT+8  
-当前代码基线：`feature/native-local-workspace-tools`，在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface 基础上，新增 Connor-owned native local workspace tool surface：`Read`、`LS`、`Glob`、`Grep`、`Write`、`Edit`、`MultiEdit`、`Bash`，并纳入 Connor Policy Engine、audit domain、release gate 与 Swift 测试覆盖。
+文档更新时间：2026-06-14 02:08 GMT+8  
+当前代码基线：`feature/project-working-directory-runtime`，在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface / session-scoped multi-root project workspace / Connor-owned Scientific Compute Runtime skeleton 基础上，新增 Craft-style 会话 composer 工作目录入口：composer 底部工具栏的 folder badge 可快速查看当前 session primary root、切换已有 roots、选择新文件夹并设为主目录、或重置为默认；Workspace 详情仍保留 multi-root 管理能力，所有工作目录状态继续保存到当前 Session Capsule。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package，目标是把 Connor 建成 **graph-memory-native Agent OS**：它不是“图谱编辑器”，也不是“Claude SDK 外壳”，而是以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI 和 Local Automation Surface 共同构成的本地 Agent 操作系统。
 
@@ -137,7 +137,7 @@ sessions/{sessionID}/
 └── logs/
 ```
 
-Connor 的会话持久化边界是完整 Session Capsule：SQLite 仍承担 session / run / event / graph 查询存储，但 session-local 的 UI/workspace 状态、记录流、附件、plans、data、logs 与 browser 子状态都归属于 `sessions/{sessionID}/`。`records.jsonl` 使用单行 JSONL 追加保存，读取时可跳过坏行，避免 10+ 条记录因一次异常写入或重启退化成 1 条。
+Connor 的会话持久化边界是完整 Session Capsule：SQLite 仍承担 session / run / event / graph 查询存储，但 session-local 的 UI/workspace 状态、记录流、附件、plans、data、logs 与 browser 子状态都归属于 `sessions/{sessionID}/`。`session-state.json` 可保存 `workspace` 引用，用于记录当前会话绑定的 project working directory 来源与路径；`records.jsonl` 使用单行 JSONL 追加保存，读取时可跳过坏行，避免 10+ 条记录因一次异常写入或重启退化成 1 条。
 
 主要状态文件：
 
@@ -155,7 +155,7 @@ graph/evaluations/retrieval-evaluation-cases.json
 graph/evaluations/reports/*.json
 ```
 
-`runtime-settings.json` 保存应用、外观、输入、权限、UI 和用户偏好类设置；`llm-settings.json` 保存模型提供方、Base URL、模型名和 Claude Sidecar 配置。API Key 不写入 JSON，由本地 Keychain 凭据仓库管理。
+`runtime-settings.json` 保存应用、外观、输入、权限、UI 和用户偏好类设置。项目工作目录不再作为设置页里的全局主状态；每个会话在自己的 Session Capsule 中保存 `workspace` 引用和 roots。会话页 composer 底部的 folder badge 是当前工作目录的高频入口，可快速切换 primary root、选择新目录或重置为默认；顶部 Workspace 详情用于 multi-root 管理。`runtime-settings.workspace` / `llm.sidecar.workingDirectoryPath` 仅保留为 legacy fallback / 新会话初始模板兼容层。Native local tools 使用当前 session 的 multi-root allowed roots；Claude Sidecar 使用当前 session primary root 作为单一 cwd。`llm-settings.json` 保存模型提供方、Base URL、模型名和 Claude Sidecar 配置。API Key 不写入 JSON，由本地 Keychain 凭据仓库管理。
 
 ---
 
@@ -311,6 +311,7 @@ Agent runtime target。包含：
 - Graph write tools
 - Web/search tools
 - Native local workspace tools
+- Scientific Compute Runtime tools
 - Permission policy
 - Prompt budget estimation and inspection
 - Session summary strategy
@@ -331,6 +332,7 @@ Sources/ConnorGraphAgent/GraphReadTools.swift
 Sources/ConnorGraphAgent/GraphWriteTools.swift
 Sources/ConnorGraphAgent/LocalWorkspacePolicy.swift
 Sources/ConnorGraphAgent/LocalWorkspaceTools.swift
+Sources/ConnorGraphAgent/ScientificComputeRuntime.swift
 Sources/ConnorGraphAgent/AgentPermission.swift
 Sources/ConnorGraphAgent/AgentEvent.swift
 Sources/ConnorGraphAgent/AgentEventRecorder.swift
@@ -849,7 +851,7 @@ connor://open/browserWorkspace
 
 ## Settings Center
 
-设置入口位于 System / Settings。设置中心由中间栏分类列表和右侧设置详情组成，不包含 workspace / workplace 设置，因为当前应用仍是单一 Home / Runtime Root，不支持多 workspace。
+设置入口位于 System / Settings。设置中心由中间栏分类列表和右侧设置详情组成，不包含项目工作目录编辑器：Workspace Roots 属于每个会话，在会话界面顶部的“当前会话 Workspace”中设置。Connor 仍是单一 Home / Runtime Root，不引入 Craft-style multi-workspace。
 
 当前设置分类：
 
@@ -895,6 +897,7 @@ app
 appearance
 input
 permissions
+workspace
 preferences
 updatedAt
 ```
@@ -926,9 +929,21 @@ MultiEdit  editWorkspaceFile       对单文件执行原子多重替换；任一
 Bash       dynamic shell capability 在 workspace 内执行非交互命令，按命令风险追加评估 shell capability
 ```
 
-本地 workspace 安全边界由 `LocalWorkspacePolicy` 负责：
+本地 workspace 安全边界由 `LocalWorkspacePolicy` 负责。Project workspace 由 `AppProjectWorkingDirectoryResolver` 统一解析：Native AgentLoop 本地工具使用 primary root 作为相对路径基准，并把其他 roots 作为 additional allowed roots；Governed Claude Sidecar 使用同一个 primary root 作为单一 cwd。
 
-- 默认 working directory 为当前进程 working directory；后续可升级为独立 `agentLoopWorkingDirectoryPath` 设置。
+```text
+1. Session Capsule workspace roots / session override
+2. runtime-settings.json workspace.roots primary root
+3. legacy runtime-settings.json workspace.defaultWorkingDirectoryPath + additionalAllowedDirectoryPaths
+4. legacy llm-settings sidecarWorkingDirectoryPath
+5. process currentDirectoryPath fallback
+```
+
+- 默认项目目录推荐写入当前会话的 `sessions/{sessionID}/state/session-state.json` → `workspace.roots`；每个 root 包含 `id`、`displayName`、`path`、`role` 和 `isPrimary`。
+- `runtime-settings.json` 中的 `workspace.defaultWorkingDirectoryPath`、`workspace.additionalAllowedDirectoryPaths`、`workspace.roots` 保留为旧配置兼容 fallback / 新会话初始模板，不再是 UI 主设置。
+- 会话界面的“当前会话 Workspace”控件支持选择多个目录、添加路径、设为主目录、移除 root；样式沿用 row / badge 体系。
+- Claude Sidecar 的 cwd 仍只能是一个目录，因此使用 primary root；其他 roots 是 Connor Native tools 的允许根。
+- `llm.sidecar.workingDirectoryPath` 保留为旧配置兼容 fallback，不再是唯一 Sidecar cwd 来源。
 - 所有路径会做标准化和 symlink resolving，防止 workspace 内 symlink 逃逸到系统目录。
 - 默认拒绝 workspace 外路径、`.git/objects` / `.git/index` 写入、`.env*` 写入、`~/.ssh` / `~/.gnupg` / `~/.aws` 等敏感路径。
 - 文件读取、写入、搜索和工具输出都有大小/数量上限，避免大结果污染模型上下文。
@@ -948,7 +963,39 @@ runReadOnlyShellCommand
 runWorkspaceShellCommand
 runNetworkShellCommand
 runDestructiveShellCommand
+computeScientific
 ```
+
+### Scientific Compute Runtime
+
+Connor 原生 AgentLoop 现在有一个商用级 Scientific Compute Runtime 骨架，而不是把模型暴露给任意 eval / shell / Python 代码。模型只能通过声明式 operation JSON 调用白名单计算能力；结果带 `engine`、`method`、`tolerance`、`warnings`、`elapsedMilliseconds` 等 diagnostics，便于审计、复现和后续多引擎路由。
+
+当前注册工具：
+
+```text
+science_compute        computeScientific    通用科学计算入口：算术、比较、单位、统计、小型线代
+science_units          computeScientific    单位换算与量纲校验入口，当前委托 Native runtime
+science_stats          computeScientific    统计入口，当前委托 Native runtime
+science_linalg         computeScientific    线性代数入口，当前委托 Native runtime
+science_symbolic       computeScientific    符号数学入口；等待 Python/SymPy sidecar engine
+science_optimize       computeScientific    优化入口；等待 SciPy/Accelerate engine
+science_table_compute  computeScientific    表格科学计算入口；等待 DataFrame/table engine
+```
+
+当前 Native Swift engine 是 always-on reliability core，覆盖：
+
+```text
+add / subtract / multiply / divide
+compare / equal / not_equal / greater_than / less_than / greater_than_or_equal / less_than_or_equal
+approximate equality via absolute_tolerance / relative_tolerance
+summary statistics: count / sum / mean / median / min / max / sample_standard_deviation
+unit_convert: m / cm / km / s / min / h / m/s / km/h
+solve_linear_system for small square systems via Gaussian elimination with pivoting
+```
+
+比较大小是一级能力，不允许把浮点 `==` 静默伪装成可靠事实。若浮点相等/compare 没有显式 tolerance，Native engine 会在 diagnostics warnings 中记录 `Floating equality used without explicit tolerance policy.`。带单位比较和更完整单位制、符号正负判断、高精度 decimal/rational、概率分布、优化、积分、ODE、SVD/eigen 等属于后续 Python Scientific Sidecar / Accelerate engine 扩展范围。
+
+`computeScientific` 是纯本地确定性计算 capability，在 read-only / ask-to-write / trusted-write / allow-all 下默认批准；它不读写 workspace、不访问网络、不 shell out。
 
 AI 设置页支持：
 
@@ -958,7 +1005,9 @@ AI 设置页支持：
 - Base URL
 - API Key 输入 / 清除
 - 连接测试
-- Claude Sidecar executable / arguments / working directory
+- 默认权限、外观、输入和用户偏好
+- Claude Sidecar executable / arguments / legacy working directory fallback
+- 当前会话 Workspace 在会话界面内设置，不在 Settings Center 中设置
 - Sidecar mode guardrail
 
 注意：部分设置已完成本地持久化，但尚未全部接入实际运行时行为，例如桌面通知、保持屏幕常亮、外观模式实时切换、输入框拼写检查和网络 / Shell 审批细粒度 enforcement。
@@ -1083,6 +1132,17 @@ swift run connor automations evaluate --trigger sessionStatusChanged --session d
 最近验证结果：
 
 ```text
+Project Working Directory Runtime targeted tests passed (2026-06-14 01:00 GMT+8):
+- swift test --filter runtimeSettingsRepositoryPersistsWorkspaceRoots
+- swift test --filter AppProjectWorkingDirectoryResolverTests
+- swift test --filter sessionStatePreservesWorkspaceReference
+- swift test --filter sessionStatePreservesWorkspaceRootReferences
+- swift test --filter appGraphAgentRuntimeFactoryConfiguredSidecarUsesRuntimeWorkspaceBeforeLegacySidecarWorkspace
+- swift test --filter agentLoopRuntimeFactoryNativeReadUsesRuntimeWorkspace
+- swift test --filter agentLoopRuntimeFactoryNativeReadAllowsAdditionalWorkspaceRoot
+- swift test --filter LocalWorkspacePolicyTests
+- swift test --filter LocalWorkspaceToolsTests
+
 Native local workspace tool targeted tests passed (2026-06-13 23:31 GMT+8):
 - swift test --filter LocalWorkspacePolicyTests
 - swift test --filter LocalWorkspaceToolsTests
@@ -1090,9 +1150,14 @@ Native local workspace tool targeted tests passed (2026-06-13 23:31 GMT+8):
 - swift test --filter AppGraphAgentRuntimeFactoryLocalToolsTests
 - swift test --filter CommercialReadinessReleaseGateTests
 
-Full swift test status on feature/native-local-workspace-tools:
-- 447 / 448 tests passed.
-- 1 existing UI copy expectation failed outside the native workspace tool scope:
+Scientific Compute Runtime targeted tests passed (2026-06-14 01:26 GMT+8):
+- swift test --filter ScientificComputeRuntimeTests
+- swift test --filter agentLoopRunsScientificToolThenFinalAnswer
+- swift test --filter agentLoopRuntimeFactoryRegistersScientificComputingTools
+
+Full swift test status on feature/project-working-directory-runtime after Scientific Compute Runtime skeleton (2026-06-14 01:26 GMT+8):
+- 467 / 468 tests passed.
+- 1 existing UI copy expectation failed outside the Scientific Compute Runtime and project working directory runtime scope:
   PhaseGCraftGradeNativeUITests.nativeShellBuildsCraftGradeSidebarGroupsAndCommands
   expected shell.title == "Connor", actual shell.title == "康纳同学".
 ```
@@ -1120,6 +1185,7 @@ Tests/ConnorGraphAgentTests/AgentContextBuilderSQLiteSearchTests.swift
 Tests/ConnorGraphAgentTests/LocalWorkspacePolicyTests.swift
 Tests/ConnorGraphAgentTests/LocalWorkspaceToolsTests.swift
 Tests/ConnorGraphAgentTests/LocalShellCommandPolicyTests.swift
+Tests/ConnorGraphAgentTests/ScientificComputeRuntimeTests.swift
 Tests/ConnorGraphAppSupportTests/AppGraphAgentRuntimeFactoryLocalToolsTests.swift
 Tests/ConnorGraphAppSupportTests/AppGraphAgentRuntimeFactoryNativeSessionManagerTests.swift
 Tests/ConnorGraphAppSupportTests/NativeSessionManagerBackendTests.swift

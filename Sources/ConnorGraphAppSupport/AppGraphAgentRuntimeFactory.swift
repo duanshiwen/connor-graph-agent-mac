@@ -44,10 +44,11 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     public func makeAgentLoopChatController(
         session: AgentSession = AgentSession(id: "app-session"),
         permissionMode: AgentPermissionMode = .askToWrite,
-        configuration: AgentLoopConfiguration = AgentLoopConfiguration()
+        configuration: AgentLoopConfiguration = AgentLoopConfiguration(),
+        sessionWorkspace: AppSessionWorkspaceReference? = nil
     ) -> AgentLoopChatController<AnyAgentModelProvider> {
         AgentLoopChatController(
-            loopController: makeAgentLoopController(permissionMode: permissionMode, configuration: configuration),
+            loopController: makeAgentLoopController(permissionMode: permissionMode, configuration: configuration, sessionWorkspace: sessionWorkspace),
             session: session,
             groupID: groupID,
             memoryStagingRepository: AppMemoryStagingBufferRepository(store: store)
@@ -57,13 +58,14 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     public func makeNativeSessionManager(
         session: AgentSession = AgentSession(id: "app-session"),
         permissionMode: AgentPermissionMode = .askToWrite,
-        configuration: AgentLoopConfiguration = AgentLoopConfiguration()
+        configuration: AgentLoopConfiguration = AgentLoopConfiguration(),
+        sessionWorkspace: AppSessionWorkspaceReference? = nil
     ) -> NativeSessionManager {
-        if let sidecarManager = try? makeConfiguredGovernedClaudeSDKSidecarNativeSessionManager(session: session) {
+        if let sidecarManager = try? makeConfiguredGovernedClaudeSDKSidecarNativeSessionManager(session: session, sessionWorkspace: sessionWorkspace) {
             return sidecarManager
         }
         return NativeSessionManager(
-            backend: AgentLoopBackend(loopController: makeAgentLoopController(permissionMode: permissionMode, configuration: configuration)),
+            backend: AgentLoopBackend(loopController: makeAgentLoopController(permissionMode: permissionMode, configuration: configuration, sessionWorkspace: sessionWorkspace)),
             sessionRepository: AppChatSessionRepository(store: store),
             session: session,
             groupID: groupID,
@@ -73,7 +75,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     }
 
     public func makeConfiguredGovernedClaudeSDKSidecarNativeSessionManager(
-        session: AgentSession = AgentSession(id: "app-session")
+        session: AgentSession = AgentSession(id: "app-session"),
+        sessionWorkspace: AppSessionWorkspaceReference? = nil
     ) throws -> NativeSessionManager? {
         let settings = try settingsRepository.loadSettings()
         guard settings.providerMode == .governedClaudeSidecar else { return nil }
@@ -83,7 +86,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             session: session,
             sidecarExecutableURL: URL(fileURLWithPath: executablePath),
             sidecarArguments: Self.splitSidecarArguments(settings.sidecarArguments),
-            workingDirectory: Self.sidecarWorkingDirectory(from: settings),
+            workingDirectory: resolvedProjectWorkingDirectory(llmSettings: settings, sessionWorkspace: sessionWorkspace).url,
             permissionMode: settings.sidecarPermissionMode
         )
     }
@@ -96,7 +99,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         guard settings.sidecarPermissionMode != .allowAll else {
             throw AppGraphAgentRuntimeFactoryError.unsafeSidecarPermissionMode(settings.sidecarPermissionMode)
         }
-        let workingDirectory = Self.sidecarWorkingDirectory(from: settings)
+        let workingDirectory = resolvedProjectWorkingDirectory(llmSettings: settings).url
         let transport = ClaudeSDKSidecarPersistentProcessTransport(
             executableURL: URL(fileURLWithPath: executablePath),
             arguments: Self.splitSidecarArguments(settings.sidecarArguments),
@@ -185,14 +188,26 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
 
     public func makeAgentLoopController(
         permissionMode: AgentPermissionMode = .askToWrite,
-        configuration: AgentLoopConfiguration = AgentLoopConfiguration()
+        configuration: AgentLoopConfiguration = AgentLoopConfiguration(),
+        sessionWorkspace: AppSessionWorkspaceReference? = nil
     ) -> AgentLoopController<AnyAgentModelProvider> {
         let searchService = SQLiteGraphHybridSearchService(store: store)
         var registry = AgentToolRegistry()
         registry.register(GraphSearchTool(searchService: searchService))
         registry.register(GraphIngestEpisodeTool(repository: store))
         registry.register(GraphProposeWriteTool(repository: store))
-        let localWorkspacePolicy = LocalWorkspacePolicy(workingDirectory: Self.nativeAgentLoopWorkingDirectory())
+        let settings = (try? settingsRepository.loadSettings()) ?? .default
+        let runtimeSettings = loadRuntimeSettings()
+        let resolvedWorkspace = AppProjectWorkingDirectoryResolver.resolveWorkspace(
+            sessionWorkingDirectoryPath: sessionWorkspace?.workingDirectoryPath,
+            sessionWorkspaceRoots: sessionWorkspace?.roots ?? [],
+            runtimeSettings: runtimeSettings,
+            llmSettings: settings
+        )
+        let localWorkspacePolicy = LocalWorkspacePolicy(
+            workingDirectory: resolvedWorkspace.primary.url,
+            additionalAllowedDirectories: resolvedWorkspace.additionalAllowedDirectories
+        )
         registry.register(LocalReadFileTool(policy: localWorkspacePolicy))
         registry.register(LocalListDirectoryTool(policy: localWorkspacePolicy))
         registry.register(LocalGlobTool(policy: localWorkspacePolicy))
@@ -201,6 +216,14 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         registry.register(LocalEditFileTool(policy: localWorkspacePolicy))
         registry.register(LocalMultiEditTool(policy: localWorkspacePolicy))
         registry.register(LocalBashTool(policy: localWorkspacePolicy))
+        let scientificRuntime = ScientificComputeRuntime(engines: [NativeSwiftScientificEngine()])
+        registry.register(ScienceComputeTool(runtime: scientificRuntime))
+        registry.register(ScienceUnitsTool(runtime: scientificRuntime))
+        registry.register(ScienceStatsTool(runtime: scientificRuntime))
+        registry.register(ScienceLinalgTool(runtime: scientificRuntime))
+        registry.register(ScienceSymbolicTool())
+        registry.register(ScienceOptimizeTool())
+        registry.register(ScienceTableComputeTool())
         registry.register(BrowserFetchTool())
         registry.register(SearchEngineMCPTool(browserAssistedSearchHandler: browserAssistedSearchHandler))
         registry.register(SearchEngineMCPWebFetchTool(browserAssistedSearchHandler: browserAssistedSearchHandler))
@@ -258,8 +281,21 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         }
     }
 
-    private static func nativeAgentLoopWorkingDirectory() -> URL {
-        URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+    private func loadRuntimeSettings() -> AgentRuntimeSettings {
+        guard let storagePaths else { return .default }
+        return (try? AppRuntimeSettingsRepository(configDirectory: storagePaths.configDirectory).loadOrCreateDefault()) ?? .default
+    }
+
+    private func resolvedProjectWorkingDirectory(
+        llmSettings: AppLLMSettings,
+        sessionWorkspace: AppSessionWorkspaceReference? = nil
+    ) -> ResolvedProjectWorkingDirectory {
+        AppProjectWorkingDirectoryResolver.resolveWorkspace(
+            sessionWorkingDirectoryPath: sessionWorkspace?.workingDirectoryPath,
+            sessionWorkspaceRoots: sessionWorkspace?.roots ?? [],
+            runtimeSettings: loadRuntimeSettings(),
+            llmSettings: llmSettings
+        ).primary
     }
 
     private static func splitSidecarArguments(_ arguments: String) -> [String] {
@@ -268,11 +304,4 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             .map(String.init)
     }
 
-    private static func sidecarWorkingDirectory(from settings: AppLLMSettings) -> URL {
-        let path = settings.sidecarWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        if path.isEmpty {
-            return URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-        }
-        return URL(fileURLWithPath: path, isDirectory: true)
-    }
 }

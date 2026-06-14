@@ -208,15 +208,30 @@ public struct LocalBashTool: AgentTool {
             throw LocalWorkspacePolicyError.commandDenied(classification.reason)
         }
         let requiredCapability = Self.capability(for: classification.risk)
-        let permissionDecision = await context.policyEngine.evaluate(
-            capability: requiredCapability,
-            runID: context.runID,
-            sessionID: context.sessionID,
-            toolName: name,
-            payloadJSON: LocalToolJSON.encode(["command": command, "classification": classification.risk.rawValue]) ?? "{}"
-        )
-        guard permissionDecision.outcome == .approved else {
-            throw AgentToolError.permissionDenied(permissionDecision.reason)
+        let permissionPayloadJSON = LocalToolJSON.encode(["command": command, "classification": classification.risk.rawValue]) ?? "{}"
+        if !context.approvedCapabilities.contains(requiredCapability) {
+            let permissionDecision = await context.policyEngine.evaluate(
+                capability: requiredCapability,
+                runID: context.runID,
+                sessionID: context.sessionID,
+                toolName: name,
+                payloadJSON: permissionPayloadJSON
+            )
+            switch permissionDecision.outcome {
+            case .approved:
+                break
+            case .needsApproval:
+                throw AgentToolError.permissionNeedsApproval(AgentPermissionRequest(
+                    id: permissionDecision.requestID,
+                    runID: context.runID,
+                    sessionID: context.sessionID,
+                    capability: requiredCapability,
+                    toolName: name,
+                    payloadJSON: permissionPayloadJSON
+                ))
+            case .denied:
+                throw AgentToolError.permissionDenied(permissionDecision.reason)
+            }
         }
         let workingDirectory = try policy.resolvePath(arguments.string("working_directory") ?? ".")
         try policy.validateSearchScope(workingDirectory)
