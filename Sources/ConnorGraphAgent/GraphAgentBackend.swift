@@ -9,6 +9,8 @@ public struct AgentChatRequest: Sendable, Equatable {
     public var sessionSummary: AgentSessionSummary?
     public var recentMessages: [AgentMessage]
     public var permissionMode: AgentPermissionMode
+    /// Compression anchor state from prior rounds.
+    public var anchorState: SessionAnchorState?
 
     public init(
         runID: String = UUID().uuidString,
@@ -17,7 +19,8 @@ public struct AgentChatRequest: Sendable, Equatable {
         userMessage: String,
         sessionSummary: AgentSessionSummary? = nil,
         recentMessages: [AgentMessage] = [],
-        permissionMode: AgentPermissionMode = .askToWrite
+        permissionMode: AgentPermissionMode = .askToWrite,
+        anchorState: SessionAnchorState? = nil
     ) {
         self.runID = runID
         self.sessionID = sessionID
@@ -26,13 +29,15 @@ public struct AgentChatRequest: Sendable, Equatable {
         self.sessionSummary = sessionSummary
         self.recentMessages = recentMessages
         self.permissionMode = permissionMode
+        self.anchorState = anchorState
     }
 
     public var normalizedPrompt: String {
         AgentChatPromptContext(
             userPrompt: userMessage,
             sessionSummary: sessionSummary,
-            recentMessages: recentMessages
+            recentMessages: recentMessages,
+            anchorState: anchorState
         ).renderedPrompt
     }
 }

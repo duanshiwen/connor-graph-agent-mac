@@ -69,6 +69,17 @@ public struct NativeSessionManager: Sendable {
     public var permissionMode: AgentPermissionMode
     public var recentMessageLimit: Int
 
+    // MARK: - Context Compression
+
+    /// Persisted anchor state for context compression (loaded from Session Capsule).
+    public private(set) var anchorState: SessionAnchorState?
+    /// Model's context window size in tokens (for percentage-based budget).
+    public var contextWindowSize: Int
+    /// Compression pipeline (type-erased).  Nil when compression is disabled.
+    private let compressionProvider: AnyLLMProvider?
+    /// Recent message keep count for compression (default 7).
+    public var compressionRecentMessageKeepCount: Int = 7
+
     private let presenter: AgentEventPresenter
     private let memoryIngestionService: MemoryIngestionService
     private let memoryStagingRepository: AppMemoryStagingBufferRepository?
@@ -85,7 +96,10 @@ public struct NativeSessionManager: Sendable {
         memoryStagingRepository: AppMemoryStagingBufferRepository? = nil,
         memoryIngestionService: MemoryIngestionService = MemoryIngestionService(),
         eventRecorder: AgentEventRecorder? = nil,
-        pendingApprovalRepository: (any AgentPendingApprovalRepository)? = nil
+        pendingApprovalRepository: (any AgentPendingApprovalRepository)? = nil,
+        compressionProvider: AnyLLMProvider? = nil,
+        contextWindowSize: Int = 200_000,
+        anchorState: SessionAnchorState? = nil
     ) {
         self.backend = AnyAgentBackend(backend)
         self.sessionRepository = sessionRepository
@@ -101,6 +115,9 @@ public struct NativeSessionManager: Sendable {
         self.memoryIngestionService = memoryIngestionService
         self.eventRecorder = eventRecorder
         self.pendingApprovalRepository = pendingApprovalRepository
+        self.compressionProvider = compressionProvider
+        self.contextWindowSize = contextWindowSize
+        self.anchorState = anchorState
     }
 
     public init<Provider: AgentModelProvider>(
@@ -135,6 +152,10 @@ public struct NativeSessionManager: Sendable {
         onRunStarted: (@MainActor @Sendable (String) -> Void)? = nil,
         onEventPresentation: (@MainActor @Sendable (AgentEventPresentation) -> Void)? = nil
     ) async throws -> AgentLoopChatResponse {
+        // MARK: - Context Compression Check
+        // Check if cumulative tokens exceed the percentage-based threshold.\        // If so, compress older messages into the anchor state.
+        try await maybeCompressContext()
+
         let recentMessages = Array(session.messages.suffix(max(0, recentMessageLimit)))
         let userMessage = session.appendUserMessage(displayPrompt ?? prompt)
         try persistSession()
@@ -146,7 +167,8 @@ public struct NativeSessionManager: Sendable {
             userMessage: prompt,
             sessionSummary: sessionSummary,
             recentMessages: recentMessages,
-            permissionMode: permissionMode
+            permissionMode: permissionMode,
+            anchorState: anchorState
         )
         let now = Date()
         var run = AgentRun(
@@ -411,6 +433,45 @@ public struct NativeSessionManager: Sendable {
 
     private func persistSession() throws {
         try sessionRepository.saveSession(session)
+    }
+
+    // MARK: - Context Compression
+
+    /// Check if context compression should be triggered.
+    /// If so, compress older messages into the anchor state.
+    private mutating func maybeCompressContext() async throws {
+        guard let provider = compressionProvider else { return }
+
+        let tokenCount = SessionTokenCounter().estimate(messages: session.messages)
+        let budget = SessionContextBudget(contextWindowSize: contextWindowSize)
+        let status = budget.status(tokenCount: tokenCount.totalTokenCount)
+
+        guard status >= .shouldCompress else { return }
+
+        let pipeline = ContextCompressionPipeline(
+            provider: provider,
+            recentMessageKeepCount: compressionRecentMessageKeepCount
+        )
+        let compressed = try await pipeline.compress(
+            messages: session.messages,
+            existingAnchor: anchorState
+        )
+        anchorState = compressed.anchor
+        // Persist anchor state to the session capsule
+        try persistAnchorState()
+    }
+
+    /// Update anchor state externally (e.g., when loading from Session Capsule).
+    public mutating func setAnchorState(_ anchor: SessionAnchorState?) {
+        self.anchorState = anchor
+    }
+
+    private func persistAnchorState() throws {
+        var snapshot = (try? sessionRepository.loadSessionState(sessionID: session.id))
+            ?? AppSessionStateSnapshot(sessionID: session.id)
+        snapshot.anchorState = anchorState
+        snapshot.updatedAt = Date()
+        try sessionRepository.saveSessionState(snapshot, sessionID: session.id)
     }
 
     @discardableResult
