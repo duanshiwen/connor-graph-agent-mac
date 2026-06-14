@@ -176,7 +176,7 @@ private struct CraftPrimarySidebarView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
                     SidebarDisclosure(title: "所有会话", systemImage: "tray", isExpanded: $sessionsExpanded) {
-                        SidebarRow(title: "全部", systemImage: "bubble.left.and.bubble.right", count: viewModel.chatSessions.count, isSelected: selection == .agentChat && viewModel.sessionListFilter == .all) {
+                        SidebarRow(title: "全部", systemImage: "bubble.left.and.bubble.right", count: allSessionsCount, isSelected: selection == .agentChat && viewModel.sessionListFilter == .all) {
                             viewModel.setSessionListFilter(.all)
                             select(.agentChat)
                         }
@@ -231,17 +231,25 @@ private struct CraftPrimarySidebarView: View {
         }
     }
 
+    private var countSourceSessions: [AgentSession] {
+        viewModel.allChatSessions.isEmpty ? viewModel.chatSessions : viewModel.allChatSessions
+    }
+
+    private var allSessionsCount: Int {
+        countSourceSessions.count
+    }
+
     private var inboxCount: Int {
-        viewModel.chatSessions.filter { !$0.governance.isArchived }.count
+        countSourceSessions.filter { !$0.governance.isArchived }.count
     }
 
     private func count(for status: AgentSessionStatus) -> Int {
-        viewModel.chatSessions.filter { $0.governance.status == status }.count
+        countSourceSessions.filter { !$0.governance.isArchived && $0.governance.status == status }.count
     }
 
     private func count(forLabel labelID: String) -> Int {
-        viewModel.chatSessions.filter { session in
-            session.governance.labels.contains { $0.id == labelID }
+        countSourceSessions.filter { session in
+            !session.governance.isArchived && session.governance.labels.contains { $0.id == labelID }
         }.count
     }
 
