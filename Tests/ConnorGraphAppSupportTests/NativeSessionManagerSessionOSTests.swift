@@ -33,6 +33,31 @@ private struct SessionOSAnswerBackend: AgentBackend {
     }
 }
 
+private struct SessionOSFailingEventBackend: AgentBackend {
+    func chat(_ request: AgentChatRequest) -> AsyncThrowingStream<AgentEvent, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.yield(.runFailed(AgentRunFailure(
+                runID: request.runID,
+                sessionID: request.sessionID,
+                message: "backend reported failure"
+            )))
+            continuation.finish()
+        }
+    }
+}
+
+private enum SessionOSThrowingBackendError: Error, Sendable, Equatable {
+    case crashed
+}
+
+private struct SessionOSThrowingBackend: AgentBackend {
+    func chat(_ request: AgentChatRequest) -> AsyncThrowingStream<AgentEvent, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.finish(throwing: SessionOSThrowingBackendError.crashed)
+        }
+    }
+}
+
 private struct SessionOSApprovalBackend: AgentBackend {
     func chat(_ request: AgentChatRequest) -> AsyncThrowingStream<AgentEvent, Error> {
         AsyncThrowingStream { continuation in
@@ -233,8 +258,56 @@ private func makeSessionOSStore(_ name: String = UUID().uuidString) throws -> SQ
 
     let runID = try #require(capturedRunID.value)
     let run = try #require(try repository.loadRun(id: runID))
+    let loaded = try #require(try repository.loadSession(id: session.id))
     #expect(run.status == .cancelled)
     #expect(backend.chatStartedCount == 0)
+    #expect(loaded.messages.last?.role == .assistant)
+    #expect(loaded.messages.last?.content.contains("操作已终止：cancelled before backend") == true)
+}
+
+@Test func nativeSessionManagerAppendsTerminationMessageWhenBackendThrows() async throws {
+    let store = try makeSessionOSStore()
+    let repository = AppChatSessionRepository(store: store)
+    let session = AgentSession(id: "session-os-throws", title: "Session OS Throws")
+    try repository.saveSession(session)
+    var manager = NativeSessionManager(
+        backend: SessionOSThrowingBackend(),
+        sessionRepository: repository,
+        session: session
+    )
+
+    do {
+        _ = try await manager.submit("Trigger backend throw")
+        Issue.record("Expected backend to throw")
+    } catch SessionOSThrowingBackendError.crashed {
+        // expected
+    }
+
+    let loaded = try #require(try repository.loadSession(id: session.id))
+    #expect(loaded.messages.map(\.role) == [.user, .assistant])
+    #expect(loaded.messages.last?.content.contains("操作已终止：") == true)
+    #expect(loaded.messages.last?.content.contains("crashed") == true)
+}
+
+@Test func nativeSessionManagerAppendsTerminationMessageWhenBackendReportsRunFailed() async throws {
+    let store = try makeSessionOSStore()
+    let repository = AppChatSessionRepository(store: store)
+    let session = AgentSession(id: "session-os-run-failed", title: "Session OS Run Failed")
+    try repository.saveSession(session)
+    var manager = NativeSessionManager(
+        backend: SessionOSFailingEventBackend(),
+        sessionRepository: repository,
+        session: session
+    )
+
+    let response = try await manager.submit("Trigger runFailed event")
+    let runID = try #require(manager.runtimeState.lastRunID)
+    let run = try #require(try repository.loadRun(id: runID))
+    let loaded = try #require(try repository.loadSession(id: session.id))
+
+    #expect(response.assistantMessage?.content.contains("操作已终止：backend reported failure") == true)
+    #expect(run.status == .failed)
+    #expect(loaded.messages.last?.content.contains("操作已终止：backend reported failure") == true)
 }
 
 @Test func nativeSessionManagerCancelActiveRunStaysCancelledWhenBackendStreamFinishes() async throws {

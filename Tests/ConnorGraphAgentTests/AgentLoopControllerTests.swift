@@ -192,6 +192,35 @@ private actor SuspendingModelProvider: AgentModelProvider {
     #expect(FileManager.default.fileExists(atPath: workspace.appendingPathComponent("shell-created.txt").path))
 }
 
+@Test func agentLoopContinuesAfterTokenBudgetExceeded() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: "Still completed after budget warning.",
+            toolCalls: [],
+            usage: AgentModelUsage(promptTokens: 200, completionTokens: 50),
+            finishReason: .stop
+        )
+    ])
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: AgentToolRegistry(),
+        configuration: AgentLoopConfiguration(
+            maxToolIterations: 1,
+            permissionMode: .askToWrite,
+            budget: AgentBudgetConfiguration(maxTotalTokens: 100, warningThresholdRatio: 0.8)
+        )
+    )
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(AgentChatRequest(sessionID: "session-budget-continue", userMessage: "Continue even if budget exceeds")) {
+        events.append(event)
+    }
+
+    #expect(events.map(\.kind).contains(.budgetWarning))
+    #expect(events.map(\.kind).contains(.textComplete))
+    #expect(events.last?.kind == .runCompleted)
+}
+
 @Test func agentLoopRunsScientificToolThenFinalAnswer() async throws {
     let provider = ScriptedModelProvider(responses: [
         AgentModelResponse(

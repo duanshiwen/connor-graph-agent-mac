@@ -2189,8 +2189,11 @@ final class AppViewModel: ObservableObject {
                 .last(where: { $0.role == .assistant })?
                 .content
         } catch {
+            let recoveredSession = (try? chatSessionRepository?.loadSession(id: submittingSessionID)) ?? manager.session
             if selectedChatSessionID == submittingSessionID {
-                transcript = optimisticTranscript + [optimisticUserMessage]
+                nativeSessionManager = manager
+                fallbackChatSession = recoveredSession
+                transcript = recoveredSession.messages.isEmpty ? optimisticTranscript + [optimisticUserMessage] : recoveredSession.messages
             }
             reloadPendingApprovals()
             pendingChatCancellationReasonsBySessionID.removeValue(forKey: submittingSessionID)
