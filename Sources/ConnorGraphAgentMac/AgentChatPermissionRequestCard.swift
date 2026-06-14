@@ -12,15 +12,17 @@ struct AgentChatPermissionRequestCard: View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
             HStack(alignment: .top, spacing: AgentChatLayout.spaceM) {
                 Image(systemName: "shield.lefthalf.filled")
+                    .font(.system(size: AgentChatTypography.controlIconSize + 2, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(.orange)
                     .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
 
                 VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                     HStack(spacing: AgentChatLayout.spaceS) {
                         Text("需要权限")
-                            .font(.subheadline.weight(.semibold))
+                            .font(AgentChatTypography.calloutEmphasis)
                         Text(approval.capability.rawValue)
-                            .font(.caption.monospaced())
+                            .font(AgentChatTypography.monoMeta)
                             .padding(.horizontal, AgentChatLayout.spaceS)
                             .padding(.vertical, AgentChatLayout.spaceXS)
                             .background(Color.orange.opacity(0.12), in: Capsule())
@@ -37,7 +39,7 @@ struct AgentChatPermissionRequestCard: View {
 
                     DisclosureGroup(isExpanded: $isPayloadExpanded) {
                         Text(approval.payloadJSON)
-                            .font(.caption.monospaced())
+                            .font(AgentChatTypography.monoMeta)
                             .textSelection(.enabled)
                             .lineLimit(isPayloadExpanded ? nil : 4)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -45,7 +47,7 @@ struct AgentChatPermissionRequestCard: View {
                             .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
                     } label: {
                         Text(compactPayload)
-                            .font(.caption.monospaced())
+                            .font(AgentChatTypography.monoMeta)
                             .lineLimit(2)
                             .truncationMode(.middle)
                             .padding(.horizontal, AgentChatLayout.spaceM)
@@ -54,7 +56,7 @@ struct AgentChatPermissionRequestCard: View {
                             .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
                     }
                 }
-                .font(.caption)
+                .font(AgentChatTypography.meta)
                 .foregroundStyle(.secondary)
             }
 
@@ -65,7 +67,7 @@ struct AgentChatPermissionRequestCard: View {
                     Label("Allow", systemImage: "checkmark")
                 }
                 .buttonStyle(.borderedProminent)
-                .controlSize(.small)
+                .controlSize(.regular)
 
                 Button {
                     viewModel.alwaysAllowPendingApproval(approval)
@@ -73,7 +75,7 @@ struct AgentChatPermissionRequestCard: View {
                     Label("Always Allow", systemImage: "arrow.triangle.2.circlepath")
                 }
                 .buttonStyle(.bordered)
-                .controlSize(.small)
+                .controlSize(.regular)
                 .help("将当前 Sidecar 会话权限提升为受信写入，并批准这个请求")
 
                 Button(role: .destructive) {
@@ -82,12 +84,12 @@ struct AgentChatPermissionRequestCard: View {
                     Label("Deny", systemImage: "xmark")
                 }
                 .buttonStyle(.bordered)
-                .controlSize(.small)
+                .controlSize(.regular)
 
                 Spacer(minLength: AgentChatLayout.spaceS)
 
                 Text("Always Allow 会记住当前会话权限模式")
-                    .font(.caption2)
+                    .font(AgentChatTypography.meta)
                     .foregroundStyle(.secondary)
             }
         }
