@@ -1,6 +1,6 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-14 16:50 GMT+8  
+文档更新时间：2026-06-14 23:10 GMT+8  
 当前代码基线:`optimize/chat-ui-first-pass`,在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface / session-scoped multi-root project workspace / Connor-owned Scientific Compute Runtime skeleton 基础上,完成 P1/P2 合并优化:权限审批恢复、composer 内权限确认 overlay、取消后保留 activity timeline、Chat UI 组件拆分、App shell/settings/ProductOS/diagnostic 视图拆分、AppViewModel factory / builder / mapper / editor 小步抽取、Browser workspace 模型与浮窗视图拆分、Commercial readiness snapshot builder 拆分、Claude sidecar protocol DTO 拆分,以及 SwiftPM asset catalog resource warning 修复。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package,目标是把 Connor 建成 **graph-memory-native Agent OS**:它不是"图谱编辑器",也不是"Claude SDK 外壳",而是以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI 和 Local Automation Surface 共同构成的本地 Agent 操作系统。
@@ -771,6 +771,8 @@ CraftDetailPaneView
 AgentChatView
 AgentChatComposerView
 AgentChatInspectorView
+WorkspaceRootsSettingsContent
+WorkspaceRootRow
 ConnorSettingsDetailView
 SourceRuntimePanelView
 SkillRuntimePanelView
@@ -778,6 +780,16 @@ AutomationRuntimePanelView
 ConnorCommandPaletteView
 BrowserWorkspaceView
 ```
+
+Session Workspace 当前支持:
+
+- 每个 Connor Session 都可以拥有自己的 project workspace roots,随 Session Capsule 持久化,而不是依赖全局设置页里的单一工作目录。
+- 一个会话可同时绑定多个 root:一个 `primary root` 作为相对路径基准和 Claude Sidecar cwd,其他 roots 作为 Connor Native local tools 的 additional allowed roots。
+- 会话顶部的"当前会话 Workspace"区域支持查看 roots 摘要、输入路径、选择多个文件夹、添加 root、设为主目录和移除 root。
+- composer 底部 folder badge 是高频切换入口:下拉列表直接展示当前 session roots,每个 root 都以 folder 图标呈现,不使用 checkmark 制造单选列表错觉;点击任一 root 会将它设为 primary root。
+- folder badge 的"历史打开列表"二级菜单展示跨会话最近目录 MRU,每个历史项都以历史图标呈现;选择历史项会加入当前 session roots 并设为 primary,适合在相关项目之间快速切换。
+- folder badge 还支持"选择文件夹..."和"重置为默认",用于从 Finder 添加新目录或回退到 legacy / fallback 默认工作目录。
+- 多工作目录能力只作用于 project workspace / allowed roots;Connor 仍保持单一 Home / Runtime Root,不引入 Craft-style multi-workspace。
 
 Browser Workspace 当前支持:
 
