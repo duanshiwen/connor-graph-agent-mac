@@ -96,6 +96,48 @@ private struct ToolCallingCapturingHTTPClient: AgentHTTPClient {
     #expect(messages.first?["content"] as? String == "Core instruction")
 }
 
+@Test func openAICompatibleProviderSerializesImageContentParts() async throws {
+    let body = #"""
+    {
+      "choices": [
+        {
+          "message": { "role": "assistant", "content": "I can see it." },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": { "prompt_tokens": 20, "completion_tokens": 4, "total_tokens": 24 }
+    }
+    """#.data(using: .utf8)!
+    let client = ToolCallingCapturingHTTPClient(responseBody: body)
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(baseURL: URL(string: "https://llm.example.com/v1")!, apiKey: "test-key", model: "gpt-vision-test"),
+        httpClient: client
+    )
+
+    _ = try await provider.completeWithTools(AgentModelRequest(messages: [
+        AgentModelMessage(
+            role: .user,
+            content: "Describe the image",
+            contentParts: [
+                .text("Describe the image"),
+                .imageDataURL("data:image/png;base64,aGVsbG8=", mimeType: "image/png", detail: "auto")
+            ]
+        )
+    ]))
+
+    let captured = try #require(client.storage.capturedBody)
+    let object = try #require(try JSONSerialization.jsonObject(with: captured) as? [String: Any])
+    let messages = try #require(object["messages"] as? [[String: Any]])
+    let user = try #require(messages.first(where: { $0["role"] as? String == "user" }))
+    let content = try #require(user["content"] as? [[String: Any]])
+    #expect(content.first?["type"] as? String == "text")
+    #expect(content.first?["text"] as? String == "Describe the image")
+    #expect(content.dropFirst().first?["type"] as? String == "image_url")
+    let imageURL = try #require(content.dropFirst().first?["image_url"] as? [String: Any])
+    #expect(imageURL["url"] as? String == "data:image/png;base64,aGVsbG8=")
+    #expect(imageURL["detail"] as? String == "auto")
+}
+
 @Test func openAICompatibleProviderSerializesAssistantToolCallsInConversationHistory() async throws {
     let body = #"""
     {
