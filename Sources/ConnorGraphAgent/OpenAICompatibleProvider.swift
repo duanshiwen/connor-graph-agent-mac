@@ -119,7 +119,7 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, Ag
             supportsToolCalling: true,
             supportsParallelToolCalls: false,
             supportsStructuredOutput: false,
-            supportsVision: false
+            supportsVision: true
         )
     }
 
@@ -199,6 +199,7 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, Ag
             return OpenAIChatMessage(
                 role: role,
                 content: message.content,
+                contentParts: message.contentParts,
                 toolCallID: message.toolCallID,
                 name: message.name,
                 toolCalls: message.toolCalls?.map { call in
@@ -308,13 +309,22 @@ private struct OpenAIChatCompletionRequest: Encodable {
 private struct OpenAIChatMessage: Codable {
     var role: String
     var content: String?
+    var contentParts: [AgentModelMessageContentPart]?
     var toolCallID: String?
     var name: String?
     var toolCalls: [OpenAIToolCall]?
 
-    init(role: String, content: String? = nil, toolCallID: String? = nil, name: String? = nil, toolCalls: [OpenAIToolCall]? = nil) {
+    init(
+        role: String,
+        content: String? = nil,
+        contentParts: [AgentModelMessageContentPart]? = nil,
+        toolCallID: String? = nil,
+        name: String? = nil,
+        toolCalls: [OpenAIToolCall]? = nil
+    ) {
         self.role = role
         self.content = content
+        self.contentParts = contentParts
         self.toolCallID = toolCallID
         self.name = name
         self.toolCalls = toolCalls
@@ -327,6 +337,59 @@ private struct OpenAIChatMessage: Codable {
         case name
         case toolCalls = "tool_calls"
     }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        role = try container.decode(String.self, forKey: .role)
+        content = try? container.decodeIfPresent(String.self, forKey: .content)
+        contentParts = nil
+        toolCallID = try container.decodeIfPresent(String.self, forKey: .toolCallID)
+        name = try container.decodeIfPresent(String.self, forKey: .name)
+        toolCalls = try container.decodeIfPresent([OpenAIToolCall].self, forKey: .toolCalls)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(role, forKey: .role)
+        if let contentParts, !contentParts.isEmpty {
+            try container.encode(contentParts.map(OpenAIChatContentPart.init(part:)), forKey: .content)
+        } else {
+            try container.encodeIfPresent(content, forKey: .content)
+        }
+        try container.encodeIfPresent(toolCallID, forKey: .toolCallID)
+        try container.encodeIfPresent(name, forKey: .name)
+        try container.encodeIfPresent(toolCalls, forKey: .toolCalls)
+    }
+}
+
+private struct OpenAIChatContentPart: Encodable {
+    var type: String
+    var text: String?
+    var imageURL: OpenAIChatImageURL?
+
+    init(part: AgentModelMessageContentPart) {
+        switch part.kind {
+        case .text:
+            type = "text"
+            text = part.text ?? ""
+            imageURL = nil
+        case .imageDataURL:
+            type = "image_url"
+            text = nil
+            imageURL = OpenAIChatImageURL(url: part.dataURL ?? "", detail: part.detail)
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case text
+        case imageURL = "image_url"
+    }
+}
+
+private struct OpenAIChatImageURL: Encodable {
+    var url: String
+    var detail: String?
 }
 
 private struct OpenAIToolDefinition: Encodable {
