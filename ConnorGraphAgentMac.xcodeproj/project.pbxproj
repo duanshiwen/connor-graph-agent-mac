@@ -39,6 +39,9 @@
 		D0000000000000000000000F /* Sources/ConnorGraphAgentMac/ConnorSettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0000000000000000000000F /* Sources/ConnorGraphAgentMac/ConnorSettingsViews.swift */; };
 		D00000000000000000000010 /* Sources/ConnorGraphAgentMac/ProductOSRegistryViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000010 /* Sources/ConnorGraphAgentMac/ProductOSRegistryViews.swift */; };
 		D00000000000000000000011 /* Sources/ConnorGraphAgentMac/WorkspaceDiagnosticViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000011 /* Sources/ConnorGraphAgentMac/WorkspaceDiagnosticViews.swift */; };
+		E00000000000000000000001 /* Sources/ConnorGraphAgentMac/AgentAttachmentInspectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E00000000000000000000011 /* Sources/ConnorGraphAgentMac/AgentAttachmentInspectorView.swift */; };
+		E00000000000000000000002 /* Sources/ConnorGraphAgentMac/AgentAttachmentPreviewSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E00000000000000000000012 /* Sources/ConnorGraphAgentMac/AgentAttachmentPreviewSheetView.swift */; };
+		E00000000000000000000003 /* Sources/ConnorGraphAgentMac/AgentAttachmentShelfView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E00000000000000000000013 /* Sources/ConnorGraphAgentMac/AgentAttachmentShelfView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -70,6 +73,9 @@
 		C0000000000000000000000F /* Sources/ConnorGraphAgentMac/ConnorSettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ConnorSettingsViews.swift; sourceTree = "<group>"; };
 		C00000000000000000000010 /* Sources/ConnorGraphAgentMac/ProductOSRegistryViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ProductOSRegistryViews.swift; sourceTree = "<group>"; };
 		C00000000000000000000011 /* Sources/ConnorGraphAgentMac/WorkspaceDiagnosticViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/WorkspaceDiagnosticViews.swift; sourceTree = "<group>"; };
+		E00000000000000000000011 /* Sources/ConnorGraphAgentMac/AgentAttachmentInspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AgentAttachmentInspectorView.swift; sourceTree = "<group>"; };
+		E00000000000000000000012 /* Sources/ConnorGraphAgentMac/AgentAttachmentPreviewSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AgentAttachmentPreviewSheetView.swift; sourceTree = "<group>"; };
+		E00000000000000000000013 /* Sources/ConnorGraphAgentMac/AgentAttachmentShelfView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AgentAttachmentShelfView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -119,6 +125,9 @@
 				A00000000000000000000033 /* Sources/ConnorGraphAgentMac/ConnorCommandPaletteView.swift */,
 				A00000000000000000000037 /* Sources/ConnorGraphAgentMac/SourceSkillAutomationRuntimeViews.swift */,
 				C00000000000000000000001 /* Sources/ConnorGraphAgentMac/AgentChatActivityViews.swift */,
+				E00000000000000000000011 /* Sources/ConnorGraphAgentMac/AgentAttachmentInspectorView.swift */,
+				E00000000000000000000012 /* Sources/ConnorGraphAgentMac/AgentAttachmentPreviewSheetView.swift */,
+				E00000000000000000000013 /* Sources/ConnorGraphAgentMac/AgentAttachmentShelfView.swift */,
 				C00000000000000000000002 /* Sources/ConnorGraphAgentMac/AgentChatComposerView.swift */,
 				C00000000000000000000003 /* Sources/ConnorGraphAgentMac/AgentChatPermissionRequestCard.swift */,
 				C00000000000000000000004 /* Sources/ConnorGraphAgentMac/AppChatSummaryPresentationBuilder.swift */,
@@ -257,6 +266,9 @@
 				A00000000000000000000032 /* Sources/ConnorGraphAgentMac/ConnorCommandPaletteView.swift in Sources */,
 				A00000000000000000000036 /* Sources/ConnorGraphAgentMac/SourceSkillAutomationRuntimeViews.swift in Sources */,
 				D00000000000000000000001 /* Sources/ConnorGraphAgentMac/AgentChatActivityViews.swift in Sources */,
+				E00000000000000000000001 /* Sources/ConnorGraphAgentMac/AgentAttachmentInspectorView.swift in Sources */,
+				E00000000000000000000002 /* Sources/ConnorGraphAgentMac/AgentAttachmentPreviewSheetView.swift in Sources */,
+				E00000000000000000000003 /* Sources/ConnorGraphAgentMac/AgentAttachmentShelfView.swift in Sources */,
 				D00000000000000000000002 /* Sources/ConnorGraphAgentMac/AgentChatComposerView.swift in Sources */,
 				D00000000000000000000003 /* Sources/ConnorGraphAgentMac/AgentChatPermissionRequestCard.swift in Sources */,
 				D00000000000000000000004 /* Sources/ConnorGraphAgentMac/AppChatSummaryPresentationBuilder.swift in Sources */,

@@ -31,7 +31,6 @@ public enum AttachmentImportValidationResult: Sendable, Equatable {
 public enum AttachmentImportRejectionReason: Sendable, Equatable, CustomStringConvertible {
     case missingFileExtension
     case unsupportedHTML
-    case unsupportedImage
     case unsupportedPDF
     case unsupportedAudio
     case unsupportedVideo
@@ -50,7 +49,6 @@ public enum AttachmentImportRejectionReason: Sendable, Equatable, CustomStringCo
         switch self {
         case .missingFileExtension: return "缺少文件扩展名"
         case .unsupportedHTML: return "暂不支持 HTML 文件"
-        case .unsupportedImage: return "暂不支持图片文件"
         case .unsupportedPDF: return "暂不支持 PDF 文件"
         case .unsupportedAudio: return "暂不支持音频文件"
         case .unsupportedVideo: return "暂不支持视频文件"
@@ -61,30 +59,34 @@ public enum AttachmentImportRejectionReason: Sendable, Equatable, CustomStringCo
         case .unsupportedDatabase: return "暂不支持数据库文件"
         case .unsupportedExecutableOrBinary: return "暂不支持可执行、安装包或二进制文件"
         case .unsupportedUnknownExtension(let ext): return "暂不支持 .\(ext) 文件"
-        case .fileTooLarge(let maxBytes): return "文件超过当前文本附件大小限制（\(ByteCountFormatter.string(fromByteCount: maxBytes, countStyle: .file))）"
+        case .fileTooLarge(let maxBytes): return "文件超过当前附件大小限制（\(ByteCountFormatter.string(fromByteCount: maxBytes, countStyle: .file))）"
         }
     }
 }
 
 public struct AttachmentImportPolicy: Sendable {
     public var maxAcceptedBytes: Int64
+    public var maxImageBytes: Int64
 
-    public init(maxAcceptedBytes: Int64 = 512_000) {
+    public init(maxAcceptedBytes: Int64 = 512_000, maxImageBytes: Int64 = 10_000_000) {
         self.maxAcceptedBytes = maxAcceptedBytes
+        self.maxImageBytes = maxImageBytes
     }
 
     public func validate(url: URL, fileManager: FileManager = .default) -> AttachmentImportValidationResult {
         let ext = url.pathExtension.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !ext.isEmpty else { return .rejected(.missingFileExtension) }
 
-        if let byteCount = try? byteCount(url: url, fileManager: fileManager), byteCount > maxAcceptedBytes {
-            return .rejected(.fileTooLarge(maxAcceptedBytes))
+        guard let kind = Self.acceptedKind(forExtension: ext) else {
+            return .rejected(Self.rejectionReason(forExtension: ext))
         }
 
-        if let kind = Self.acceptedKind(forExtension: ext) {
-            return .accepted(kind: kind)
+        let byteLimit = kind == .image ? maxImageBytes : maxAcceptedBytes
+        if let byteCount = try? byteCount(url: url, fileManager: fileManager), byteCount > byteLimit {
+            return .rejected(.fileTooLarge(byteLimit))
         }
-        return .rejected(Self.rejectionReason(forExtension: ext))
+
+        return .accepted(kind: kind)
     }
 
     public static func acceptedKind(forExtension ext: String) -> AgentAttachmentKind? {
@@ -96,6 +98,8 @@ public struct AttachmentImportPolicy: Sendable {
         case "xml", "yaml", "yml": return .code
         case "swift", "py", "js", "ts", "tsx", "jsx", "rs", "go", "java", "kt", "c", "cpp", "h", "hpp", "cs", "rb", "php", "sh", "zsh", "bash", "sql", "css", "scss":
             return .code
+        case "png", "jpg", "jpeg", "gif", "webp", "heic", "bmp", "ico", "tif", "tiff":
+            return .image
         default:
             return nil
         }
@@ -104,8 +108,7 @@ public struct AttachmentImportPolicy: Sendable {
     public static func rejectionReason(forExtension ext: String) -> AttachmentImportRejectionReason {
         switch ext.lowercased() {
         case "html", "htm": return .unsupportedHTML
-        case "svg": return .unsupportedSVG
-        case "png", "jpg", "jpeg", "gif", "webp", "heic", "avif", "bmp", "ico": return .unsupportedImage
+        case "svg", "avif": return .unsupportedSVG
         case "pdf": return .unsupportedPDF
         case "mp3", "wav", "m4a", "aac", "flac", "ogg": return .unsupportedAudio
         case "mp4", "mov", "mkv", "avi", "webm": return .unsupportedVideo

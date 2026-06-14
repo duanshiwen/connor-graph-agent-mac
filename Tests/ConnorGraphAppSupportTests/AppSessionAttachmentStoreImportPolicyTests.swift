@@ -39,9 +39,27 @@ struct AppSessionAttachmentStoreImportPolicyTests {
         #expect(!FileManager.default.fileExists(atPath: ledgerURL.path))
     }
 
-    @Test func rejectsOfficeArchiveImagePDFAndMedia() throws {
+    @Test func importsImageAsStoredAttachmentWithoutTextDerivative() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let paths = AppStoragePaths(applicationSupportDirectory: root)
+        try paths.ensureDirectoryHierarchy()
+        let source = root.appendingPathComponent("photo.png")
+        try Data([0x89, 0x50, 0x4E, 0x47]).write(to: source)
+
+        let manifest = try AppSessionAttachmentStore(paths: paths).importFile(at: source, sessionID: "s", now: Date(timeIntervalSince1970: 1))
+
+        #expect(manifest.kind == .image)
+        #expect(manifest.mimeType == "image/png")
+        #expect(manifest.extractionStatus == .unsupported)
+        #expect(manifest.extractedTextRelativePath == nil)
+        #expect(manifest.derivativeRefs.isEmpty)
+        let storedURL = paths.sessionArtifactDirectories(sessionID: "s").root.appendingPathComponent(manifest.storedRelativePath)
+        #expect(FileManager.default.fileExists(atPath: storedURL.path))
+    }
+
+    @Test func rejectsOfficeArchivePDFAndMedia() throws {
         let policy = AttachmentImportPolicy()
-        let files = ["report.docx", "archive.zip", "photo.png", "paper.pdf", "meeting.mp3", "movie.mp4"]
+        let files = ["report.docx", "archive.zip", "paper.pdf", "meeting.mp3", "movie.mp4"]
         for file in files {
             let result = policy.validate(url: URL(fileURLWithPath: "/tmp/\(file)"))
             if case .accepted = result {
