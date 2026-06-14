@@ -202,11 +202,11 @@ public struct AppChatSessionRepository: Sendable {
         )
     }
 
-    public func loadRecentJournalEvents(sessionID: String, limit: Int = 100) throws -> [PersistedAgentEvent] {
+    public func loadRecentJournalEvents(sessionID: String, limit: Int? = 100) throws -> [PersistedAgentEvent] {
         try store.recentEvents(sessionID: sessionID, limit: limit)
     }
 
-    public func loadRunEvents(runID: String, limit: Int = 200) throws -> [PersistedAgentEvent] {
+    public func loadRunEvents(runID: String, limit: Int? = 200) throws -> [PersistedAgentEvent] {
         try store.events(runID: runID, limit: limit)
     }
 
