@@ -309,7 +309,7 @@ private struct CraftSessionListPane: View {
                         CraftSessionRow(
                             row: AgentChatSessionPresentation(session: session),
                             isSelected: session.id == viewModel.selectedChatSessionID,
-                            isRunning: session.id == viewModel.submittingChatSessionID
+                            isRunning: viewModel.isChatSessionSubmitting(session.id)
                         ) {
                             var transaction = Transaction()
                             transaction.disablesAnimations = true

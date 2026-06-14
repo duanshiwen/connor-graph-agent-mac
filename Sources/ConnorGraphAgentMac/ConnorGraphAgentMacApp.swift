@@ -55,7 +55,12 @@ final class AppViewModel: ObservableObject {
     @Published var selection: SidebarItem? = .agentChat
     @Published var query: String = "记忆"
     @Published var searchResults: [GraphSearchHit] = []
-    @Published var chatInput: String = ""
+    @Published var chatInput: String = "" {
+        didSet {
+            guard !isRestoringChatInputDraft, let selectedChatSessionID else { return }
+            chatInputDraftsBySessionID[selectedChatSessionID] = chatInput
+        }
+    }
     @Published var transcript: [AgentMessage] = []
     @Published var lastContext: AgentContext?
     @Published var lastPromptInspection: AgentChatPromptInspection?
@@ -171,11 +176,13 @@ final class AppViewModel: ObservableObject {
     // fallbackChatSession is UI-only for demo/no-runtime states.
     private var fallbackChatSession: AgentSession
     private var nativeSessionManager: NativeSessionManager?
-    @Published private(set) var submittingChatSessionID: String?
-    private var activeChatRunID: String?
+    @Published private(set) var submittingChatSessionIDs: Set<String> = []
+    private var activeChatRunIDsBySessionID: [String: String] = [:]
     private var activeChatBackendsBySessionID: [String: AnyAgentBackend] = [:]
     private var activeChatBackendsByRunID: [String: AnyAgentBackend] = [:]
     private var pendingChatCancellationReasonsBySessionID: [String: String] = [:]
+    private var chatInputDraftsBySessionID: [String: String] = [:]
+    private var isRestoringChatInputDraft = false
     private var agentEventTimelinesBySessionID: [String: [AgentEventPresentation]] = [:]
     private var agentEventTimelinesByProcessKey: [String: [AgentEventPresentation]] = [:]
     private var browserWorkspaceSessionBinding = BrowserWorkspaceSessionBinding()
@@ -200,7 +207,7 @@ final class AppViewModel: ObservableObject {
         guard mode != .allowAll else { return }
         sidecarPermissionMode = mode
         nativeSessionManager?.permissionMode = mode
-        persistLLMSettings(rebuildRuntime: submittingChatSessionID == nil)
+        persistLLMSettings(rebuildRuntime: submittingChatSessionIDs.isEmpty)
         autoApproveCurrentPolicyPendingApprovals()
     }
 
@@ -233,6 +240,24 @@ final class AppViewModel: ObservableObject {
                 )
             }
         }
+    }
+
+    func isChatSessionSubmitting(_ sessionID: String) -> Bool {
+        submittingChatSessionIDs.contains(sessionID)
+    }
+
+    private func setChatInputDraft(_ draft: String, for sessionID: String?) {
+        isRestoringChatInputDraft = true
+        chatInput = sessionID.flatMap { chatInputDraftsBySessionID[$0] } ?? draft
+        isRestoringChatInputDraft = false
+    }
+
+    private func restoreChatInputDraft(for sessionID: String?) {
+        setChatInputDraft("", for: sessionID)
+    }
+
+    private func refreshSelectedSubmittingState() {
+        isSubmittingChat = selectedChatSessionID.map { submittingChatSessionIDs.contains($0) } ?? false
     }
 
     func deferViewUpdate(_ operation: @escaping @MainActor () -> Void) {
@@ -1065,7 +1090,8 @@ final class AppViewModel: ObservableObject {
                 fallbackChatSession = session
                 nativeSessionManager = makeNativeSessionManager(for: session)
                 transcript = session.messages
-                isSubmittingChat = submittingChatSessionID == selectedID
+                restoreChatInputDraft(for: selectedID)
+                refreshSelectedSubmittingState()
                 if let cachedTimeline = agentEventTimelinesBySessionID[selectedID] {
                     agentEventTimeline = cachedTimeline
                 } else {
@@ -1100,7 +1126,8 @@ final class AppViewModel: ObservableObject {
             fallbackChatSession = session
             nativeSessionManager = makeNativeSessionManager(for: session)
             transcript = []
-            isSubmittingChat = false
+            restoreChatInputDraft(for: session.id)
+            refreshSelectedSubmittingState()
             agentEventTimeline = []
             agentEventTimelinesBySessionID[session.id] = []
             latestChatSummary = nil
@@ -1312,7 +1339,8 @@ final class AppViewModel: ObservableObject {
             fallbackChatSession = session
             nativeSessionManager = makeNativeSessionManager(for: session)
             transcript = session.messages
-            isSubmittingChat = submittingChatSessionID == session.id
+            restoreChatInputDraft(for: session.id)
+            refreshSelectedSubmittingState()
             if let cachedTimeline = agentEventTimelinesBySessionID[session.id] {
                 agentEventTimeline = cachedTimeline
             } else {
@@ -1744,11 +1772,11 @@ final class AppViewModel: ObservableObject {
     }
 
     func cancelActiveChatRun() {
-        guard let submittingSessionID = submittingChatSessionID,
-              selectedChatSessionID == submittingSessionID
+        guard let submittingSessionID = selectedChatSessionID,
+              submittingChatSessionIDs.contains(submittingSessionID)
         else { return }
         let reason = "cancelled by user"
-        guard let runID = activeChatRunID else {
+        guard let runID = activeChatRunIDsBySessionID[submittingSessionID] else {
             if pendingChatCancellationReasonsBySessionID[submittingSessionID] == nil {
                 pendingChatCancellationReasonsBySessionID[submittingSessionID] = reason
                 appendChatCancellationPresentation(
@@ -1764,7 +1792,9 @@ final class AppViewModel: ObservableObject {
     }
 
     private func cancelRunningChatRun(sessionID: String, runID: String, reason: String) {
-        if var manager = nativeSessionManager {
+        if let backend = activeChatBackendsByRunID[runID] ?? activeChatBackendsBySessionID[sessionID] {
+            backend.abort(runID: runID)
+        } else if var manager = nativeSessionManager, selectedChatSessionID == sessionID {
             manager.cancel(runID: runID, reason: reason)
             nativeSessionManager = manager
         }
@@ -1775,9 +1805,9 @@ final class AppViewModel: ObservableObject {
             detail: "已手动终止本轮 agent loop。"
         )
         pendingChatCancellationReasonsBySessionID.removeValue(forKey: sessionID)
-        submittingChatSessionID = nil
-        activeChatRunID = nil
-        isSubmittingChat = false
+        submittingChatSessionIDs.remove(sessionID)
+        activeChatRunIDsBySessionID.removeValue(forKey: sessionID)
+        refreshSelectedSubmittingState()
     }
 
     private func appendChatCancellationPresentation(sessionID: String, runID: String?, title: String, detail: String) {
@@ -1802,21 +1832,25 @@ final class AppViewModel: ObservableObject {
     func submitChat(prompt rawPrompt: String, clearComposer: Bool = false, displayPrompt rawDisplayPrompt: String? = nil) async -> String? {
         let prompt = rawPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let displayPrompt = rawDisplayPrompt?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !prompt.isEmpty, submittingChatSessionID == nil else { return nil }
+        guard !prompt.isEmpty else { return nil }
         guard var manager = nativeSessionManager else {
             errorMessage = String(describing: AppChatRuntimeUnavailableError.nativeSessionManagerUnavailable)
             return nil
         }
         let submittingSessionID = manager.session.id
+        guard !submittingChatSessionIDs.contains(submittingSessionID) else { return nil }
         let liveBackend = manager.backend
         activeChatBackendsBySessionID[submittingSessionID] = liveBackend
-        if clearComposer { chatInput = "" }
+        if clearComposer {
+            chatInputDraftsBySessionID[submittingSessionID] = ""
+            if selectedChatSessionID == submittingSessionID { setChatInputDraft("", for: submittingSessionID) }
+        }
         agentEventTimelinesBySessionID[submittingSessionID] = []
         agentEventTimelinesByProcessKey = agentEventTimelinesByProcessKey.filter { key, _ in !key.hasPrefix("\(submittingSessionID):") }
         agentEventTimeline = []
-        submittingChatSessionID = submittingSessionID
-        activeChatRunID = nil
-        isSubmittingChat = selectedChatSessionID == submittingSessionID
+        submittingChatSessionIDs.insert(submittingSessionID)
+        activeChatRunIDsBySessionID.removeValue(forKey: submittingSessionID)
+        refreshSelectedSubmittingState()
         let optimisticTranscript = transcript
         let baselineMessageCount = manager.session.messages.count
         let optimisticUserMessage = AgentMessage(role: .user, content: displayPrompt?.isEmpty == false ? displayPrompt! : prompt)
@@ -1827,14 +1861,12 @@ final class AppViewModel: ObservableObject {
         lastPromptInspection = nil
         defer {
             activeChatBackendsBySessionID.removeValue(forKey: submittingSessionID)
-            if let runID = activeChatRunID {
+            if let runID = activeChatRunIDsBySessionID[submittingSessionID] {
                 activeChatBackendsByRunID.removeValue(forKey: runID)
             }
-            if submittingChatSessionID == submittingSessionID {
-                submittingChatSessionID = nil
-                activeChatRunID = nil
-            }
-            isSubmittingChat = selectedChatSessionID == submittingSessionID ? false : (submittingChatSessionID == selectedChatSessionID)
+            submittingChatSessionIDs.remove(submittingSessionID)
+            activeChatRunIDsBySessionID.removeValue(forKey: submittingSessionID)
+            refreshSelectedSubmittingState()
         }
         do {
             let sessionSummary: AgentSessionSummary?
@@ -1850,8 +1882,8 @@ final class AppViewModel: ObservableObject {
                 displayPrompt: displayPrompt?.isEmpty == false ? displayPrompt : nil,
                 onRunStarted: { [weak self] runID in
                     guard let self else { return }
-                    if self.submittingChatSessionID == submittingSessionID {
-                        self.activeChatRunID = runID
+                    if self.submittingChatSessionIDs.contains(submittingSessionID) {
+                        self.activeChatRunIDsBySessionID[submittingSessionID] = runID
                         self.activeChatBackendsByRunID[runID] = liveBackend
                         self.activeChatBackendsBySessionID[submittingSessionID] = liveBackend
                         if let reason = self.pendingChatCancellationReasonsBySessionID[submittingSessionID] {
