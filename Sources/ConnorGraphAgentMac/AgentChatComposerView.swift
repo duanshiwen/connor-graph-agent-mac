@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 import ConnorGraphCore
 import ConnorGraphAgent
 import ConnorGraphSearch
@@ -48,6 +49,41 @@ struct AgentChatComposerView: View {
     @State private var isFileImporterPresented: Bool = false
 
     private let workspaceMenuItemMaxWidth: CGFloat = 320
+    private let supportedAttachmentContentTypes: [UTType] = [
+        .plainText,
+        .text,
+        .json,
+        .commaSeparatedText,
+        .xml,
+        UTType(filenameExtension: "md") ?? .text,
+        UTType(filenameExtension: "markdown") ?? .text,
+        UTType(filenameExtension: "log") ?? .text,
+        UTType(filenameExtension: "yaml") ?? .text,
+        UTType(filenameExtension: "yml") ?? .text,
+        UTType(filenameExtension: "swift") ?? .sourceCode,
+        UTType(filenameExtension: "py") ?? .sourceCode,
+        UTType(filenameExtension: "js") ?? .sourceCode,
+        UTType(filenameExtension: "ts") ?? .sourceCode,
+        UTType(filenameExtension: "tsx") ?? .sourceCode,
+        UTType(filenameExtension: "jsx") ?? .sourceCode,
+        UTType(filenameExtension: "rs") ?? .sourceCode,
+        UTType(filenameExtension: "go") ?? .sourceCode,
+        UTType(filenameExtension: "java") ?? .sourceCode,
+        UTType(filenameExtension: "kt") ?? .sourceCode,
+        UTType(filenameExtension: "c") ?? .sourceCode,
+        UTType(filenameExtension: "cpp") ?? .sourceCode,
+        UTType(filenameExtension: "h") ?? .sourceCode,
+        UTType(filenameExtension: "hpp") ?? .sourceCode,
+        UTType(filenameExtension: "cs") ?? .sourceCode,
+        UTType(filenameExtension: "rb") ?? .sourceCode,
+        UTType(filenameExtension: "php") ?? .sourceCode,
+        UTType(filenameExtension: "sh") ?? .shellScript,
+        UTType(filenameExtension: "zsh") ?? .shellScript,
+        UTType(filenameExtension: "bash") ?? .shellScript,
+        UTType(filenameExtension: "sql") ?? .text,
+        UTType(filenameExtension: "css") ?? .text,
+        UTType(filenameExtension: "scss") ?? .text
+    ]
 
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
@@ -149,7 +185,7 @@ struct AgentChatComposerView: View {
         }
         .padding(0)
         .background(Color.clear)
-        .fileImporter(isPresented: $isFileImporterPresented, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+        .fileImporter(isPresented: $isFileImporterPresented, allowedContentTypes: supportedAttachmentContentTypes, allowsMultipleSelection: true) { result in
             switch result {
             case .success(let urls):
                 Task { await viewModel.importAttachments(urls: urls) }

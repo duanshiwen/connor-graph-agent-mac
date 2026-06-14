@@ -22,4 +22,23 @@ struct AttachmentPromptRoutingTests {
         #expect(rendered.contains("gemini"))
         #expect(rendered.contains("files/a"))
     }
+
+    @Test func renderedAttachmentContextMarksTruncatedInlineBlocks() {
+        let plan = AttachmentContextPlan(inlineBlocks: [
+            AttachmentInlineBlock(
+                attachmentID: "a",
+                displayName: "notes.md",
+                kind: .markdown,
+                content: "# Notes",
+                sourceRelativePath: "attachments/a/derivatives/current/extracted.md",
+                isTruncated: true
+            )
+        ])
+
+        let rendered = AgentAttachmentContextSection(plan: plan).renderedText
+
+        #expect(rendered.contains("## User Attachments"))
+        #expect(rendered.contains("Attachment content truncated"))
+        #expect(rendered.contains("attachments/a/derivatives/current/extracted.md"))
+    }
 }

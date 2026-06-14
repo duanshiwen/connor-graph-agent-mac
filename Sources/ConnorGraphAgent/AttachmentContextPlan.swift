@@ -7,19 +7,22 @@ public struct AttachmentInlineBlock: Sendable, Equatable {
     public var kind: AgentAttachmentKind
     public var content: String
     public var sourceRelativePath: String?
+    public var isTruncated: Bool
 
     public init(
         attachmentID: String,
         displayName: String,
         kind: AgentAttachmentKind,
         content: String,
-        sourceRelativePath: String? = nil
+        sourceRelativePath: String? = nil,
+        isTruncated: Bool = false
     ) {
         self.attachmentID = attachmentID
         self.displayName = displayName
         self.kind = kind
         self.content = content
         self.sourceRelativePath = sourceRelativePath
+        self.isTruncated = isTruncated
     }
 }
 
@@ -97,6 +100,9 @@ public struct AgentAttachmentContextSection: Sendable, Equatable {
             var header = "Attachment: \(block.displayName)\nID: \(block.attachmentID)\nKind: \(block.kind.rawValue)"
             if let source = block.sourceRelativePath {
                 header += "\nSource: \(source)"
+            }
+            if block.isTruncated {
+                header += "\nNote: Attachment content truncated before prompt assembly."
             }
             parts.append("""
             \(header)
