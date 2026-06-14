@@ -43,7 +43,7 @@ public final class GovernedClaudeSDKSidecarRuntime<Transport: ClaudeSDKSidecarSe
     }
 
     public func chat(_ request: AgentChatRequest) -> AsyncThrowingStream<AgentEvent, Error> {
-        let effectivePermissionMode = request.permissionMode == .allowAll ? permissionMode : request.permissionMode
+        let effectivePermissionMode = request.permissionMode == .trustedWrite ? .trustedWrite : permissionMode
         let safeRequest = AgentChatRequest(
             runID: request.runID,
             sessionID: request.sessionID,
