@@ -13,7 +13,7 @@ Phase 2 ships both:
 
 The real entry point imports `@anthropic-ai/claude-agent-sdk` and calls `query(prompt, options)`, but Connor does **not** enable it by default. Swift tests include a gated integration path that only runs when explicitly requested by environment variables.
 
-The sidecar now also emits normalized tool and permission boundary events. These events let Connor render/audit SDK tool activity without granting the SDK product-state authority. Swift-side protocol events for `resumeAccepted` and `resumeRejected` also exist as a skeleton for future approval resume, but they are not yet emitted by the real `claude-sidecar.mjs` entry point and do not enable deferred tool execution.
+The sidecar now also emits normalized tool and permission boundary events. These events let Connor render/audit SDK tool activity without granting the SDK product-state authority. The real `claude-sidecar.mjs` entry point supports the persistent `approvalResolved` command for Connor-owned deferred tool approval: SDK `tool_deferred` results are surfaced as `permissionRequested`, the sidecar keeps the session transport open, and Connor approval or denial is sent back through the command loop.
 
 ## Request Protocol
 
@@ -61,14 +61,14 @@ Tool / permission boundary events:
 {"toolUseCompleted":{"toolCallID":"tool-1","name":"Read","contentText":"README contents","contentJSON":null,"isError":false}}
 ```
 
-Future persistent resume skeleton events:
+Persistent approval resume events:
 
 ```jsonl
 {"resumeAccepted":{"requestID":"permission-tool-1","toolName":"Write","message":"Resume accepted by fake sidecar"}}
 {"resumeRejected":{"requestID":"permission-tool-2","toolName":"Bash","reason":"Denied by reviewer"}}
 ```
 
-These are protocol-level events only. They are not currently mapped to new Connor timeline event kinds and are not emitted by the real one-shot SDK sidecar.
+These are protocol-level events used by the persistent sidecar command loop. They acknowledge whether a Connor-owned `approvalResolved` command resumed or rejected a deferred SDK tool request. Connor pending approvals and audit history remain authoritative.
 
 Failure event:
 
@@ -91,16 +91,15 @@ stderr is reserved for diagnostics. A non-zero exit code is treated as a transpo
    - `includePartialMessages = true`
 4. Maps SDK assistant-like messages to `textDelta`.
 5. Maps SDK `tool_use` / `tool_result`-like content into normalized tool events.
-6. Maps deferred or denied tool-use states into `permissionRequested` / failed tool results.
-7. Emits `textComplete` and `runCompleted` after the SDK stream finishes.
-8. Emits `runFailed` for SDK errors or non-success result messages.
-9. Never persists SDK sessions as Connor sessions.
-
-Before enabling write-capable tools by default, Connor still needs execution-resume semantics over product-owned approval decisions.
+6. Maps denied tool-use states into failed tool results.
+7. Maps SDK `tool_deferred` states into `permissionRequested` and waits for a Connor `approvalResolved` command instead of failing the run.
+8. Emits `textComplete` and `runCompleted` after the SDK stream finishes.
+9. Emits `runFailed` for SDK errors or non-success result messages. Deferred permission waiting is not a failure condition.
+10. Never persists SDK sessions as Connor sessions.
 
 ## Approval Resolution Command and Session Transport Skeleton
 
-Connor now has a Swift-side command envelope for the future Connor → sidecar resume path. `ClaudeSDKSidecarProcessTransport` implements the command transport boundary for `.start(...)` while preserving the direct request shape shown above. It explicitly rejects `.approvalResolved(...)` because it is still a one-shot process transport.
+Connor now has a Swift-side command envelope for the Connor → sidecar resume path. `ClaudeSDKSidecarProcessTransport` implements the command transport boundary for `.start(...)` while preserving the direct request shape shown above. It explicitly rejects `.approvalResolved(...)` because it is still a one-shot process transport; the persistent session transport is required for approval resume.
 
 Swift also defines `ClaudeSDKSidecarSessionTransport`:
 
@@ -112,7 +111,7 @@ public protocol ClaudeSDKSidecarSessionTransport: Sendable {
 }
 ```
 
-That protocol is the persistent streaming boundary for sending `approvalResolved` after the initial start request. Current tests use both a fake session transport and a Swift persistent process transport fixture to prove that an approval command can produce `resumeAccepted` or `resumeRejected`. This is still a transport skeleton, not an enabled write-tool execution path.
+That protocol is the persistent streaming boundary for sending `approvalResolved` after the initial start request. Current tests use both a fake session transport and a Swift persistent process transport fixture to prove that an approval command can produce `resumeAccepted` or `resumeRejected`. The real Node sidecar implements the same command envelope for deferred SDK tools.
 
 ```jsonl
 {"approvalResolved":{"connorRunID":"run-id","connorSessionID":"session-id","requestID":"permission-tool-1","status":"approved","outcome":"approved","capability":"commitGraphWrite","toolName":"Write","payloadJSON":"{}","reason":"Human reviewer approved the write","actor":"human-reviewer","ownsProductState":false}}
@@ -131,8 +130,8 @@ Rules:
 - `ownsProductState` remains `false`; the sidecar must not become the approval ledger.
 - `approved` maps to SDK/tool continuation intent.
 - `denied` and `cancelled` both map to denied execution outcome; `cancelled` remains distinct only in Connor pending-approval state and audit history.
-- `resumeAccepted` / `resumeRejected` currently confirm protocol handling only.
-- `approvalResolved` in `claude-sidecar.mjs` now looks up Connor-tracked deferred SDK tool uses and resumes the same SDK session only after Connor approval.
+- `resumeAccepted` / `resumeRejected` confirm whether the persistent sidecar accepted or rejected Connor's approval resolution for the deferred SDK tool.
+- `approvalResolved` in `claude-sidecar.mjs` looks up Connor-tracked deferred SDK tool uses and resumes the same SDK session only after Connor approval.
 - The resume path follows the official hook round trip: `PreToolUse` returns `permissionDecision: "defer"`; SDK returns `tool_deferred` with `deferred_tool_use`; Connor approval resumes with `permissionDecision: "allow"` and `updatedInput`.
 - This does not make the SDK the permission ledger; Connor pending approvals, audit, and native timeline remain authoritative.
 
