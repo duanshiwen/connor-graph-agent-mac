@@ -108,19 +108,47 @@ public struct AgentRuntimeWorkspaceSettings: Codable, Sendable, Equatable {
     public var defaultWorkingDirectoryPath: String
     public var additionalAllowedDirectoryPaths: [String]
     public var roots: [AgentRuntimeWorkspaceRoot]
+    public var recentWorkspacePaths: [String]
 
     public init(
         defaultWorkingDirectoryPath: String = "",
         additionalAllowedDirectoryPaths: [String] = [],
-        roots: [AgentRuntimeWorkspaceRoot] = []
+        roots: [AgentRuntimeWorkspaceRoot] = [],
+        recentWorkspacePaths: [String] = []
     ) {
         self.defaultWorkingDirectoryPath = defaultWorkingDirectoryPath
         self.additionalAllowedDirectoryPaths = additionalAllowedDirectoryPaths
         self.roots = roots
+        self.recentWorkspacePaths = recentWorkspacePaths
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case defaultWorkingDirectoryPath
+        case additionalAllowedDirectoryPaths
+        case roots
+        case recentWorkspacePaths
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.defaultWorkingDirectoryPath = try container.decodeIfPresent(String.self, forKey: .defaultWorkingDirectoryPath) ?? ""
+        self.additionalAllowedDirectoryPaths = try container.decodeIfPresent([String].self, forKey: .additionalAllowedDirectoryPaths) ?? []
+        self.roots = try container.decodeIfPresent([AgentRuntimeWorkspaceRoot].self, forKey: .roots) ?? []
+        self.recentWorkspacePaths = try container.decodeIfPresent([String].self, forKey: .recentWorkspacePaths) ?? []
     }
 
     public var primaryRoot: AgentRuntimeWorkspaceRoot? {
         roots.first(where: \.isPrimary) ?? roots.first
+    }
+
+    public mutating func rememberWorkspacePath(_ rawPath: String, limit: Int = 8) {
+        let path = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !path.isEmpty else { return }
+        recentWorkspacePaths.removeAll { $0 == path }
+        recentWorkspacePaths.insert(path, at: 0)
+        if recentWorkspacePaths.count > limit {
+            recentWorkspacePaths = Array(recentWorkspacePaths.prefix(limit))
+        }
     }
 
     public mutating func syncLegacyFieldsFromRoots() {

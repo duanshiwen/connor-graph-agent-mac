@@ -53,7 +53,7 @@ enum AgentChatTypography {
     static let chevronIconSize: CGFloat = 13
     static let sendIconSize: CGFloat = 15
 
-    static let title: Font = .title3.weight(.semibold)
+    static let title: Font = .system(size: 15.5, weight: .semibold)
     static let sectionTitle: Font = .headline.weight(.semibold)
     static let sessionTitle: Font = .system(size: 15, weight: .regular)
     static let sessionTitleEmphasis: Font = .system(size: 15, weight: .semibold)
@@ -120,7 +120,7 @@ struct AgentChatView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if isSessionInfoPresented {
-                AgentChatInspectorView(viewModel: viewModel)
+                AgentChatInspectorView(viewModel: viewModel, isPresented: $isSessionInfoPresented)
                     .frame(width: 360, height: 420)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusXL, style: .continuous))
                     .overlay(
@@ -454,7 +454,7 @@ private struct AgentChatConversationHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
             Text(selectedTitle)
-                .font(AgentChatTypography.sectionTitle)
+                .font(AgentChatTypography.title)
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .center)
 
@@ -584,32 +584,62 @@ private struct AgentLabelPill: View {
 
 private struct AgentChatInspectorView: View {
     @ObservedObject var viewModel: AppViewModel
+    @Binding var isPresented: Bool
 
     private var selectedSession: AgentSession? {
-        viewModel.chatSessions.first { $0.id == viewModel.selectedChatSessionID }
+        guard let selectedID = viewModel.selectedChatSessionID else { return nil }
+        return viewModel.allChatSessions.first { $0.id == selectedID }
+            ?? viewModel.chatSessions.first { $0.id == selectedID }
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
-                VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
-                    Text("信息")
-                        .font(AgentChatTypography.sectionTitle)
-                    Text("会话设置、标签和文件")
-                        .font(AgentChatTypography.meta)
-                        .foregroundStyle(.secondary)
-                }
+        VStack(spacing: 0) {
+            inspectorHeader
+                .padding(.horizontal, AgentChatLayout.spaceL)
+                .padding(.top, AgentChatLayout.spaceL)
+                .padding(.bottom, AgentChatLayout.spaceM)
 
-                if let session = selectedSession {
-                    sessionGovernance(session)
-                    labels(session)
-                    artifacts
-                } else {
-                    ContentUnavailableView("未选择会话", systemImage: "bubble.left.and.bubble.right", description: Text("从会话列表选择一个会话查看信息。"))
-                        .frame(minHeight: 240)
+            ScrollView {
+                VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
+                    if let session = selectedSession {
+                        sessionGovernance(session)
+                        labels(session)
+                        artifacts
+                    } else {
+                        ContentUnavailableView("未选择会话", systemImage: "bubble.left.and.bubble.right", description: Text("从会话列表选择一个会话查看信息。"))
+                            .frame(minHeight: 240)
+                    }
                 }
+                .padding(.horizontal, AgentChatLayout.spaceL)
+                .padding(.bottom, AgentChatLayout.spaceL)
             }
-            .padding(AgentChatLayout.spaceL)
+        }
+    }
+
+    private var inspectorHeader: some View {
+        HStack(alignment: .top, spacing: AgentChatLayout.spaceM) {
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
+                Text("信息")
+                    .font(AgentChatTypography.sectionTitle)
+                Text("会话设置、标签和文件")
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: AgentChatLayout.spaceM)
+
+            Button {
+                isPresented = false
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: AgentChatTypography.controlIconSize, weight: .semibold))
+                    .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
+            }
+            .buttonStyle(.plain)
+            .frame(width: AgentChatLayout.hitTargetSize, height: AgentChatLayout.hitTargetSize)
+            .contentShape(Rectangle())
+            .keyboardShortcut(.escape, modifiers: [])
+            .accessibilityLabel("关闭信息面板")
         }
     }
 
@@ -659,23 +689,54 @@ private struct AgentChatInspectorView: View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
             Text("标签")
                 .font(AgentChatTypography.calloutEmphasis)
-            ForEach(viewModel.governanceConfig.labels.filter { $0.valueType == .boolean }) { definition in
-                Button {
-                    viewModel.toggleSelectedSessionLabel(definition.id)
-                } label: {
-                    HStack {
-                        Image(systemName: session.governance.labels.contains(where: { $0.id == definition.id }) ? "checkmark.circle.fill" : "circle")
-                        Text(definition.name)
-                        Spacer()
-                    }
-                    .font(AgentChatTypography.callout)
-                    .padding(.vertical, 2)
+
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+                Text("当前会话标签")
+                    .font(AgentChatTypography.metaEmphasis)
+                    .foregroundStyle(.secondary)
+
+                if session.governance.labels.isEmpty {
+                    Text("暂无已应用标签")
+                        .font(AgentChatTypography.meta)
+                        .foregroundStyle(.tertiary)
+                } else {
+                    FlowLikeChips(values: session.governance.labels.map { displayText(for: $0) })
                 }
-                .buttonStyle(.plain)
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+                Text("可切换标签")
+                    .font(AgentChatTypography.metaEmphasis)
+                    .foregroundStyle(.secondary)
+
+                ForEach(viewModel.governanceConfig.labels.filter { $0.valueType == .boolean }) { definition in
+                    Button {
+                        viewModel.toggleSelectedSessionLabel(definition.id)
+                    } label: {
+                        HStack {
+                            Image(systemName: session.governance.labels.contains(where: { $0.id == definition.id }) ? "checkmark.circle.fill" : "circle")
+                            Text(definition.name)
+                            Spacer()
+                        }
+                        .font(AgentChatTypography.callout)
+                        .padding(.vertical, 2)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
         }
         .padding(AgentChatLayout.spaceM)
         .background(.quaternary.opacity(0.16), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
+    }
+
+    private func displayText(for label: AgentSessionLabel) -> String {
+        guard let definition = viewModel.governanceConfig.definition(for: label.id) else {
+            return label.displayText
+        }
+        guard let value = label.value else { return definition.name }
+        return "\(definition.name): \(value)"
     }
 
     private var artifacts: some View {

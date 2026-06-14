@@ -45,10 +45,11 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         session: AgentSession = AgentSession(id: "app-session"),
         permissionMode: AgentPermissionMode = .askToWrite,
         configuration: AgentLoopConfiguration = AgentLoopConfiguration(),
-        sessionWorkspace: AppSessionWorkspaceReference? = nil
+        sessionWorkspace: AppSessionWorkspaceReference? = nil,
+        sessionLLMOverride: SessionLLMOverride? = nil
     ) -> AgentLoopChatController<AnyAgentModelProvider> {
         AgentLoopChatController(
-            loopController: makeAgentLoopController(permissionMode: permissionMode, configuration: configuration, sessionWorkspace: sessionWorkspace),
+            loopController: makeAgentLoopController(permissionMode: permissionMode, configuration: configuration, sessionWorkspace: sessionWorkspace, sessionLLMOverride: sessionLLMOverride),
             session: session,
             groupID: groupID,
             memoryStagingRepository: AppMemoryStagingBufferRepository(store: store)
@@ -59,13 +60,14 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         session: AgentSession = AgentSession(id: "app-session"),
         permissionMode: AgentPermissionMode = .askToWrite,
         configuration: AgentLoopConfiguration = AgentLoopConfiguration(),
-        sessionWorkspace: AppSessionWorkspaceReference? = nil
+        sessionWorkspace: AppSessionWorkspaceReference? = nil,
+        sessionLLMOverride: SessionLLMOverride? = nil
     ) -> NativeSessionManager {
-        if let sidecarManager = try? makeConfiguredGovernedClaudeSDKSidecarNativeSessionManager(session: session, sessionWorkspace: sessionWorkspace) {
+        if let sidecarManager = try? makeConfiguredGovernedClaudeSDKSidecarNativeSessionManager(session: session, sessionWorkspace: sessionWorkspace, sessionLLMOverride: sessionLLMOverride) {
             return sidecarManager
         }
         return NativeSessionManager(
-            backend: AgentLoopBackend(loopController: makeAgentLoopController(permissionMode: permissionMode, configuration: configuration, sessionWorkspace: sessionWorkspace)),
+            backend: AgentLoopBackend(loopController: makeAgentLoopController(permissionMode: permissionMode, configuration: configuration, sessionWorkspace: sessionWorkspace, sessionLLMOverride: sessionLLMOverride)),
             sessionRepository: AppChatSessionRepository(store: store),
             session: session,
             groupID: groupID,
@@ -76,10 +78,17 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
 
     public func makeConfiguredGovernedClaudeSDKSidecarNativeSessionManager(
         session: AgentSession = AgentSession(id: "app-session"),
-        sessionWorkspace: AppSessionWorkspaceReference? = nil
+        sessionWorkspace: AppSessionWorkspaceReference? = nil,
+        sessionLLMOverride: SessionLLMOverride? = nil
     ) throws -> NativeSessionManager? {
         let settings = try settingsRepository.loadSettings()
-        guard settings.providerMode == .governedClaudeSidecar else { return nil }
+        let effectiveProviderMode: AppLLMProviderMode
+        if let override = sessionLLMOverride, let overrideMode = AppLLMProviderMode(rawValue: override.providerMode) {
+            effectiveProviderMode = overrideMode
+        } else {
+            effectiveProviderMode = settings.providerMode
+        }
+        guard effectiveProviderMode == .governedClaudeSidecar else { return nil }
         let executablePath = settings.sidecarExecutablePath.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !executablePath.isEmpty else { throw AppGraphAgentRuntimeFactoryError.missingSidecarExecutablePath }
         return try makeGovernedClaudeSDKSidecarNativeSessionManager(
@@ -189,7 +198,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     public func makeAgentLoopController(
         permissionMode: AgentPermissionMode = .askToWrite,
         configuration: AgentLoopConfiguration = AgentLoopConfiguration(),
-        sessionWorkspace: AppSessionWorkspaceReference? = nil
+        sessionWorkspace: AppSessionWorkspaceReference? = nil,
+        sessionLLMOverride: SessionLLMOverride? = nil
     ) -> AgentLoopController<AnyAgentModelProvider> {
         let searchService = SQLiteGraphHybridSearchService(store: store)
         var registry = AgentToolRegistry()
@@ -230,7 +240,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         var effectiveConfiguration = configuration
         effectiveConfiguration.permissionMode = permissionMode
         return AgentLoopController(
-            modelProvider: makeAgentModelProvider(),
+            modelProvider: makeAgentModelProvider(sessionLLMOverride: sessionLLMOverride),
             toolRegistry: registry,
             configuration: effectiveConfiguration,
             auditLog: SQLiteAgentAuditLog(store: store),
@@ -239,16 +249,30 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         )
     }
 
-    public func makeAgentModelProvider() -> AnyAgentModelProvider {
+    public func makeAgentModelProvider(
+        sessionLLMOverride: SessionLLMOverride? = nil
+    ) -> AnyAgentModelProvider {
         do {
             let settings = try settingsRepository.loadSettings()
-            switch settings.providerMode {
+            let effectiveProviderMode: AppLLMProviderMode
+            let effectiveModel: String
+            let effectiveBaseURL: String?
+            if let override = sessionLLMOverride {
+                effectiveProviderMode = AppLLMProviderMode(rawValue: override.providerMode) ?? settings.providerMode
+                effectiveModel = override.model
+                effectiveBaseURL = override.baseURLString
+            } else {
+                effectiveProviderMode = settings.providerMode
+                effectiveModel = settings.effectiveModel
+                effectiveBaseURL = nil
+            }
+            switch effectiveProviderMode {
             case .governedClaudeSidecar:
                 return AnyAgentModelProvider(modelID: "governed-claude-sidecar-requires-session-manager") { _ in
                     throw AppGraphAgentRuntimeFactoryError.sidecarRequiresSessionManager
                 }
             case .openAICompatible:
-                guard let config = try settingsRepository.openAICompatibleConfig() else {
+                guard let config = try openAICompatibleConfigWithOverride(model: effectiveModel, baseURLOverride: effectiveBaseURL) else {
                     return AnyAgentModelProvider(modelID: "missing-openai-compatible-config") { _ in
                         throw OpenAICompatibleProviderError.missingAPIKey
                     }
@@ -258,6 +282,24 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         } catch {
             return AnyAgentModelProvider(modelID: "settings-error") { _ in throw error }
         }
+    }
+
+    private func openAICompatibleConfigWithOverride(
+        model: String,
+        baseURLOverride: String?
+    ) throws -> OpenAICompatibleConfig? {
+        let settings = try settingsRepository.loadSettings()
+        guard let apiKey = try settingsRepository.credentialStore.readSecret(
+            service: AppLLMSettingsRepository.keychainService,
+            account: AppLLMSettingsRepository.apiKeyAccount
+        ), !apiKey.isEmpty else {
+            return nil
+        }
+        let urlString = baseURLOverride ?? settings.baseURLString
+        guard let baseURL = URL(string: urlString) else {
+            throw OpenAICompatibleProviderError.invalidBaseURL(urlString)
+        }
+        return OpenAICompatibleConfig(baseURL: baseURL, apiKey: apiKey, model: model)
     }
 
     public func makeLLMProvider() -> AnyLLMProvider {

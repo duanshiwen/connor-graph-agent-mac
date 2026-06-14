@@ -49,10 +49,6 @@ struct AppShellView: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
                 .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(Color(nsColor: .separatorColor).opacity(0.32), lineWidth: 1)
-                )
             }
 
             ToolbarItem(placement: .primaryAction) {
@@ -176,7 +172,7 @@ private struct CraftPrimarySidebarView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
                     SidebarDisclosure(title: "所有会话", systemImage: "tray", isExpanded: $sessionsExpanded) {
-                        SidebarRow(title: "全部", systemImage: "bubble.left.and.bubble.right", count: viewModel.chatSessions.count, isSelected: selection == .agentChat && viewModel.sessionListFilter == .all) {
+                        SidebarRow(title: "全部", systemImage: "bubble.left.and.bubble.right", count: allSessionsCount, isSelected: selection == .agentChat && viewModel.sessionListFilter == .all) {
                             viewModel.setSessionListFilter(.all)
                             select(.agentChat)
                         }
@@ -231,17 +227,25 @@ private struct CraftPrimarySidebarView: View {
         }
     }
 
+    private var countSourceSessions: [AgentSession] {
+        viewModel.allChatSessions.isEmpty ? viewModel.chatSessions : viewModel.allChatSessions
+    }
+
+    private var allSessionsCount: Int {
+        countSourceSessions.count
+    }
+
     private var inboxCount: Int {
-        viewModel.chatSessions.filter { !$0.governance.isArchived }.count
+        countSourceSessions.filter { !$0.governance.isArchived }.count
     }
 
     private func count(for status: AgentSessionStatus) -> Int {
-        viewModel.chatSessions.filter { $0.governance.status == status }.count
+        countSourceSessions.filter { !$0.governance.isArchived && $0.governance.status == status }.count
     }
 
     private func count(forLabel labelID: String) -> Int {
-        viewModel.chatSessions.filter { session in
-            session.governance.labels.contains { $0.id == labelID }
+        countSourceSessions.filter { session in
+            !session.governance.isArchived && session.governance.labels.contains { $0.id == labelID }
         }.count
     }
 
@@ -302,7 +306,11 @@ private struct CraftSessionListPane: View {
             ScrollView {
                 LazyVStack(spacing: 2) {
                     ForEach(filteredSessions) { session in
-                        CraftSessionRow(row: AgentChatSessionPresentation(session: session), isSelected: session.id == viewModel.selectedChatSessionID) {
+                        CraftSessionRow(
+                            row: AgentChatSessionPresentation(session: session),
+                            isSelected: session.id == viewModel.selectedChatSessionID,
+                            isRunning: viewModel.isChatSessionSubmitting(session.id)
+                        ) {
                             var transaction = Transaction()
                             transaction.disablesAnimations = true
                             withTransaction(transaction) {
@@ -385,22 +393,35 @@ private struct CraftDetailPaneView: View {
 private struct CraftSessionRow: View {
     var row: AgentChatSessionPresentation
     var isSelected: Bool
+    var isRunning: Bool
     var action: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: row.isFlagged ? "pin.fill" : icon(for: row.status))
-                .foregroundStyle(row.isFlagged ? .orange : (isSelected ? .accentColor : .secondary))
-                .frame(width: 18)
+            if isRunning {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(width: 18, height: 18)
+            } else {
+                Image(systemName: row.isFlagged ? "pin.fill" : icon(for: row.status))
+                    .foregroundStyle(row.isFlagged ? .orange : (isSelected ? .accentColor : .secondary))
+                    .frame(width: 18)
+            }
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Text(row.title)
                         .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
                         .lineLimit(1)
                     Spacer(minLength: 4)
-                    Text(row.relativeUpdatedTime)
-                        .font(AppListTypography.rowCaption)
-                        .foregroundStyle(.secondary)
+                    if isRunning {
+                        Text("运行中")
+                            .font(AppListTypography.rowCaptionEmphasized)
+                            .foregroundStyle(Color.accentColor)
+                    } else {
+                        Text(row.relativeUpdatedTime)
+                            .font(AppListTypography.rowCaption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 HStack(spacing: 6) {
                     Text(row.statusText)

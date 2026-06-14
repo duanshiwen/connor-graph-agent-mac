@@ -126,14 +126,10 @@ struct AgentChatComposerView: View {
 
                         AgentChatPermissionRequestCard(approval: approval, viewModel: viewModel)
                             .padding(AgentChatLayout.spaceM)
+                            .frame(maxHeight: 220)
                     }
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 }
-            }
-
-            if let error = viewModel.errorMessage {
-                AgentMarkdownPreviewText(markdown: error, font: AgentChatTypography.meta)
-                    .foregroundStyle(.red)
             }
         }
         .padding(0)
@@ -161,6 +157,24 @@ struct AgentChatComposerView: View {
             }
 
             Divider()
+
+            Menu {
+                if viewModel.recentWorkspacePaths.isEmpty {
+                    Button("暂无历史记录") {}
+                        .disabled(true)
+                } else {
+                    ForEach(viewModel.recentWorkspacePaths, id: \.self) { path in
+                        Button {
+                            viewModel.addWorkspaceRootAndSetPrimary(path: path)
+                        } label: {
+                            Label(workspaceMenuItemTitle(forPath: path), systemImage: isCurrentPrimaryWorkspacePath(path) ? "checkmark" : "clock.arrow.circlepath")
+                        }
+                        .help(path)
+                    }
+                }
+            } label: {
+                Label("历史打开列表", systemImage: "clock.arrow.circlepath")
+            }
 
             Button {
                 chooseWorkingDirectory()
@@ -200,10 +214,23 @@ struct AgentChatComposerView: View {
     }
 
     private func workspaceMenuItemTitle(for root: WorkspaceRootDraft) -> String {
-        let name = workspaceDisplayName(for: root)
-        let parent = workspaceParentDisplayPath(for: root.path)
+        workspaceMenuItemTitle(name: workspaceDisplayName(for: root), path: root.path)
+    }
+
+    private func workspaceMenuItemTitle(forPath path: String) -> String {
+        let url = URL(fileURLWithPath: path, isDirectory: true)
+        let name = url.lastPathComponent.isEmpty ? path : url.lastPathComponent
+        return workspaceMenuItemTitle(name: name, path: path)
+    }
+
+    private func workspaceMenuItemTitle(name: String, path: String) -> String {
+        let parent = workspaceParentDisplayPath(for: path)
         guard !parent.isEmpty else { return name }
         return "\(name)  in \(parent)"
+    }
+
+    private func isCurrentPrimaryWorkspacePath(_ path: String) -> Bool {
+        viewModel.primaryWorkspaceRootDraft?.path == path
     }
 
     private func workspaceDisplayName(for root: WorkspaceRootDraft) -> String {
@@ -273,7 +300,7 @@ struct AgentChatComposerView: View {
         Menu {
             ForEach(AgentPermissionMode.allCases.filter { $0 != .allowAll }, id: \.self) { mode in
                 Button {
-                    viewModel.sidecarPermissionMode = mode
+                    viewModel.setSidecarPermissionMode(mode)
                 } label: {
                     Text(menuOptionTitle(mode.displayName, isSelected: mode == viewModel.sidecarPermissionMode))
                 }
@@ -358,6 +385,15 @@ struct AgentChatComposerView: View {
                     }
                 }
 
+                if viewModel.sessionHasLLMOverride {
+                    Divider()
+                    Button {
+                        viewModel.clearSessionLLMOverride()
+                    } label: {
+                        Label("恢复全局默认模型", systemImage: "arrow.counterclockwise")
+                    }
+                }
+
                 Divider()
 
                 Button {
@@ -367,12 +403,20 @@ struct AgentChatComposerView: View {
                 }
             }
         } label: {
-            Label {
-                Text(viewModel.llmSelectedModel.isEmpty ? "未选择模型" : viewModel.llmSelectedModel)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            } icon: {
-                Image(systemName: "cpu")
+            HStack(spacing: AgentChatLayout.spaceXS) {
+                Label {
+                    Text(viewModel.llmSelectedModel.isEmpty ? "未选择模型" : viewModel.llmSelectedModel)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                } icon: {
+                    Image(systemName: "cpu")
+                }
+                if viewModel.sessionHasLLMOverride {
+                    Circle()
+                        .fill(Color.accentColor)
+                        .frame(width: 6, height: 6)
+                        .help("此会话使用自定义模型，与全局设置不同")
+                }
             }
             .font(AgentChatTypography.micro.weight(.medium))
             .padding(.horizontal, AgentChatLayout.spaceM)

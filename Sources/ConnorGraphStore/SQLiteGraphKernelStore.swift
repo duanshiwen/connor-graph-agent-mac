@@ -994,11 +994,12 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         return try decodeAgentRun(row)
     }
 
-    public func events(runID: String, limit: Int = 100) throws -> [PersistedAgentEvent] {
-        try query(sql: """
+    public func events(runID: String, limit: Int? = 100) throws -> [PersistedAgentEvent] {
+        let limitClause = limit.map { " LIMIT \($0)" } ?? ""
+        return try query(sql: """
         SELECT id, run_id, session_id, sequence, kind, payload_json, created_at
         FROM agent_events WHERE run_id = \(quote(runID))
-        ORDER BY sequence ASC, created_at ASC LIMIT \(limit)
+        ORDER BY sequence ASC, created_at ASC\(limitClause)
         """).map(decodePersistedAgentEvent)
     }
 
@@ -1016,11 +1017,12 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         """).map(decodeAgentRun)
     }
 
-    public func recentEvents(sessionID: String, limit: Int = 100) throws -> [PersistedAgentEvent] {
-        try query(sql: """
+    public func recentEvents(sessionID: String, limit: Int? = 100) throws -> [PersistedAgentEvent] {
+        let limitClause = limit.map { " LIMIT \($0)" } ?? ""
+        return try query(sql: """
         SELECT id, run_id, session_id, sequence, kind, payload_json, created_at
         FROM agent_events WHERE session_id = \(quote(sessionID))
-        ORDER BY created_at DESC LIMIT \(limit)
+        ORDER BY created_at DESC\(limitClause)
         """).map(decodePersistedAgentEvent)
     }
 
