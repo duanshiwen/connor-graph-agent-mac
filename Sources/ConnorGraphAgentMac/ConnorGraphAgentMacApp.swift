@@ -387,24 +387,25 @@ final class AppViewModel: ObservableObject {
         )
     }
 
+    private var chatSummaryPresentation: AppChatSummaryPresentation {
+        AppChatSummaryPresentationBuilder().build(
+            latestSummary: latestChatSummary,
+            activeSession: activeChatSession,
+            isSummarizing: isSummarizingChatSession,
+            hasTranscriptMessages: !transcript.isEmpty
+        )
+    }
+
     var latestChatSummaryFreshness: AgentSessionSummaryFreshness? {
-        latestChatSummary?.freshness(for: activeChatSession)
+        chatSummaryPresentation.freshness
     }
 
     var latestChatSummaryContextMessage: String {
-        guard let freshness = latestChatSummaryFreshness else { return "" }
-        if freshness.isFresh {
-            return "会话摘要已是最新，将包含在下一次回答中。"
-        }
-        return "会话摘要已过期：还有 \(freshness.uncoveredMessageCount) 条消息未覆盖，因此不会包含在下一次回答中。"
+        chatSummaryPresentation.contextMessage
     }
 
     var latestChatSummaryRefreshState: AgentSessionSummaryRefreshState {
-        AgentSessionSummaryRefreshState(
-            isSummarizing: isSummarizingChatSession,
-            hasTranscriptMessages: !transcript.isEmpty,
-            freshness: latestChatSummaryFreshness
-        )
+        chatSummaryPresentation.refreshState
     }
 
     var summarizeChatSessionButtonTitle: String {
