@@ -326,6 +326,7 @@ struct AgentChatTurnTimestampRow: View {
 
 struct AgentChatMessageRow: View {
     var row: AgentChatMessagePresentation
+    var onAssistantMessageCollapsed: (() -> Void)? = nil
     @State private var isAssistantMessageExpanded = false
 
     @MainActor
@@ -441,8 +442,12 @@ struct AgentChatMessageRow: View {
                 }
 
                 Button {
+                    let wasExpanded = isAssistantMessageExpanded
                     withAnimation(.easeInOut(duration: 0.18)) {
                         isAssistantMessageExpanded.toggle()
+                    }
+                    if wasExpanded, !isAssistantMessageExpanded {
+                        onAssistantMessageCollapsed?()
                     }
                 } label: {
                     Label(isAssistantMessageExpanded ? "收起回答" : "展开完整回答", systemImage: isAssistantMessageExpanded ? "chevron.up" : "chevron.down")
