@@ -39,6 +39,23 @@ struct AttachmentPreviewLoaderTests {
         #expect(model.bodyMode == .monospaced)
     }
 
+    @Test func loadsImagePreviewFromStoredOriginalFile() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let paths = AppStoragePaths(applicationSupportDirectory: root)
+        try paths.ensureDirectoryHierarchy()
+        let source = root.appendingPathComponent("photo.png")
+        try Data([0x89, 0x50, 0x4E, 0x47]).write(to: source)
+        let store = AppSessionAttachmentStore(paths: paths)
+        let manifest = try store.importFile(at: source, sessionID: "s")
+
+        let model = AttachmentPreviewLoader(store: store).load(sessionID: "s", attachment: manifest.messageRef)
+
+        #expect(model.errorMessage == nil)
+        #expect(model.bodyMode == .image)
+        #expect(model.sourceRelativePath == manifest.storedRelativePath)
+        #expect(model.sourceFileURL?.lastPathComponent == "photo.png")
+    }
+
     @Test func missingManifestReturnsGracefulErrorModel() {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let paths = AppStoragePaths(applicationSupportDirectory: root)

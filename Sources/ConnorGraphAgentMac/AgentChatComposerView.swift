@@ -55,6 +55,9 @@ struct AgentChatComposerView: View {
         .json,
         .commaSeparatedText,
         .xml,
+        .image,
+        UTType(filenameExtension: "jsonl") ?? .json,
+        UTType(filenameExtension: "tsv") ?? .commaSeparatedText,
         UTType(filenameExtension: "md") ?? .text,
         UTType(filenameExtension: "markdown") ?? .text,
         UTType(filenameExtension: "log") ?? .text,
@@ -104,7 +107,8 @@ struct AgentChatComposerView: View {
                         text: $viewModel.chatInput,
                         placeholder: "按 Shift + Return 换行",
                         isSpellCheckEnabled: viewModel.spellCheckEnabled,
-                        onSubmit: { Task { await viewModel.submitChat() } }
+                        onSubmit: { Task { await viewModel.submitChat() } },
+                        onImportFiles: { urls in Task { await viewModel.importAttachments(urls: urls) } }
                     )
                     .padding(.horizontal, AgentChatLayout.spaceL)
                     .padding(.top, viewModel.pendingAttachmentRefs.isEmpty ? AgentChatLayout.spaceM : AgentChatLayout.spaceXS)
@@ -690,6 +694,7 @@ struct SafeChatComposerTextView: NSViewRepresentable {
     var placeholder: String
     var isSpellCheckEnabled: Bool
     var onSubmit: () -> Void
+    var onImportFiles: ([URL]) -> Void
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
@@ -702,6 +707,7 @@ struct SafeChatComposerTextView: NSViewRepresentable {
         let textView = SubmitAwareTextView()
         textView.delegate = context.coordinator
         textView.onSubmit = onSubmit
+        textView.onImportFiles = onImportFiles
         textView.placeholderString = placeholder
         textView.isRichText = false
         textView.importsGraphics = false
@@ -737,6 +743,7 @@ struct SafeChatComposerTextView: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? SubmitAwareTextView else { return }
         textView.onSubmit = onSubmit
+        textView.onImportFiles = onImportFiles
         textView.placeholderString = placeholder
         textView.font = AgentChatTypography.composerNSFont
         if textView.string != text {
@@ -766,6 +773,7 @@ struct SafeChatComposerTextView: NSViewRepresentable {
 
 final class SubmitAwareTextView: NSTextView {
     var onSubmit: (() -> Void)?
+    var onImportFiles: (([URL]) -> Void)?
     var placeholderString: String = "" {
         didSet { needsDisplay = true }
     }
@@ -780,6 +788,36 @@ final class SubmitAwareTextView: NSTextView {
             super.insertNewline(sender)
         } else {
             onSubmit?()
+        }
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        fileURLs(from: sender.draggingPasteboard).isEmpty ? super.draggingEntered(sender) : .copy
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let urls = fileURLs(from: sender.draggingPasteboard)
+        guard !urls.isEmpty else { return super.performDragOperation(sender) }
+        onImportFiles?(urls)
+        return true
+    }
+
+    override func readSelection(from pboard: NSPasteboard, type: NSPasteboard.PasteboardType) -> Bool {
+        let urls = fileURLs(from: pboard)
+        guard urls.isEmpty else {
+            onImportFiles?(urls)
+            return true
+        }
+        return super.readSelection(from: pboard, type: type)
+    }
+
+    private func fileURLs(from pasteboard: NSPasteboard) -> [URL] {
+        let objects = pasteboard.readObjects(forClasses: [NSURL.self], options: [
+            .urlReadingFileURLsOnly: true
+        ]) ?? []
+        return objects.compactMap { object in
+            guard let nsURL = object as? NSURL, let url = nsURL as URL? else { return nil }
+            return url.isFileURL ? url : nil
         }
     }
 

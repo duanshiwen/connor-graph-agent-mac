@@ -170,7 +170,7 @@ public struct AppSessionAttachmentStore: Sendable {
         case "json", "jsonl": return .json
         case "csv", "tsv": return .csv
         case "swift", "rs", "py", "js", "ts", "tsx", "jsx", "java", "kt", "go", "rb", "sh", "sql", "xml", "yaml", "yml", "c", "cpp", "h", "hpp", "cs", "php", "zsh", "bash", "css", "scss": return .code
-        case "png", "jpg", "jpeg", "webp", "gif", "heic": return .image
+        case "png", "jpg", "jpeg", "webp", "gif", "heic", "bmp", "ico", "tif", "tiff": return .image
         case "pdf": return .pdf
         case "doc", "docx", "rtf", "pages", "epub": return .document
         case "xls", "xlsx", "numbers": return .spreadsheet
@@ -201,6 +201,18 @@ public struct AppSessionAttachmentStore: Sendable {
         case .markdown: return "text/markdown"
         case .json: return "application/json"
         case .csv: return "text/csv"
+        case .image:
+            switch fileExtension?.lowercased() {
+            case "png": return "image/png"
+            case "jpg", "jpeg": return "image/jpeg"
+            case "gif": return "image/gif"
+            case "webp": return "image/webp"
+            case "heic": return "image/heic"
+            case "bmp": return "image/bmp"
+            case "ico": return "image/x-icon"
+            case "tif", "tiff": return "image/tiff"
+            default: return "image/*"
+            }
         default: return nil
         }
     }

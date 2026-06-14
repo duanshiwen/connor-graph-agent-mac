@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import ConnorGraphAppSupport
 import ConnorGraphCore
 
@@ -14,7 +15,7 @@ struct AgentAttachmentPreviewSheetView: View {
             footer
         }
         .padding(AgentChatLayout.spaceL)
-        .frame(minWidth: 680, minHeight: 560)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private var header: some View {
@@ -57,16 +58,36 @@ struct AgentAttachmentPreviewSheetView: View {
                         .font(AgentChatTypography.body)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                case .image:
+                    imagePreview
                 }
             }
             .padding(AgentChatLayout.spaceM)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous)
                 .stroke(Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1)
         )
+    }
+
+    @ViewBuilder
+    private var imagePreview: some View {
+        if let url = model.sourceFileURL, let image = NSImage(contentsOf: url) {
+            Image(nsImage: image)
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        } else {
+            ContentUnavailableView(
+                "无法预览图片",
+                systemImage: "photo",
+                description: Text(model.sourceRelativePath ?? model.attachment.displayName)
+            )
+            .frame(maxWidth: .infinity, minHeight: 320)
+        }
     }
 
     private var footer: some View {
@@ -97,6 +118,7 @@ struct AgentAttachmentPreviewSheetView: View {
 
     private func iconName(for kind: AgentAttachmentKind) -> String {
         switch kind {
+        case .image: return "photo"
         case .csv, .spreadsheet: return "tablecells"
         case .code, .json, .html: return "chevron.left.forwardslash.chevron.right"
         case .markdown, .text: return "doc.text"
