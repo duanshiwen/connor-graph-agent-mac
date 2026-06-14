@@ -149,6 +149,8 @@ public struct NativeSessionManager: Sendable {
         _ prompt: String,
         sessionSummary: AgentSessionSummary?,
         displayPrompt: String? = nil,
+        attachments: [AgentMessageAttachmentRef] = [],
+        attachmentContextPlan: AttachmentContextPlan = AttachmentContextPlan(),
         onRunStarted: (@MainActor @Sendable (String) -> Void)? = nil,
         onEventPresentation: (@MainActor @Sendable (AgentEventPresentation) -> Void)? = nil
     ) async throws -> AgentLoopChatResponse {
@@ -157,7 +159,7 @@ public struct NativeSessionManager: Sendable {
         try await maybeCompressContext()
 
         let recentMessages = Array(session.messages.suffix(max(0, recentMessageLimit)))
-        let userMessage = session.appendUserMessage(displayPrompt ?? prompt)
+        let userMessage = session.appendUserMessage(displayPrompt ?? prompt, attachments: attachments)
         try persistSession()
         try persistMemoryStagingAfterUserMessage(userMessage)
 
@@ -168,6 +170,8 @@ public struct NativeSessionManager: Sendable {
             sessionSummary: sessionSummary,
             recentMessages: recentMessages,
             permissionMode: permissionMode,
+            attachmentRefs: attachments,
+            attachmentContextPlan: attachmentContextPlan,
             anchorState: anchorState
         )
         let now = Date()

@@ -258,6 +258,7 @@ public struct AgentChatMessagePresentation: Sendable, Equatable, Identifiable {
     public var currentRequest: String?
     public var promptSnapshotText: String?
     public var citationIDs: [String]
+    public var attachments: [AgentMessageAttachmentRef]
     public var expandedContextItems: [AgentContextItem]
 
     public init(
@@ -272,6 +273,7 @@ public struct AgentChatMessagePresentation: Sendable, Equatable, Identifiable {
         self.roleLabel = Self.makeRoleLabel(for: message.role)
         self.isLatestAssistantMessage = isLatestAssistantMessage
         self.citationIDs = message.citations
+        self.attachments = message.attachments
         if isLatestAssistantMessage {
             self.expandedContextItems = lastContext?.items ?? []
         } else {
