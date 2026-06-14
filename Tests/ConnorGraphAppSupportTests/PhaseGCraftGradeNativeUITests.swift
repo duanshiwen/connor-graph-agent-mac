@@ -9,7 +9,7 @@ struct PhaseGCraftGradeNativeUITests {
     @Test func nativeShellBuildsCraftGradeSidebarGroupsAndCommands() {
         let shell = ConnorNativeShellPresentation.default
 
-        #expect(shell.title == "Connor")
+        #expect(shell.title == "康纳同学")
         #expect(shell.defaultSelection == .agentChat)
         #expect(shell.sidebarGroups.map(\.title) == ["Work", "Memory", "Governance", "Extensions", "System"])
         #expect(shell.sidebarGroups.flatMap(\.items).map(\.id).prefix(5) == [
