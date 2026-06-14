@@ -221,10 +221,12 @@ struct BrowserWorkspaceView: View {
             .disabled(activeWebView == nil)
             .help(activeTab?.navigationState.isLoading == true ? "停止加载" : "刷新")
 
-            TextField("输入网址或搜索词，按 Return 打开", text: $addressText)
-                .font(BrowserFloatingTypography.input)
-                .textFieldStyle(.roundedBorder)
-                .onSubmit { navigateFromAddressBar() }
+            BrowserAddressTextField(
+                text: $addressText,
+                placeholder: "输入网址或搜索词，按 Return 打开",
+                onSubmit: navigateFromAddressBar
+            )
+            .frame(height: 28)
 
             Button(action: showPageQuestionPopover) {
                 BrowserAskAIButtonLabel()
@@ -587,6 +589,73 @@ struct BrowserWorkspaceView: View {
       });
     })();
     """
+}
+
+private struct BrowserAddressTextField: NSViewRepresentable {
+    @Binding var text: String
+    var placeholder: String
+    var onSubmit: () -> Void
+
+    func makeNSView(context: Context) -> NSTextField {
+        let textField = SelectAllOnFocusTextField()
+        textField.delegate = context.coordinator
+        textField.placeholderString = placeholder
+        textField.font = .systemFont(ofSize: 13)
+        textField.isBordered = true
+        textField.isBezeled = true
+        textField.bezelStyle = .roundedBezel
+        textField.focusRingType = .default
+        textField.lineBreakMode = .byTruncatingMiddle
+        textField.cell?.sendsActionOnEndEditing = false
+        return textField
+    }
+
+    func updateNSView(_ nsView: NSTextField, context: Context) {
+        if nsView.stringValue != text {
+            nsView.stringValue = text
+        }
+        nsView.placeholderString = placeholder
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text, onSubmit: onSubmit)
+    }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        @Binding var text: String
+        var onSubmit: () -> Void
+
+        init(text: Binding<String>, onSubmit: @escaping () -> Void) {
+            _text = text
+            self.onSubmit = onSubmit
+        }
+
+        func controlTextDidChange(_ notification: Notification) {
+            guard let field = notification.object as? NSTextField else { return }
+            text = field.stringValue
+        }
+
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+                text = (control as? NSTextField)?.stringValue ?? text
+                onSubmit()
+                return true
+            }
+            return false
+        }
+    }
+}
+
+private final class SelectAllOnFocusTextField: NSTextField {
+    override func becomeFirstResponder() -> Bool {
+        let didBecomeFirstResponder = super.becomeFirstResponder()
+        if didBecomeFirstResponder {
+            DispatchQueue.main.async { [weak self] in
+                self?.selectText(nil)
+            }
+        }
+        return didBecomeFirstResponder
+    }
 }
 
 private struct EmbeddedWebView: NSViewRepresentable {
