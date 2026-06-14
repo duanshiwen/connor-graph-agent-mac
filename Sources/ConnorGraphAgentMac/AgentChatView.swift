@@ -410,16 +410,6 @@ private struct AgentChatConversationHeader: View {
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .center)
 
-            DisclosureGroup {
-                WorkspaceRootsSettingsContent(viewModel: viewModel)
-                    .padding(.top, AgentChatLayout.spaceS)
-            } label: {
-                Label("当前会话 Workspace 详情", systemImage: "folder.badge.gearshape")
-                    .font(.caption.weight(.semibold))
-            }
-            .padding(AgentChatLayout.spaceM)
-            .background(.quaternary.opacity(0.16), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
-
             if let summary = viewModel.latestChatSummary {
                 DisclosureGroup {
                     VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
