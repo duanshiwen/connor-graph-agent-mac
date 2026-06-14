@@ -1,7 +1,7 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-14 13:35 GMT+8  
-当前代码基线：`optimize/chat-ui-first-pass`，在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface / session-scoped multi-root project workspace / Connor-owned Scientific Compute Runtime skeleton 基础上，完成首轮低风险代码库整理：权限审批恢复、composer 内权限确认 overlay、取消后保留 activity timeline、Chat UI 组件拆分、App shell/settings/ProductOS/diagnostic 视图拆分，以及 AppViewModel factory / LLM provider helper 小步抽取。
+文档更新时间：2026-06-14 14:10 GMT+8  
+当前代码基线：`optimize/chat-ui-first-pass`，在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface / session-scoped multi-root project workspace / Connor-owned Scientific Compute Runtime skeleton 基础上，完成 P1/P2 合并优化：权限审批恢复、composer 内权限确认 overlay、取消后保留 activity timeline、Chat UI 组件拆分、App shell/settings/ProductOS/diagnostic 视图拆分、AppViewModel factory / builder / mapper / editor 小步抽取、Browser workspace 模型与浮窗视图拆分、Commercial readiness snapshot builder 拆分、Claude sidecar protocol DTO 拆分，以及 SwiftPM asset catalog resource warning 修复。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package，目标是把 Connor 建成 **graph-memory-native Agent OS**：它不是“图谱编辑器”，也不是“Claude SDK 外壳”，而是以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI 和 Local Automation Surface 共同构成的本地 Agent 操作系统。
 
@@ -1161,6 +1161,14 @@ Targeted regression status on optimize/chat-ui-first-pass after first-pass clean
 - swift test --filter PhaseGCraftGradeNativeUITests: passed.
 - swift test --filter NativeSessionManagerTests: passed.
 - The previous UI copy expectation mismatch has been resolved by aligning the native shell title expectation with the localized product name `康纳同学`.
+
+P1/P2 combined optimization final targeted regression status (2026-06-14 14:10 GMT+8):
+- swift test --filter AgentChatPresentationTests: passed, 12 tests.
+- swift test --filter ClaudeSDKSidecarBackendTests: passed, 22 tests.
+- swift test --filter NativeSessionManagerTests: passed, 11 tests.
+- swift test --filter PhaseGCraftGradeNativeUITests: passed, 3 tests.
+- swift test --filter CommercialReadinessReleaseGateTests: passed, 4 tests.
+- SwiftPM `Assets.xcassets` unhandled-file warning is resolved by declaring `.process("Assets.xcassets")` on the mac app executable target.
 ```
 
 ---
