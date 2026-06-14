@@ -44,6 +44,9 @@ struct AgentSendControlButton: View {
 struct AgentChatComposerView: View {
     @ObservedObject var viewModel: AppViewModel
     @Binding var isSessionInfoPresented: Bool
+    @State private var isWorkspacePopoverPresented: Bool = false
+
+    private let workspaceMenuItemMaxWidth: CGFloat = 320
 
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
@@ -141,53 +144,8 @@ struct AgentChatComposerView: View {
     }
 
     private var workingDirectoryMenu: some View {
-        Menu {
-            if viewModel.workspaceRoots.isEmpty {
-                Button("尚未设置工作目录") {}
-                    .disabled(true)
-            } else {
-                ForEach(viewModel.workspaceRoots) { root in
-                    Button {
-                        viewModel.setPrimaryWorkspaceRoot(id: root.id)
-                    } label: {
-                        Label(workspaceMenuItemTitle(for: root), systemImage: "folder")
-                    }
-                    .help(root.path)
-                }
-            }
-
-            Divider()
-
-            Menu {
-                if viewModel.recentWorkspacePaths.isEmpty {
-                    Button("暂无历史记录") {}
-                        .disabled(true)
-                } else {
-                    ForEach(viewModel.recentWorkspacePaths, id: \.self) { path in
-                        Button {
-                            viewModel.addWorkspaceRootAndSetPrimary(path: path)
-                        } label: {
-                            Label(workspaceMenuItemTitle(forPath: path), systemImage: "clock.arrow.circlepath")
-                        }
-                        .help(path)
-                    }
-                }
-            } label: {
-                Label("历史打开列表", systemImage: "clock.arrow.circlepath")
-            }
-
-            Button {
-                chooseWorkingDirectory()
-            } label: {
-                Label("选择文件夹…", systemImage: "folder.badge.plus")
-            }
-
-            Button {
-                viewModel.resetWorkspaceRootsForCurrentSession()
-            } label: {
-                Label("重置为默认", systemImage: "arrow.counterclockwise")
-            }
-            .disabled(viewModel.workspaceRoots.isEmpty && viewModel.defaultWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        Button {
+            isWorkspacePopoverPresented.toggle()
         } label: {
             AgentComposerOptionBadge(
                 title: workingDirectoryBadgeTitle,
@@ -197,8 +155,116 @@ struct AgentChatComposerView: View {
                 style: .compact
             )
         }
-        .menuStyle(.borderlessButton)
+        .buttonStyle(.plain)
+        .popover(isPresented: $isWorkspacePopoverPresented, arrowEdge: .bottom) {
+            workingDirectoryPopoverContent
+                .padding(10)
+                .frame(width: 390)
+        }
         .help(workingDirectoryHelpText)
+    }
+
+    private var workingDirectoryPopoverContent: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if viewModel.workspaceRoots.isEmpty {
+                Text("尚未设置工作目录")
+                    .font(AgentChatTypography.micro)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+            } else {
+                VStack(spacing: 2) {
+                    ForEach(viewModel.workspaceRoots) { root in
+                        workspaceRootPopoverRow(root)
+                    }
+                }
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 2) {
+                Label("历史打开列表", systemImage: "clock.arrow.circlepath")
+                    .font(AgentChatTypography.micro.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.top, 2)
+
+                if viewModel.recentWorkspacePaths.isEmpty {
+                    Text("暂无历史记录")
+                        .font(AgentChatTypography.micro)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                } else {
+                    ForEach(viewModel.recentWorkspacePaths, id: \.self) { path in
+                        Button {
+                            viewModel.addWorkspaceRootAndSetPrimary(path: path)
+                            isWorkspacePopoverPresented = false
+                        } label: {
+                            workspaceMenuItemLabel(title: workspaceMenuItemTitle(forPath: path), systemImage: "clock.arrow.circlepath")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .contentShape(Rectangle())
+                        .help(path)
+                    }
+                }
+            }
+
+            Divider()
+
+            HStack(spacing: 8) {
+                Button {
+                    isWorkspacePopoverPresented = false
+                    chooseWorkingDirectory()
+                } label: {
+                    Label("选择文件夹…", systemImage: "folder.badge.plus")
+                }
+                .buttonStyle(.borderless)
+
+                Button {
+                    viewModel.resetWorkspaceRootsForCurrentSession()
+                    isWorkspacePopoverPresented = false
+                } label: {
+                    Label("重置为默认", systemImage: "arrow.counterclockwise")
+                }
+                .buttonStyle(.borderless)
+                .disabled(viewModel.workspaceRoots.isEmpty && viewModel.defaultWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            .font(AgentChatTypography.micro)
+            .padding(.horizontal, 4)
+        }
+    }
+
+    private func workspaceRootPopoverRow(_ root: WorkspaceRootDraft) -> some View {
+        HStack(spacing: 6) {
+            Button {
+                viewModel.setPrimaryWorkspaceRoot(id: root.id)
+                isWorkspacePopoverPresented = false
+            } label: {
+                workspaceMenuItemLabel(title: workspaceMenuItemTitle(for: root), systemImage: "folder")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .help(root.path)
+
+            Button {
+                viewModel.removeWorkspaceRoot(id: root.id)
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("取消此工作目录")
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .contentShape(Rectangle())
     }
 
     private var workingDirectoryBadgeTitle: String {
@@ -227,6 +293,17 @@ struct AgentChatComposerView: View {
         let parent = workspaceParentDisplayPath(for: path)
         guard !parent.isEmpty else { return name }
         return "\(name)  in \(parent)"
+    }
+
+    private func workspaceMenuItemLabel(title: String, systemImage: String) -> some View {
+        Label {
+            Text(title)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: workspaceMenuItemMaxWidth, alignment: .leading)
+        } icon: {
+            Image(systemName: systemImage)
+        }
     }
 
     private func workspaceDisplayName(for root: WorkspaceRootDraft) -> String {
