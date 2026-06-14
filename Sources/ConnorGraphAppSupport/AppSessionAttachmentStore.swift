@@ -20,8 +20,18 @@ public struct AppSessionAttachmentStore: Sendable {
         now: Date = Date()
     ) throws -> AgentAttachmentManifest {
         let fileManager = FileManager.default
-        let attachmentID = UUID().uuidString
+        let importPolicy = AttachmentImportPolicy(maxAcceptedBytes: maxTextExtractionBytes)
         let originalFilename = sourceURL.lastPathComponent
+        let validation = importPolicy.validate(url: sourceURL, fileManager: fileManager)
+        let kind: AgentAttachmentKind
+        switch validation {
+        case .accepted(let acceptedKind):
+            kind = acceptedKind
+        case .rejected(let reason):
+            throw AppSessionAttachmentImportError.rejected(filename: originalFilename, reason: reason)
+        }
+        let attachmentID = UUID().uuidString
+        let runID = Self.derivativeRunID(now: now, engine: .builtinText)
         let normalizedFilename = Self.sanitizedFilename(originalFilename)
         let directories = try paths.ensureSessionArtifactDirectories(sessionID: sessionID, fileManager: fileManager)
         try fileManager.createDirectory(at: directories.attachments, withIntermediateDirectories: true)
@@ -29,8 +39,13 @@ public struct AppSessionAttachmentStore: Sendable {
         let attachmentDirectory = directories.attachments.appendingPathComponent(attachmentID, isDirectory: true)
         let originalDirectory = attachmentDirectory.appendingPathComponent("original", isDirectory: true)
         let derivativesDirectory = attachmentDirectory.appendingPathComponent("derivatives", isDirectory: true)
+        let currentDerivativesDirectory = derivativesDirectory.appendingPathComponent("current", isDirectory: true)
+        let runDerivativesDirectory = derivativesDirectory
+            .appendingPathComponent("runs", isDirectory: true)
+            .appendingPathComponent(runID, isDirectory: true)
         try fileManager.createDirectory(at: originalDirectory, withIntermediateDirectories: true)
-        try fileManager.createDirectory(at: derivativesDirectory, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: currentDerivativesDirectory, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: runDerivativesDirectory, withIntermediateDirectories: true)
 
         let originalURL = originalDirectory.appendingPathComponent(normalizedFilename)
         if fileManager.fileExists(atPath: originalURL.path) {
@@ -40,7 +55,6 @@ public struct AppSessionAttachmentStore: Sendable {
 
         let data = try Data(contentsOf: originalURL)
         let digest = Self.sha256Hex(data)
-        let kind = Self.kind(for: sourceURL)
         let fileExtension = sourceURL.pathExtension.isEmpty ? nil : sourceURL.pathExtension.lowercased()
         var extractedPath: String?
         var previewText: String?
@@ -51,15 +65,26 @@ public struct AppSessionAttachmentStore: Sendable {
         previewText = extraction.previewText
         var derivativeRefs: [AgentAttachmentDerivativeRef] = []
         if let markdown = extraction.markdown {
-            let extractedURL = derivativesDirectory.appendingPathComponent("extracted.md")
-            try markdown.write(to: extractedURL, atomically: true, encoding: .utf8)
-            extractedPath = "attachments/\(attachmentID)/derivatives/extracted.md"
+            let currentExtractedURL = currentDerivativesDirectory.appendingPathComponent("extracted.md")
+            let runExtractedURL = runDerivativesDirectory.appendingPathComponent("extracted.md")
+            try markdown.write(to: currentExtractedURL, atomically: true, encoding: .utf8)
+            try markdown.write(to: runExtractedURL, atomically: true, encoding: .utf8)
+            extractedPath = "attachments/\(attachmentID)/derivatives/current/extracted.md"
+            let runExtractedPath = "attachments/\(attachmentID)/derivatives/runs/\(runID)/extracted.md"
             let extractedData = Data(markdown.utf8)
+            let extractedDigest = Self.sha256Hex(extractedData)
             derivativeRefs.append(AgentAttachmentDerivativeRef(
                 kind: .extractedMarkdown,
                 relativePath: extractedPath!,
                 byteCount: Int64(extractedData.count),
-                sha256: Self.sha256Hex(extractedData),
+                sha256: extractedDigest,
+                createdAt: now
+            ))
+            derivativeRefs.append(AgentAttachmentDerivativeRef(
+                kind: .extractedMarkdown,
+                relativePath: runExtractedPath,
+                byteCount: Int64(extractedData.count),
+                sha256: extractedDigest,
                 createdAt: now
             ))
         }
@@ -144,8 +169,7 @@ public struct AppSessionAttachmentStore: Sendable {
         case "md", "markdown": return .markdown
         case "json", "jsonl": return .json
         case "csv", "tsv": return .csv
-        case "html", "htm": return .html
-        case "swift", "rs", "py", "js", "ts", "tsx", "jsx", "java", "kt", "go", "rb", "sh", "sql", "xml", "yaml", "yml": return .code
+        case "swift", "rs", "py", "js", "ts", "tsx", "jsx", "java", "kt", "go", "rb", "sh", "sql", "xml", "yaml", "yml", "c", "cpp", "h", "hpp", "cs", "php", "zsh", "bash", "css", "scss": return .code
         case "png", "jpg", "jpeg", "webp", "gif", "heic": return .image
         case "pdf": return .pdf
         case "doc", "docx", "rtf", "pages", "epub": return .document
@@ -161,17 +185,22 @@ public struct AppSessionAttachmentStore: Sendable {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
+    public static func derivativeRunID(now: Date, engine: AgentAttachmentExtractionEngine) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let timestamp = formatter.string(from: now)
+            .replacingOccurrences(of: ":", with: "")
+            .replacingOccurrences(of: "-", with: "")
+            .replacingOccurrences(of: ".", with: "")
+        return "\(timestamp)-\(engine.rawValue)-\(UUID().uuidString.prefix(8))"
+    }
+
     private static func mimeType(for kind: AgentAttachmentKind, fileExtension: String?) -> String? {
         switch kind {
         case .text: return "text/plain"
         case .markdown: return "text/markdown"
         case .json: return "application/json"
         case .csv: return "text/csv"
-        case .html: return "text/html"
-        case .pdf: return "application/pdf"
-        case .image:
-            if let fileExtension { return "image/\(fileExtension == "jpg" ? "jpeg" : fileExtension)" }
-            return "image/*"
         default: return nil
         }
     }

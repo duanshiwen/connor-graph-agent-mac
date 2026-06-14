@@ -1,7 +1,7 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-15 00:58 GMT+8  
-当前代码基线:`optimize/chat-ui-first-pass`,在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface / session-scoped multi-root project workspace / Connor-owned Scientific Compute Runtime skeleton 基础上,继续加入 Attachment OS Commercial Completion Slice:正式附件域模型、message-level lightweight attachment refs、Session Capsule 附件存储、轻量文本抽取、Docling/MarkItDown sidecar 抽象、PDF/Office/OCR/ASR/VLM capability-aware extraction reports、OpenAI/Claude/Gemini provider-native file routing skeleton、remote provider cache/purge lifecycle、attachment search/embedding index、Graph Memory evidence candidate、enterprise audit mirror 和 full attachment inspector。
+文档更新时间：2026-06-15 02:09 GMT+8  
+当前代码基线:`optimize/chat-ui-first-pass`,在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface / session-scoped multi-root project workspace / Connor-owned Scientific Compute Runtime skeleton 基础上,继续加入 Strict Text Attachment Send Slice:严格文本附件 allowlist、Store 层强制拒绝 unsupported 文件、composer 多文件部分成功/拒绝反馈、Session Capsule current/runs derivative 防冲突结构、附件正文随用户消息进入 prompt、transcript lightweight attachment refs 展示。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package,目标是把 Connor 建成 **graph-memory-native Agent OS**:它不是"图谱编辑器",也不是"Claude SDK 外壳",而是以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI 和 Local Automation Surface 共同构成的本地 Agent 操作系统。
 
@@ -164,9 +164,11 @@ sessions/{sessionID}/
 
 Connor 的会话持久化边界是完整 Session Capsule:SQLite 仍承担 session / run / event / graph 查询存储,但 session-local 的 UI/workspace 状态、记录流、附件、plans、data、logs 与 browser 子状态都归属于 `sessions/{sessionID}/`。`session-state.json` 可保存 `workspace` 引用和 `llmOverride`(per-session 模型覆盖),用于记录当前会话绑定的 project working directory 来源与路径以及独立的模型选择;`records.jsonl` 使用单行 JSONL 追加保存,读取时可跳过坏行,避免 10+ 条记录因一次异常写入或重启退化成 1 条。
 
-Attachment OS 当前遵循本地优先:导入文件会复制到 `attachments/{attachmentID}/original/`,写入 `manifest.json` 和 `attachment-manifest.jsonl`;文本/代码/Markdown/JSON/CSV/HTML 等轻量类型会生成 `derivatives/extracted.md` 并可通过 `AttachmentContextPlan` 进入 prompt。`AgentMessage` 只保存 lightweight `AgentMessageAttachmentRef`,不重复嵌入原文件或完整 manifest。
+Attachment OS 当前遵循本地优先:被允许的附件会复制到 `attachments/{attachmentID}/original/`,写入 `manifest.json` 和 `attachment-manifest.jsonl`;文本/代码/Markdown/JSON/CSV/XML/YAML/日志会生成 `derivatives/current/extracted.md`,并在 `derivatives/runs/{runID}/extracted.md` 保留本次抽取产物以避免文件名冲突。`AgentMessage` 只保存 lightweight `AgentMessageAttachmentRef`,不重复嵌入原文件或完整 manifest;发送消息时,AppViewModel 会读取 current extracted text,按单附件/总预算截断后通过 `AttachmentContextPlan` 注入 `## User Attachments` prompt section。
 
-商业闭环切片新增以下边界:Docling/MarkItDown 通过 `AttachmentExtractionSidecar` 作为本地 sidecar 能力接入,CLI 不存在时 graceful unavailable;PDF / Office / OCR / ASR / VLM 以 capability flags 和 `AgentAttachmentExtractionReport` 表达,不要求默认安装大型模型。OpenAI / Claude / Gemini provider-native file API 通过 provider-neutral routing policy 与 request builders 表达,远程 file ID 只写入 `provider-cache/`,不能成为 source of truth。remote upload / purge 写入 provider cache 和 purge ledger;Claude Files API 明确标记为非 ZDR eligible。Attachment search / embedding index、Graph Memory evidence candidate、enterprise audit mirror 和 full attachment inspector 都围绕同一 Attachment Store 工作,不能绕过 Connor Policy / Session OS。
+当前 Strict Text Attachment Send Slice 使用显式 allowlist:只支持 `.txt`, `.md`, `.markdown`, `.log`, `.json`, `.csv`, `.tsv`, `.xml`, `.yaml`, `.yml` 和常见代码扩展如 `.swift`, `.py`, `.js`, `.ts`, `.tsx`, `.jsx`, `.rs`, `.go`, `.java`, `.kt`, `.c`, `.cpp`, `.h`, `.hpp`, `.cs`, `.rb`, `.php`, `.sh`, `.zsh`, `.bash`, `.sql`, `.css`, `.scss`。HTML/HTM、图片、PDF、音频、视频、Word/Excel/PPT、Apple iWork、压缩包、SVG、数据库、可执行/安装包/二进制和未知扩展会在导入时直接拒绝;被拒绝文件不复制进 Session Capsule、不写 manifest、不生成 message ref、不进入 composer、不进入 prompt。
+
+商业闭环骨架仍保留以下未来扩展入口,但当前发送切片不启用:Docling/MarkItDown sidecar、PDF/Office/OCR/ASR/VLM、OpenAI/Claude/Gemini provider-native file API、remote upload/purge、attachment search/embedding index、Graph Memory evidence candidate、enterprise audit mirror 和 full attachment inspector。这些能力必须继续围绕同一 Attachment Store 工作,不能绕过 Connor Session OS。
 
 主要状态文件:
 

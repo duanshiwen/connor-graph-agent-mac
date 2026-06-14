@@ -49,7 +49,7 @@ public enum AttachmentTextExtraction {
 
     public static func supports(kind: AgentAttachmentKind) -> Bool {
         switch kind {
-        case .text, .code, .markdown, .json, .csv, .html:
+        case .text, .code, .markdown, .json, .csv:
             return true
         default:
             return false
@@ -73,14 +73,6 @@ public enum AttachmentTextExtraction {
             # Extracted attachment: \(filename)
 
             ```csv
-            \(text)
-            ```
-            """
-        case .html:
-            return """
-            # Extracted attachment: \(filename)
-
-            ```html
             \(text)
             ```
             """
