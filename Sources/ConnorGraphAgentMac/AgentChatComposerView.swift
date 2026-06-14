@@ -124,16 +124,14 @@ struct AgentChatComposerView: View {
                         RoundedRectangle(cornerRadius: AgentChatLayout.radiusXL, style: .continuous)
                             .fill(Color(nsColor: .controlBackgroundColor).opacity(0.96))
 
-                        AgentChatPermissionRequestCard(approval: approval, viewModel: viewModel)
-                            .padding(AgentChatLayout.spaceM)
+                        ScrollView {
+                            AgentChatPermissionRequestCard(approval: approval, viewModel: viewModel)
+                                .padding(AgentChatLayout.spaceM)
+                        }
+                        .frame(maxHeight: 220)
                     }
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 }
-            }
-
-            if let error = viewModel.errorMessage {
-                AgentMarkdownPreviewText(markdown: error, font: AgentChatTypography.meta)
-                    .foregroundStyle(.red)
             }
         }
         .padding(0)
@@ -304,7 +302,7 @@ struct AgentChatComposerView: View {
         Menu {
             ForEach(AgentPermissionMode.allCases.filter { $0 != .allowAll }, id: \.self) { mode in
                 Button {
-                    viewModel.sidecarPermissionMode = mode
+                    viewModel.setSidecarPermissionMode(mode)
                 } label: {
                     Text(menuOptionTitle(mode.displayName, isSelected: mode == viewModel.sidecarPermissionMode))
                 }

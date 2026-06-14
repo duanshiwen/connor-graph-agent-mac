@@ -38,13 +38,15 @@ struct AgentChatPermissionRequestCard: View {
                     Label("Session: \(approval.sessionID)", systemImage: "bubble.left.and.bubble.right")
 
                     DisclosureGroup(isExpanded: $isPayloadExpanded) {
-                        Text(approval.payloadJSON)
-                            .font(AgentChatTypography.monoMeta)
-                            .textSelection(.enabled)
-                            .lineLimit(isPayloadExpanded ? nil : 4)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(AgentChatLayout.spaceM)
-                            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
+                        ScrollView {
+                            Text(approval.payloadJSON)
+                                .font(AgentChatTypography.monoMeta)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(AgentChatLayout.spaceM)
+                        }
+                        .frame(maxHeight: 120)
+                        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
                     } label: {
                         Text(compactPayload)
                             .font(AgentChatTypography.monoMeta)
