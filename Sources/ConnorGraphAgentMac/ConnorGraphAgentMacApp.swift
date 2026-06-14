@@ -1739,7 +1739,8 @@ final class AppViewModel: ObservableObject {
             return nil
         }
         let submittingSessionID = manager.session.id
-        activeChatBackendsBySessionID[submittingSessionID] = manager.backend
+        let liveBackend = manager.backend
+        activeChatBackendsBySessionID[submittingSessionID] = liveBackend
         if clearComposer { chatInput = "" }
         agentEventTimelinesBySessionID[submittingSessionID] = []
         agentEventTimelinesByProcessKey = agentEventTimelinesByProcessKey.filter { key, _ in !key.hasPrefix("\(submittingSessionID):") }
@@ -1782,8 +1783,8 @@ final class AppViewModel: ObservableObject {
                     guard let self else { return }
                     if self.submittingChatSessionID == submittingSessionID {
                         self.activeChatRunID = runID
-                        self.activeChatBackendsByRunID[runID] = manager.backend
-                        self.activeChatBackendsBySessionID[submittingSessionID] = manager.backend
+                        self.activeChatBackendsByRunID[runID] = liveBackend
+                        self.activeChatBackendsBySessionID[submittingSessionID] = liveBackend
                         if let reason = self.pendingChatCancellationReasonsBySessionID[submittingSessionID] {
                             self.cancelRunningChatRun(sessionID: submittingSessionID, runID: runID, reason: reason)
                         }
