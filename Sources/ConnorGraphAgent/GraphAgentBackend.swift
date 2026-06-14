@@ -9,6 +9,8 @@ public struct AgentChatRequest: Sendable, Equatable {
     public var sessionSummary: AgentSessionSummary?
     public var recentMessages: [AgentMessage]
     public var permissionMode: AgentPermissionMode
+    public var attachmentRefs: [AgentMessageAttachmentRef]
+    public var attachmentContextPlan: AttachmentContextPlan
     /// Compression anchor state from prior rounds.
     public var anchorState: SessionAnchorState?
 
@@ -20,6 +22,8 @@ public struct AgentChatRequest: Sendable, Equatable {
         sessionSummary: AgentSessionSummary? = nil,
         recentMessages: [AgentMessage] = [],
         permissionMode: AgentPermissionMode = .askToWrite,
+        attachmentRefs: [AgentMessageAttachmentRef] = [],
+        attachmentContextPlan: AttachmentContextPlan = AttachmentContextPlan(),
         anchorState: SessionAnchorState? = nil
     ) {
         self.runID = runID
@@ -29,6 +33,8 @@ public struct AgentChatRequest: Sendable, Equatable {
         self.sessionSummary = sessionSummary
         self.recentMessages = recentMessages
         self.permissionMode = permissionMode
+        self.attachmentRefs = attachmentRefs
+        self.attachmentContextPlan = attachmentContextPlan
         self.anchorState = anchorState
     }
 

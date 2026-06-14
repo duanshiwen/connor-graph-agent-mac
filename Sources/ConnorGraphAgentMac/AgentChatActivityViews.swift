@@ -391,6 +391,9 @@ struct AgentChatMessageRow: View {
 
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                 messageContent
+                if !row.attachments.isEmpty {
+                    AgentMessageAttachmentRefsView(attachments: row.attachments)
+                }
             }
             .foregroundStyle(Color.primary)
             .padding(AgentChatLayout.spaceM)
@@ -471,6 +474,30 @@ struct AgentChatMessageRow: View {
     private var messageBackground: Color {
         if isUser { return ConnorCraftPalette.userBubble }
         return Color(nsColor: .controlBackgroundColor).opacity(0.85)
+    }
+}
+
+private struct AgentMessageAttachmentRefsView: View {
+    var attachments: [AgentMessageAttachmentRef]
+
+    var body: some View {
+        FlowLikeChips(values: attachments.map { attachment in
+            "\(iconPrefix(for: attachment.kind)) \(attachment.displayName)"
+        })
+        .accessibilityLabel("消息附件 \(attachments.count) 个")
+    }
+
+    private func iconPrefix(for kind: AgentAttachmentKind) -> String {
+        switch kind {
+        case .image: return "图片"
+        case .pdf: return "PDF"
+        case .csv, .spreadsheet: return "表格"
+        case .code, .json, .html: return "代码"
+        case .archive: return "压缩包"
+        case .audio: return "音频"
+        case .video: return "视频"
+        default: return "附件"
+        }
     }
 }
 

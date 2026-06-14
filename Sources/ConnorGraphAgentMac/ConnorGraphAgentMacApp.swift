@@ -151,6 +151,7 @@ final class AppViewModel: ObservableObject {
     @Published var userCountry: String = "中国"
     @Published var userPreferenceNotes: String = ""
     @Published var appSettingsMessage: String?
+    @Published var pendingAttachmentRefs: [AgentMessageAttachmentRef] = []
 
     private var repository: AppGraphRepository?
     private var promotionRepository: AppPromotionQueueRepository?
@@ -182,6 +183,7 @@ final class AppViewModel: ObservableObject {
     private var activeChatBackendsByRunID: [String: AnyAgentBackend] = [:]
     private var pendingChatCancellationReasonsBySessionID: [String: String] = [:]
     private var chatInputDraftsBySessionID: [String: String] = [:]
+    private var pendingAttachmentRefsBySessionID: [String: [AgentMessageAttachmentRef]] = [:]
     private var isRestoringChatInputDraft = false
     private var agentEventTimelinesBySessionID: [String: [AgentEventPresentation]] = [:]
     private var agentEventTimelinesByProcessKey: [String: [AgentEventPresentation]] = [:]
@@ -254,6 +256,39 @@ final class AppViewModel: ObservableObject {
 
     private func restoreChatInputDraft(for sessionID: String?) {
         setChatInputDraft("", for: sessionID)
+        pendingAttachmentRefs = sessionID.flatMap { pendingAttachmentRefsBySessionID[$0] } ?? []
+    }
+
+    var canSubmitCurrentChat: Bool {
+        !chatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !pendingAttachmentRefs.isEmpty
+    }
+
+    func removePendingAttachment(id: String) {
+        pendingAttachmentRefs.removeAll { $0.id == id }
+        if let selectedChatSessionID {
+            pendingAttachmentRefsBySessionID[selectedChatSessionID] = pendingAttachmentRefs
+        }
+    }
+
+    func importAttachments(urls: [URL]) async {
+        guard let selectedChatSessionID, let storagePaths else { return }
+        let store = AppSessionAttachmentStore(paths: storagePaths)
+        var imported: [AgentMessageAttachmentRef] = []
+        for url in urls {
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer {
+                if accessed { url.stopAccessingSecurityScopedResource() }
+            }
+            do {
+                let manifest = try store.importFile(at: url, sessionID: selectedChatSessionID)
+                imported.append(manifest.messageRef)
+            } catch {
+                errorMessage = "附件导入失败：\(error)"
+            }
+        }
+        guard !imported.isEmpty else { return }
+        pendingAttachmentRefs.append(contentsOf: imported)
+        pendingAttachmentRefsBySessionID[selectedChatSessionID] = pendingAttachmentRefs
     }
 
     private func refreshSelectedSubmittingState() {
@@ -1897,7 +1932,8 @@ final class AppViewModel: ObservableObject {
     func submitChat(prompt rawPrompt: String, clearComposer: Bool = false, displayPrompt rawDisplayPrompt: String? = nil) async -> String? {
         let prompt = rawPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let displayPrompt = rawDisplayPrompt?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !prompt.isEmpty else { return nil }
+        let attachmentsForSubmission = pendingAttachmentRefs
+        guard !prompt.isEmpty || !attachmentsForSubmission.isEmpty else { return nil }
         guard var manager = nativeSessionManager else {
             errorMessage = String(describing: AppChatRuntimeUnavailableError.nativeSessionManagerUnavailable)
             return nil
@@ -1909,6 +1945,8 @@ final class AppViewModel: ObservableObject {
         if clearComposer {
             chatInputDraftsBySessionID[submittingSessionID] = ""
             if selectedChatSessionID == submittingSessionID { setChatInputDraft("", for: submittingSessionID) }
+            pendingAttachmentRefsBySessionID[submittingSessionID] = []
+            if selectedChatSessionID == submittingSessionID { pendingAttachmentRefs = [] }
         }
         agentEventTimelinesBySessionID[submittingSessionID] = []
         agentEventTimelinesByProcessKey = agentEventTimelinesByProcessKey.filter { key, _ in !key.hasPrefix("\(submittingSessionID):") }
@@ -1918,7 +1956,11 @@ final class AppViewModel: ObservableObject {
         refreshSelectedSubmittingState()
         let optimisticTranscript = transcript
         let baselineMessageCount = manager.session.messages.count
-        let optimisticUserMessage = AgentMessage(role: .user, content: displayPrompt?.isEmpty == false ? displayPrompt! : prompt)
+        let optimisticUserMessage = AgentMessage(
+            role: .user,
+            content: displayPrompt?.isEmpty == false ? displayPrompt! : prompt,
+            attachments: attachmentsForSubmission
+        )
         if selectedChatSessionID == submittingSessionID {
             transcript = optimisticTranscript + [optimisticUserMessage]
         }
@@ -1945,6 +1987,7 @@ final class AppViewModel: ObservableObject {
                 prompt,
                 sessionSummary: sessionSummary,
                 displayPrompt: displayPrompt?.isEmpty == false ? displayPrompt : nil,
+                attachments: attachmentsForSubmission,
                 onRunStarted: { [weak self] runID in
                     guard let self else { return }
                     if self.submittingChatSessionIDs.contains(submittingSessionID) {

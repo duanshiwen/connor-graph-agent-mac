@@ -45,6 +45,7 @@ struct AgentChatComposerView: View {
     @ObservedObject var viewModel: AppViewModel
     @Binding var isSessionInfoPresented: Bool
     @State private var isWorkspacePopoverPresented: Bool = false
+    @State private var isFileImporterPresented: Bool = false
 
     private let workspaceMenuItemMaxWidth: CGFloat = 320
 
@@ -53,19 +54,30 @@ struct AgentChatComposerView: View {
             optionBadgeRow
 
             VStack(spacing: 0) {
-                SafeChatComposerTextView(
-                    text: $viewModel.chatInput,
-                    placeholder: "按 Shift + Return 换行",
-                    isSpellCheckEnabled: viewModel.spellCheckEnabled,
-                    onSubmit: { Task { await viewModel.submitChat() } }
-                )
-                .padding(.horizontal, AgentChatLayout.spaceL)
-                .padding(.vertical, AgentChatLayout.spaceM)
+                VStack(spacing: 0) {
+                    if !viewModel.pendingAttachmentRefs.isEmpty {
+                        AgentAttachmentShelfView(attachments: viewModel.pendingAttachmentRefs) { id in
+                            viewModel.removePendingAttachment(id: id)
+                        }
+                        .frame(height: 42, alignment: .topLeading)
+                    }
+
+                    SafeChatComposerTextView(
+                        text: $viewModel.chatInput,
+                        placeholder: "按 Shift + Return 换行",
+                        isSpellCheckEnabled: viewModel.spellCheckEnabled,
+                        onSubmit: { Task { await viewModel.submitChat() } }
+                    )
+                    .padding(.horizontal, AgentChatLayout.spaceL)
+                    .padding(.top, viewModel.pendingAttachmentRefs.isEmpty ? AgentChatLayout.spaceM : AgentChatLayout.spaceXS)
+                    .padding(.bottom, AgentChatLayout.spaceM)
+                    .frame(maxHeight: .infinity, alignment: .topLeading)
+                    .background(Color.clear)
+                }
                 .frame(minHeight: AgentChatLayout.composerTextMinHeight, maxHeight: AgentChatLayout.composerTextMaxHeight, alignment: .topLeading)
-                .background(Color.clear)
 
                 HStack(spacing: AgentChatLayout.spaceS) {
-                    Button(action: {}) {
+                    Button(action: { isFileImporterPresented = true }) {
                         Image(systemName: "paperclip")
                             .font(.system(size: AgentChatTypography.controlIconSize, weight: .medium))
                             .symbolRenderingMode(.hierarchical)
@@ -102,7 +114,7 @@ struct AgentChatComposerView: View {
 
                     AgentSendControlButton(
                         isSubmitting: viewModel.isSubmittingChat,
-                        isDisabled: !viewModel.isSubmittingChat && viewModel.chatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                        isDisabled: !viewModel.isSubmittingChat && !viewModel.canSubmitCurrentChat,
                         action: {
                             if viewModel.isSubmittingChat {
                                 viewModel.cancelActiveChatRun()
@@ -137,6 +149,14 @@ struct AgentChatComposerView: View {
         }
         .padding(0)
         .background(Color.clear)
+        .fileImporter(isPresented: $isFileImporterPresented, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+            switch result {
+            case .success(let urls):
+                Task { await viewModel.importAttachments(urls: urls) }
+            case .failure(let error):
+                viewModel.errorMessage = "附件选择失败：\(error)"
+            }
+        }
     }
 
     private var selectedSession: AgentSession? {
