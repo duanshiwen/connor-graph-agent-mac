@@ -44,6 +44,34 @@ enum ConnorCraftPalette {
     }
 }
 
+enum AgentChatTypography {
+    // Keep a small, semantic scale instead of one-off sizes. Apple HIG recommends
+    // using font size, weight, and color to preserve legibility and hierarchy.
+    static let largeIconSize: CGFloat = 48
+    static let controlIconSize: CGFloat = 15
+    static let smallIconSize: CGFloat = 13
+    static let chevronIconSize: CGFloat = 13
+    static let sendIconSize: CGFloat = 15
+
+    static let title: Font = .title3.weight(.semibold)
+    static let sectionTitle: Font = .headline.weight(.semibold)
+    static let sessionTitle: Font = .system(size: 15, weight: .regular)
+    static let sessionTitleEmphasis: Font = .system(size: 15, weight: .semibold)
+    static let body: Font = .system(size: 15)
+    static let bodyEmphasis: Font = .system(size: 15, weight: .semibold)
+    static let callout: Font = .system(size: 14)
+    static let calloutEmphasis: Font = .system(size: 14, weight: .semibold)
+    static let meta: Font = .system(size: 13)
+    static let metaEmphasis: Font = .system(size: 13, weight: .semibold)
+    static let micro: Font = .system(size: 12)
+    static let microEmphasis: Font = .system(size: 12, weight: .semibold)
+    static let monoMeta: Font = .system(size: 13, design: .monospaced)
+    static let monoMetaEmphasis: Font = .system(size: 13, weight: .semibold, design: .monospaced)
+    static let monoMicro: Font = .system(size: 12, design: .monospaced)
+
+    static var composerNSFont: NSFont { .systemFont(ofSize: 16) }
+}
+
 enum AgentChatLayout {
     static let spaceXS: CGFloat = 3
     static let spaceS: CGFloat = 6
@@ -57,10 +85,12 @@ enum AgentChatLayout {
     static let radiusXL: CGFloat = 18
 
     static let hairlineOpacity: Double = 0.14
-    static let chipHeight: CGFloat = 24
-    static let iconButtonSize: CGFloat = 24
-    static let primaryButtonSize: CGFloat = 28
-    static let composerTextMinHeight: CGFloat = 46
+    static let chipHeight: CGFloat = 30
+    static let iconButtonSize: CGFloat = 32
+    static let primaryButtonSize: CGFloat = 34
+    static let hitTargetSize: CGFloat = 44
+    static let activityRowMinHeight: CGFloat = 24
+    static let composerTextMinHeight: CGFloat = 56
     static let composerTextMaxHeight: CGFloat = 120
     static let composerInfoButtonWidth: CGFloat = 78
     static let modelMenuMaxWidth: CGFloat = 176
@@ -130,10 +160,13 @@ private struct AgentChatSessionListView: View {
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                 HStack {
                     Text("Inbox")
-                        .font(.headline)
+                        .font(AgentChatTypography.sectionTitle)
                     Spacer()
                     Button(action: { viewModel.reloadChatSessions() }) {
                         Image(systemName: "arrow.clockwise")
+                            .font(.system(size: AgentChatTypography.controlIconSize, weight: .medium))
+                            .symbolRenderingMode(.hierarchical)
+                            .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
                     }
                     .buttonStyle(.borderless)
                     .help("重新加载会话")
@@ -176,21 +209,22 @@ private struct AgentChatSessionRow: View {
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                 HStack(spacing: AgentChatLayout.spaceS) {
                     Image(systemName: row.isFlagged ? "flag.fill" : (isSelected ? "message.fill" : "message"))
-                        .font(.caption)
+                        .font(.system(size: AgentChatTypography.controlIconSize, weight: .medium))
+                        .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(row.isFlagged ? .orange : (isSelected ? ConnorCraftPalette.accent : .secondary))
                         .frame(width: 16)
                     Text(row.title)
-                        .font(.subheadline.weight(isSelected ? .semibold : .regular))
+                        .font(isSelected ? AgentChatTypography.sessionTitleEmphasis : AgentChatTypography.sessionTitle)
                         .lineLimit(1)
                     Spacer(minLength: 0)
                 }
                 HStack(spacing: AgentChatLayout.spaceS) {
                     AgentStatusPill(status: row.status, text: row.statusText)
                     Text("\(row.messageCount) msgs")
-                        .font(.caption2)
+                        .font(AgentChatTypography.micro)
                         .foregroundStyle(.secondary)
                     Text(row.relativeUpdatedTime)
-                        .font(.caption2)
+                        .font(AgentChatTypography.micro)
                         .foregroundStyle(.secondary)
                 }
                 if !row.labels.isEmpty {
@@ -206,6 +240,7 @@ private struct AgentChatSessionRow: View {
             .contentShape(RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
         }
         .buttonStyle(.plain)
+        .contentShape(Capsule())
     }
 }
 
@@ -419,7 +454,7 @@ private struct AgentChatConversationHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
             Text(selectedTitle)
-                .font(.headline)
+                .font(AgentChatTypography.sectionTitle)
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .center)
 
@@ -427,26 +462,26 @@ private struct AgentChatConversationHeader: View {
                 DisclosureGroup {
                     VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                         Text(summary.content)
-                            .font(.subheadline)
+                            .font(AgentChatTypography.callout)
                             .textSelection(.enabled)
                         if let freshness = viewModel.latestChatSummaryFreshness {
                             Text("覆盖 \(freshness.coveredMessageCount) / \(freshness.currentMessageCount) 条消息 · 更新于 \(summary.updatedAt.formatted())")
-                                .font(.caption)
+                                .font(AgentChatTypography.meta)
                                 .foregroundStyle(.secondary)
                         }
                         Text(viewModel.latestChatSummaryContextMessage)
-                            .font(.caption)
+                            .font(AgentChatTypography.meta)
                             .foregroundColor(viewModel.latestChatSummaryFreshness?.isFresh == true ? .secondary : .orange)
                         if let message = viewModel.chatSummaryMessage {
                             Text(message)
-                                .font(.caption)
+                                .font(AgentChatTypography.meta)
                                 .foregroundStyle(.green)
                         }
                     }
                     .padding(.top, AgentChatLayout.spaceS)
                 } label: {
                     Label("会话摘要", systemImage: "text.quote")
-                        .font(.caption.weight(.semibold))
+                        .font(AgentChatTypography.metaEmphasis)
                 }
                 .padding(AgentChatLayout.spaceM)
                 .background(.quaternary.opacity(0.20), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
@@ -486,7 +521,7 @@ private struct FilterButton: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.caption.weight(isSelected ? .semibold : .regular))
+                .font(AgentChatTypography.meta.weight(isSelected ? .semibold : .regular))
                 .padding(.horizontal, AgentChatLayout.spaceM)
                 .padding(.vertical, AgentChatLayout.spaceS)
                 .background(isSelected ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.10), in: Capsule())
@@ -501,7 +536,7 @@ private struct AgentStatusPill: View {
 
     var body: some View {
         Label(text, systemImage: icon)
-            .font(.caption2.weight(.semibold))
+            .font(AgentChatTypography.microEmphasis)
             .padding(.horizontal, AgentChatLayout.spaceS)
             .padding(.vertical, AgentChatLayout.spaceXS)
             .background(color.opacity(0.16), in: Capsule())
@@ -538,7 +573,7 @@ private struct AgentLabelPill: View {
 
     var body: some View {
         Text(text)
-            .font(.caption2.weight(.medium))
+            .font(AgentChatTypography.micro.weight(.medium))
             .lineLimit(1)
             .padding(.horizontal, AgentChatLayout.spaceS)
             .padding(.vertical, AgentChatLayout.spaceXS)
@@ -559,9 +594,9 @@ private struct AgentChatInspectorView: View {
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
                 VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
                     Text("信息")
-                        .font(.headline)
+                        .font(AgentChatTypography.sectionTitle)
                     Text("会话设置、标签和文件")
-                        .font(.caption)
+                        .font(AgentChatTypography.meta)
                         .foregroundStyle(.secondary)
                 }
 
@@ -581,7 +616,7 @@ private struct AgentChatInspectorView: View {
     private func sessionGovernance(_ session: AgentSession) -> some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
             Text("会话")
-                .font(.subheadline.weight(.semibold))
+                .font(AgentChatTypography.calloutEmphasis)
             Picker("状态", selection: Binding(
                 get: { session.governance.status },
                 set: { newValue in
@@ -605,7 +640,7 @@ private struct AgentChatInspectorView: View {
                 }
             }
             .buttonStyle(.bordered)
-            .controlSize(.small)
+            .controlSize(.regular)
 
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
                 Text("消息：\(session.messages.count)")
@@ -613,7 +648,7 @@ private struct AgentChatInspectorView: View {
                 Text("会话 ID：\(session.id)")
                     .textSelection(.enabled)
             }
-            .font(.caption)
+            .font(AgentChatTypography.meta)
             .foregroundStyle(.secondary)
         }
         .padding(AgentChatLayout.spaceM)
@@ -623,7 +658,7 @@ private struct AgentChatInspectorView: View {
     private func labels(_ session: AgentSession) -> some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
             Text("标签")
-                .font(.subheadline.weight(.semibold))
+                .font(AgentChatTypography.calloutEmphasis)
             ForEach(viewModel.governanceConfig.labels.filter { $0.valueType == .boolean }) { definition in
                 Button {
                     viewModel.toggleSelectedSessionLabel(definition.id)
@@ -633,7 +668,7 @@ private struct AgentChatInspectorView: View {
                         Text(definition.name)
                         Spacer()
                     }
-                    .font(.subheadline)
+                    .font(AgentChatTypography.callout)
                     .padding(.vertical, 2)
                 }
                 .buttonStyle(.plain)
@@ -646,7 +681,7 @@ private struct AgentChatInspectorView: View {
     private var artifacts: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
             Text("会话文件")
-                .font(.subheadline.weight(.semibold))
+                .font(AgentChatTypography.calloutEmphasis)
             if let dirs = viewModel.selectedSessionArtifactDirectories {
                 ArtifactPathRow(label: "plans", path: dirs.plans.path)
                 ArtifactPathRow(label: "data", path: dirs.data.path)
@@ -654,7 +689,7 @@ private struct AgentChatInspectorView: View {
                 ArtifactPathRow(label: "exports", path: dirs.exports.path)
             } else {
                 Text("暂无会话文件。")
-                    .font(.caption)
+                    .font(AgentChatTypography.meta)
                     .foregroundStyle(.secondary)
             }
         }
@@ -670,9 +705,9 @@ private struct ArtifactPathRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
-                .font(.caption.weight(.semibold))
+                .font(AgentChatTypography.metaEmphasis)
             Text(path)
-                .font(.caption2.monospaced())
+                .font(AgentChatTypography.monoMicro)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
                 .textSelection(.enabled)
