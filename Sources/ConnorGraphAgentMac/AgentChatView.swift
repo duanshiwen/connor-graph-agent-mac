@@ -136,6 +136,9 @@ struct AgentChatView: View {
             return .handled
         })
         .navigationTitle("康纳同学会话")
+        .sheet(item: $viewModel.attachmentPreviewModel) { model in
+            AgentAttachmentPreviewSheetView(model: model)
+        }
         .task {
             viewModel.deferViewUpdate {
                 viewModel.reloadChatSessions()
@@ -379,6 +382,9 @@ private struct AgentChatConversationView: View {
                                         row: message,
                                         onAssistantMessageCollapsed: {
                                             scrollToBottomAfterCollapsedMessageLayout(proxy: proxy)
+                                        },
+                                        onPreviewAttachment: { attachment in
+                                            viewModel.previewAttachment(attachment)
                                         }
                                     )
                                     .id(item.id)

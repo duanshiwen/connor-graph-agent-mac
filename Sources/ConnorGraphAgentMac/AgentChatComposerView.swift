@@ -92,9 +92,11 @@ struct AgentChatComposerView: View {
             VStack(spacing: 0) {
                 VStack(spacing: 0) {
                     if !viewModel.pendingAttachmentRefs.isEmpty {
-                        AgentAttachmentShelfView(attachments: viewModel.pendingAttachmentRefs) { id in
-                            viewModel.removePendingAttachment(id: id)
-                        }
+                        AgentAttachmentShelfView(
+                            attachments: viewModel.pendingAttachmentRefs,
+                            onPreview: { attachment in viewModel.previewAttachment(attachment) },
+                            onRemove: { id in viewModel.removePendingAttachment(id: id) }
+                        )
                         .frame(height: 42, alignment: .topLeading)
                     }
 

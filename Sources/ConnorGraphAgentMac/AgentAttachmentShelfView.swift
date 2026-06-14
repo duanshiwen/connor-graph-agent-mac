@@ -3,6 +3,7 @@ import ConnorGraphCore
 
 struct AgentAttachmentShelfView: View {
     var attachments: [AgentMessageAttachmentRef]
+    var onPreview: (AgentMessageAttachmentRef) -> Void = { _ in }
     var onRemove: (String) -> Void
 
     var body: some View {
@@ -22,18 +23,27 @@ struct AgentAttachmentShelfView: View {
 
     private func attachmentChip(_ attachment: AgentMessageAttachmentRef) -> some View {
         HStack(spacing: AgentChatLayout.spaceS) {
-            Image(systemName: iconName(for: attachment.kind))
-                .font(.system(size: AgentChatTypography.smallIconSize, weight: .medium))
-                .foregroundStyle(ConnorCraftPalette.accent)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(attachment.displayName)
-                    .font(AgentChatTypography.microEmphasis)
-                    .lineLimit(1)
-                Text(statusText(for: attachment))
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+            Button {
+                onPreview(attachment)
+            } label: {
+                HStack(spacing: AgentChatLayout.spaceS) {
+                    Image(systemName: iconName(for: attachment.kind))
+                        .font(.system(size: AgentChatTypography.smallIconSize, weight: .medium))
+                        .foregroundStyle(ConnorCraftPalette.accent)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(attachment.displayName)
+                            .font(AgentChatTypography.microEmphasis)
+                            .lineLimit(1)
+                        Text(statusText(for: attachment))
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("预览附件 \(attachment.displayName)")
+
             Button {
                 onRemove(attachment.id)
             } label: {
