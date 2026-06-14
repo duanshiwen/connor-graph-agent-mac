@@ -1,6 +1,6 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-14 14:10 GMT+8  
+文档更新时间：2026-06-14 15:25 GMT+8  
 当前代码基线：`optimize/chat-ui-first-pass`，在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface / session-scoped multi-root project workspace / Connor-owned Scientific Compute Runtime skeleton 基础上，完成 P1/P2 合并优化：权限审批恢复、composer 内权限确认 overlay、取消后保留 activity timeline、Chat UI 组件拆分、App shell/settings/ProductOS/diagnostic 视图拆分、AppViewModel factory / builder / mapper / editor 小步抽取、Browser workspace 模型与浮窗视图拆分、Commercial readiness snapshot builder 拆分、Claude sidecar protocol DTO 拆分，以及 SwiftPM asset catalog resource warning 修复。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package，目标是把 Connor 建成 **graph-memory-native Agent OS**：它不是“图谱编辑器”，也不是“Claude SDK 外壳”，而是以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI 和 Local Automation Surface 共同构成的本地 Agent 操作系统。
@@ -155,7 +155,7 @@ graph/evaluations/retrieval-evaluation-cases.json
 graph/evaluations/reports/*.json
 ```
 
-`runtime-settings.json` 保存应用、外观、输入、权限、UI 和用户偏好类设置。项目工作目录不再作为设置页里的全局主状态；每个会话在自己的 Session Capsule 中保存 `workspace` 引用和 roots。会话页 composer 底部的 folder badge 是当前工作目录的高频入口，可快速切换 primary root、选择新目录或重置为默认；顶部 Workspace 详情用于 multi-root 管理。`runtime-settings.workspace` / `llm.sidecar.workingDirectoryPath` 仅保留为 legacy fallback / 新会话初始模板兼容层。Native local tools 使用当前 session 的 multi-root allowed roots；Claude Sidecar 使用当前 session primary root 作为单一 cwd。`llm-settings.json` 保存模型提供方、Base URL、模型名和 Claude Sidecar 配置。API Key 不写入 JSON，由本地 Keychain 凭据仓库管理。
+`runtime-settings.json` 保存应用、外观、输入、权限、UI、用户偏好和轻量 MRU 历史类设置。项目工作目录不再作为设置页里的全局主状态；每个会话在自己的 Session Capsule 中保存 `workspace` 引用和 roots。会话页 composer 底部的 folder badge 是当前工作目录的高频入口，可快速切换 primary root、通过“历史打开列表”二级菜单恢复最近打开目录、选择新目录或重置为默认；顶部 Workspace 详情用于 multi-root 管理。`runtime-settings.workspace.defaultWorkingDirectoryPath` / `runtime-settings.workspace.roots` / `llm.sidecar.workingDirectoryPath` 仅保留为 legacy fallback / 新会话初始模板兼容层；`runtime-settings.workspace.recentWorkspacePaths` 保存跨会话最近打开目录列表。Native local tools 使用当前 session 的 multi-root allowed roots；Claude Sidecar 使用当前 session primary root 作为单一 cwd。`llm-settings.json` 保存模型提供方、Base URL、模型名和 Claude Sidecar 配置。API Key 不写入 JSON，由本地 Keychain 凭据仓库管理。
 
 ---
 
@@ -940,8 +940,8 @@ Bash       dynamic shell capability 在 workspace 内执行非交互命令，按
 ```
 
 - 默认项目目录推荐写入当前会话的 `sessions/{sessionID}/state/session-state.json` → `workspace.roots`；每个 root 包含 `id`、`displayName`、`path`、`role` 和 `isPrimary`。
-- `runtime-settings.json` 中的 `workspace.defaultWorkingDirectoryPath`、`workspace.additionalAllowedDirectoryPaths`、`workspace.roots` 保留为旧配置兼容 fallback / 新会话初始模板，不再是 UI 主设置。
-- 会话界面的“当前会话 Workspace”控件支持选择多个目录、添加路径、设为主目录、移除 root；样式沿用 row / badge 体系。
+- `runtime-settings.json` 中的 `workspace.defaultWorkingDirectoryPath`、`workspace.additionalAllowedDirectoryPaths`、`workspace.roots` 保留为旧配置兼容 fallback / 新会话初始模板，不再是 UI 主设置；`workspace.recentWorkspacePaths` 仅保存跨会话最近打开目录 MRU 列表，默认最多 8 个。
+- 会话界面的“当前会话 Workspace”控件支持选择多个目录、添加路径、设为主目录、移除 root；composer folder badge 额外提供“历史打开列表”二级菜单，点击历史项会加入当前 session roots 并设为 primary。
 - Claude Sidecar 的 cwd 仍只能是一个目录，因此使用 primary root；其他 roots 是 Connor Native tools 的允许根。
 - `llm.sidecar.workingDirectoryPath` 保留为旧配置兼容 fallback，不再是唯一 Sidecar cwd 来源。
 - 所有路径会做标准化和 symlink resolving，防止 workspace 内 symlink 逃逸到系统目录。
