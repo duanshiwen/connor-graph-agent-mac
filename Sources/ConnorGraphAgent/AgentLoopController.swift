@@ -1,6 +1,7 @@
 import Foundation
 import ConnorGraphCore
 import ConnorGraphSearch
+import os.log
 
 public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
     public var maxToolIterations: Int
@@ -39,6 +40,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
     public var contextBuilder: AgentContextBuilder?
     private let cancellationRegistry: AgentLoopCancellationRegistry
     private let approvalRegistry: AgentLoopApprovalRegistry
+    private let logger = Logger(subsystem: "com.connor.agent", category: "tool-loop")
 
     public init(
         modelProvider: Provider,
@@ -96,10 +98,39 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 messages.append(AgentModelMessage(role: .user, content: request.normalizedPrompt))
 
                 do {
+                    var iterationCount = 0
+                    var recentToolCalls: [String] = []  // 记录最近的工具调用名称
+                    let maxConsecutiveFailures = 3
+                    var consecutiveFailures = 0
+                    
                     for _ in 0..<configuration.maxToolIterations {
+                        iterationCount += 1
+                        logger.info("Iteration \(iterationCount)/\(configuration.maxToolIterations)")
+                        
+                        // 检测是否卡住（最近 6 次调用只有 2 个不同的工具）
+                        if recentToolCalls.count >= 6 {
+                            let last6 = Array(recentToolCalls.suffix(6))
+                            let uniqueTools = Set(last6)
+                            if uniqueTools.count <= 2 {
+                                logger.warning("Agent appears stuck: repeating tools \(uniqueTools)")
+                                let failure = AgentRunFailure(
+                                    runID: run.id,
+                                    sessionID: run.sessionID,
+                                    message: "Agent appears to be stuck in a loop (repeating: \(uniqueTools.joined(separator: ", "))). Please try a different approach or provide more specific instructions."
+                                )
+                                run.status = .failed
+                                run.completedAt = Date()
+                                try? eventRecorder.recordRun(run)
+                                yield(.runFailed(failure), to: continuation, recorder: eventRecorder)
+                                continuation.finish(throwing: AgentLoopError.maxToolIterationsReached)
+                                return
+                            }
+                        }
+                        
                         try Task.checkCancellation()
                         let modelResponse = try await modelProvider.complete(AgentModelRequest(messages: messages, tools: toolRegistry.definitions))
                         try Task.checkCancellation()
+                        logger.info("Model response: \(modelResponse.toolCalls.count) tool calls, has text: \(modelResponse.text != nil)")
                         let budgetSnapshot = await budgetMeter.record(modelResponse.usage)
                         if budgetSnapshot.status == .warning || budgetSnapshot.status == .exceeded {
                             let label = budgetSnapshot.status == .exceeded ? "Token budget exceeded" : "Token budget warning"
@@ -126,10 +157,12 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         }
 
                         let calls = Array(modelResponse.toolCalls.prefix(configuration.maxToolCallsPerIteration))
+                        logger.info("Executing \(calls.count) tool calls: \(calls.map(\.name).joined(separator: ", "))")
                         for var call in calls {
                             try Task.checkCancellation()
                             call.runID = run.id
                             call.sessionID = run.sessionID
+                            logger.info("Starting tool: \(call.name) (ID: \(call.id))")
                             yield(.toolRequested(call), to: continuation, recorder: eventRecorder)
                             yield(.toolStarted(call), to: continuation, recorder: eventRecorder)
                             let context = AgentToolExecutionContext(
@@ -148,7 +181,11 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                     continuation: continuation
                                 )
                                 try Task.checkCancellation()
+                                logger.info("Tool \(call.name) completed. Result: \(result.contentText.prefix(200))")
                                 yield(.toolFinished(result), to: continuation, recorder: eventRecorder)
+                                // 跟踪工具调用
+                                recentToolCalls.append(call.name)
+                                consecutiveFailures = 0  // 成功则重置失败计数
                                 messages.append(AgentModelMessage(
                                     role: .assistant,
                                     content: "",
@@ -161,6 +198,26 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                     name: call.name
                                 ))
                             } catch {
+                                logger.error("Tool \(call.name) failed: \(error.localizedDescription)")
+                                consecutiveFailures += 1
+                                recentToolCalls.append(call.name)
+                                
+                                // 如果连续失败太多次，停止
+                                if consecutiveFailures >= maxConsecutiveFailures {
+                                    logger.warning("Too many consecutive failures (\(consecutiveFailures)). Stopping.")
+                                    let failure = AgentRunFailure(
+                                        runID: run.id,
+                                        sessionID: run.sessionID,
+                                        message: "Too many consecutive tool failures (\(consecutiveFailures)). Last error: \(error.localizedDescription)"
+                                    )
+                                    run.status = .failed
+                                    run.completedAt = Date()
+                                    try? eventRecorder.recordRun(run)
+                                    yield(.runFailed(failure), to: continuation, recorder: eventRecorder)
+                                    continuation.finish(throwing: AgentLoopError.maxToolIterationsReached)
+                                    return
+                                }
+                                
                                 let failure = AgentToolFailure(
                                     runID: run.id,
                                     sessionID: run.sessionID,
@@ -247,7 +304,30 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
 
     private var systemPrompt: String {
         """
-        You are Connor Graph Agent. Use graph tools when you need grounded knowledge. Prefer evidence-backed answers. Do not claim graph writes are committed unless a commit tool result says so.
+        You are Connor Graph Agent, a specialized AI assistant for knowledge graph operations and local file management.
+
+        ## Core Principles
+        1. **Be Efficient**: Use the minimum number of tool calls to complete the task.
+        2. **Stop When Done**: Once the task is complete, provide a final answer immediately.
+        3. **Learn from Failures**: If a tool fails, analyze the error and try a different approach. Do not retry the same failing operation.
+        4. **Avoid Loops**: If you've tried the same approach 3 times without progress, stop and explain the issue.
+
+        ## Tool Usage Guidelines
+        - **Read files first**: Before editing, always read the file to understand its structure.
+        - **Use Grep to find**: When searching for code patterns, use Grep instead of reading entire files.
+        - **Edit vs MultiEdit**: Use Edit for single changes, MultiEdit for multiple changes in one file.
+        - **Bash for commands**: Use Bash for shell commands, not for file operations.
+
+        ## When to Stop
+        - Task is completed successfully
+        - You've encountered an error you cannot resolve
+        - You've made 3 attempts without progress
+        - The user's request is unclear (ask for clarification)
+
+        ## Response Format
+        - Provide a clear summary of what you did
+        - Include any relevant file paths or code snippets
+        - If there were errors, explain what went wrong and what you tried
         """
     }
 

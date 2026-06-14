@@ -28,6 +28,27 @@ import ConnorGraphStore
     #expect(try store.events(runID: run.id).map(\.kind) == [.runStarted])
 }
 
+@Test func storeLoadsAllRunEventsWhenLimitIsNil() throws {
+    let store = try SQLiteGraphKernelStore(path: ":memory:")
+    try store.migrate()
+
+    let run = AgentRun(sessionID: "session-many-events", groupID: "default", status: .running, model: "test-model")
+    try store.upsert(run: run)
+
+    for index in 0..<350 {
+        try store.append(event: PersistedAgentEvent(
+            runID: run.id,
+            sessionID: run.sessionID,
+            kind: .toolStarted,
+            payloadJSON: "{\"index\":\(index)}",
+            sequence: index
+        ))
+    }
+
+    #expect(try store.events(runID: run.id, limit: 300).count == 300)
+    #expect(try store.events(runID: run.id, limit: nil).count == 350)
+}
+
 @Test func storePersistsGraphWriteCandidatesWithoutCommittingGraph() throws {
     let store = try SQLiteGraphKernelStore(path: ":memory:")
     try store.migrate()

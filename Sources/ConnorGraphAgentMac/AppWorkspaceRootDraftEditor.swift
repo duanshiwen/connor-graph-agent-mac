@@ -6,7 +6,10 @@ enum AppWorkspaceRootDraftEditor {
         let path = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !path.isEmpty else { return false }
         if let existing = roots.first(where: { $0.path == path }) {
-            if makePrimary { setPrimaryRoot(id: existing.id, in: &roots) }
+            if makePrimary {
+                setPrimaryRoot(id: existing.id, in: &roots)
+                return true
+            }
             return false
         }
         let url = URL(fileURLWithPath: path, isDirectory: true)
