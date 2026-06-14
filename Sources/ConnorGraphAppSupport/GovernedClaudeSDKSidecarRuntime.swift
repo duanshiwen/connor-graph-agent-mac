@@ -43,6 +43,7 @@ public final class GovernedClaudeSDKSidecarRuntime<Transport: ClaudeSDKSidecarSe
     }
 
     public func chat(_ request: AgentChatRequest) -> AsyncThrowingStream<AgentEvent, Error> {
+        let effectivePermissionMode = request.permissionMode == .trustedWrite ? .trustedWrite : permissionMode
         let safeRequest = AgentChatRequest(
             runID: request.runID,
             sessionID: request.sessionID,
@@ -50,7 +51,7 @@ public final class GovernedClaudeSDKSidecarRuntime<Transport: ClaudeSDKSidecarSe
             userMessage: request.userMessage,
             sessionSummary: request.sessionSummary,
             recentMessages: request.recentMessages,
-            permissionMode: permissionMode
+            permissionMode: effectivePermissionMode
         )
         let resumeSDKSessionID = (try? runtimeStore?.load(connorSessionID: safeRequest.sessionID))?.sdkSessionID
         let sidecarRequest = ClaudeSDKSidecarRequest(
