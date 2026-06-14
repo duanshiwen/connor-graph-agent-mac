@@ -99,7 +99,9 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
 
                 do {
                     var iterationCount = 0
-                    var recentToolCalls: [String] = []  // 记录最近的工具调用名称
+                    var recentToolCallSignatures: [String] = []
+                    let suspectedLoopWindow = 12
+                    let maxUniqueSignaturesInSuspectedLoopWindow = 2
                     let maxConsecutiveFailures = 3
                     var consecutiveFailures = 0
                     
@@ -107,16 +109,21 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         iterationCount += 1
                         logger.info("Iteration \(iterationCount)/\(configuration.maxToolIterations)")
                         
-                        // 检测是否卡住（最近 6 次调用只有 2 个不同的工具）
-                        if recentToolCalls.count >= 6 {
-                            let last6 = Array(recentToolCalls.suffix(6))
-                            let uniqueTools = Set(last6)
-                            if uniqueTools.count <= 2 {
-                                logger.warning("Agent appears stuck: repeating tools \(uniqueTools)")
+                        // Detect likely loops conservatively. A normal research/read flow may call the same
+                        // one or two tools many times with different arguments, so use tool+arguments
+                        // signatures and a wider window instead of stopping after six tool names.
+                        if recentToolCallSignatures.count >= suspectedLoopWindow {
+                            let recentWindow = Array(recentToolCallSignatures.suffix(suspectedLoopWindow))
+                            let uniqueSignatures = Set(recentWindow)
+                            if uniqueSignatures.count <= maxUniqueSignaturesInSuspectedLoopWindow {
+                                logger.warning("Agent appears stuck: repeating tool call signatures \(uniqueSignatures)")
+                                let repeatedTools = Set(recentWindow.map { signature in
+                                    signature.split(separator: "\u{1F}", maxSplits: 1).first.map(String.init) ?? signature
+                                })
                                 let failure = AgentRunFailure(
                                     runID: run.id,
                                     sessionID: run.sessionID,
-                                    message: "Agent appears to be stuck in a loop (repeating: \(uniqueTools.joined(separator: ", "))). Please try a different approach or provide more specific instructions."
+                                    message: "Agent appears to be stuck in a loop (repeating: \(repeatedTools.joined(separator: ", "))). Please try a different approach or provide more specific instructions."
                                 )
                                 run.status = .failed
                                 run.completedAt = Date()
@@ -183,8 +190,9 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 try Task.checkCancellation()
                                 logger.info("Tool \(call.name) completed. Result: \(result.contentText.prefix(200))")
                                 yield(.toolFinished(result), to: continuation, recorder: eventRecorder)
-                                // 跟踪工具调用
-                                recentToolCalls.append(call.name)
+                                // Track tool+argument signatures so legitimate repeated tool names with
+                                // different arguments do not look like a loop.
+                                recentToolCallSignatures.append("\(call.name)\u{1F}\(call.argumentsJSON)")
                                 consecutiveFailures = 0  // 成功则重置失败计数
                                 messages.append(AgentModelMessage(
                                     role: .assistant,
@@ -200,7 +208,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             } catch {
                                 logger.error("Tool \(call.name) failed: \(error.localizedDescription)")
                                 consecutiveFailures += 1
-                                recentToolCalls.append(call.name)
+                                recentToolCallSignatures.append("\(call.name)\u{1F}\(call.argumentsJSON)")
                                 
                                 // 如果连续失败太多次，停止
                                 if consecutiveFailures >= maxConsecutiveFailures {

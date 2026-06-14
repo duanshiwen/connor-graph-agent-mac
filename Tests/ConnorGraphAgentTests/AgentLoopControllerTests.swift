@@ -223,6 +223,59 @@ private actor SuspendingModelProvider: AgentModelProvider {
     #expect(events.last?.kind == .runCompleted)
 }
 
+private struct EchoArgumentsTool: AgentTool {
+    let definition = AgentToolDefinition(
+        name: "echo_args",
+        description: "Echo arguments",
+        inputSchema: .object(properties: ["value": .string(description: "Value")], required: ["value"])
+    )
+
+    func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        let value = arguments.object["value"]?.stringValue ?? ""
+        return AgentToolResult(
+            runID: context.runID,
+            sessionID: context.sessionID,
+            toolCallID: context.toolCallID,
+            toolName: definition.name,
+            contentText: value
+        )
+    }
+}
+
+@Test func agentLoopDoesNotTreatSameToolWithDifferentArgumentsAsLoop() async throws {
+    let toolResponses = (1...12).map { index in
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "call-echo-\(index)", name: "echo_args", argumentsJSON: #"{"value":"step-\\#(index)"}"#)],
+            usage: AgentModelUsage(promptTokens: 1, completionTokens: 1),
+            finishReason: .toolCalls
+        )
+    }
+    let provider = ScriptedModelProvider(responses: toolResponses + [
+        AgentModelResponse(
+            text: "Completed varied tool calls.",
+            toolCalls: [],
+            usage: AgentModelUsage(promptTokens: 1, completionTokens: 1),
+            finishReason: .stop
+        )
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(EchoArgumentsTool())
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        configuration: AgentLoopConfiguration(maxToolIterations: 16)
+    )
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(AgentChatRequest(sessionID: "session-varied-tool-args", userMessage: "Run many varied steps")) {
+        events.append(event)
+    }
+
+    #expect(events.map(\.kind).contains(.textComplete))
+    #expect(events.last?.kind == .runCompleted)
+}
+
 @Test func agentLoopPreservesAssistantToolCallsBeforeToolResult() async throws {
     let provider = ScriptedModelProvider(responses: [
         AgentModelResponse(
