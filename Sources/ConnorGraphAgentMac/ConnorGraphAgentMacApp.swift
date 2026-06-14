@@ -191,7 +191,48 @@ final class AppViewModel: ObservableObject {
 
     var activeChatPendingApprovals: [AgentPendingApproval] {
         let activeSessionID = activeChatSession.id
-        return pendingApprovals.filter { $0.sessionID == activeSessionID }
+        return pendingApprovals.filter { approval in
+            approval.sessionID == activeSessionID && !shouldAutoApprovePendingApproval(approval)
+        }
+    }
+
+    func setSidecarPermissionMode(_ mode: AgentPermissionMode) {
+        guard mode != .allowAll else { return }
+        sidecarPermissionMode = mode
+        nativeSessionManager?.permissionMode = mode
+        persistLLMSettings(rebuildRuntime: submittingChatSessionID == nil)
+        autoApproveCurrentPolicyPendingApprovals()
+    }
+
+    private func shouldAutoApprovePendingApproval(_ approval: AgentPendingApproval) -> Bool {
+        guard approval.status == .pending else { return false }
+        switch sidecarPermissionMode {
+        case .trustedWrite:
+            switch approval.capability {
+            case .readGraph, .readSession, .modelCall, .proposeGraphWrite, .commitGraphWrite, .externalNetwork, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .writeWorkspaceFile, .editWorkspaceFile, .computeScientific, .runReadOnlyShellCommand, .runWorkspaceShellCommand:
+                return true
+            case .invalidateGraphStatement, .deleteGraphObject, .costlyModelCall, .deleteWorkspaceFile, .runNetworkShellCommand, .runDestructiveShellCommand:
+                return false
+            }
+        case .allowAll:
+            return true
+        case .readOnly, .askToWrite:
+            return false
+        }
+    }
+
+    private func autoApproveCurrentPolicyPendingApprovals() {
+        let approvals = pendingApprovals.filter(shouldAutoApprovePendingApproval)
+        for approval in approvals {
+            Task {
+                await resolvePendingApproval(
+                    approval,
+                    status: .approved,
+                    reason: "Automatically approved by current \(sidecarPermissionMode.displayName) policy",
+                    actor: "policy-auto-approver"
+                )
+            }
+        }
     }
 
     func deferViewUpdate(_ operation: @escaping @MainActor () -> Void) {
@@ -721,6 +762,10 @@ final class AppViewModel: ObservableObject {
     }
 
     func saveLLMSettings() {
+        persistLLMSettings(rebuildRuntime: true)
+    }
+
+    private func persistLLMSettings(rebuildRuntime: Bool) {
         do {
             let settings = AppLLMSettings(
                 baseURLString: llmBaseURLString.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -736,9 +781,13 @@ final class AppViewModel: ObservableObject {
             let apiKey = llmAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
             try llmSettingsRepository.save(settings: settings, apiKey: apiKey.isEmpty ? nil : apiKey)
             loadLLMSettings()
-            let session = activeChatSession
-            fallbackChatSession = session
-            nativeSessionManager = makeNativeSessionManager(for: session)
+            if rebuildRuntime {
+                let session = activeChatSession
+                fallbackChatSession = session
+                nativeSessionManager = makeNativeSessionManager(for: session)
+            } else {
+                nativeSessionManager?.permissionMode = sidecarPermissionMode
+            }
             llmSettingsMessage = "模型设置已保存。"
             llmHealthCheckMessage = nil
             errorMessage = nil
@@ -1427,6 +1476,7 @@ final class AppViewModel: ObservableObject {
     func reloadPendingApprovals() {
         do {
             pendingApprovals = try pendingApprovalRepository?.loadPending() ?? []
+            autoApproveCurrentPolicyPendingApprovals()
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
