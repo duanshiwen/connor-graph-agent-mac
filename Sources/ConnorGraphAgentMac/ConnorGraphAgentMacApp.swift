@@ -151,6 +151,8 @@ final class AppViewModel: ObservableObject {
     @Published var userCountry: String = "中国"
     @Published var userPreferenceNotes: String = ""
     @Published var appSettingsMessage: String?
+    @Published var pendingAttachmentRefs: [AgentMessageAttachmentRef] = []
+    @Published var attachmentPreviewModel: AttachmentPreviewModel?
 
     private var repository: AppGraphRepository?
     private var promotionRepository: AppPromotionQueueRepository?
@@ -182,6 +184,7 @@ final class AppViewModel: ObservableObject {
     private var activeChatBackendsByRunID: [String: AnyAgentBackend] = [:]
     private var pendingChatCancellationReasonsBySessionID: [String: String] = [:]
     private var chatInputDraftsBySessionID: [String: String] = [:]
+    private var pendingAttachmentRefsBySessionID: [String: [AgentMessageAttachmentRef]] = [:]
     private var isRestoringChatInputDraft = false
     private var agentEventTimelinesBySessionID: [String: [AgentEventPresentation]] = [:]
     private var agentEventTimelinesByProcessKey: [String: [AgentEventPresentation]] = [:]
@@ -254,6 +257,115 @@ final class AppViewModel: ObservableObject {
 
     private func restoreChatInputDraft(for sessionID: String?) {
         setChatInputDraft("", for: sessionID)
+        pendingAttachmentRefs = sessionID.flatMap { pendingAttachmentRefsBySessionID[$0] } ?? []
+    }
+
+    var canSubmitCurrentChat: Bool {
+        !chatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !pendingAttachmentRefs.isEmpty
+    }
+
+    func removePendingAttachment(id: String) {
+        pendingAttachmentRefs.removeAll { $0.id == id }
+        if let selectedChatSessionID {
+            pendingAttachmentRefsBySessionID[selectedChatSessionID] = pendingAttachmentRefs
+        }
+    }
+
+    func previewAttachment(_ attachment: AgentMessageAttachmentRef) {
+        guard let selectedChatSessionID, let storagePaths else { return }
+        let store = AppSessionAttachmentStore(paths: storagePaths)
+        attachmentPreviewModel = AttachmentPreviewLoader(store: store).load(
+            sessionID: selectedChatSessionID,
+            attachment: attachment
+        )
+    }
+
+    @discardableResult
+    func importAttachments(urls: [URL]) async -> AttachmentImportBatchResult {
+        guard let selectedChatSessionID, let storagePaths else { return AttachmentImportBatchResult() }
+        let store = AppSessionAttachmentStore(paths: storagePaths)
+        var imported: [AgentMessageAttachmentRef] = []
+        var rejected: [AttachmentRejectedFile] = []
+        for url in urls {
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer {
+                if accessed { url.stopAccessingSecurityScopedResource() }
+            }
+            do {
+                let manifest = try store.importFile(at: url, sessionID: selectedChatSessionID)
+                imported.append(manifest.messageRef)
+            } catch let error as AppSessionAttachmentImportError {
+                switch error {
+                case .rejected(let filename, let reason):
+                    rejected.append(AttachmentRejectedFile(filename: filename, reason: reason))
+                }
+            } catch {
+                rejected.append(AttachmentRejectedFile(filename: url.lastPathComponent, reason: .unsupportedUnknownExtension(url.pathExtension.isEmpty ? "unknown" : url.pathExtension.lowercased())))
+            }
+        }
+        if !imported.isEmpty {
+            pendingAttachmentRefs.append(contentsOf: imported)
+            pendingAttachmentRefsBySessionID[selectedChatSessionID] = pendingAttachmentRefs
+        }
+        let result = AttachmentImportBatchResult(accepted: imported, rejected: rejected)
+        if !rejected.isEmpty {
+            errorMessage = attachmentImportSummary(result)
+        }
+        return result
+    }
+
+    private func attachmentImportSummary(_ result: AttachmentImportBatchResult) -> String {
+        let supportedSummary = "Connor 当前只支持添加文本、Markdown、日志、JSON、CSV、XML/YAML 和代码文件。暂不支持 HTML、图片、PDF、音频、视频、Office、iWork、压缩包、SVG、数据库、可执行文件或未知格式。"
+        let rejectedLines = result.rejected.prefix(8).map { "- \($0.filename)：\($0.reason.userMessage)" }.joined(separator: "\n")
+        let remaining = result.rejected.count > 8 ? "\n…另有 \(result.rejected.count - 8) 个文件未添加" : ""
+        if result.accepted.isEmpty {
+            return "不支持的附件类型\n\n\(supportedSummary)\n\n未添加：\n\(rejectedLines)\(remaining)"
+        }
+        return "已添加 \(result.accepted.count) 个附件，拒绝 \(result.rejected.count) 个不支持的文件。\n\n\(supportedSummary)\n\n未添加：\n\(rejectedLines)\(remaining)"
+    }
+
+    private func buildAttachmentContextPlan(
+        sessionID: String,
+        attachments: [AgentMessageAttachmentRef],
+        perAttachmentCharacterLimit: Int = 20_000,
+        totalCharacterLimit: Int = 60_000
+    ) -> AttachmentContextPlan {
+        guard !attachments.isEmpty, let storagePaths else { return AttachmentContextPlan() }
+        let store = AppSessionAttachmentStore(paths: storagePaths)
+        var inlineBlocks: [AttachmentInlineBlock] = []
+        var omissions: [AttachmentOmission] = []
+        var remainingBudget = totalCharacterLimit
+        for attachment in attachments {
+            guard remainingBudget > 0 else {
+                omissions.append(AttachmentOmission(attachmentID: attachment.id, displayName: attachment.displayName, reason: "Total attachment prompt budget exhausted."))
+                continue
+            }
+            do {
+                let manifest = try store.loadManifest(sessionID: sessionID, attachmentID: attachment.id)
+                guard let relativePath = manifest.extractedTextRelativePath else {
+                    omissions.append(AttachmentOmission(attachmentID: attachment.id, displayName: attachment.displayName, reason: "No extracted text is available."))
+                    continue
+                }
+                let url = storagePaths.sessionArtifactDirectories(sessionID: sessionID).root.appendingPathComponent(relativePath)
+                let content = try String(contentsOf: url, encoding: .utf8)
+                let limit = min(perAttachmentCharacterLimit, remainingBudget)
+                let isTruncated = content.count > limit
+                let inlineContent = isTruncated ? String(content.prefix(limit)) : content
+                remainingBudget -= inlineContent.count
+                inlineBlocks.append(AttachmentInlineBlock(
+                    attachmentID: manifest.id,
+                    displayName: manifest.displayName,
+                    kind: manifest.kind,
+                    content: inlineContent,
+                    sourceRelativePath: relativePath,
+                    isTruncated: isTruncated
+                ))
+            } catch {
+                omissions.append(AttachmentOmission(attachmentID: attachment.id, displayName: attachment.displayName, reason: "Failed to read extracted text: \(error)"))
+            }
+        }
+        let estimatedTokens = max(1, inlineBlocks.reduce(0) { $0 + $1.content.count } / 4)
+        return AttachmentContextPlan(inlineBlocks: inlineBlocks, omittedAttachments: omissions, estimatedTokens: estimatedTokens)
     }
 
     private func refreshSelectedSubmittingState() {
@@ -1897,7 +2009,8 @@ final class AppViewModel: ObservableObject {
     func submitChat(prompt rawPrompt: String, clearComposer: Bool = false, displayPrompt rawDisplayPrompt: String? = nil) async -> String? {
         let prompt = rawPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let displayPrompt = rawDisplayPrompt?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !prompt.isEmpty else { return nil }
+        let attachmentsForSubmission = pendingAttachmentRefs
+        guard !prompt.isEmpty || !attachmentsForSubmission.isEmpty else { return nil }
         guard var manager = nativeSessionManager else {
             errorMessage = String(describing: AppChatRuntimeUnavailableError.nativeSessionManagerUnavailable)
             return nil
@@ -1909,6 +2022,8 @@ final class AppViewModel: ObservableObject {
         if clearComposer {
             chatInputDraftsBySessionID[submittingSessionID] = ""
             if selectedChatSessionID == submittingSessionID { setChatInputDraft("", for: submittingSessionID) }
+            pendingAttachmentRefsBySessionID[submittingSessionID] = []
+            if selectedChatSessionID == submittingSessionID { pendingAttachmentRefs = [] }
         }
         agentEventTimelinesBySessionID[submittingSessionID] = []
         agentEventTimelinesByProcessKey = agentEventTimelinesByProcessKey.filter { key, _ in !key.hasPrefix("\(submittingSessionID):") }
@@ -1918,7 +2033,11 @@ final class AppViewModel: ObservableObject {
         refreshSelectedSubmittingState()
         let optimisticTranscript = transcript
         let baselineMessageCount = manager.session.messages.count
-        let optimisticUserMessage = AgentMessage(role: .user, content: displayPrompt?.isEmpty == false ? displayPrompt! : prompt)
+        let optimisticUserMessage = AgentMessage(
+            role: .user,
+            content: displayPrompt?.isEmpty == false ? displayPrompt! : prompt,
+            attachments: attachmentsForSubmission
+        )
         if selectedChatSessionID == submittingSessionID {
             transcript = optimisticTranscript + [optimisticUserMessage]
         }
@@ -1941,10 +2060,16 @@ final class AppViewModel: ObservableObject {
             } else {
                 sessionSummary = nil
             }
+            let attachmentContextPlan = buildAttachmentContextPlan(
+                sessionID: submittingSessionID,
+                attachments: attachmentsForSubmission
+            )
             let response = try await manager.submit(
                 prompt,
                 sessionSummary: sessionSummary,
                 displayPrompt: displayPrompt?.isEmpty == false ? displayPrompt : nil,
+                attachments: attachmentsForSubmission,
+                attachmentContextPlan: attachmentContextPlan,
                 onRunStarted: { [weak self] runID in
                     guard let self else { return }
                     if self.submittingChatSessionIDs.contains(submittingSessionID) {

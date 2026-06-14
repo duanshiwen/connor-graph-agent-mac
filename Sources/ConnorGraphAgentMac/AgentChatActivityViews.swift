@@ -327,6 +327,7 @@ struct AgentChatTurnTimestampRow: View {
 struct AgentChatMessageRow: View {
     var row: AgentChatMessagePresentation
     var onAssistantMessageCollapsed: (() -> Void)? = nil
+    var onPreviewAttachment: (AgentMessageAttachmentRef) -> Void = { _ in }
     @State private var isAssistantMessageExpanded = false
 
     @MainActor
@@ -391,6 +392,11 @@ struct AgentChatMessageRow: View {
 
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                 messageContent
+                if !row.attachments.isEmpty {
+                    AgentMessageAttachmentRefsView(attachments: row.attachments) { attachment in
+                        onPreviewAttachment(attachment)
+                    }
+                }
             }
             .foregroundStyle(Color.primary)
             .padding(AgentChatLayout.spaceM)
@@ -471,6 +477,45 @@ struct AgentChatMessageRow: View {
     private var messageBackground: Color {
         if isUser { return ConnorCraftPalette.userBubble }
         return Color(nsColor: .controlBackgroundColor).opacity(0.85)
+    }
+}
+
+private struct AgentMessageAttachmentRefsView: View {
+    var attachments: [AgentMessageAttachmentRef]
+    var onPreview: (AgentMessageAttachmentRef) -> Void
+
+    var body: some View {
+        HStack(spacing: AgentChatLayout.spaceS) {
+            ForEach(attachments) { attachment in
+                Button {
+                    onPreview(attachment)
+                } label: {
+                    Text("\(iconPrefix(for: attachment.kind)) \(attachment.displayName)")
+                        .font(AgentChatTypography.meta)
+                        .lineLimit(1)
+                        .padding(.horizontal, AgentChatLayout.spaceS)
+                        .padding(.vertical, 4)
+                        .background(ConnorCraftPalette.accentSubtleFill, in: Capsule())
+                        .overlay(Capsule().stroke(ConnorCraftPalette.accentBorder, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("预览附件 \(attachment.displayName)")
+            }
+        }
+        .accessibilityLabel("消息附件 \(attachments.count) 个")
+    }
+
+    private func iconPrefix(for kind: AgentAttachmentKind) -> String {
+        switch kind {
+        case .image: return "图片"
+        case .pdf: return "PDF"
+        case .csv, .spreadsheet: return "表格"
+        case .code, .json, .html: return "代码"
+        case .archive: return "压缩包"
+        case .audio: return "音频"
+        case .video: return "视频"
+        default: return "附件"
+        }
     }
 }
 
