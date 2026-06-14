@@ -328,6 +328,7 @@ struct AgentChatMessageRow: View {
     var row: AgentChatMessagePresentation
     var onAssistantMessageCollapsed: (() -> Void)? = nil
     @State private var isAssistantMessageExpanded = false
+    @State private var inspectedAttachment: AgentMessageAttachmentRef?
 
     @MainActor
     private final class BrowserPromptFoldingCache {
@@ -392,7 +393,9 @@ struct AgentChatMessageRow: View {
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                 messageContent
                 if !row.attachments.isEmpty {
-                    AgentMessageAttachmentRefsView(attachments: row.attachments)
+                    AgentMessageAttachmentRefsView(attachments: row.attachments) { attachment in
+                        inspectedAttachment = attachment
+                    }
                 }
             }
             .foregroundStyle(Color.primary)
@@ -405,6 +408,9 @@ struct AgentChatMessageRow: View {
             )
         }
         .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+        .sheet(item: $inspectedAttachment) { attachment in
+            AgentAttachmentInspectorView(attachment: attachment)
+        }
     }
 
     @ViewBuilder
@@ -479,11 +485,26 @@ struct AgentChatMessageRow: View {
 
 private struct AgentMessageAttachmentRefsView: View {
     var attachments: [AgentMessageAttachmentRef]
+    var onInspect: (AgentMessageAttachmentRef) -> Void
 
     var body: some View {
-        FlowLikeChips(values: attachments.map { attachment in
-            "\(iconPrefix(for: attachment.kind)) \(attachment.displayName)"
-        })
+        HStack(spacing: AgentChatLayout.spaceS) {
+            ForEach(attachments) { attachment in
+                Button {
+                    onInspect(attachment)
+                } label: {
+                    Text("\(iconPrefix(for: attachment.kind)) \(attachment.displayName)")
+                        .font(AgentChatTypography.meta)
+                        .lineLimit(1)
+                        .padding(.horizontal, AgentChatLayout.spaceS)
+                        .padding(.vertical, 4)
+                        .background(ConnorCraftPalette.accentSubtleFill, in: Capsule())
+                        .overlay(Capsule().stroke(ConnorCraftPalette.accentBorder, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("检查附件 \(attachment.displayName)")
+            }
+        }
         .accessibilityLabel("消息附件 \(attachments.count) 个")
     }
 

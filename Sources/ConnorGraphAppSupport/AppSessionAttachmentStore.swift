@@ -39,7 +39,7 @@ public struct AppSessionAttachmentStore: Sendable {
         try fileManager.copyItem(at: sourceURL, to: originalURL)
 
         let data = try Data(contentsOf: originalURL)
-        let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        let digest = Self.sha256Hex(data)
         let kind = Self.kind(for: sourceURL)
         let fileExtension = sourceURL.pathExtension.isEmpty ? nil : sourceURL.pathExtension.lowercased()
         var extractedPath: String?
@@ -49,11 +49,29 @@ public struct AppSessionAttachmentStore: Sendable {
         let extraction = try AttachmentTextExtraction.extract(fileURL: originalURL, kind: kind, maxBytes: maxTextExtractionBytes)
         extractionStatus = extraction.status
         previewText = extraction.previewText
+        var derivativeRefs: [AgentAttachmentDerivativeRef] = []
         if let markdown = extraction.markdown {
             let extractedURL = derivativesDirectory.appendingPathComponent("extracted.md")
             try markdown.write(to: extractedURL, atomically: true, encoding: .utf8)
             extractedPath = "attachments/\(attachmentID)/derivatives/extracted.md"
+            let extractedData = Data(markdown.utf8)
+            derivativeRefs.append(AgentAttachmentDerivativeRef(
+                kind: .extractedMarkdown,
+                relativePath: extractedPath!,
+                byteCount: Int64(extractedData.count),
+                sha256: Self.sha256Hex(extractedData),
+                createdAt: now
+            ))
         }
+        let extractionReport = AgentAttachmentExtractionReport(
+            attachmentID: attachmentID,
+            engine: .builtinText,
+            status: extractionStatus,
+            capabilitiesUsed: AttachmentTextExtraction.supports(kind: kind) ? ["text"] : [],
+            derivativeRefs: derivativeRefs,
+            startedAt: now,
+            completedAt: now
+        )
 
         let manifest = AgentAttachmentManifest(
             id: attachmentID,
@@ -71,6 +89,8 @@ public struct AppSessionAttachmentStore: Sendable {
             manifestRelativePath: "attachments/\(attachmentID)/manifest.json",
             extractedTextRelativePath: extractedPath,
             previewText: previewText,
+            derivativeRefs: derivativeRefs,
+            extractionReports: [extractionReport],
             createdAt: now,
             updatedAt: now,
             sourceDisplayPath: sourceURL.path
@@ -135,6 +155,10 @@ public struct AppSessionAttachmentStore: Sendable {
         case "mp4", "mov", "avi", "mkv": return .video
         default: return .unknown
         }
+    }
+
+    public static func sha256Hex(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     private static func mimeType(for kind: AgentAttachmentKind, fileExtension: String?) -> String? {

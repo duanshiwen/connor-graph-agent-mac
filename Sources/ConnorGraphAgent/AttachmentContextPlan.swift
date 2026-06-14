@@ -23,6 +23,31 @@ public struct AttachmentInlineBlock: Sendable, Equatable {
     }
 }
 
+public struct AttachmentProviderNativeBlock: Sendable, Equatable {
+    public var attachmentID: String
+    public var displayName: String
+    public var provider: AgentAttachmentProvider
+    public var remoteFileID: String?
+    public var remoteURI: String?
+    public var reason: String
+
+    public init(
+        attachmentID: String,
+        displayName: String,
+        provider: AgentAttachmentProvider,
+        remoteFileID: String? = nil,
+        remoteURI: String? = nil,
+        reason: String
+    ) {
+        self.attachmentID = attachmentID
+        self.displayName = displayName
+        self.provider = provider
+        self.remoteFileID = remoteFileID
+        self.remoteURI = remoteURI
+        self.reason = reason
+    }
+}
+
 public struct AttachmentOmission: Sendable, Equatable {
     public var attachmentID: String
     public var displayName: String
@@ -38,20 +63,23 @@ public struct AttachmentOmission: Sendable, Equatable {
 public struct AttachmentContextPlan: Sendable, Equatable {
     public var inlineBlocks: [AttachmentInlineBlock]
     public var omittedAttachments: [AttachmentOmission]
+    public var providerNativeBlocks: [AttachmentProviderNativeBlock]
     public var estimatedTokens: Int
 
     public init(
         inlineBlocks: [AttachmentInlineBlock] = [],
         omittedAttachments: [AttachmentOmission] = [],
+        providerNativeBlocks: [AttachmentProviderNativeBlock] = [],
         estimatedTokens: Int = 0
     ) {
         self.inlineBlocks = inlineBlocks
         self.omittedAttachments = omittedAttachments
+        self.providerNativeBlocks = providerNativeBlocks
         self.estimatedTokens = estimatedTokens
     }
 
     public var isEmpty: Bool {
-        inlineBlocks.isEmpty && omittedAttachments.isEmpty
+        inlineBlocks.isEmpty && omittedAttachments.isEmpty && providerNativeBlocks.isEmpty
     }
 }
 
@@ -76,6 +104,20 @@ public struct AgentAttachmentContextSection: Sendable, Equatable {
             ```\(fenceLanguage(for: block.kind))
             \(block.content)
             ```
+            """)
+        }
+        if !plan.providerNativeBlocks.isEmpty {
+            let nativeBlocks = plan.providerNativeBlocks
+                .map { block in
+                    var line = "- \(block.displayName) (\(block.attachmentID)): routed via \(block.provider.rawValue). Reason: \(block.reason)"
+                    if let remoteFileID = block.remoteFileID { line += " Remote file ID: \(remoteFileID)." }
+                    if let remoteURI = block.remoteURI { line += " Remote URI: \(remoteURI)." }
+                    return line
+                }
+                .joined(separator: "\n")
+            parts.append("""
+            Provider-native attachment delivery:
+            \(nativeBlocks)
             """)
         }
         if !plan.omittedAttachments.isEmpty {
