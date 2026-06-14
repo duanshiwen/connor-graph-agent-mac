@@ -43,6 +43,27 @@ public struct AgentEventPresenter: Sendable {
         switch event {
         case .runStarted(let payload):
             return item(event, title: "Run started", detail: "Model: \(payload.run.model ?? "unknown")", severity: .info)
+        case .turnStarted(let payload):
+            return item(event, title: "Turn started", detail: "Turn \(payload.turnIndex) started.", severity: .info)
+        case .turnCompleted(let payload):
+            let stopDetail = payload.stoppedAfterTurn ? " · stopped after turn" : ""
+            return item(
+                event,
+                title: "Turn completed",
+                detail: "Turn \(payload.turnIndex) completed · tools: \(payload.toolResultCount)/\(payload.toolCallCount)\(stopDetail)",
+                severity: .success
+            )
+        case .promptAssembled(let payload):
+            let sectionSummary = payload.sections
+                .map { "\($0.title): \($0.estimatedTokenCount)t" + ($0.wasTrimmed ? " trimmed" : "") }
+                .joined(separator: " · ")
+            let transformers = payload.appliedTransformers.isEmpty ? "none" : payload.appliedTransformers.joined(separator: ", ")
+            return item(
+                event,
+                title: "Prompt assembled",
+                detail: "Projection: \(payload.projectionMode) · total: \(payload.totalEstimatedTokenCount)t · transformers: \(transformers) · \(sectionSummary)",
+                severity: .info
+            )
         case .textDelta(let payload):
             return item(event, title: "Assistant is writing", detail: payload.text, severity: .info)
         case .textComplete(let payload):

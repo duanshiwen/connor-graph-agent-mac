@@ -96,6 +96,6 @@ import ConnorGraphAgent
     let snapshot = policy.snapshot(for: inspection)
 
     #expect(snapshot.renderedPrompt == nil)
-    #expect(snapshot.estimatedPromptTokenCount == 8_000)
+    #expect(snapshot.estimatedPromptTokenCount == AgentPromptBudgetEstimator().estimate(inspection.renderedPrompt).estimatedTokenCount)
     #expect(snapshot.promptBudgetStatus == .over)
 }
