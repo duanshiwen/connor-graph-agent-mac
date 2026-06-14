@@ -99,40 +99,25 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
 
                 do {
                     var iterationCount = 0
-                    var recentToolCallSignatures: [String] = []
-                    let suspectedLoopWindow = 12
-                    let maxUniqueSignaturesInSuspectedLoopWindow = 2
+                    var lastToolCallSignature: String?
+                    var consecutiveIdenticalToolCalls = 0
+                    let maxConsecutiveIdenticalToolCalls = 12
                     let maxConsecutiveFailures = 3
                     var consecutiveFailures = 0
+
+                    func recordToolCallSignature(_ signature: String) -> Bool {
+                        if signature == lastToolCallSignature {
+                            consecutiveIdenticalToolCalls += 1
+                        } else {
+                            lastToolCallSignature = signature
+                            consecutiveIdenticalToolCalls = 1
+                        }
+                        return consecutiveIdenticalToolCalls >= maxConsecutiveIdenticalToolCalls
+                    }
                     
                     for _ in 0..<configuration.maxToolIterations {
                         iterationCount += 1
                         logger.info("Iteration \(iterationCount)/\(configuration.maxToolIterations)")
-                        
-                        // Detect likely loops conservatively. A normal research/read flow may call the same
-                        // one or two tools many times with different arguments, so use tool+arguments
-                        // signatures and a wider window instead of stopping after six tool names.
-                        if recentToolCallSignatures.count >= suspectedLoopWindow {
-                            let recentWindow = Array(recentToolCallSignatures.suffix(suspectedLoopWindow))
-                            let uniqueSignatures = Set(recentWindow)
-                            if uniqueSignatures.count <= maxUniqueSignaturesInSuspectedLoopWindow {
-                                logger.warning("Agent appears stuck: repeating tool call signatures \(uniqueSignatures)")
-                                let repeatedTools = Set(recentWindow.map { signature in
-                                    signature.split(separator: "\u{1F}", maxSplits: 1).first.map(String.init) ?? signature
-                                })
-                                let failure = AgentRunFailure(
-                                    runID: run.id,
-                                    sessionID: run.sessionID,
-                                    message: "Agent appears to be stuck in a loop (repeating: \(repeatedTools.joined(separator: ", "))). Please try a different approach or provide more specific instructions."
-                                )
-                                run.status = .failed
-                                run.completedAt = Date()
-                                try? eventRecorder.recordRun(run)
-                                yield(.runFailed(failure), to: continuation, recorder: eventRecorder)
-                                continuation.finish(throwing: AgentLoopError.maxToolIterationsReached)
-                                return
-                            }
-                        }
                         
                         try Task.checkCancellation()
                         let modelResponse = try await modelProvider.complete(AgentModelRequest(messages: messages, tools: toolRegistry.definitions))
@@ -190,9 +175,21 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 try Task.checkCancellation()
                                 logger.info("Tool \(call.name) completed. Result: \(result.contentText.prefix(200))")
                                 yield(.toolFinished(result), to: continuation, recorder: eventRecorder)
-                                // Track tool+argument signatures so legitimate repeated tool names with
-                                // different arguments do not look like a loop.
-                                recentToolCallSignatures.append("\(call.name)\u{1F}\(call.argumentsJSON)")
+                                let toolCallSignature = "\(call.name)\u{1F}\(call.argumentsJSON)"
+                                if recordToolCallSignature(toolCallSignature) {
+                                    logger.warning("Agent appears stuck: repeated identical tool call \(call.name)")
+                                    let failure = AgentRunFailure(
+                                        runID: run.id,
+                                        sessionID: run.sessionID,
+                                        message: "Agent appears to be stuck in a loop: repeated identical tool call \(call.name) \(consecutiveIdenticalToolCalls) times."
+                                    )
+                                    run.status = .failed
+                                    run.completedAt = Date()
+                                    try? eventRecorder.recordRun(run)
+                                    yield(.runFailed(failure), to: continuation, recorder: eventRecorder)
+                                    continuation.finish(throwing: AgentLoopError.maxToolIterationsReached)
+                                    return
+                                }
                                 consecutiveFailures = 0  // 成功则重置失败计数
                                 messages.append(AgentModelMessage(
                                     role: .assistant,
@@ -208,7 +205,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             } catch {
                                 logger.error("Tool \(call.name) failed: \(error.localizedDescription)")
                                 consecutiveFailures += 1
-                                recentToolCallSignatures.append("\(call.name)\u{1F}\(call.argumentsJSON)")
+                                _ = recordToolCallSignature("\(call.name)\u{1F}\(call.argumentsJSON)")
                                 
                                 // 如果连续失败太多次，停止
                                 if consecutiveFailures >= maxConsecutiveFailures {
