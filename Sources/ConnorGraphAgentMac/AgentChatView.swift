@@ -454,7 +454,7 @@ private struct AgentChatConversationHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
             Text(selectedTitle)
-                .font(AgentChatTypography.sectionTitle)
+                .font(AgentChatTypography.title)
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .center)
 
