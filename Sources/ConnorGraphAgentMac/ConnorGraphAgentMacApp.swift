@@ -171,7 +171,7 @@ final class AppViewModel: ObservableObject {
     // fallbackChatSession is UI-only for demo/no-runtime states.
     private var fallbackChatSession: AgentSession
     private var nativeSessionManager: NativeSessionManager?
-    private var submittingChatSessionID: String?
+    @Published private(set) var submittingChatSessionID: String?
     private var activeChatRunID: String?
     private var activeChatBackendsBySessionID: [String: AnyAgentBackend] = [:]
     private var activeChatBackendsByRunID: [String: AnyAgentBackend] = [:]
