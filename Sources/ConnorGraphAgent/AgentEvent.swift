@@ -3,6 +3,9 @@ import ConnorGraphCore
 
 public enum AgentEvent: Sendable, Equatable {
     case runStarted(AgentRunStartedEvent)
+    case turnStarted(AgentTurnStartedEvent)
+    case turnCompleted(AgentTurnCompletedEvent)
+    case promptAssembled(AgentPromptAssembledEvent)
     case textDelta(AgentTextDeltaEvent)
     case textComplete(AgentTextCompleteEvent)
     case assistantMessageCreated(AgentMessage)
@@ -31,6 +34,9 @@ public enum AgentEvent: Sendable, Equatable {
     public var kind: AgentEventKind {
         switch self {
         case .runStarted: return .runStarted
+        case .turnStarted: return .turnStarted
+        case .turnCompleted: return .turnCompleted
+        case .promptAssembled: return .promptAssembled
         case .textDelta: return .textDelta
         case .textComplete: return .textComplete
         case .assistantMessageCreated: return .assistantMessageCreated
@@ -61,6 +67,9 @@ public enum AgentEvent: Sendable, Equatable {
     public var runID: String? {
         switch self {
         case .runStarted(let event): return event.run.id
+        case .turnStarted(let event): return event.runID
+        case .turnCompleted(let event): return event.runID
+        case .promptAssembled(let event): return event.runID
         case .textDelta(let event): return event.runID
         case .textComplete(let event): return event.runID
         case .assistantMessageCreated: return nil
@@ -83,6 +92,9 @@ public enum AgentEvent: Sendable, Equatable {
     public var sessionID: String? {
         switch self {
         case .runStarted(let event): return event.run.sessionID
+        case .turnStarted(let event): return event.sessionID
+        case .turnCompleted(let event): return event.sessionID
+        case .promptAssembled(let event): return event.sessionID
         case .textDelta(let event): return event.sessionID
         case .textComplete(let event): return event.sessionID
         case .assistantMessageCreated: return nil

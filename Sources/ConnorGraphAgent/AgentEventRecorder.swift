@@ -36,6 +36,9 @@ public struct AgentEventRecorder: Sendable {
         let data: Data
         switch event {
         case .runStarted(let payload): data = try encoder.encode(payload)
+        case .turnStarted(let payload): data = try encoder.encode(payload)
+        case .turnCompleted(let payload): data = try encoder.encode(payload)
+        case .promptAssembled(let payload): data = try encoder.encode(payload)
         case .textDelta(let payload): data = try encoder.encode(payload)
         case .textComplete(let payload): data = try encoder.encode(payload)
         case .assistantMessageCreated(let payload): data = try encoder.encode(payload)

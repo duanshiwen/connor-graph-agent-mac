@@ -12,11 +12,15 @@ public struct AgentPromptBudgetEstimate: Sendable, Equatable {
 }
 
 public struct AgentPromptBudgetEstimator: Sendable, Equatable {
-    public init() {}
+    public var tokenEstimator: AgentTextTokenEstimator
+
+    public init(tokenEstimator: AgentTextTokenEstimator = AgentTextTokenEstimator()) {
+        self.tokenEstimator = tokenEstimator
+    }
 
     public func estimate(_ text: String) -> AgentPromptBudgetEstimate {
         let characterCount = text.count
-        let estimatedTokenCount = characterCount == 0 ? 0 : Int(ceil(Double(characterCount) / 4.0))
+        let estimatedTokenCount = tokenEstimator.estimateTokenCount(text)
         return AgentPromptBudgetEstimate(
             characterCount: characterCount,
             estimatedTokenCount: estimatedTokenCount

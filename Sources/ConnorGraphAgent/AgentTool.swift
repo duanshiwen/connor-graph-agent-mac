@@ -289,6 +289,10 @@ public struct AgentToolRegistry: Sendable {
         return AgentToolDefinition(name: tool.name, description: tool.description, inputSchema: tool.inputSchema)
     }
 
+    public func permission(named name: String) -> AgentPermissionCapability? {
+        tools[name]?.permission
+    }
+
     public var definitions: [AgentToolDefinition] {
         tools.keys.sorted().compactMap { definition(named: $0) }
     }

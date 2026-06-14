@@ -445,26 +445,13 @@ enum LocalShellExecutor {
 
         try process.run()
 
-        let timedOut = await withTaskGroup(of: Bool.self, returning: Bool.self) { group in
-            group.addTask {
-                while process.isRunning {
-                    try? await Task.sleep(nanoseconds: 20_000_000)
-                }
-                return false
-            }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: UInt64(timeoutSeconds) * 1_000_000_000)
-                if process.isRunning {
-                    process.terminate()
-                    return true
-                }
-                return false
-            }
-            let result = await group.next() ?? false
-            group.cancelAll()
-            return result
+        let deadline = Date().addingTimeInterval(TimeInterval(timeoutSeconds))
+        while process.isRunning && Date() < deadline {
+            try? await Task.sleep(nanoseconds: 20_000_000)
         }
-        if timedOut {
+        if process.isRunning {
+            process.terminate()
+            process.waitUntilExit()
             throw LocalWorkspacePolicyError.commandTimedOut(command)
         }
         let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()

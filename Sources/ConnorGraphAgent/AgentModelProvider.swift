@@ -13,13 +13,22 @@ public struct AgentModelMessage: Codable, Sendable, Equatable, Identifiable {
     public var content: String
     public var toolCallID: String?
     public var name: String?
+    public var toolCalls: [AgentToolCall]?
 
-    public init(id: String = UUID().uuidString, role: AgentModelMessageRole, content: String, toolCallID: String? = nil, name: String? = nil) {
+    public init(
+        id: String = UUID().uuidString,
+        role: AgentModelMessageRole,
+        content: String,
+        toolCallID: String? = nil,
+        name: String? = nil,
+        toolCalls: [AgentToolCall]? = nil
+    ) {
         self.id = id
         self.role = role
         self.content = content
         self.toolCallID = toolCallID
         self.name = name
+        self.toolCalls = toolCalls
     }
 }
 
@@ -43,11 +52,21 @@ public struct AgentModelRequest: Sendable, Equatable {
     public var messages: [AgentModelMessage]
     public var tools: [AgentToolDefinition]
     public var temperature: Double
+    public var promptDiagnostics: AgentPromptDiagnostics?
+    public var instructionPlacement: AgentInstructionPlacement
 
-    public init(messages: [AgentModelMessage], tools: [AgentToolDefinition] = [], temperature: Double = 0.2) {
+    public init(
+        messages: [AgentModelMessage],
+        tools: [AgentToolDefinition] = [],
+        temperature: Double = 0.2,
+        promptDiagnostics: AgentPromptDiagnostics? = nil,
+        instructionPlacement: AgentInstructionPlacement = .systemMessage
+    ) {
         self.messages = messages
         self.tools = tools
         self.temperature = temperature
+        self.promptDiagnostics = promptDiagnostics
+        self.instructionPlacement = instructionPlacement
     }
 }
 

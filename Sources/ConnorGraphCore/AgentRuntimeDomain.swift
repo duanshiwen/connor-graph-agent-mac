@@ -43,6 +43,9 @@ public struct AgentRun: Codable, Sendable, Equatable, Identifiable {
 
 public enum AgentEventKind: String, Codable, Sendable, Equatable {
     case runStarted
+    case turnStarted
+    case turnCompleted
+    case promptAssembled
     case textDelta
     case textComplete
     case assistantMessageCreated
@@ -102,6 +105,99 @@ public struct AgentRunStartedEvent: Codable, Sendable, Equatable {
 
     public init(run: AgentRun) {
         self.run = run
+    }
+}
+
+public struct AgentTurnStartedEvent: Codable, Sendable, Equatable {
+    public var runID: String
+    public var sessionID: String
+    public var turnIndex: Int
+
+    public init(runID: String, sessionID: String, turnIndex: Int) {
+        self.runID = runID
+        self.sessionID = sessionID
+        self.turnIndex = turnIndex
+    }
+}
+
+public struct AgentTurnCompletedEvent: Codable, Sendable, Equatable {
+    public var runID: String
+    public var sessionID: String
+    public var turnIndex: Int
+    public var assistantText: String?
+    public var toolCallCount: Int
+    public var toolResultCount: Int
+    public var stoppedAfterTurn: Bool
+
+    public init(
+        runID: String,
+        sessionID: String,
+        turnIndex: Int,
+        assistantText: String? = nil,
+        toolCallCount: Int = 0,
+        toolResultCount: Int = 0,
+        stoppedAfterTurn: Bool = false
+    ) {
+        self.runID = runID
+        self.sessionID = sessionID
+        self.turnIndex = turnIndex
+        self.assistantText = assistantText
+        self.toolCallCount = toolCallCount
+        self.toolResultCount = toolResultCount
+        self.stoppedAfterTurn = stoppedAfterTurn
+    }
+}
+
+public struct AgentPromptSectionSnapshot: Codable, Sendable, Equatable, Identifiable {
+    public var id: String
+    public var title: String
+    public var role: String
+    public var characterCount: Int
+    public var estimatedTokenCount: Int
+    public var wasTrimmed: Bool
+    public var notes: [String]
+
+    public init(
+        id: String,
+        title: String,
+        role: String,
+        characterCount: Int,
+        estimatedTokenCount: Int,
+        wasTrimmed: Bool = false,
+        notes: [String] = []
+    ) {
+        self.id = id
+        self.title = title
+        self.role = role
+        self.characterCount = characterCount
+        self.estimatedTokenCount = estimatedTokenCount
+        self.wasTrimmed = wasTrimmed
+        self.notes = notes
+    }
+}
+
+public struct AgentPromptAssembledEvent: Codable, Sendable, Equatable {
+    public var runID: String
+    public var sessionID: String
+    public var projectionMode: String
+    public var sections: [AgentPromptSectionSnapshot]
+    public var totalEstimatedTokenCount: Int
+    public var appliedTransformers: [String]
+
+    public init(
+        runID: String,
+        sessionID: String,
+        projectionMode: String,
+        sections: [AgentPromptSectionSnapshot],
+        totalEstimatedTokenCount: Int,
+        appliedTransformers: [String] = []
+    ) {
+        self.runID = runID
+        self.sessionID = sessionID
+        self.projectionMode = projectionMode
+        self.sections = sections
+        self.totalEstimatedTokenCount = totalEstimatedTokenCount
+        self.appliedTransformers = appliedTransformers
     }
 }
 

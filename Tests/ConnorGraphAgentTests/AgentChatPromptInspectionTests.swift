@@ -87,6 +87,7 @@ import ConnorGraphAgent
 
     let inspection = context.inspection
 
-    #expect(inspection.estimatedPromptTokenCount == 6_000)
+    let expectedTokens = AgentPromptBudgetEstimator().estimate(inspection.renderedPrompt).estimatedTokenCount
+    #expect(inspection.estimatedPromptTokenCount == expectedTokens)
     #expect(inspection.promptBudgetStatus == .warning)
 }
