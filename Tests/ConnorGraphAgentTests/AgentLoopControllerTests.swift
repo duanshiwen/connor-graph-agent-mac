@@ -241,6 +241,25 @@ private struct EchoArgumentsTool: AgentTool {
     }
 }
 
+private struct NamedDelayTool: AgentTool {
+    let name: String
+    let delayNanoseconds: UInt64
+    let description = "Delay and return tool name"
+    let permission = AgentPermissionCapability.readSession
+    let inputSchema = AgentToolInputSchema.object(properties: [:], required: [])
+
+    func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        try await Task.sleep(nanoseconds: delayNanoseconds)
+        return AgentToolResult(
+            runID: context.runID,
+            sessionID: context.sessionID,
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: name
+        )
+    }
+}
+
 @Test func agentLoopDoesNotTreatSameToolWithDifferentArgumentsAsLoop() async throws {
     let toolResponses = (1...12).map { index in
         AgentModelResponse(
@@ -445,4 +464,222 @@ private struct EchoArgumentsTool: AgentTool {
     }.first
     #expect(textComplete?.citations == ["episode:episode-1"])
     #expect(textComplete?.contextSnapshot?.contains("诗闻喜欢结构化推进") == true)
+}
+
+@Test func agentLoopPreservesAssistantToolCallBatchBeforeToolResults() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: "I will inspect two values.",
+            toolCalls: [
+                AgentToolCall(id: "call-batch-1", name: "echo_args", argumentsJSON: #"{"value":"one"}"#),
+                AgentToolCall(id: "call-batch-2", name: "echo_args", argumentsJSON: #"{"value":"two"}"#)
+            ],
+            usage: AgentModelUsage(promptTokens: 10, completionTokens: 3),
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(text: "Done.", usage: AgentModelUsage(promptTokens: 20, completionTokens: 5))
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(EchoArgumentsTool())
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    for try await _ in loop.run(AgentChatRequest(sessionID: "session-batch-transcript", userMessage: "Run two tools")) {}
+
+    let followUpMessages = try #require(await provider.requests.last?.messages)
+    let assistantToolMessages = followUpMessages.filter { $0.role == .assistant && $0.toolCalls?.isEmpty == false }
+    #expect(assistantToolMessages.count == 1)
+    #expect(assistantToolMessages.first?.content == "I will inspect two values.")
+    #expect(assistantToolMessages.first?.toolCalls?.map(\.id) == ["call-batch-1", "call-batch-2"])
+    let toolMessages = followUpMessages.filter { $0.role == .tool }
+    #expect(toolMessages.map(\.toolCallID) == ["call-batch-1", "call-batch-2"])
+    #expect(toolMessages.map(\.name) == ["echo_args", "echo_args"])
+}
+
+@Test func agentLoopReturnsInvalidArgumentsAsToolResultAndLetsModelRetry() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "call-invalid-json", name: "echo_args", argumentsJSON: #"["not","object"]"#)],
+            usage: AgentModelUsage(promptTokens: 5, completionTokens: 2),
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "call-valid-json", name: "echo_args", argumentsJSON: #"{"value":"recovered"}"#)],
+            usage: AgentModelUsage(promptTokens: 5, completionTokens: 2),
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(text: "Recovered.", usage: AgentModelUsage(promptTokens: 5, completionTokens: 2))
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(EchoArgumentsTool())
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(AgentChatRequest(sessionID: "session-invalid-retry", userMessage: "Retry after invalid args")) {
+        events.append(event)
+    }
+
+    #expect(events.map(\.kind).contains(.toolFailed))
+    #expect(events.last?.kind == .runCompleted)
+    let secondRequest = try #require(await provider.requests.dropFirst().first)
+    let errorToolMessage = try #require(secondRequest.messages.first(where: { $0.role == .tool && $0.toolCallID == "call-invalid-json" }))
+    #expect(errorToolMessage.content.contains("Tool failed:"))
+    #expect(errorToolMessage.content.contains("Invalid arguments"))
+}
+
+@Test func agentLoopReturnsUnknownToolAsToolResultAndLetsModelRecover() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "call-unknown", name: "missing_tool", argumentsJSON: #"{}"#)],
+            usage: AgentModelUsage(promptTokens: 5, completionTokens: 2),
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(text: "I can recover without that tool.", usage: AgentModelUsage(promptTokens: 5, completionTokens: 2))
+    ])
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: AgentToolRegistry())
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(AgentChatRequest(sessionID: "session-unknown-tool", userMessage: "Call unknown")) {
+        events.append(event)
+    }
+
+    #expect(events.map(\.kind).contains(.toolFailed))
+    #expect(events.last?.kind == .runCompleted)
+    let followUp = try #require(await provider.requests.last)
+    let errorToolMessage = try #require(followUp.messages.first(where: { $0.role == .tool && $0.toolCallID == "call-unknown" }))
+    #expect(errorToolMessage.content.contains("Unknown tool"))
+}
+
+@Test func agentLoopStopsAfterTooManyConsecutiveToolResultErrors() async throws {
+    let responses = (1...3).map { index in
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "call-error-\(index)", name: "missing_tool", argumentsJSON: #"{}"#)],
+            usage: AgentModelUsage(promptTokens: 1, completionTokens: 1),
+            finishReason: .toolCalls
+        )
+    }
+    let provider = ScriptedModelProvider(responses: responses)
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: AgentToolRegistry(),
+        configuration: AgentLoopConfiguration(maxToolIterations: 8, maxConsecutiveToolResultErrors: 3)
+    )
+
+    var events: [AgentEvent] = []
+    do {
+        for try await event in loop.run(AgentChatRequest(sessionID: "session-too-many-errors", userMessage: "Keep failing")) {
+            events.append(event)
+        }
+    } catch AgentLoopError.maxToolIterationsReached {
+        // Expected fuse.
+    }
+
+    #expect(events.map(\.kind).filter { $0 == .toolFailed }.count == 3)
+    #expect(events.last?.kind == .runFailed)
+}
+
+@Test func agentLoopParallelToolCallsAppendToolResultsInAssistantSourceOrder() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [
+                AgentToolCall(id: "call-slow", name: "slow_tool", argumentsJSON: #"{}"#),
+                AgentToolCall(id: "call-fast", name: "fast_tool", argumentsJSON: #"{}"#)
+            ],
+            usage: AgentModelUsage(promptTokens: 5, completionTokens: 2),
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(text: "Parallel done.", usage: AgentModelUsage(promptTokens: 5, completionTokens: 2))
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(NamedDelayTool(name: "slow_tool", delayNanoseconds: 60_000_000))
+    registry.register(NamedDelayTool(name: "fast_tool", delayNanoseconds: 1_000_000))
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        configuration: AgentLoopConfiguration(allowParallelToolCalls: true)
+    )
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(AgentChatRequest(sessionID: "session-parallel-order", userMessage: "Run parallel")) {
+        events.append(event)
+    }
+
+    let finishedNames = events.compactMap { event -> String? in
+        if case .toolFinished(let result) = event { return result.toolName }
+        return nil
+    }
+    #expect(finishedNames.first == "fast_tool")
+    let followUp = try #require(await provider.requests.last)
+    let toolMessages = followUp.messages.filter { $0.role == .tool }
+    #expect(toolMessages.map(\.toolCallID) == ["call-slow", "call-fast"])
+}
+
+@Test func agentLoopEmitsTurnBoundariesAroundModelCallAndToolBatch() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "call-turn", name: "echo_args", argumentsJSON: #"{"value":"turn"}"#)],
+            usage: AgentModelUsage(promptTokens: 5, completionTokens: 2),
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(text: "Turn done.", usage: AgentModelUsage(promptTokens: 5, completionTokens: 2))
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(EchoArgumentsTool())
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(AgentChatRequest(sessionID: "session-turn-events", userMessage: "Emit turns")) {
+        events.append(event)
+    }
+
+    #expect(events.map(\.kind).filter { $0 == .turnStarted }.count == 2)
+    #expect(events.map(\.kind).filter { $0 == .turnCompleted }.count == 2)
+    let completedTurns = events.compactMap { event -> AgentTurnCompletedEvent? in
+        if case .turnCompleted(let payload) = event { return payload }
+        return nil
+    }
+    #expect(completedTurns.first?.toolCallCount == 1)
+    #expect(completedTurns.first?.toolResultCount == 1)
+    #expect(completedTurns.last?.toolCallCount == 0)
+}
+
+@Test func agentLoopCanStopGracefullyAfterBudgetExceededTurn() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "call-budget-stop", name: "echo_args", argumentsJSON: #"{"value":"budget"}"#)],
+            usage: AgentModelUsage(promptTokens: 200, completionTokens: 50),
+            finishReason: .toolCalls
+        )
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(EchoArgumentsTool())
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        configuration: AgentLoopConfiguration(
+            maxToolIterations: 4,
+            stopAfterTurnWhenBudgetExceeded: true,
+            budget: AgentBudgetConfiguration(maxTotalTokens: 100, warningThresholdRatio: 0.8)
+        )
+    )
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(AgentChatRequest(sessionID: "session-budget-stop", userMessage: "Stop after turn")) {
+        events.append(event)
+    }
+
+    #expect(await provider.requests.count == 1)
+    #expect(events.map(\.kind).contains(.budgetWarning))
+    let turnCompleted = try #require(events.compactMap { event -> AgentTurnCompletedEvent? in
+        if case .turnCompleted(let payload) = event { return payload }
+        return nil
+    }.first)
+    #expect(turnCompleted.stoppedAfterTurn)
+    #expect(events.last?.kind == .runCompleted)
 }

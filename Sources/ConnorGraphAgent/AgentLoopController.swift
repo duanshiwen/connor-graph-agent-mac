@@ -9,6 +9,8 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
     public var maxRunDurationSeconds: Int
     public var maxToolResultBytes: Int
     public var allowParallelToolCalls: Bool
+    public var maxConsecutiveToolResultErrors: Int
+    public var stopAfterTurnWhenBudgetExceeded: Bool
     public var permissionMode: AgentPermissionMode
     public var budget: AgentBudgetConfiguration
 
@@ -18,6 +20,8 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         maxRunDurationSeconds: Int = 180,
         maxToolResultBytes: Int = 32 * 1024,
         allowParallelToolCalls: Bool = false,
+        maxConsecutiveToolResultErrors: Int = 6,
+        stopAfterTurnWhenBudgetExceeded: Bool = false,
         permissionMode: AgentPermissionMode = .askToWrite,
         budget: AgentBudgetConfiguration = AgentBudgetConfiguration()
     ) {
@@ -26,6 +30,8 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         self.maxRunDurationSeconds = maxRunDurationSeconds
         self.maxToolResultBytes = maxToolResultBytes
         self.allowParallelToolCalls = allowParallelToolCalls
+        self.maxConsecutiveToolResultErrors = maxConsecutiveToolResultErrors
+        self.stopAfterTurnWhenBudgetExceeded = stopAfterTurnWhenBudgetExceeded
         self.permissionMode = permissionMode
         self.budget = budget
     }
@@ -84,6 +90,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 try? Task.checkCancellation()
                 try? eventRecorder.recordRun(run)
                 yield(.runStarted(AgentRunStartedEvent(run: run)), to: continuation, recorder: eventRecorder)
+
                 let policy = AgentPolicyEngine(permissionMode: request.permissionMode, auditLog: auditLog)
                 let budgetMeter = AgentBudgetMeter(configuration: configuration.budget)
                 var messages: [AgentModelMessage] = [
@@ -102,8 +109,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                     var lastToolCallSignature: String?
                     var consecutiveIdenticalToolCalls = 0
                     let maxConsecutiveIdenticalToolCalls = 12
-                    let maxConsecutiveFailures = 3
-                    var consecutiveFailures = 0
+                    var consecutiveToolResultErrors = 0
 
                     func recordToolCallSignature(_ signature: String) -> Bool {
                         if signature == lastToolCallSignature {
@@ -114,31 +120,53 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         }
                         return consecutiveIdenticalToolCalls >= maxConsecutiveIdenticalToolCalls
                     }
-                    
+
                     for _ in 0..<configuration.maxToolIterations {
                         iterationCount += 1
-                        logger.info("Iteration \(iterationCount)/\(configuration.maxToolIterations)")
-                        
+                        logger.info("Turn \(iterationCount)/\(configuration.maxToolIterations)")
+                        yield(.turnStarted(AgentTurnStartedEvent(
+                            runID: run.id,
+                            sessionID: run.sessionID,
+                            turnIndex: iterationCount
+                        )), to: continuation, recorder: eventRecorder)
+
                         try Task.checkCancellation()
                         let modelResponse = try await modelProvider.complete(AgentModelRequest(messages: messages, tools: toolRegistry.definitions))
                         try Task.checkCancellation()
                         logger.info("Model response: \(modelResponse.toolCalls.count) tool calls, has text: \(modelResponse.text != nil)")
+
                         let budgetSnapshot = await budgetMeter.record(modelResponse.usage)
-                        if budgetSnapshot.status == .warning || budgetSnapshot.status == .exceeded {
-                            let label = budgetSnapshot.status == .exceeded ? "Token budget exceeded" : "Token budget warning"
+                        let budgetExceeded = budgetSnapshot.status == .exceeded
+                        if budgetSnapshot.status == .warning || budgetExceeded {
+                            let label = budgetExceeded ? "Token budget exceeded" : "Token budget warning"
+                            let suffix = configuration.stopAfterTurnWhenBudgetExceeded && budgetExceeded
+                                ? " Stopping gracefully after this turn."
+                                : " Continuing without automatic stop."
                             yield(.budgetWarning(AgentBudgetWarning(
                                 runID: run.id,
                                 sessionID: run.sessionID,
-                                message: "\(label): \(budgetSnapshot.totalTokens)/\(budgetSnapshot.maxTotalTokens) tokens used. Continuing without automatic stop."
+                                message: "\(label): \(budgetSnapshot.totalTokens)/\(budgetSnapshot.maxTotalTokens) tokens used.\(suffix)"
                             )), to: continuation, recorder: eventRecorder)
                         }
-                        if let text = modelResponse.text, modelResponse.toolCalls.isEmpty {
-                            yield(.textComplete(AgentTextCompleteEvent(
+
+                        if modelResponse.toolCalls.isEmpty {
+                            if let text = modelResponse.text {
+                                yield(.textComplete(AgentTextCompleteEvent(
+                                    runID: run.id,
+                                    sessionID: run.sessionID,
+                                    text: text,
+                                    citations: usableInitialContext?.items.map(\.sourceID) ?? [],
+                                    contextSnapshot: usableInitialContext?.renderedText
+                                )), to: continuation, recorder: eventRecorder)
+                            }
+                            yield(.turnCompleted(AgentTurnCompletedEvent(
                                 runID: run.id,
                                 sessionID: run.sessionID,
-                                text: text,
-                                citations: usableInitialContext?.items.map(\.sourceID) ?? [],
-                                contextSnapshot: usableInitialContext?.renderedText
+                                turnIndex: iterationCount,
+                                assistantText: modelResponse.text,
+                                toolCallCount: 0,
+                                toolResultCount: 0,
+                                stoppedAfterTurn: false
                             )), to: continuation, recorder: eventRecorder)
                             run.status = .completed
                             run.completedAt = Date()
@@ -148,96 +176,91 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             return
                         }
 
-                        let calls = Array(modelResponse.toolCalls.prefix(configuration.maxToolCallsPerIteration))
+                        var calls = Array(modelResponse.toolCalls.prefix(configuration.maxToolCallsPerIteration))
+                        for index in calls.indices {
+                            calls[index].runID = run.id
+                            calls[index].sessionID = run.sessionID
+                        }
                         logger.info("Executing \(calls.count) tool calls: \(calls.map(\.name).joined(separator: ", "))")
-                        for var call in calls {
-                            try Task.checkCancellation()
-                            call.runID = run.id
-                            call.sessionID = run.sessionID
-                            logger.info("Starting tool: \(call.name) (ID: \(call.id))")
-                            yield(.toolRequested(call), to: continuation, recorder: eventRecorder)
-                            yield(.toolStarted(call), to: continuation, recorder: eventRecorder)
-                            let context = AgentToolExecutionContext(
-                                runID: run.id,
-                                sessionID: run.sessionID,
-                                groupID: request.groupID,
-                                userPrompt: request.userMessage,
-                                toolCallID: call.id,
-                                policyEngine: policy
-                            )
-                            do {
-                                let result = try await executeToolWithApprovalIfNeeded(
-                                    call: call,
-                                    context: context,
-                                    run: &run,
-                                    continuation: continuation
-                                )
-                                try Task.checkCancellation()
-                                logger.info("Tool \(call.name) completed. Result: \(result.contentText.prefix(200))")
-                                yield(.toolFinished(result), to: continuation, recorder: eventRecorder)
-                                let toolCallSignature = "\(call.name)\u{1F}\(call.argumentsJSON)"
-                                if recordToolCallSignature(toolCallSignature) {
-                                    logger.warning("Agent appears stuck: repeated identical tool call \(call.name)")
-                                    let failure = AgentRunFailure(
-                                        runID: run.id,
-                                        sessionID: run.sessionID,
-                                        message: "Agent appears to be stuck in a loop: repeated identical tool call \(call.name) \(consecutiveIdenticalToolCalls) times."
-                                    )
-                                    run.status = .failed
-                                    run.completedAt = Date()
-                                    try? eventRecorder.recordRun(run)
-                                    yield(.runFailed(failure), to: continuation, recorder: eventRecorder)
-                                    continuation.finish(throwing: AgentLoopError.maxToolIterationsReached)
-                                    return
-                                }
-                                consecutiveFailures = 0  // 成功则重置失败计数
-                                messages.append(AgentModelMessage(
-                                    role: .assistant,
-                                    content: "",
-                                    toolCalls: [call]
-                                ))
-                                messages.append(AgentModelMessage(
-                                    role: .tool,
-                                    content: compactToolResult(result),
-                                    toolCallID: call.id,
-                                    name: call.name
-                                ))
-                            } catch {
-                                logger.error("Tool \(call.name) failed: \(error.localizedDescription)")
-                                consecutiveFailures += 1
-                                _ = recordToolCallSignature("\(call.name)\u{1F}\(call.argumentsJSON)")
-                                
-                                // 如果连续失败太多次，停止
-                                if consecutiveFailures >= maxConsecutiveFailures {
-                                    logger.warning("Too many consecutive failures (\(consecutiveFailures)). Stopping.")
-                                    let failure = AgentRunFailure(
-                                        runID: run.id,
-                                        sessionID: run.sessionID,
-                                        message: "Too many consecutive tool failures (\(consecutiveFailures)). Last error: \(error.localizedDescription)"
-                                    )
-                                    run.status = .failed
-                                    run.completedAt = Date()
-                                    try? eventRecorder.recordRun(run)
-                                    yield(.runFailed(failure), to: continuation, recorder: eventRecorder)
-                                    continuation.finish(throwing: AgentLoopError.maxToolIterationsReached)
-                                    return
-                                }
-                                
-                                let failure = AgentToolFailure(
+
+                        messages.append(AgentModelMessage(
+                            role: .assistant,
+                            content: modelResponse.text ?? "",
+                            toolCalls: calls
+                        ))
+
+                        for call in calls {
+                            let toolCallSignature = "\(call.name)\u{1F}\(call.argumentsJSON)"
+                            if recordToolCallSignature(toolCallSignature) {
+                                logger.warning("Agent appears stuck: repeated identical tool call \(call.name)")
+                                let failure = AgentRunFailure(
                                     runID: run.id,
                                     sessionID: run.sessionID,
-                                    toolCallID: call.id,
-                                    toolName: call.name,
-                                    message: String(describing: error)
+                                    message: "Agent appears to be stuck in a loop: repeated identical tool call \(call.name) \(consecutiveIdenticalToolCalls) times."
                                 )
-                                yield(.toolFailed(failure), to: continuation, recorder: eventRecorder)
-                                messages.append(AgentModelMessage(
-                                    role: .tool,
-                                    content: "Tool failed: \(failure.message)",
-                                    toolCallID: call.id,
-                                    name: call.name
-                                ))
+                                run.status = .failed
+                                run.completedAt = Date()
+                                try? eventRecorder.recordRun(run)
+                                yield(.runFailed(failure), to: continuation, recorder: eventRecorder)
+                                continuation.finish(throwing: AgentLoopError.maxToolIterationsReached)
+                                return
                             }
+                        }
+
+                        let batchResults = try await executeToolBatch(
+                            calls: calls,
+                            request: request,
+                            run: &run,
+                            policy: policy,
+                            continuation: continuation
+                        )
+
+                        for batchResult in batchResults {
+                            if batchResult.result.error == nil {
+                                consecutiveToolResultErrors = 0
+                            } else {
+                                consecutiveToolResultErrors += 1
+                            }
+                            messages.append(AgentModelMessage(
+                                role: .tool,
+                                content: compactToolResult(batchResult.result),
+                                toolCallID: batchResult.call.id,
+                                name: batchResult.call.name
+                            ))
+                        }
+
+                        let shouldStopAfterTurn = configuration.stopAfterTurnWhenBudgetExceeded && budgetExceeded
+                        yield(.turnCompleted(AgentTurnCompletedEvent(
+                            runID: run.id,
+                            sessionID: run.sessionID,
+                            turnIndex: iterationCount,
+                            assistantText: modelResponse.text,
+                            toolCallCount: calls.count,
+                            toolResultCount: batchResults.count,
+                            stoppedAfterTurn: shouldStopAfterTurn
+                        )), to: continuation, recorder: eventRecorder)
+
+                        if consecutiveToolResultErrors >= configuration.maxConsecutiveToolResultErrors {
+                            let failure = AgentRunFailure(
+                                runID: run.id,
+                                sessionID: run.sessionID,
+                                message: "Too many consecutive tool result errors (\(consecutiveToolResultErrors))."
+                            )
+                            run.status = .failed
+                            run.completedAt = Date()
+                            try? eventRecorder.recordRun(run)
+                            yield(.runFailed(failure), to: continuation, recorder: eventRecorder)
+                            continuation.finish(throwing: AgentLoopError.maxToolIterationsReached)
+                            return
+                        }
+
+                        if shouldStopAfterTurn {
+                            run.status = .completed
+                            run.completedAt = Date()
+                            try? eventRecorder.recordRun(run)
+                            yield(.runCompleted(AgentRunCompletedEvent(run: run)), to: continuation, recorder: eventRecorder)
+                            continuation.finish()
+                            return
                         }
                     }
                     let failure = AgentRunFailure(runID: run.id, sessionID: run.sessionID, message: "Max tool iterations reached")
@@ -268,6 +291,138 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         }
     }
 
+    private func executeToolBatch(
+        calls: [AgentToolCall],
+        request: AgentChatRequest,
+        run: inout AgentRun,
+        policy: AgentPolicyEngine,
+        continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
+    ) async throws -> [AgentToolBatchResult] {
+        if configuration.allowParallelToolCalls && canExecuteInParallel(calls) {
+            return try await executeToolBatchInParallel(
+                calls: calls,
+                request: request,
+                run: run,
+                policy: policy,
+                continuation: continuation
+            )
+        }
+        var results: [AgentToolBatchResult] = []
+        for call in calls {
+            try Task.checkCancellation()
+            let result = try await executeSingleToolAsResult(
+                call: call,
+                request: request,
+                run: &run,
+                policy: policy,
+                continuation: continuation
+            )
+            results.append(AgentToolBatchResult(call: call, result: result))
+        }
+        return results
+    }
+
+    private func executeToolBatchInParallel(
+        calls: [AgentToolCall],
+        request: AgentChatRequest,
+        run: AgentRun,
+        policy: AgentPolicyEngine,
+        continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
+    ) async throws -> [AgentToolBatchResult] {
+        for call in calls {
+            yield(.toolRequested(call), to: continuation, recorder: eventRecorder)
+            yield(.toolStarted(call), to: continuation, recorder: eventRecorder)
+        }
+
+        return try await withThrowingTaskGroup(of: (Int, AgentToolBatchResult).self) { group in
+            for (index, call) in calls.enumerated() {
+                group.addTask {
+                    let context = AgentToolExecutionContext(
+                        runID: run.id,
+                        sessionID: run.sessionID,
+                        groupID: request.groupID,
+                        userPrompt: request.userMessage,
+                        toolCallID: call.id,
+                        policyEngine: policy
+                    )
+                    let result: AgentToolResult
+                    do {
+                        var success = try await toolRegistry.execute(call, context: context)
+                        success.runID = run.id
+                        success.sessionID = run.sessionID
+                        result = success
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        result = errorToolResult(for: call, run: run, message: String(describing: error))
+                    }
+                    return (index, AgentToolBatchResult(call: call, result: result))
+                }
+            }
+
+            var ordered = Array<AgentToolBatchResult?>(repeating: nil, count: calls.count)
+            for try await (index, batchResult) in group {
+                if batchResult.result.error == nil {
+                    yield(.toolFinished(batchResult.result), to: continuation, recorder: eventRecorder)
+                } else {
+                    yield(.toolFailed(AgentToolFailure(
+                        runID: run.id,
+                        sessionID: run.sessionID,
+                        toolCallID: batchResult.call.id,
+                        toolName: batchResult.call.name,
+                        message: batchResult.result.error ?? batchResult.result.contentText
+                    )), to: continuation, recorder: eventRecorder)
+                }
+                ordered[index] = batchResult
+            }
+            return ordered.compactMap { $0 }
+        }
+    }
+
+    private func executeSingleToolAsResult(
+        call: AgentToolCall,
+        request: AgentChatRequest,
+        run: inout AgentRun,
+        policy: AgentPolicyEngine,
+        continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
+    ) async throws -> AgentToolResult {
+        yield(.toolRequested(call), to: continuation, recorder: eventRecorder)
+        yield(.toolStarted(call), to: continuation, recorder: eventRecorder)
+        let context = AgentToolExecutionContext(
+            runID: run.id,
+            sessionID: run.sessionID,
+            groupID: request.groupID,
+            userPrompt: request.userMessage,
+            toolCallID: call.id,
+            policyEngine: policy
+        )
+        do {
+            let result = try await executeToolWithApprovalIfNeeded(
+                call: call,
+                context: context,
+                run: &run,
+                continuation: continuation
+            )
+            try Task.checkCancellation()
+            logger.info("Tool \(call.name) completed. Result: \(result.contentText.prefix(200))")
+            yield(.toolFinished(result), to: continuation, recorder: eventRecorder)
+            return result
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            logger.error("Tool \(call.name) failed: \(error.localizedDescription)")
+            let result = errorToolResult(for: call, run: run, message: String(describing: error))
+            yield(.toolFailed(AgentToolFailure(
+                runID: run.id,
+                sessionID: run.sessionID,
+                toolCallID: call.id,
+                toolName: call.name,
+                message: result.error ?? result.contentText
+            )), to: continuation, recorder: eventRecorder)
+            return result
+        }
+    }
+
     private func executeToolWithApprovalIfNeeded(
         call: AgentToolCall,
         context: AgentToolExecutionContext,
@@ -282,6 +437,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
             run.status = .waitingForApproval
             try? eventRecorder.recordRun(run)
             let status = await approvalRegistry.waitForResolution(requestID: request.id)
+            if status == .cancelled { throw CancellationError() }
             let outcome: AgentPermissionOutcome = status == .approved ? .approved : .denied
             let decision = AgentPermissionDecision(
                 requestID: request.id,
@@ -300,6 +456,26 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
             let approvedContext = context.approving(request.capability)
             return try await toolRegistry.execute(call, context: approvedContext)
         }
+    }
+
+    private func canExecuteInParallel(_ calls: [AgentToolCall]) -> Bool {
+        guard calls.count > 1 else { return false }
+        return calls.allSatisfy { call in
+            guard let permission = toolRegistry.permission(named: call.name) else { return false }
+            return permission.isSafeForParallelNativeToolExecution
+        }
+    }
+
+    private func errorToolResult(for call: AgentToolCall, run: AgentRun, message: String) -> AgentToolResult {
+        AgentToolResult(
+            runID: run.id,
+            sessionID: run.sessionID,
+            toolCallID: call.id,
+            toolName: call.name,
+            contentText: "Tool failed: \(message)",
+            contentJSON: nil,
+            error: message
+        )
     }
 
     private func yield(_ event: AgentEvent, to continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation, recorder: AgentEventRecorder) {
@@ -369,6 +545,25 @@ public enum AgentLoopError: Error, Sendable, Equatable {
     case maxToolIterationsReached
     case budgetExceeded
     case cancelled
+}
+
+private struct AgentToolBatchResult: Sendable, Equatable {
+    var call: AgentToolCall
+    var result: AgentToolResult
+}
+
+private extension AgentPermissionCapability {
+    var isSafeForParallelNativeToolExecution: Bool {
+        switch self {
+        case .readGraph, .readSession, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific:
+            return true
+        case .proposeGraphWrite, .commitGraphWrite, .invalidateGraphStatement, .deleteGraphObject,
+             .externalNetwork, .modelCall, .costlyModelCall,
+             .writeWorkspaceFile, .editWorkspaceFile, .deleteWorkspaceFile,
+             .runReadOnlyShellCommand, .runWorkspaceShellCommand, .runNetworkShellCommand, .runDestructiveShellCommand:
+            return false
+        }
+    }
 }
 
 private actor AgentLoopApprovalRegistry {
