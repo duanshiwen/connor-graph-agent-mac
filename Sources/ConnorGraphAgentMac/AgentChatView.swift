@@ -1486,11 +1486,6 @@ private struct AgentChatComposerView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
-            if let approval = viewModel.activeChatPendingApprovals.first {
-                AgentChatPermissionRequestCard(approval: approval, viewModel: viewModel)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-
             optionBadgeRow
 
             VStack(spacing: 0) {
@@ -1558,6 +1553,18 @@ private struct AgentChatComposerView: View {
                 RoundedRectangle(cornerRadius: AgentChatLayout.radiusXL, style: .continuous)
                     .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
             )
+            .overlay {
+                if let approval = viewModel.activeChatPendingApprovals.first {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: AgentChatLayout.radiusXL, style: .continuous)
+                            .fill(Color(nsColor: .controlBackgroundColor).opacity(0.96))
+
+                        AgentChatPermissionRequestCard(approval: approval, viewModel: viewModel)
+                            .padding(AgentChatLayout.spaceM)
+                    }
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                }
+            }
 
             if let error = viewModel.errorMessage {
                 AgentMarkdownPreviewText(markdown: error, font: .caption)
