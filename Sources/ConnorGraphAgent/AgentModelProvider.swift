@@ -13,13 +13,22 @@ public struct AgentModelMessage: Codable, Sendable, Equatable, Identifiable {
     public var content: String
     public var toolCallID: String?
     public var name: String?
+    public var toolCalls: [AgentToolCall]?
 
-    public init(id: String = UUID().uuidString, role: AgentModelMessageRole, content: String, toolCallID: String? = nil, name: String? = nil) {
+    public init(
+        id: String = UUID().uuidString,
+        role: AgentModelMessageRole,
+        content: String,
+        toolCallID: String? = nil,
+        name: String? = nil,
+        toolCalls: [AgentToolCall]? = nil
+    ) {
         self.id = id
         self.role = role
         self.content = content
         self.toolCallID = toolCallID
         self.name = name
+        self.toolCalls = toolCalls
     }
 }
 

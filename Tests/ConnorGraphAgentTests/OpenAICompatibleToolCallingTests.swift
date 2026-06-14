@@ -62,3 +62,45 @@ private struct ToolCallingCapturingHTTPClient: AgentHTTPClient {
     #expect(requestText.contains("tools"))
     #expect(requestText.contains("graph_search"))
 }
+
+@Test func openAICompatibleProviderSerializesAssistantToolCallsInConversationHistory() async throws {
+    let body = #"""
+    {
+      "choices": [
+        {
+          "message": { "role": "assistant", "content": "Done." },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": { "prompt_tokens": 20, "completion_tokens": 3, "total_tokens": 23 }
+    }
+    """#.data(using: .utf8)!
+    let client = ToolCallingCapturingHTTPClient(responseBody: body)
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(baseURL: URL(string: "https://llm.example.com/v1")!, apiKey: "test-key", model: "gpt-test"),
+        httpClient: client
+    )
+
+    _ = try await provider.completeWithTools(AgentModelRequest(messages: [
+        AgentModelMessage(role: .user, content: "Find memory"),
+        AgentModelMessage(
+            role: .assistant,
+            content: "",
+            toolCalls: [AgentToolCall(id: "call-1", name: "graph_search", argumentsJSON: #"{"query":"memory"}"#)]
+        ),
+        AgentModelMessage(role: .tool, content: #"{"hits":[]}"#, toolCallID: "call-1", name: "graph_search")
+    ]))
+
+    let captured = try #require(client.storage.capturedBody)
+    let object = try #require(try JSONSerialization.jsonObject(with: captured) as? [String: Any])
+    let messages = try #require(object["messages"] as? [[String: Any]])
+    let assistant = try #require(messages.first(where: { $0["role"] as? String == "assistant" }))
+    let toolCalls = try #require(assistant["tool_calls"] as? [[String: Any]])
+    #expect(toolCalls.first?["id"] as? String == "call-1")
+    let function = try #require(toolCalls.first?["function"] as? [String: Any])
+    #expect(function["name"] as? String == "graph_search")
+    #expect(function["arguments"] as? String == #"{"query":"memory"}"#)
+    let tool = try #require(messages.first(where: { $0["role"] as? String == "tool" }))
+    #expect(tool["tool_call_id"] as? String == "call-1")
+    #expect(tool["name"] as? String == "graph_search")
+}

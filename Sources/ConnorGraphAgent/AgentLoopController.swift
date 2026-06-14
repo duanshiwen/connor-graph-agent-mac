@@ -189,7 +189,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                                 messages.append(AgentModelMessage(
                                     role: .assistant,
                                     content: "",
-                                    name: call.name
+                                    toolCalls: [call]
                                 ))
                                 messages.append(AgentModelMessage(
                                     role: .tool,

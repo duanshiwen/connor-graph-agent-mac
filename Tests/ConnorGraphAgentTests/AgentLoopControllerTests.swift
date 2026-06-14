@@ -19,13 +19,15 @@ private actor ScriptedModelProvider: AgentModelProvider {
     let modelID = "scripted"
     let capabilities = AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false)
     private var responses: [AgentModelResponse]
+    private(set) var requests: [AgentModelRequest] = []
 
     init(responses: [AgentModelResponse]) {
         self.responses = responses
     }
 
     func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
-        responses.removeFirst()
+        requests.append(request)
+        return responses.removeFirst()
     }
 }
 
@@ -219,6 +221,43 @@ private actor SuspendingModelProvider: AgentModelProvider {
     #expect(events.map(\.kind).contains(.budgetWarning))
     #expect(events.map(\.kind).contains(.textComplete))
     #expect(events.last?.kind == .runCompleted)
+}
+
+@Test func agentLoopPreservesAssistantToolCallsBeforeToolResult() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "call-science-transcript", name: "science_compute", argumentsJSON: #"{"operation":"add","inputs":{"values":[1,2]}}"#)],
+            usage: AgentModelUsage(promptTokens: 10, completionTokens: 3),
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: "1 + 2 = 3.",
+            toolCalls: [],
+            usage: AgentModelUsage(promptTokens: 20, completionTokens: 5),
+            finishReason: .stop
+        )
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(ScienceComputeTool(runtime: ScientificComputeRuntime(engines: [NativeSwiftScientificEngine()])))
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    for try await _ in loop.run(AgentChatRequest(sessionID: "session-tool-transcript", userMessage: "Calculate 1+2")) {}
+
+    let requests = await provider.requests
+    #expect(requests.count == 2)
+    let followUpMessages = try #require(requests.last?.messages)
+    let assistantToolMessage = try #require(followUpMessages.first(where: { $0.role == .assistant && $0.toolCalls?.isEmpty == false }))
+    let assistantToolCallIDs = assistantToolMessage.toolCalls?.map(\.id)
+    let assistantToolName = assistantToolMessage.toolCalls?.first?.name
+    let containsMatchingToolResult = followUpMessages.contains { message in
+        message.role == .tool &&
+            message.toolCallID == "call-science-transcript" &&
+            message.name == "science_compute"
+    }
+    #expect(assistantToolCallIDs == ["call-science-transcript"])
+    #expect(assistantToolName == "science_compute")
+    #expect(containsMatchingToolResult)
 }
 
 @Test func agentLoopRunsScientificToolThenFinalAnswer() async throws {
