@@ -263,6 +263,7 @@ public struct AgentPromptDiagnosticsTransformer: AgentContextTransformer, Sendab
                 text: attachmentContext.renderedText,
                 notes: [
                     "inline=\(attachmentContext.plan.inlineBlocks.count)",
+                    "images=\(attachmentContext.plan.imageBlocks.count)",
                     "omitted=\(attachmentContext.plan.omittedAttachments.count)",
                     "estimatedTokens=\(attachmentContext.plan.estimatedTokens)"
                 ]
@@ -440,7 +441,8 @@ public struct AgentTranscriptProjector: Sendable {
                 .joined(separator: "\n\n")
             messages.append(AgentModelMessage(
                 role: .user,
-                content: assembly.conversation.legacyRenderedPrompt(userPrompt: userPrompt)
+                content: assembly.conversation.legacyRenderedPrompt(userPrompt: userPrompt),
+                contentParts: contentParts(for: assembly, fallbackText: assembly.conversation.legacyRenderedPrompt(userPrompt: userPrompt))
             ))
         case .structuredContextMessages:
             let context = assembly.conversation.renderedContextOnly.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -456,7 +458,11 @@ public struct AgentTranscriptProjector: Sendable {
                     messages.append(AgentModelMessage(role: .user, content: attachmentText))
                 }
             }
-            messages.append(AgentModelMessage(role: .user, content: assembly.userRequest.text))
+            messages.append(AgentModelMessage(
+                role: .user,
+                content: assembly.userRequest.text,
+                contentParts: contentParts(for: assembly, fallbackText: assembly.userRequest.text)
+            ))
         }
 
         return AgentModelRequest(
@@ -466,5 +472,12 @@ public struct AgentTranscriptProjector: Sendable {
             promptDiagnostics: assembly.diagnostics,
             instructionPlacement: instructionPlacement
         )
+    }
+
+    private func contentParts(for assembly: AgentPromptAssembly, fallbackText: String) -> [AgentModelMessageContentPart]? {
+        guard let imageBlocks = assembly.attachmentContext?.plan.imageBlocks, !imageBlocks.isEmpty else { return nil }
+        var parts: [AgentModelMessageContentPart] = [.text(fallbackText)]
+        parts.append(contentsOf: imageBlocks.map { .imageDataURL($0.dataURL, mimeType: $0.mimeType, detail: "auto") })
+        return parts
     }
 }

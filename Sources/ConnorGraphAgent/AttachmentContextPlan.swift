@@ -26,6 +26,31 @@ public struct AttachmentInlineBlock: Sendable, Equatable {
     }
 }
 
+public struct AttachmentImageBlock: Sendable, Equatable {
+    public var attachmentID: String
+    public var displayName: String
+    public var kind: AgentAttachmentKind
+    public var mimeType: String?
+    public var dataURL: String
+    public var sourceRelativePath: String
+
+    public init(
+        attachmentID: String,
+        displayName: String,
+        kind: AgentAttachmentKind = .image,
+        mimeType: String? = nil,
+        dataURL: String,
+        sourceRelativePath: String
+    ) {
+        self.attachmentID = attachmentID
+        self.displayName = displayName
+        self.kind = kind
+        self.mimeType = mimeType
+        self.dataURL = dataURL
+        self.sourceRelativePath = sourceRelativePath
+    }
+}
+
 public struct AttachmentProviderNativeBlock: Sendable, Equatable {
     public var attachmentID: String
     public var displayName: String
@@ -67,22 +92,25 @@ public struct AttachmentContextPlan: Sendable, Equatable {
     public var inlineBlocks: [AttachmentInlineBlock]
     public var omittedAttachments: [AttachmentOmission]
     public var providerNativeBlocks: [AttachmentProviderNativeBlock]
+    public var imageBlocks: [AttachmentImageBlock]
     public var estimatedTokens: Int
 
     public init(
         inlineBlocks: [AttachmentInlineBlock] = [],
         omittedAttachments: [AttachmentOmission] = [],
         providerNativeBlocks: [AttachmentProviderNativeBlock] = [],
+        imageBlocks: [AttachmentImageBlock] = [],
         estimatedTokens: Int = 0
     ) {
         self.inlineBlocks = inlineBlocks
         self.omittedAttachments = omittedAttachments
         self.providerNativeBlocks = providerNativeBlocks
+        self.imageBlocks = imageBlocks
         self.estimatedTokens = estimatedTokens
     }
 
     public var isEmpty: Bool {
-        inlineBlocks.isEmpty && omittedAttachments.isEmpty && providerNativeBlocks.isEmpty
+        inlineBlocks.isEmpty && omittedAttachments.isEmpty && providerNativeBlocks.isEmpty && imageBlocks.isEmpty
     }
 }
 
@@ -110,6 +138,15 @@ public struct AgentAttachmentContextSection: Sendable, Equatable {
             ```\(fenceLanguage(for: block.kind))
             \(block.content)
             ```
+            """)
+        }
+        if !plan.imageBlocks.isEmpty {
+            let images = plan.imageBlocks
+                .map { "- \($0.displayName) (\($0.attachmentID)): image content will be sent to vision-capable model input. Source: \($0.sourceRelativePath)" }
+                .joined(separator: "\n")
+            parts.append("""
+            Vision image attachments:
+            \(images)
             """)
         }
         if !plan.providerNativeBlocks.isEmpty {

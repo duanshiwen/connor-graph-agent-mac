@@ -333,6 +333,7 @@ final class AppViewModel: ObservableObject {
         guard !attachments.isEmpty, let storagePaths else { return AttachmentContextPlan() }
         let store = AppSessionAttachmentStore(paths: storagePaths)
         var inlineBlocks: [AttachmentInlineBlock] = []
+        var imageBlocks: [AttachmentImageBlock] = []
         var omissions: [AttachmentOmission] = []
         var remainingBudget = totalCharacterLimit
         for attachment in attachments {
@@ -342,6 +343,20 @@ final class AppViewModel: ObservableObject {
             }
             do {
                 let manifest = try store.loadManifest(sessionID: sessionID, attachmentID: attachment.id)
+                if manifest.kind == .image {
+                    let imageURL = storagePaths.sessionArtifactDirectories(sessionID: sessionID).root.appendingPathComponent(manifest.storedRelativePath)
+                    let data = try Data(contentsOf: imageURL)
+                    let mimeType = manifest.mimeType ?? "image/png"
+                    let dataURL = "data:\(mimeType);base64,\(data.base64EncodedString())"
+                    imageBlocks.append(AttachmentImageBlock(
+                        attachmentID: manifest.id,
+                        displayName: manifest.displayName,
+                        mimeType: mimeType,
+                        dataURL: dataURL,
+                        sourceRelativePath: manifest.storedRelativePath
+                    ))
+                    continue
+                }
                 guard let relativePath = manifest.extractedTextRelativePath else {
                     omissions.append(AttachmentOmission(attachmentID: attachment.id, displayName: attachment.displayName, reason: "No extracted text is available."))
                     continue
@@ -364,8 +379,8 @@ final class AppViewModel: ObservableObject {
                 omissions.append(AttachmentOmission(attachmentID: attachment.id, displayName: attachment.displayName, reason: "Failed to read extracted text: \(error)"))
             }
         }
-        let estimatedTokens = max(1, inlineBlocks.reduce(0) { $0 + $1.content.count } / 4)
-        return AttachmentContextPlan(inlineBlocks: inlineBlocks, omittedAttachments: omissions, estimatedTokens: estimatedTokens)
+        let estimatedTokens = max(1, inlineBlocks.reduce(0) { $0 + $1.content.count } / 4 + imageBlocks.count * 85)
+        return AttachmentContextPlan(inlineBlocks: inlineBlocks, omittedAttachments: omissions, imageBlocks: imageBlocks, estimatedTokens: estimatedTokens)
     }
 
     private func refreshSelectedSubmittingState() {
