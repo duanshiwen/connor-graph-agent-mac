@@ -55,6 +55,8 @@ enum AgentChatTypography {
 
     static let title: Font = .title3.weight(.semibold)
     static let sectionTitle: Font = .headline.weight(.semibold)
+    static let sessionTitle: Font = .system(size: 15, weight: .regular)
+    static let sessionTitleEmphasis: Font = .system(size: 15, weight: .semibold)
     static let body: Font = .system(size: 15)
     static let bodyEmphasis: Font = .system(size: 15, weight: .semibold)
     static let callout: Font = .system(size: 14)
@@ -212,7 +214,7 @@ private struct AgentChatSessionRow: View {
                         .foregroundStyle(row.isFlagged ? .orange : (isSelected ? ConnorCraftPalette.accent : .secondary))
                         .frame(width: 16)
                     Text(row.title)
-                        .font(AgentChatTypography.callout.weight(isSelected ? .semibold : .regular))
+                        .font(isSelected ? AgentChatTypography.sessionTitleEmphasis : AgentChatTypography.sessionTitle)
                         .lineLimit(1)
                     Spacer(minLength: 0)
                 }
