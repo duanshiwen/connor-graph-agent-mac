@@ -13,14 +13,17 @@ struct AgentSendControlButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: isSubmitting ? "stop.fill" : "arrow.up")
-                .font(.system(size: 11, weight: .semibold))
-                .frame(width: 22, height: 22)
+                .font(.system(size: AgentChatTypography.sendIconSize, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
+                .frame(width: AgentChatLayout.primaryButtonSize, height: AgentChatLayout.primaryButtonSize)
+                .background(buttonBackground, in: Circle())
+                .overlay(Circle().stroke(buttonBorder, lineWidth: 1))
+                .shadow(color: buttonShadow, radius: 7, x: 0, y: 2)
         }
         .buttonStyle(.plain)
         .foregroundStyle(isSubmitting ? ConnorCraftPalette.foreground : ConnorCraftPalette.sendButtonForeground)
-        .background(buttonBackground, in: Circle())
-        .overlay(Circle().stroke(buttonBorder, lineWidth: 1))
-        .shadow(color: buttonShadow, radius: 7, x: 0, y: 2)
+        .frame(width: AgentChatLayout.hitTargetSize, height: AgentChatLayout.hitTargetSize)
+        .contentShape(Circle())
         .opacity(isDisabled ? 0.42 : 1)
         .disabled(isDisabled)
     }
@@ -61,9 +64,13 @@ struct AgentChatComposerView: View {
                 HStack(spacing: AgentChatLayout.spaceS) {
                     Button(action: {}) {
                         Image(systemName: "paperclip")
+                            .font(.system(size: AgentChatTypography.controlIconSize, weight: .medium))
+                            .symbolRenderingMode(.hierarchical)
                             .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
                     }
                     .buttonStyle(.plain)
+                    .frame(width: AgentChatLayout.hitTargetSize, height: AgentChatLayout.hitTargetSize)
+                    .contentShape(Rectangle())
                     .help("添加附件")
 
                     workingDirectoryMenu
@@ -82,7 +89,7 @@ struct AgentChatComposerView: View {
 
                     if let inspection = viewModel.lastPromptInspection {
                         Label("约 \(inspection.estimatedPromptTokenCount) tokens", systemImage: "text.alignleft")
-                            .font(.caption2)
+                            .font(AgentChatTypography.micro)
                             .foregroundStyle(promptBudgetStatusColor(inspection.promptBudgetStatus))
                     }
 
@@ -104,7 +111,7 @@ struct AgentChatComposerView: View {
                 }
                 .padding(.horizontal, AgentChatLayout.spaceM)
                 .padding(.vertical, AgentChatLayout.spaceS)
-                .frame(minHeight: AgentChatLayout.primaryButtonSize)
+                .frame(minHeight: AgentChatLayout.hitTargetSize)
             }
             .background(Color(nsColor: .controlBackgroundColor).opacity(0.58), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusXL, style: .continuous))
             .overlay(
@@ -125,7 +132,7 @@ struct AgentChatComposerView: View {
             }
 
             if let error = viewModel.errorMessage {
-                AgentMarkdownPreviewText(markdown: error, font: .caption)
+                AgentMarkdownPreviewText(markdown: error, font: AgentChatTypography.meta)
                     .foregroundStyle(.red)
             }
         }
@@ -342,7 +349,7 @@ struct AgentChatComposerView: View {
                             VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
                                 Text(connection.title)
                                 Text(connection.subtitle)
-                                    .font(.caption2)
+                                    .font(AgentChatTypography.micro)
                                     .foregroundStyle(.secondary)
                             }
                         } icon: {
@@ -367,13 +374,13 @@ struct AgentChatComposerView: View {
             } icon: {
                 Image(systemName: "cpu")
             }
-            .font(.caption2.weight(.medium))
+            .font(AgentChatTypography.micro.weight(.medium))
             .padding(.horizontal, AgentChatLayout.spaceM)
             .frame(height: AgentChatLayout.chipHeight)
             .frame(maxWidth: AgentChatLayout.modelMenuMaxWidth)
         }
         .menuStyle(.borderlessButton)
-        .controlSize(.small)
+        .controlSize(.regular)
         .help("选择真实配置的连接和模型；切换后下一轮请求立即使用该模型")
     }
 
@@ -435,23 +442,20 @@ struct AgentComposerOptionBadge: View {
 
         var iconSize: CGFloat {
             switch self {
-            case .compact: 12
-            case .prominent: 13
+            case .compact: AgentChatTypography.controlIconSize
+            case .prominent: AgentChatTypography.controlIconSize + 1
             }
         }
 
         var textFont: Font {
             switch self {
-            case .compact: .caption2.weight(.medium)
-            case .prominent: .caption.weight(.semibold)
+            case .compact: AgentChatTypography.meta.weight(.medium)
+            case .prominent: AgentChatTypography.metaEmphasis
             }
         }
 
         var chevronSize: CGFloat {
-            switch self {
-            case .compact: 9
-            case .prominent: 10
-            }
+            AgentChatTypography.smallIconSize
         }
     }
 
@@ -466,17 +470,19 @@ struct AgentComposerOptionBadge: View {
         HStack(spacing: 6) {
             Image(systemName: systemImage)
                 .font(.system(size: style.iconSize, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
             Text(title)
                 .font(style.textFont)
                 .lineLimit(1)
             if showsChevron {
                 Image(systemName: "chevron.down")
                     .font(.system(size: style.chevronSize, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
                     .opacity(0.72)
             }
         }
         .padding(.horizontal, AgentChatLayout.spaceS)
-        .frame(height: 26)
+        .frame(height: AgentChatLayout.chipHeight)
         .foregroundStyle(tint)
         .background(
             RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
@@ -487,6 +493,7 @@ struct AgentComposerOptionBadge: View {
                 .stroke(Color.secondary.opacity(isActive ? 0.28 : 0.18), lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
+        .frame(minHeight: AgentChatLayout.hitTargetSize)
         .contentShape(RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
     }
 }
@@ -521,7 +528,7 @@ struct SafeChatComposerTextView: NSViewRepresentable {
         textView.isGrammarCheckingEnabled = false
         textView.isAutomaticSpellingCorrectionEnabled = false
         textView.enabledTextCheckingTypes = isSpellCheckEnabled ? NSTextCheckingResult.CheckingType.spelling.rawValue : 0
-        textView.font = .preferredFont(forTextStyle: .body)
+        textView.font = AgentChatTypography.composerNSFont
         textView.textColor = .labelColor
         textView.backgroundColor = .clear
         textView.drawsBackground = false
@@ -544,6 +551,7 @@ struct SafeChatComposerTextView: NSViewRepresentable {
         guard let textView = scrollView.documentView as? SubmitAwareTextView else { return }
         textView.onSubmit = onSubmit
         textView.placeholderString = placeholder
+        textView.font = AgentChatTypography.composerNSFont
         if textView.string != text {
             textView.string = text
         }
@@ -592,7 +600,7 @@ final class SubmitAwareTextView: NSTextView {
         super.draw(dirtyRect)
         guard string.isEmpty, !placeholderString.isEmpty else { return }
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: font ?? NSFont.preferredFont(forTextStyle: .body),
+            .font: font ?? AgentChatTypography.composerNSFont,
             .foregroundColor: NSColor.placeholderTextColor
         ]
         placeholderString.draw(
