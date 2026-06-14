@@ -15,14 +15,14 @@ struct AgentEventTimelineView: View {
                                 Image(systemName: icon(for: event.severity))
                                     .foregroundStyle(color(for: event.severity))
                                 Text(event.title)
-                                    .font(.caption.weight(.semibold))
+                                    .font(AgentChatTypography.metaEmphasis)
                                     .lineLimit(1)
                             }
-                            AgentMarkdownPreviewText(markdown: event.detail, font: .caption2, lineLimit: 3)
+                            AgentMarkdownPreviewText(markdown: event.detail, font: AgentChatTypography.micro, lineLimit: 3)
                                 .foregroundStyle(.secondary)
                                 .frame(width: 220, alignment: .leading)
                             Text(event.kind)
-                                .font(.caption2.monospaced())
+                                .font(AgentChatTypography.monoMicro)
                                 .foregroundStyle(.tertiary)
                         }
                         .padding(AgentChatLayout.spaceM)
@@ -38,7 +38,7 @@ struct AgentEventTimelineView: View {
             }
         } label: {
             Label("Agent 运行时间线（\(events.count) 个事件）", systemImage: "point.3.connected.trianglepath.dotted")
-                .font(.caption.weight(.semibold))
+                .font(AgentChatTypography.metaEmphasis)
         }
     }
 
@@ -65,12 +65,12 @@ struct AgentChatEmptyStateView: View {
     var body: some View {
         VStack(spacing: 12) {
             Image(systemName: "sparkles.rectangle.stack")
-                .font(.system(size: 42))
+                .font(.system(size: AgentChatTypography.largeIconSize))
                 .foregroundStyle(.secondary)
             Text("开始基于图谱的对话")
-                .font(.title3.weight(.semibold))
+                .font(AgentChatTypography.title)
             Text("你可以询问已导入的图谱知识。每一轮助手回复都可以展开查看提示词、上下文、Token 预算和引用。")
-                .font(.subheadline)
+                .font(AgentChatTypography.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 480)
@@ -81,7 +81,7 @@ struct AgentChatEmptyStateView: View {
 
 struct AgentMarkdownPreviewText: View {
     var markdown: String
-    var font: Font = .body
+    var font: Font = AgentChatTypography.body
     var monospacedFallback: Bool = false
     var lineLimit: Int? = nil
 
@@ -137,13 +137,13 @@ struct AgentMarkdownPreviewText: View {
     var body: some View {
         if let lineLimit {
             Text(inlineRendered)
-                .font(monospacedFallback ? .system(.caption, design: .monospaced) : font)
+                .font(monospacedFallback ? AgentChatTypography.monoMeta : font)
                 .lineLimit(lineLimit)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else if monospacedFallback {
             Text(markdown)
-                .font(.system(.caption, design: .monospaced))
+                .font(AgentChatTypography.monoMeta)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else {
@@ -217,11 +217,11 @@ struct AgentMarkdownPreviewText: View {
             VStack(alignment: .leading, spacing: 6) {
                 if let language, !language.isEmpty {
                     Text(language)
-                        .font(.caption2.monospaced().weight(.semibold))
+                        .font(AgentChatTypography.monoMicro.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
                 Text(text)
-                    .font(.system(.caption, design: .monospaced))
+                    .font(AgentChatTypography.monoMeta)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(8)
@@ -292,9 +292,9 @@ struct AgentMarkdownPreviewText: View {
 
     private func headingFont(_ level: Int) -> Font {
         switch level {
-        case 1: return .title3.weight(.semibold)
-        case 2: return .headline.weight(.semibold)
-        default: return .subheadline.weight(.semibold)
+        case 1: return AgentChatTypography.title
+        case 2: return AgentChatTypography.sectionTitle
+        default: return AgentChatTypography.calloutEmphasis
         }
     }
 
@@ -315,7 +315,7 @@ struct AgentChatTurnTimestampRow: View {
 
     var body: some View {
         Text(timestamp.text)
-            .font(.caption2.weight(.medium))
+            .font(AgentChatTypography.micro.weight(.medium))
             .foregroundStyle(.tertiary)
             .lineLimit(1)
             .padding(.vertical, 2)
@@ -402,11 +402,11 @@ struct AgentChatMessageRow: View {
             if let browserPromptFoldingParts {
                 BrowserPromptFoldedMessageView(parts: browserPromptFoldingParts)
             } else {
-                AgentMarkdownPreviewText(markdown: row.message.content, font: .body)
+                AgentMarkdownPreviewText(markdown: row.message.content, font: AgentChatTypography.body)
             }
         } else {
             ScrollView {
-                AgentMarkdownPreviewText(markdown: row.message.content, font: .body)
+                AgentMarkdownPreviewText(markdown: row.message.content, font: AgentChatTypography.body)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.trailing, AgentChatLayout.spaceXS)
             }
@@ -427,13 +427,13 @@ private struct BrowserPromptFoldedMessageView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
             if !parts.leadingMarkdown.isEmpty {
-                AgentMarkdownPreviewText(markdown: parts.leadingMarkdown, font: .body)
+                AgentMarkdownPreviewText(markdown: parts.leadingMarkdown, font: AgentChatTypography.body)
             }
 
             DisclosureGroup(isExpanded: $isWebPageBodyExpanded) {
                 ScrollView {
                     Text(parts.webPageBody)
-                        .font(.system(.caption, design: .monospaced))
+                        .font(AgentChatTypography.monoMeta)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(AgentChatLayout.spaceS)
@@ -442,12 +442,12 @@ private struct BrowserPromptFoldedMessageView: View {
                 .background(Color.black.opacity(0.05), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
             } label: {
                 Label("网页正文", systemImage: "doc.text.magnifyingglass")
-                    .font(.caption.weight(.semibold))
+                    .font(AgentChatTypography.metaEmphasis)
             }
             .tint(.primary)
 
             if !parts.trailingMarkdown.isEmpty {
-                AgentMarkdownPreviewText(markdown: parts.trailingMarkdown, font: .body)
+                AgentMarkdownPreviewText(markdown: parts.trailingMarkdown, font: AgentChatTypography.body)
             }
         }
     }
@@ -484,7 +484,7 @@ struct AgentChatTurnProcessRow: View {
                             AgentActivityLoadingRow(startedAt: startedAt)
                         }
                     }
-                    .padding(.leading, 18)
+                    .padding(.leading, AgentChatLayout.iconButtonSize)
                     .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
@@ -498,36 +498,37 @@ struct AgentChatTurnProcessRow: View {
     private var activityHeader: some View {
         HStack(spacing: AgentChatLayout.spaceS) {
             Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: AgentChatTypography.chevronIconSize, weight: .semibold))
                 .foregroundStyle(.secondary)
-                .frame(width: 12)
+                .frame(width: AgentChatTypography.controlIconSize)
 
             Text("\(visibleEvents.count)")
-                .font(.caption2.monospacedDigit().weight(.medium))
+                .font(AgentChatTypography.micro.monospacedDigit().weight(.medium))
                 .foregroundStyle(.secondary)
                 .frame(minWidth: 14, alignment: .center)
 
             if process.state == .running {
                 ProgressView()
-                    .controlSize(.mini)
-                    .frame(width: 12, height: 12)
+                    .controlSize(.small)
+                    .frame(width: AgentChatTypography.controlIconSize, height: AgentChatTypography.controlIconSize)
                     .fixedSize()
                 Text("正在处理")
-                    .font(.caption2.weight(.medium))
+                    .font(AgentChatTypography.micro.weight(.medium))
                     .foregroundStyle(.secondary)
             }
 
             Text("Activity")
-                .font(.caption2.weight(.medium))
+                .font(AgentChatTypography.micro.weight(.medium))
                 .foregroundStyle(.secondary)
             Text("第 \(process.turnNumber) 轮 · \(visibleEvents.count) 个事件")
-                .font(.caption2)
+                .font(AgentChatTypography.micro)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, AgentChatLayout.spaceM)
         .padding(.vertical, AgentChatLayout.spaceXS)
+        .frame(minHeight: AgentChatLayout.activityRowMinHeight)
         .background(Color.clear)
         .contentShape(Rectangle())
     }
@@ -540,19 +541,20 @@ struct AgentActivityLoadingRow: View {
         TimelineView(.periodic(from: startedAt, by: 1)) { context in
             HStack(spacing: AgentChatLayout.spaceS) {
                 ProgressView()
-                    .controlSize(.mini)
-                    .frame(width: 12, height: 12)
+                    .controlSize(.small)
+                    .frame(width: AgentChatTypography.controlIconSize, height: AgentChatTypography.controlIconSize)
                     .fixedSize()
                 Text("忙碌中…")
-                    .font(.caption2.weight(.medium))
+                    .font(AgentChatTypography.micro.weight(.medium))
                     .foregroundStyle(.secondary)
                 Text(Self.elapsedText(from: startedAt, to: context.date))
-                    .font(.caption2.monospacedDigit())
+                    .font(AgentChatTypography.micro.monospacedDigit())
                     .foregroundStyle(.tertiary)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, AgentChatLayout.spaceM)
             .padding(.vertical, 3)
+            .frame(minHeight: AgentChatLayout.activityRowMinHeight)
             .contentShape(RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
         }
     }
@@ -576,27 +578,28 @@ struct AgentActivityEventRow: View {
     var body: some View {
         HStack(spacing: AgentChatLayout.spaceS) {
             Image(systemName: icon)
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: AgentChatTypography.chevronIconSize, weight: .semibold))
                 .foregroundStyle(color)
-                .frame(width: 12)
+                .frame(width: AgentChatTypography.controlIconSize)
             Text(event.title)
-                .font(.caption2.weight(.medium))
+                .font(AgentChatTypography.micro.weight(.medium))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-            AgentMarkdownPreviewText(markdown: event.detail, font: .caption2, lineLimit: 1)
+            AgentMarkdownPreviewText(markdown: event.detail, font: AgentChatTypography.micro, lineLimit: 1)
                 .foregroundStyle(.tertiary)
                 .truncationMode(.tail)
             Spacer(minLength: 0)
             Text(event.kind)
-                .font(.caption2.monospaced())
+                .font(AgentChatTypography.monoMicro)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
             Image(systemName: "arrow.up.right")
-                .font(.system(size: 9, weight: .semibold))
+                .font(.system(size: AgentChatTypography.smallIconSize, weight: .semibold))
                 .foregroundStyle(.tertiary)
         }
         .padding(.horizontal, AgentChatLayout.spaceM)
         .padding(.vertical, 2)
+        .frame(minHeight: AgentChatLayout.activityRowMinHeight)
         .contentShape(RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
     }
 
@@ -658,9 +661,9 @@ struct AgentActivityDetailOverlay: View {
                 HStack {
                     Spacer()
                     Label("Activity", systemImage: "info.circle")
-                        .font(.caption.weight(.medium))
+                        .font(AgentChatTypography.meta.weight(.medium))
                         .padding(.horizontal, AgentChatLayout.spaceS)
-                        .frame(height: 24)
+                        .frame(height: AgentChatLayout.chipHeight)
                         .background(Color.clear, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
                         .overlay(
                             RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
@@ -670,10 +673,12 @@ struct AgentActivityDetailOverlay: View {
 
                     Button(action: onClose) {
                         Image(systemName: "xmark")
-                            .font(.system(size: 11, weight: .semibold))
-                            .frame(width: 24, height: 24)
+                            .font(.system(size: AgentChatTypography.controlIconSize, weight: .semibold))
+                            .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
                     }
                     .buttonStyle(.plain)
+                    .frame(width: AgentChatLayout.hitTargetSize, height: AgentChatLayout.hitTargetSize)
+                    .contentShape(Rectangle())
                     .keyboardShortcut(.escape, modifiers: [])
                     .background(Color.clear, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
                     .overlay(
@@ -689,13 +694,13 @@ struct AgentActivityDetailOverlay: View {
                     VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
                         HStack(spacing: AgentChatLayout.spaceS) {
                             Text(event.title)
-                                .font(.headline)
+                                .font(AgentChatTypography.sectionTitle)
                             Text(event.kind)
-                                .font(.caption2.monospaced())
+                                .font(AgentChatTypography.monoMicro)
                                 .foregroundStyle(.tertiary)
                             Spacer()
                         }
-                        AgentMarkdownPreviewText(markdown: event.detail, font: .body)
+                        AgentMarkdownPreviewText(markdown: event.detail, font: AgentChatTypography.body)
                             .foregroundStyle(.primary)
                     }
                     .frame(maxWidth: 900, alignment: .leading)
@@ -729,17 +734,17 @@ private struct AgentChatPendingAssistantRow: View {
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
                 HStack(spacing: AgentChatLayout.spaceS) {
                     Text("助手")
-                        .font(.caption.weight(.semibold))
+                        .font(AgentChatTypography.metaEmphasis)
                         .foregroundStyle(.secondary)
                     Text("第 \(pending.turnNumber) 轮")
-                        .font(.caption2)
+                        .font(AgentChatTypography.micro)
                         .foregroundStyle(.secondary)
                     ProgressView()
-                        .controlSize(.small)
+                        .controlSize(.regular)
                         .frame(width: 14, height: 14)
                         .fixedSize()
                     Text(pending.title)
-                        .font(.caption)
+                        .font(AgentChatTypography.meta)
                         .foregroundStyle(.secondary)
                 }
 
@@ -751,14 +756,14 @@ private struct AgentChatPendingAssistantRow: View {
                         Label("正在组装近期对话和可选会话摘要", systemImage: "text.bubble")
                         Label("正在调用已配置的模型提供方", systemImage: "network")
                     }
-                    .font(.caption)
+                    .font(AgentChatTypography.meta)
                     .foregroundStyle(.secondary)
                     .padding(.top, 8)
                 } label: {
                     Text("处理中")
-                        .font(.caption.weight(.semibold))
+                        .font(AgentChatTypography.metaEmphasis)
                 }
-                .font(.caption)
+                .font(AgentChatTypography.meta)
             }
             .padding(AgentChatLayout.spaceM)
             .frame(maxWidth: AgentChatLayout.messageMaxWidth, alignment: .leading)
@@ -798,10 +803,10 @@ private struct AgentChatTurnInspectorView: View {
             if let summary = row.turnMetadataSummary {
                 HStack(spacing: AgentChatLayout.spaceS) {
                     Image(systemName: "info.circle")
-                    AgentMarkdownPreviewText(markdown: summary, font: .caption, lineLimit: 1)
+                    AgentMarkdownPreviewText(markdown: summary, font: AgentChatTypography.meta, lineLimit: 1)
                     Spacer(minLength: 0)
                 }
-                .font(.caption)
+                .font(AgentChatTypography.meta)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
@@ -821,13 +826,13 @@ private struct AgentChatTurnInspectorView: View {
                     if !row.expandedContextItems.isEmpty {
                         VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                             Text("引用的图谱上下文")
-                                .font(.caption.weight(.semibold))
+                                .font(AgentChatTypography.metaEmphasis)
                                 .foregroundStyle(.secondary)
                             ForEach(row.expandedContextItems) { item in
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(item.sourceID)
-                                        .font(.caption.weight(.semibold))
-                                    AgentMarkdownPreviewText(markdown: item.content, font: .caption)
+                                        .font(AgentChatTypography.metaEmphasis)
+                                    AgentMarkdownPreviewText(markdown: item.content, font: AgentChatTypography.meta)
                                         .foregroundStyle(.secondary)
                                 }
                                 .padding(8)
@@ -841,16 +846,16 @@ private struct AgentChatTurnInspectorView: View {
                         MetadataBlock(title: "提示词快照", text: prompt, monospaced: true)
                     } else if row.message.promptInspection != nil {
                         Text("本轮没有保存渲染后的提示词快照。")
-                            .font(.caption)
+                            .font(AgentChatTypography.meta)
                             .foregroundStyle(.secondary)
                     }
                 }
                 .padding(.top, 8)
             } label: {
                 Text("轮次信息")
-                    .font(.caption.weight(.semibold))
+                    .font(AgentChatTypography.metaEmphasis)
             }
-            .font(.caption)
+            .font(AgentChatTypography.meta)
         }
     }
 }
@@ -863,9 +868,9 @@ private struct MetadataBlock: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(title)
-                .font(.caption.weight(.semibold))
+                .font(AgentChatTypography.metaEmphasis)
                 .foregroundStyle(.secondary)
-            AgentMarkdownPreviewText(markdown: text, font: .caption, monospacedFallback: monospaced)
+            AgentMarkdownPreviewText(markdown: text, font: AgentChatTypography.meta, monospacedFallback: monospaced)
                 .padding(8)
                 .background(.quaternary.opacity(0.14), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
@@ -879,7 +884,7 @@ private struct MetadataChips: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
             Text(title)
-                .font(.caption.weight(.semibold))
+                .font(AgentChatTypography.metaEmphasis)
                 .foregroundStyle(.secondary)
             FlowLikeChips(values: values)
         }
@@ -893,7 +898,7 @@ struct FlowLikeChips: View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
             ForEach(values, id: \.self) { value in
                 Text(value)
-                    .font(.caption2)
+                    .font(AgentChatTypography.micro)
                     .lineLimit(1)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
