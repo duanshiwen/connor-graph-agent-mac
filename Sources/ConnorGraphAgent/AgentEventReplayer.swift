@@ -28,6 +28,8 @@ public struct AgentEventReplayer: Sendable {
             return .turnStarted(try decoder.decode(AgentTurnStartedEvent.self, from: data))
         case .turnCompleted:
             return .turnCompleted(try decoder.decode(AgentTurnCompletedEvent.self, from: data))
+        case .promptAssembled:
+            return .promptAssembled(try decoder.decode(AgentPromptAssembledEvent.self, from: data))
         case .textDelta:
             return .textDelta(try decoder.decode(AgentTextDeltaEvent.self, from: data))
         case .textComplete:

@@ -194,9 +194,10 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, Ag
 
     private func makeToolCallingRequest(_ request: AgentModelRequest) throws -> AgentHTTPRequest {
         let endpoint = config.baseURL.appendingPathComponent("chat/completions")
-        let messages = request.messages.map { message in
-            OpenAIChatMessage(
-                role: message.role.rawValue,
+        let messages = request.messages.enumerated().map { index, message in
+            let role = projectedRole(for: message, index: index, instructionPlacement: request.instructionPlacement)
+            return OpenAIChatMessage(
+                role: role,
                 content: message.content,
                 toolCallID: message.toolCallID,
                 name: message.name,
@@ -230,6 +231,16 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, Ag
             headers: ["Authorization": "Bearer \(config.apiKey)", "Content-Type": "application/json"],
             body: data
         )
+    }
+
+    private func projectedRole(for message: AgentModelMessage, index: Int, instructionPlacement: AgentInstructionPlacement) -> String {
+        guard index == 0, message.role == .system else { return message.role.rawValue }
+        switch instructionPlacement {
+        case .developerMessage:
+            return "developer"
+        case .systemMessage, .providerNativeSystem:
+            return "system"
+        }
     }
 
     private func parseResponse(_ data: Data) throws -> String {

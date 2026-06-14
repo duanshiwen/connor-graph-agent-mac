@@ -52,11 +52,21 @@ public struct AgentModelRequest: Sendable, Equatable {
     public var messages: [AgentModelMessage]
     public var tools: [AgentToolDefinition]
     public var temperature: Double
+    public var promptDiagnostics: AgentPromptDiagnostics?
+    public var instructionPlacement: AgentInstructionPlacement
 
-    public init(messages: [AgentModelMessage], tools: [AgentToolDefinition] = [], temperature: Double = 0.2) {
+    public init(
+        messages: [AgentModelMessage],
+        tools: [AgentToolDefinition] = [],
+        temperature: Double = 0.2,
+        promptDiagnostics: AgentPromptDiagnostics? = nil,
+        instructionPlacement: AgentInstructionPlacement = .systemMessage
+    ) {
         self.messages = messages
         self.tools = tools
         self.temperature = temperature
+        self.promptDiagnostics = promptDiagnostics
+        self.instructionPlacement = instructionPlacement
     }
 }
 

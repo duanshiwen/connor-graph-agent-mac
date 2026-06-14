@@ -63,6 +63,39 @@ private struct ToolCallingCapturingHTTPClient: AgentHTTPClient {
     #expect(requestText.contains("graph_search"))
 }
 
+@Test func openAICompatibleProviderSerializesDeveloperInstructionPlacement() async throws {
+    let body = #"""
+    {
+      "choices": [
+        {
+          "message": { "role": "assistant", "content": "Done." },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": { "prompt_tokens": 8, "completion_tokens": 2, "total_tokens": 10 }
+    }
+    """#.data(using: .utf8)!
+    let client = ToolCallingCapturingHTTPClient(responseBody: body)
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(baseURL: URL(string: "https://llm.example.com/v1")!, apiKey: "test-key", model: "gpt-test"),
+        httpClient: client
+    )
+
+    _ = try await provider.completeWithTools(AgentModelRequest(
+        messages: [
+            AgentModelMessage(role: .system, content: "Core instruction"),
+            AgentModelMessage(role: .user, content: "Hello")
+        ],
+        instructionPlacement: .developerMessage
+    ))
+
+    let captured = try #require(client.storage.capturedBody)
+    let object = try #require(try JSONSerialization.jsonObject(with: captured) as? [String: Any])
+    let messages = try #require(object["messages"] as? [[String: Any]])
+    #expect(messages.first?["role"] as? String == "developer")
+    #expect(messages.first?["content"] as? String == "Core instruction")
+}
+
 @Test func openAICompatibleProviderSerializesAssistantToolCallsInConversationHistory() async throws {
     let body = #"""
     {

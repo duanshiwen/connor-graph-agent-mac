@@ -95,6 +95,7 @@ private func persisted(_ event: AgentEvent, id: String, sequence: Int?, createdA
     case .runStarted(let payload): payloadJSON = encode(payload, using: encoder)
     case .turnStarted(let payload): payloadJSON = encode(payload, using: encoder)
     case .turnCompleted(let payload): payloadJSON = encode(payload, using: encoder)
+    case .promptAssembled(let payload): payloadJSON = encode(payload, using: encoder)
     case .textDelta(let payload): payloadJSON = encode(payload, using: encoder)
     case .textComplete(let payload): payloadJSON = encode(payload, using: encoder)
     case .assistantMessageCreated(let payload): payloadJSON = encode(payload, using: encoder)

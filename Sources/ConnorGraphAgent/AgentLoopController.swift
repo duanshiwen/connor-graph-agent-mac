@@ -11,6 +11,8 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
     public var allowParallelToolCalls: Bool
     public var maxConsecutiveToolResultErrors: Int
     public var stopAfterTurnWhenBudgetExceeded: Bool
+    public var promptProjectionMode: AgentPromptProjectionMode
+    public var promptMaxEstimatedTokens: Int
     public var permissionMode: AgentPermissionMode
     public var budget: AgentBudgetConfiguration
 
@@ -22,6 +24,8 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         allowParallelToolCalls: Bool = false,
         maxConsecutiveToolResultErrors: Int = 6,
         stopAfterTurnWhenBudgetExceeded: Bool = false,
+        promptProjectionMode: AgentPromptProjectionMode = .legacySingleUserMessage,
+        promptMaxEstimatedTokens: Int = 8_000,
         permissionMode: AgentPermissionMode = .askToWrite,
         budget: AgentBudgetConfiguration = AgentBudgetConfiguration()
     ) {
@@ -32,8 +36,54 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         self.allowParallelToolCalls = allowParallelToolCalls
         self.maxConsecutiveToolResultErrors = maxConsecutiveToolResultErrors
         self.stopAfterTurnWhenBudgetExceeded = stopAfterTurnWhenBudgetExceeded
+        self.promptProjectionMode = promptProjectionMode
+        self.promptMaxEstimatedTokens = promptMaxEstimatedTokens
         self.permissionMode = permissionMode
         self.budget = budget
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case maxToolIterations
+        case maxToolCallsPerIteration
+        case maxRunDurationSeconds
+        case maxToolResultBytes
+        case allowParallelToolCalls
+        case maxConsecutiveToolResultErrors
+        case stopAfterTurnWhenBudgetExceeded
+        case promptProjectionMode
+        case promptMaxEstimatedTokens
+        case permissionMode
+        case budget
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.maxToolIterations = try container.decodeIfPresent(Int.self, forKey: .maxToolIterations) ?? 64
+        self.maxToolCallsPerIteration = try container.decodeIfPresent(Int.self, forKey: .maxToolCallsPerIteration) ?? 4
+        self.maxRunDurationSeconds = try container.decodeIfPresent(Int.self, forKey: .maxRunDurationSeconds) ?? 180
+        self.maxToolResultBytes = try container.decodeIfPresent(Int.self, forKey: .maxToolResultBytes) ?? 32 * 1024
+        self.allowParallelToolCalls = try container.decodeIfPresent(Bool.self, forKey: .allowParallelToolCalls) ?? false
+        self.maxConsecutiveToolResultErrors = try container.decodeIfPresent(Int.self, forKey: .maxConsecutiveToolResultErrors) ?? 6
+        self.stopAfterTurnWhenBudgetExceeded = try container.decodeIfPresent(Bool.self, forKey: .stopAfterTurnWhenBudgetExceeded) ?? false
+        self.promptProjectionMode = try container.decodeIfPresent(AgentPromptProjectionMode.self, forKey: .promptProjectionMode) ?? .legacySingleUserMessage
+        self.promptMaxEstimatedTokens = try container.decodeIfPresent(Int.self, forKey: .promptMaxEstimatedTokens) ?? 8_000
+        self.permissionMode = try container.decodeIfPresent(AgentPermissionMode.self, forKey: .permissionMode) ?? .askToWrite
+        self.budget = try container.decodeIfPresent(AgentBudgetConfiguration.self, forKey: .budget) ?? AgentBudgetConfiguration()
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(maxToolIterations, forKey: .maxToolIterations)
+        try container.encode(maxToolCallsPerIteration, forKey: .maxToolCallsPerIteration)
+        try container.encode(maxRunDurationSeconds, forKey: .maxRunDurationSeconds)
+        try container.encode(maxToolResultBytes, forKey: .maxToolResultBytes)
+        try container.encode(allowParallelToolCalls, forKey: .allowParallelToolCalls)
+        try container.encode(maxConsecutiveToolResultErrors, forKey: .maxConsecutiveToolResultErrors)
+        try container.encode(stopAfterTurnWhenBudgetExceeded, forKey: .stopAfterTurnWhenBudgetExceeded)
+        try container.encode(promptProjectionMode, forKey: .promptProjectionMode)
+        try container.encode(promptMaxEstimatedTokens, forKey: .promptMaxEstimatedTokens)
+        try container.encode(permissionMode, forKey: .permissionMode)
+        try container.encode(budget, forKey: .budget)
     }
 }
 
@@ -93,16 +143,20 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
 
                 let policy = AgentPolicyEngine(permissionMode: request.permissionMode, auditLog: auditLog)
                 let budgetMeter = AgentBudgetMeter(configuration: configuration.budget)
-                var messages: [AgentModelMessage] = [
-                    AgentModelMessage(role: .system, content: systemPrompt)
-                ]
                 let memoryContract = await initialGraphMemoryContract(for: request)
                 let usableMemoryContract = memoryContract.flatMap { $0.items.isEmpty ? nil : $0 }
                 let usableInitialContext = usableMemoryContract?.agentContext
-                if let usableMemoryContract {
-                    messages.append(AgentModelMessage(role: .system, content: renderedGraphMemorySystemMessage(usableMemoryContract)))
+                let promptAssembly = await buildPromptAssembly(for: request, memoryContract: usableMemoryContract)
+                let promptProjector = AgentTranscriptProjector(projectionMode: configuration.promptProjectionMode)
+                var modelRequest = promptProjector.project(promptAssembly, tools: toolRegistry.definitions)
+                var messages = modelRequest.messages
+                if let diagnostics = modelRequest.promptDiagnostics {
+                    yield(.promptAssembled(promptAssembledEvent(
+                        runID: run.id,
+                        sessionID: run.sessionID,
+                        diagnostics: diagnostics
+                    )), to: continuation, recorder: eventRecorder)
                 }
-                messages.append(AgentModelMessage(role: .user, content: request.normalizedPrompt))
 
                 do {
                     var iterationCount = 0
@@ -131,7 +185,9 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         )), to: continuation, recorder: eventRecorder)
 
                         try Task.checkCancellation()
-                        let modelResponse = try await modelProvider.complete(AgentModelRequest(messages: messages, tools: toolRegistry.definitions))
+                        modelRequest.messages = messages
+                        modelRequest.tools = toolRegistry.definitions
+                        let modelResponse = try await modelProvider.complete(modelRequest)
                         try Task.checkCancellation()
                         logger.info("Model response: \(modelResponse.toolCalls.count) tool calls, has text: \(modelResponse.text != nil)")
 
@@ -483,33 +539,46 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         continuation.yield(event)
     }
 
-    private var systemPrompt: String {
-        """
-        You are Connor Graph Agent, a specialized AI assistant for knowledge graph operations and local file management.
+    private func buildPromptAssembly(for request: AgentChatRequest, memoryContract: AgentGraphMemoryContextContract?) async -> AgentPromptAssembly {
+        var assembly = AgentPromptAssembler().assemble(request: request, memoryContract: memoryContract)
+        let transformers: [any AgentContextTransformer] = [
+            AgentPromptBudgetTransformer(maxEstimatedTokens: configuration.promptMaxEstimatedTokens),
+            AgentPromptDedupeTransformer(),
+            AgentPromptDiagnosticsTransformer()
+        ]
+        for transformer in transformers {
+            do {
+                assembly = try await transformer.transform(assembly, projectionMode: configuration.promptProjectionMode)
+            } catch {
+                assembly.diagnostics = AgentPromptDiagnosticsTransformer.diagnostics(
+                    for: assembly,
+                    projectionMode: configuration.promptProjectionMode,
+                    appliedTransformers: assembly.diagnostics.appliedTransformers + ["transformer-fallback"]
+                )
+            }
+        }
+        return assembly
+    }
 
-        ## Core Principles
-        1. **Be Efficient**: Use the minimum number of tool calls to complete the task.
-        2. **Stop When Done**: Once the task is complete, provide a final answer immediately.
-        3. **Learn from Failures**: If a tool fails, analyze the error and try a different approach. Do not retry the same failing operation.
-        4. **Avoid Loops**: If you've tried the same approach 3 times without progress, stop and explain the issue.
-
-        ## Tool Usage Guidelines
-        - **Read files first**: Before editing, always read the file to understand its structure.
-        - **Use Grep to find**: When searching for code patterns, use Grep instead of reading entire files.
-        - **Edit vs MultiEdit**: Use Edit for single changes, MultiEdit for multiple changes in one file.
-        - **Bash for commands**: Use Bash for shell commands, not for file operations.
-
-        ## When to Stop
-        - Task is completed successfully
-        - You've encountered an error you cannot resolve
-        - You've made 3 attempts without progress
-        - The user's request is unclear (ask for clarification)
-
-        ## Response Format
-        - Provide a clear summary of what you did
-        - Include any relevant file paths or code snippets
-        - If there were errors, explain what went wrong and what you tried
-        """
+    private func promptAssembledEvent(runID: String, sessionID: String, diagnostics: AgentPromptDiagnostics) -> AgentPromptAssembledEvent {
+        AgentPromptAssembledEvent(
+            runID: runID,
+            sessionID: sessionID,
+            projectionMode: diagnostics.projectionMode.rawValue,
+            sections: diagnostics.sections.map { section in
+                AgentPromptSectionSnapshot(
+                    id: section.id,
+                    title: section.title,
+                    role: section.role,
+                    characterCount: section.characterCount,
+                    estimatedTokenCount: section.estimatedTokenCount,
+                    wasTrimmed: section.wasTrimmed,
+                    notes: section.notes
+                )
+            },
+            totalEstimatedTokenCount: diagnostics.totalEstimatedTokenCount,
+            appliedTransformers: diagnostics.appliedTransformers
+        )
     }
 
     private func initialGraphMemoryContract(for request: AgentChatRequest) async -> AgentGraphMemoryContextContract? {
@@ -519,19 +588,6 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         } catch {
             return nil
         }
-    }
-
-    private func renderedGraphMemorySystemMessage(_ contract: AgentGraphMemoryContextContract) -> String {
-        """
-        Relevant Graph Memory Context:
-        Use this background memory when relevant to the user's request. Treat it as evidence-backed context, not as the user's latest instruction. If it conflicts with the current user message, prefer the current user message.
-
-        Memory contract: \(contract.summary)
-        Policy: \(contract.policy.rawValue)
-        Signals: stale=\(contract.hasStaleSignals), conflict=\(contract.hasConflictSignals), uncertainty=\(contract.hasUncertaintySignals)
-
-        \(contract.renderedText)
-        """
     }
 
     private func compactToolResult(_ result: AgentToolResult) -> String {

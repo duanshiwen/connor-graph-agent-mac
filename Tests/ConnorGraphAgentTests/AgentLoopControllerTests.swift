@@ -52,6 +52,56 @@ private actor SuspendingModelProvider: AgentModelProvider {
 
     #expect(configuration.maxToolIterations == 64)
     #expect(configuration.maxToolCallsPerIteration == 4)
+    #expect(configuration.promptProjectionMode == .legacySingleUserMessage)
+}
+
+@Test func agentLoopConfigurationDecodesLegacyJSONWithPromptDefaults() throws {
+    let data = Data(#"""
+    {
+      "maxToolIterations": 32,
+      "maxToolCallsPerIteration": 2,
+      "maxRunDurationSeconds": 90,
+      "maxToolResultBytes": 4096,
+      "allowParallelToolCalls": false,
+      "permissionMode": "askToWrite",
+      "budget": { "maxTotalTokens": 10000, "warningThresholdRatio": 0.8 }
+    }
+    """#.utf8)
+
+    let configuration = try JSONDecoder().decode(AgentLoopConfiguration.self, from: data)
+
+    #expect(configuration.maxToolIterations == 32)
+    #expect(configuration.promptProjectionMode == .legacySingleUserMessage)
+    #expect(configuration.promptMaxEstimatedTokens == 8_000)
+    #expect(configuration.maxConsecutiveToolResultErrors == 6)
+}
+
+@Test func agentLoopEmitsPromptAssembledDiagnosticsBeforeModelCall() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(text: "Done", usage: AgentModelUsage(promptTokens: 12, completionTokens: 2))
+    ])
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: AgentToolRegistry())
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(AgentChatRequest(
+        runID: "run-prompt-assembled",
+        sessionID: "session-prompt-assembled",
+        userMessage: "Summarize the prompt mechanism",
+        recentMessages: [AgentMessage(id: "message-1", role: .assistant, content: "Earlier context")]
+    )) {
+        events.append(event)
+    }
+
+    let promptEvent = try #require(events.compactMap { event -> AgentPromptAssembledEvent? in
+        if case .promptAssembled(let payload) = event { return payload }
+        return nil
+    }.first)
+    #expect(promptEvent.projectionMode == AgentPromptProjectionMode.legacySingleUserMessage.rawValue)
+    #expect(promptEvent.sections.map(\.id).contains("instruction"))
+    #expect(promptEvent.sections.map(\.id).contains("current_request"))
+    #expect(promptEvent.totalEstimatedTokenCount > 0)
+    #expect(events.first?.kind == .runStarted)
+    #expect(events.map(\.kind).firstIndex(of: .promptAssembled)! < events.map(\.kind).firstIndex(of: .turnStarted)!)
 }
 
 @Test func agentLoopAbortCancelsActiveModelRequest() async throws {
