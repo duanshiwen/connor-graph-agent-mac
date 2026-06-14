@@ -150,9 +150,10 @@ struct AgentChatComposerView: View {
             AgentComposerOptionBadge(
                 title: workingDirectoryBadgeTitle,
                 systemImage: viewModel.primaryWorkspaceRootDraft == nil ? "folder" : "folder.fill",
-                tint: viewModel.primaryWorkspaceRootDraft == nil ? .secondary : .accentColor,
-                isActive: viewModel.primaryWorkspaceRootDraft != nil,
-                style: .compact
+                tint: .secondary,
+                isActive: false,
+                style: .compact,
+                showsBorder: false
             )
         }
         .buttonStyle(.plain)
@@ -233,6 +234,14 @@ struct AgentChatComposerView: View {
                 }
                 .buttonStyle(.borderless)
                 .disabled(viewModel.workspaceRoots.isEmpty && viewModel.defaultWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                Button {
+                    viewModel.clearRecentWorkspacePaths()
+                } label: {
+                    Label("清空历史", systemImage: "trash")
+                }
+                .buttonStyle(.borderless)
+                .disabled(viewModel.recentWorkspacePaths.isEmpty)
             }
             .font(AgentChatTypography.micro)
             .padding(.horizontal, 4)
@@ -582,6 +591,7 @@ struct AgentComposerOptionBadge: View {
     var showsChevron: Bool = true
     var isActive: Bool = false
     var style: Style = .compact
+    var showsBorder: Bool = true
 
     var body: some View {
         HStack(spacing: 6) {
@@ -605,10 +615,12 @@ struct AgentComposerOptionBadge: View {
             RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
                 .fill(Color.clear)
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
-                .stroke(Color.secondary.opacity(isActive ? 0.28 : 0.18), lineWidth: 1)
-        )
+        .overlay {
+            if showsBorder {
+                RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
+                    .stroke(Color.secondary.opacity(isActive ? 0.28 : 0.18), lineWidth: 1)
+            }
+        }
         .shadow(color: .black.opacity(0.07), radius: 3, x: 0, y: 1)
         .frame(minHeight: AgentChatLayout.hitTargetSize)
         .contentShape(RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
