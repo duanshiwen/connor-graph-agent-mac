@@ -76,6 +76,181 @@ private actor SuspendingModelProvider: AgentModelProvider {
     #expect(events.map(\.kind).contains(.runFailed))
 }
 
+@Test func agentLoopRequestsApprovalForAskToWriteToolAndContinuesAfterApproval() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "call-write-approval", name: "Write", argumentsJSON: #"{"file_path":"note.txt","content":"approved"}"#)],
+            usage: AgentModelUsage(promptTokens: 10, completionTokens: 3),
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: "Write completed.",
+            toolCalls: [],
+            usage: AgentModelUsage(promptTokens: 20, completionTokens: 5),
+            finishReason: .stop
+        )
+    ])
+    let workspace = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorAgentLoopApproval-")
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: workspace) }
+    var registry = AgentToolRegistry()
+    registry.register(LocalWriteFileTool(policy: LocalWorkspacePolicy(workingDirectory: workspace)))
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        configuration: AgentLoopConfiguration(permissionMode: .askToWrite)
+    )
+    let request = AgentChatRequest(runID: "run-write-approval", sessionID: "session-write-approval", userMessage: "Write note", permissionMode: .askToWrite)
+
+    let task = Task { () throws -> [AgentEvent] in
+        var events: [AgentEvent] = []
+        for try await event in loop.run(request) {
+            events.append(event)
+            if case .permissionRequested(let approvalRequest) = event {
+                Task {
+                    await loop.resolveApproval(AgentPendingApproval(
+                        requestID: approvalRequest.id,
+                        runID: approvalRequest.runID,
+                        sessionID: approvalRequest.sessionID,
+                        capability: approvalRequest.capability,
+                        toolName: approvalRequest.toolName,
+                        payloadJSON: approvalRequest.payloadJSON
+                    ), status: .approved)
+                }
+            }
+        }
+        return events
+    }
+
+    let events = try await task.value
+
+    #expect(events.map(\.kind).contains(.permissionRequested))
+    #expect(events.map(\.kind).contains(.permissionResolved))
+    #expect(events.map(\.kind).contains(.toolFinished))
+    #expect(events.map(\.kind).contains(.textComplete))
+    #expect(events.last?.kind == .runCompleted)
+    #expect(try String(contentsOf: workspace.appendingPathComponent("note.txt"), encoding: .utf8) == "approved")
+}
+
+@Test func agentLoopRequestsApprovalForWorkspaceShellCommand() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "call-bash-approval", name: "Bash", argumentsJSON: #"{"command":"touch shell-created.txt"}"#)],
+            usage: AgentModelUsage(promptTokens: 10, completionTokens: 3),
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: "Shell command completed.",
+            toolCalls: [],
+            usage: AgentModelUsage(promptTokens: 20, completionTokens: 5),
+            finishReason: .stop
+        )
+    ])
+    let workspace = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorAgentLoopShellApproval-")
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: workspace) }
+    var registry = AgentToolRegistry()
+    registry.register(LocalBashTool(policy: LocalWorkspacePolicy(workingDirectory: workspace)))
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        configuration: AgentLoopConfiguration(permissionMode: .askToWrite)
+    )
+    let request = AgentChatRequest(runID: "run-bash-approval", sessionID: "session-bash-approval", userMessage: "Touch file", permissionMode: .askToWrite)
+
+    let task = Task { () throws -> [AgentEvent] in
+        var events: [AgentEvent] = []
+        for try await event in loop.run(request) {
+            events.append(event)
+            if case .permissionRequested(let approvalRequest) = event {
+                #expect(approvalRequest.capability == .runWorkspaceShellCommand)
+                Task {
+                    await loop.resolveApproval(AgentPendingApproval(
+                        requestID: approvalRequest.id,
+                        runID: approvalRequest.runID,
+                        sessionID: approvalRequest.sessionID,
+                        capability: approvalRequest.capability,
+                        toolName: approvalRequest.toolName,
+                        payloadJSON: approvalRequest.payloadJSON
+                    ), status: .approved)
+                }
+            }
+        }
+        return events
+    }
+
+    let events = try await task.value
+
+    #expect(events.map(\.kind).contains(.permissionRequested))
+    #expect(events.map(\.kind).contains(.toolFinished))
+    #expect(FileManager.default.fileExists(atPath: workspace.appendingPathComponent("shell-created.txt").path))
+}
+
+@Test func agentLoopContinuesAfterTokenBudgetExceeded() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: "Still completed after budget warning.",
+            toolCalls: [],
+            usage: AgentModelUsage(promptTokens: 200, completionTokens: 50),
+            finishReason: .stop
+        )
+    ])
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: AgentToolRegistry(),
+        configuration: AgentLoopConfiguration(
+            maxToolIterations: 1,
+            permissionMode: .askToWrite,
+            budget: AgentBudgetConfiguration(maxTotalTokens: 100, warningThresholdRatio: 0.8)
+        )
+    )
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(AgentChatRequest(sessionID: "session-budget-continue", userMessage: "Continue even if budget exceeds")) {
+        events.append(event)
+    }
+
+    #expect(events.map(\.kind).contains(.budgetWarning))
+    #expect(events.map(\.kind).contains(.textComplete))
+    #expect(events.last?.kind == .runCompleted)
+}
+
+@Test func agentLoopRunsScientificToolThenFinalAnswer() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "call-science-1", name: "science_compute", argumentsJSON: #"{"operation":"add","inputs":{"values":[2,3,4]}}"#)],
+            usage: AgentModelUsage(promptTokens: 10, completionTokens: 3),
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: "2 + 3 + 4 = 9.",
+            toolCalls: [],
+            usage: AgentModelUsage(promptTokens: 20, completionTokens: 5),
+            finishReason: .stop
+        )
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(ScienceComputeTool(runtime: ScientificComputeRuntime(engines: [NativeSwiftScientificEngine()])))
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(AgentChatRequest(sessionID: "session-science-loop", userMessage: "Calculate 2+3+4")) {
+        events.append(event)
+    }
+
+    #expect(events.map(\.kind).contains(.toolStarted))
+    #expect(events.map(\.kind).contains(.toolFinished))
+    #expect(events.map(\.kind).contains(.textComplete))
+    #expect(events.last?.kind == .runCompleted)
+}
+
 @Test func agentLoopRunsGraphToolThenFinalAnswer() async throws {
     let provider = ScriptedModelProvider(responses: [
         AgentModelResponse(

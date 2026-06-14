@@ -84,6 +84,65 @@ private func temporaryFactoryNativeSessionDatabaseURL(_ name: String = UUID().uu
     #expect(loaded.messages.last?.content == "Configured sidecar answer")
 }
 
+@Test func appGraphAgentRuntimeFactoryConfiguredSidecarUsesRuntimeWorkspaceBeforeLegacySidecarWorkspace() async throws {
+    let appDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorFactoryRuntimeWorkspacePriority-")
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: appDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: appDirectory) }
+    let storagePaths = AppStoragePaths(applicationSupportDirectory: appDirectory)
+    try storagePaths.ensureDirectoryHierarchy()
+
+    let runtimeWorkspace = appDirectory.appendingPathComponent("runtime-project", isDirectory: true)
+    let legacyWorkspace = appDirectory.appendingPathComponent("legacy-sidecar", isDirectory: true)
+    try FileManager.default.createDirectory(at: runtimeWorkspace, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: legacyWorkspace, withIntermediateDirectories: true)
+
+    var runtimeSettings = AgentRuntimeSettings.default
+    runtimeSettings.workspace.defaultWorkingDirectoryPath = runtimeWorkspace.path
+    try AppRuntimeSettingsRepository(configDirectory: storagePaths.configDirectory).save(runtimeSettings)
+
+    let store = try SQLiteGraphKernelStore(path: temporaryFactoryNativeSessionDatabaseURL().path)
+    try store.migrate()
+    let settingsRepository = AppLLMSettingsRepository(
+        settingsStore: FactoryNativeSessionSettingsStore(),
+        credentialStore: FactoryNativeSessionCredentialStore()
+    )
+    let sidecarURL = appDirectory.appendingPathComponent("cwd-sidecar.sh")
+    try """
+    #!/bin/sh
+    while IFS= read -r command; do
+      case "$command" in
+        *'"start"'*)
+          printf '%s\n' '{"runStarted":{"sdkSessionID":"sdk-cwd"}}'
+          printf '%s\n' '{"textComplete":{"text":"cwd:'"$(pwd)"'","citations":[],"contextSnapshot":null}}'
+          printf '%s\n' '{"runCompleted":{}}'
+          ;;
+      esac
+    done
+    """.write(to: sidecarURL, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: sidecarURL.path)
+    try settingsRepository.save(
+        settings: AppLLMSettings(
+            baseURLString: AppLLMSettings.default.baseURLString,
+            model: AppLLMSettings.default.model,
+            hasAPIKey: false,
+            providerMode: .governedClaudeSidecar,
+            sidecarExecutablePath: "/bin/sh",
+            sidecarArguments: sidecarURL.path,
+            sidecarWorkingDirectoryPath: legacyWorkspace.path
+        ),
+        apiKey: nil
+    )
+    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: settingsRepository, storagePaths: storagePaths)
+    var manager = factory.makeNativeSessionManager(session: AgentSession(id: "factory-runtime-cwd"))
+
+    let response = try await manager.submit("Report cwd")
+
+    #expect(response.assistantMessage?.content.hasSuffix("/runtime-project") == true)
+    #expect(response.assistantMessage?.content.contains("legacy-sidecar") == false)
+}
+
 @Test func appGraphAgentRuntimeFactoryDoesNotUseLegacyDirectProviderForClaudeSidecarMode() async throws {
     let store = try SQLiteGraphKernelStore(path: temporaryFactoryNativeSessionDatabaseURL().path)
     try store.migrate()

@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import ConnorGraphCore
 import ConnorGraphMemory
 import ConnorGraphSearch
@@ -66,6 +67,28 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case llmSettings = "模型设置"
 
     var id: String { rawValue }
+}
+
+struct WorkspaceRootDraft: Identifiable, Equatable {
+    var id: String
+    var displayName: String
+    var path: String
+    var role: String
+    var isPrimary: Bool
+
+    init(
+        id: String = UUID().uuidString,
+        displayName: String,
+        path: String,
+        role: String = "project",
+        isPrimary: Bool = false
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.path = path
+        self.role = role
+        self.isPrimary = isPrimary
+    }
 }
 
 enum ConnorSettingsSection: String, CaseIterable, Identifiable {
@@ -240,6 +263,9 @@ final class AppViewModel: ObservableObject {
     @Published var defaultPermissionMode: AgentPermissionMode = .askToWrite
     @Published var requireApprovalForNetwork: Bool = true
     @Published var requireApprovalForShell: Bool = true
+    @Published var defaultWorkingDirectoryPath: String = ""
+    @Published var workspaceRoots: [WorkspaceRootDraft] = []
+    @Published var workspaceRootPathInput: String = ""
     @Published var userDisplayName: String = "诗闻"
     @Published var userTimezone: String = "Asia/Shanghai"
     @Published var userCity: String = "杭州"
@@ -773,7 +799,7 @@ final class AppViewModel: ObservableObject {
         observeLogEntries = snapshot.observeLogEntries
         let session = activeChatSession
         fallbackChatSession = session
-        nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: session)
+        nativeSessionManager = makeNativeSessionManager(for: session)
         Task { await runSearch() }
         reloadPromotionCandidates()
         reloadGraphWriteCandidates()
@@ -997,7 +1023,7 @@ final class AppViewModel: ObservableObject {
             loadLLMSettings()
             let session = activeChatSession
             fallbackChatSession = session
-            nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: session)
+            nativeSessionManager = makeNativeSessionManager(for: session)
             llmSettingsMessage = "模型设置已保存。"
             llmHealthCheckMessage = nil
             errorMessage = nil
@@ -1013,7 +1039,7 @@ final class AppViewModel: ObservableObject {
             loadLLMSettings()
             let session = activeChatSession
             fallbackChatSession = session
-            nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: session)
+            nativeSessionManager = makeNativeSessionManager(for: session)
             llmSettingsMessage = "API Key 已清除。"
             llmHealthCheckMessage = nil
             errorMessage = nil
@@ -1041,6 +1067,78 @@ final class AppViewModel: ObservableObject {
         selection = .llmSettings
     }
 
+    private func makeNativeSessionManager(for session: AgentSession) -> NativeSessionManager? {
+        agentRuntimeFactory?.makeNativeSessionManager(
+            session: session,
+            sessionWorkspace: sessionStateSnapshotsBySessionID[session.id]?.workspace
+        )
+    }
+
+    private func rebuildNativeSessionManagerForActiveSession() {
+        let session = activeChatSession
+        fallbackChatSession = session
+        nativeSessionManager = makeNativeSessionManager(for: session)
+    }
+
+    private func syncWorkspaceDraftsFromSession(_ state: AppSessionStateSnapshot?) {
+        if let workspace = state?.workspace {
+            workspaceRoots = Self.workspaceRootDrafts(from: workspace)
+            defaultWorkingDirectoryPath = workspace.workingDirectoryPath
+            return
+        }
+        workspaceRoots = []
+        defaultWorkingDirectoryPath = ""
+    }
+
+    private func currentSessionIDForWorkspaceDrafts() -> String? {
+        selectedChatSessionID ?? activeChatSession.id
+    }
+
+    private func sessionWorkspaceReferenceFromDrafts(source: String = "session") -> AppSessionWorkspaceReference? {
+        let roots = sessionWorkspaceRootsFromDrafts()
+        let primary = roots.first(where: \.isPrimary) ?? roots.first
+        let workingDirectoryPath = primary?.path ?? defaultWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !workingDirectoryPath.isEmpty || !roots.isEmpty else { return nil }
+        return AppSessionWorkspaceReference(
+            workingDirectoryPath: workingDirectoryPath,
+            source: source,
+            roots: roots
+        )
+    }
+
+    private func sessionWorkspaceRootsFromDrafts() -> [AppSessionWorkspaceRootReference] {
+        let primaryID = workspaceRoots.first(where: \.isPrimary)?.id ?? workspaceRoots.first?.id
+        return workspaceRoots
+            .map { draft in
+                AppSessionWorkspaceRootReference(
+                    id: draft.id,
+                    displayName: draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? URL(fileURLWithPath: draft.path).lastPathComponent : draft.displayName,
+                    path: draft.path.trimmingCharacters(in: .whitespacesAndNewlines),
+                    role: draft.role.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "project" : draft.role,
+                    isPrimary: draft.id == primaryID
+                )
+            }
+            .filter { !$0.path.isEmpty }
+    }
+
+    private func saveWorkspaceDraftsToCurrentSession() {
+        guard let sessionID = currentSessionIDForWorkspaceDrafts() else { return }
+        do {
+            var state = try chatSessionRepository?.loadSessionState(sessionID: sessionID) ?? AppSessionStateSnapshot(sessionID: sessionID)
+            state.workspace = sessionWorkspaceReferenceFromDrafts()
+            state.updatedAt = Date()
+            sessionStateSnapshotsBySessionID[sessionID] = state
+            try chatSessionRepository?.saveSessionState(state, sessionID: sessionID)
+            if activeChatSession.id == sessionID || selectedChatSessionID == sessionID {
+                rebuildNativeSessionManagerForActiveSession()
+            }
+            appSettingsMessage = "当前会话 Workspace 已保存。"
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
     func loadRuntimeSettings() {
         do {
             let settings = try runtimeSettingsRepository?.loadOrCreateDefault() ?? .default
@@ -1058,6 +1156,12 @@ final class AppViewModel: ObservableObject {
             composerSendShortcut = settings.input.composerSendShortcut
             requireApprovalForNetwork = settings.permissions.requireApprovalForNetwork
             requireApprovalForShell = settings.permissions.requireApprovalForShell
+            if let sessionID = currentSessionIDForWorkspaceDrafts() {
+                syncWorkspaceDraftsFromSession(sessionStateSnapshotsBySessionID[sessionID])
+            } else {
+                defaultWorkingDirectoryPath = ""
+                workspaceRoots = []
+            }
             userDisplayName = settings.preferences.displayName
             userTimezone = settings.preferences.timezone
             userCity = settings.preferences.city
@@ -1087,6 +1191,8 @@ final class AppViewModel: ObservableObject {
             settings.input.composerSendShortcut = composerSendShortcut
             settings.permissions.requireApprovalForNetwork = requireApprovalForNetwork
             settings.permissions.requireApprovalForShell = requireApprovalForShell
+            // Workspace roots are session-scoped and saved into Session Capsule.
+            // Keep runtime-settings.workspace as a legacy fallback/template only.
             settings.preferences.displayName = userDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.timezone = userTimezone.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.city = userCity.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1097,6 +1203,152 @@ final class AppViewModel: ObservableObject {
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
+        }
+    }
+
+    var primaryWorkspaceRootDraft: WorkspaceRootDraft? {
+        workspaceRoots.first(where: \.isPrimary) ?? workspaceRoots.first
+    }
+
+    func addWorkspaceRoot(path rawPath: String) {
+        let path = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !path.isEmpty else { return }
+        guard !workspaceRoots.contains(where: { $0.path == path }) else {
+            workspaceRootPathInput = ""
+            return
+        }
+        let url = URL(fileURLWithPath: path, isDirectory: true)
+        workspaceRoots.append(WorkspaceRootDraft(
+            displayName: url.lastPathComponent.isEmpty ? path : url.lastPathComponent,
+            path: path,
+            role: workspaceRoots.isEmpty ? "project" : "additional",
+            isPrimary: workspaceRoots.isEmpty
+        ))
+        normalizeWorkspaceRootsPrimary()
+        defaultWorkingDirectoryPath = workspaceRoots.first(where: \.isPrimary)?.path ?? ""
+        workspaceRootPathInput = ""
+        saveWorkspaceDraftsToCurrentSession()
+    }
+
+    func addWorkspaceRootAndSetPrimary(path rawPath: String) {
+        let path = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !path.isEmpty else { return }
+        if let existing = workspaceRoots.first(where: { $0.path == path }) {
+            setPrimaryWorkspaceRoot(id: existing.id)
+            workspaceRootPathInput = ""
+            return
+        }
+        let url = URL(fileURLWithPath: path, isDirectory: true)
+        for index in workspaceRoots.indices {
+            workspaceRoots[index].isPrimary = false
+        }
+        workspaceRoots.append(WorkspaceRootDraft(
+            displayName: url.lastPathComponent.isEmpty ? path : url.lastPathComponent,
+            path: path,
+            role: workspaceRoots.isEmpty ? "project" : "additional",
+            isPrimary: true
+        ))
+        normalizeWorkspaceRootsPrimary()
+        defaultWorkingDirectoryPath = path
+        workspaceRootPathInput = ""
+        saveWorkspaceDraftsToCurrentSession()
+    }
+
+    func addWorkspaceRoots(paths: [String]) {
+        for path in paths { addWorkspaceRoot(path: path) }
+    }
+
+    func resetWorkspaceRootsForCurrentSession() {
+        workspaceRoots = []
+        defaultWorkingDirectoryPath = ""
+        workspaceRootPathInput = ""
+        saveWorkspaceDraftsToCurrentSession()
+    }
+
+    func removeWorkspaceRoot(id: String) {
+        let removedWasPrimary = workspaceRoots.first(where: { $0.id == id })?.isPrimary == true
+        workspaceRoots.removeAll { $0.id == id }
+        if removedWasPrimary, !workspaceRoots.isEmpty {
+            workspaceRoots[0].isPrimary = true
+        }
+        normalizeWorkspaceRootsPrimary()
+        defaultWorkingDirectoryPath = workspaceRoots.first(where: \.isPrimary)?.path ?? ""
+        saveWorkspaceDraftsToCurrentSession()
+    }
+
+    func setPrimaryWorkspaceRoot(id: String) {
+        for index in workspaceRoots.indices {
+            workspaceRoots[index].isPrimary = workspaceRoots[index].id == id
+        }
+        defaultWorkingDirectoryPath = workspaceRoots.first(where: \.isPrimary)?.path ?? ""
+        saveWorkspaceDraftsToCurrentSession()
+    }
+
+    private func normalizeWorkspaceRootsPrimary() {
+        guard !workspaceRoots.isEmpty else { return }
+        let primaryIDs = workspaceRoots.filter(\.isPrimary).map(\.id)
+        let primaryID = primaryIDs.first ?? workspaceRoots[0].id
+        for index in workspaceRoots.indices {
+            workspaceRoots[index].isPrimary = workspaceRoots[index].id == primaryID
+        }
+    }
+
+    private func runtimeWorkspaceRootsFromDrafts() -> [AgentRuntimeWorkspaceRoot] {
+        var drafts = workspaceRoots
+        if drafts.isEmpty {
+            let path = defaultWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !path.isEmpty {
+                let url = URL(fileURLWithPath: path, isDirectory: true)
+                drafts = [WorkspaceRootDraft(displayName: url.lastPathComponent, path: path, role: "project", isPrimary: true)]
+            }
+        }
+        let primaryID = drafts.first(where: \.isPrimary)?.id ?? drafts.first?.id
+        return drafts
+            .map { draft in
+                AgentRuntimeWorkspaceRoot(
+                    id: draft.id,
+                    displayName: draft.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? URL(fileURLWithPath: draft.path).lastPathComponent : draft.displayName,
+                    path: draft.path.trimmingCharacters(in: .whitespacesAndNewlines),
+                    role: draft.role.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "project" : draft.role,
+                    isPrimary: draft.id == primaryID
+                )
+            }
+            .filter { !$0.path.isEmpty }
+    }
+
+    private static func workspaceRootDrafts(from settings: AgentRuntimeWorkspaceSettings) -> [WorkspaceRootDraft] {
+        let roots = settings.effectiveRoots()
+        let primaryID = roots.first(where: \.isPrimary)?.id ?? roots.first?.id
+        return roots.map { root in
+            WorkspaceRootDraft(
+                id: root.id,
+                displayName: root.displayName,
+                path: root.path,
+                role: root.role,
+                isPrimary: root.id == primaryID
+            )
+        }
+    }
+
+    private static func workspaceRootDrafts(from workspace: AppSessionWorkspaceReference) -> [WorkspaceRootDraft] {
+        let primaryID = workspace.roots.first(where: \.isPrimary)?.id ?? workspace.roots.first?.id
+        if workspace.roots.isEmpty, !workspace.workingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let path = workspace.workingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+            return [WorkspaceRootDraft(
+                displayName: URL(fileURLWithPath: path).lastPathComponent,
+                path: path,
+                role: "project",
+                isPrimary: true
+            )]
+        }
+        return workspace.roots.map { root in
+            WorkspaceRootDraft(
+                id: root.id,
+                displayName: root.displayName,
+                path: root.path,
+                role: root.role,
+                isPrimary: root.id == primaryID
+            )
         }
     }
 
@@ -1127,8 +1379,9 @@ final class AppViewModel: ObservableObject {
             let selectedID = selectedChatSessionID ?? sessions.first?.id
             selectedChatSessionID = selectedID
             if let selectedID, let session = try chatSessionRepository.loadSession(id: selectedID) {
+                try loadSessionCapsule(sessionID: selectedID)
                 fallbackChatSession = session
-                nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: session)
+                nativeSessionManager = makeNativeSessionManager(for: session)
                 transcript = session.messages
                 isSubmittingChat = submittingChatSessionID == selectedID
                 if let cachedTimeline = agentEventTimelinesBySessionID[selectedID] {
@@ -1138,7 +1391,6 @@ final class AppViewModel: ObservableObject {
                 }
                 latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: selectedID)
                 selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: selectedID)
-                try loadSessionCapsule(sessionID: selectedID)
                 restoreWorkspaceMode(for: selectedID)
             } else {
                 selectedSessionArtifactDirectories = nil
@@ -1161,8 +1413,10 @@ final class AppViewModel: ObservableObject {
             isBrowserVisible = false
             browserWorkspaceSessionID = nil
             rememberWorkspaceMode(.conversation, for: session.id)
+            selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
+            try loadSessionCapsule(sessionID: session.id)
             fallbackChatSession = session
-            nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: session)
+            nativeSessionManager = makeNativeSessionManager(for: session)
             transcript = []
             isSubmittingChat = false
             agentEventTimeline = []
@@ -1170,8 +1424,6 @@ final class AppViewModel: ObservableObject {
             latestChatSummary = nil
             chatSummaryMessage = nil
             lastPromptInspection = nil
-            selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
-            try loadSessionCapsule(sessionID: session.id)
             reloadChatSessions()
             errorMessage = nil
         } catch {
@@ -1184,12 +1436,14 @@ final class AppViewModel: ObservableObject {
         _ = try chatSessionRepository.artifactDirectories(sessionID: sessionID)
         if let state = try chatSessionRepository.loadSessionState(sessionID: sessionID) {
             sessionStateSnapshotsBySessionID[sessionID] = state
+            if selectedChatSessionID == sessionID { syncWorkspaceDraftsFromSession(state) }
             if let mode = ChatSessionWorkspaceMode(rawValue: state.selectedPane ?? "") {
                 chatSessionWorkspaceModes.setMode(mode, for: sessionID)
             }
         } else {
             let state = AppSessionStateSnapshot(sessionID: sessionID, updatedAt: Date())
             sessionStateSnapshotsBySessionID[sessionID] = state
+            if selectedChatSessionID == sessionID { syncWorkspaceDraftsFromSession(state) }
             try chatSessionRepository.saveSessionState(state, sessionID: sessionID)
         }
         sessionRecordsBySessionID[sessionID] = try chatSessionRepository.loadSessionRecords(sessionID: sessionID, limit: nil)
@@ -1372,8 +1626,9 @@ final class AppViewModel: ObservableObject {
             guard let session = try chatSessionRepository.loadSession(id: sessionID) else { return }
             selectedChatSessionID = session.id
             agentEventTimelinesByProcessKey.removeAll(keepingCapacity: true)
+            try loadSessionCapsule(sessionID: session.id)
             fallbackChatSession = session
-            nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: session)
+            nativeSessionManager = makeNativeSessionManager(for: session)
             transcript = session.messages
             isSubmittingChat = submittingChatSessionID == session.id
             if let cachedTimeline = agentEventTimelinesBySessionID[session.id] {
@@ -1383,7 +1638,6 @@ final class AppViewModel: ObservableObject {
             }
             latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: session.id)
             selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
-            try loadSessionCapsule(sessionID: session.id)
             restoreWorkspaceMode(for: session.id)
             chatSummaryMessage = nil
             lastContext = nil
@@ -1907,6 +2161,9 @@ final class AppViewModel: ObservableObject {
                     if self.selectedChatSessionID == submittingSessionID {
                         self.agentEventTimeline = timeline
                     }
+                    if presentation.kind == AgentEventKind.permissionRequested.rawValue {
+                        self.reloadPendingApprovals()
+                    }
                 }
             )
             agentEventTimelinesBySessionID[submittingSessionID] = manager.eventPresentations
@@ -1932,8 +2189,11 @@ final class AppViewModel: ObservableObject {
                 .last(where: { $0.role == .assistant })?
                 .content
         } catch {
+            let recoveredSession = (try? chatSessionRepository?.loadSession(id: submittingSessionID)) ?? manager.session
             if selectedChatSessionID == submittingSessionID {
-                transcript = optimisticTranscript + [optimisticUserMessage]
+                nativeSessionManager = manager
+                fallbackChatSession = recoveredSession
+                transcript = recoveredSession.messages.isEmpty ? optimisticTranscript + [optimisticUserMessage] : recoveredSession.messages
             }
             reloadPendingApprovals()
             pendingChatCancellationReasonsBySessionID.removeValue(forKey: submittingSessionID)
@@ -3889,7 +4149,7 @@ private struct SettingsAISection: View {
                     Divider()
                     SettingsTextFieldRow(title: "参数", subtitle: "sidecars/claude-agent-engine/claude-sidecar.mjs", text: $viewModel.sidecarArguments)
                     Divider()
-                    SettingsTextFieldRow(title: "工作目录", subtitle: "Sidecar 运行目录", text: $viewModel.sidecarWorkingDirectoryPath)
+                    SettingsTextFieldRow(title: "工作目录", subtitle: "兼容旧配置 fallback；当前会话 Workspace 请在会话界面顶部设置", text: $viewModel.sidecarWorkingDirectoryPath)
                 }
             }
 
@@ -3974,8 +4234,135 @@ private struct SettingsPermissionsSection: View {
                 Divider()
                 SettingsToggleRow(title: "Shell 写入需要审批", subtitle: "本地命令涉及写入时默认要求确认。", isOn: $viewModel.requireApprovalForShell)
             }
+            Text("项目工作目录已改为每个会话内设置：打开任意会话，在会话顶部的 ‘当前会话 Workspace’ 中配置。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             SettingsSaveBar(viewModel: viewModel)
         }
+    }
+}
+
+struct WorkspaceRootsSettingsContent: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    private var primaryRoot: WorkspaceRootDraft? {
+        viewModel.workspaceRoots.first(where: \.isPrimary) ?? viewModel.workspaceRoots.first
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("当前会话 Workspace")
+                        .font(.subheadline.weight(.medium))
+                    Text(summaryText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                Spacer()
+                Button("选择目录…") { chooseDirectories() }
+                    .buttonStyle(.bordered)
+            }
+            .frame(minHeight: 42)
+
+            if !viewModel.workspaceRoots.isEmpty {
+                Divider()
+                VStack(spacing: 0) {
+                    ForEach(viewModel.workspaceRoots) { root in
+                        WorkspaceRootRow(
+                            root: root,
+                            setPrimary: { viewModel.setPrimaryWorkspaceRoot(id: root.id) },
+                            remove: { viewModel.removeWorkspaceRoot(id: root.id) }
+                        )
+                        if root.id != viewModel.workspaceRoots.last?.id { Divider() }
+                    }
+                }
+            }
+
+            Divider()
+            HStack(spacing: 8) {
+                TextField("输入目录路径", text: $viewModel.workspaceRootPathInput)
+                    .textFieldStyle(.roundedBorder)
+                Button("添加路径") {
+                    viewModel.addWorkspaceRoot(path: viewModel.workspaceRootPathInput)
+                }
+                .buttonStyle(.bordered)
+                .disabled(viewModel.workspaceRootPathInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            Text("保存到当前 Session Capsule。Native local tools 可访问所有 roots；Claude Sidecar cwd 使用主目录。为空时兼容旧 Sidecar 目录，再回退到进程 cwd。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var summaryText: String {
+        if let primaryRoot {
+            return "主目录：\(primaryRoot.path) · 共 \(viewModel.workspaceRoots.count) 个 root"
+        }
+        let fallback = viewModel.defaultWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !fallback.isEmpty { return "默认项目目录：\(fallback)" }
+        return "尚未设置；将使用旧 Sidecar 工作目录或进程 cwd。"
+    }
+
+    private func chooseDirectories() {
+        let panel = NSOpenPanel()
+        panel.title = "选择当前会话项目工作目录"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = true
+        panel.canCreateDirectories = true
+        if panel.runModal() == .OK {
+            viewModel.addWorkspaceRoots(paths: panel.urls.map(\.path))
+        }
+    }
+}
+
+private struct WorkspaceRootRow: View {
+    var root: WorkspaceRootDraft
+    var setPrimary: () -> Void
+    var remove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(root.displayName.isEmpty ? URL(fileURLWithPath: root.path).lastPathComponent : root.displayName)
+                        .font(.subheadline.weight(.medium))
+                    Text(root.role)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Color.secondary.opacity(0.10), in: Capsule())
+                    if root.isPrimary {
+                        Text("主目录")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.orange)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(Color.orange.opacity(0.12), in: Capsule())
+                    }
+                }
+                Text(root.path)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer()
+            if !root.isPrimary {
+                Button("设为主目录", action: setPrimary)
+                    .buttonStyle(.bordered)
+            }
+            Button(role: .destructive, action: remove) {
+                Image(systemName: "minus.circle")
+            }
+            .buttonStyle(.borderless)
+        }
+        .frame(minHeight: 50)
+        .padding(.vertical, 6)
     }
 }
 

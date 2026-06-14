@@ -82,6 +82,73 @@ public struct AgentRuntimePermissionSettings: Codable, Sendable, Equatable {
     }
 }
 
+public struct AgentRuntimeWorkspaceRoot: Codable, Sendable, Equatable, Identifiable {
+    public var id: String
+    public var displayName: String
+    public var path: String
+    public var role: String
+    public var isPrimary: Bool
+
+    public init(
+        id: String = UUID().uuidString,
+        displayName: String,
+        path: String,
+        role: String = "project",
+        isPrimary: Bool = false
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.path = path
+        self.role = role
+        self.isPrimary = isPrimary
+    }
+}
+
+public struct AgentRuntimeWorkspaceSettings: Codable, Sendable, Equatable {
+    public var defaultWorkingDirectoryPath: String
+    public var additionalAllowedDirectoryPaths: [String]
+    public var roots: [AgentRuntimeWorkspaceRoot]
+
+    public init(
+        defaultWorkingDirectoryPath: String = "",
+        additionalAllowedDirectoryPaths: [String] = [],
+        roots: [AgentRuntimeWorkspaceRoot] = []
+    ) {
+        self.defaultWorkingDirectoryPath = defaultWorkingDirectoryPath
+        self.additionalAllowedDirectoryPaths = additionalAllowedDirectoryPaths
+        self.roots = roots
+    }
+
+    public var primaryRoot: AgentRuntimeWorkspaceRoot? {
+        roots.first(where: \.isPrimary) ?? roots.first
+    }
+
+    public mutating func syncLegacyFieldsFromRoots() {
+        guard !roots.isEmpty else { return }
+        let primary = primaryRoot
+        defaultWorkingDirectoryPath = primary?.path ?? ""
+        additionalAllowedDirectoryPaths = roots
+            .filter { $0.id != primary?.id }
+            .map(\.path)
+    }
+
+    public func effectiveRoots() -> [AgentRuntimeWorkspaceRoot] {
+        if !roots.isEmpty { return roots }
+        let primaryPath = defaultWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        let additional = additionalAllowedDirectoryPaths
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        var synthesized: [AgentRuntimeWorkspaceRoot] = []
+        if !primaryPath.isEmpty {
+            synthesized.append(AgentRuntimeWorkspaceRoot(displayName: URL(fileURLWithPath: primaryPath).lastPathComponent, path: primaryPath, role: "project", isPrimary: true))
+        }
+        synthesized.append(contentsOf: additional.map { path in
+            AgentRuntimeWorkspaceRoot(displayName: URL(fileURLWithPath: path).lastPathComponent, path: path, role: "additional", isPrimary: false)
+        })
+        return synthesized
+    }
+}
+
 public struct AgentRuntimePreferenceSettings: Codable, Sendable, Equatable {
     public var displayName: String
     public var timezone: String
@@ -112,6 +179,7 @@ public struct AgentRuntimeSettings: Codable, Sendable, Equatable {
     public var appearance: AgentRuntimeAppearanceSettings
     public var input: AgentRuntimeInputSettings
     public var permissions: AgentRuntimePermissionSettings
+    public var workspace: AgentRuntimeWorkspaceSettings
     public var preferences: AgentRuntimePreferenceSettings
     public var updatedAt: Date
 
@@ -123,6 +191,7 @@ public struct AgentRuntimeSettings: Codable, Sendable, Equatable {
         appearance: AgentRuntimeAppearanceSettings = AgentRuntimeAppearanceSettings(),
         input: AgentRuntimeInputSettings = AgentRuntimeInputSettings(),
         permissions: AgentRuntimePermissionSettings = AgentRuntimePermissionSettings(),
+        workspace: AgentRuntimeWorkspaceSettings = AgentRuntimeWorkspaceSettings(),
         preferences: AgentRuntimePreferenceSettings = AgentRuntimePreferenceSettings(),
         updatedAt: Date = Date()
     ) {
@@ -133,6 +202,7 @@ public struct AgentRuntimeSettings: Codable, Sendable, Equatable {
         self.appearance = appearance
         self.input = input
         self.permissions = permissions
+        self.workspace = workspace
         self.preferences = preferences
         self.updatedAt = updatedAt
     }
@@ -147,6 +217,7 @@ public struct AgentRuntimeSettings: Codable, Sendable, Equatable {
         case appearance
         case input
         case permissions
+        case workspace
         case preferences
         case updatedAt
     }
@@ -160,6 +231,7 @@ public struct AgentRuntimeSettings: Codable, Sendable, Equatable {
         self.appearance = try container.decodeIfPresent(AgentRuntimeAppearanceSettings.self, forKey: .appearance) ?? AgentRuntimeAppearanceSettings()
         self.input = try container.decodeIfPresent(AgentRuntimeInputSettings.self, forKey: .input) ?? AgentRuntimeInputSettings()
         self.permissions = try container.decodeIfPresent(AgentRuntimePermissionSettings.self, forKey: .permissions) ?? AgentRuntimePermissionSettings()
+        self.workspace = try container.decodeIfPresent(AgentRuntimeWorkspaceSettings.self, forKey: .workspace) ?? AgentRuntimeWorkspaceSettings()
         self.preferences = try container.decodeIfPresent(AgentRuntimePreferenceSettings.self, forKey: .preferences) ?? AgentRuntimePreferenceSettings()
         self.updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
     }

@@ -182,7 +182,21 @@ public struct NativeSessionManager: Sendable {
         if let onRunStarted {
             await onRunStarted(run.id)
         }
-        try throwIfRunCancelled(runID: run.id)
+        do {
+            try throwIfRunCancelled(runID: run.id)
+        } catch NativeSessionManagerError.runCancelled(let reason) {
+            runtimeState.queuedRunIDs.removeAll { $0 == run.id }
+            runtimeState.isProcessing = false
+            runtimeState.activeRunID = nil
+            runtimeState.lastRunID = run.id
+            runtimeState.lastCompletedAt = Date()
+            runtimeState.cancellationReason = reason
+            _ = try appendTerminationMessage(
+                "操作已终止：\(reason)",
+                runID: run.id
+            )
+            throw NativeSessionManagerError.runCancelled(reason)
+        }
         run.status = .running
         try sessionRepository.saveRun(run)
         if eventRecorder == nil {
@@ -253,20 +267,34 @@ public struct NativeSessionManager: Sendable {
             }
 
             try throwIfRunCancelled(runID: run.id)
+            let runFailure = collectedEvents.compactMap { event -> AgentRunFailure? in
+                if case .runFailed(let failure) = event { return failure }
+                return nil
+            }.last
+            if assistantMessage == nil, let runFailure {
+                assistantMessage = try appendTerminationMessage(
+                    "操作已终止：\(runFailure.message)",
+                    runID: run.id
+                )
+            }
             runtimeState.isProcessing = false
             runtimeState.activeRunID = nil
             runtimeState.lastCompletedAt = Date()
             var completedRun = run
-            completedRun.status = .completed
+            completedRun.status = runFailure == nil ? .completed : .failed
             completedRun.completedAt = runtimeState.lastCompletedAt
+            if let runFailure {
+                completedRun.metadata["failure"] = runFailure.message
+                runtimeState.lastFailureMessage = runFailure.message
+            }
             try sessionRepository.saveRun(completedRun)
         if eventRecorder == nil {
             try sessionRepository.appendJournalEvent(
                     runID: run.id,
                     sessionID: session.id,
-                    kind: .runCompleted,
-                    action: "run_completed",
-                    message: "Session run completed"
+                    kind: runFailure == nil ? .runCompleted : .runFailed,
+                    action: runFailure == nil ? "run_completed" : "run_failed",
+                    message: runFailure == nil ? "Session run completed" : (runFailure?.message ?? "Session run failed")
                 )
         }
             return AgentLoopChatResponse(
@@ -286,6 +314,10 @@ public struct NativeSessionManager: Sendable {
                 cancelledRun.metadata["cancellation_reason"] = cancelledRun.metadata["cancellation_reason"] ?? reason
                 try? sessionRepository.saveRun(cancelledRun)
             }
+            _ = try appendTerminationMessage(
+                "操作已终止：\(reason)",
+                runID: run.id
+            )
             try persistSession()
             throw NativeSessionManagerError.runCancelled(reason)
         } catch {
@@ -296,6 +328,10 @@ public struct NativeSessionManager: Sendable {
             if let existingRun = try? sessionRepository.loadRun(id: run.id), existingRun.status == .cancelled {
                 let reason = existingRun.metadata["cancellation_reason"] ?? "cancelled by user"
                 runtimeState.cancellationReason = reason
+                _ = try appendTerminationMessage(
+                    "操作已终止：\(reason)",
+                    runID: run.id
+                )
                 try persistSession()
                 throw NativeSessionManagerError.runCancelled(reason)
             }
@@ -314,6 +350,10 @@ public struct NativeSessionManager: Sendable {
                 )
         }
             // Connor owns session state. A backend failure must not roll back the user's input.
+            _ = try appendTerminationMessage(
+                "操作已终止：\(String(describing: error))",
+                runID: run.id
+            )
             try persistSession()
             throw error
         }
@@ -371,6 +411,20 @@ public struct NativeSessionManager: Sendable {
 
     private func persistSession() throws {
         try sessionRepository.saveSession(session)
+    }
+
+    @discardableResult
+    private mutating func appendTerminationMessage(_ content: String, runID: String) throws -> AgentMessage {
+        if let last = session.messages.last,
+           last.role == .assistant,
+           last.content.hasPrefix("操作已终止：") {
+            try persistSession()
+            return last
+        }
+        let message = session.appendAssistantMessage(content)
+        try persistSession()
+        try persistMemoryStagingAfterAssistantMessage(message, runID: runID)
+        return message
     }
 
     private func throwIfRunCancelled(runID: String) throws {

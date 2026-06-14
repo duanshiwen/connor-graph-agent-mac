@@ -8,6 +8,7 @@ public struct AppSessionManifest: Codable, Equatable, Sendable {
     public var stateFile: String?
     public var recordsFile: String?
     public var browserStateFile: String?
+    public var workspace: AppSessionWorkspaceReference?
     public var attachmentSummary: AppSessionAttachmentSummary?
     public var recordSummary: AppSessionRecordSummary?
 
@@ -18,6 +19,7 @@ public struct AppSessionManifest: Codable, Equatable, Sendable {
         stateFile: String? = "state/session-state.json",
         recordsFile: String? = "state/records.jsonl",
         browserStateFile: String? = "browser/browser-state.json",
+        workspace: AppSessionWorkspaceReference? = nil,
         attachmentSummary: AppSessionAttachmentSummary? = nil,
         recordSummary: AppSessionRecordSummary? = nil
     ) {
@@ -27,6 +29,7 @@ public struct AppSessionManifest: Codable, Equatable, Sendable {
         self.stateFile = stateFile
         self.recordsFile = recordsFile
         self.browserStateFile = browserStateFile
+        self.workspace = workspace
         self.attachmentSummary = attachmentSummary
         self.recordSummary = recordSummary
     }
@@ -39,6 +42,7 @@ public struct AppSessionStateSnapshot: Codable, Equatable, Sendable {
     public var selectedPane: String?
     public var activityTimelineCache: [AgentEventPresentation]?
     public var browser: AppBrowserStateReference?
+    public var workspace: AppSessionWorkspaceReference?
     public var recordSummary: AppSessionRecordSummary?
     public var attachmentSummary: AppSessionAttachmentSummary?
 
@@ -49,6 +53,7 @@ public struct AppSessionStateSnapshot: Codable, Equatable, Sendable {
         selectedPane: String? = nil,
         activityTimelineCache: [AgentEventPresentation]? = nil,
         browser: AppBrowserStateReference? = nil,
+        workspace: AppSessionWorkspaceReference? = nil,
         recordSummary: AppSessionRecordSummary? = nil,
         attachmentSummary: AppSessionAttachmentSummary? = nil
     ) {
@@ -58,8 +63,53 @@ public struct AppSessionStateSnapshot: Codable, Equatable, Sendable {
         self.selectedPane = selectedPane
         self.activityTimelineCache = activityTimelineCache
         self.browser = browser
+        self.workspace = workspace
         self.recordSummary = recordSummary
         self.attachmentSummary = attachmentSummary
+    }
+}
+
+public struct AppSessionWorkspaceRootReference: Codable, Equatable, Sendable, Identifiable {
+    public var id: String
+    public var displayName: String
+    public var path: String
+    public var role: String
+    public var isPrimary: Bool
+    public var updatedAt: Date
+
+    public init(
+        id: String = UUID().uuidString,
+        displayName: String,
+        path: String,
+        role: String = "project",
+        isPrimary: Bool = false,
+        updatedAt: Date = Date()
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.path = path
+        self.role = role
+        self.isPrimary = isPrimary
+        self.updatedAt = updatedAt
+    }
+}
+
+public struct AppSessionWorkspaceReference: Codable, Equatable, Sendable {
+    public var workingDirectoryPath: String
+    public var source: String
+    public var updatedAt: Date
+    public var roots: [AppSessionWorkspaceRootReference]
+
+    public init(
+        workingDirectoryPath: String,
+        source: String,
+        updatedAt: Date = Date(),
+        roots: [AppSessionWorkspaceRootReference] = []
+    ) {
+        self.workingDirectoryPath = workingDirectoryPath
+        self.source = source
+        self.updatedAt = updatedAt
+        self.roots = roots
     }
 }
 
