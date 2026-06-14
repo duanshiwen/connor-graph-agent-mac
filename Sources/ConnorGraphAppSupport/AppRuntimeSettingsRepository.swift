@@ -141,7 +141,7 @@ public struct AgentRuntimeWorkspaceSettings: Codable, Sendable, Equatable {
         roots.first(where: \.isPrimary) ?? roots.first
     }
 
-    public mutating func rememberWorkspacePath(_ rawPath: String, limit: Int = 8) {
+    public mutating func rememberWorkspacePath(_ rawPath: String, limit: Int = 10) {
         let path = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !path.isEmpty else { return }
         recentWorkspacePaths.removeAll { $0 == path }
@@ -149,6 +149,10 @@ public struct AgentRuntimeWorkspaceSettings: Codable, Sendable, Equatable {
         if recentWorkspacePaths.count > limit {
             recentWorkspacePaths = Array(recentWorkspacePaths.prefix(limit))
         }
+    }
+
+    public mutating func clearRecentWorkspacePaths() {
+        recentWorkspacePaths = []
     }
 
     public mutating func syncLegacyFieldsFromRoots() {

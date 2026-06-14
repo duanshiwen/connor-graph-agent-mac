@@ -1084,6 +1084,17 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func clearRecentWorkspacePaths() {
+        do {
+            var settings = try runtimeSettingsRepository?.loadOrCreateDefault() ?? .default
+            settings.workspace.clearRecentWorkspacePaths()
+            recentWorkspacePaths = settings.workspace.recentWorkspacePaths
+            try runtimeSettingsRepository?.save(settings)
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
     func addWorkspaceRoots(paths: [String]) {
         for path in paths { addWorkspaceRoot(path: path) }
     }
