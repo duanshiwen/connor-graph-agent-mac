@@ -473,17 +473,21 @@ struct AgentChatTurnProcessRow: View {
                 .buttonStyle(.plain)
 
                 if isExpanded {
-                    VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
-                        ForEach(visibleEvents) { event in
-                            Button(action: { onOpenDetail(event) }) {
-                                AgentActivityEventRow(event: event)
+                    ScrollView(.vertical, showsIndicators: true) {
+                        VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
+                            ForEach(visibleEvents) { event in
+                                Button(action: { onOpenDetail(event) }) {
+                                    AgentActivityEventRow(event: event)
+                                }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
+                            if process.state == .running {
+                                AgentActivityLoadingRow(startedAt: startedAt)
+                            }
                         }
-                        if process.state == .running {
-                            AgentActivityLoadingRow(startedAt: startedAt)
-                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    .frame(maxHeight: 300)
                     .padding(.leading, AgentChatLayout.iconButtonSize)
                     .transition(.opacity.combined(with: .move(edge: .top)))
                 }
