@@ -1,7 +1,7 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-14 23:24 GMT+8  
-当前代码基线:`optimize/chat-ui-first-pass`,在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface / session-scoped multi-root project workspace / Connor-owned Scientific Compute Runtime skeleton 基础上,完成 P1/P2 合并优化:权限审批恢复、composer 内权限确认 overlay、取消后保留 activity timeline、Chat UI 组件拆分、App shell/settings/ProductOS/diagnostic 视图拆分、AppViewModel factory / builder / mapper / editor 小步抽取、Browser workspace 模型与浮窗视图拆分、Commercial readiness snapshot builder 拆分、Claude sidecar protocol DTO 拆分,以及 SwiftPM asset catalog resource warning 修复。
+文档更新时间：2026-06-15 00:30 GMT+8  
+当前代码基线:`optimize/chat-ui-first-pass`,在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface / session-scoped multi-root project workspace / Connor-owned Scientific Compute Runtime skeleton 基础上,继续加入 Attachment OS Commercial Foundation Slice:正式附件域模型、message-level lightweight attachment refs、Session Capsule 附件存储、轻量文本抽取、prompt attachment context section、NativeSessionManager 附件提交链路、composer 文本框内部上半区附件展示和 transcript 附件引用展示。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package,目标是把 Connor 建成 **graph-memory-native Agent OS**:它不是"图谱编辑器",也不是"Claude SDK 外壳",而是以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI 和 Local Automation Surface 共同构成的本地 Agent 操作系统。
 
@@ -19,6 +19,7 @@ Connor 当前坚持以下主权边界:
 - **Source sovereignty belongs to Connor Source Platform**:MCP servers 是外部能力提供者,不拥有 Connor source registry、permission policy、audit、graph ingestion policy 或 readiness state。
 - **UI sovereignty belongs to Swift Native Shell**:不 fork Craft UI,不引入 Electron/Web UI,不引入 Craft-style multi-workspace。
 - **Automation sovereignty belongs to Connor Local Automation Surface**:CLI/API 只能通过本地、可审计、可 dry-run、可 review 的 contract 调用 Connor runtime。
+- **Attachment sovereignty belongs to Connor Session OS / Attachment Store**:用户文件先进入本地 Session Capsule,原文件、manifest、派生抽取文本和 message refs 由 Connor 管理;OpenAI/Claude/Gemini 等 provider-native file API 未来只能作为可治理的投递/缓存策略,不能成为 source of truth。
 
 明确不做:
 
@@ -133,11 +134,20 @@ sessions/{sessionID}/
 ├── plans/
 ├── data/
 ├── attachments/
+│   ├── attachment-manifest.jsonl
+│   └── {attachmentID}/
+│       ├── manifest.json
+│       ├── original/
+│       │   └── {safeOriginalFilename}
+│       └── derivatives/
+│           └── extracted.md
 ├── exports/
 └── logs/
 ```
 
 Connor 的会话持久化边界是完整 Session Capsule:SQLite 仍承担 session / run / event / graph 查询存储,但 session-local 的 UI/workspace 状态、记录流、附件、plans、data、logs 与 browser 子状态都归属于 `sessions/{sessionID}/`。`session-state.json` 可保存 `workspace` 引用和 `llmOverride`(per-session 模型覆盖),用于记录当前会话绑定的 project working directory 来源与路径以及独立的模型选择;`records.jsonl` 使用单行 JSONL 追加保存,读取时可跳过坏行,避免 10+ 条记录因一次异常写入或重启退化成 1 条。
+
+Attachment OS 当前基础切片遵循本地优先:导入文件会复制到 `attachments/{attachmentID}/original/`,写入 `manifest.json` 和 `attachment-manifest.jsonl`;文本/代码/Markdown/JSON/CSV/HTML 等轻量类型会生成 `derivatives/extracted.md` 并可通过 `AttachmentContextPlan` 进入 prompt。`AgentMessage` 只保存 lightweight `AgentMessageAttachmentRef`,不重复嵌入原文件或完整 manifest。未来 Docling/MarkItDown、OCR/ASR、provider-native file API、remote purge、attachment index 和 Graph Memory evidence admission 都应接入同一 Attachment Store,不能绕过 Connor Policy / Session OS。
 
 主要状态文件:
 
@@ -790,6 +800,7 @@ Session Workspace 当前支持:
 - 当前 roots 保持原先的"点击目录项即切换到该目录"交互,每行右侧额外提供一个小叉用于取消此工作目录;若取消的是当前 primary root,剩余的第一个辅助 root 会自动升级为 primary root。
 - folder badge 的"历史打开列表"区域展示跨会话最近目录 MRU,每个历史项都以历史图标呈现并限制最大宽度;选择历史项会加入当前 session roots 并设为 primary,适合在相关项目之间快速切换。
 - folder badge 还支持"选择文件夹..."和"重置为默认",用于从 Finder 添加新目录或回退到 legacy / fallback 默认工作目录。
+- composer paperclip 现在导入 Session Capsule 附件;附件 chips 展示在现有 composer 文本框内部上半部分,文本框整体尺寸不变,composer 的尺寸、位置和外部布局不变。附件多时在文本框内部横向滚动,不在 composer 上方新增 shelf,也不推动底部按钮栏。
 - 多工作目录能力只作用于 project workspace / allowed roots;Connor 仍保持单一 Home / Runtime Root,不引入 Craft-style multi-workspace。
 
 Browser Workspace 当前支持:
