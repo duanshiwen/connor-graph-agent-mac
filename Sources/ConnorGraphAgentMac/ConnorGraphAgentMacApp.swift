@@ -93,6 +93,7 @@ final class AppViewModel: ObservableObject {
     @Published var llmModelConnections: [AppLLMModelConnection] = []
     @Published var isLoadingLLMModelConnections: Bool = false
     @Published var chatSessions: [AgentSession] = []
+    @Published var allChatSessions: [AgentSession] = []
     @Published var selectedChatSessionID: String?
     @Published var sessionListFilter: AgentSessionListFilter = .all
     @Published var sessionSearchQuery: String = ""
@@ -137,6 +138,7 @@ final class AppViewModel: ObservableObject {
     @Published var requireApprovalForShell: Bool = true
     @Published var defaultWorkingDirectoryPath: String = ""
     @Published var workspaceRoots: [WorkspaceRootDraft] = []
+    @Published var recentWorkspacePaths: [String] = []
     @Published var workspaceRootPathInput: String = ""
     @Published var userDisplayName: String = "诗闻"
     @Published var userTimezone: String = "Asia/Shanghai"
@@ -869,6 +871,7 @@ final class AppViewModel: ObservableObject {
             composerSendShortcut = settings.input.composerSendShortcut
             requireApprovalForNetwork = settings.permissions.requireApprovalForNetwork
             requireApprovalForShell = settings.permissions.requireApprovalForShell
+            recentWorkspacePaths = settings.workspace.recentWorkspacePaths
             if let sessionID = currentSessionIDForWorkspaceDrafts() {
                 syncWorkspaceDraftsFromSession(sessionStateSnapshotsBySessionID[sessionID])
             } else {
@@ -906,6 +909,7 @@ final class AppViewModel: ObservableObject {
             settings.permissions.requireApprovalForShell = requireApprovalForShell
             // Workspace roots are session-scoped and saved into Session Capsule.
             // Keep runtime-settings.workspace as a legacy fallback/template only.
+            settings.workspace.recentWorkspacePaths = recentWorkspacePaths
             settings.preferences.displayName = userDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.timezone = userTimezone.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.city = userCity.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -940,7 +944,19 @@ final class AppViewModel: ObservableObject {
         }
         defaultWorkingDirectoryPath = workspaceRoots.first(where: \.isPrimary)?.path ?? ""
         workspaceRootPathInput = ""
+        rememberWorkspacePath(defaultWorkingDirectoryPath)
         saveWorkspaceDraftsToCurrentSession()
+    }
+
+    private func rememberWorkspacePath(_ path: String) {
+        do {
+            var settings = try runtimeSettingsRepository?.loadOrCreateDefault() ?? .default
+            settings.workspace.rememberWorkspacePath(path)
+            recentWorkspacePaths = settings.workspace.recentWorkspacePaths
+            try runtimeSettingsRepository?.save(settings)
+        } catch {
+            errorMessage = String(describing: error)
+        }
     }
 
     func addWorkspaceRoots(paths: [String]) {
@@ -980,6 +996,8 @@ final class AppViewModel: ObservableObject {
     func reloadChatSessions() {
         guard let chatSessionRepository else {
             transcript = activeChatTranscript
+            chatSessions = [activeChatSession]
+            allChatSessions = [activeChatSession]
             selectedChatSessionID = activeChatSession.id
             return
         }
@@ -990,6 +1008,7 @@ final class AppViewModel: ObservableObject {
                 sessions = [session]
             }
             chatSessions = sessions
+            allChatSessions = try chatSessionRepository.loadSessions(filter: .all)
             let selectedID = selectedChatSessionID ?? sessions.first?.id
             selectedChatSessionID = selectedID
             if let selectedID, let session = try chatSessionRepository.loadSession(id: selectedID) {

@@ -162,6 +162,24 @@ struct AgentChatComposerView: View {
 
             Divider()
 
+            Menu {
+                if viewModel.recentWorkspacePaths.isEmpty {
+                    Button("暂无历史记录") {}
+                        .disabled(true)
+                } else {
+                    ForEach(viewModel.recentWorkspacePaths, id: \.self) { path in
+                        Button {
+                            viewModel.addWorkspaceRootAndSetPrimary(path: path)
+                        } label: {
+                            Label(workspaceMenuItemTitle(forPath: path), systemImage: isCurrentPrimaryWorkspacePath(path) ? "checkmark" : "clock.arrow.circlepath")
+                        }
+                        .help(path)
+                    }
+                }
+            } label: {
+                Label("历史打开列表", systemImage: "clock.arrow.circlepath")
+            }
+
             Button {
                 chooseWorkingDirectory()
             } label: {
@@ -200,10 +218,23 @@ struct AgentChatComposerView: View {
     }
 
     private func workspaceMenuItemTitle(for root: WorkspaceRootDraft) -> String {
-        let name = workspaceDisplayName(for: root)
-        let parent = workspaceParentDisplayPath(for: root.path)
+        workspaceMenuItemTitle(name: workspaceDisplayName(for: root), path: root.path)
+    }
+
+    private func workspaceMenuItemTitle(forPath path: String) -> String {
+        let url = URL(fileURLWithPath: path, isDirectory: true)
+        let name = url.lastPathComponent.isEmpty ? path : url.lastPathComponent
+        return workspaceMenuItemTitle(name: name, path: path)
+    }
+
+    private func workspaceMenuItemTitle(name: String, path: String) -> String {
+        let parent = workspaceParentDisplayPath(for: path)
         guard !parent.isEmpty else { return name }
         return "\(name)  in \(parent)"
+    }
+
+    private func isCurrentPrimaryWorkspacePath(_ path: String) -> Bool {
+        viewModel.primaryWorkspaceRootDraft?.path == path
     }
 
     private func workspaceDisplayName(for root: WorkspaceRootDraft) -> String {
