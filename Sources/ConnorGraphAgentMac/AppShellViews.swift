@@ -49,10 +49,6 @@ struct AppShellView: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
                 .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(Color(nsColor: .separatorColor).opacity(0.32), lineWidth: 1)
-                )
             }
 
             ToolbarItem(placement: .primaryAction) {
