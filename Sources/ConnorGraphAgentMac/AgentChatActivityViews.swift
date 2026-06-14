@@ -543,28 +543,21 @@ struct AgentChatTurnProcessRow: View {
     }
 
     private func activityHeader(_ summary: AgentTurnActivitySummaryPresentation) -> some View {
-        HStack(alignment: .top, spacing: AgentChatLayout.spaceS) {
+        HStack(alignment: .center, spacing: AgentChatLayout.spaceS) {
             statusIcon(summary.state)
                 .frame(width: AgentChatTypography.controlIconSize, height: AgentChatTypography.controlIconSize)
-                .padding(.top, 1)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(summary.title)
-                    .font(AgentChatTypography.micro.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Text(summary.subtitle)
-                    .font(AgentChatTypography.micro)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(2)
-            }
+            Text("\(summary.title) · \(summary.subtitle)")
+                .font(AgentChatTypography.micro.weight(.medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
 
             Spacer(minLength: 0)
 
             Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                 .font(.system(size: AgentChatTypography.chevronIconSize, weight: .semibold))
                 .foregroundStyle(.tertiary)
-                .padding(.top, 1)
         }
         .padding(.horizontal, AgentChatLayout.spaceM)
         .padding(.vertical, AgentChatLayout.spaceXS)
