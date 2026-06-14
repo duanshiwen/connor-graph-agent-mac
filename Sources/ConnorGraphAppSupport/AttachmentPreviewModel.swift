@@ -5,6 +5,7 @@ public enum AttachmentPreviewBodyMode: String, Sendable, Codable, Equatable {
     case markdown
     case monospaced
     case plain
+    case image
 }
 
 public struct AttachmentPreviewModel: Sendable, Equatable, Identifiable {
@@ -16,6 +17,7 @@ public struct AttachmentPreviewModel: Sendable, Equatable, Identifiable {
     public var body: String
     public var bodyMode: AttachmentPreviewBodyMode
     public var sourceRelativePath: String?
+    public var sourceFileURL: URL?
     public var errorMessage: String?
 
     public init(
@@ -26,6 +28,7 @@ public struct AttachmentPreviewModel: Sendable, Equatable, Identifiable {
         body: String,
         bodyMode: AttachmentPreviewBodyMode,
         sourceRelativePath: String? = nil,
+        sourceFileURL: URL? = nil,
         errorMessage: String? = nil
     ) {
         self.attachment = attachment
@@ -35,6 +38,7 @@ public struct AttachmentPreviewModel: Sendable, Equatable, Identifiable {
         self.body = body
         self.bodyMode = bodyMode
         self.sourceRelativePath = sourceRelativePath
+        self.sourceFileURL = sourceFileURL
         self.errorMessage = errorMessage
     }
 }
@@ -53,6 +57,20 @@ public struct AttachmentPreviewLoader: Sendable {
         do {
             let manifest = try store.loadManifest(sessionID: sessionID, attachmentID: attachment.id)
             let subtitle = Self.subtitle(for: manifest)
+            if manifest.kind == .image {
+                let imageURL = store.paths.sessionArtifactDirectories(sessionID: sessionID).root.appendingPathComponent(manifest.storedRelativePath)
+                return AttachmentPreviewModel(
+                    attachment: attachment,
+                    manifest: manifest,
+                    title: attachment.displayName,
+                    subtitle: subtitle,
+                    body: "",
+                    bodyMode: .image,
+                    sourceRelativePath: manifest.storedRelativePath,
+                    sourceFileURL: imageURL,
+                    errorMessage: nil
+                )
+            }
             guard let relativePath = manifest.extractedTextRelativePath, !relativePath.isEmpty else {
                 let fallback = attachment.previewText ?? manifest.previewText ?? "当前附件没有可预览文本。"
                 return AttachmentPreviewModel(
@@ -115,6 +133,8 @@ public struct AttachmentPreviewLoader: Sendable {
             return .monospaced
         case .text:
             return .plain
+        case .image:
+            return .image
         default:
             return .plain
         }
