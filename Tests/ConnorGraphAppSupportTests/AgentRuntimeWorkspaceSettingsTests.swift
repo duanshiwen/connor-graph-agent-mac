@@ -18,13 +18,23 @@ struct AgentRuntimeWorkspaceSettingsTests {
         var settings = AgentRuntimeWorkspaceSettings()
 
         settings.rememberWorkspacePath("   ")
-        for index in 0..<10 {
-            settings.rememberWorkspacePath("/tmp/project-\(index)", limit: 8)
+        for index in 0..<12 {
+            settings.rememberWorkspacePath("/tmp/project-\(index)")
         }
 
-        #expect(settings.recentWorkspacePaths.count == 8)
-        #expect(settings.recentWorkspacePaths.first == "/tmp/project-9")
+        #expect(settings.recentWorkspacePaths.count == 10)
+        #expect(settings.recentWorkspacePaths.first == "/tmp/project-11")
         #expect(settings.recentWorkspacePaths.last == "/tmp/project-2")
+    }
+
+    @Test func clearRecentWorkspacePathsRemovesHistory() {
+        var settings = AgentRuntimeWorkspaceSettings()
+
+        settings.rememberWorkspacePath("/tmp/project-a")
+        settings.rememberWorkspacePath("/tmp/project-b")
+        settings.clearRecentWorkspacePaths()
+
+        #expect(settings.recentWorkspacePaths.isEmpty)
     }
 
     @Test func decodesWorkspaceSettingsWithoutRecentHistory() throws {
