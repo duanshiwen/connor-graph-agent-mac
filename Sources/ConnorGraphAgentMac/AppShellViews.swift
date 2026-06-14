@@ -306,7 +306,11 @@ private struct CraftSessionListPane: View {
             ScrollView {
                 LazyVStack(spacing: 2) {
                     ForEach(filteredSessions) { session in
-                        CraftSessionRow(row: AgentChatSessionPresentation(session: session), isSelected: session.id == viewModel.selectedChatSessionID) {
+                        CraftSessionRow(
+                            row: AgentChatSessionPresentation(session: session),
+                            isSelected: session.id == viewModel.selectedChatSessionID,
+                            isRunning: session.id == viewModel.submittingChatSessionID
+                        ) {
                             var transaction = Transaction()
                             transaction.disablesAnimations = true
                             withTransaction(transaction) {
@@ -389,22 +393,35 @@ private struct CraftDetailPaneView: View {
 private struct CraftSessionRow: View {
     var row: AgentChatSessionPresentation
     var isSelected: Bool
+    var isRunning: Bool
     var action: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: row.isFlagged ? "pin.fill" : icon(for: row.status))
-                .foregroundStyle(row.isFlagged ? .orange : (isSelected ? .accentColor : .secondary))
-                .frame(width: 18)
+            if isRunning {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(width: 18, height: 18)
+            } else {
+                Image(systemName: row.isFlagged ? "pin.fill" : icon(for: row.status))
+                    .foregroundStyle(row.isFlagged ? .orange : (isSelected ? .accentColor : .secondary))
+                    .frame(width: 18)
+            }
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Text(row.title)
                         .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
                         .lineLimit(1)
                     Spacer(minLength: 4)
-                    Text(row.relativeUpdatedTime)
-                        .font(AppListTypography.rowCaption)
-                        .foregroundStyle(.secondary)
+                    if isRunning {
+                        Text("运行中")
+                            .font(AppListTypography.rowCaptionEmphasized)
+                            .foregroundStyle(Color.accentColor)
+                    } else {
+                        Text(row.relativeUpdatedTime)
+                            .font(AppListTypography.rowCaption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 HStack(spacing: 6) {
                     Text(row.statusText)
