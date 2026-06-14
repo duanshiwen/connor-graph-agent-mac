@@ -171,6 +171,8 @@ final class AppViewModel: ObservableObject {
     private var nativeSessionManager: NativeSessionManager?
     private var submittingChatSessionID: String?
     private var activeChatRunID: String?
+    private var activeChatBackendsBySessionID: [String: AnyAgentBackend] = [:]
+    private var activeChatBackendsByRunID: [String: AnyAgentBackend] = [:]
     private var pendingChatCancellationReasonsBySessionID: [String: String] = [:]
     private var agentEventTimelinesBySessionID: [String: [AgentEventPresentation]] = [:]
     private var agentEventTimelinesByProcessKey: [String: [AgentEventPresentation]] = [:]
@@ -1443,17 +1445,27 @@ final class AppViewModel: ObservableObject {
             case .pending:
                 resolved = approval
             }
-            if let resolved {
-                try await nativeSessionManager?.backend.resolveApproval(resolved, status: status, reason: reason, actor: actor)
+            let didSendToLiveBackend: Bool
+            if let resolved, let backend = backendForPendingApproval(resolved) {
+                try await backend.resolveApproval(resolved, status: status, reason: reason, actor: actor)
+                didSendToLiveBackend = true
+            } else {
+                didSendToLiveBackend = false
             }
             reloadPendingApprovals()
             switch status {
             case .approved:
-                lastPendingApprovalResultSummary = "已批准权限请求 \(approval.requestID)，并写入审计、timeline，且已向 sidecar 发送 resume。"
+                lastPendingApprovalResultSummary = didSendToLiveBackend
+                    ? "已批准权限请求 \(approval.requestID)，并写入审计、timeline，且已向当前运行中的 sidecar/run 发送 resume。"
+                    : "已批准权限请求 \(approval.requestID)，并写入审计、timeline；但当前未找到仍在线等待的 run，未发送 resume。请重试该会话请求。"
             case .denied:
-                lastPendingApprovalResultSummary = "已拒绝权限请求 \(approval.requestID)，并写入审计、timeline，且已向 sidecar 发送 deny。"
+                lastPendingApprovalResultSummary = didSendToLiveBackend
+                    ? "已拒绝权限请求 \(approval.requestID)，并写入审计、timeline，且已向当前运行中的 sidecar/run 发送 deny。"
+                    : "已拒绝权限请求 \(approval.requestID)，并写入审计、timeline；但当前未找到仍在线等待的 run。"
             case .cancelled:
-                lastPendingApprovalResultSummary = "已取消权限请求 \(approval.requestID)，并写入审计、timeline，且已向 sidecar 发送 cancel/deny。"
+                lastPendingApprovalResultSummary = didSendToLiveBackend
+                    ? "已取消权限请求 \(approval.requestID)，并写入审计、timeline，且已向当前运行中的 sidecar/run 发送 cancel/deny。"
+                    : "已取消权限请求 \(approval.requestID)，并写入审计、timeline；但当前未找到仍在线等待的 run。"
             case .pending:
                 lastPendingApprovalResultSummary = "权限请求 \(approval.requestID) 仍为 pending。"
             }
@@ -1461,6 +1473,12 @@ final class AppViewModel: ObservableObject {
         } catch {
             errorMessage = String(describing: error)
         }
+    }
+
+    private func backendForPendingApproval(_ approval: AgentPendingApproval) -> AnyAgentBackend? {
+        activeChatBackendsByRunID[approval.runID]
+            ?? activeChatBackendsBySessionID[approval.sessionID]
+            ?? nativeSessionManager?.backend
     }
 
     func reloadSchemaHealthReport() {
@@ -1721,6 +1739,7 @@ final class AppViewModel: ObservableObject {
             return nil
         }
         let submittingSessionID = manager.session.id
+        activeChatBackendsBySessionID[submittingSessionID] = manager.backend
         if clearComposer { chatInput = "" }
         agentEventTimelinesBySessionID[submittingSessionID] = []
         agentEventTimelinesByProcessKey = agentEventTimelinesByProcessKey.filter { key, _ in !key.hasPrefix("\(submittingSessionID):") }
@@ -1737,6 +1756,10 @@ final class AppViewModel: ObservableObject {
         lastContext = nil
         lastPromptInspection = nil
         defer {
+            activeChatBackendsBySessionID.removeValue(forKey: submittingSessionID)
+            if let runID = activeChatRunID {
+                activeChatBackendsByRunID.removeValue(forKey: runID)
+            }
             if submittingChatSessionID == submittingSessionID {
                 submittingChatSessionID = nil
                 activeChatRunID = nil
@@ -1759,6 +1782,8 @@ final class AppViewModel: ObservableObject {
                     guard let self else { return }
                     if self.submittingChatSessionID == submittingSessionID {
                         self.activeChatRunID = runID
+                        self.activeChatBackendsByRunID[runID] = manager.backend
+                        self.activeChatBackendsBySessionID[submittingSessionID] = manager.backend
                         if let reason = self.pendingChatCancellationReasonsBySessionID[submittingSessionID] {
                             self.cancelRunningChatRun(sessionID: submittingSessionID, runID: runID, reason: reason)
                         }
