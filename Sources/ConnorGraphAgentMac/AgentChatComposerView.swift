@@ -124,11 +124,9 @@ struct AgentChatComposerView: View {
                         RoundedRectangle(cornerRadius: AgentChatLayout.radiusXL, style: .continuous)
                             .fill(Color(nsColor: .controlBackgroundColor).opacity(0.96))
 
-                        ScrollView {
-                            AgentChatPermissionRequestCard(approval: approval, viewModel: viewModel)
-                                .padding(AgentChatLayout.spaceM)
-                        }
-                        .frame(maxHeight: 220)
+                        AgentChatPermissionRequestCard(approval: approval, viewModel: viewModel)
+                            .padding(AgentChatLayout.spaceM)
+                            .frame(maxHeight: 220)
                     }
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 }
@@ -387,6 +385,15 @@ struct AgentChatComposerView: View {
                     }
                 }
 
+                if viewModel.sessionHasLLMOverride {
+                    Divider()
+                    Button {
+                        viewModel.clearSessionLLMOverride()
+                    } label: {
+                        Label("恢复全局默认模型", systemImage: "arrow.counterclockwise")
+                    }
+                }
+
                 Divider()
 
                 Button {
@@ -396,12 +403,20 @@ struct AgentChatComposerView: View {
                 }
             }
         } label: {
-            Label {
-                Text(viewModel.llmSelectedModel.isEmpty ? "未选择模型" : viewModel.llmSelectedModel)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            } icon: {
-                Image(systemName: "cpu")
+            HStack(spacing: AgentChatLayout.spaceXS) {
+                Label {
+                    Text(viewModel.llmSelectedModel.isEmpty ? "未选择模型" : viewModel.llmSelectedModel)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                } icon: {
+                    Image(systemName: "cpu")
+                }
+                if viewModel.sessionHasLLMOverride {
+                    Circle()
+                        .fill(Color.accentColor)
+                        .frame(width: 6, height: 6)
+                        .help("此会话使用自定义模型，与全局设置不同")
+                }
             }
             .font(AgentChatTypography.micro.weight(.medium))
             .padding(.horizontal, AgentChatLayout.spaceM)
