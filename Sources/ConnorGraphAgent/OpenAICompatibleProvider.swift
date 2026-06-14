@@ -195,7 +195,19 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, Ag
     private func makeToolCallingRequest(_ request: AgentModelRequest) throws -> AgentHTTPRequest {
         let endpoint = config.baseURL.appendingPathComponent("chat/completions")
         let messages = request.messages.map { message in
-            OpenAIChatMessage(role: message.role.rawValue, content: message.content, toolCallID: message.toolCallID, name: message.name)
+            OpenAIChatMessage(
+                role: message.role.rawValue,
+                content: message.content,
+                toolCallID: message.toolCallID,
+                name: message.name,
+                toolCalls: message.toolCalls?.map { call in
+                    OpenAIToolCall(
+                        id: call.id,
+                        type: "function",
+                        function: OpenAIToolCallFunction(name: call.name, arguments: call.argumentsJSON)
+                    )
+                }
+            )
         }
         let tools = request.tools.map { definition in
             OpenAIToolDefinition(type: "function", function: OpenAIFunctionDefinition(
