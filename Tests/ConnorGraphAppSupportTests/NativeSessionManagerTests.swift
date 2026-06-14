@@ -167,9 +167,12 @@ private func makeNativeSessionStore() throws -> SQLiteGraphKernelStore {
     }
 
     let loaded = try #require(try repository.loadSession(id: "native-session-failure"))
-    #expect(loaded.messages.count == 1)
+    #expect(loaded.messages.count == 2)
     #expect(loaded.messages.first?.role == .user)
     #expect(loaded.messages.first?.content == "This must be durable even if the backend fails")
+    #expect(loaded.messages.last?.role == .assistant)
+    #expect(loaded.messages.last?.content.contains("操作已终止：") == true)
+    #expect(loaded.messages.last?.content.contains("backendUnavailable") == true)
     #expect(manager.session.messages.map(\.id) == loaded.messages.map(\.id))
     #expect(manager.session.messages.map(\.role) == loaded.messages.map(\.role))
     #expect(manager.session.messages.map(\.content) == loaded.messages.map(\.content))

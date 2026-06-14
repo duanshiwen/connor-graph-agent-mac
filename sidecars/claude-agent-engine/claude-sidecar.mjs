@@ -357,11 +357,9 @@ const runRequest = async (request) => {
         const subtype = message?.subtype ?? message?.terminal_reason ?? 'completed';
         const terminalReason = message?.terminal_reason ?? message?.stop_reason ?? subtype;
         if (terminalReason === 'tool_deferred' && emitPermissionRequestedFromDeferredResult(message, request)) {
-          emitRunFailed('Claude SDK deferred tool use pending Connor permission approval', 'permission_deferred', 'requires_user_action');
           return;
         }
         if (emitPermissionRequestedFromDeferredResult(message, request)) {
-          emitRunFailed('Claude SDK deferred tool use pending Connor permission approval', 'permission_deferred', 'requires_user_action');
           return;
         }
         if (subtype !== 'success' && subtype !== 'completed') {

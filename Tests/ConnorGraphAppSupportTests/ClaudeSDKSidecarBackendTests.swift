@@ -220,6 +220,29 @@ private actor FakeClaudeSDKSidecarSessionTransport: ClaudeSDKSidecarSessionTrans
     }
 }
 
+@Test func claudeSDKSidecarApprovalResolutionCommandMapsDeniedToDeniedOutcome() throws {
+    let approval = AgentPendingApproval(
+        requestID: "permission-tool-denied",
+        runID: "run-sidecar-tools",
+        sessionID: "connor-session-sidecar-tools",
+        capability: .externalNetwork,
+        toolName: "Bash",
+        status: .denied
+    )
+    let resolution = ClaudeSDKSidecarApprovalResolution(
+        approval: approval,
+        status: .denied,
+        reason: "Denied by reviewer",
+        actor: "human-reviewer"
+    )
+
+    #expect(resolution.status == .denied)
+    #expect(resolution.outcome == .denied)
+    #expect(resolution.reason == "Denied by reviewer")
+    #expect(resolution.actor == "human-reviewer")
+    #expect(resolution.ownsProductState == false)
+}
+
 @Test func claudeSDKSidecarApprovalResolutionCommandMapsCancelledToDeniedOutcome() throws {
     let approval = AgentPendingApproval(
         requestID: "permission-tool-2",
@@ -618,6 +641,19 @@ private actor FakeClaudeSDKSidecarSessionTransport: ClaudeSDKSidecarSessionTrans
     #expect(sidecarSource.contains("permissionDecision: 'allow'"))
     #expect(sidecarSource.contains("updatedInput"))
     #expect(sidecarSource.contains("resume: deferred.sdkSessionID"))
+}
+
+@Test func claudeSDKSidecarDeferredPermissionWaitsForConnorApprovalInsteadOfFailingRun() throws {
+    let root = repositoryRootURL()
+    let sidecarSource = try String(
+        contentsOf: root.appendingPathComponent("sidecars/claude-agent-engine/claude-sidecar.mjs"),
+        encoding: .utf8
+    )
+
+    #expect(sidecarSource.contains("emitPermissionRequestedFromDeferredResult(message, request)"))
+    #expect(sidecarSource.contains("return;"))
+    #expect(!sidecarSource.contains("emitRunFailed('Claude SDK deferred tool use pending Connor permission approval'"))
+    #expect(!sidecarSource.contains("'permission_deferred'"))
 }
 
 @Test func realClaudeSDKSidecarIntegrationSkipsUnlessExplicitlyEnabled() async throws {

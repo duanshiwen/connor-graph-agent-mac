@@ -101,14 +101,13 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         let modelResponse = try await modelProvider.complete(AgentModelRequest(messages: messages, tools: toolRegistry.definitions))
                         try Task.checkCancellation()
                         let budgetSnapshot = await budgetMeter.record(modelResponse.usage)
-                        if budgetSnapshot.status == .warning {
+                        if budgetSnapshot.status == .warning || budgetSnapshot.status == .exceeded {
+                            let label = budgetSnapshot.status == .exceeded ? "Token budget exceeded" : "Token budget warning"
                             yield(.budgetWarning(AgentBudgetWarning(
                                 runID: run.id,
                                 sessionID: run.sessionID,
-                                message: "Token budget warning: \(budgetSnapshot.totalTokens)/\(budgetSnapshot.maxTotalTokens) tokens used."
+                                message: "\(label): \(budgetSnapshot.totalTokens)/\(budgetSnapshot.maxTotalTokens) tokens used. Continuing without automatic stop."
                             )), to: continuation, recorder: eventRecorder)
-                        } else if budgetSnapshot.status == .exceeded {
-                            throw AgentLoopError.budgetExceeded
                         }
                         if let text = modelResponse.text, modelResponse.toolCalls.isEmpty {
                             yield(.textComplete(AgentTextCompleteEvent(
