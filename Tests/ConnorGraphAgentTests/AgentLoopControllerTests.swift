@@ -310,6 +310,23 @@ private struct NamedDelayTool: AgentTool {
     }
 }
 
+private struct LongResultTool: AgentTool {
+    let name = "long_result"
+    let description = "Return a long deterministic result"
+    let permission = AgentPermissionCapability.readSession
+    let inputSchema = AgentToolInputSchema.object(properties: [:], required: [])
+
+    func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        AgentToolResult(
+            runID: context.runID,
+            sessionID: context.sessionID,
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: "abcdefghijklmnopqrstuvwxyz"
+        )
+    }
+}
+
 @Test func agentLoopDoesNotTreatSameToolWithDifferentArgumentsAsLoop() async throws {
     let toolResponses = (1...12).map { index in
         AgentModelResponse(
@@ -342,6 +359,43 @@ private struct NamedDelayTool: AgentTool {
 
     #expect(events.map(\.kind).contains(.textComplete))
     #expect(events.last?.kind == .runCompleted)
+}
+
+@Test func agentLoopGatesLargeToolResultBeforeFollowUpModelRequest() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "call-long-result", name: "long_result", argumentsJSON: #"{}"#)],
+            usage: AgentModelUsage(promptTokens: 10, completionTokens: 3),
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: "Handled gated result.",
+            toolCalls: [],
+            usage: AgentModelUsage(promptTokens: 20, completionTokens: 5),
+            finishReason: .stop
+        )
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(LongResultTool())
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: registry,
+        configuration: AgentLoopConfiguration(maxToolResultBytes: 10)
+    )
+
+    for try await _ in loop.run(AgentChatRequest(sessionID: "session-gated-tool-result", userMessage: "Run long result")) {}
+
+    let followUpMessages = try #require(await provider.requests.last?.messages)
+    let toolMessage = try #require(followUpMessages.first(where: { $0.role == .tool && $0.toolCallID == "call-long-result" }))
+
+    #expect(toolMessage.name == "long_result")
+    #expect(toolMessage.content.hasPrefix("abcdefghij"))
+    #expect(!toolMessage.content.contains("klmnopqrstuvwxyz"))
+    #expect(toolMessage.content.contains("...[truncated tool result:"))
+    #expect(toolMessage.content.contains("tool=long_result"))
+    #expect(toolMessage.content.contains("kept=10 chars"))
+    #expect(toolMessage.content.contains("original=26 chars"))
 }
 
 @Test func agentLoopPreservesAssistantToolCallsBeforeToolResult() async throws {
