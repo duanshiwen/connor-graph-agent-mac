@@ -399,10 +399,7 @@ struct AgentChatMessageRow: View {
                 RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
                     .stroke(isUser ? Color.clear : Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1)
             )
-
-            if !isUser { Spacer(minLength: AgentChatLayout.messageSideInset) }
         }
-        .padding(.trailing, isUser ? 0 : AgentChatLayout.assistantMessageScrollbarGutter)
         .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
     }
 
@@ -525,28 +522,23 @@ struct AgentChatTurnProcessRow: View {
                 .buttonStyle(.plain)
 
                 if isExpanded {
-                    ScrollView(.vertical, showsIndicators: true) {
-                        VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
-                            ForEach(visibleEvents) { event in
-                                Button(action: { onOpenDetail(event) }) {
-                                    AgentActivityEventRow(event: event)
-                                }
-                                .buttonStyle(.plain)
+                    VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
+                        ForEach(visibleEvents) { event in
+                            Button(action: { onOpenDetail(event) }) {
+                                AgentActivityEventRow(event: event)
                             }
-                            if process.state == .running {
-                                AgentActivityLoadingRow(startedAt: startedAt)
-                            }
+                            .buttonStyle(.plain)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        if process.state == .running {
+                            AgentActivityLoadingRow(startedAt: startedAt)
+                        }
                     }
-                    .frame(maxHeight: 300)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.leading, AgentChatLayout.iconButtonSize)
                     .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
-            .frame(maxWidth: AgentChatLayout.messageMaxWidth, alignment: .leading)
-
-            Spacer(minLength: AgentChatLayout.messageSideInset)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
