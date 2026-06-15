@@ -8,6 +8,27 @@ private func temporaryAppChatDatabaseURL(_ name: String = UUID().uuidString) -> 
     FileManager.default.temporaryDirectory.appendingPathComponent("\(name).sqlite")
 }
 
+private func temporaryAppChatStoragePaths(_ name: String = UUID().uuidString) -> AppStoragePaths {
+    AppStoragePaths(applicationSupportDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(name, isDirectory: true))
+}
+
+@Test func appChatRepositoryPersistsMarkdownRenderCacheForSavedAssistantMessages() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryAppChatDatabaseURL().path)
+    try store.migrate()
+    let paths = temporaryAppChatStoragePaths()
+    let repository = AppChatSessionRepository(store: store, storagePaths: paths)
+    let user = AgentMessage(id: "user-1", role: .user, content: "Question")
+    let assistant = AgentMessage(id: "assistant-1", role: .assistant, content: "# Answer\n\nBody with **markdown**")
+    let session = AgentSession(id: "session-cache", messages: [user, assistant])
+
+    try repository.saveSession(session, previousMessageCount: 1)
+
+    let cacheStore = AgentMarkdownRenderCacheStore(storagePaths: paths)
+    let cachedBlocks = try cacheStore.loadBlocks(sessionID: session.id, messageID: assistant.id, content: assistant.content)
+    #expect(cachedBlocks == AgentMarkdownBlockParser().parse(assistant.content))
+    #expect(try cacheStore.loadBlocks(sessionID: session.id, messageID: user.id, content: user.content) == nil)
+}
+
 @Test func appChatRepositoryPersistsBackgroundTasksIsolatedBySession() throws {
     let store = try SQLiteGraphKernelStore(path: temporaryAppChatDatabaseURL().path)
     try store.migrate()
