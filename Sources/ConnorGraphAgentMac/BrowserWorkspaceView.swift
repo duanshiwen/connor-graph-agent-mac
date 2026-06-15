@@ -100,6 +100,15 @@ struct BrowserWorkspaceView: View {
                         .transition(.scale(scale: 0.96).combined(with: .opacity))
                     }
                 }
+
+                // History panel overlay on the right side
+                if viewModel.isBrowserHistoryPanelVisible {
+                    HStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        BrowserHistoryPanelView(viewModel: viewModel)
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                    }
+                }
             }
         }
         .onAppear {
@@ -228,6 +237,14 @@ struct BrowserWorkspaceView: View {
             )
             .frame(height: 28)
 
+            Button(action: { viewModel.toggleBrowserHistoryPanel() }) {
+                Image(systemName: viewModel.isBrowserHistoryPanelVisible ? "clock.arrow.circlepath" : "clock")
+                    .font(BrowserFloatingTypography.toolbarIcon)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(viewModel.isBrowserHistoryPanelVisible ? Color.accentColor : Color.secondary)
+            .help("浏览历史")
+
             Button(action: showPageQuestionPopover) {
                 BrowserAskAIButtonLabel()
             }
@@ -326,6 +343,15 @@ struct BrowserWorkspaceView: View {
             session.tabs[index].navigationState = normalizedState
         }
         if tabID == activeSelectedTabID, !displayURL.isEmpty { addressText = displayURL }
+
+        // Record browser history when page finishes loading
+        if !state.isLoading, !state.url.isEmpty, !state.url.hasPrefix("connor://"), !state.url.hasPrefix("about:"), !state.url.hasPrefix("data:") {
+            viewModel.recordBrowserHistory(
+                url: state.url,
+                title: state.title,
+                sessionID: activeSessionID
+            )
+        }
     }
 
     private func syncAddressTextWithActiveTab() {

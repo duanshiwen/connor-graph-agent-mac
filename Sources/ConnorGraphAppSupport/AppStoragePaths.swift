@@ -19,6 +19,7 @@ public struct AppStoragePaths: Sendable, Equatable {
     public var auditLogsDirectory: URL
     public var runtimeLogsDirectory: URL
     public var sidecarsDirectory: URL
+    public var browserDirectory: URL
     public var databaseURL: URL
 
     public init(
@@ -39,6 +40,7 @@ public struct AppStoragePaths: Sendable, Equatable {
         auditLogsDirectory: URL? = nil,
         runtimeLogsDirectory: URL? = nil,
         sidecarsDirectory: URL? = nil,
+        browserDirectory: URL? = nil,
         databaseURL: URL? = nil
     ) {
         self.applicationSupportDirectory = applicationSupportDirectory
@@ -65,6 +67,7 @@ public struct AppStoragePaths: Sendable, Equatable {
         self.auditLogsDirectory = auditLogsDirectory ?? resolvedLogsDirectory.appendingPathComponent("audit", isDirectory: true)
         self.runtimeLogsDirectory = runtimeLogsDirectory ?? resolvedLogsDirectory.appendingPathComponent("runtime", isDirectory: true)
         self.sidecarsDirectory = sidecarsDirectory ?? applicationSupportDirectory.appendingPathComponent("sidecars", isDirectory: true)
+        self.browserDirectory = browserDirectory ?? applicationSupportDirectory.appendingPathComponent("browser", isDirectory: true)
         self.databaseURL = databaseURL ?? resolvedGraphDirectory.appendingPathComponent("connor.sqlite")
     }
 
@@ -101,8 +104,13 @@ public struct AppStoragePaths: Sendable, Equatable {
             logsDirectory,
             auditLogsDirectory,
             runtimeLogsDirectory,
-            sidecarsDirectory
+            sidecarsDirectory,
+            browserDirectory
         ]
+    }
+
+    public var browserHistoryURL: URL {
+        browserDirectory.appendingPathComponent("history.jsonl")
     }
 
     public func sessionArtifactDirectories(sessionID: String) -> AgentSessionArtifactDirectories {
