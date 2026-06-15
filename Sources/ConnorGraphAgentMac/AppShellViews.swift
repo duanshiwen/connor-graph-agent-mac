@@ -505,7 +505,7 @@ private struct CraftSessionRow: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor).opacity(0.001), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(rowBackgroundColor, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(SessionMouseDownHandler {
             if isActionsRevealed {
@@ -519,6 +519,10 @@ private struct CraftSessionRow: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
+    }
+
+    private var rowBackgroundColor: Color {
+        isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor)
     }
 
     private var actionButtons: some View {
