@@ -439,16 +439,16 @@ private struct AgentChatSessionListView: View {
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
-                    ForEach(viewModel.chatSessionListItems) { item in
-                        let row = AgentChatSessionPresentation(listItem: item)
+                    ForEach(viewModel.chatSessions) { session in
+                        let row = AgentChatSessionPresentation(session: session)
                         AgentChatSessionRow(
                             row: row,
-                            isSelected: item.id == viewModel.selectedChatSessionID
+                            isSelected: session.id == viewModel.selectedChatSessionID
                         ) {
                             var transaction = Transaction()
                             transaction.disablesAnimations = true
                             withTransaction(transaction) {
-                                viewModel.selectChatSession(item.id)
+                                viewModel.selectChatSession(session.id)
                             }
                         }
                     }
