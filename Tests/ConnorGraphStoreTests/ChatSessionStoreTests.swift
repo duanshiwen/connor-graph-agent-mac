@@ -100,3 +100,118 @@ private func temporaryChatDatabaseURL(_ name: String = UUID().uuidString) -> URL
 
     #expect(tables.contains("agent_sessions"))
 }
+
+@Test func graphKernelStoreMigratesSessionBackgroundTasksTable() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryChatDatabaseURL().path)
+    try store.migrate()
+
+    let tables = try store.tableNames()
+    let indexes = try store.indexNames()
+
+    #expect(tables.contains("session_background_tasks"))
+    #expect(indexes.contains("idx_session_background_tasks_session"))
+    #expect(indexes.contains("idx_session_background_tasks_status"))
+}
+
+@Test func graphKernelStorePersistsSessionBackgroundTasksIsolatedBySession() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryChatDatabaseURL().path)
+    try store.migrate()
+    let task1 = PersistedSessionBackgroundTask(
+        id: "task-1",
+        sessionID: "session-1",
+        kind: "title_generation",
+        title: "重新生成会话标题",
+        detail: "生成中",
+        status: .running,
+        createdAt: Date(timeIntervalSince1970: 1_000),
+        updatedAt: Date(timeIntervalSince1970: 1_001),
+        errorMessage: nil,
+        payloadJSON: "{}"
+    )
+    let task2 = PersistedSessionBackgroundTask(
+        id: "task-2",
+        sessionID: "session-2",
+        kind: "title_generation",
+        title: "重新生成会话标题",
+        detail: "另一个会话",
+        status: .queued,
+        createdAt: Date(timeIntervalSince1970: 2_000),
+        updatedAt: Date(timeIntervalSince1970: 2_001),
+        errorMessage: nil,
+        payloadJSON: "{}"
+    )
+
+    try store.upsertSessionBackgroundTask(task1)
+    try store.upsertSessionBackgroundTask(task2)
+
+    let session1Tasks = try store.sessionBackgroundTasks(sessionID: "session-1")
+    let session2Tasks = try store.sessionBackgroundTasks(sessionID: "session-2")
+
+    #expect(session1Tasks.map(\.id) == ["task-1"])
+    #expect(session2Tasks.map(\.id) == ["task-2"])
+}
+
+@Test func graphKernelStoreUpdatesSessionBackgroundTaskWithoutDuplicating() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryChatDatabaseURL().path)
+    try store.migrate()
+    var task = PersistedSessionBackgroundTask(
+        id: "task-1",
+        sessionID: "session-1",
+        kind: "title_generation",
+        title: "重新生成会话标题",
+        detail: "生成中",
+        status: .running,
+        createdAt: Date(timeIntervalSince1970: 1_000),
+        updatedAt: Date(timeIntervalSince1970: 1_001),
+        errorMessage: nil,
+        payloadJSON: "{}"
+    )
+
+    try store.upsertSessionBackgroundTask(task)
+    task.status = .succeeded
+    task.detail = "已更新为：新标题"
+    task.updatedAt = Date(timeIntervalSince1970: 1_100)
+    try store.upsertSessionBackgroundTask(task)
+
+    let tasks = try store.sessionBackgroundTasks(sessionID: "session-1")
+
+    #expect(tasks.count == 1)
+    #expect(tasks.first?.status == .succeeded)
+    #expect(tasks.first?.detail == "已更新为：新标题")
+}
+
+@Test func graphKernelStoreDeletesBackgroundTasksWhenDeletingSession() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryChatDatabaseURL().path)
+    try store.migrate()
+    try store.upsertSession(AgentSession(id: "session-1", title: "One"))
+    try store.upsertSession(AgentSession(id: "session-2", title: "Two"))
+    try store.upsertSessionBackgroundTask(PersistedSessionBackgroundTask(
+        id: "task-1",
+        sessionID: "session-1",
+        kind: "title_generation",
+        title: "重新生成会话标题",
+        detail: "生成中",
+        status: .running,
+        createdAt: Date(timeIntervalSince1970: 1_000),
+        updatedAt: Date(timeIntervalSince1970: 1_001),
+        errorMessage: nil,
+        payloadJSON: "{}"
+    ))
+    try store.upsertSessionBackgroundTask(PersistedSessionBackgroundTask(
+        id: "task-2",
+        sessionID: "session-2",
+        kind: "title_generation",
+        title: "重新生成会话标题",
+        detail: "另一个会话",
+        status: .queued,
+        createdAt: Date(timeIntervalSince1970: 2_000),
+        updatedAt: Date(timeIntervalSince1970: 2_001),
+        errorMessage: nil,
+        payloadJSON: "{}"
+    ))
+
+    try store.deleteSession(id: "session-1")
+
+    #expect(try store.sessionBackgroundTasks(sessionID: "session-1").isEmpty)
+    #expect(try store.sessionBackgroundTasks(sessionID: "session-2").map(\.id) == ["task-2"])
+}

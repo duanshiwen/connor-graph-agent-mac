@@ -405,6 +405,7 @@ private struct AgentBackgroundTaskOverlay: View {
         case .running: .accentColor
         case .succeeded: .green
         case .failed: .red
+        case .interrupted: .orange
         }
     }
 }
