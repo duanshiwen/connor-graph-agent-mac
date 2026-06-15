@@ -1,7 +1,7 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-15 14:53 GMT+8  
-当前代码基线:`feature/session-list-title-actions`,在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface / session-scoped multi-root project workspace / Connor-owned Scientific Compute Runtime skeleton / 商用级 Document Attachment OS 基础上,继续收紧 Apple 原生 UI 边界:PDF/Word/Excel/PowerPoint 一等附件仍由 Connor Session Capsule 和 Attachment Store 管理;PDF selectable text 抽取继续使用 PDFKit;Office/Presentation/Spreadsheet 抽取继续通过 MarkItDown/Docling sidecar 编排与 hardening;原文件预览优先交给 macOS Quick Look / QuickLookUI,Connor 自有 UI 只负责 manifest、extraction status、retry、omitted attachment summary 和治理证据。
+文档更新时间：2026-06-15 15:12 GMT+8  
+当前代码基线:`feature/apple-native-attachment-preview`,在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface / session-scoped multi-root project workspace / Connor-owned Scientific Compute Runtime skeleton / 商用级 Document Attachment OS 基础上,继续收紧 Apple 原生 UI 边界:PDF/Word/Excel/PowerPoint 一等附件仍由 Connor Session Capsule 和 Attachment Store 管理;PDF selectable text 抽取和多页原文预览继续使用 PDFKit;Office/Presentation/Spreadsheet 抽取继续通过 MarkItDown/Docling sidecar 编排与 hardening;Office/Presentation/Spreadsheet 原文件预览优先交给 macOS Quick Look / QuickLookUI,Connor 自有 UI 只负责 manifest、extraction status、retry、omitted attachment summary 和治理证据。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package,目标是把 Connor 建成 **graph-memory-native Agent OS**:它不是"图谱编辑器",也不是"Claude SDK 外壳",而是以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI 和 Local Automation Surface 共同构成的本地 Agent 操作系统。
 
@@ -172,7 +172,7 @@ Attachment OS 当前遵循本地优先:被允许的附件会复制到 `attachmen
 
 当前 Document Attachment OS 使用显式 allowlist:支持 `.txt`, `.md`, `.markdown`, `.log`, `.json`, `.jsonl`, `.csv`, `.tsv`, `.xml`, `.yaml`, `.yml`、常见代码扩展、常见图片（PNG/JPEG/GIF/WebP/HEIC/BMP/ICO/TIFF）,以及 `.pdf`, `.doc`, `.docx`, `.rtf`, `.xls`, `.xlsx`, `.ppt`, `.pptx`。文本类默认 512 KB 上限,图片默认 10 MB 上限,文档类默认 25 MB 上限。HTML/HTM、音频、视频、Apple iWork、压缩包、SVG/AVIF、数据库、可执行/安装包/二进制和未知扩展仍在导入时拒绝;被拒绝文件不复制进 Session Capsule、不写 manifest、不生成 message ref、不进入 composer、不进入 prompt,并通过聊天上下文反馈导入状态和拒绝原因。
 
-文档抽取策略遵循可降级商用路径:PDF 优先使用 PDFKit 抽取 selectable text;如果 PDF 没有文本层,会返回 unsupported warning 并保留后续 OCR/sidecar 入口。Office/Presentation/Spreadsheet 文档走 MarkItDown、Docling 等命令型 sidecar;sidecar 通过 `Process.arguments` 调用,带 timeout、stdout 大小限制、stderr 捕获和结构化 failed report。发送消息时,AppViewModel 只把已成功抽取且在预算内的 current extracted text 注入 `## User Attachments` prompt section;pending/unsupported/failed/skippedOversize 附件不会静默忽略,会作为 omitted attachment summary 说明其状态。composer pending attachment chip 和 transcript attachment chip 仍打开现有纯阅读预览弹窗,但弹窗内容区对图片、PDF、Office、Presentation、Spreadsheet 原文件优先嵌入 macOS Quick Look / QuickLookUI 原生预览;Connor 自有预览内容保留用于 extracted markdown、manifest、等待解析、无法解析、解析失败和 retry 等 Attachment OS 状态。
+文档抽取策略遵循可降级商用路径:PDF 优先使用 PDFKit 抽取 selectable text;如果 PDF 没有文本层,会返回 unsupported warning 并保留后续 OCR/sidecar 入口。Office/Presentation/Spreadsheet 文档走 MarkItDown、Docling 等命令型 sidecar;sidecar 通过 `Process.arguments` 调用,带 timeout、stdout 大小限制、stderr 捕获和结构化 failed report。发送消息时,AppViewModel 只把已成功抽取且在预算内的 current extracted text 注入 `## User Attachments` prompt section;pending/unsupported/failed/skippedOversize 附件不会静默忽略,会作为 omitted attachment summary 说明其状态。composer pending attachment chip 和 transcript attachment chip 仍打开现有纯阅读预览弹窗,但弹窗内容区会按类型分流:PDF 原文件使用 PDFKit `PDFView` 单页连续纵向滚动预览,避免嵌入式 Quick Look 只显示第一页;Office、Presentation、Spreadsheet 和图片原文件继续使用 macOS Quick Look / QuickLookUI 原生预览。Connor 自有预览内容保留用于 extracted markdown、manifest、等待解析、无法解析、解析失败和 retry 等 Attachment OS 状态。
 
 商业闭环骨架仍保留以下未来扩展入口:OCR 扫描 PDF、XLSX 多 sheet 结构化 JSON、PPT slide-level JSONL、OpenAI/Claude/Gemini provider-native file API、remote upload/purge、attachment search/embedding index、Graph Memory evidence candidate、enterprise audit mirror 和 full attachment inspector。这些能力必须继续围绕同一 Attachment Store 工作,不能绕过 Connor Session OS。
 
@@ -762,7 +762,7 @@ localOnlySafetyReady
 
 ## Native UI
 
-Commercial Train 5 将 Native UI 从功能入口集合升级为商业级 Agent OS 控制台。Native UI 的实现边界遵循 Apple-owned UI first:文件原件预览使用 Quick Look / QuickLookUI,PDF 文本抽取使用 PDFKit,系统级设置、inspector、文件选择和命令尽量沿用 macOS/SwiftUI/AppKit 原生语义;Connor 自定义视图只负责会话、权限、附件解析状态、Graph Memory、Source/Skill/Automation 等 Agent OS 特有控制面。
+Commercial Train 5 将 Native UI 从功能入口集合升级为商业级 Agent OS 控制台。Native UI 的实现边界遵循 Apple-owned UI first:PDF 原件多页预览和文本抽取使用 PDFKit,Office/Presentation/Spreadsheet 原件预览使用 Quick Look / QuickLookUI,系统级设置、inspector、文件选择和命令尽量沿用 macOS/SwiftUI/AppKit 原生语义;Connor 自定义视图只负责会话、权限、附件解析状态、Graph Memory、Source/Skill/Automation 等 Agent OS 特有控制面。
 
 当前 shell 信息架构:
 
@@ -827,7 +827,7 @@ Session Workspace 当前支持:
 - 当前 roots 保持原先的"点击目录项即切换到该目录"交互,每行右侧额外提供一个小叉用于取消此工作目录;若取消的是当前 primary root,剩余的第一个辅助 root 会自动升级为 primary root。
 - folder badge 的"历史打开列表"区域展示跨会话最近目录 MRU,每个历史项都以历史图标呈现并限制最大宽度;选择历史项会加入当前 session roots 并设为 primary,适合在相关项目之间快速切换。
 - folder badge 还支持"选择文件夹..."和"重置为默认",用于从 Finder 添加新目录或回退到 legacy / fallback 默认工作目录。
-- composer paperclip 现在导入 Session Capsule 附件;附件 chips 展示在现有 composer 文本框内部上半部分,文本框整体尺寸不变,composer 的尺寸、位置和外部布局不变。附件多时在文本框内部横向滚动,不在 composer 上方新增 shelf,也不推动底部按钮栏。点击附件 chip 主体会打开现有纯阅读预览弹窗;弹窗外层布局保持不变,内部对图片、PDF 和常见文档优先使用 macOS Quick Look / QuickLookUI 原生预览原文件,同时保留 Connor 的解析状态、manifest 路径和 retry 入口;点击 `xmark.circle.fill` 只移除附件。
+- composer paperclip 现在导入 Session Capsule 附件;附件 chips 展示在现有 composer 文本框内部上半部分,文本框整体尺寸不变,composer 的尺寸、位置和外部布局不变。附件多时在文本框内部横向滚动,不在 composer 上方新增 shelf,也不推动底部按钮栏。点击附件 chip 主体会打开现有纯阅读预览弹窗;弹窗外层布局保持不变,内部对 PDF 使用 PDFKit 多页连续滚动原文件预览,对 Office/Presentation/Spreadsheet 和图片使用 macOS Quick Look / QuickLookUI 原生预览原文件,同时保留 Connor 的解析状态、manifest 路径和 retry 入口;点击 `xmark.circle.fill` 只移除附件。
 - 多工作目录能力只作用于 project workspace / allowed roots;Connor 仍保持单一 Home / Runtime Root,不引入 Craft-style multi-workspace。
 
 Browser Workspace 当前支持:
