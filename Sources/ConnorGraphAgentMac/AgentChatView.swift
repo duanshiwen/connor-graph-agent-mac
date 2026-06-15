@@ -292,6 +292,9 @@ private struct AgentChatConversationView: View {
     @State private var lastObservedSessionID: String?
     @State private var lastObservedTranscriptCount: Int = 0
     @State private var pendingSessionTranscriptReloadID: String?
+    @State private var transcriptContentHeight: CGFloat = 0
+    @State private var transcriptViewportHeight: CGFloat = 0
+    private let collapseScrollPolicy = AgentChatCollapseScrollPolicy()
 
     @MainActor
     private final class TimelineCache {
@@ -380,9 +383,14 @@ private struct AgentChatConversationView: View {
     }
 
     private func scrollToBottomAfterCollapsedMessageLayout(proxy: ScrollViewProxy) {
-        let delays: [TimeInterval] = [0, 0.2]
+        let delays: [TimeInterval] = [0.05, 0.2]
         for delay in delays {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                let decision = collapseScrollPolicy.decisionAfterAssistantMessageCollapse(
+                    contentHeight: Double(transcriptContentHeight),
+                    viewportHeight: Double(transcriptViewportHeight)
+                )
+                guard decision == .scrollToBottom else { return }
                 scrollToBottom(proxy: proxy)
             }
         }
@@ -447,6 +455,22 @@ private struct AgentChatConversationView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 0)
                     .padding(.vertical, AgentChatLayout.spaceXL)
+                    .background(
+                        GeometryReader { geometry in
+                            Color.clear.preference(key: AgentChatTranscriptContentHeightKey.self, value: geometry.size.height)
+                        }
+                    )
+                }
+                .background(
+                    GeometryReader { geometry in
+                        Color.clear.preference(key: AgentChatTranscriptViewportHeightKey.self, value: geometry.size.height)
+                    }
+                )
+                .onPreferenceChange(AgentChatTranscriptContentHeightKey.self) { height in
+                    transcriptContentHeight = height
+                }
+                .onPreferenceChange(AgentChatTranscriptViewportHeightKey.self) { height in
+                    transcriptViewportHeight = height
                 }
                 .onAppear {
                     lastObservedSessionID = viewModel.selectedChatSessionID
@@ -499,6 +523,22 @@ private struct AgentChatConversationView: View {
         }
         .padding(.horizontal, AgentChatLayout.spaceL)
         .padding(.vertical, AgentChatLayout.spaceM)
+    }
+}
+
+private struct AgentChatTranscriptContentHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct AgentChatTranscriptViewportHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 
