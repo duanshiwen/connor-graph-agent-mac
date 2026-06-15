@@ -407,8 +407,11 @@ private struct CraftSessionRow: View {
         ZStack(alignment: .trailing) {
             actionButtons
                 .frame(width: actionWidth)
+                .offset(x: actionWidth + dragOffset)
+                .allowsHitTesting(isActionsRevealed)
 
             rowContent
+                .zIndex(1)
                 .offset(x: dragOffset)
                 .gesture(
                     DragGesture(minimumDistance: 12)
@@ -507,13 +510,13 @@ private struct CraftSessionRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(rowBackgroundColor, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(SessionMouseDownHandler {
+        .onTapGesture {
             if isActionsRevealed {
                 closeActions()
             } else if !isEditingTitle {
                 onSelect()
             }
-        })
+        }
         .onChange(of: isTitleFocused) { _, focused in
             if !focused, isEditingTitle { commitTitleEdit() }
         }
