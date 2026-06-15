@@ -307,6 +307,7 @@ private struct CraftSessionListPane: View {
                         isSelected: session.id == viewModel.selectedChatSessionID,
                         isRunning: viewModel.isChatSessionSubmitting(session.id),
                         isRegeneratingTitle: viewModel.regeneratingTitleSessionIDs.contains(session.id),
+                        labelDefinitions: viewModel.governanceConfig.labels,
                         onSelect: {
                             var transaction = Transaction()
                             transaction.disablesAnimations = true
@@ -315,6 +316,8 @@ private struct CraftSessionListPane: View {
                             }
                         },
                         onRename: { title in viewModel.renameChatSession(session.id, title: title) },
+                        onSetStatus: { status in viewModel.setChatSessionStatus(session.id, status: status) },
+                        onToggleLabel: { labelID in viewModel.toggleChatSessionLabel(session.id, labelID: labelID) },
                         onRegenerateTitle: { viewModel.regenerateChatSessionTitle(session.id) },
                         onDelete: { viewModel.deleteChatSession(session.id) }
                     )
@@ -390,8 +393,11 @@ private struct CraftSessionRow: View {
     var isSelected: Bool
     var isRunning: Bool
     var isRegeneratingTitle: Bool
+    var labelDefinitions: [AgentSessionLabelDefinition]
     var onSelect: () -> Void
     var onRename: (String) -> Void
+    var onSetStatus: (AgentSessionStatus) -> Void
+    var onToggleLabel: (String) -> Void
     var onRegenerateTitle: () -> Void
     var onDelete: () -> Void
 
@@ -417,6 +423,7 @@ private struct CraftSessionRow: View {
                     Label("删除", systemImage: "trash")
                 }
             }
+            .contextMenu { contextMenuItems }
             .onChange(of: row.title) { _, newTitle in
             guard !isEditingTitle else { return }
             titleDraft = newTitle
@@ -428,6 +435,58 @@ private struct CraftSessionRow: View {
             } message: {
                 Text("删除后会话将从列表中移除。")
             }
+    }
+
+    @ViewBuilder
+    private var contextMenuItems: some View {
+        Menu("更改状态") {
+            ForEach(AgentSessionStatus.allCases.filter { $0 != .archived }, id: \.self) { status in
+                Button {
+                    onSetStatus(status)
+                } label: {
+                    Label(status.displayName, systemImage: status == row.status ? "checkmark" : icon(for: status))
+                }
+            }
+        }
+
+        Menu("标签") {
+            let booleanLabels = labelDefinitions.filter { $0.valueType == .boolean }
+            if booleanLabels.isEmpty {
+                Button("暂无可切换标签") {}
+                    .disabled(true)
+            } else {
+                ForEach(booleanLabels) { definition in
+                    Button {
+                        onToggleLabel(definition.id)
+                    } label: {
+                        Label(definition.name, systemImage: row.labels.contains(where: { $0.id == definition.id }) ? "checkmark.circle.fill" : "circle")
+                    }
+                }
+            }
+        }
+
+        Divider()
+
+        Button {
+            beginTitleEdit()
+        } label: {
+            Label("重命名", systemImage: "pencil")
+        }
+
+        Button {
+            onRegenerateTitle()
+        } label: {
+            Label("重新生成标题", systemImage: "sparkles")
+        }
+        .disabled(isRegeneratingTitle)
+
+        Divider()
+
+        Button(role: .destructive) {
+            isDeleteConfirmationPresented = true
+        } label: {
+            Label("删除", systemImage: "trash")
+        }
     }
 
     private var rowContent: some View {
