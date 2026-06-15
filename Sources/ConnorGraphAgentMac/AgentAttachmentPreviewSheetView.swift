@@ -5,6 +5,7 @@ import ConnorGraphCore
 
 struct AgentAttachmentPreviewSheetView: View {
     var model: AttachmentPreviewModel
+    var onRetryExtraction: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
@@ -39,6 +40,23 @@ struct AgentAttachmentPreviewSheetView: View {
                 }
             }
             Spacer()
+            if canRetryExtraction, let onRetryExtraction {
+                Button(action: onRetryExtraction) {
+                    Label("重新解析", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .help("重新排队解析这个附件")
+            }
+        }
+    }
+
+    private var canRetryExtraction: Bool {
+        guard let manifest = model.manifest else { return false }
+        switch manifest.kind {
+        case .pdf, .document, .spreadsheet, .presentation:
+            return true
+        default:
+            return false
         }
     }
 
@@ -122,6 +140,9 @@ struct AgentAttachmentPreviewSheetView: View {
         case .csv, .spreadsheet: return "tablecells"
         case .code, .json, .html: return "chevron.left.forwardslash.chevron.right"
         case .markdown, .text: return "doc.text"
+        case .pdf: return "doc.richtext"
+        case .document: return "doc.text"
+        case .presentation: return "rectangle.on.rectangle"
         default: return "paperclip"
         }
     }

@@ -1,7 +1,7 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-15 03:05 GMT+8  
-当前代码基线:`optimize/chat-ui-first-pass`,在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface / session-scoped multi-root project workspace / Connor-owned Scientific Compute Runtime skeleton 基础上,继续加入 Strict Text Attachment Send + Preview Popup Slice:严格文本附件 allowlist、Store 层强制拒绝 unsupported 文件、composer 多文件部分成功/拒绝反馈、Session Capsule current/runs derivative 防冲突结构、附件正文随用户消息进入 prompt、transcript lightweight attachment refs 展示、composer/transcript 统一附件预览弹窗。
+文档更新时间：2026-06-15 11:38 GMT+8  
+当前代码基线:`feature/commercial-document-attachments`,在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface / session-scoped multi-root project workspace / Connor-owned Scientific Compute Runtime skeleton 基础上,继续加入商用级 Document Attachment OS:PDF/Word/Excel/PowerPoint 一等附件、PDFKit 内置 PDF 文本层抽取、MarkItDown/Docling sidecar 编排与 hardening、持久化 extraction job ledger、Session Capsule current/runs derivative 防冲突结构、pending/failed/unsupported 状态可见、附件导入拒绝统一 toast 提示、composer/transcript 统一附件预览弹窗。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package,目标是把 Connor 建成 **graph-memory-native Agent OS**:它不是"图谱编辑器",也不是"Claude SDK 外壳",而是以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI 和 Local Automation Surface 共同构成的本地 Agent 操作系统。
 
@@ -44,7 +44,7 @@ Unreviewed automation execution bypass
 Package name: ConnorGraphAgentMac
 Swift tools version: 6.0
 Platform: macOS 14+
-System libraries/frameworks: sqlite3, Security, WebKit
+System libraries/frameworks: sqlite3, Security, WebKit, PDFKit
 ```
 
 Products:
@@ -135,6 +135,7 @@ sessions/{sessionID}/
 ├── data/
 ├── attachments/
 │   ├── attachment-manifest.jsonl
+│   ├── extraction-jobs.jsonl
 │   ├── audit.jsonl
 │   ├── purge-ledger.jsonl
 │   ├── evidence-candidates.jsonl
@@ -151,7 +152,10 @@ sessions/{sessionID}/
 │       ├── original/
 │       │   └── {safeOriginalFilename}
 │       ├── derivatives/
-│       │   ├── extracted.md
+│       │   ├── current/
+│       │   │   └── extracted.md
+│       │   ├── runs/{runID}/
+│       │   │   └── extracted.md
 │       │   ├── structured.json
 │       │   ├── pages.jsonl
 │       │   ├── media-transcript.md
@@ -164,11 +168,13 @@ sessions/{sessionID}/
 
 Connor 的会话持久化边界是完整 Session Capsule:SQLite 仍承担 session / run / event / graph 查询存储,但 session-local 的 UI/workspace 状态、记录流、附件、plans、data、logs 与 browser 子状态都归属于 `sessions/{sessionID}/`。`session-state.json` 可保存 `workspace` 引用和 `llmOverride`(per-session 模型覆盖),用于记录当前会话绑定的 project working directory 来源与路径以及独立的模型选择;`records.jsonl` 使用单行 JSONL 追加保存,读取时可跳过坏行,避免 10+ 条记录因一次异常写入或重启退化成 1 条。
 
-Attachment OS 当前遵循本地优先:被允许的附件会复制到 `attachments/{attachmentID}/original/`,写入 `manifest.json` 和 `attachment-manifest.jsonl`;文本/代码/Markdown/JSON/CSV/XML/YAML/日志会生成 `derivatives/current/extracted.md`,并在 `derivatives/runs/{runID}/extracted.md` 保留本次抽取产物以避免文件名冲突。`AgentMessage` 只保存 lightweight `AgentMessageAttachmentRef`,不重复嵌入原文件或完整 manifest;发送消息时,AppViewModel 会读取 current extracted text,按单附件/总预算截断后通过 `AttachmentContextPlan` 注入 `## User Attachments` prompt section。composer pending attachment chip 和 transcript attachment chip 都可打开同一个纯阅读预览弹窗,预览来源优先使用 `derivatives/current/extracted.md`;Markdown 用富文本 Markdown 渲染,代码/JSON/CSV 用 monospaced 方式展示,读取失败时显示 graceful error。
+Attachment OS 当前遵循本地优先:被允许的附件会复制到 `attachments/{attachmentID}/original/`,写入 `manifest.json` 和 `attachment-manifest.jsonl`;文本/代码/Markdown/JSON/CSV/XML/YAML/日志会立即生成 `derivatives/current/extracted.md`,并在 `derivatives/runs/{runID}/extracted.md` 保留本次抽取产物以避免文件名冲突。PDF、Word、Excel、PowerPoint 会先以 `extractionStatus = pending` 保存原件和 manifest,再写入 `extraction-jobs.jsonl` 等待文档抽取 worker/processor 处理;成功后同样写入 current/runs extracted markdown,失败或 unsupported 时保留原件、report、warnings/errors 和可重试的 job 记录。
 
-当前 Strict Text Attachment Send Slice 使用显式 allowlist:只支持 `.txt`, `.md`, `.markdown`, `.log`, `.json`, `.csv`, `.tsv`, `.xml`, `.yaml`, `.yml` 和常见代码扩展如 `.swift`, `.py`, `.js`, `.ts`, `.tsx`, `.jsx`, `.rs`, `.go`, `.java`, `.kt`, `.c`, `.cpp`, `.h`, `.hpp`, `.cs`, `.rb`, `.php`, `.sh`, `.zsh`, `.bash`, `.sql`, `.css`, `.scss`。HTML/HTM、图片、PDF、音频、视频、Word/Excel/PPT、Apple iWork、压缩包、SVG、数据库、可执行/安装包/二进制和未知扩展会在导入时直接拒绝;被拒绝文件不复制进 Session Capsule、不写 manifest、不生成 message ref、不进入 composer、不进入 prompt。
+当前 Document Attachment OS 使用显式 allowlist:支持 `.txt`, `.md`, `.markdown`, `.log`, `.json`, `.jsonl`, `.csv`, `.tsv`, `.xml`, `.yaml`, `.yml`、常见代码扩展、常见图片（PNG/JPEG/GIF/WebP/HEIC/BMP/ICO/TIFF）,以及 `.pdf`, `.doc`, `.docx`, `.rtf`, `.xls`, `.xlsx`, `.ppt`, `.pptx`。文本类默认 512 KB 上限,图片默认 10 MB 上限,文档类默认 25 MB 上限。HTML/HTM、音频、视频、Apple iWork、压缩包、SVG/AVIF、数据库、可执行/安装包/二进制和未知扩展仍在导入时拒绝;被拒绝文件不复制进 Session Capsule、不写 manifest、不生成 message ref、不进入 composer、不进入 prompt,并统一通过聊天界面 toast 提示。
 
-商业闭环骨架仍保留以下未来扩展入口,但当前发送切片不启用:Docling/MarkItDown sidecar、PDF/Office/OCR/ASR/VLM、OpenAI/Claude/Gemini provider-native file API、remote upload/purge、attachment search/embedding index、Graph Memory evidence candidate、enterprise audit mirror 和 full attachment inspector。这些能力必须继续围绕同一 Attachment Store 工作,不能绕过 Connor Session OS。
+文档抽取策略遵循可降级商用路径:PDF 优先使用 PDFKit 抽取 selectable text;如果 PDF 没有文本层,会返回 unsupported warning 并保留后续 OCR/sidecar 入口。Office/Presentation/Spreadsheet 文档走 MarkItDown、Docling 等命令型 sidecar;sidecar 通过 `Process.arguments` 调用,带 timeout、stdout 大小限制、stderr 捕获和结构化 failed report。发送消息时,AppViewModel 只把已成功抽取且在预算内的 current extracted text 注入 `## User Attachments` prompt section;pending/unsupported/failed/skippedOversize 附件不会静默忽略,会作为 omitted attachment summary 说明其状态。composer pending attachment chip 和 transcript attachment chip 都可打开同一个纯阅读预览弹窗,预览页会显示已解析正文或等待解析/无法解析/解析失败的可读原因。
+
+商业闭环骨架仍保留以下未来扩展入口:OCR 扫描 PDF、XLSX 多 sheet 结构化 JSON、PPT slide-level JSONL、OpenAI/Claude/Gemini provider-native file API、remote upload/purge、attachment search/embedding index、Graph Memory evidence candidate、enterprise audit mirror 和 full attachment inspector。这些能力必须继续围绕同一 Attachment Store 工作,不能绕过 Connor Session OS。
 
 主要状态文件:
 

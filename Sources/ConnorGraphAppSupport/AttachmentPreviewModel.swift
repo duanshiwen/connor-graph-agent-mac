@@ -72,7 +72,8 @@ public struct AttachmentPreviewLoader: Sendable {
                 )
             }
             guard let relativePath = manifest.extractedTextRelativePath, !relativePath.isEmpty else {
-                let fallback = attachment.previewText ?? manifest.previewText ?? "当前附件没有可预览文本。"
+                let statusMessage = Self.statusMessage(for: manifest)
+                let fallback = attachment.previewText ?? manifest.previewText ?? statusMessage
                 return AttachmentPreviewModel(
                     attachment: attachment,
                     manifest: manifest,
@@ -81,7 +82,7 @@ public struct AttachmentPreviewLoader: Sendable {
                     body: fallback,
                     bodyMode: Self.bodyMode(for: manifest),
                     sourceRelativePath: nil,
-                    errorMessage: "当前附件没有可预览文本。"
+                    errorMessage: statusMessage
                 )
             }
             let url = store.paths.sessionArtifactDirectories(sessionID: sessionID).root.appendingPathComponent(relativePath)
@@ -121,6 +122,23 @@ public struct AttachmentPreviewLoader: Sendable {
         return "\(attachment.kind.rawValue) · \(size) · \(attachment.extractionStatus.rawValue)"
     }
 
+    private static func statusMessage(for manifest: AgentAttachmentManifest) -> String {
+        switch manifest.extractionStatus {
+        case .pending:
+            return "附件已保存，正在等待文字解析；解析完成前不会进入 prompt。"
+        case .unsupported:
+            let warning = manifest.extractionReports.last?.warnings.first
+            return warning.map { "附件已保存，但当前无法转换为文字：\($0)" } ?? "附件已保存，但当前无法转换为文字。"
+        case .failed:
+            let error = manifest.extractionReports.last?.errors.first
+            return error.map { "附件已保存，但文字解析失败：\($0)" } ?? "附件已保存，但文字解析失败。"
+        case .skippedOversize:
+            return "附件已保存，但因超过解析大小限制，未转换为文字。"
+        case .extracted:
+            return "当前附件没有可预览文本。"
+        }
+    }
+
     private static func bodyMode(for manifest: AgentAttachmentManifest) -> AttachmentPreviewBodyMode {
         bodyMode(for: manifest.kind)
     }
@@ -135,6 +153,8 @@ public struct AttachmentPreviewLoader: Sendable {
             return .plain
         case .image:
             return .image
+        case .pdf, .document, .spreadsheet, .presentation:
+            return .markdown
         default:
             return .plain
         }
