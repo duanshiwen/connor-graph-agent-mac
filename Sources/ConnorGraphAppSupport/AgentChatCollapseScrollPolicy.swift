@@ -2,6 +2,7 @@ import Foundation
 
 public struct AgentChatCollapseScrollPolicy: Sendable {
     public enum Decision: Equatable, Sendable {
+        case scrollToTop
         case scrollToBottom
         case doNotScroll
     }
@@ -22,6 +23,6 @@ public struct AgentChatCollapseScrollPolicy: Sendable {
               viewportHeight > 0
         else { return .doNotScroll }
 
-        return contentHeight > viewportHeight + overflowTolerance ? .scrollToBottom : .doNotScroll
+        return contentHeight > viewportHeight + overflowTolerance ? .scrollToBottom : .scrollToTop
     }
 }

@@ -295,6 +295,7 @@ private struct AgentChatConversationView: View {
     @State private var transcriptContentHeight: CGFloat = 0
     @State private var transcriptViewportHeight: CGFloat = 0
     private let collapseScrollPolicy = AgentChatCollapseScrollPolicy()
+    private let transcriptTopAnchorID = "agent-chat-transcript-top-anchor"
 
     @MainActor
     private final class TimelineCache {
@@ -382,7 +383,13 @@ private struct AgentChatConversationView: View {
         }
     }
 
-    private func scrollToBottomAfterCollapsedMessageLayout(proxy: ScrollViewProxy) {
+    private func scrollToTop(proxy: ScrollViewProxy) {
+        withAnimation(.easeOut(duration: 0.2)) {
+            proxy.scrollTo(transcriptTopAnchorID, anchor: .top)
+        }
+    }
+
+    private func scrollAfterCollapsedMessageLayout(proxy: ScrollViewProxy) {
         let delays: [TimeInterval] = [0.05, 0.2]
         for delay in delays {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
@@ -390,8 +397,14 @@ private struct AgentChatConversationView: View {
                     contentHeight: Double(transcriptContentHeight),
                     viewportHeight: Double(transcriptViewportHeight)
                 )
-                guard decision == .scrollToBottom else { return }
-                scrollToBottom(proxy: proxy)
+                switch decision {
+                case .scrollToTop:
+                    scrollToTop(proxy: proxy)
+                case .scrollToBottom:
+                    scrollToBottom(proxy: proxy)
+                case .doNotScroll:
+                    return
+                }
             }
         }
     }
@@ -429,7 +442,7 @@ private struct AgentChatConversationView: View {
                                     AgentChatMessageRow(
                                         row: message,
                                         onAssistantMessageCollapsed: {
-                                            scrollToBottomAfterCollapsedMessageLayout(proxy: proxy)
+                                            scrollAfterCollapsedMessageLayout(proxy: proxy)
                                         },
                                         onPreviewAttachment: { attachment in
                                             viewModel.previewAttachment(attachment)
@@ -452,6 +465,7 @@ private struct AgentChatConversationView: View {
                             }
                         }
                     }
+                    .id(transcriptTopAnchorID)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 0)
                     .padding(.vertical, AgentChatLayout.spaceXL)
