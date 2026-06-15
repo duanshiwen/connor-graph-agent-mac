@@ -286,20 +286,9 @@ private struct CraftSessionListPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ZStack {
-                Text(sessionListTitle)
-                    .font(AppListTypography.header)
-                    .frame(maxWidth: .infinity, alignment: .center)
-
-                HStack {
-                    Spacer()
-                    Button(action: { viewModel.reloadChatSessions() }) {
-                        Image(systemName: "line.3.horizontal.decrease")
-                    }
-                    .buttonStyle(.borderless)
-                    .help("刷新/过滤")
-                }
-            }
+            Text(sessionListTitle)
+                .font(AppListTypography.header)
+                .frame(maxWidth: .infinity, alignment: .center)
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
 
