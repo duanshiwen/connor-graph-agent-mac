@@ -45,6 +45,7 @@ struct AgentSendControlButton: View {
 struct AgentChatComposerView: View {
     @ObservedObject var viewModel: AppViewModel
     @Binding var isSessionInfoPresented: Bool
+    @State private var localChatInput: String = ""
     @State private var isWorkspacePopoverPresented: Bool = false
     @State private var isFileImporterPresented: Bool = false
 
@@ -112,10 +113,10 @@ struct AgentChatComposerView: View {
                     }
 
                     SafeChatComposerTextView(
-                        text: $viewModel.chatInput,
+                        text: localChatInputBinding,
                         placeholder: "按 Shift + Return 换行",
                         isSpellCheckEnabled: viewModel.spellCheckEnabled,
-                        onSubmit: { Task { await viewModel.submitChat() } },
+                        onSubmit: submitLocalChatInput,
                         onImportFiles: { urls in Task { await viewModel.importAttachments(urls: urls) } }
                     )
                     .padding(.horizontal, AgentChatLayout.spaceL)
@@ -165,12 +166,12 @@ struct AgentChatComposerView: View {
 
                     AgentSendControlButton(
                         isSubmitting: viewModel.isSubmittingChat,
-                        isDisabled: !viewModel.isSubmittingChat && !viewModel.canSubmitCurrentChat,
+                        isDisabled: !viewModel.isSubmittingChat && !canSubmitLocalChat,
                         action: {
                             if viewModel.isSubmittingChat {
                                 viewModel.cancelActiveChatRun()
                             } else {
-                                Task { await viewModel.submitChat() }
+                                submitLocalChatInput()
                             }
                         }
                     )
@@ -200,6 +201,16 @@ struct AgentChatComposerView: View {
         }
         .padding(0)
         .background(Color.clear)
+        .onAppear {
+            localChatInput = viewModel.chatInput
+        }
+        .onChange(of: viewModel.selectedChatSessionID) { _, _ in
+            localChatInput = viewModel.chatInput
+        }
+        .onChange(of: viewModel.chatInput) { _, newValue in
+            guard newValue != localChatInput else { return }
+            localChatInput = newValue
+        }
         .fileImporter(isPresented: $isFileImporterPresented, allowedContentTypes: supportedAttachmentContentTypes, allowsMultipleSelection: true) { result in
             switch result {
             case .success(let urls):
@@ -212,6 +223,31 @@ struct AgentChatComposerView: View {
 
     private var selectedSession: AgentSession? {
         viewModel.chatSessions.first { $0.id == viewModel.selectedChatSessionID }
+    }
+
+    private var localChatInputBinding: Binding<String> {
+        Binding(
+            get: { localChatInput },
+            set: { newValue in
+                localChatInput = newValue
+                viewModel.updateSelectedChatInputDraft(newValue)
+            }
+        )
+    }
+
+    private var canSubmitLocalChat: Bool {
+        !localChatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !viewModel.pendingAttachmentRefs.isEmpty
+    }
+
+    private func submitLocalChatInput() {
+        let prompt = localChatInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayPrompt = localChatInput
+        Task {
+            let runID = await viewModel.submitChat(prompt: prompt, clearComposer: true, displayPrompt: displayPrompt)
+            if runID != nil {
+                localChatInput = ""
+            }
+        }
     }
 
     private var workingDirectoryMenu: some View {

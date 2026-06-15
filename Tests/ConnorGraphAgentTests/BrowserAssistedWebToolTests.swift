@@ -31,6 +31,30 @@ struct BrowserAssistedWebToolTests {
         )
     }
 
+    @Test func browserFetchDecodesGBKMetaCharsetChineseText() throws {
+        let html = """
+        <html><head><meta charset=\"gbk\"></head><body>科技新闻</body></html>
+        """
+        let data = try #require(html.data(using: BrowserFetchTool.gb18030TestEncoding))
+
+        let decoded = BrowserFetchTool.decodeWebPageText(data: data, responseEncodingName: nil)
+
+        #expect(decoded.text.contains("科技新闻"))
+        #expect(decoded.encodingName == "gbk")
+        #expect(decoded.mojibakeRepaired == false)
+    }
+
+    @Test func browserFetchRepairsLatin1DecodedGBKChineseMojibake() throws {
+        let mojibake = "¿Æ¼¼ÐÂÎÅ"
+        let data = try #require(mojibake.data(using: .utf8))
+
+        let decoded = BrowserFetchTool.decodeWebPageText(data: data, responseEncodingName: "utf-8")
+
+        #expect(decoded.text == "科技新闻")
+        #expect(decoded.encodingName == "utf-8→gb18030")
+        #expect(decoded.mojibakeRepaired == true)
+    }
+
     @Test func javascriptWebFetchUsesBrowserAssistedHandler() async throws {
         final class Recorder: @unchecked Sendable {
             var requests: [BrowserAssistedSearchRequest] = []
