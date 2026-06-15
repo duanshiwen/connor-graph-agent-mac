@@ -383,6 +383,11 @@ final class AppViewModel: ObservableObject {
         isRestoringChatInputDraft = false
     }
 
+    func updateSelectedChatInputDraft(_ draft: String) {
+        guard !isRestoringChatInputDraft, let selectedChatSessionID else { return }
+        chatInputDraftsBySessionID[selectedChatSessionID] = draft
+    }
+
     private func restoreChatInputDraft(for sessionID: String?) {
         setChatInputDraft("", for: sessionID)
         pendingAttachmentRefs = sessionID.flatMap { pendingAttachmentRefsBySessionID[$0] } ?? []
@@ -405,6 +410,15 @@ final class AppViewModel: ObservableObject {
         attachmentPreviewModel = AttachmentPreviewLoader(store: store).load(
             sessionID: selectedChatSessionID,
             attachment: attachment
+        )
+    }
+
+    func markdownPersistentCacheContext(messageID: String) -> AgentMarkdownPersistentCacheContext? {
+        guard let selectedChatSessionID, let storagePaths else { return nil }
+        return AgentMarkdownPersistentCacheContext(
+            store: AgentMarkdownRenderCacheStore(storagePaths: storagePaths),
+            sessionID: selectedChatSessionID,
+            messageID: messageID
         )
     }
 

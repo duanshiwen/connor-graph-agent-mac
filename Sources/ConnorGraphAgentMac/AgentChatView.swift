@@ -717,6 +717,7 @@ private struct AgentChatConversationView: View {
                                 if let message = item.message {
                                     AgentChatMessageRow(
                                         row: message,
+                                        persistentCacheContext: viewModel.markdownPersistentCacheContext(messageID: message.message.id),
                                         onAssistantMessageCollapsed: {
                                             scrollAfterCollapsedMessageLayout(proxy: proxy)
                                         },

@@ -62,7 +62,26 @@ public struct AppChatSessionRepository: Sendable {
     public func saveSession(_ session: AgentSession, previousMessageCount: Int = 0) throws -> AgentSession {
         try store.upsertSession(session)
         _ = try storagePaths?.ensureSessionArtifactDirectories(sessionID: session.id)
+        try prewarmMarkdownRenderCacheIfNeeded(for: session, previousMessageCount: previousMessageCount)
         return session
+    }
+
+    private func prewarmMarkdownRenderCacheIfNeeded(for session: AgentSession, previousMessageCount: Int) throws {
+        guard let storagePaths else { return }
+        guard session.messages.count > previousMessageCount else { return }
+        let cacheStore = AgentMarkdownRenderCacheStore(storagePaths: storagePaths)
+        let newMessages = session.messages.dropFirst(max(0, previousMessageCount))
+        for message in newMessages where message.role == .assistant {
+            if try cacheStore.loadBlocks(sessionID: session.id, messageID: message.id, content: message.content) != nil { continue }
+            let blocks = AgentMarkdownBlockParser().parse(message.content)
+            try cacheStore.saveBlocks(
+                sessionID: session.id,
+                messageID: message.id,
+                content: message.content,
+                blocks: blocks,
+                createdAt: message.createdAt
+            )
+        }
     }
 
     @discardableResult
