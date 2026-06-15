@@ -450,12 +450,11 @@ private struct CraftSessionRow: View {
         }
 
         Menu("标签") {
-            let booleanLabels = labelDefinitions.filter { $0.valueType == .boolean }
-            if booleanLabels.isEmpty {
+            if labelDefinitions.isEmpty {
                 Button("暂无可切换标签") {}
                     .disabled(true)
             } else {
-                ForEach(booleanLabels) { definition in
+                ForEach(labelDefinitions) { definition in
                     Button {
                         onToggleLabel(definition.id)
                     } label: {
