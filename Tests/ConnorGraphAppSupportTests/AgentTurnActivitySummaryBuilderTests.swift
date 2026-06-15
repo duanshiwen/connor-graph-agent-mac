@@ -61,8 +61,27 @@ import ConnorGraphCore
     #expect(summary.subtitle == "使用 Read File、Swift: 编译项目 · 3 个底层事件")
 }
 
-@Test func marksTurnFailedWhenAnyToolFails() {
-    let process = makeProcess(state: .completed, turnNumber: 3)
+@Test func keepsRunningTurnWhenOneToolFailsButRunContinues() {
+    let process = makeProcess(state: .running, turnNumber: 3)
+    let events: [AgentEventPresentation] = [
+        event(kind: "toolRequested", title: "Tool requested: Read", detail: "Call 1", severity: .info),
+        event(kind: "toolFailed", title: "Tool failed: Read", detail: "Call 1 · file not found", severity: .error),
+        event(kind: "toolRequested", title: "Tool requested: Bash", detail: "Call 2", severity: .info),
+        event(kind: "toolFinished", title: "Tool finished: Bash", detail: "ok", severity: .success)
+    ]
+
+    let summary = AgentTurnActivitySummaryBuilder().summary(process: process, events: events)
+
+    #expect(summary.state == .running)
+    #expect(summary.statusText == "正在处理")
+    #expect(summary.toolNames == ["Read", "Bash"])
+    #expect(summary.toolFailureCount == 1)
+    #expect(summary.primaryErrorMessage == "Call 1 · file not found")
+    #expect(summary.subtitle == "正在使用 Read、Bash · 4 个底层事件")
+}
+
+@Test func marksTurnFailedOnlyWhenRunFails() {
+    let process = makeProcess(state: .completed, turnNumber: 13)
     let events: [AgentEventPresentation] = [
         event(kind: "toolRequested", title: "Tool requested: Bash", detail: "Call 1", severity: .info),
         event(kind: "toolFailed", title: "Tool failed: Bash", detail: "Call 1 · command timed out", severity: .error),
