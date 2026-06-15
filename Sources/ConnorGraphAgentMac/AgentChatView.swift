@@ -390,14 +390,32 @@ private struct AgentChatConversationView: View {
     }
 
     private func scrollAfterCollapsedMessageLayout(proxy: ScrollViewProxy) {
+        scheduleScrollDecisionAfterLayout(proxy: proxy) {
+            collapseScrollPolicy.decisionAfterAssistantMessageCollapse(
+                contentHeight: Double(transcriptContentHeight),
+                viewportHeight: Double(transcriptViewportHeight)
+            )
+        }
+    }
+
+    private func scrollAfterSessionSwitchLayout(proxy: ScrollViewProxy, sessionID: String?) {
+        scheduleScrollDecisionAfterLayout(proxy: proxy) {
+            guard sessionID == viewModel.selectedChatSessionID else { return .doNotScroll }
+            return collapseScrollPolicy.decisionAfterSessionSwitch(
+                contentHeight: Double(transcriptContentHeight),
+                viewportHeight: Double(transcriptViewportHeight)
+            )
+        }
+    }
+
+    private func scheduleScrollDecisionAfterLayout(
+        proxy: ScrollViewProxy,
+        decision: @escaping () -> AgentChatCollapseScrollPolicy.Decision
+    ) {
         let delays: [TimeInterval] = [0.05, 0.2]
         for delay in delays {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                let decision = collapseScrollPolicy.decisionAfterAssistantMessageCollapse(
-                    contentHeight: Double(transcriptContentHeight),
-                    viewportHeight: Double(transcriptViewportHeight)
-                )
-                switch decision {
+                switch decision() {
                 case .scrollToTop:
                     scrollToTop(proxy: proxy)
                 case .scrollToBottom:
@@ -503,6 +521,7 @@ private struct AgentChatConversationView: View {
                     }
                     if pendingSessionTranscriptReloadID == currentSessionID {
                         pendingSessionTranscriptReloadID = nil
+                        scrollAfterSessionSwitchLayout(proxy: proxy, sessionID: currentSessionID)
                         return
                     }
                     guard currentSessionID == lastObservedSessionID,
