@@ -2,6 +2,7 @@ import Foundation
 
 public struct AgentChatCollapseScrollPolicy: Sendable {
     public enum Decision: Equatable, Sendable {
+        case scrollToTop
         case scrollToBottom
         case doNotScroll
     }
@@ -16,12 +17,28 @@ public struct AgentChatCollapseScrollPolicy: Sendable {
         contentHeight: Double,
         viewportHeight: Double
     ) -> Decision {
-        guard contentHeight.isFinite,
-              viewportHeight.isFinite,
-              contentHeight > 0,
-              viewportHeight > 0
-        else { return .doNotScroll }
+        guard hasValidDimensions(contentHeight: contentHeight, viewportHeight: viewportHeight) else {
+            return .doNotScroll
+        }
 
-        return contentHeight > viewportHeight + overflowTolerance ? .scrollToBottom : .doNotScroll
+        return contentHeight > viewportHeight + overflowTolerance ? .scrollToBottom : .scrollToTop
+    }
+
+    public func decisionAfterSessionSwitch(
+        contentHeight: Double,
+        viewportHeight: Double
+    ) -> Decision {
+        guard hasValidDimensions(contentHeight: contentHeight, viewportHeight: viewportHeight) else {
+            return .doNotScroll
+        }
+
+        return contentHeight > viewportHeight + overflowTolerance ? .doNotScroll : .scrollToTop
+    }
+
+    private func hasValidDimensions(contentHeight: Double, viewportHeight: Double) -> Bool {
+        contentHeight.isFinite &&
+            viewportHeight.isFinite &&
+            contentHeight > 0 &&
+            viewportHeight > 0
     }
 }
