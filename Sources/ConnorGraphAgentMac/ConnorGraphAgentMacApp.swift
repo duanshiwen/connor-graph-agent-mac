@@ -1961,11 +1961,18 @@ final class AppViewModel: ObservableObject {
     }
 
     func setSelectedSessionStatus(_ status: AgentSessionStatus) {
-        guard let selectedChatSessionID, let chatSessionRepository else { return }
+        guard let selectedChatSessionID else { return }
+        setChatSessionStatus(selectedChatSessionID, status: status)
+    }
+
+    func setChatSessionStatus(_ sessionID: String, status: AgentSessionStatus) {
+        guard let chatSessionRepository else { return }
         do {
-            let session = try chatSessionRepository.setStatus(sessionID: selectedChatSessionID, status: status)
-            self.selectedChatSessionID = session.id
-            fallbackChatSession = session
+            let session = try chatSessionRepository.setStatus(sessionID: sessionID, status: status)
+            if selectedChatSessionID == sessionID {
+                self.selectedChatSessionID = session.id
+                fallbackChatSession = session
+            }
             reloadChatSessions()
             appendGovernanceEvent(.sessionStatusChanged(AgentSessionGovernanceEvent(sessionID: session.id, message: "状态已更新为 \(status.displayName)", status: status)))
             evaluateAutomation(ProductOSAutomationEventContext(triggerKind: .sessionStatusChanged, sessionID: session.id, status: status))
@@ -1988,9 +1995,14 @@ final class AppViewModel: ObservableObject {
     }
 
     func toggleSelectedSessionLabel(_ labelID: String) {
-        guard let selectedChatSessionID, let chatSessionRepository else { return }
+        guard let selectedChatSessionID else { return }
+        toggleChatSessionLabel(selectedChatSessionID, labelID: labelID)
+    }
+
+    func toggleChatSessionLabel(_ sessionID: String, labelID: String) {
+        guard let chatSessionRepository else { return }
         do {
-            guard let session = try chatSessionRepository.loadSession(id: selectedChatSessionID) else { return }
+            guard let session = try chatSessionRepository.loadSession(id: sessionID) else { return }
             var labels = session.governance.labels
             let didRemove: Bool
             if labels.contains(where: { $0.id == labelID }) {
@@ -2000,8 +2012,10 @@ final class AppViewModel: ObservableObject {
                 labels.append(AgentSessionLabel(id: labelID))
                 didRemove = false
             }
-            let updated = try chatSessionRepository.setLabels(sessionID: selectedChatSessionID, labels: labels)
-            fallbackChatSession = updated
+            let updated = try chatSessionRepository.setLabels(sessionID: sessionID, labels: labels)
+            if selectedChatSessionID == sessionID {
+                fallbackChatSession = updated
+            }
             reloadChatSessions()
             appendGovernanceEvent(.sessionLabelsChanged(AgentSessionGovernanceEvent(sessionID: updated.id, message: "标签已更新：\(updated.governance.labels.map(\.displayText).joined(separator: ", "))", labels: updated.governance.labels)))
             evaluateAutomation(ProductOSAutomationEventContext(triggerKind: didRemove ? .sessionLabelRemoved : .sessionLabelAdded, sessionID: updated.id, labelID: labelID))

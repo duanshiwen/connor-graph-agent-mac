@@ -888,8 +888,8 @@ private struct AgentChatConversationHeader: View {
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .center)
                 .contentShape(Rectangle())
-                .onTapGesture(count: 2) { beginTitleEdit() }
-                .help("双击编辑会话标题")
+                .onTapGesture { beginTitleEdit() }
+                .help("单击编辑会话标题")
         }
     }
 
