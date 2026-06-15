@@ -210,24 +210,27 @@ struct BrowserWorkspaceView: View {
     private var toolbar: some View {
         HStack(spacing: 8) {
             Button(action: { activeWebView?.goBack() }) {
-                Image(systemName: "chevron.left")
-                    .font(BrowserFloatingTypography.toolbarIcon)
+                BrowserToolbarIconButtonLabel(systemImage: "chevron.left")
             }
+            .buttonStyle(.plain)
             .disabled(activeTab?.navigationState.canGoBack != true)
+            .opacity(activeTab?.navigationState.canGoBack == true ? 1 : 0.48)
             .help("后退")
 
             Button(action: { activeWebView?.goForward() }) {
-                Image(systemName: "chevron.right")
-                    .font(BrowserFloatingTypography.toolbarIcon)
+                BrowserToolbarIconButtonLabel(systemImage: "chevron.right")
             }
+            .buttonStyle(.plain)
             .disabled(activeTab?.navigationState.canGoForward != true)
+            .opacity(activeTab?.navigationState.canGoForward == true ? 1 : 0.48)
             .help("前进")
 
             Button(action: reloadOrStopActiveWebView) {
-                Image(systemName: activeTab?.navigationState.isLoading == true ? "xmark" : "arrow.clockwise")
-                    .font(BrowserFloatingTypography.toolbarIcon)
+                BrowserToolbarIconButtonLabel(systemImage: activeTab?.navigationState.isLoading == true ? "xmark" : "arrow.clockwise")
             }
+            .buttonStyle(.plain)
             .disabled(activeWebView == nil)
+            .opacity(activeWebView == nil ? 0.48 : 1)
             .help(activeTab?.navigationState.isLoading == true ? "停止加载" : "刷新")
 
             BrowserAddressTextField(
@@ -238,11 +241,12 @@ struct BrowserWorkspaceView: View {
             .frame(height: 28)
 
             Button(action: { viewModel.toggleBrowserHistoryPanel() }) {
-                Image(systemName: viewModel.isBrowserHistoryPanelVisible ? "clock.arrow.circlepath" : "clock")
-                    .font(BrowserFloatingTypography.toolbarIcon)
+                BrowserToolbarIconButtonLabel(
+                    systemImage: viewModel.isBrowserHistoryPanelVisible ? "clock.arrow.circlepath" : "clock",
+                    isActive: viewModel.isBrowserHistoryPanelVisible
+                )
             }
             .buttonStyle(.plain)
-            .foregroundStyle(viewModel.isBrowserHistoryPanelVisible ? Color.accentColor : Color.secondary)
             .help("浏览历史")
 
             Button(action: showPageQuestionPopover) {
