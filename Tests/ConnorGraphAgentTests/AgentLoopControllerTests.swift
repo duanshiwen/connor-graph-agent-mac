@@ -327,6 +327,24 @@ private struct LongResultTool: AgentTool {
     }
 }
 
+private struct BashLikeOutputTool: AgentTool {
+    let name = "Bash"
+    let description = "Return shell-like stdout plus JSON metadata"
+    let permission = AgentPermissionCapability.readSession
+    let inputSchema = AgentToolInputSchema.object(properties: [:], required: [])
+
+    func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        AgentToolResult(
+            runID: context.runID,
+            sessionID: context.sessionID,
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: "exitCode: 0\nstdout:\nhello-from-stdout\n\nstderr:\n",
+            contentJSON: "{\"exitCode\":0,\"truncated\":false}"
+        )
+    }
+}
+
 @Test func agentLoopDoesNotTreatSameToolWithDifferentArgumentsAsLoop() async throws {
     let toolResponses = (1...12).map { index in
         AgentModelResponse(
@@ -359,6 +377,36 @@ private struct LongResultTool: AgentTool {
 
     #expect(events.map(\.kind).contains(.textComplete))
     #expect(events.last?.kind == .runCompleted)
+}
+
+@Test func agentLoopSendsToolTextOutputToFollowUpModelRequestWhenJSONMetadataExists() async throws {
+    let provider = ScriptedModelProvider(responses: [
+        AgentModelResponse(
+            text: nil,
+            toolCalls: [AgentToolCall(id: "call-bash-output", name: "Bash", argumentsJSON: #"{}"#)],
+            usage: AgentModelUsage(promptTokens: 10, completionTokens: 3),
+            finishReason: .toolCalls
+        ),
+        AgentModelResponse(
+            text: "Saw stdout.",
+            toolCalls: [],
+            usage: AgentModelUsage(promptTokens: 20, completionTokens: 5),
+            finishReason: .stop
+        )
+    ])
+    var registry = AgentToolRegistry()
+    registry.register(BashLikeOutputTool())
+    let loop = AgentLoopController(modelProvider: provider, toolRegistry: registry)
+
+    for try await _ in loop.run(AgentChatRequest(sessionID: "session-bash-output", userMessage: "Run echo")) {}
+
+    let followUpMessages = try #require(await provider.requests.last?.messages)
+    let toolMessage = try #require(followUpMessages.first(where: { $0.role == .tool && $0.toolCallID == "call-bash-output" }))
+
+    #expect(toolMessage.name == "Bash")
+    #expect(toolMessage.content.contains("stdout:"))
+    #expect(toolMessage.content.contains("hello-from-stdout"))
+    #expect(toolMessage.content != "{\"exitCode\":0,\"truncated\":false}")
 }
 
 @Test func agentLoopGatesLargeToolResultBeforeFollowUpModelRequest() async throws {
