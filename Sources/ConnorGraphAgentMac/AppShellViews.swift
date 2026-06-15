@@ -429,6 +429,12 @@ private struct CraftSessionRow: View {
                 )
         }
         .clipped()
+        .overlay(
+            SessionHorizontalSwipeHandler(
+                onHorizontalScroll: { deltaX in handleHorizontalScroll(deltaX: deltaX) },
+                onEnded: { settleSwipeOffset() }
+            )
+        )
         .onChange(of: row.title) { _, newTitle in
             guard !isEditingTitle else { return }
             titleDraft = newTitle
@@ -585,6 +591,23 @@ private struct CraftSessionRow: View {
         onRename(trimmed)
     }
 
+    private func handleHorizontalScroll(deltaX: CGFloat) {
+        guard !isEditingTitle else { return }
+        let base = isActionsRevealed ? -actionWidth : dragOffset
+        let nextOffset = min(0, max(-actionWidth, base - deltaX))
+        dragOffset = nextOffset
+        isActionsRevealed = nextOffset <= -actionWidth * 0.98
+    }
+
+    private func settleSwipeOffset() {
+        guard !isEditingTitle else { return }
+        let shouldReveal = dragOffset < -actionWidth * 0.35
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.9)) {
+            isActionsRevealed = shouldReveal
+            dragOffset = shouldReveal ? -actionWidth : 0
+        }
+    }
+
     private func closeActions() {
         withAnimation(.spring(response: 0.24, dampingFraction: 0.9)) {
             isActionsRevealed = false
@@ -617,26 +640,67 @@ private struct CraftSessionRow: View {
     }
 }
 
-private struct SessionMouseDownHandler: NSViewRepresentable {
-    var action: () -> Void
+private struct SessionHorizontalSwipeHandler: NSViewRepresentable {
+    var onHorizontalScroll: (CGFloat) -> Void
+    var onEnded: () -> Void
 
-    func makeNSView(context: Context) -> MouseDownView {
-        let view = MouseDownView(frame: .zero)
-        view.action = action
+    func makeNSView(context: Context) -> HorizontalSwipeView {
+        let view = HorizontalSwipeView(frame: .zero)
+        view.onHorizontalScroll = onHorizontalScroll
+        view.onEnded = onEnded
         return view
     }
 
-    func updateNSView(_ nsView: MouseDownView, context: Context) {
-        nsView.action = action
+    func updateNSView(_ nsView: HorizontalSwipeView, context: Context) {
+        nsView.onHorizontalScroll = onHorizontalScroll
+        nsView.onEnded = onEnded
     }
 
-    final class MouseDownView: NSView {
-        var action: (() -> Void)?
+    final class HorizontalSwipeView: NSView {
+        var onHorizontalScroll: ((CGFloat) -> Void)?
+        var onEnded: (() -> Void)?
+        private var settleWorkItem: DispatchWorkItem?
 
-        override var acceptsFirstResponder: Bool { true }
+        override func scrollWheel(with event: NSEvent) {
+            let horizontal = event.scrollingDeltaX
+            let vertical = event.scrollingDeltaY
+            guard abs(horizontal) > abs(vertical), abs(horizontal) > 0.5 else {
+                nextResponder?.scrollWheel(with: event)
+                return
+            }
+
+            onHorizontalScroll?(horizontal)
+            scheduleSettle()
+            if event.phase == .ended || event.phase == .cancelled || event.momentumPhase == .ended || event.momentumPhase == .cancelled {
+                settleNow()
+            }
+        }
 
         override func mouseDown(with event: NSEvent) {
-            action?()
+            nextResponder?.mouseDown(with: event)
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            nextResponder?.mouseUp(with: event)
+        }
+
+        override func rightMouseDown(with event: NSEvent) {
+            nextResponder?.rightMouseDown(with: event)
+        }
+
+        private func scheduleSettle() {
+            settleWorkItem?.cancel()
+            let workItem = DispatchWorkItem { [weak self] in
+                self?.onEnded?()
+            }
+            settleWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: workItem)
+        }
+
+        private func settleNow() {
+            settleWorkItem?.cancel()
+            settleWorkItem = nil
+            onEnded?()
         }
     }
 }
