@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import PDFKit
 import QuickLookUI
 import ConnorGraphAppSupport
 import ConnorGraphCore
@@ -60,8 +61,8 @@ struct AgentAttachmentPreviewSheetView: View {
 
     private var previewBody: some View {
         Group {
-            if shouldUseNativeFilePreview, let url = model.sourceFileURL {
-                NativeAttachmentQuickLookPreview(fileURL: url)
+            if nativePreviewRenderer != .none, let url = model.sourceFileURL {
+                nativeFilePreview(for: url)
                     .frame(maxWidth: .infinity, minHeight: 360, maxHeight: .infinity)
                     .overlay(alignment: .bottomLeading) {
                         if let error = model.errorMessage, !error.isEmpty {
@@ -107,13 +108,22 @@ struct AgentAttachmentPreviewSheetView: View {
         )
     }
 
-    private var shouldUseNativeFilePreview: Bool {
-        guard model.sourceFileURL != nil else { return false }
-        switch model.manifest?.kind ?? model.attachment.kind {
-        case .image, .pdf, .document, .spreadsheet, .presentation:
-            return true
-        default:
-            return false
+    private var nativePreviewRenderer: AttachmentNativePreviewRenderer {
+        AttachmentPreviewPresentationPolicy.nativeRenderer(
+            for: model.manifest?.kind ?? model.attachment.kind,
+            hasOriginalFileURL: model.sourceFileURL != nil
+        )
+    }
+
+    @ViewBuilder
+    private func nativeFilePreview(for url: URL) -> some View {
+        switch nativePreviewRenderer {
+        case .pdfKit:
+            NativeAttachmentPDFPreview(fileURL: url)
+        case .quickLook:
+            NativeAttachmentQuickLookPreview(fileURL: url)
+        case .none:
+            EmptyView()
         }
     }
 
@@ -177,6 +187,30 @@ struct AgentAttachmentPreviewSheetView: View {
         case .presentation: return "rectangle.on.rectangle"
         default: return "paperclip"
         }
+    }
+}
+
+private struct NativeAttachmentPDFPreview: NSViewRepresentable {
+    var fileURL: URL
+
+    func makeNSView(context: Context) -> PDFView {
+        let pdfView = PDFView(frame: .zero)
+        pdfView.autoScales = true
+        pdfView.displayMode = .singlePageContinuous
+        pdfView.displayDirection = .vertical
+        pdfView.displaysPageBreaks = true
+        pdfView.backgroundColor = .clear
+        pdfView.document = PDFDocument(url: fileURL)
+        return pdfView
+    }
+
+    func updateNSView(_ nsView: PDFView, context: Context) {
+        if nsView.document?.documentURL != fileURL {
+            nsView.document = PDFDocument(url: fileURL)
+        }
+        nsView.autoScales = true
+        nsView.displayMode = .singlePageContinuous
+        nsView.displayDirection = .vertical
     }
 }
 
