@@ -37,3 +37,39 @@ import Testing
 @Test func collapseScrollScheduleIncludesPostAnimationLayoutProbe() {
     #expect(AgentChatCollapseScrollSchedule.decisionDelays.contains { $0 >= 0.3 })
 }
+
+@Test func collapseResetScrollIdentityWhenTranscriptShrinksFromOverflowingToFittingViewport() {
+    let policy = AgentChatCollapseScrollPolicy()
+
+    let shouldReset = policy.shouldResetScrollIdentityAfterCollapse(
+        previousContentHeight: 980,
+        newContentHeight: 560,
+        viewportHeight: 700
+    )
+
+    #expect(shouldReset)
+}
+
+@Test func collapseDoesNotResetScrollIdentityWhenTranscriptStillOverflowsViewport() {
+    let policy = AgentChatCollapseScrollPolicy()
+
+    let shouldReset = policy.shouldResetScrollIdentityAfterCollapse(
+        previousContentHeight: 980,
+        newContentHeight: 760,
+        viewportHeight: 700
+    )
+
+    #expect(!shouldReset)
+}
+
+@Test func collapseDoesNotResetScrollIdentityWithoutPriorOverflow() {
+    let policy = AgentChatCollapseScrollPolicy()
+
+    let shouldReset = policy.shouldResetScrollIdentityAfterCollapse(
+        previousContentHeight: 620,
+        newContentHeight: 560,
+        viewportHeight: 700
+    )
+
+    #expect(!shouldReset)
+}
