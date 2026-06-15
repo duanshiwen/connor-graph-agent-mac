@@ -1,6 +1,6 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-16 01:45 GMT+8  
+文档更新时间：2026-06-16 02:11 GMT+8  
 当前代码基线:`feature/apple-iwork-attachment-support`,在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface / session-scoped multi-root project workspace / Connor-owned Scientific Compute Runtime skeleton / 商用级 Document Attachment OS 基础上,继续收紧 Apple 原生 UI 边界:PDF/Word/Excel/PowerPoint 与 Apple iWork（Pages/Numbers/Keynote）一等附件仍由 Connor Session Capsule 和 Attachment Store 管理;PDF selectable text 抽取和多页原文预览继续使用 PDFKit;Office/iWork/Presentation/Spreadsheet 抽取继续通过 MarkItDown/Docling sidecar best-effort 编排与 hardening;Office/iWork/Presentation/Spreadsheet 原文件预览优先交给 macOS Quick Look / QuickLookUI,Connor 自有 UI 只负责 manifest、extraction status、retry、omitted attachment summary 和治理证据。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package,目标是把 Connor 建成 **graph-memory-native Agent OS**:它不是"图谱编辑器",也不是"Claude SDK 外壳",而是以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI 和 Local Automation Surface 共同构成的本地 Agent 操作系统。
@@ -809,6 +809,8 @@ CraftDetailPaneView
 AgentChatView
 AgentChatComposerView
 AgentChatInspectorView
+AgentToolInvocationDetailOverlay
+AgentToolOutputRenderers
 WorkspaceRootsSettingsContent
 WorkspaceRootRow
 ConnorSettingsDetailView
@@ -830,6 +832,16 @@ Session Workspace 当前支持:
 - folder badge 还支持"选择文件夹..."和"重置为默认",用于从 Finder 添加新目录或回退到 legacy / fallback 默认工作目录。
 - composer paperclip 现在导入 Session Capsule 附件;附件 chips 展示在现有 composer 文本框内部上半部分,文本框整体尺寸不变,composer 的尺寸、位置和外部布局不变。附件多时在文本框内部横向滚动,不在 composer 上方新增 shelf,也不推动底部按钮栏。点击附件 chip 主体会打开现有纯阅读预览弹窗;弹窗外层布局保持不变,内部对 PDF 使用 PDFKit 多页连续滚动原文件预览,对 Office/iWork/Presentation/Spreadsheet 和图片使用 macOS Quick Look / QuickLookUI 原生预览原文件,同时保留 Connor 的解析状态、manifest 路径和 retry 入口;点击 `xmark.circle.fill` 只移除附件。
 - 多工作目录能力只作用于 project workspace / allowed roots;Connor 仍保持单一 Home / Runtime Root,不引入 Craft-style multi-workspace。
+
+Agent tool invocation detail 当前支持:
+
+- 对同一个 `callID` 下的 `toolRequested` / `toolApproved` / `toolStarted` / `toolFinished` / `toolFailed` 事件进行 Connor-owned 聚合,形成 `AgentToolInvocationPresentation`,避免点击工具活动时只打开最早的 `Tool requested` 事件。
+- 工具活动行点击打开 Native SwiftUI `AgentToolInvocationDetailOverlay`,而底层事件列表仍保留原有 `AgentActivityDetailOverlay`,用于审计与调试。
+- 详情面板分为 Summary、Input、Output、Metadata、Raw Event Index,可复制 input/output/callID,并显示 runID、sessionID、semantic kind、artifact/truncation metadata。
+- Bash / swift build / swift test / git / python / node / package manager 等 shell-like 工具使用 terminal-style renderer,优先从 result JSON 展示 stdout、stderr、exitCode,否则回退到纯文本解析。
+- Edit/Write 等文件变更类工具使用 `AgentToolChangePresentation` 提取 result JSON / arguments JSON / outputText 中的 unified diff、patch、oldText/newText,并由 SwiftUI 原生 diff renderer 高亮新增、删除和 hunk 行。
+- MCP、Browser、Read/Grep/List 和未知工具使用原生 input/output card 与 JSON/text renderer;这是参考 Craft activity overlay 的信息架构,不是 Craft UI fork,也不引入 Electron/Web UI。
+- 大输出通过 `AgentToolOutputDisplayPolicy` 先做 preview/truncation 治理;当前不强制把超大 stdout/stderr 落 Session Capsule artifact,后续若需要再以独立 artifact policy 接入。
 
 Browser Workspace 当前支持:
 
