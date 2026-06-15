@@ -1133,7 +1133,7 @@ private struct AgentChatInspectorView: View {
                     .font(AgentChatTypography.metaEmphasis)
                     .foregroundStyle(.secondary)
 
-                ForEach(viewModel.governanceConfig.labels.filter { $0.valueType == .boolean }) { definition in
+                ForEach(viewModel.governanceConfig.labels) { definition in
                     Button {
                         viewModel.toggleSelectedSessionLabel(definition.id)
                     } label: {
