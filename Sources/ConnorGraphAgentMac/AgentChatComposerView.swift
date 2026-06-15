@@ -134,6 +134,7 @@ struct AgentChatComposerView: View {
                             .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
                     }
                     .buttonStyle(.plain)
+                    .foregroundStyle(composerControlForeground)
                     .frame(width: AgentChatLayout.hitTargetSize, height: AgentChatLayout.hitTargetSize)
                     .contentShape(Rectangle())
                     .help("添加附件")
@@ -144,7 +145,7 @@ struct AgentChatComposerView: View {
                         AgentComposerOptionBadge(
                             title: viewModel.isBrowserVisible ? "隐藏浏览器" : "浏览器",
                             systemImage: "safari",
-                            tint: viewModel.isBrowserVisible ? .accentColor : .secondary,
+                            tint: viewModel.isBrowserVisible ? composerControlActiveForeground : composerControlForeground,
                             showsChevron: false,
                             isActive: viewModel.isBrowserVisible,
                             style: .compact
@@ -437,7 +438,7 @@ struct AgentChatComposerView: View {
                 AgentComposerOptionBadge(
                     title: "信息",
                     systemImage: "info.circle",
-                    tint: .secondary,
+                    tint: isSessionInfoPresented ? composerControlActiveForeground : composerControlForeground,
                     showsChevron: false,
                     isActive: isSessionInfoPresented,
                     style: .compact
@@ -467,6 +468,7 @@ struct AgentChatComposerView: View {
                 }
             }
             .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
+            .foregroundStyle(viewModel.hasRunningActiveSessionBackgroundTask ? composerControlActiveForeground : composerControlForeground)
         }
         .buttonStyle(.plain)
         .frame(width: AgentChatLayout.hitTargetSize, height: AgentChatLayout.hitTargetSize)
@@ -597,6 +599,7 @@ struct AgentChatComposerView: View {
                 }
             }
             .font(AgentChatTypography.micro.weight(.medium))
+            .foregroundStyle(composerControlForeground)
             .padding(.horizontal, AgentChatLayout.spaceM)
             .frame(height: AgentChatLayout.chipHeight)
             .frame(maxWidth: AgentChatLayout.modelMenuMaxWidth)
@@ -605,6 +608,10 @@ struct AgentChatComposerView: View {
         .controlSize(.regular)
         .help("选择真实配置的连接和模型；切换后下一轮请求立即使用该模型")
     }
+
+    private var composerControlForeground: Color { .secondary }
+
+    private var composerControlActiveForeground: Color { .accentColor }
 
     private func promptBudgetStatusColor(_ status: AgentPromptBudgetStatus) -> Color {
         switch status {
@@ -625,10 +632,7 @@ struct AgentChatComposerView: View {
 
     private func permissionModeColor(_ mode: AgentPermissionMode) -> Color {
         switch mode {
-        case .readOnly: .secondary
-        case .askToWrite: .orange
-        case .trustedWrite: .accentColor
-        case .allowAll: .purple
+        case .readOnly, .askToWrite, .trustedWrite, .allowAll: composerControlForeground
         }
     }
 
@@ -646,13 +650,7 @@ struct AgentChatComposerView: View {
 
     private func sessionStatusColor(_ status: AgentSessionStatus) -> Color {
         switch status {
-        case .todo: .secondary
-        case .inProgress: .blue
-        case .waiting: .orange
-        case .needsReview: .purple
-        case .done: .green
-        case .blocked: .red
-        case .archived: .gray
+        case .todo, .inProgress, .waiting, .needsReview, .done, .blocked, .archived: composerControlForeground
         }
     }
 }
