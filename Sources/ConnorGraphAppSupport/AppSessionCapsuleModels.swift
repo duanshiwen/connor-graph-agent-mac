@@ -411,3 +411,30 @@ public struct AppBrowserSelectionThreadMessageSnapshot: Codable, Equatable, Iden
         self.isPending = try container.decodeIfPresent(Bool.self, forKey: .isPending) ?? false
     }
 }
+
+// MARK: - Browser History
+
+public struct BrowserHistoryRecord: Codable, Equatable, Identifiable, Sendable {
+    public var id: UUID
+    public var url: String
+    public var title: String
+    public var sessionID: String
+    public var sessionTitle: String
+    public var visitedAt: Date
+
+    public init(
+        id: UUID = UUID(),
+        url: String,
+        title: String,
+        sessionID: String,
+        sessionTitle: String,
+        visitedAt: Date = Date()
+    ) {
+        self.id = id
+        self.url = url
+        self.title = title
+        self.sessionID = sessionID
+        self.sessionTitle = sessionTitle
+        self.visitedAt = visitedAt
+    }
+}
