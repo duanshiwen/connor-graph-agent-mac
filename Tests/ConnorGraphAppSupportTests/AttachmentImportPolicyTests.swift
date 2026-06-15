@@ -43,6 +43,19 @@ struct AttachmentImportPolicyTests {
         }
     }
 
+    @Test func acceptsAppleIWorkAttachmentAllowlist() {
+        let accepted: [(String, AgentAttachmentKind)] = [
+            ("draft.pages", .document),
+            ("budget.numbers", .spreadsheet),
+            ("deck.keynote", .presentation)
+        ]
+        for (filename, expectedKind) in accepted {
+            let ext = URL(fileURLWithPath: filename).pathExtension
+            #expect(AttachmentImportPolicy.acceptedKind(forExtension: ext) == expectedKind)
+            #expect(AttachmentImportPolicy().validate(url: URL(fileURLWithPath: "/tmp/\(filename)")) != .rejected(.unsupportedIWork))
+        }
+    }
+
     @Test func rejectsUnsupportedAttachmentFamilies() {
         let rejected: [(String, AttachmentImportRejectionReason)] = [
             ("page.html", .unsupportedHTML),
@@ -50,7 +63,6 @@ struct AttachmentImportPolicyTests {
             ("vector.svg", .unsupportedSVG),
             ("audio.mp3", .unsupportedAudio),
             ("video.mp4", .unsupportedVideo),
-            ("draft.pages", .unsupportedIWork),
             ("archive.zip", .unsupportedArchive),
             ("archive.tar", .unsupportedArchive),
             ("db.sqlite", .unsupportedDatabase),
