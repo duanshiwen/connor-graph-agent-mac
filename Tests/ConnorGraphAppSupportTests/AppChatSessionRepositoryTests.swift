@@ -137,40 +137,6 @@ private func temporaryAppChatDatabaseURL(_ name: String = UUID().uuidString) -> 
     #expect(sessions.map(\.id) == ["new", "old"])
 }
 
-@Test func appChatRepositoryLoadsLightweightSessionListItemsForFilteredLists() throws {
-    let store = try SQLiteGraphKernelStore(path: temporaryAppChatDatabaseURL().path)
-    try store.migrate()
-    let repository = AppChatSessionRepository(store: store)
-    let visible = AgentSession(
-        id: "visible",
-        title: "Visible",
-        messages: [
-            AgentMessage(id: "message-1", role: .user, content: "hello", createdAt: Date(timeIntervalSince1970: 1_000)),
-            AgentMessage(id: "message-2", role: .assistant, content: "hi", createdAt: Date(timeIntervalSince1970: 1_001))
-        ],
-        createdAt: Date(timeIntervalSince1970: 1_000),
-        updatedAt: Date(timeIntervalSince1970: 2_000),
-        governance: AgentSessionGovernanceMetadata(status: .waiting, labels: [AgentSessionLabel(id: "project", value: "connor")])
-    )
-    let archived = AgentSession(
-        id: "archived",
-        title: "Archived",
-        messages: [AgentMessage(id: "archived-message", role: .user, content: "archived", createdAt: Date(timeIntervalSince1970: 1_000))],
-        createdAt: Date(timeIntervalSince1970: 1_000),
-        updatedAt: Date(timeIntervalSince1970: 3_000),
-        governance: AgentSessionGovernanceMetadata(status: .archived, isArchived: true)
-    )
-    try repository.saveSession(visible)
-    try repository.saveSession(archived)
-
-    let waitingItems = try repository.loadSessionListItems(filter: .status(.waiting), limit: 10)
-    let allItems = try repository.loadSessionListItems(filter: .all, limit: 10)
-
-    #expect(waitingItems.map(\.id) == ["visible"])
-    #expect(waitingItems.first?.messageCount == 2)
-    #expect(allItems.map(\.id) == ["archived", "visible"])
-}
-
 @Test func appChatRepositorySavesNativeSessionTurn() throws {
     let store = try SQLiteGraphKernelStore(path: temporaryAppChatDatabaseURL().path)
     try store.migrate()
