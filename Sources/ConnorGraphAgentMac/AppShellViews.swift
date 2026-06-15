@@ -486,7 +486,7 @@ private struct CraftSessionRow: View {
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(statusColor(row.status).opacity(0.14), in: Capsule())
-                    Text("\(row.messageCount) msgs")
+                    Text("\(row.messageCount) 条消息")
                         .font(AppListTypography.rowCaption)
                         .foregroundStyle(.secondary)
                 }
