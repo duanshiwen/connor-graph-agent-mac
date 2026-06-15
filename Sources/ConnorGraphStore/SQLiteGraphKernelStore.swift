@@ -912,6 +912,10 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         """)
     }
 
+    public func deleteSession(id: String) throws {
+        try execute("DELETE FROM agent_sessions WHERE id = \(quote(id));")
+    }
+
     private func decodeSession(_ row: [String]) throws -> AgentSession {
         let governance = AgentSessionGovernanceMetadata(
             status: AgentSessionStatus(rawValue: row[safe: 5] ?? "") ?? .todo,

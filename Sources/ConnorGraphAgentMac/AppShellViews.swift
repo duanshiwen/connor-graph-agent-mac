@@ -298,14 +298,19 @@ private struct CraftSessionListPane: View {
                         CraftSessionRow(
                             row: AgentChatSessionPresentation(session: session),
                             isSelected: session.id == viewModel.selectedChatSessionID,
-                            isRunning: viewModel.isChatSessionSubmitting(session.id)
-                        ) {
-                            var transaction = Transaction()
-                            transaction.disablesAnimations = true
-                            withTransaction(transaction) {
-                                viewModel.selectChatSession(session.id)
-                            }
-                        }
+                            isRunning: viewModel.isChatSessionSubmitting(session.id),
+                            isRegeneratingTitle: viewModel.regeneratingTitleSessionIDs.contains(session.id),
+                            onSelect: {
+                                var transaction = Transaction()
+                                transaction.disablesAnimations = true
+                                withTransaction(transaction) {
+                                    viewModel.selectChatSession(session.id)
+                                }
+                            },
+                            onRename: { title in viewModel.renameChatSession(session.id, title: title) },
+                            onRegenerateTitle: { viewModel.regenerateChatSessionTitle(session.id) },
+                            onDelete: { viewModel.deleteChatSession(session.id) }
+                        )
                     }
                     if filteredSessions.isEmpty {
                         if viewModel.sessionSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -380,14 +385,63 @@ private struct CraftDetailPaneView: View {
 
 
 private struct CraftSessionRow: View {
+    private let actionWidth: CGFloat = 136
+
     var row: AgentChatSessionPresentation
     var isSelected: Bool
     var isRunning: Bool
-    var action: () -> Void
+    var isRegeneratingTitle: Bool
+    var onSelect: () -> Void
+    var onRename: (String) -> Void
+    var onRegenerateTitle: () -> Void
+    var onDelete: () -> Void
+
+    @State private var dragOffset: CGFloat = 0
+    @State private var isActionsRevealed: Bool = false
+    @State private var isEditingTitle: Bool = false
+    @State private var titleDraft: String = ""
+    @State private var isDeleteConfirmationPresented: Bool = false
+    @FocusState private var isTitleFocused: Bool
 
     var body: some View {
+        ZStack(alignment: .trailing) {
+            actionButtons
+                .frame(width: actionWidth)
+
+            rowContent
+                .offset(x: dragOffset)
+                .gesture(
+                    DragGesture(minimumDistance: 12)
+                        .onChanged { value in
+                            let base = isActionsRevealed ? -actionWidth : 0
+                            dragOffset = min(0, max(-actionWidth, base + value.translation.width))
+                        }
+                        .onEnded { value in
+                            let shouldReveal = dragOffset < -actionWidth * 0.45 || value.predictedEndTranslation.width < -actionWidth * 0.65
+                            withAnimation(.spring(response: 0.24, dampingFraction: 0.9)) {
+                                isActionsRevealed = shouldReveal
+                                dragOffset = shouldReveal ? -actionWidth : 0
+                            }
+                        }
+                )
+        }
+        .clipped()
+        .onChange(of: row.title) { _, newTitle in
+            guard !isEditingTitle else { return }
+            titleDraft = newTitle
+        }
+        .onAppear { titleDraft = row.title }
+        .confirmationDialog("删除这个会话？", isPresented: $isDeleteConfirmationPresented, titleVisibility: .visible) {
+            Button("删除", role: .destructive, action: onDelete)
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("删除后会话将从列表中移除。")
+        }
+    }
+
+    private var rowContent: some View {
         HStack(alignment: .top, spacing: 10) {
-            if isRunning {
+            if isRunning || isRegeneratingTitle {
                 ProgressView()
                     .controlSize(.small)
                     .frame(width: 18, height: 18)
@@ -398,12 +452,26 @@ private struct CraftSessionRow: View {
             }
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Text(row.title)
-                        .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
-                        .lineLimit(1)
+                    if isEditingTitle {
+                        TextField("会话标题", text: $titleDraft)
+                            .textFieldStyle(.plain)
+                            .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
+                            .focused($isTitleFocused)
+                            .lineLimit(1)
+                            .onSubmit { commitTitleEdit() }
+                    } else {
+                        Text(row.title)
+                            .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
+                            .lineLimit(1)
+                            .onTapGesture(count: 2) { beginTitleEdit() }
+                    }
                     Spacer(minLength: 4)
                     if isRunning {
                         Text("运行中")
+                            .font(AppListTypography.rowCaptionEmphasized)
+                            .foregroundStyle(Color.accentColor)
+                    } else if isRegeneratingTitle {
+                        Text("生成中")
                             .font(AppListTypography.rowCaptionEmphasized)
                             .foregroundStyle(Color.accentColor)
                     } else {
@@ -437,11 +505,84 @@ private struct CraftSessionRow: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(isSelected ? Color.accentColor.opacity(0.14) : Color.clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor).opacity(0.001), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(SessionMouseDownHandler(action: action))
+        .overlay(SessionMouseDownHandler {
+            if isActionsRevealed {
+                closeActions()
+            } else if !isEditingTitle {
+                onSelect()
+            }
+        })
+        .onChange(of: isTitleFocused) { _, focused in
+            if !focused, isEditingTitle { commitTitleEdit() }
+        }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
+    }
+
+    private var actionButtons: some View {
+        HStack(spacing: 0) {
+            Button {
+                closeActions()
+                onRegenerateTitle()
+            } label: {
+                VStack(spacing: 4) {
+                    if isRegeneratingTitle {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "sparkles")
+                    }
+                    Text("标题")
+                        .font(AppListTypography.rowCaptionEmphasized)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .buttonStyle(.plain)
+            .disabled(isRegeneratingTitle)
+            .background(Color.accentColor.opacity(0.88))
+            .foregroundStyle(.white)
+
+            Button(role: .destructive) {
+                closeActions()
+                isDeleteConfirmationPresented = true
+            } label: {
+                VStack(spacing: 4) {
+                    Image(systemName: "trash")
+                    Text("删除")
+                        .font(AppListTypography.rowCaptionEmphasized)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .buttonStyle(.plain)
+            .background(Color.red.opacity(0.88))
+            .foregroundStyle(.white)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func beginTitleEdit() {
+        titleDraft = row.title
+        isEditingTitle = true
+        isTitleFocused = true
+    }
+
+    private func commitTitleEdit() {
+        let trimmed = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        isEditingTitle = false
+        isTitleFocused = false
+        guard !trimmed.isEmpty, trimmed != row.title else {
+            titleDraft = row.title
+            return
+        }
+        onRename(trimmed)
+    }
+
+    private func closeActions() {
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.9)) {
+            isActionsRevealed = false
+            dragOffset = 0
+        }
     }
 
     private func icon(for status: AgentSessionStatus) -> String {

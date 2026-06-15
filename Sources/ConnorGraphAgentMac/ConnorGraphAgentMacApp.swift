@@ -108,6 +108,7 @@ final class AppViewModel: ObservableObject {
     @Published var chatSessions: [AgentSession] = []
     @Published var allChatSessions: [AgentSession] = []
     @Published var selectedChatSessionID: String?
+    @Published var regeneratingTitleSessionIDs: Set<String> = []
     @Published var sessionListFilter: AgentSessionListFilter = .all
     @Published var sessionSearchQuery: String = ""
     @Published var governanceConfig: AppSessionGovernanceConfig = .default
@@ -1425,6 +1426,102 @@ final class AppViewModel: ObservableObject {
             errorMessage = String(describing: error)
         }
     };
+
+    func renameChatSession(_ sessionID: String, title: String) {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let chatSessionRepository else { return }
+        do {
+            let updated = try chatSessionRepository.renameSession(sessionID: sessionID, title: trimmed)
+            if selectedChatSessionID == sessionID {
+                fallbackChatSession = updated
+                nativeSessionManager = makeNativeSessionManager(for: updated)
+                transcript = updated.messages
+            }
+            reloadChatSessions()
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func regenerateChatSessionTitle(_ sessionID: String) {
+        guard !regeneratingTitleSessionIDs.contains(sessionID) else { return }
+        regeneratingTitleSessionIDs.insert(sessionID)
+        Task {
+            defer { regeneratingTitleSessionIDs.remove(sessionID) }
+            do {
+                guard let chatSessionRepository,
+                      let session = try chatSessionRepository.loadSession(id: sessionID)
+                else { return }
+                let userPrompts = session.messages
+                    .filter { $0.role == .user }
+                    .map { $0.content.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                guard !userPrompts.isEmpty else {
+                    renameChatSession(sessionID, title: "新对话")
+                    return
+                }
+                let title = try await generateTitleFromUserPrompts(userPrompts)
+                renameChatSession(sessionID, title: title)
+            } catch {
+                errorMessage = String(describing: error)
+            }
+        }
+    }
+
+    private func generateTitleFromUserPrompts(_ prompts: [String]) async throws -> String {
+        let provider = Self.makeLLMProvider(settingsRepository: llmSettingsRepository)
+        let joinedPrompts = prompts.enumerated().map { index, prompt in
+            "用户 Prompt \(index + 1):\n\(prompt)"
+        }.joined(separator: "\n\n---\n\n")
+        let prompt = """
+        你是会话标题生成器。请根据下面这个对话中所有用户 Prompt，生成一个中文会话标题。
+
+        要求：
+        - 20 个汉字以内
+        - 不要引号
+        - 不要句号
+        - 不要解释
+        - 只输出标题本身
+
+        \(joinedPrompts)
+        """
+        let response = try await provider.complete(prompt: prompt, context: AgentContext(query: "session-title", items: []))
+        return sanitizedSessionTitle(response.text)
+    }
+
+    private func sanitizedSessionTitle(_ raw: String) -> String {
+        var title = raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\"'“”‘’`。，.：:；;！!？?"))
+        if title.count > 20 {
+            title = String(title.prefix(20))
+        }
+        return title.isEmpty ? "新对话" : title
+    }
+
+    func deleteChatSession(_ sessionID: String) {
+        guard let chatSessionRepository else { return }
+        do {
+            try chatSessionRepository.deleteSession(sessionID: sessionID)
+            regeneratingTitleSessionIDs.remove(sessionID)
+            chatInputDraftsBySessionID.removeValue(forKey: sessionID)
+            pendingAttachmentRefsBySessionID.removeValue(forKey: sessionID)
+            agentEventTimelinesBySessionID.removeValue(forKey: sessionID)
+            agentEventTimelinesByProcessKey = agentEventTimelinesByProcessKey.filter { key, _ in !key.hasPrefix("\(sessionID):") }
+            if selectedChatSessionID == sessionID {
+                selectedChatSessionID = nil
+                transcript = []
+                agentEventTimeline = []
+                latestChatSummary = nil
+                selectedSessionArtifactDirectories = nil
+            }
+            reloadChatSessions()
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
 
     private func loadSessionCapsule(sessionID: String) throws {
         guard let chatSessionRepository else { return }
