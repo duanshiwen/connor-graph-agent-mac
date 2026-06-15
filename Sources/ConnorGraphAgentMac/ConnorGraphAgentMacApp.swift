@@ -253,6 +253,9 @@ final class AppViewModel: ObservableObject {
     @Published var sessionRecordsBySessionID: [String: [AppSessionRecord]] = [:]
     @Published var browserWorkspaceSnapshotsBySessionID: [String: AppBrowserStateSnapshot] = [:]
     @Published var browserAssistedTasksByID: [UUID: BrowserAssistedTaskState] = [:]
+    @Published var isBrowserHistoryPanelVisible: Bool = false
+    @Published var browserHistoryRecords: [BrowserHistoryRecord] = []
+    @Published var filteredBrowserHistoryRecords: [BrowserHistoryRecord] = []
     @Published var isCommandPalettePresented: Bool = false
     @Published var selectedSettingsSection: ConnorSettingsSection = .app
     @Published var desktopNotificationsEnabled: Bool = true
@@ -295,6 +298,7 @@ final class AppViewModel: ObservableObject {
     private var sourceRuntimeRepository: AppMCPSourceRuntimeRepository?
     private var skillRuntimeRepository: AppSkillRuntimeRepository?
     private var storagePaths: AppStoragePaths?
+    private var browserHistoryStore: BrowserHistoryStore?
     private var runtimeSettingsRepository: AppRuntimeSettingsRepository?
     private var llmSettingsRepository: AppLLMSettingsRepository
     private var llmProviderHealthChecker: AppLLMProviderHealthChecker
@@ -873,6 +877,7 @@ final class AppViewModel: ObservableObject {
             self.automationRepository = AppProductOSAutomationRepository(storagePaths: storagePaths)
             self.sourceRuntimeRepository = AppMCPSourceRuntimeRepository(storagePaths: storagePaths)
             self.skillRuntimeRepository = AppSkillRuntimeRepository(storagePaths: storagePaths)
+            self.browserHistoryStore = BrowserHistoryStore(historyURL: storagePaths.browserHistoryURL)
         }
         if let repository {
             self.promotionRepository = AppPromotionQueueRepository(store: repository.store)
@@ -926,6 +931,7 @@ final class AppViewModel: ObservableObject {
         reloadSkillRuntimeDefinitions()
         reloadSidecarRuntimeDiagnostics()
         reloadChatSessions()
+        loadBrowserHistory()
         reloadSchemaHealthReport()
         reloadGraphExtractionTraces()
         reloadMemoryChangeLog()
@@ -1785,6 +1791,89 @@ final class AppViewModel: ObservableObject {
         } catch {
             errorMessage = String(describing: error)
         }
+    }
+
+    // MARK: - Browser History
+
+    func loadBrowserHistory() {
+        guard let store = browserHistoryStore else { return }
+        browserHistoryRecords = store.loadHistory()
+        filteredBrowserHistoryRecords = browserHistoryRecords
+    }
+
+    func recordBrowserHistory(url: String, title: String, sessionID: String) {
+        guard let store = browserHistoryStore else { return }
+        let trimmedURL = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedURL.isEmpty,
+              !trimmedURL.hasPrefix("connor://"),
+              !trimmedURL.hasPrefix("about:"),
+              !trimmedURL.hasPrefix("data:")
+        else { return }
+        let sessionTitle = sessionTitleForHistory(sessionID: sessionID)
+        let record = BrowserHistoryRecord(
+            url: trimmedURL,
+            title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+            sessionID: sessionID,
+            sessionTitle: sessionTitle
+        )
+        store.appendRecord(record)
+        browserHistoryRecords = store.loadHistory()
+        applyBrowserHistoryFilter()
+    }
+
+    func toggleBrowserHistoryPanel() {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            isBrowserHistoryPanelVisible.toggle()
+        }
+        if isBrowserHistoryPanelVisible {
+            loadBrowserHistory()
+        }
+    }
+
+    func filterBrowserHistory(query: String) {
+        guard let store = browserHistoryStore else { return }
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            filteredBrowserHistoryRecords = browserHistoryRecords
+        } else {
+            filteredBrowserHistoryRecords = store.searchHistory(query: trimmed)
+        }
+    }
+
+    func deleteBrowserHistoryRecord(_ id: UUID) {
+        browserHistoryStore?.deleteRecord(id: id)
+        loadBrowserHistory()
+    }
+
+    func clearBrowserHistory() {
+        browserHistoryStore?.clearHistory()
+        browserHistoryRecords = []
+        filteredBrowserHistoryRecords = []
+    }
+
+    func navigateToHistoryRecord(_ record: BrowserHistoryRecord) {
+        // Switch to the session that owns this history record
+        if record.sessionID != selectedChatSessionID {
+            selectChatSession(record.sessionID)
+        }
+        // Open URL in browser — the onChange handler in BrowserWorkspaceView
+        // will detect the URL change and navigate the active WKWebView
+        browserTargetURLString = record.url
+        showBrowserWorkspace()
+    }
+
+    private func sessionTitleForHistory(sessionID: String) -> String {
+        if let session = allChatSessions.first(where: { $0.id == sessionID }) {
+            return session.title
+        }
+        if let session = chatSessions.first(where: { $0.id == sessionID }) {
+            return session.title
+        }
+        return sessionID
+    }
+
+    private func applyBrowserHistoryFilter() {
+        filteredBrowserHistoryRecords = browserHistoryRecords
     }
 
     private func rememberCurrentWorkspaceMode() {
