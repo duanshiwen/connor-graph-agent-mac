@@ -71,6 +71,8 @@ public struct CommandAttachmentExtractionSidecar: AttachmentExtractionSidecar {
     public var displayName: String
     public var engine: AgentAttachmentExtractionEngine
     public var executableName: String
+    public var timeoutSeconds: TimeInterval
+    public var maxOutputBytes: Int
     public var arguments: @Sendable (AttachmentExtractionRequest) -> [String]
 
     public init(
@@ -78,12 +80,16 @@ public struct CommandAttachmentExtractionSidecar: AttachmentExtractionSidecar {
         displayName: String,
         engine: AgentAttachmentExtractionEngine,
         executableName: String,
+        timeoutSeconds: TimeInterval = 30,
+        maxOutputBytes: Int = 5_000_000,
         arguments: @escaping @Sendable (AttachmentExtractionRequest) -> [String]
     ) {
         self.id = id
         self.displayName = displayName
         self.engine = engine
         self.executableName = executableName
+        self.timeoutSeconds = timeoutSeconds
+        self.maxOutputBytes = maxOutputBytes
         self.arguments = arguments
     }
 
@@ -106,17 +112,38 @@ public struct CommandAttachmentExtractionSidecar: AttachmentExtractionSidecar {
             )
             return AttachmentExtractionResult(report: report)
         }
-        let output = try Self.run(executable: executable, arguments: arguments(request))
-        let markdown = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        let startedAt = Date()
+        let execution = Self.run(
+            executable: executable,
+            arguments: arguments(request),
+            timeoutSeconds: timeoutSeconds,
+            maxOutputBytes: maxOutputBytes
+        )
+        let markdown = execution.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard execution.status == .succeeded else {
+            let report = AgentAttachmentExtractionReport(
+                attachmentID: request.manifest.id,
+                engine: engine,
+                status: .failed,
+                capabilitiesUsed: request.requestedCapabilities,
+                warnings: execution.warnings,
+                errors: execution.errors,
+                startedAt: startedAt,
+                completedAt: Date()
+            )
+            return AttachmentExtractionResult(report: report)
+        }
         let status: AgentAttachmentExtractionStatus = markdown.isEmpty ? .unsupported : .extracted
+        var warnings = execution.warnings
+        if status == .unsupported { warnings.append("Extractor produced no markdown output.") }
         let report = AgentAttachmentExtractionReport(
             attachmentID: request.manifest.id,
             engine: engine,
             status: status,
             capabilitiesUsed: request.requestedCapabilities,
-            warnings: [],
+            warnings: warnings,
             errors: [],
-            startedAt: Date(),
+            startedAt: startedAt,
             completedAt: Date()
         )
         return AttachmentExtractionResult(
@@ -135,22 +162,66 @@ public struct CommandAttachmentExtractionSidecar: AttachmentExtractionSidecar {
         return nil
     }
 
-    private static func run(executable: String, arguments: [String]) throws -> String {
+    private enum ExecutionStatus: Sendable, Equatable {
+        case succeeded
+        case failed
+    }
+
+    private struct ExecutionResult: Sendable, Equatable {
+        var status: ExecutionStatus
+        var stdout: String
+        var warnings: [String]
+        var errors: [String]
+    }
+
+    private static func run(
+        executable: String,
+        arguments: [String],
+        timeoutSeconds: TimeInterval,
+        maxOutputBytes: Int
+    ) -> ExecutionResult {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
-        let pipe = Pipe()
+        let outputPipe = Pipe()
         let errorPipe = Pipe()
-        process.standardOutput = pipe
+        process.standardOutput = outputPipe
         process.standardError = errorPipe
-        try process.run()
-        process.waitUntilExit()
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        if process.terminationStatus != 0 {
-            let error = String(data: errorPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            throw NSError(domain: "AttachmentExtractionSidecar", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: error])
+        do {
+            try process.run()
+        } catch {
+            return ExecutionResult(status: .failed, stdout: "", warnings: [], errors: ["Failed to launch extractor: \(error.localizedDescription)"])
         }
-        return String(data: data, encoding: .utf8) ?? ""
+
+        let deadline = Date().addingTimeInterval(timeoutSeconds)
+        while process.isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+        if process.isRunning {
+            process.terminate()
+            process.waitUntilExit()
+            return ExecutionResult(status: .failed, stdout: "", warnings: [], errors: ["Extractor timed out after \(timeoutSeconds) seconds."])
+        }
+
+        let stdoutData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+        let stderrData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+        var warnings: [String] = []
+        let cappedData: Data
+        if stdoutData.count > maxOutputBytes {
+            cappedData = stdoutData.prefix(maxOutputBytes)
+            warnings.append("Extractor stdout was truncated to \(maxOutputBytes) bytes.")
+        } else {
+            cappedData = stdoutData
+        }
+        let stdout = String(data: cappedData, encoding: .utf8) ?? ""
+        let stderr = String(data: stderrData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if process.terminationStatus != 0 {
+            var errors = ["Extractor exited with status \(process.terminationStatus)."]
+            if !stderr.isEmpty { errors.append(stderr) }
+            return ExecutionResult(status: .failed, stdout: stdout, warnings: warnings, errors: errors)
+        }
+        if !stderr.isEmpty { warnings.append(stderr) }
+        return ExecutionResult(status: .succeeded, stdout: stdout, warnings: warnings, errors: [])
     }
 
     private static func preview(_ text: String, max: Int = 240) -> String? {
@@ -187,10 +258,16 @@ public enum DoclingAttachmentExtractor {
 public struct AttachmentExtractionOrchestrator: Sendable {
     public var sidecars: [any AttachmentExtractionSidecar]
     public var maxBuiltinTextBytes: Int64
+    public var maxBuiltinPDFBytes: Int64
 
-    public init(sidecars: [any AttachmentExtractionSidecar] = [MarkItDownAttachmentExtractor.sidecar(), DoclingAttachmentExtractor.sidecar()], maxBuiltinTextBytes: Int64 = 512_000) {
+    public init(
+        sidecars: [any AttachmentExtractionSidecar] = [MarkItDownAttachmentExtractor.sidecar(), DoclingAttachmentExtractor.sidecar()],
+        maxBuiltinTextBytes: Int64 = 512_000,
+        maxBuiltinPDFBytes: Int64 = 25_000_000
+    ) {
         self.sidecars = sidecars
         self.maxBuiltinTextBytes = maxBuiltinTextBytes
+        self.maxBuiltinPDFBytes = maxBuiltinPDFBytes
     }
 
     public func extract(_ request: AttachmentExtractionRequest) async throws -> AttachmentExtractionResult {
@@ -205,6 +282,17 @@ public struct AttachmentExtractionOrchestrator: Sendable {
                 completedAt: Date()
             )
             return AttachmentExtractionResult(report: report, extractedMarkdown: builtin.markdown, previewText: builtin.previewText)
+        }
+
+        if AttachmentPDFTextExtraction.supports(kind: request.manifest.kind) {
+            let pdf = try AttachmentPDFTextExtraction.extract(
+                fileURL: request.originalFileURL,
+                attachmentID: request.manifest.id,
+                maxBytes: maxBuiltinPDFBytes
+            )
+            if pdf.report.status == .extracted || pdf.report.status == .skippedOversize || pdf.report.status == .failed {
+                return pdf
+            }
         }
 
         for sidecar in sidecars {
