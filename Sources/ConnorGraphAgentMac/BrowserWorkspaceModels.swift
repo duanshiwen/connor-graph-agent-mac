@@ -7,13 +7,15 @@ struct BrowserSessionState {
     var selectedTabID: BrowserTabState.ID?
     var selectionPopover: BrowserSelectionPopoverState?
     var threads: [UUID: BrowserSelectionThread] = [:]
+    var historyEntries: [BrowserHistoryEntry] = []
     var webViewsByTabID: [UUID: WKWebView] = [:]
 
-    init(tabs: [BrowserTabState], selectedTabID: BrowserTabState.ID?, selectionPopover: BrowserSelectionPopoverState? = nil, threads: [UUID: BrowserSelectionThread] = [:], webViewsByTabID: [UUID: WKWebView] = [:]) {
+    init(tabs: [BrowserTabState], selectedTabID: BrowserTabState.ID?, selectionPopover: BrowserSelectionPopoverState? = nil, threads: [UUID: BrowserSelectionThread] = [:], historyEntries: [BrowserHistoryEntry] = [], webViewsByTabID: [UUID: WKWebView] = [:]) {
         self.tabs = tabs
         self.selectedTabID = selectedTabID
         self.selectionPopover = selectionPopover
         self.threads = threads
+        self.historyEntries = historyEntries
         self.webViewsByTabID = webViewsByTabID
     }
 
@@ -27,6 +29,7 @@ struct BrowserSessionState {
         self.selectedTabID = snapshot.selectedTabID ?? self.tabs.first?.id
         self.selectionPopover = snapshot.selectionPopover.map(BrowserSelectionPopoverState.init(snapshot:))
         self.threads = Dictionary(uniqueKeysWithValues: snapshot.threads.map { ($0.key, BrowserSelectionThread(snapshot: $0.value)) })
+        self.historyEntries = snapshot.historyEntries
         self.webViewsByTabID = webViewsByTabID
         if self.tabs.isEmpty {
             let fallback = BrowserTabState(initialURLString: fallbackURLString)
@@ -45,7 +48,8 @@ struct BrowserSessionState {
             tabs: tabs.map(\.snapshot),
             selectedTabID: selectedTabID,
             selectionPopover: selectionPopover?.snapshot,
-            threads: Dictionary(uniqueKeysWithValues: threads.map { ($0.key, $0.value.snapshot) })
+            threads: Dictionary(uniqueKeysWithValues: threads.map { ($0.key, $0.value.snapshot) }),
+            historyEntries: historyEntries
         )
     }
 

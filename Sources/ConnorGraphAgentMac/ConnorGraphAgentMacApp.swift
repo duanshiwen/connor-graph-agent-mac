@@ -1790,6 +1790,20 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func saveBrowserHistoryContent(entryID: UUID, text: String, sessionID: String) -> String? {
+        guard let paths = chatSessionRepository?.storagePaths else { return nil }
+        do {
+            let dirs = try paths.ensureSessionArtifactDirectories(sessionID: sessionID)
+            let historyDir = dirs.browser.appendingPathComponent("history")
+            try FileManager.default.createDirectory(at: historyDir, withIntermediateDirectories: true)
+            let fileURL = historyDir.appendingPathComponent("\(entryID.uuidString).txt")
+            try text.write(to: fileURL, atomically: true, encoding: .utf8)
+            return "browser/history/\(entryID.uuidString).txt"
+        } catch {
+            return nil
+        }
+    }
+
     private func rememberCurrentWorkspaceMode() {
         rememberWorkspaceMode(isBrowserVisible ? .browser : .conversation, for: selectedChatSessionID ?? activeChatSession.id)
     }
