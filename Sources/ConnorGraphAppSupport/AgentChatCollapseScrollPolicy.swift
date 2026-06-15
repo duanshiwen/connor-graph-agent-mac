@@ -1,5 +1,9 @@
 import Foundation
 
+public enum AgentChatCollapseScrollSchedule {
+    public static let decisionDelays: [TimeInterval] = [0.05, 0.2, 0.35]
+}
+
 public struct AgentChatCollapseScrollPolicy: Sendable {
     public enum Decision: Equatable, Sendable {
         case scrollToTop
