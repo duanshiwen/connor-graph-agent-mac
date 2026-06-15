@@ -58,13 +58,15 @@ public struct AppSessionAttachmentStore: Sendable {
         let fileExtension = sourceURL.pathExtension.isEmpty ? nil : sourceURL.pathExtension.lowercased()
         var extractedPath: String?
         var previewText: String?
-        var extractionStatus: AgentAttachmentExtractionStatus = .pending
-
-        let extraction = try AttachmentTextExtraction.extract(fileURL: originalURL, kind: kind, maxBytes: maxTextExtractionBytes)
-        extractionStatus = extraction.status
-        previewText = extraction.previewText
+        var extractionStatus: AgentAttachmentExtractionStatus = Self.shouldEnqueueExtraction(kind: kind) ? .pending : .pending
         var derivativeRefs: [AgentAttachmentDerivativeRef] = []
-        if let markdown = extraction.markdown {
+        var extractionReports: [AgentAttachmentExtractionReport] = []
+
+        if !Self.shouldEnqueueExtraction(kind: kind) {
+            let extraction = try AttachmentTextExtraction.extract(fileURL: originalURL, kind: kind, maxBytes: maxTextExtractionBytes)
+            extractionStatus = extraction.status
+            previewText = extraction.previewText
+            if let markdown = extraction.markdown {
             let currentExtractedURL = currentDerivativesDirectory.appendingPathComponent("extracted.md")
             let runExtractedURL = runDerivativesDirectory.appendingPathComponent("extracted.md")
             try markdown.write(to: currentExtractedURL, atomically: true, encoding: .utf8)
@@ -87,16 +89,18 @@ public struct AppSessionAttachmentStore: Sendable {
                 sha256: extractedDigest,
                 createdAt: now
             ))
+            }
+            let extractionReport = AgentAttachmentExtractionReport(
+                attachmentID: attachmentID,
+                engine: .builtinText,
+                status: extractionStatus,
+                capabilitiesUsed: AttachmentTextExtraction.supports(kind: kind) ? ["text"] : [],
+                derivativeRefs: derivativeRefs,
+                startedAt: now,
+                completedAt: now
+            )
+            extractionReports.append(extractionReport)
         }
-        let extractionReport = AgentAttachmentExtractionReport(
-            attachmentID: attachmentID,
-            engine: .builtinText,
-            status: extractionStatus,
-            capabilitiesUsed: AttachmentTextExtraction.supports(kind: kind) ? ["text"] : [],
-            derivativeRefs: derivativeRefs,
-            startedAt: now,
-            completedAt: now
-        )
 
         let manifest = AgentAttachmentManifest(
             id: attachmentID,
@@ -115,7 +119,7 @@ public struct AppSessionAttachmentStore: Sendable {
             extractedTextRelativePath: extractedPath,
             previewText: previewText,
             derivativeRefs: derivativeRefs,
-            extractionReports: [extractionReport],
+            extractionReports: extractionReports,
             createdAt: now,
             updatedAt: now,
             sourceDisplayPath: sourceURL.path
@@ -126,6 +130,16 @@ public struct AppSessionAttachmentStore: Sendable {
         encoder.dateEncodingStrategy = .iso8601
         let manifestData = try encoder.encode(manifest)
         try manifestData.write(to: attachmentDirectory.appendingPathComponent("manifest.json"), options: [.atomic])
+
+        if Self.shouldEnqueueExtraction(kind: kind) {
+            let job = AgentAttachmentExtractionJob(
+                sessionID: sessionID,
+                attachmentID: attachmentID,
+                requestedCapabilities: Self.requestedCapabilities(for: kind),
+                createdAt: now
+            )
+            try AttachmentExtractionJobStore(paths: paths).append(job)
+        }
 
         let lineEncoder = JSONEncoder()
         lineEncoder.dateEncodingStrategy = .iso8601
@@ -174,10 +188,31 @@ public struct AppSessionAttachmentStore: Sendable {
         case "pdf": return .pdf
         case "doc", "docx", "rtf", "pages", "epub": return .document
         case "xls", "xlsx", "numbers": return .spreadsheet
+        case "ppt", "pptx", "keynote": return .presentation
         case "zip", "tar", "gz", "7z": return .archive
         case "mp3", "wav", "m4a", "aac": return .audio
         case "mp4", "mov", "avi", "mkv": return .video
         default: return .unknown
+        }
+    }
+
+    public static func shouldEnqueueExtraction(kind: AgentAttachmentKind) -> Bool {
+        switch kind {
+        case .pdf, .document, .spreadsheet, .presentation:
+            return true
+        default:
+            return false
+        }
+    }
+
+    public static func requestedCapabilities(for kind: AgentAttachmentKind) -> [String] {
+        switch kind {
+        case .pdf:
+            return ["pdf-selectable-text", "document-to-markdown"]
+        case .document, .spreadsheet, .presentation:
+            return ["document-to-markdown"]
+        default:
+            return []
         }
     }
 
@@ -212,6 +247,27 @@ public struct AppSessionAttachmentStore: Sendable {
             case "ico": return "image/x-icon"
             case "tif", "tiff": return "image/tiff"
             default: return "image/*"
+            }
+        case .pdf:
+            return "application/pdf"
+        case .document:
+            switch fileExtension?.lowercased() {
+            case "docx": return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            case "doc": return "application/msword"
+            case "rtf": return "application/rtf"
+            default: return "application/document"
+            }
+        case .spreadsheet:
+            switch fileExtension?.lowercased() {
+            case "xlsx": return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            case "xls": return "application/vnd.ms-excel"
+            default: return "application/spreadsheet"
+            }
+        case .presentation:
+            switch fileExtension?.lowercased() {
+            case "pptx": return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            case "ppt": return "application/vnd.ms-powerpoint"
+            default: return "application/presentation"
             }
         default: return nil
         }
