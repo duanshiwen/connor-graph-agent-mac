@@ -105,9 +105,9 @@ public struct AttachmentImportPolicy: Sendable {
         case "png", "jpg", "jpeg", "gif", "webp", "heic", "bmp", "ico", "tif", "tiff":
             return .image
         case "pdf": return .pdf
-        case "doc", "docx", "rtf": return .document
-        case "xls", "xlsx": return .spreadsheet
-        case "ppt", "pptx": return .presentation
+        case "doc", "docx", "rtf", "pages": return .document
+        case "xls", "xlsx", "numbers": return .spreadsheet
+        case "ppt", "pptx", "keynote": return .presentation
         default:
             return nil
         }
@@ -139,10 +139,30 @@ public struct AttachmentImportPolicy: Sendable {
     }
 
     private func byteCount(url: URL, fileManager: FileManager) throws -> Int64 {
-        let values = try url.resourceValues(forKeys: [.fileSizeKey])
-        if let fileSize = values.fileSize { return Int64(fileSize) }
-        let attributes = try fileManager.attributesOfItem(atPath: url.path)
-        return (attributes[.size] as? NSNumber)?.int64Value ?? 0
+        let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey])
+        if values.isSymbolicLink == true { return 0 }
+        if values.isRegularFile == true {
+            if let fileSize = values.fileSize { return Int64(fileSize) }
+            let attributes = try fileManager.attributesOfItem(atPath: url.path)
+            return (attributes[.size] as? NSNumber)?.int64Value ?? 0
+        }
+        if values.isDirectory == true {
+            guard let enumerator = fileManager.enumerator(
+                at: url,
+                includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            ) else { return 0 }
+            var total: Int64 = 0
+            for case let childURL as URL in enumerator {
+                let childValues = try childURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
+                guard childValues.isSymbolicLink != true, childValues.isRegularFile == true else { continue }
+                if let fileSize = childValues.fileSize {
+                    total += Int64(fileSize)
+                }
+            }
+            return total
+        }
+        return 0
     }
 }
 
