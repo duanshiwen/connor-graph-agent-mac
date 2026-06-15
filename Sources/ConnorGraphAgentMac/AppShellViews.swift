@@ -737,6 +737,8 @@ private struct SidebarRow: View {
     var isSelected: Bool
     var action: () -> Void
 
+    @State private var isHovering = false
+
     var body: some View {
         Button(action: action) {
             HStack(spacing: 9) {
@@ -748,9 +750,7 @@ private struct SidebarRow: View {
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 if let count {
-                    Text("\(count)")
-                        .font(AppListTypography.rowCaption.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                    SidebarRowCountText(count: count, isVisible: isHovering)
                 }
             }
             .padding(.horizontal, 9)
@@ -759,6 +759,27 @@ private struct SidebarRow: View {
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityValue(accessibilityCountValue)
+        .onHover { isHovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: isHovering)
+    }
+
+    private var accessibilityCountValue: String {
+        count.map { "\($0)" } ?? ""
+    }
+}
+
+private struct SidebarRowCountText: View {
+    var count: Int
+    var isVisible: Bool
+
+    var body: some View {
+        Text("\(count)")
+            .font(AppListTypography.rowCaption.monospacedDigit())
+            .foregroundStyle(.secondary)
+            .opacity(isVisible ? 1 : 0)
+            .accessibilityHidden(true)
     }
 }
 
