@@ -33,3 +33,7 @@ import Testing
 
     #expect(decision == .scrollToTop)
 }
+
+@Test func collapseScrollScheduleIncludesPostAnimationLayoutProbe() {
+    #expect(AgentChatCollapseScrollSchedule.decisionDelays.contains { $0 >= 0.3 })
+}

@@ -634,8 +634,7 @@ private struct AgentChatConversationView: View {
         proxy: ScrollViewProxy,
         decision: @escaping () -> AgentChatCollapseScrollPolicy.Decision
     ) {
-        let delays: [TimeInterval] = [0.05, 0.2]
-        for delay in delays {
+        for delay in AgentChatCollapseScrollSchedule.decisionDelays {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                 switch decision() {
                 case .scrollToTop:
@@ -673,6 +672,10 @@ private struct AgentChatConversationView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
+                        Color.clear
+                            .frame(height: 0)
+                            .id(transcriptTopAnchorID)
+
                         if timelineSnapshot.isEmpty {
                             AgentChatEmptyStateView()
                                 .frame(maxWidth: .infinity, minHeight: 360)
@@ -705,7 +708,6 @@ private struct AgentChatConversationView: View {
                             }
                         }
                     }
-                    .id(transcriptTopAnchorID)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 0)
                     .padding(.vertical, AgentChatLayout.spaceXL)
