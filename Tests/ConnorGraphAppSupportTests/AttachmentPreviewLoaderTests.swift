@@ -74,6 +74,23 @@ struct AttachmentPreviewLoaderTests {
         #expect(model.bodyMode == .markdown)
     }
 
+    @Test func documentPreviewExposesStoredOriginalFileForNativePreview() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let paths = AppStoragePaths(applicationSupportDirectory: root)
+        try paths.ensureDirectoryHierarchy()
+        let source = root.appendingPathComponent("report.pdf")
+        try Data("%PDF-1.4".utf8).write(to: source)
+        let store = AppSessionAttachmentStore(paths: paths)
+        let manifest = try store.importFile(at: source, sessionID: "s")
+
+        let model = AttachmentPreviewLoader(store: store).load(sessionID: "s", attachment: manifest.messageRef)
+
+        #expect(model.manifest?.kind == .pdf)
+        #expect(model.sourceRelativePath == manifest.storedRelativePath)
+        #expect(model.sourceFileURL?.lastPathComponent == "report.pdf")
+        #expect(model.sourceFileURL.map { FileManager.default.fileExists(atPath: $0.path) } == true)
+    }
+
     @Test func failedDocumentPreviewIncludesExtractorError() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let paths = AppStoragePaths(applicationSupportDirectory: root)
