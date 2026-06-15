@@ -80,6 +80,34 @@ public struct AppChatSessionRepository: Sendable {
         try store.deleteSession(id: sessionID)
     }
 
+    public func loadBackgroundTasks(sessionID: String, limit: Int? = nil) throws -> [PersistedSessionBackgroundTask] {
+        try store.sessionBackgroundTasks(sessionID: sessionID, limit: limit)
+    }
+
+    public func saveBackgroundTask(_ task: PersistedSessionBackgroundTask) throws {
+        try store.upsertSessionBackgroundTask(task)
+    }
+
+    public func updateBackgroundTask(
+        sessionID: String,
+        taskID: String,
+        status: PersistedSessionBackgroundTaskStatus,
+        detail: String? = nil,
+        errorMessage: String? = nil,
+        updatedAt: Date = Date()
+    ) throws {
+        guard var task = try store.sessionBackgroundTasks(sessionID: sessionID).first(where: { $0.id == taskID }) else { return }
+        task.status = status
+        task.updatedAt = updatedAt
+        if let detail { task.detail = detail }
+        task.errorMessage = errorMessage
+        try store.upsertSessionBackgroundTask(task)
+    }
+
+    public func deleteBackgroundTasks(sessionID: String) throws {
+        try store.deleteSessionBackgroundTasks(sessionID: sessionID)
+    }
+
     @discardableResult
     public func updateGovernance(sessionID: String, mutate: (inout AgentSessionGovernanceMetadata) throws -> Void) throws -> AgentSession {
         guard var session = try loadSession(id: sessionID) else { throw AppChatSessionRepositoryError.sessionNotFound(sessionID) }

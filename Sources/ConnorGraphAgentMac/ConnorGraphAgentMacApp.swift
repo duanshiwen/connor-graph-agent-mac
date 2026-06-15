@@ -62,6 +62,7 @@ enum AppSessionBackgroundTaskStatus: String, Codable, Equatable, Sendable {
     case running
     case succeeded
     case failed
+    case interrupted
 
     var displayName: String {
         switch self {
@@ -69,6 +70,7 @@ enum AppSessionBackgroundTaskStatus: String, Codable, Equatable, Sendable {
         case .running: "运行中"
         case .succeeded: "已完成"
         case .failed: "失败"
+        case .interrupted: "已中断"
         }
     }
 
@@ -78,6 +80,7 @@ enum AppSessionBackgroundTaskStatus: String, Codable, Equatable, Sendable {
         case .running: "arrow.triangle.2.circlepath"
         case .succeeded: "checkmark.circle.fill"
         case .failed: "xmark.circle.fill"
+        case .interrupted: "pause.circle.fill"
         }
     }
 }
@@ -85,12 +88,90 @@ enum AppSessionBackgroundTaskStatus: String, Codable, Equatable, Sendable {
 struct AppSessionBackgroundTask: Identifiable, Equatable, Sendable {
     var id: String = UUID().uuidString
     var sessionID: String
+    var kind: String = "generic"
     var title: String
     var detail: String
     var status: AppSessionBackgroundTaskStatus = .queued
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
     var errorMessage: String?
+    var payloadJSON: String = "{}"
+
+    init(
+        id: String = UUID().uuidString,
+        sessionID: String,
+        kind: String = "generic",
+        title: String,
+        detail: String,
+        status: AppSessionBackgroundTaskStatus = .queued,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date(),
+        errorMessage: String? = nil,
+        payloadJSON: String = "{}"
+    ) {
+        self.id = id
+        self.sessionID = sessionID
+        self.kind = kind
+        self.title = title
+        self.detail = detail
+        self.status = status
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.errorMessage = errorMessage
+        self.payloadJSON = payloadJSON
+    }
+
+    init(persisted task: PersistedSessionBackgroundTask) {
+        self.init(
+            id: task.id,
+            sessionID: task.sessionID,
+            kind: task.kind,
+            title: task.title,
+            detail: task.detail,
+            status: AppSessionBackgroundTaskStatus(persisted: task.status),
+            createdAt: task.createdAt,
+            updatedAt: task.updatedAt,
+            errorMessage: task.errorMessage,
+            payloadJSON: task.payloadJSON
+        )
+    }
+
+    var persisted: PersistedSessionBackgroundTask {
+        PersistedSessionBackgroundTask(
+            id: id,
+            sessionID: sessionID,
+            kind: kind,
+            title: title,
+            detail: detail,
+            status: status.persisted,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            errorMessage: errorMessage,
+            payloadJSON: payloadJSON
+        )
+    }
+}
+
+private extension AppSessionBackgroundTaskStatus {
+    init(persisted status: PersistedSessionBackgroundTaskStatus) {
+        switch status {
+        case .queued: self = .queued
+        case .running: self = .running
+        case .succeeded: self = .succeeded
+        case .failed: self = .failed
+        case .interrupted: self = .interrupted
+        }
+    }
+
+    var persisted: PersistedSessionBackgroundTaskStatus {
+        switch self {
+        case .queued: .queued
+        case .running: .running
+        case .succeeded: .succeeded
+        case .failed: .failed
+        case .interrupted: .interrupted
+        }
+    }
 }
 
 @MainActor
@@ -1412,6 +1493,7 @@ final class AppViewModel: ObservableObject {
             selectedChatSessionID = selectedID
             if let selectedID, let session = try chatSessionRepository.loadSession(id: selectedID) {
                 try loadSessionCapsule(sessionID: selectedID)
+                try loadBackgroundTasks(sessionID: selectedID)
                 fallbackChatSession = session
                 nativeSessionManager = makeNativeSessionManager(for: session)
                 transcript = session.messages
@@ -1448,6 +1530,7 @@ final class AppViewModel: ObservableObject {
             rememberWorkspaceMode(.conversation, for: session.id)
             selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
             try loadSessionCapsule(sessionID: session.id)
+            try loadBackgroundTasks(sessionID: session.id)
             fallbackChatSession = session
             nativeSessionManager = makeNativeSessionManager(for: session)
             transcript = []
@@ -1501,12 +1584,36 @@ final class AppViewModel: ObservableObject {
             .contains { $0.status == .queued || $0.status == .running }
     }
 
+    private func loadBackgroundTasks(sessionID: String) throws {
+        guard let chatSessionRepository else { return }
+        let activeInMemoryTaskIDs = Set(
+            backgroundTasksBySessionID[sessionID, default: []]
+                .filter { $0.status == .queued || $0.status == .running }
+                .map(\.id)
+        )
+        var tasks = try chatSessionRepository.loadBackgroundTasks(sessionID: sessionID)
+            .map(AppSessionBackgroundTask.init(persisted:))
+        var didInterruptActiveTasks = false
+        for index in tasks.indices where (tasks[index].status == .queued || tasks[index].status == .running) && !activeInMemoryTaskIDs.contains(tasks[index].id) {
+            tasks[index].status = .interrupted
+            tasks[index].updatedAt = Date()
+            tasks[index].errorMessage = "应用重启或会话恢复后，旧后台任务不会自动继续执行。"
+            didInterruptActiveTasks = true
+            try chatSessionRepository.saveBackgroundTask(tasks[index].persisted)
+        }
+        backgroundTasksBySessionID[sessionID] = tasks
+        if didInterruptActiveTasks || !hasRunningTitleTask(sessionID: sessionID) {
+            regeneratingTitleSessionIDs.remove(sessionID)
+        }
+    }
+
     func regenerateChatSessionTitle(_ sessionID: String) {
         guard !hasRunningTitleTask(sessionID: sessionID) else { return }
         let task = enqueueBackgroundTask(
             sessionID: sessionID,
             title: "重新生成会话标题",
-            detail: "根据此会话中的所有用户 Prompt 生成 20 字以内标题。"
+            detail: "根据此会话中的所有用户 Prompt 生成 20 字以内标题。",
+            kind: "title_generation"
         )
         runTitleGenerationTask(taskID: task.id, sessionID: sessionID)
     }
@@ -1518,9 +1625,14 @@ final class AppViewModel: ObservableObject {
     }
 
     @discardableResult
-    private func enqueueBackgroundTask(sessionID: String, title: String, detail: String) -> AppSessionBackgroundTask {
-        let task = AppSessionBackgroundTask(sessionID: sessionID, title: title, detail: detail)
+    private func enqueueBackgroundTask(sessionID: String, title: String, detail: String, kind: String = "generic") -> AppSessionBackgroundTask {
+        let task = AppSessionBackgroundTask(sessionID: sessionID, kind: kind, title: title, detail: detail)
         backgroundTasksBySessionID[sessionID, default: []].append(task)
+        do {
+            try chatSessionRepository?.saveBackgroundTask(task.persisted)
+        } catch {
+            errorMessage = String(describing: error)
+        }
         if title == "重新生成会话标题" { regeneratingTitleSessionIDs.insert(sessionID) }
         return task
     }
@@ -1532,6 +1644,11 @@ final class AppViewModel: ObservableObject {
         if let detail { tasks[index].detail = detail }
         tasks[index].errorMessage = errorMessage
         backgroundTasksBySessionID[sessionID] = tasks
+        do {
+            try chatSessionRepository?.saveBackgroundTask(tasks[index].persisted)
+        } catch {
+            self.errorMessage = String(describing: error)
+        }
         if !hasRunningTitleTask(sessionID: sessionID) {
             regeneratingTitleSessionIDs.remove(sessionID)
         }
@@ -1814,6 +1931,7 @@ final class AppViewModel: ObservableObject {
             selectedChatSessionID = session.id
             agentEventTimelinesByProcessKey.removeAll(keepingCapacity: true)
             try loadSessionCapsule(sessionID: session.id)
+            try loadBackgroundTasks(sessionID: session.id)
             fallbackChatSession = session
             nativeSessionManager = makeNativeSessionManager(for: session)
             transcript = session.messages
