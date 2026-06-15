@@ -224,8 +224,6 @@ final class AppViewModel: ObservableObject {
     @Published var isLoadingLLMModelConnections: Bool = false
     @Published var chatSessions: [AgentSession] = []
     @Published var allChatSessions: [AgentSession] = []
-    @Published var chatSessionListItems: [AgentSessionListItem] = []
-    @Published var allChatSessionListItems: [AgentSessionListItem] = []
     @Published var selectedChatSessionID: String?
     @Published var regeneratingTitleSessionIDs: Set<String> = []
     @Published var backgroundTasksBySessionID: [String: [AppSessionBackgroundTask]] = [:]
@@ -1480,21 +1478,18 @@ final class AppViewModel: ObservableObject {
             transcript = activeChatTranscript
             chatSessions = [activeChatSession]
             allChatSessions = [activeChatSession]
-            let activeItem = AgentSessionListItem(session: activeChatSession)
-            chatSessionListItems = [activeItem]
-            allChatSessionListItems = [activeItem]
             selectedChatSessionID = activeChatSession.id
             return
         }
         do {
-            var listItems = try chatSessionRepository.loadSessionListItems(filter: sessionListFilter)
-            if listItems.isEmpty, sessionListFilter == .inbox || sessionListFilter == .all {
+            var sessions = try chatSessionRepository.loadSessions(filter: sessionListFilter)
+            if sessions.isEmpty, sessionListFilter == .inbox || sessionListFilter == .all {
                 let session = try chatSessionRepository.createSession()
-                listItems = [AgentSessionListItem(session: session)]
+                sessions = [session]
             }
-            chatSessionListItems = listItems
-            allChatSessionListItems = try chatSessionRepository.loadSessionListItems(filter: .all)
-            let selectedID = selectedChatSessionID ?? listItems.first?.id
+            chatSessions = sessions
+            allChatSessions = try chatSessionRepository.loadSessions(filter: .all)
+            let selectedID = selectedChatSessionID ?? sessions.first?.id
             selectedChatSessionID = selectedID
             if let selectedID, let session = try chatSessionRepository.loadSession(id: selectedID) {
                 try loadSessionCapsule(sessionID: selectedID)
@@ -1516,23 +1511,11 @@ final class AppViewModel: ObservableObject {
                 selectedSessionArtifactDirectories = nil
                 latestChatSummary = nil
             }
-            refreshLoadedChatSessionCaches(selectedSession: fallbackChatSession)
             chatSummaryMessage = nil
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
         }
-    }
-
-    private func refreshLoadedChatSessionCaches(selectedSession: AgentSession? = nil) {
-        var visible = chatSessionListItems.map(AgentSession.init(listItem:))
-        var all = allChatSessionListItems.map(AgentSession.init(listItem:))
-        if let selectedSession {
-            if let index = visible.firstIndex(where: { $0.id == selectedSession.id }) { visible[index] = selectedSession }
-            if let index = all.firstIndex(where: { $0.id == selectedSession.id }) { all[index] = selectedSession }
-        }
-        chatSessions = visible
-        allChatSessions = all
     }
 
     func newChatSession() {
@@ -1963,7 +1946,6 @@ final class AppViewModel: ObservableObject {
             selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
             restoreWorkspaceMode(for: session.id)
             syncLLMModelDisplayFromSession(sessionID)
-            refreshLoadedChatSessionCaches(selectedSession: session)
             chatSummaryMessage = nil
             lastContext = nil
             lastPromptInspection = nil
@@ -2568,9 +2550,7 @@ final class AppViewModel: ObservableObject {
             }
             reloadPendingApprovals()
             if let chatSessionRepository {
-                chatSessionListItems = try chatSessionRepository.loadSessionListItems(filter: sessionListFilter)
-                allChatSessionListItems = try chatSessionRepository.loadSessionListItems(filter: .all)
-                refreshLoadedChatSessionCaches(selectedSession: response.session)
+                chatSessions = try chatSessionRepository.loadSessions(filter: sessionListFilter)
             }
             errorMessage = nil
             Task { await runBackgroundJobs() }

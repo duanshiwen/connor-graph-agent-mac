@@ -227,8 +227,8 @@ private struct CraftPrimarySidebarView: View {
         }
     }
 
-    private var countSourceSessions: [AgentSessionListItem] {
-        viewModel.allChatSessionListItems.isEmpty ? viewModel.chatSessionListItems : viewModel.allChatSessionListItems
+    private var countSourceSessions: [AgentSession] {
+        viewModel.allChatSessions.isEmpty ? viewModel.chatSessions : viewModel.allChatSessions
     }
 
     private var allSessionsCount: Int {
@@ -301,25 +301,25 @@ private struct CraftSessionListPane: View {
                         .padding(.top, 80)
                 }
             } else {
-                List(filteredSessions) { item in
+                List(filteredSessions) { session in
                     CraftSessionRow(
-                        row: AgentChatSessionPresentation(listItem: item),
-                        isSelected: item.id == viewModel.selectedChatSessionID,
-                        isRunning: viewModel.isChatSessionSubmitting(item.id),
-                        isRegeneratingTitle: viewModel.regeneratingTitleSessionIDs.contains(item.id),
+                        row: AgentChatSessionPresentation(session: session),
+                        isSelected: session.id == viewModel.selectedChatSessionID,
+                        isRunning: viewModel.isChatSessionSubmitting(session.id),
+                        isRegeneratingTitle: viewModel.regeneratingTitleSessionIDs.contains(session.id),
                         labelDefinitions: viewModel.governanceConfig.labels,
                         onSelect: {
                             var transaction = Transaction()
                             transaction.disablesAnimations = true
                             withTransaction(transaction) {
-                                viewModel.selectChatSession(item.id)
+                                viewModel.selectChatSession(session.id)
                             }
                         },
-                        onRename: { title in viewModel.renameChatSession(item.id, title: title) },
-                        onSetStatus: { status in viewModel.setChatSessionStatus(item.id, status: status) },
-                        onToggleLabel: { labelID in viewModel.toggleChatSessionLabel(item.id, labelID: labelID) },
-                        onRegenerateTitle: { viewModel.regenerateChatSessionTitle(item.id) },
-                        onDelete: { viewModel.deleteChatSession(item.id) }
+                        onRename: { title in viewModel.renameChatSession(session.id, title: title) },
+                        onSetStatus: { status in viewModel.setChatSessionStatus(session.id, status: status) },
+                        onToggleLabel: { labelID in viewModel.toggleChatSessionLabel(session.id, labelID: labelID) },
+                        onRegenerateTitle: { viewModel.regenerateChatSessionTitle(session.id) },
+                        onDelete: { viewModel.deleteChatSession(session.id) }
                     )
                     .listRowInsets(EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8))
                     .listRowSeparator(.hidden)
@@ -329,17 +329,11 @@ private struct CraftSessionListPane: View {
                 .scrollContentBackground(.hidden)
             }
         }
+        .task { viewModel.reloadChatSessions() }
     }
 
-    private var filteredSessions: [AgentSessionListItem] {
-        let terms = viewModel.sessionSearchQuery
-            .split(whereSeparator: { $0.isWhitespace || $0.isNewline })
-            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        guard !terms.isEmpty else { return viewModel.chatSessionListItems }
-        return viewModel.chatSessionListItems.filter { item in
-            terms.allSatisfy { item.title.localizedCaseInsensitiveContains($0) }
-        }
+    private var filteredSessions: [AgentSession] {
+        AgentSessionTextSearchFilter().filter(viewModel.chatSessions, query: viewModel.sessionSearchQuery)
     }
 
     private var sessionListTitle: String {

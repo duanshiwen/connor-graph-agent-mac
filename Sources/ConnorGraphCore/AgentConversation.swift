@@ -181,42 +181,6 @@ public struct AgentSessionSummary: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
-public struct AgentSessionListItem: Codable, Sendable, Equatable, Identifiable {
-    public let id: String
-    public var title: String
-    public var createdAt: Date
-    public var updatedAt: Date
-    public var governance: AgentSessionGovernanceMetadata
-    public var messageCount: Int
-
-    public init(
-        id: String,
-        title: String,
-        createdAt: Date,
-        updatedAt: Date,
-        governance: AgentSessionGovernanceMetadata = .default,
-        messageCount: Int = 0
-    ) {
-        self.id = id
-        self.title = title
-        self.createdAt = createdAt
-        self.updatedAt = updatedAt
-        self.governance = governance
-        self.messageCount = messageCount
-    }
-
-    public init(session: AgentSession) {
-        self.init(
-            id: session.id,
-            title: session.title,
-            createdAt: session.createdAt,
-            updatedAt: session.updatedAt,
-            governance: session.governance,
-            messageCount: session.messages.count
-        )
-    }
-}
-
 public struct AgentSession: Codable, Sendable, Equatable, Identifiable {
     public let id: String
     public var title: String
@@ -239,17 +203,6 @@ public struct AgentSession: Codable, Sendable, Equatable, Identifiable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt ?? createdAt
         self.governance = governance
-    }
-
-    public init(listItem: AgentSessionListItem) {
-        self.init(
-            id: listItem.id,
-            title: listItem.title,
-            messages: [],
-            createdAt: listItem.createdAt,
-            updatedAt: listItem.updatedAt,
-            governance: listItem.governance
-        )
     }
 
     public var status: AgentSessionStatus {

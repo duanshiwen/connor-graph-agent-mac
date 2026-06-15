@@ -84,41 +84,53 @@ struct AgentMarkdownPreviewText: View {
     var font: Font = AgentChatTypography.body
     var monospacedFallback: Bool = false
     var lineLimit: Int? = nil
-    var maxRenderedBlocks: Int? = nil
 
     @MainActor
     private final class RenderCache {
         static let shared = RenderCache()
-        private let documentCache = AgentMarkdownCompiledDocumentCache(limit: 600)
+        private var inlineCache: [String: AttributedString] = [:]
+        private var blockCache: [String: [AgentMarkdownBlock]] = [:]
+        private let limit = 600
 
-        func document(_ markdown: String) -> AgentMarkdownCompiledDocument {
-            documentCache.document(for: markdown)
+        func inline(_ markdown: String) -> AttributedString {
+            if let cached = inlineCache[markdown] { return cached }
+            let rendered: AttributedString
+            if let attributed = try? AttributedString(
+                markdown: markdown,
+                options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+            ) {
+                rendered = attributed
+            } else {
+                rendered = AttributedString(markdown)
+            }
+            storeInline(rendered, for: markdown)
+            return rendered
         }
-    }
 
-    private var compiledDocument: AgentMarkdownCompiledDocument {
-        RenderCache.shared.document(markdown)
-    }
+        func blocks(_ markdown: String, parse: (String) -> [AgentMarkdownBlock]) -> [AgentMarkdownBlock] {
+            if let cached = blockCache[markdown] { return cached }
+            let parsed = parse(markdown)
+            storeBlocks(parsed, for: markdown)
+            return parsed
+        }
 
-    private var renderWindow: AgentMarkdownCompiledRenderWindow {
-        AgentMarkdownCompiledRenderWindowPolicy().window(
-            for: compiledDocument,
-            maxRenderedBlocks: maxRenderedBlocks
-        )
+        private func storeInline(_ value: AttributedString, for key: String) {
+            if inlineCache.count >= limit { inlineCache.removeAll(keepingCapacity: true) }
+            inlineCache[key] = value
+        }
+
+        private func storeBlocks(_ value: [AgentMarkdownBlock], for key: String) {
+            if blockCache.count >= limit { blockCache.removeAll(keepingCapacity: true) }
+            blockCache[key] = value
+        }
     }
 
     private var inlineRendered: AttributedString {
-        if let block = compiledDocument.blocks.first,
-           case .paragraph(_, let inline) = block.content {
-            return inline
-        }
-        if let attributed = try? AttributedString(
-            markdown: markdown,
-            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        ) {
-            return attributed
-        }
-        return AttributedString(markdown)
+        RenderCache.shared.inline(markdown)
+    }
+
+    private var blocks: [AgentMarkdownBlock] {
+        RenderCache.shared.blocks(markdown) { AgentMarkdownBlockParser().parse($0) }
     }
 
     @ViewBuilder
@@ -136,11 +148,8 @@ struct AgentMarkdownPreviewText: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             VStack(alignment: .leading, spacing: 7) {
-                ForEach(renderWindow.blocks) { block in
+                ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                     view(for: block)
-                }
-                if renderWindow.omittedBlockCount > 0 {
-                    omittedBlocksIndicator(count: renderWindow.omittedBlockCount)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -149,55 +158,55 @@ struct AgentMarkdownPreviewText: View {
     }
 
     @ViewBuilder
-    private func view(for block: AgentMarkdownCompiledBlock) -> some View {
-        switch block.content {
-        case .heading(let level, _, let inline):
-            Text(inline)
+    private func view(for block: AgentMarkdownBlock) -> some View {
+        switch block {
+        case .heading(let level, let text):
+            Text(renderInline(text))
                 .font(headingFont(level))
                 .frame(maxWidth: .infinity, alignment: .leading)
-        case .paragraph(_, let inline):
-            Text(inline)
+        case .paragraph(let text):
+            Text(renderInline(text))
                 .font(font)
                 .frame(maxWidth: .infinity, alignment: .leading)
-        case .unorderedItem(_, let inline):
+        case .unorderedItem(let text):
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("•")
                     .font(font)
                     .frame(width: 12, alignment: .trailing)
-                Text(inline)
+                Text(renderInline(text))
                     .font(font)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.leading, 4)
-        case .orderedItem(let number, _, let inline):
+        case .orderedItem(let number, let text):
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("\(number).")
                     .font(font)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
                     .frame(width: 22, alignment: .trailing)
-                Text(inline)
+                Text(renderInline(text))
                     .font(font)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.leading, 2)
-        case .quote(_, let inline):
+        case .quote(let text):
             HStack(alignment: .top, spacing: 8) {
                 Rectangle()
                     .fill(Color.secondary.opacity(0.28))
                     .frame(width: 3)
-                Text(inline)
+                Text(renderInline(text))
                     .font(font)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-        case .taskItem(let isCompleted, _, let inline):
+        case .taskItem(let isCompleted, let text):
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Image(systemName: isCompleted ? "checkmark.square.fill" : "square")
                     .font(font)
                     .foregroundStyle(isCompleted ? .secondary : .tertiary)
                     .frame(width: 14, alignment: .center)
-                Text(inline)
+                Text(renderInline(text))
                     .font(font)
                     .foregroundStyle(isCompleted ? .secondary : .primary)
                     .strikethrough(isCompleted, color: .secondary)
@@ -229,14 +238,6 @@ struct AgentMarkdownPreviewText: View {
         }
     }
 
-    private func omittedBlocksIndicator(count: Int) -> some View {
-        Text("已暂缓渲染后续 \(count) 个 Markdown 块，展开后完整显示")
-            .font(AgentChatTypography.meta)
-            .foregroundStyle(.secondary)
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
     private func markdownTableView(_ table: AgentMarkdownTable) -> some View {
         ScrollView(.horizontal, showsIndicators: true) {
             Grid(horizontalSpacing: 0, verticalSpacing: 0) {
@@ -263,7 +264,7 @@ struct AgentMarkdownPreviewText: View {
     }
 
     private func tableCell(_ text: String, isHeader: Bool, alignment: Alignment) -> some View {
-        Text(renderTableCellInline(text))
+        Text(renderInline(text))
             .font(isHeader ? font.weight(.semibold) : font)
             .frame(minWidth: 92, maxWidth: 220, alignment: alignment)
             .padding(.horizontal, 10)
@@ -297,14 +298,8 @@ struct AgentMarkdownPreviewText: View {
         }
     }
 
-    private func renderTableCellInline(_ text: String) -> AttributedString {
-        if let attributed = try? AttributedString(
-            markdown: text,
-            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        ) {
-            return attributed
-        }
-        return AttributedString(text)
+    private func renderInline(_ text: String) -> AttributedString {
+        RenderCache.shared.inline(text)
     }
 
 }
@@ -435,7 +430,7 @@ struct AgentChatMessageRow: View {
                 if isAssistantMessageExpanded {
                     assistantMarkdownBody
                 } else {
-                    assistantCollapsedMarkdownBody
+                    assistantMarkdownBody
                         .frame(maxHeight: assistantCollapsedMaxHeight, alignment: .top)
                         .clipped()
                         .overlay(alignment: .bottom) {
@@ -475,12 +470,6 @@ struct AgentChatMessageRow: View {
 
     private var assistantMarkdownBody: some View {
         AgentMarkdownPreviewText(markdown: row.message.content, font: AgentChatTypography.body)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.trailing, AgentChatLayout.spaceXS)
-    }
-
-    private var assistantCollapsedMarkdownBody: some View {
-        AgentMarkdownPreviewText(markdown: row.message.content, font: AgentChatTypography.body, maxRenderedBlocks: 16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.trailing, AgentChatLayout.spaceXS)
     }
