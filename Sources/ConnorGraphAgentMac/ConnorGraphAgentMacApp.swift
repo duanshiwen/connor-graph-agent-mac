@@ -57,6 +57,42 @@ struct AgentChatToast: Identifiable, Equatable {
     var systemImage: String
 }
 
+enum AppSessionBackgroundTaskStatus: String, Codable, Equatable, Sendable {
+    case queued
+    case running
+    case succeeded
+    case failed
+
+    var displayName: String {
+        switch self {
+        case .queued: "排队中"
+        case .running: "运行中"
+        case .succeeded: "已完成"
+        case .failed: "失败"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .queued: "clock"
+        case .running: "arrow.triangle.2.circlepath"
+        case .succeeded: "checkmark.circle.fill"
+        case .failed: "xmark.circle.fill"
+        }
+    }
+}
+
+struct AppSessionBackgroundTask: Identifiable, Equatable, Sendable {
+    var id: String = UUID().uuidString
+    var sessionID: String
+    var title: String
+    var detail: String
+    var status: AppSessionBackgroundTaskStatus = .queued
+    var createdAt: Date = Date()
+    var updatedAt: Date = Date()
+    var errorMessage: String?
+}
+
 @MainActor
 final class AppViewModel: ObservableObject {
     @Published var selection: SidebarItem? = .agentChat
@@ -109,6 +145,8 @@ final class AppViewModel: ObservableObject {
     @Published var allChatSessions: [AgentSession] = []
     @Published var selectedChatSessionID: String?
     @Published var regeneratingTitleSessionIDs: Set<String> = []
+    @Published var backgroundTasksBySessionID: [String: [AppSessionBackgroundTask]] = [:]
+    @Published var isBackgroundTasksPresented: Bool = false
     @Published var sessionListFilter: AgentSessionListFilter = .all
     @Published var sessionSearchQuery: String = ""
     @Published var governanceConfig: AppSessionGovernanceConfig = .default
@@ -1444,11 +1482,64 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func backgroundTasks(for sessionID: String?) -> [AppSessionBackgroundTask] {
+        guard let sessionID else { return [] }
+        return backgroundTasksBySessionID[sessionID, default: []]
+            .sorted { $0.createdAt > $1.createdAt }
+    }
+
+    var activeSessionBackgroundTasks: [AppSessionBackgroundTask] {
+        backgroundTasks(for: selectedChatSessionID)
+    }
+
+    var hasRunningActiveSessionBackgroundTask: Bool {
+        activeSessionBackgroundTasks.contains { $0.status == .queued || $0.status == .running }
+    }
+
+    func hasRunningBackgroundTask(sessionID: String) -> Bool {
+        backgroundTasksBySessionID[sessionID, default: []]
+            .contains { $0.status == .queued || $0.status == .running }
+    }
+
     func regenerateChatSessionTitle(_ sessionID: String) {
-        guard !regeneratingTitleSessionIDs.contains(sessionID) else { return }
-        regeneratingTitleSessionIDs.insert(sessionID)
+        guard !hasRunningTitleTask(sessionID: sessionID) else { return }
+        let task = enqueueBackgroundTask(
+            sessionID: sessionID,
+            title: "重新生成会话标题",
+            detail: "根据此会话中的所有用户 Prompt 生成 20 字以内标题。"
+        )
+        runTitleGenerationTask(taskID: task.id, sessionID: sessionID)
+    }
+
+    private func hasRunningTitleTask(sessionID: String) -> Bool {
+        backgroundTasksBySessionID[sessionID, default: []].contains { task in
+            task.title == "重新生成会话标题" && (task.status == .queued || task.status == .running)
+        }
+    }
+
+    @discardableResult
+    private func enqueueBackgroundTask(sessionID: String, title: String, detail: String) -> AppSessionBackgroundTask {
+        let task = AppSessionBackgroundTask(sessionID: sessionID, title: title, detail: detail)
+        backgroundTasksBySessionID[sessionID, default: []].append(task)
+        if title == "重新生成会话标题" { regeneratingTitleSessionIDs.insert(sessionID) }
+        return task
+    }
+
+    private func updateBackgroundTask(sessionID: String, taskID: String, status: AppSessionBackgroundTaskStatus, detail: String? = nil, errorMessage: String? = nil) {
+        guard var tasks = backgroundTasksBySessionID[sessionID], let index = tasks.firstIndex(where: { $0.id == taskID }) else { return }
+        tasks[index].status = status
+        tasks[index].updatedAt = Date()
+        if let detail { tasks[index].detail = detail }
+        tasks[index].errorMessage = errorMessage
+        backgroundTasksBySessionID[sessionID] = tasks
+        if !hasRunningTitleTask(sessionID: sessionID) {
+            regeneratingTitleSessionIDs.remove(sessionID)
+        }
+    }
+
+    private func runTitleGenerationTask(taskID: String, sessionID: String) {
+        updateBackgroundTask(sessionID: sessionID, taskID: taskID, status: .running)
         Task {
-            defer { regeneratingTitleSessionIDs.remove(sessionID) }
             do {
                 guard let chatSessionRepository,
                       let session = try chatSessionRepository.loadSession(id: sessionID)
@@ -1459,11 +1550,14 @@ final class AppViewModel: ObservableObject {
                     .filter { !$0.isEmpty }
                 guard !userPrompts.isEmpty else {
                     renameChatSession(sessionID, title: "新对话")
+                    updateBackgroundTask(sessionID: sessionID, taskID: taskID, status: .succeeded, detail: "没有用户 Prompt，已使用默认标题。")
                     return
                 }
                 let title = try await generateTitleFromUserPrompts(userPrompts)
                 renameChatSession(sessionID, title: title)
+                updateBackgroundTask(sessionID: sessionID, taskID: taskID, status: .succeeded, detail: "已更新为：\(title)")
             } catch {
+                updateBackgroundTask(sessionID: sessionID, taskID: taskID, status: .failed, errorMessage: String(describing: error))
                 errorMessage = String(describing: error)
             }
         }
@@ -1505,6 +1599,7 @@ final class AppViewModel: ObservableObject {
         do {
             try chatSessionRepository.deleteSession(sessionID: sessionID)
             regeneratingTitleSessionIDs.remove(sessionID)
+            backgroundTasksBySessionID.removeValue(forKey: sessionID)
             chatInputDraftsBySessionID.removeValue(forKey: sessionID)
             pendingAttachmentRefsBySessionID.removeValue(forKey: sessionID)
             agentEventTimelinesBySessionID.removeValue(forKey: sessionID)
