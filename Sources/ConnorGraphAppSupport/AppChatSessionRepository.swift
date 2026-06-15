@@ -66,6 +66,49 @@ public struct AppChatSessionRepository: Sendable {
     }
 
     @discardableResult
+    public func renameSession(sessionID: String, title: String, now: Date = Date()) throws -> AgentSession {
+        guard var session = try loadSession(id: sessionID) else { throw AppChatSessionRepositoryError.sessionNotFound(sessionID) }
+        session.title = title
+        session.updatedAt = now
+        try store.upsertSession(session)
+        try appendJournalEvent(runID: UUID().uuidString, sessionID: sessionID, kind: .sessionStatusChanged, action: "session_title_changed", message: "Session title changed", metadata: ["title": title])
+        return session
+    }
+
+    public func deleteSession(sessionID: String) throws {
+        guard try loadSession(id: sessionID) != nil else { throw AppChatSessionRepositoryError.sessionNotFound(sessionID) }
+        try store.deleteSession(id: sessionID)
+    }
+
+    public func loadBackgroundTasks(sessionID: String, limit: Int? = nil) throws -> [PersistedSessionBackgroundTask] {
+        try store.sessionBackgroundTasks(sessionID: sessionID, limit: limit)
+    }
+
+    public func saveBackgroundTask(_ task: PersistedSessionBackgroundTask) throws {
+        try store.upsertSessionBackgroundTask(task)
+    }
+
+    public func updateBackgroundTask(
+        sessionID: String,
+        taskID: String,
+        status: PersistedSessionBackgroundTaskStatus,
+        detail: String? = nil,
+        errorMessage: String? = nil,
+        updatedAt: Date = Date()
+    ) throws {
+        guard var task = try store.sessionBackgroundTasks(sessionID: sessionID).first(where: { $0.id == taskID }) else { return }
+        task.status = status
+        task.updatedAt = updatedAt
+        if let detail { task.detail = detail }
+        task.errorMessage = errorMessage
+        try store.upsertSessionBackgroundTask(task)
+    }
+
+    public func deleteBackgroundTasks(sessionID: String) throws {
+        try store.deleteSessionBackgroundTasks(sessionID: sessionID)
+    }
+
+    @discardableResult
     public func updateGovernance(sessionID: String, mutate: (inout AgentSessionGovernanceMetadata) throws -> Void) throws -> AgentSession {
         guard var session = try loadSession(id: sessionID) else { throw AppChatSessionRepositoryError.sessionNotFound(sessionID) }
         var governance = session.governance

@@ -57,6 +57,123 @@ struct AgentChatToast: Identifiable, Equatable {
     var systemImage: String
 }
 
+enum AppSessionBackgroundTaskStatus: String, Codable, Equatable, Sendable {
+    case queued
+    case running
+    case succeeded
+    case failed
+    case interrupted
+
+    var displayName: String {
+        switch self {
+        case .queued: "排队中"
+        case .running: "运行中"
+        case .succeeded: "已完成"
+        case .failed: "失败"
+        case .interrupted: "已中断"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .queued: "clock"
+        case .running: "arrow.triangle.2.circlepath"
+        case .succeeded: "checkmark.circle.fill"
+        case .failed: "xmark.circle.fill"
+        case .interrupted: "pause.circle.fill"
+        }
+    }
+}
+
+struct AppSessionBackgroundTask: Identifiable, Equatable, Sendable {
+    var id: String = UUID().uuidString
+    var sessionID: String
+    var kind: String = "generic"
+    var title: String
+    var detail: String
+    var status: AppSessionBackgroundTaskStatus = .queued
+    var createdAt: Date = Date()
+    var updatedAt: Date = Date()
+    var errorMessage: String?
+    var payloadJSON: String = "{}"
+
+    init(
+        id: String = UUID().uuidString,
+        sessionID: String,
+        kind: String = "generic",
+        title: String,
+        detail: String,
+        status: AppSessionBackgroundTaskStatus = .queued,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date(),
+        errorMessage: String? = nil,
+        payloadJSON: String = "{}"
+    ) {
+        self.id = id
+        self.sessionID = sessionID
+        self.kind = kind
+        self.title = title
+        self.detail = detail
+        self.status = status
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.errorMessage = errorMessage
+        self.payloadJSON = payloadJSON
+    }
+
+    init(persisted task: PersistedSessionBackgroundTask) {
+        self.init(
+            id: task.id,
+            sessionID: task.sessionID,
+            kind: task.kind,
+            title: task.title,
+            detail: task.detail,
+            status: AppSessionBackgroundTaskStatus(persisted: task.status),
+            createdAt: task.createdAt,
+            updatedAt: task.updatedAt,
+            errorMessage: task.errorMessage,
+            payloadJSON: task.payloadJSON
+        )
+    }
+
+    var persisted: PersistedSessionBackgroundTask {
+        PersistedSessionBackgroundTask(
+            id: id,
+            sessionID: sessionID,
+            kind: kind,
+            title: title,
+            detail: detail,
+            status: status.persisted,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            errorMessage: errorMessage,
+            payloadJSON: payloadJSON
+        )
+    }
+}
+
+private extension AppSessionBackgroundTaskStatus {
+    init(persisted status: PersistedSessionBackgroundTaskStatus) {
+        switch status {
+        case .queued: self = .queued
+        case .running: self = .running
+        case .succeeded: self = .succeeded
+        case .failed: self = .failed
+        case .interrupted: self = .interrupted
+        }
+    }
+
+    var persisted: PersistedSessionBackgroundTaskStatus {
+        switch self {
+        case .queued: .queued
+        case .running: .running
+        case .succeeded: .succeeded
+        case .failed: .failed
+        case .interrupted: .interrupted
+        }
+    }
+}
+
 @MainActor
 final class AppViewModel: ObservableObject {
     @Published var selection: SidebarItem? = .agentChat
@@ -108,6 +225,9 @@ final class AppViewModel: ObservableObject {
     @Published var chatSessions: [AgentSession] = []
     @Published var allChatSessions: [AgentSession] = []
     @Published var selectedChatSessionID: String?
+    @Published var regeneratingTitleSessionIDs: Set<String> = []
+    @Published var backgroundTasksBySessionID: [String: [AppSessionBackgroundTask]] = [:]
+    @Published var isBackgroundTasksPresented: Bool = false
     @Published var sessionListFilter: AgentSessionListFilter = .all
     @Published var sessionSearchQuery: String = ""
     @Published var governanceConfig: AppSessionGovernanceConfig = .default
@@ -1373,6 +1493,7 @@ final class AppViewModel: ObservableObject {
             selectedChatSessionID = selectedID
             if let selectedID, let session = try chatSessionRepository.loadSession(id: selectedID) {
                 try loadSessionCapsule(sessionID: selectedID)
+                try loadBackgroundTasks(sessionID: selectedID)
                 fallbackChatSession = session
                 nativeSessionManager = makeNativeSessionManager(for: session)
                 transcript = session.messages
@@ -1409,6 +1530,7 @@ final class AppViewModel: ObservableObject {
             rememberWorkspaceMode(.conversation, for: session.id)
             selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
             try loadSessionCapsule(sessionID: session.id)
+            try loadBackgroundTasks(sessionID: session.id)
             fallbackChatSession = session
             nativeSessionManager = makeNativeSessionManager(for: session)
             transcript = []
@@ -1425,6 +1547,193 @@ final class AppViewModel: ObservableObject {
             errorMessage = String(describing: error)
         }
     };
+
+    func renameChatSession(_ sessionID: String, title: String) {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let chatSessionRepository else { return }
+        do {
+            let updated = try chatSessionRepository.renameSession(sessionID: sessionID, title: trimmed)
+            if selectedChatSessionID == sessionID {
+                fallbackChatSession = updated
+                nativeSessionManager = makeNativeSessionManager(for: updated)
+                transcript = updated.messages
+            }
+            reloadChatSessions()
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func backgroundTasks(for sessionID: String?) -> [AppSessionBackgroundTask] {
+        guard let sessionID else { return [] }
+        return backgroundTasksBySessionID[sessionID, default: []]
+            .sorted { $0.createdAt > $1.createdAt }
+    }
+
+    var activeSessionBackgroundTasks: [AppSessionBackgroundTask] {
+        backgroundTasks(for: selectedChatSessionID)
+    }
+
+    var hasRunningActiveSessionBackgroundTask: Bool {
+        activeSessionBackgroundTasks.contains { $0.status == .queued || $0.status == .running }
+    }
+
+    func hasRunningBackgroundTask(sessionID: String) -> Bool {
+        backgroundTasksBySessionID[sessionID, default: []]
+            .contains { $0.status == .queued || $0.status == .running }
+    }
+
+    private func loadBackgroundTasks(sessionID: String) throws {
+        guard let chatSessionRepository else { return }
+        let activeInMemoryTaskIDs = Set(
+            backgroundTasksBySessionID[sessionID, default: []]
+                .filter { $0.status == .queued || $0.status == .running }
+                .map(\.id)
+        )
+        var tasks = try chatSessionRepository.loadBackgroundTasks(sessionID: sessionID)
+            .map(AppSessionBackgroundTask.init(persisted:))
+        var didInterruptActiveTasks = false
+        for index in tasks.indices where (tasks[index].status == .queued || tasks[index].status == .running) && !activeInMemoryTaskIDs.contains(tasks[index].id) {
+            tasks[index].status = .interrupted
+            tasks[index].updatedAt = Date()
+            tasks[index].errorMessage = "应用重启或会话恢复后，旧后台任务不会自动继续执行。"
+            didInterruptActiveTasks = true
+            try chatSessionRepository.saveBackgroundTask(tasks[index].persisted)
+        }
+        backgroundTasksBySessionID[sessionID] = tasks
+        if didInterruptActiveTasks || !hasRunningTitleTask(sessionID: sessionID) {
+            regeneratingTitleSessionIDs.remove(sessionID)
+        }
+    }
+
+    func regenerateChatSessionTitle(_ sessionID: String) {
+        guard !hasRunningTitleTask(sessionID: sessionID) else { return }
+        let task = enqueueBackgroundTask(
+            sessionID: sessionID,
+            title: "重新生成会话标题",
+            detail: "根据此会话中的所有用户 Prompt 生成 20 字以内标题。",
+            kind: "title_generation"
+        )
+        runTitleGenerationTask(taskID: task.id, sessionID: sessionID)
+    }
+
+    private func hasRunningTitleTask(sessionID: String) -> Bool {
+        backgroundTasksBySessionID[sessionID, default: []].contains { task in
+            task.kind == "title_generation" && (task.status == .queued || task.status == .running)
+        }
+    }
+
+    @discardableResult
+    private func enqueueBackgroundTask(sessionID: String, title: String, detail: String, kind: String = "generic") -> AppSessionBackgroundTask {
+        let task = AppSessionBackgroundTask(sessionID: sessionID, kind: kind, title: title, detail: detail)
+        backgroundTasksBySessionID[sessionID, default: []].append(task)
+        do {
+            try chatSessionRepository?.saveBackgroundTask(task.persisted)
+        } catch {
+            errorMessage = String(describing: error)
+        }
+        if kind == "title_generation" { regeneratingTitleSessionIDs.insert(sessionID) }
+        return task
+    }
+
+    private func updateBackgroundTask(sessionID: String, taskID: String, status: AppSessionBackgroundTaskStatus, detail: String? = nil, errorMessage: String? = nil) {
+        guard var tasks = backgroundTasksBySessionID[sessionID], let index = tasks.firstIndex(where: { $0.id == taskID }) else { return }
+        tasks[index].status = status
+        tasks[index].updatedAt = Date()
+        if let detail { tasks[index].detail = detail }
+        tasks[index].errorMessage = errorMessage
+        backgroundTasksBySessionID[sessionID] = tasks
+        do {
+            try chatSessionRepository?.saveBackgroundTask(tasks[index].persisted)
+        } catch {
+            self.errorMessage = String(describing: error)
+        }
+        if !hasRunningTitleTask(sessionID: sessionID) {
+            regeneratingTitleSessionIDs.remove(sessionID)
+        }
+    }
+
+    private func runTitleGenerationTask(taskID: String, sessionID: String) {
+        updateBackgroundTask(sessionID: sessionID, taskID: taskID, status: .running)
+        Task {
+            do {
+                guard let chatSessionRepository,
+                      let session = try chatSessionRepository.loadSession(id: sessionID)
+                else { return }
+                let userPrompts = session.messages
+                    .filter { $0.role == .user }
+                    .map { $0.content.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                guard !userPrompts.isEmpty else {
+                    renameChatSession(sessionID, title: "新对话")
+                    updateBackgroundTask(sessionID: sessionID, taskID: taskID, status: .succeeded, detail: "没有用户 Prompt，已使用默认标题。")
+                    return
+                }
+                let title = try await generateTitleFromUserPrompts(userPrompts)
+                renameChatSession(sessionID, title: title)
+                updateBackgroundTask(sessionID: sessionID, taskID: taskID, status: .succeeded, detail: "已更新为：\(title)")
+            } catch {
+                updateBackgroundTask(sessionID: sessionID, taskID: taskID, status: .failed, errorMessage: String(describing: error))
+                errorMessage = String(describing: error)
+            }
+        }
+    }
+
+    private func generateTitleFromUserPrompts(_ prompts: [String]) async throws -> String {
+        let provider = Self.makeLLMProvider(settingsRepository: llmSettingsRepository)
+        let joinedPrompts = prompts.enumerated().map { index, prompt in
+            "用户 Prompt \(index + 1):\n\(prompt)"
+        }.joined(separator: "\n\n---\n\n")
+        let prompt = """
+        你是会话标题生成器。请根据下面这个对话中所有用户 Prompt，生成一个中文会话标题。
+
+        要求：
+        - 20 个汉字以内
+        - 不要引号
+        - 不要句号
+        - 不要解释
+        - 只输出标题本身
+
+        \(joinedPrompts)
+        """
+        let response = try await provider.complete(prompt: prompt, context: AgentContext(query: "session-title", items: []))
+        return sanitizedSessionTitle(response.text)
+    }
+
+    private func sanitizedSessionTitle(_ raw: String) -> String {
+        var title = raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\"'“”‘’`。，.：:；;！!？?"))
+        if title.count > 20 {
+            title = String(title.prefix(20))
+        }
+        return title.isEmpty ? "新对话" : title
+    }
+
+    func deleteChatSession(_ sessionID: String) {
+        guard let chatSessionRepository else { return }
+        do {
+            try chatSessionRepository.deleteSession(sessionID: sessionID)
+            regeneratingTitleSessionIDs.remove(sessionID)
+            backgroundTasksBySessionID.removeValue(forKey: sessionID)
+            chatInputDraftsBySessionID.removeValue(forKey: sessionID)
+            pendingAttachmentRefsBySessionID.removeValue(forKey: sessionID)
+            agentEventTimelinesBySessionID.removeValue(forKey: sessionID)
+            agentEventTimelinesByProcessKey = agentEventTimelinesByProcessKey.filter { key, _ in !key.hasPrefix("\(sessionID):") }
+            if selectedChatSessionID == sessionID {
+                selectedChatSessionID = nil
+                transcript = []
+                agentEventTimeline = []
+                latestChatSummary = nil
+                selectedSessionArtifactDirectories = nil
+            }
+            reloadChatSessions()
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
 
     private func loadSessionCapsule(sessionID: String) throws {
         guard let chatSessionRepository else { return }
@@ -1622,6 +1931,7 @@ final class AppViewModel: ObservableObject {
             selectedChatSessionID = session.id
             agentEventTimelinesByProcessKey.removeAll(keepingCapacity: true)
             try loadSessionCapsule(sessionID: session.id)
+            try loadBackgroundTasks(sessionID: session.id)
             fallbackChatSession = session
             nativeSessionManager = makeNativeSessionManager(for: session)
             transcript = session.messages
@@ -1651,11 +1961,18 @@ final class AppViewModel: ObservableObject {
     }
 
     func setSelectedSessionStatus(_ status: AgentSessionStatus) {
-        guard let selectedChatSessionID, let chatSessionRepository else { return }
+        guard let selectedChatSessionID else { return }
+        setChatSessionStatus(selectedChatSessionID, status: status)
+    }
+
+    func setChatSessionStatus(_ sessionID: String, status: AgentSessionStatus) {
+        guard let chatSessionRepository else { return }
         do {
-            let session = try chatSessionRepository.setStatus(sessionID: selectedChatSessionID, status: status)
-            self.selectedChatSessionID = session.id
-            fallbackChatSession = session
+            let session = try chatSessionRepository.setStatus(sessionID: sessionID, status: status)
+            if selectedChatSessionID == sessionID {
+                self.selectedChatSessionID = session.id
+                fallbackChatSession = session
+            }
             reloadChatSessions()
             appendGovernanceEvent(.sessionStatusChanged(AgentSessionGovernanceEvent(sessionID: session.id, message: "状态已更新为 \(status.displayName)", status: status)))
             evaluateAutomation(ProductOSAutomationEventContext(triggerKind: .sessionStatusChanged, sessionID: session.id, status: status))
@@ -1678,9 +1995,14 @@ final class AppViewModel: ObservableObject {
     }
 
     func toggleSelectedSessionLabel(_ labelID: String) {
-        guard let selectedChatSessionID, let chatSessionRepository else { return }
+        guard let selectedChatSessionID else { return }
+        toggleChatSessionLabel(selectedChatSessionID, labelID: labelID)
+    }
+
+    func toggleChatSessionLabel(_ sessionID: String, labelID: String) {
+        guard let chatSessionRepository else { return }
         do {
-            guard let session = try chatSessionRepository.loadSession(id: selectedChatSessionID) else { return }
+            guard let session = try chatSessionRepository.loadSession(id: sessionID) else { return }
             var labels = session.governance.labels
             let didRemove: Bool
             if labels.contains(where: { $0.id == labelID }) {
@@ -1690,8 +2012,10 @@ final class AppViewModel: ObservableObject {
                 labels.append(AgentSessionLabel(id: labelID))
                 didRemove = false
             }
-            let updated = try chatSessionRepository.setLabels(sessionID: selectedChatSessionID, labels: labels)
-            fallbackChatSession = updated
+            let updated = try chatSessionRepository.setLabels(sessionID: sessionID, labels: labels)
+            if selectedChatSessionID == sessionID {
+                fallbackChatSession = updated
+            }
             reloadChatSessions()
             appendGovernanceEvent(.sessionLabelsChanged(AgentSessionGovernanceEvent(sessionID: updated.id, message: "标签已更新：\(updated.governance.labels.map(\.displayText).joined(separator: ", "))", labels: updated.governance.labels)))
             evaluateAutomation(ProductOSAutomationEventContext(triggerKind: didRemove ? .sessionLabelRemoved : .sessionLabelAdded, sessionID: updated.id, labelID: labelID))
@@ -2145,6 +2469,8 @@ final class AppViewModel: ObservableObject {
         refreshSelectedSubmittingState()
         let optimisticTranscript = transcript
         let baselineMessageCount = manager.session.messages.count
+        let baselineUserMessageCount = manager.session.messages.filter { $0.role == .user }.count
+        let shouldAutoGenerateInitialTitle = baselineUserMessageCount == 0
         let optimisticUserMessage = AgentMessage(
             role: .user,
             content: displayPrompt?.isEmpty == false ? displayPrompt! : prompt,
@@ -2188,6 +2514,9 @@ final class AppViewModel: ObservableObject {
                         self.activeChatRunIDsBySessionID[submittingSessionID] = runID
                         self.activeChatBackendsByRunID[runID] = liveBackend
                         self.activeChatBackendsBySessionID[submittingSessionID] = liveBackend
+                        if shouldAutoGenerateInitialTitle {
+                            self.regenerateChatSessionTitle(submittingSessionID)
+                        }
                         if let reason = self.pendingChatCancellationReasonsBySessionID[submittingSessionID] {
                             self.cancelRunningChatRun(sessionID: submittingSessionID, runID: runID, reason: reason)
                         }
