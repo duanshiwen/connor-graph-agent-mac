@@ -215,30 +215,51 @@ private struct AgentAttachmentPreviewOverlay: View {
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            Color(nsColor: .windowBackgroundColor)
-                .opacity(0.98)
+            Color.black.opacity(0.18)
                 .ignoresSafeArea()
+                .onTapGesture(perform: onClose)
 
-            AgentAttachmentPreviewSheetView(model: model, onRetryExtraction: onRetryExtraction)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .padding(.top, AgentChatLayout.spaceXL)
-                .padding(.horizontal, AgentChatLayout.spaceXL)
-                .padding(.bottom, AgentChatLayout.spaceXL)
+            VStack(spacing: 0) {
+                HStack {
+                    Spacer()
+                    Label("Attachment", systemImage: "paperclip")
+                        .font(AgentChatTypography.meta.weight(.medium))
+                        .padding(.horizontal, AgentChatLayout.spaceS)
+                        .frame(height: AgentChatLayout.chipHeight)
+                        .background(Color.clear, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
+                                .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+                        )
+                    Spacer()
 
-            Button(action: onClose) {
-                Image(systemName: "xmark")
-                    .font(.system(size: AgentChatTypography.controlIconSize, weight: .semibold))
-                    .symbolRenderingMode(.hierarchical)
-                    .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
-                    .background(.regularMaterial, in: Circle())
-                    .overlay(Circle().stroke(Color.secondary.opacity(0.18), lineWidth: 1))
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: AgentChatTypography.controlIconSize, weight: .semibold))
+                            .symbolRenderingMode(.hierarchical)
+                            .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
+                    }
+                    .buttonStyle(.plain)
+                    .frame(width: AgentChatLayout.hitTargetSize, height: AgentChatLayout.hitTargetSize)
+                    .contentShape(Rectangle())
+                    .keyboardShortcut(.escape, modifiers: [])
+                    .accessibilityLabel("关闭附件预览")
+                    .help("关闭预览")
+                }
+                .padding(AgentChatLayout.spaceM)
+
+                AgentAttachmentPreviewSheetView(model: model, onRetryExtraction: onRetryExtraction)
+                    .frame(maxWidth: 900, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(.horizontal, AgentChatLayout.spaceXL)
+                    .padding(.bottom, AgentChatLayout.spaceXL)
             }
-            .buttonStyle(.plain)
-            .keyboardShortcut(.cancelAction)
-            .accessibilityLabel("关闭附件预览")
-            .help("关闭预览")
-            .padding(.top, AgentChatLayout.spaceL)
-            .padding(.trailing, AgentChatLayout.spaceL)
+            .background(Color(nsColor: .windowBackgroundColor).opacity(0.96), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusXL, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: AgentChatLayout.radiusXL, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.20), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.18), radius: 24, x: 0, y: 14)
+            .padding(AgentChatLayout.spaceXL)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
