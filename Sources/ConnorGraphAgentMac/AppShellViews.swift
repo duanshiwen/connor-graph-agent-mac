@@ -322,7 +322,7 @@ private struct CraftSessionListPane: View {
                         onDelete: { viewModel.deleteChatSession(session.id) }
                     )
                     .listRowInsets(EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8))
-                    .listRowSeparator(.visible, edges: .bottom)
+                    .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
                 }
                 .listStyle(.plain)
@@ -412,7 +412,7 @@ private struct CraftSessionRow: View {
                 Button {
                     onRegenerateTitle()
                 } label: {
-                    Label("标题", systemImage: "sparkles")
+                    Label("重设标题", systemImage: "sparkles")
                 }
                 .disabled(isRegeneratingTitle)
                 .tint(.orange)
@@ -476,7 +476,7 @@ private struct CraftSessionRow: View {
         Button {
             onRegenerateTitle()
         } label: {
-            Label("重新生成标题", systemImage: "sparkles")
+            Label("重设标题", systemImage: "sparkles")
         }
         .disabled(isRegeneratingTitle)
 
