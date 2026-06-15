@@ -247,6 +247,28 @@ struct BrowserTabChip: View {
     private var tabBorder: Color { isSelected ? Color.secondary.opacity(0.18) : Color.secondary.opacity(0.07) }
 }
 
+struct BrowserToolbarIconButtonLabel: View {
+    var systemImage: String
+    var isActive: Bool = false
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(BrowserFloatingTypography.toolbarIcon)
+            .symbolRenderingMode(.monochrome)
+            .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
+            .frame(width: 28, height: 28)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(isActive ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.055))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .stroke(isActive ? Color.accentColor.opacity(0.22) : Color.secondary.opacity(0.09), lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+    }
+}
+
 struct BrowserAskAIButtonLabel: View {
     var body: some View {
         HStack(spacing: 6) {
