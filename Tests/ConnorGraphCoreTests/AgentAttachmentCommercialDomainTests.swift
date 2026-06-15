@@ -71,6 +71,73 @@ struct AgentAttachmentCommercialDomainTests {
         #expect(decoded.remoteFileRefs.first?.zdrEligible == false)
     }
 
+    @Test func presentationAndBuiltinPDFTextRoundTripThroughCodable() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_200)
+        let report = AgentAttachmentExtractionReport(
+            attachmentID: "slides",
+            engine: .builtinPDFText,
+            status: .unsupported,
+            warnings: ["No selectable PDF text"],
+            startedAt: now,
+            completedAt: now
+        )
+        let manifest = AgentAttachmentManifest(
+            id: "slides",
+            displayName: "deck.pptx",
+            originalFilename: "deck.pptx",
+            normalizedFilename: "deck.pptx",
+            kind: .presentation,
+            mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            fileExtension: "pptx",
+            byteCount: 2048,
+            sha256: "hash",
+            lifecycleStatus: .ready,
+            extractionStatus: .unsupported,
+            storedRelativePath: "attachments/slides/original/deck.pptx",
+            manifestRelativePath: "attachments/slides/manifest.json",
+            extractionReports: [report],
+            createdAt: now,
+            updatedAt: now
+        )
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(AgentAttachmentManifest.self, from: encoder.encode(manifest))
+
+        #expect(decoded.kind == .presentation)
+        #expect(decoded.extractionReports.first?.engine == .builtinPDFText)
+        #expect(decoded.messageRef.kind == .presentation)
+    }
+
+    @Test func extractionJobRoundTripsThroughCodable() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_300)
+        let job = AgentAttachmentExtractionJob(
+            id: "job-1",
+            sessionID: "session",
+            attachmentID: "attachment",
+            requestedCapabilities: ["document-to-markdown"],
+            status: .running,
+            attempt: 2,
+            maxAttempts: 4,
+            createdAt: now,
+            startedAt: now,
+            completedAt: nil,
+            lastError: "previous failure"
+        )
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(AgentAttachmentExtractionJob.self, from: encoder.encode(job))
+
+        #expect(decoded == job)
+        #expect(decoded.status == .running)
+        #expect(decoded.requestedCapabilities == ["document-to-markdown"])
+    }
+
     @Test func legacyAttachmentManifestDecodesWithEmptyCommercialCollections() throws {
         let json = """
         {
