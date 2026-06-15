@@ -7,10 +7,40 @@ public enum AgentModelMessageRole: String, Codable, Sendable, Equatable {
     case tool
 }
 
+public struct AgentModelMessageContentPart: Codable, Sendable, Equatable {
+    public enum Kind: String, Codable, Sendable, Equatable {
+        case text
+        case imageDataURL = "image_data_url"
+    }
+
+    public var kind: Kind
+    public var text: String?
+    public var dataURL: String?
+    public var mimeType: String?
+    public var detail: String?
+
+    public init(kind: Kind, text: String? = nil, dataURL: String? = nil, mimeType: String? = nil, detail: String? = nil) {
+        self.kind = kind
+        self.text = text
+        self.dataURL = dataURL
+        self.mimeType = mimeType
+        self.detail = detail
+    }
+
+    public static func text(_ text: String) -> AgentModelMessageContentPart {
+        AgentModelMessageContentPart(kind: .text, text: text)
+    }
+
+    public static func imageDataURL(_ dataURL: String, mimeType: String?, detail: String? = nil) -> AgentModelMessageContentPart {
+        AgentModelMessageContentPart(kind: .imageDataURL, dataURL: dataURL, mimeType: mimeType, detail: detail)
+    }
+}
+
 public struct AgentModelMessage: Codable, Sendable, Equatable, Identifiable {
     public var id: String
     public var role: AgentModelMessageRole
     public var content: String
+    public var contentParts: [AgentModelMessageContentPart]?
     public var toolCallID: String?
     public var name: String?
     public var toolCalls: [AgentToolCall]?
@@ -19,6 +49,7 @@ public struct AgentModelMessage: Codable, Sendable, Equatable, Identifiable {
         id: String = UUID().uuidString,
         role: AgentModelMessageRole,
         content: String,
+        contentParts: [AgentModelMessageContentPart]? = nil,
         toolCallID: String? = nil,
         name: String? = nil,
         toolCalls: [AgentToolCall]? = nil
@@ -26,6 +57,7 @@ public struct AgentModelMessage: Codable, Sendable, Equatable, Identifiable {
         self.id = id
         self.role = role
         self.content = content
+        self.contentParts = contentParts
         self.toolCallID = toolCallID
         self.name = name
         self.toolCalls = toolCalls

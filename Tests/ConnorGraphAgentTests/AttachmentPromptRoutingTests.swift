@@ -23,6 +23,36 @@ struct AttachmentPromptRoutingTests {
         #expect(rendered.contains("files/a"))
     }
 
+    @Test func imageAttachmentsRenderAsVisionDeliveryAndProjectToContentParts() throws {
+        let dataURL = "data:image/png;base64,aGVsbG8="
+        let plan = AttachmentContextPlan(imageBlocks: [
+            AttachmentImageBlock(
+                attachmentID: "img-1",
+                displayName: "diagram.png",
+                mimeType: "image/png",
+                dataURL: dataURL,
+                sourceRelativePath: "attachments/img-1/original/diagram.png"
+            )
+        ])
+        let rendered = AgentAttachmentContextSection(plan: plan).renderedText
+        #expect(rendered.contains("Vision image attachments"))
+        #expect(rendered.contains("diagram.png"))
+        #expect(!rendered.contains("aGVsbG8="))
+
+        let request = AgentTranscriptProjector().project(
+            AgentPromptAssembly(
+                conversation: AgentConversationSection(),
+                userRequest: AgentUserRequestSection(text: "Describe it."),
+                attachmentContext: AgentAttachmentContextSection(plan: plan)
+            ),
+            tools: []
+        )
+        let user = try #require(request.messages.last)
+        #expect(user.contentParts?.count == 2)
+        #expect(user.contentParts?.last?.kind == .imageDataURL)
+        #expect(user.contentParts?.last?.dataURL == dataURL)
+    }
+
     @Test func renderedAttachmentContextMarksTruncatedInlineBlocks() {
         let plan = AttachmentContextPlan(inlineBlocks: [
             AttachmentInlineBlock(
