@@ -242,10 +242,14 @@ struct AgentChatComposerView: View {
     private func submitLocalChatInput() {
         let prompt = localChatInput.trimmingCharacters(in: .whitespacesAndNewlines)
         let displayPrompt = localChatInput
+        let submittedText = localChatInput
+        localChatInput = ""
+        viewModel.updateSelectedChatInputDraft("")
         Task {
             let runID = await viewModel.submitChat(prompt: prompt, clearComposer: true, displayPrompt: displayPrompt)
-            if runID != nil {
-                localChatInput = ""
+            if runID == nil, localChatInput.isEmpty {
+                localChatInput = submittedText
+                viewModel.updateSelectedChatInputDraft(submittedText)
             }
         }
     }
