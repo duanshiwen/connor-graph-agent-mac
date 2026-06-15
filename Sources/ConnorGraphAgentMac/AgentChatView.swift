@@ -142,9 +142,11 @@ struct AgentChatView: View {
             }
 
             if let model = viewModel.attachmentPreviewModel {
-                AgentAttachmentPreviewOverlay(model: model) {
-                    viewModel.attachmentPreviewModel = nil
-                }
+                AgentAttachmentPreviewOverlay(
+                    model: model,
+                    onRetryExtraction: { viewModel.retryAttachmentExtraction(attachmentID: model.attachment.id) },
+                    onClose: { viewModel.attachmentPreviewModel = nil }
+                )
                 .transition(.opacity.combined(with: .scale(scale: 0.985)))
                 .zIndex(10)
             }
@@ -208,6 +210,7 @@ private struct AgentChatToastView: View {
 
 private struct AgentAttachmentPreviewOverlay: View {
     var model: AttachmentPreviewModel
+    var onRetryExtraction: (() -> Void)? = nil
     var onClose: () -> Void
 
     var body: some View {
@@ -216,7 +219,7 @@ private struct AgentAttachmentPreviewOverlay: View {
                 .opacity(0.98)
                 .ignoresSafeArea()
 
-            AgentAttachmentPreviewSheetView(model: model)
+            AgentAttachmentPreviewSheetView(model: model, onRetryExtraction: onRetryExtraction)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .padding(.top, AgentChatLayout.spaceXL)
                 .padding(.horizontal, AgentChatLayout.spaceXL)

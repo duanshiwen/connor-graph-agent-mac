@@ -314,6 +314,7 @@ final class AppViewModel: ObservableObject {
         if !imported.isEmpty {
             pendingAttachmentRefs.append(contentsOf: imported)
             pendingAttachmentRefsBySessionID[selectedChatSessionID] = pendingAttachmentRefs
+            Task { await runAttachmentExtractionJobs(sessionID: selectedChatSessionID) }
         }
         let result = AttachmentImportBatchResult(accepted: imported, rejected: rejected)
         if !rejected.isEmpty {
@@ -329,6 +330,55 @@ final class AppViewModel: ObservableObject {
             try? await Task.sleep(nanoseconds: 4_500_000_000)
             if self.attachmentToast?.id == toast.id {
                 self.attachmentToast = nil
+            }
+        }
+    }
+
+    func retryAttachmentExtraction(attachmentID: String) {
+        guard let selectedChatSessionID, let storagePaths else { return }
+        do {
+            let manifest = try AppSessionAttachmentStore(paths: storagePaths).loadManifest(sessionID: selectedChatSessionID, attachmentID: attachmentID)
+            _ = try AttachmentExtractionJobStore(paths: storagePaths).appendStatus(
+                AgentAttachmentExtractionJob(
+                    sessionID: selectedChatSessionID,
+                    attachmentID: attachmentID,
+                    requestedCapabilities: AppSessionAttachmentStore.requestedCapabilities(for: manifest.kind)
+                ),
+                status: .queued
+            )
+            showAttachmentToast(title: "已重新排队解析", message: manifest.displayName, systemImage: "arrow.clockwise")
+            Task { await runAttachmentExtractionJobs(sessionID: selectedChatSessionID) }
+        } catch {
+            showAttachmentToast(title: "重新解析失败", message: String(describing: error), systemImage: "xmark.circle")
+        }
+    }
+
+    private func runAttachmentExtractionJobs(sessionID: String) async {
+        guard let storagePaths else { return }
+        do {
+            let queue = AttachmentExtractionQueue(
+                jobStore: AttachmentExtractionJobStore(paths: storagePaths),
+                processor: AttachmentExtractionJobProcessor(paths: storagePaths)
+            )
+            try await queue.drain(sessionID: sessionID)
+            refreshPendingAttachmentRefs(sessionID: sessionID)
+        } catch {
+            showAttachmentToast(title: "附件解析失败", message: String(describing: error), systemImage: "exclamationmark.triangle")
+        }
+    }
+
+    private func refreshPendingAttachmentRefs(sessionID: String) {
+        guard let storagePaths else { return }
+        let store = AppSessionAttachmentStore(paths: storagePaths)
+        let refs = (pendingAttachmentRefsBySessionID[sessionID] ?? []).map { ref -> AgentMessageAttachmentRef in
+            (try? store.loadManifest(sessionID: sessionID, attachmentID: ref.id).messageRef) ?? ref
+        }
+        pendingAttachmentRefsBySessionID[sessionID] = refs
+        if selectedChatSessionID == sessionID {
+            pendingAttachmentRefs = refs
+            if let model = attachmentPreviewModel,
+               refs.contains(where: { $0.id == model.attachment.id }) {
+                attachmentPreviewModel = AttachmentPreviewLoader(store: store).load(sessionID: sessionID, attachment: model.attachment)
             }
         }
     }
