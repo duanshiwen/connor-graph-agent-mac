@@ -292,44 +292,38 @@ private struct CraftSessionListPane: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
 
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(Array(filteredSessions.enumerated()), id: \.element.id) { index, session in
-                        CraftSessionRow(
-                            row: AgentChatSessionPresentation(session: session),
-                            isSelected: session.id == viewModel.selectedChatSessionID,
-                            isRunning: viewModel.isChatSessionSubmitting(session.id),
-                            isRegeneratingTitle: viewModel.regeneratingTitleSessionIDs.contains(session.id),
-                            onSelect: {
-                                var transaction = Transaction()
-                                transaction.disablesAnimations = true
-                                withTransaction(transaction) {
-                                    viewModel.selectChatSession(session.id)
-                                }
-                            },
-                            onRename: { title in viewModel.renameChatSession(session.id, title: title) },
-                            onRegenerateTitle: { viewModel.regenerateChatSessionTitle(session.id) },
-                            onDelete: { viewModel.deleteChatSession(session.id) }
-                        )
-                        if index < filteredSessions.count - 1 {
-                            Rectangle()
-                                .fill(Color(nsColor: .separatorColor).opacity(0.42))
-                                .frame(height: 0.5)
-                                .padding(.leading, 42)
-                                .padding(.trailing, 10)
-                        }
-                    }
-                    if filteredSessions.isEmpty {
-                        if viewModel.sessionSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            ContentUnavailableView("暂无会话", systemImage: "bubble.left", description: Text("点击左上角新建会话开始。"))
-                                .padding(.top, 80)
-                        } else {
-                            ContentUnavailableView("没有匹配的会话", systemImage: "magnifyingglass", description: Text("搜索会匹配会话标题和消息内容。"))
-                                .padding(.top, 80)
-                        }
-                    }
+            if filteredSessions.isEmpty {
+                if viewModel.sessionSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    ContentUnavailableView("暂无会话", systemImage: "bubble.left", description: Text("点击左上角新建会话开始。"))
+                        .padding(.top, 80)
+                } else {
+                    ContentUnavailableView("没有匹配的会话", systemImage: "magnifyingglass", description: Text("搜索会匹配会话标题和消息内容。"))
+                        .padding(.top, 80)
                 }
-                .padding(8)
+            } else {
+                List(filteredSessions) { session in
+                    CraftSessionRow(
+                        row: AgentChatSessionPresentation(session: session),
+                        isSelected: session.id == viewModel.selectedChatSessionID,
+                        isRunning: viewModel.isChatSessionSubmitting(session.id),
+                        isRegeneratingTitle: viewModel.regeneratingTitleSessionIDs.contains(session.id),
+                        onSelect: {
+                            var transaction = Transaction()
+                            transaction.disablesAnimations = true
+                            withTransaction(transaction) {
+                                viewModel.selectChatSession(session.id)
+                            }
+                        },
+                        onRename: { title in viewModel.renameChatSession(session.id, title: title) },
+                        onRegenerateTitle: { viewModel.regenerateChatSessionTitle(session.id) },
+                        onDelete: { viewModel.deleteChatSession(session.id) }
+                    )
+                    .listRowInsets(EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8))
+                    .listRowSeparator(.visible, edges: .bottom)
+                    .listRowBackground(Color.clear)
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
             }
         }
         .task { viewModel.reloadChatSessions() }
@@ -392,8 +386,6 @@ private struct CraftDetailPaneView: View {
 
 
 private struct CraftSessionRow: View {
-    private let actionWidth: CGFloat = 136
-
     var row: AgentChatSessionPresentation
     var isSelected: Bool
     var isRunning: Bool
@@ -403,56 +395,39 @@ private struct CraftSessionRow: View {
     var onRegenerateTitle: () -> Void
     var onDelete: () -> Void
 
-    @State private var dragOffset: CGFloat = 0
-    @State private var isActionsRevealed: Bool = false
     @State private var isEditingTitle: Bool = false
     @State private var titleDraft: String = ""
     @State private var isDeleteConfirmationPresented: Bool = false
     @FocusState private var isTitleFocused: Bool
 
     var body: some View {
-        ZStack(alignment: .trailing) {
-            actionButtons
-                .frame(width: actionWidth)
-                .offset(x: actionWidth + dragOffset)
-                .allowsHitTesting(isActionsRevealed)
+        rowContent
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button {
+                    onRegenerateTitle()
+                } label: {
+                    Label("标题", systemImage: "sparkles")
+                }
+                .disabled(isRegeneratingTitle)
+                .tint(.orange)
 
-            rowContent
-                .zIndex(1)
-                .offset(x: dragOffset)
-                .gesture(
-                    DragGesture(minimumDistance: 12)
-                        .onChanged { value in
-                            let base = isActionsRevealed ? -actionWidth : 0
-                            dragOffset = min(0, max(-actionWidth, base + value.translation.width))
-                        }
-                        .onEnded { value in
-                            let shouldReveal = dragOffset < -actionWidth * 0.45 || value.predictedEndTranslation.width < -actionWidth * 0.65
-                            withAnimation(.spring(response: 0.24, dampingFraction: 0.9)) {
-                                isActionsRevealed = shouldReveal
-                                dragOffset = shouldReveal ? -actionWidth : 0
-                            }
-                        }
-                )
-        }
-        .clipped()
-        .overlay(
-            SessionHorizontalSwipeHandler(
-                onHorizontalScroll: { deltaX in handleHorizontalScroll(deltaX: deltaX) },
-                onEnded: { settleSwipeOffset() }
-            )
-        )
-        .onChange(of: row.title) { _, newTitle in
+                Button(role: .destructive) {
+                    isDeleteConfirmationPresented = true
+                } label: {
+                    Label("删除", systemImage: "trash")
+                }
+            }
+            .onChange(of: row.title) { _, newTitle in
             guard !isEditingTitle else { return }
             titleDraft = newTitle
         }
-        .onAppear { titleDraft = row.title }
-        .confirmationDialog("删除这个会话？", isPresented: $isDeleteConfirmationPresented, titleVisibility: .visible) {
+            .onAppear { titleDraft = row.title }
+            .confirmationDialog("删除这个会话？", isPresented: $isDeleteConfirmationPresented, titleVisibility: .visible) {
             Button("删除", role: .destructive, action: onDelete)
             Button("取消", role: .cancel) {}
-        } message: {
-            Text("删除后会话将从列表中移除。")
-        }
+            } message: {
+                Text("删除后会话将从列表中移除。")
+            }
     }
 
     private var rowContent: some View {
@@ -524,11 +499,7 @@ private struct CraftSessionRow: View {
         .background(rowBackgroundColor, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .onTapGesture {
-            if isActionsRevealed {
-                closeActions()
-            } else if !isEditingTitle {
-                onSelect()
-            }
+            if !isEditingTitle { onSelect() }
         }
         .onChange(of: isTitleFocused) { _, focused in
             if !focused, isEditingTitle { commitTitleEdit() }
@@ -541,45 +512,6 @@ private struct CraftSessionRow: View {
         isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor)
     }
 
-    private var actionButtons: some View {
-        HStack(spacing: 0) {
-            Button {
-                closeActions()
-                onRegenerateTitle()
-            } label: {
-                VStack(spacing: 4) {
-                    if isRegeneratingTitle {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Image(systemName: "sparkles")
-                    }
-                    Text("标题")
-                        .font(AppListTypography.rowCaptionEmphasized)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            .buttonStyle(.plain)
-            .disabled(isRegeneratingTitle)
-            .background(Color.accentColor.opacity(0.88))
-            .foregroundStyle(.white)
-
-            Button(role: .destructive) {
-                closeActions()
-                isDeleteConfirmationPresented = true
-            } label: {
-                VStack(spacing: 4) {
-                    Image(systemName: "trash")
-                    Text("删除")
-                        .font(AppListTypography.rowCaptionEmphasized)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            .buttonStyle(.plain)
-            .background(Color.red.opacity(0.88))
-            .foregroundStyle(.white)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
 
     private func beginTitleEdit() {
         titleDraft = row.title
@@ -598,29 +530,6 @@ private struct CraftSessionRow: View {
         onRename(trimmed)
     }
 
-    private func handleHorizontalScroll(deltaX: CGFloat) {
-        guard !isEditingTitle else { return }
-        let base = isActionsRevealed ? -actionWidth : dragOffset
-        let nextOffset = min(0, max(-actionWidth, base - deltaX))
-        dragOffset = nextOffset
-        isActionsRevealed = nextOffset <= -actionWidth * 0.98
-    }
-
-    private func settleSwipeOffset() {
-        guard !isEditingTitle else { return }
-        let shouldReveal = dragOffset < -actionWidth * 0.35
-        withAnimation(.spring(response: 0.24, dampingFraction: 0.9)) {
-            isActionsRevealed = shouldReveal
-            dragOffset = shouldReveal ? -actionWidth : 0
-        }
-    }
-
-    private func closeActions() {
-        withAnimation(.spring(response: 0.24, dampingFraction: 0.9)) {
-            isActionsRevealed = false
-            dragOffset = 0
-        }
-    }
 
     private func icon(for status: AgentSessionStatus) -> String {
         switch status {
@@ -647,70 +556,6 @@ private struct CraftSessionRow: View {
     }
 }
 
-private struct SessionHorizontalSwipeHandler: NSViewRepresentable {
-    var onHorizontalScroll: (CGFloat) -> Void
-    var onEnded: () -> Void
-
-    func makeNSView(context: Context) -> HorizontalSwipeView {
-        let view = HorizontalSwipeView(frame: .zero)
-        view.onHorizontalScroll = onHorizontalScroll
-        view.onEnded = onEnded
-        return view
-    }
-
-    func updateNSView(_ nsView: HorizontalSwipeView, context: Context) {
-        nsView.onHorizontalScroll = onHorizontalScroll
-        nsView.onEnded = onEnded
-    }
-
-    final class HorizontalSwipeView: NSView {
-        var onHorizontalScroll: ((CGFloat) -> Void)?
-        var onEnded: (() -> Void)?
-        private var settleWorkItem: DispatchWorkItem?
-
-        override func scrollWheel(with event: NSEvent) {
-            let horizontal = event.scrollingDeltaX
-            let vertical = event.scrollingDeltaY
-            guard abs(horizontal) > abs(vertical), abs(horizontal) > 0.5 else {
-                nextResponder?.scrollWheel(with: event)
-                return
-            }
-
-            onHorizontalScroll?(horizontal)
-            scheduleSettle()
-            if event.phase == .ended || event.phase == .cancelled || event.momentumPhase == .ended || event.momentumPhase == .cancelled {
-                settleNow()
-            }
-        }
-
-        override func mouseDown(with event: NSEvent) {
-            nextResponder?.mouseDown(with: event)
-        }
-
-        override func mouseUp(with event: NSEvent) {
-            nextResponder?.mouseUp(with: event)
-        }
-
-        override func rightMouseDown(with event: NSEvent) {
-            nextResponder?.rightMouseDown(with: event)
-        }
-
-        private func scheduleSettle() {
-            settleWorkItem?.cancel()
-            let workItem = DispatchWorkItem { [weak self] in
-                self?.onEnded?()
-            }
-            settleWorkItem = workItem
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: workItem)
-        }
-
-        private func settleNow() {
-            settleWorkItem?.cancel()
-            settleWorkItem = nil
-            onEnded?()
-        }
-    }
-}
 
 private struct CraftSettingsListPane: View {
     @ObservedObject var viewModel: AppViewModel
