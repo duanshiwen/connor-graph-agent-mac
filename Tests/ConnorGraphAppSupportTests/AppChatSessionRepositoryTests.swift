@@ -8,6 +8,107 @@ private func temporaryAppChatDatabaseURL(_ name: String = UUID().uuidString) -> 
     FileManager.default.temporaryDirectory.appendingPathComponent("\(name).sqlite")
 }
 
+@Test func appChatRepositoryPersistsBackgroundTasksIsolatedBySession() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryAppChatDatabaseURL().path)
+    try store.migrate()
+    let repository = AppChatSessionRepository(store: store)
+    let task1 = PersistedSessionBackgroundTask(
+        id: "task-1",
+        sessionID: "session-1",
+        kind: "title_generation",
+        title: "重新生成会话标题",
+        detail: "生成中",
+        status: .running,
+        createdAt: Date(timeIntervalSince1970: 1_000),
+        updatedAt: Date(timeIntervalSince1970: 1_001),
+        payloadJSON: "{}"
+    )
+    let task2 = PersistedSessionBackgroundTask(
+        id: "task-2",
+        sessionID: "session-2",
+        kind: "title_generation",
+        title: "重新生成会话标题",
+        detail: "另一个会话",
+        status: .queued,
+        createdAt: Date(timeIntervalSince1970: 2_000),
+        updatedAt: Date(timeIntervalSince1970: 2_001),
+        payloadJSON: "{}"
+    )
+
+    try repository.saveBackgroundTask(task1)
+    try repository.saveBackgroundTask(task2)
+
+    #expect(try repository.loadBackgroundTasks(sessionID: "session-1").map(\.id) == ["task-1"])
+    #expect(try repository.loadBackgroundTasks(sessionID: "session-2").map(\.id) == ["task-2"])
+}
+
+@Test func appChatRepositoryUpdatesBackgroundTaskBySessionAndTaskID() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryAppChatDatabaseURL().path)
+    try store.migrate()
+    let repository = AppChatSessionRepository(store: store)
+    try repository.saveBackgroundTask(PersistedSessionBackgroundTask(
+        id: "task-1",
+        sessionID: "session-1",
+        kind: "title_generation",
+        title: "重新生成会话标题",
+        detail: "生成中",
+        status: .running,
+        createdAt: Date(timeIntervalSince1970: 1_000),
+        updatedAt: Date(timeIntervalSince1970: 1_001),
+        payloadJSON: "{}"
+    ))
+
+    try repository.updateBackgroundTask(
+        sessionID: "session-1",
+        taskID: "task-1",
+        status: .failed,
+        detail: "生成失败",
+        errorMessage: "LLM unavailable",
+        updatedAt: Date(timeIntervalSince1970: 1_100)
+    )
+
+    let task = try #require(try repository.loadBackgroundTasks(sessionID: "session-1").first)
+    #expect(task.status == .failed)
+    #expect(task.detail == "生成失败")
+    #expect(task.errorMessage == "LLM unavailable")
+    #expect(task.updatedAt == Date(timeIntervalSince1970: 1_100))
+}
+
+@Test func appChatRepositoryDeletesSessionBackgroundTasksWithSessionOnly() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryAppChatDatabaseURL().path)
+    try store.migrate()
+    let repository = AppChatSessionRepository(store: store)
+    try repository.saveSession(AgentSession(id: "session-1", title: "One"))
+    try repository.saveSession(AgentSession(id: "session-2", title: "Two"))
+    try repository.saveBackgroundTask(PersistedSessionBackgroundTask(
+        id: "task-1",
+        sessionID: "session-1",
+        kind: "title_generation",
+        title: "重新生成会话标题",
+        detail: "生成中",
+        status: .running,
+        createdAt: Date(timeIntervalSince1970: 1_000),
+        updatedAt: Date(timeIntervalSince1970: 1_001),
+        payloadJSON: "{}"
+    ))
+    try repository.saveBackgroundTask(PersistedSessionBackgroundTask(
+        id: "task-2",
+        sessionID: "session-2",
+        kind: "title_generation",
+        title: "重新生成会话标题",
+        detail: "另一个会话",
+        status: .queued,
+        createdAt: Date(timeIntervalSince1970: 2_000),
+        updatedAt: Date(timeIntervalSince1970: 2_001),
+        payloadJSON: "{}"
+    ))
+
+    try repository.deleteSession(sessionID: "session-1")
+
+    #expect(try repository.loadBackgroundTasks(sessionID: "session-1").isEmpty)
+    #expect(try repository.loadBackgroundTasks(sessionID: "session-2").map(\.id) == ["task-2"])
+}
+
 @Test func appChatRepositoryCreatesFirstSession() throws {
     let store = try SQLiteGraphKernelStore(path: temporaryAppChatDatabaseURL().path)
     try store.migrate()

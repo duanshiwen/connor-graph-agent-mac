@@ -3,6 +3,51 @@ import SQLite3
 import ConnorGraphCore
 import ConnorGraphMemory
 
+public enum PersistedSessionBackgroundTaskStatus: String, Codable, Equatable, Sendable {
+    case queued
+    case running
+    case succeeded
+    case failed
+    case interrupted
+}
+
+public struct PersistedSessionBackgroundTask: Identifiable, Codable, Equatable, Sendable {
+    public var id: String
+    public var sessionID: String
+    public var kind: String
+    public var title: String
+    public var detail: String
+    public var status: PersistedSessionBackgroundTaskStatus
+    public var createdAt: Date
+    public var updatedAt: Date
+    public var errorMessage: String?
+    public var payloadJSON: String
+
+    public init(
+        id: String,
+        sessionID: String,
+        kind: String,
+        title: String,
+        detail: String,
+        status: PersistedSessionBackgroundTaskStatus,
+        createdAt: Date,
+        updatedAt: Date,
+        errorMessage: String? = nil,
+        payloadJSON: String = "{}"
+    ) {
+        self.id = id
+        self.sessionID = sessionID
+        self.kind = kind
+        self.title = title
+        self.detail = detail
+        self.status = status
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.errorMessage = errorMessage
+        self.payloadJSON = payloadJSON
+    }
+}
+
 public enum SQLiteGraphKernelStoreError: Error, Equatable, CustomStringConvertible {
     case openFailed(String)
     case executeFailed(String)
@@ -88,6 +133,7 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         "graph_memory_change_log",
         "graph_write_candidates",
         "agent_sessions",
+        "session_background_tasks",
         "memory_staging_buffers",
         "agent_runs",
         "agent_events",
@@ -113,6 +159,8 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         "idx_graph_write_candidates_status",
         "idx_agent_sessions_updated",
         "idx_agent_sessions_governance",
+        "idx_session_background_tasks_session",
+        "idx_session_background_tasks_status",
         "idx_agent_events_run",
         "idx_agent_audit_events_run",
         "idx_agent_pending_approvals_run",
@@ -423,6 +471,22 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         try addColumnIfMissing(table: "agent_sessions", column: "archived_at", definition: "TEXT")
         try execute("CREATE INDEX IF NOT EXISTS idx_agent_sessions_updated ON agent_sessions(updated_at DESC);")
         try execute("CREATE INDEX IF NOT EXISTS idx_agent_sessions_governance ON agent_sessions(is_archived, status, updated_at DESC);")
+        try execute("""
+        CREATE TABLE IF NOT EXISTS session_background_tasks (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            title TEXT NOT NULL,
+            detail TEXT NOT NULL,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            error_message TEXT,
+            payload_json TEXT NOT NULL DEFAULT '{}'
+        );
+        """)
+        try execute("CREATE INDEX IF NOT EXISTS idx_session_background_tasks_session ON session_background_tasks(session_id, created_at DESC);")
+        try execute("CREATE INDEX IF NOT EXISTS idx_session_background_tasks_status ON session_background_tasks(session_id, status, updated_at DESC);")
         try execute("""
         CREATE TABLE IF NOT EXISTS memory_staging_buffers (
             id TEXT PRIMARY KEY,
@@ -910,6 +974,48 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         SET status = \(quote(governance.status.rawValue)), labels_json = \(quote(json(governance.labels))), is_archived = \(governance.isArchived ? 1 : 0), is_flagged = \(governance.isFlagged ? 1 : 0), archived_at = \(quote(governance.archivedAt.map(iso))), updated_at = \(quote(iso(updatedAt)))
         WHERE id = \(quote(sessionID))
         """)
+    }
+
+    public func deleteSession(id: String) throws {
+        try deleteSessionBackgroundTasks(sessionID: id)
+        try execute("DELETE FROM agent_sessions WHERE id = \(quote(id));")
+    }
+
+    public func upsertSessionBackgroundTask(_ task: PersistedSessionBackgroundTask) throws {
+        try execute("""
+        INSERT OR REPLACE INTO session_background_tasks
+        (id, session_id, kind, title, detail, status, created_at, updated_at, error_message, payload_json)
+        VALUES (\(quote(task.id)), \(quote(task.sessionID)), \(quote(task.kind)), \(quote(task.title)), \(quote(task.detail)), \(quote(task.status.rawValue)), \(quote(iso(task.createdAt))), \(quote(iso(task.updatedAt))), \(quote(task.errorMessage)), \(quote(task.payloadJSON)))
+        """)
+    }
+
+    public func sessionBackgroundTasks(sessionID: String, limit: Int? = nil) throws -> [PersistedSessionBackgroundTask] {
+        let limitClause = limit.map { " LIMIT \($0)" } ?? ""
+        return try query(sql: "SELECT id, session_id, kind, title, detail, status, created_at, updated_at, error_message, payload_json FROM session_background_tasks WHERE session_id = \(quote(sessionID)) ORDER BY created_at DESC\(limitClause)")
+            .map(decodeSessionBackgroundTask)
+    }
+
+    public func deleteSessionBackgroundTask(sessionID: String, taskID: String) throws {
+        try execute("DELETE FROM session_background_tasks WHERE session_id = \(quote(sessionID)) AND id = \(quote(taskID));")
+    }
+
+    public func deleteSessionBackgroundTasks(sessionID: String) throws {
+        try execute("DELETE FROM session_background_tasks WHERE session_id = \(quote(sessionID));")
+    }
+
+    private func decodeSessionBackgroundTask(_ row: [String]) throws -> PersistedSessionBackgroundTask {
+        PersistedSessionBackgroundTask(
+            id: row[0],
+            sessionID: row[1],
+            kind: row[2],
+            title: row[3],
+            detail: row[4],
+            status: PersistedSessionBackgroundTaskStatus(rawValue: row[5]) ?? .failed,
+            createdAt: try date(row[6]),
+            updatedAt: try date(row[7]),
+            errorMessage: nilIfEmpty(row[8]),
+            payloadJSON: row[9].isEmpty ? "{}" : row[9]
+        )
     }
 
     private func decodeSession(_ row: [String]) throws -> AgentSession {

@@ -150,6 +150,15 @@ struct AgentChatView: View {
                 .transition(.opacity.combined(with: .scale(scale: 0.985)))
                 .zIndex(10)
             }
+
+            if viewModel.isBackgroundTasksPresented {
+                AgentBackgroundTaskOverlay(
+                    tasks: viewModel.activeSessionBackgroundTasks,
+                    onClose: { viewModel.isBackgroundTasksPresented = false }
+                )
+                .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                .zIndex(11)
+            }
         }
         .environment(\.openURL, OpenURLAction { url in
             viewModel.openURLInCurrentChatBrowser(url)
@@ -262,6 +271,142 @@ private struct AgentAttachmentPreviewOverlay: View {
             .padding(AgentChatLayout.spaceXL)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct AgentBackgroundTaskOverlay: View {
+    var tasks: [AppSessionBackgroundTask]
+    var onClose: () -> Void
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black.opacity(0.18)
+                .ignoresSafeArea()
+                .onTapGesture(perform: onClose)
+
+            VStack(spacing: 0) {
+                HStack {
+                    Spacer()
+                    Label("后台任务", systemImage: "tray.full")
+                        .font(AgentChatTypography.meta.weight(.medium))
+                        .padding(.horizontal, AgentChatLayout.spaceS)
+                        .frame(height: AgentChatLayout.chipHeight)
+                        .background(Color.clear, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
+                                .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+                        )
+                    Spacer()
+
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: AgentChatTypography.controlIconSize, weight: .semibold))
+                            .symbolRenderingMode(.hierarchical)
+                            .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
+                    }
+                    .buttonStyle(.plain)
+                    .frame(width: AgentChatLayout.hitTargetSize, height: AgentChatLayout.hitTargetSize)
+                    .contentShape(Rectangle())
+                    .keyboardShortcut(.escape, modifiers: [])
+                    .accessibilityLabel("关闭后台任务")
+                    .help("关闭后台任务")
+                }
+                .padding(AgentChatLayout.spaceM)
+
+                taskContent
+                    .frame(maxWidth: 760, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(.horizontal, AgentChatLayout.spaceXL)
+                    .padding(.bottom, AgentChatLayout.spaceXL)
+            }
+            .background(Color(nsColor: .windowBackgroundColor).opacity(0.96), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusXL, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: AgentChatLayout.radiusXL, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.20), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.18), radius: 24, x: 0, y: 14)
+            .padding(AgentChatLayout.spaceXL)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var taskContent: some View {
+        Group {
+            if tasks.isEmpty {
+                ContentUnavailableView("暂无后台任务", systemImage: "tray", description: Text("当前会话还没有后台任务。"))
+                    .frame(minHeight: 260)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
+                        ForEach(tasks) { task in
+                            taskRow(task)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(minHeight: 260, maxHeight: 460)
+            }
+        }
+    }
+
+    private func taskRow(_ task: AppSessionBackgroundTask) -> some View {
+        HStack(alignment: .top, spacing: AgentChatLayout.spaceM) {
+            statusIcon(for: task)
+                .frame(width: 22, height: 22)
+                .padding(.top, 2)
+
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(task.title)
+                        .font(AgentChatTypography.sectionTitle)
+                    Spacer(minLength: AgentChatLayout.spaceS)
+                    Text(task.status.displayName)
+                        .font(AgentChatTypography.microEmphasis)
+                        .foregroundStyle(statusColor(for: task.status))
+                }
+                Text(task.detail)
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                if let errorMessage = task.errorMessage, !errorMessage.isEmpty {
+                    Text(errorMessage)
+                        .font(AgentChatTypography.micro)
+                        .foregroundStyle(.red)
+                        .textSelection(.enabled)
+                }
+                Text(task.updatedAt.formatted(date: .omitted, time: .shortened))
+                    .font(AgentChatTypography.micro)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(AgentChatLayout.spaceM)
+        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                .stroke(Color.secondary.opacity(0.14), lineWidth: 1)
+        )
+    }
+
+    @ViewBuilder
+    private func statusIcon(for task: AppSessionBackgroundTask) -> some View {
+        if task.status == .running || task.status == .queued {
+            ProgressView()
+                .controlSize(.small)
+        } else {
+            Image(systemName: task.status.systemImage)
+                .font(.system(size: AgentChatTypography.controlIconSize, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(statusColor(for: task.status))
+        }
+    }
+
+    private func statusColor(for status: AppSessionBackgroundTaskStatus) -> Color {
+        switch status {
+        case .queued: .secondary
+        case .running: .accentColor
+        case .succeeded: .green
+        case .failed: .red
+        case .interrupted: .orange
+        }
     }
 }
 
@@ -654,17 +799,23 @@ private struct AgentChatTranscriptViewportHeightKey: PreferenceKey {
 
 private struct AgentChatConversationHeader: View {
     @ObservedObject var viewModel: AppViewModel
+    @State private var isEditingTitle = false
+    @State private var titleDraft = ""
+    @FocusState private var isTitleFocused: Bool
 
     private var selectedTitle: String {
-        viewModel.chatSessions.first(where: { $0.id == viewModel.selectedChatSessionID })?.title ?? "智能体聊天"
+        selectedSession?.title ?? "智能体聊天"
+    }
+
+    private var selectedSession: AgentSession? {
+        guard let selectedID = viewModel.selectedChatSessionID else { return nil }
+        return viewModel.allChatSessions.first { $0.id == selectedID }
+            ?? viewModel.chatSessions.first { $0.id == selectedID }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
-            Text(selectedTitle)
-                .font(AgentChatTypography.title)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .center)
+            titleView
 
             if let summary = viewModel.latestChatSummary {
                 DisclosureGroup {
@@ -695,6 +846,69 @@ private struct AgentChatConversationHeader: View {
                 .background(.quaternary.opacity(0.20), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
             }
         }
+        .onAppear { titleDraft = selectedTitle }
+        .onChange(of: selectedTitle) { _, newTitle in
+            guard !isEditingTitle else { return }
+            titleDraft = newTitle
+        }
+        .onChange(of: viewModel.selectedChatSessionID) { _, _ in
+            isEditingTitle = false
+            isTitleFocused = false
+            titleDraft = selectedTitle
+        }
+        .onChange(of: isTitleFocused) { _, focused in
+            if !focused, isEditingTitle { commitTitleEdit() }
+        }
+    }
+
+    @ViewBuilder
+    private var titleView: some View {
+        if isEditingTitle {
+            TextField("会话标题", text: $titleDraft)
+                .textFieldStyle(.plain)
+                .font(AgentChatTypography.title)
+                .multilineTextAlignment(.center)
+                .lineLimit(1)
+                .focused($isTitleFocused)
+                .onSubmit { commitTitleEdit() }
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.horizontal, AgentChatLayout.spaceXL)
+                .background(
+                    Color(nsColor: .controlBackgroundColor).opacity(0.72),
+                    in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous)
+                        .stroke(Color.accentColor.opacity(0.35), lineWidth: 1)
+                )
+                .onAppear { isTitleFocused = true }
+        } else {
+            Text(selectedTitle)
+                .font(AgentChatTypography.title)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .contentShape(Rectangle())
+                .onTapGesture { beginTitleEdit() }
+                .help("单击编辑会话标题")
+        }
+    }
+
+    private func beginTitleEdit() {
+        guard viewModel.selectedChatSessionID != nil else { return }
+        titleDraft = selectedTitle
+        isEditingTitle = true
+        isTitleFocused = true
+    }
+
+    private func commitTitleEdit() {
+        let trimmed = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        isEditingTitle = false
+        isTitleFocused = false
+        guard let selectedID = viewModel.selectedChatSessionID, !trimmed.isEmpty, trimmed != selectedTitle else {
+            titleDraft = selectedTitle
+            return
+        }
+        viewModel.renameChatSession(selectedID, title: trimmed)
     }
 }
 
@@ -919,7 +1133,7 @@ private struct AgentChatInspectorView: View {
                     .font(AgentChatTypography.metaEmphasis)
                     .foregroundStyle(.secondary)
 
-                ForEach(viewModel.governanceConfig.labels.filter { $0.valueType == .boolean }) { definition in
+                ForEach(viewModel.governanceConfig.labels) { definition in
                     Button {
                         viewModel.toggleSelectedSessionLabel(definition.id)
                     } label: {

@@ -292,32 +292,41 @@ private struct CraftSessionListPane: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
 
-            ScrollView {
-                LazyVStack(spacing: 2) {
-                    ForEach(filteredSessions) { session in
-                        CraftSessionRow(
-                            row: AgentChatSessionPresentation(session: session),
-                            isSelected: session.id == viewModel.selectedChatSessionID,
-                            isRunning: viewModel.isChatSessionSubmitting(session.id)
-                        ) {
+            if filteredSessions.isEmpty {
+                if viewModel.sessionSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    ContentUnavailableView("暂无会话", systemImage: "bubble.left", description: Text("点击左上角新建会话开始。"))
+                        .padding(.top, 80)
+                } else {
+                    ContentUnavailableView("没有匹配的会话", systemImage: "magnifyingglass", description: Text("搜索会匹配会话标题和消息内容。"))
+                        .padding(.top, 80)
+                }
+            } else {
+                List(filteredSessions) { session in
+                    CraftSessionRow(
+                        row: AgentChatSessionPresentation(session: session),
+                        isSelected: session.id == viewModel.selectedChatSessionID,
+                        isRunning: viewModel.isChatSessionSubmitting(session.id),
+                        isRegeneratingTitle: viewModel.regeneratingTitleSessionIDs.contains(session.id),
+                        labelDefinitions: viewModel.governanceConfig.labels,
+                        onSelect: {
                             var transaction = Transaction()
                             transaction.disablesAnimations = true
                             withTransaction(transaction) {
                                 viewModel.selectChatSession(session.id)
                             }
-                        }
-                    }
-                    if filteredSessions.isEmpty {
-                        if viewModel.sessionSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            ContentUnavailableView("暂无会话", systemImage: "bubble.left", description: Text("点击左上角新建会话开始。"))
-                                .padding(.top, 80)
-                        } else {
-                            ContentUnavailableView("没有匹配的会话", systemImage: "magnifyingglass", description: Text("搜索会匹配会话标题和消息内容。"))
-                                .padding(.top, 80)
-                        }
-                    }
+                        },
+                        onRename: { title in viewModel.renameChatSession(session.id, title: title) },
+                        onSetStatus: { status in viewModel.setChatSessionStatus(session.id, status: status) },
+                        onToggleLabel: { labelID in viewModel.toggleChatSessionLabel(session.id, labelID: labelID) },
+                        onRegenerateTitle: { viewModel.regenerateChatSessionTitle(session.id) },
+                        onDelete: { viewModel.deleteChatSession(session.id) }
+                    )
+                    .listRowInsets(EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
                 }
-                .padding(8)
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
             }
         }
         .task { viewModel.reloadChatSessions() }
@@ -383,11 +392,105 @@ private struct CraftSessionRow: View {
     var row: AgentChatSessionPresentation
     var isSelected: Bool
     var isRunning: Bool
-    var action: () -> Void
+    var isRegeneratingTitle: Bool
+    var labelDefinitions: [AgentSessionLabelDefinition]
+    var onSelect: () -> Void
+    var onRename: (String) -> Void
+    var onSetStatus: (AgentSessionStatus) -> Void
+    var onToggleLabel: (String) -> Void
+    var onRegenerateTitle: () -> Void
+    var onDelete: () -> Void
+
+    @State private var isEditingTitle: Bool = false
+    @State private var titleDraft: String = ""
+    @State private var isDeleteConfirmationPresented: Bool = false
+    @FocusState private var isTitleFocused: Bool
 
     var body: some View {
+        rowContent
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button {
+                    onRegenerateTitle()
+                } label: {
+                    Label("重设标题", systemImage: "sparkles")
+                }
+                .disabled(isRegeneratingTitle)
+                .tint(.orange)
+
+                Button(role: .destructive) {
+                    isDeleteConfirmationPresented = true
+                } label: {
+                    Label("删除", systemImage: "trash")
+                }
+            }
+            .contextMenu { contextMenuItems }
+            .onChange(of: row.title) { _, newTitle in
+            guard !isEditingTitle else { return }
+            titleDraft = newTitle
+        }
+            .onAppear { titleDraft = row.title }
+            .confirmationDialog("删除这个会话？", isPresented: $isDeleteConfirmationPresented, titleVisibility: .visible) {
+            Button("删除", role: .destructive, action: onDelete)
+            Button("取消", role: .cancel) {}
+            } message: {
+                Text("删除后会话将从列表中移除。")
+            }
+    }
+
+    @ViewBuilder
+    private var contextMenuItems: some View {
+        Menu("更改状态") {
+            ForEach(AgentSessionStatus.allCases.filter { $0 != .archived }, id: \.self) { status in
+                Button {
+                    onSetStatus(status)
+                } label: {
+                    Label(status.displayName, systemImage: status == row.status ? "checkmark" : icon(for: status))
+                }
+            }
+        }
+
+        Menu("标签") {
+            if labelDefinitions.isEmpty {
+                Button("暂无可切换标签") {}
+                    .disabled(true)
+            } else {
+                ForEach(labelDefinitions) { definition in
+                    Button {
+                        onToggleLabel(definition.id)
+                    } label: {
+                        Label(definition.name, systemImage: row.labels.contains(where: { $0.id == definition.id }) ? "checkmark.circle.fill" : "circle")
+                    }
+                }
+            }
+        }
+
+        Divider()
+
+        Button {
+            beginTitleEdit()
+        } label: {
+            Label("重命名", systemImage: "pencil")
+        }
+
+        Button {
+            onRegenerateTitle()
+        } label: {
+            Label("重设标题", systemImage: "sparkles")
+        }
+        .disabled(isRegeneratingTitle)
+
+        Divider()
+
+        Button(role: .destructive) {
+            isDeleteConfirmationPresented = true
+        } label: {
+            Label("删除", systemImage: "trash")
+        }
+    }
+
+    private var rowContent: some View {
         HStack(alignment: .top, spacing: 10) {
-            if isRunning {
+            if isRunning || isRegeneratingTitle {
                 ProgressView()
                     .controlSize(.small)
                     .frame(width: 18, height: 18)
@@ -398,12 +501,26 @@ private struct CraftSessionRow: View {
             }
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Text(row.title)
-                        .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
-                        .lineLimit(1)
+                    if isEditingTitle {
+                        TextField("会话标题", text: $titleDraft)
+                            .textFieldStyle(.plain)
+                            .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
+                            .focused($isTitleFocused)
+                            .lineLimit(1)
+                            .onSubmit { commitTitleEdit() }
+                    } else {
+                        Text(row.title)
+                            .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
+                            .lineLimit(1)
+                            .onTapGesture(count: 2) { beginTitleEdit() }
+                    }
                     Spacer(minLength: 4)
                     if isRunning {
                         Text("运行中")
+                            .font(AppListTypography.rowCaptionEmphasized)
+                            .foregroundStyle(Color.accentColor)
+                    } else if isRegeneratingTitle {
+                        Text("生成中")
                             .font(AppListTypography.rowCaptionEmphasized)
                             .foregroundStyle(Color.accentColor)
                     } else {
@@ -418,7 +535,7 @@ private struct CraftSessionRow: View {
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(statusColor(row.status).opacity(0.14), in: Capsule())
-                    Text("\(row.messageCount) msgs")
+                    Text("\(row.messageCount) 条消息")
                         .font(AppListTypography.rowCaption)
                         .foregroundStyle(.secondary)
                 }
@@ -437,12 +554,40 @@ private struct CraftSessionRow: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(isSelected ? Color.accentColor.opacity(0.14) : Color.clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(rowBackgroundColor, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(SessionMouseDownHandler(action: action))
+        .onTapGesture {
+            if !isEditingTitle { onSelect() }
+        }
+        .onChange(of: isTitleFocused) { _, focused in
+            if !focused, isEditingTitle { commitTitleEdit() }
+        }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
     }
+
+    private var rowBackgroundColor: Color {
+        isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor)
+    }
+
+
+    private func beginTitleEdit() {
+        titleDraft = row.title
+        isEditingTitle = true
+        isTitleFocused = true
+    }
+
+    private func commitTitleEdit() {
+        let trimmed = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        isEditingTitle = false
+        isTitleFocused = false
+        guard !trimmed.isEmpty, trimmed != row.title else {
+            titleDraft = row.title
+            return
+        }
+        onRename(trimmed)
+    }
+
 
     private func icon(for status: AgentSessionStatus) -> String {
         switch status {
@@ -469,29 +614,6 @@ private struct CraftSessionRow: View {
     }
 }
 
-private struct SessionMouseDownHandler: NSViewRepresentable {
-    var action: () -> Void
-
-    func makeNSView(context: Context) -> MouseDownView {
-        let view = MouseDownView(frame: .zero)
-        view.action = action
-        return view
-    }
-
-    func updateNSView(_ nsView: MouseDownView, context: Context) {
-        nsView.action = action
-    }
-
-    final class MouseDownView: NSView {
-        var action: (() -> Void)?
-
-        override var acceptsFirstResponder: Bool { true }
-
-        override func mouseDown(with event: NSEvent) {
-            action?()
-        }
-    }
-}
 
 private struct CraftSettingsListPane: View {
     @ObservedObject var viewModel: AppViewModel
