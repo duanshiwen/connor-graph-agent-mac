@@ -16,6 +16,8 @@ struct BrowserWorkspaceView: View {
     @State private var addressText: String = ""
     @State private var questionText = ""
     @State private var browserKeyMonitor: Any?
+    @State private var showHistoryPanel = false
+    @State private var historySearchText = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -31,6 +33,24 @@ struct BrowserWorkspaceView: View {
                 .background(Color(nsColor: .windowBackgroundColor))
 
             Divider()
+
+            HStack(spacing: 0) {
+                if showHistoryPanel {
+                    BrowserHistoryPanel(
+                        entries: activeSession.historyEntries,
+                        searchText: $historySearchText,
+                        onSelect: { entry in
+                            showHistoryPanel = false
+                            navigate(to: entry.url)
+                        },
+                        onNavigateToSession: { entry in
+                            showHistoryPanel = false
+                            viewModel.selectedChatSessionID = entry.sessionID
+                        },
+                        onClose: { showHistoryPanel = false }
+                    )
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+                }
 
             GeometryReader { geometry in
                 ZStack(alignment: .topLeading) {
@@ -100,7 +120,8 @@ struct BrowserWorkspaceView: View {
                         .transition(.scale(scale: 0.96).combined(with: .opacity))
                     }
                 }
-            }
+            } // GeometryReader
+            } // HStack
         }
         .onAppear {
             ensureInitialTab()
@@ -228,6 +249,15 @@ struct BrowserWorkspaceView: View {
             )
             .frame(height: 28)
 
+            Button { showHistoryPanel.toggle() } label: {
+                Image(systemName: showHistoryPanel ? "clock.arrow.circlepath" : "clock")
+                    .font(.system(size: 14))
+                    .foregroundStyle(showHistoryPanel ? ConnorCraftPalette.accent : .secondary)
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.plain)
+            .help("浏览历史")
+
             Button(action: showPageQuestionPopover) {
                 BrowserAskAIButtonLabel()
             }
@@ -326,6 +356,66 @@ struct BrowserWorkspaceView: View {
             session.tabs[index].navigationState = normalizedState
         }
         if tabID == activeSelectedTabID, !displayURL.isEmpty { addressText = displayURL }
+
+        // Record history when page finishes loading
+        if !state.isLoading,
+           !state.url.isEmpty,
+           state.url != BrowserBuiltInPage.blankURLString,
+           !state.url.hasPrefix("connor://"),
+           state.errorMessage == nil,
+           tabID == activeSelectedTabID {
+            recordHistoryVisit(url: state.url, title: state.title)
+        }
+    }
+
+    private func recordHistoryVisit(url: String, title: String) {
+        let activeSessionID = self.activeSessionID
+        guard let activeWebView, activeSessionID != "__fallback__" else { return }
+
+        // Dedup: skip if same URL already recorded within last 30 minutes
+        let now = Date()
+        let recentThreshold = now.addingTimeInterval(-1800)
+        let alreadyRecorded = activeSession.historyEntries.contains { entry in
+            entry.url == url && entry.visitedAt > recentThreshold && entry.sessionID == activeSessionID
+        }
+        guard !alreadyRecorded else { return }
+
+        let entryID = UUID()
+        let sessionTitle = viewModel.chatSessionListItems.first { $0.id == activeSessionID }?.title ?? ""
+
+        // Extract page content via JS and save to file
+        activeWebView.evaluateJavaScript("document.body?.innerText || ''") { result, _ in
+            let pageText = (result as? String) ?? ""
+            var contentPath: String? = nil
+            if !pageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                contentPath = viewModel.saveBrowserHistoryContent(entryID: entryID, text: pageText, sessionID: activeSessionID)
+            }
+
+            let entry = BrowserHistoryEntry(
+                id: entryID,
+                url: url,
+                title: title,
+                visitedAt: now,
+                sessionID: activeSessionID,
+                sessionTitle: sessionTitle,
+                contentPath: contentPath
+            )
+
+            DispatchQueue.main.async {
+                mutateActiveSession { session in
+                    // Remove older entry for same URL today
+                    let today = Calendar.current.startOfDay(for: now)
+                    session.historyEntries.removeAll { existing in
+                        existing.url == url && existing.sessionID == activeSessionID && existing.visitedAt >= today
+                    }
+                    session.historyEntries.append(entry)
+                    // Cap at 5000 entries
+                    if session.historyEntries.count > 5000 {
+                        session.historyEntries = Array(session.historyEntries.suffix(5000))
+                    }
+                }
+            }
+        }
     }
 
     private func syncAddressTextWithActiveTab() {

@@ -1,4 +1,5 @@
 import SwiftUI
+import ConnorGraphAppSupport
 
 enum BrowserFloatingTypography {
     // Browser chrome follows a compact macOS semantic scale: clear hierarchy,
@@ -294,5 +295,209 @@ struct WebNavigationState: Equatable {
     var url: String
     var isLoading: Bool = false
     var errorMessage: String? = nil
+}
+
+// MARK: - Browser History Panel
+
+struct BrowserHistoryPanel: View {
+    let entries: [BrowserHistoryEntry]
+    @Binding var searchText: String
+    var onSelect: (BrowserHistoryEntry) -> Void
+    var onNavigateToSession: (BrowserHistoryEntry) -> Void
+    var onClose: () -> Void
+
+    private var filteredEntries: [BrowserHistoryEntry] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let filtered = query.isEmpty ? entries : entries.filter {
+            $0.title.lowercased().contains(query) ||
+            $0.url.lowercased().contains(query) ||
+            $0.sessionTitle.lowercased().contains(query)
+        }
+        return filtered.sorted { $0.visitedAt > $1.visitedAt }
+    }
+
+    private var groupedByDay: [(String, [BrowserHistoryEntry])] {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.calendar = Calendar(identifier: .gregorian)
+
+        let today = Calendar.current.startOfDay(for: Date())
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: today)!
+
+        var groups: [(String, [BrowserHistoryEntry])] = []
+        var grouped: [String: [BrowserHistoryEntry]] = [:]
+        var order: [String] = []
+
+        for entry in filteredEntries {
+            let day = Calendar.current.startOfDay(for: entry.visitedAt)
+            let key: String
+            if day == today {
+                key = "今天"
+            } else if day == yesterday {
+                key = "昨天"
+            } else {
+                formatter.dateFormat = "M月d日"
+                key = formatter.string(from: entry.visitedAt)
+            }
+            if grouped[key] == nil { order.append(key) }
+            grouped[key, default: []].append(entry)
+        }
+
+        for key in order {
+            if let items = grouped[key] {
+                groups.append((key, items))
+            }
+        }
+        return groups
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("浏览历史")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+
+            // Search
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                TextField("搜索历史", text: $searchText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                if !searchText.isEmpty {
+                    Button { searchText = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .padding(.horizontal, 10)
+            .padding(.bottom, 6)
+
+            Divider()
+
+            // List
+            if filteredEntries.isEmpty {
+                Spacer()
+                Text(searchText.isEmpty ? "暂无浏览记录" : "无匹配结果")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.tertiary)
+                Spacer()
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(groupedByDay, id: \.0) { dayLabel, items in
+                            Section {
+                                ForEach(items) { entry in
+                                    BrowserHistoryRow(entry: entry)
+                                        .contentShape(Rectangle())
+                                        .onTapGesture { onSelect(entry) }
+                                        .contextMenu {
+                                            Button("跳转到会话: \(entry.sessionTitle)") {
+                                                onNavigateToSession(entry)
+                                            }
+                                            Divider()
+                                            Button("在新标签页打开") { onSelect(entry) }
+                                        }
+                                }
+                            } header: {
+                                HStack {
+                                    Text(dayLabel)
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundStyle(.secondary)
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.top, 8)
+                                .padding(.bottom, 4)
+                            }
+                        }
+                    }
+                    .padding(.bottom, 8)
+                }
+            }
+        }
+        .frame(width: 280)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .overlay(
+            Rectangle()
+                .fill(Color.secondary.opacity(0.12))
+                .frame(width: 1),
+            alignment: .trailing
+        )
+    }
+}
+
+private struct BrowserHistoryRow: View {
+    let entry: BrowserHistoryEntry
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "doc.text")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+                .frame(width: 16)
+                .padding(.top, 2)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(entry.title.isEmpty ? entry.url : entry.title)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(2)
+                    .foregroundStyle(.primary)
+
+                Text(displayURL(entry.url))
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+
+                HStack(spacing: 4) {
+                    Text(timeString)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.quaternary)
+                    Text("·")
+                        .foregroundStyle(.quaternary)
+                    Text(entry.sessionTitle)
+                        .font(.system(size: 10))
+                        .foregroundStyle(ConnorCraftPalette.accent.opacity(0.7))
+                        .lineLimit(1)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
+    }
+
+    private var timeString: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: entry.visitedAt)
+    }
+
+    private func displayURL(_ url: String) -> String {
+        guard let parsed = URL(string: url), let host = parsed.host else { return url }
+        let path = parsed.path
+        if path.isEmpty || path == "/" { return host }
+        return host + (path.count > 30 ? String(path.prefix(30)) + "…" : path)
+    }
 }
 
