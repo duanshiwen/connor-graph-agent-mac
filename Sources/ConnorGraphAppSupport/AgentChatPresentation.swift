@@ -26,6 +26,18 @@ public struct AgentChatSessionPresentation: Sendable, Equatable, Identifiable {
         self.messageCount = session.messages.count
     }
 
+    public init(listItem: AgentSessionListItem, now: Date = Date()) {
+        self.id = listItem.id
+        self.title = listItem.title.isEmpty || listItem.title == "New Chat" ? "新对话" : listItem.title
+        self.relativeUpdatedTime = Self.relativeTime(from: listItem.updatedAt, to: now)
+        self.status = listItem.governance.status
+        self.statusText = listItem.governance.status.displayName
+        self.labels = listItem.governance.labels
+        self.isArchived = listItem.governance.isArchived
+        self.isFlagged = listItem.governance.isFlagged
+        self.messageCount = listItem.messageCount
+    }
+
     private static func relativeTime(from date: Date, to now: Date) -> String {
         let seconds = max(0, Int(now.timeIntervalSince(date)))
         if seconds < 60 { return "刚刚" }

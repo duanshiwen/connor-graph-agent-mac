@@ -261,6 +261,34 @@ public enum BrowserBuiltInPage: Sendable {
     }
 }
 
+public struct BrowserHistoryEntry: Codable, Equatable, Identifiable, Sendable {
+    public var id: UUID
+    public var url: String
+    public var title: String
+    public var visitedAt: Date
+    public var sessionID: String
+    public var sessionTitle: String
+    public var contentPath: String? // relative path to extracted page text file
+
+    public init(
+        id: UUID = UUID(),
+        url: String,
+        title: String,
+        visitedAt: Date = Date(),
+        sessionID: String,
+        sessionTitle: String,
+        contentPath: String? = nil
+    ) {
+        self.id = id
+        self.url = url
+        self.title = title
+        self.visitedAt = visitedAt
+        self.sessionID = sessionID
+        self.sessionTitle = sessionTitle
+        self.contentPath = contentPath
+    }
+}
+
 public struct AppBrowserStateSnapshot: Codable, Equatable, Sendable {
     public var schemaVersion: Int
     public var updatedAt: Date
@@ -268,6 +296,7 @@ public struct AppBrowserStateSnapshot: Codable, Equatable, Sendable {
     public var selectedTabID: UUID?
     public var selectionPopover: AppBrowserSelectionPopoverSnapshot?
     public var threads: [UUID: AppBrowserSelectionThreadSnapshot]
+    public var historyEntries: [BrowserHistoryEntry]
 
     public init(
         schemaVersion: Int = 1,
@@ -275,7 +304,8 @@ public struct AppBrowserStateSnapshot: Codable, Equatable, Sendable {
         tabs: [AppBrowserTabSnapshot] = [],
         selectedTabID: UUID? = nil,
         selectionPopover: AppBrowserSelectionPopoverSnapshot? = nil,
-        threads: [UUID: AppBrowserSelectionThreadSnapshot] = [:]
+        threads: [UUID: AppBrowserSelectionThreadSnapshot] = [:],
+        historyEntries: [BrowserHistoryEntry] = []
     ) {
         self.schemaVersion = schemaVersion
         self.updatedAt = updatedAt
@@ -283,6 +313,7 @@ public struct AppBrowserStateSnapshot: Codable, Equatable, Sendable {
         self.selectedTabID = selectedTabID
         self.selectionPopover = selectionPopover
         self.threads = threads
+        self.historyEntries = historyEntries
     }
 }
 

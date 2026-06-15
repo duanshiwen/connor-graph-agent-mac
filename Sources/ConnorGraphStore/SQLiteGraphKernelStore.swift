@@ -958,6 +958,11 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         return try query(sql: "SELECT id, title, messages_json, created_at, updated_at, status, labels_json, is_archived, is_flagged, archived_at FROM agent_sessions \(archivePredicate) ORDER BY updated_at DESC LIMIT \(limit)").map(decodeSession)
     }
 
+    public func recentSessionListItems(limit: Int = 50, includeArchived: Bool = false) throws -> [AgentSessionListItem] {
+        let archivePredicate = includeArchived ? "" : "WHERE is_archived = 0"
+        return try query(sql: "SELECT \(sessionListItemColumns) FROM agent_sessions \(archivePredicate) ORDER BY updated_at DESC LIMIT \(limit)").map(decodeSessionListItem)
+    }
+
     public func sessions(status: AgentSessionStatus? = nil, labelID: String? = nil, archived: Bool? = nil, limit: Int = 100) throws -> [AgentSession] {
         var conditions: [String] = []
         if let status { conditions.append("status = \(quote(status.rawValue))") }
@@ -966,6 +971,16 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         let sessions = try query(sql: "SELECT id, title, messages_json, created_at, updated_at, status, labels_json, is_archived, is_flagged, archived_at FROM agent_sessions \(whereClause) ORDER BY updated_at DESC LIMIT \(limit)").map(decodeSession)
         guard let labelID else { return sessions }
         return sessions.filter { session in session.governance.labels.contains { $0.id == labelID } }
+    }
+
+    public func sessionListItems(status: AgentSessionStatus? = nil, labelID: String? = nil, archived: Bool? = nil, limit: Int = 100) throws -> [AgentSessionListItem] {
+        var conditions: [String] = []
+        if let status { conditions.append("status = \(quote(status.rawValue))") }
+        if let archived { conditions.append("is_archived = \(archived ? 1 : 0)") }
+        let whereClause = conditions.isEmpty ? "" : "WHERE \(conditions.joined(separator: " AND "))"
+        let items = try query(sql: "SELECT \(sessionListItemColumns) FROM agent_sessions \(whereClause) ORDER BY updated_at DESC LIMIT \(limit)").map(decodeSessionListItem)
+        guard let labelID else { return items }
+        return items.filter { item in item.governance.labels.contains { $0.id == labelID } }
     }
 
     public func updateSessionGovernance(sessionID: String, governance: AgentSessionGovernanceMetadata, updatedAt: Date = Date()) throws {
@@ -1018,6 +1033,10 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         )
     }
 
+    private var sessionListItemColumns: String {
+        "id, title, created_at, updated_at, status, labels_json, is_archived, is_flagged, archived_at, json_array_length(messages_json)"
+    }
+
     private func decodeSession(_ row: [String]) throws -> AgentSession {
         let governance = AgentSessionGovernanceMetadata(
             status: AgentSessionStatus(rawValue: row[safe: 5] ?? "") ?? .todo,
@@ -1031,6 +1050,24 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
             messages: try decode([AgentMessage].self, row[2]),
             createdAt: try date(row[3]), updatedAt: try date(row[4]),
             governance: governance
+        )
+    }
+
+    private func decodeSessionListItem(_ row: [String]) throws -> AgentSessionListItem {
+        let governance = AgentSessionGovernanceMetadata(
+            status: AgentSessionStatus(rawValue: row[safe: 4] ?? "") ?? .todo,
+            labels: try decode([AgentSessionLabel].self, row[safe: 5] ?? "[]"),
+            isArchived: (Int(row[safe: 6] ?? "0") ?? 0) != 0,
+            isFlagged: (Int(row[safe: 7] ?? "0") ?? 0) != 0,
+            archivedAt: try optionalDate(row[safe: 8] ?? "")
+        )
+        return AgentSessionListItem(
+            id: row[0],
+            title: row[1],
+            createdAt: try date(row[2]),
+            updatedAt: try date(row[3]),
+            governance: governance,
+            messageCount: Int(row[safe: 9] ?? "0") ?? 0
         )
     }
 
