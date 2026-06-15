@@ -1620,7 +1620,7 @@ final class AppViewModel: ObservableObject {
 
     private func hasRunningTitleTask(sessionID: String) -> Bool {
         backgroundTasksBySessionID[sessionID, default: []].contains { task in
-            task.title == "重新生成会话标题" && (task.status == .queued || task.status == .running)
+            task.kind == "title_generation" && (task.status == .queued || task.status == .running)
         }
     }
 
@@ -1633,7 +1633,7 @@ final class AppViewModel: ObservableObject {
         } catch {
             errorMessage = String(describing: error)
         }
-        if title == "重新生成会话标题" { regeneratingTitleSessionIDs.insert(sessionID) }
+        if kind == "title_generation" { regeneratingTitleSessionIDs.insert(sessionID) }
         return task
     }
 
@@ -2469,6 +2469,8 @@ final class AppViewModel: ObservableObject {
         refreshSelectedSubmittingState()
         let optimisticTranscript = transcript
         let baselineMessageCount = manager.session.messages.count
+        let baselineUserMessageCount = manager.session.messages.filter { $0.role == .user }.count
+        let shouldAutoGenerateInitialTitle = baselineUserMessageCount == 0
         let optimisticUserMessage = AgentMessage(
             role: .user,
             content: displayPrompt?.isEmpty == false ? displayPrompt! : prompt,
@@ -2512,6 +2514,9 @@ final class AppViewModel: ObservableObject {
                         self.activeChatRunIDsBySessionID[submittingSessionID] = runID
                         self.activeChatBackendsByRunID[runID] = liveBackend
                         self.activeChatBackendsBySessionID[submittingSessionID] = liveBackend
+                        if shouldAutoGenerateInitialTitle {
+                            self.regenerateChatSessionTitle(submittingSessionID)
+                        }
                         if let reason = self.pendingChatCancellationReasonsBySessionID[submittingSessionID] {
                             self.cancelRunningChatRun(sessionID: submittingSessionID, runID: runID, reason: reason)
                         }
