@@ -221,6 +221,12 @@ public struct AgentTurnActivitySummaryBuilder: Sendable {
     }
 
     private func parseToolEvent(_ event: AgentEventPresentation) -> (name: String, phase: ToolPhase)? {
+        if let activity = event.toolActivity {
+            let name = activity.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { return nil }
+            return (name, phase(from: activity.phase))
+        }
+
         let mappings: [(prefix: String, phase: ToolPhase)] = [
             ("Tool requested: ", .requested),
             ("Tool running: ", .running),
@@ -234,6 +240,16 @@ public struct AgentTurnActivitySummaryBuilder: Sendable {
             return (name, mapping.phase)
         }
         return nil
+    }
+
+    private func phase(from activityPhase: AgentToolActivityPhase) -> ToolPhase {
+        switch activityPhase {
+        case .requested: .requested
+        case .approved: .requested
+        case .running: .running
+        case .finished: .finished
+        case .failed: .failed
+        }
     }
 }
 

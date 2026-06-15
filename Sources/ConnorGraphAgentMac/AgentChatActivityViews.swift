@@ -704,6 +704,19 @@ private struct AgentTurnActivitySummaryDetailView: View {
                 detailLine(icon: "exclamationmark.triangle", text: "错误：\(primaryErrorMessage)", color: .red)
             }
 
+            if !toolActivities.isEmpty {
+                VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
+                    ForEach(toolActivities) { activity in
+                        AgentToolActivityRow(activity: activity) {
+                            if let event = events.first(where: { $0.toolActivity?.callID == activity.callID }) {
+                                onOpenDetail(event)
+                            }
+                        }
+                    }
+                }
+                .padding(.top, AgentChatLayout.spaceXS)
+            }
+
             if isRunning {
                 AgentActivityLoadingRow(startedAt: startedAt)
                     .padding(.leading, -AgentChatLayout.spaceM)
@@ -727,6 +740,37 @@ private struct AgentTurnActivitySummaryDetailView: View {
             .tint(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var toolActivities: [AgentToolActivityPresentation] {
+        var orderedCallIDs: [String] = []
+        var byCallID: [String: AgentToolActivityPresentation] = [:]
+        for activity in events.compactMap(\.toolActivity) {
+            if byCallID[activity.callID] == nil {
+                orderedCallIDs.append(activity.callID)
+                byCallID[activity.callID] = activity
+                continue
+            }
+            if shouldReplace(existing: byCallID[activity.callID], candidate: activity) {
+                byCallID[activity.callID] = activity
+            }
+        }
+        return orderedCallIDs.compactMap { byCallID[$0] }
+    }
+
+    private func shouldReplace(existing: AgentToolActivityPresentation?, candidate: AgentToolActivityPresentation) -> Bool {
+        guard let existing else { return true }
+        return phaseRank(candidate.phase) >= phaseRank(existing.phase)
+    }
+
+    private func phaseRank(_ phase: AgentToolActivityPhase) -> Int {
+        switch phase {
+        case .requested: 0
+        case .approved: 1
+        case .running: 2
+        case .finished: 3
+        case .failed: 4
+        }
     }
 
     private var toolSummaryText: String {
@@ -764,6 +808,88 @@ private struct AgentTurnActivitySummaryDetailView: View {
         .padding(.horizontal, AgentChatLayout.spaceM)
         .padding(.vertical, 2)
         .frame(maxWidth: .infinity, minHeight: AgentChatLayout.activityRowMinHeight, alignment: .leading)
+    }
+}
+
+private struct AgentToolActivityRow: View {
+    var activity: AgentToolActivityPresentation
+    var onOpenDetail: () -> Void
+
+    var body: some View {
+        Button(action: onOpenDetail) {
+            HStack(spacing: AgentChatLayout.spaceS) {
+                Image(systemName: leadingIcon)
+                    .font(.system(size: AgentChatTypography.chevronIconSize, weight: .semibold))
+                    .foregroundStyle(color)
+                    .frame(width: AgentChatTypography.controlIconSize)
+
+                Text(activity.title)
+                    .font(AgentChatTypography.micro.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                if let target = activity.target, !target.isEmpty {
+                    Text(target)
+                        .font(AgentChatTypography.monoMicro)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .padding(.horizontal, 7)
+                        .frame(height: AgentChatLayout.chipHeight)
+                        .background(.quaternary.opacity(0.28), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
+                }
+
+                if let subtitle = activity.subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(AgentChatTypography.micro)
+                        .foregroundStyle(activity.severity == .error ? AnyShapeStyle(Color.red) : AnyShapeStyle(.tertiary))
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 0)
+
+                Text(phaseText)
+                    .font(AgentChatTypography.monoMicro)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: AgentChatTypography.smallIconSize, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, AgentChatLayout.spaceM)
+            .padding(.vertical, 2)
+            .frame(minHeight: AgentChatLayout.activityRowMinHeight)
+            .contentShape(RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var leadingIcon: String {
+        if activity.severity == .error { return "xmark.octagon" }
+        switch activity.phase {
+        case .finished: return "checkmark.circle"
+        case .failed: return "xmark.octagon"
+        default: return activity.icon
+        }
+    }
+
+    private var phaseText: String {
+        switch activity.phase {
+        case .requested: return "queued"
+        case .approved: return "approved"
+        case .running: return "running"
+        case .finished: return "done"
+        case .failed: return "error"
+        }
+    }
+
+    private var color: Color {
+        switch activity.severity {
+        case .info: return .secondary
+        case .success: return .green
+        case .warning: return .orange
+        case .error: return .red
+        }
     }
 }
 

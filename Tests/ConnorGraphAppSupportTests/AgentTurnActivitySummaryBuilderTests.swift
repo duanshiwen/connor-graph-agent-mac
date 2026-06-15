@@ -26,6 +26,41 @@ import ConnorGraphCore
     #expect(summary.subtitle == "使用 Glob、graph_search · 6 个底层事件")
 }
 
+@Test func summarizesToolActivitiesWithCraftStyleNames() {
+    let process = makeProcess(state: .completed, turnNumber: 12)
+    let readActivity = AgentToolActivityPresentation(
+        callID: "read-1",
+        phase: .requested,
+        rawToolName: "Read",
+        semanticKind: .readFile,
+        title: "Read File",
+        target: "AgentChatActivityViews.swift",
+        icon: "doc.text.magnifyingglass",
+        severity: .info
+    )
+    let swiftActivity = AgentToolActivityPresentation(
+        callID: "bash-1",
+        phase: .requested,
+        rawToolName: "Bash",
+        semanticKind: .swiftBuild,
+        title: "Swift: 编译项目",
+        target: "swift build",
+        icon: "swift",
+        severity: .info
+    )
+    let events: [AgentEventPresentation] = [
+        AgentEventPresentation(kind: "toolRequested", title: "Tool requested: Read", detail: "Call 1", severity: .info, runID: "run", sessionID: "session", toolActivity: readActivity),
+        AgentEventPresentation(kind: "toolRequested", title: "Tool requested: Bash", detail: "Call 2", severity: .info, runID: "run", sessionID: "session", toolActivity: swiftActivity),
+        event(kind: "runCompleted", title: "Run completed", detail: "Done", severity: .success)
+    ]
+
+    let summary = AgentTurnActivitySummaryBuilder().summary(process: process, events: events)
+
+    #expect(summary.toolNames == ["Read File", "Swift: 编译项目"])
+    #expect(summary.compactToolText == "使用 Read File、Swift: 编译项目")
+    #expect(summary.subtitle == "使用 Read File、Swift: 编译项目 · 3 个底层事件")
+}
+
 @Test func marksTurnFailedWhenAnyToolFails() {
     let process = makeProcess(state: .completed, turnNumber: 3)
     let events: [AgentEventPresentation] = [
