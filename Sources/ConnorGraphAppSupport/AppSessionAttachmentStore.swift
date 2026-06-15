@@ -53,8 +53,8 @@ public struct AppSessionAttachmentStore: Sendable {
         }
         try fileManager.copyItem(at: sourceURL, to: originalURL)
 
-        let data = try Data(contentsOf: originalURL)
-        let digest = Self.sha256Hex(data)
+        let byteCount = try Self.byteCount(forItemAt: originalURL)
+        let digest = try Self.sha256Hex(forItemAt: originalURL)
         let fileExtension = sourceURL.pathExtension.isEmpty ? nil : sourceURL.pathExtension.lowercased()
         var extractedPath: String?
         var previewText: String?
@@ -110,7 +110,7 @@ public struct AppSessionAttachmentStore: Sendable {
             kind: kind,
             mimeType: Self.mimeType(for: kind, fileExtension: fileExtension),
             fileExtension: fileExtension,
-            byteCount: Int64(data.count),
+            byteCount: byteCount,
             sha256: digest,
             lifecycleStatus: .ready,
             extractionStatus: extractionStatus,
@@ -218,6 +218,60 @@ public struct AppSessionAttachmentStore: Sendable {
 
     public static func sha256Hex(_ data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    public static func sha256Hex(forItemAt url: URL, fileManager: FileManager = .default) throws -> String {
+        let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey])
+        if values.isSymbolicLink == true { return sha256Hex(Data()) }
+        if values.isRegularFile == true {
+            return sha256Hex(try Data(contentsOf: url))
+        }
+        if values.isDirectory == true {
+            var hasher = SHA256()
+            for childURL in try regularFileChildren(of: url, fileManager: fileManager) {
+                let relativePath = childURL.path.replacingOccurrences(of: url.path + "/", with: "")
+                hasher.update(data: Data(relativePath.utf8))
+                hasher.update(data: Data([0]))
+                hasher.update(data: try Data(contentsOf: childURL))
+                hasher.update(data: Data([0]))
+            }
+            return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+        }
+        return sha256Hex(Data())
+    }
+
+    public static func byteCount(forItemAt url: URL, fileManager: FileManager = .default) throws -> Int64 {
+        let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey])
+        if values.isSymbolicLink == true { return 0 }
+        if values.isRegularFile == true {
+            if let fileSize = values.fileSize { return Int64(fileSize) }
+            let attributes = try fileManager.attributesOfItem(atPath: url.path)
+            return (attributes[.size] as? NSNumber)?.int64Value ?? 0
+        }
+        if values.isDirectory == true {
+            var total: Int64 = 0
+            for childURL in try regularFileChildren(of: url, fileManager: fileManager) {
+                let childValues = try childURL.resourceValues(forKeys: [.fileSizeKey])
+                total += Int64(childValues.fileSize ?? 0)
+            }
+            return total
+        }
+        return 0
+    }
+
+    private static func regularFileChildren(of root: URL, fileManager: FileManager) throws -> [URL] {
+        guard let enumerator = fileManager.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else { return [] }
+        var files: [URL] = []
+        for case let childURL as URL in enumerator {
+            let values = try childURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+            guard values.isSymbolicLink != true, values.isRegularFile == true else { continue }
+            files.append(childURL)
+        }
+        return files.sorted { $0.path < $1.path }
     }
 
     public static func derivativeRunID(now: Date, engine: AgentAttachmentExtractionEngine) -> String {
