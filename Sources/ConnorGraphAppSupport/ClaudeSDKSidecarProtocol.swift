@@ -33,6 +33,8 @@ public struct ClaudeSDKSidecarRequestOptions: Codable, Sendable, Equatable {
     public var includeHookEvents: Bool
     public var persistSession: Bool
     public var sdkSessionStoreHint: String?
+    public var appendSystemPrompt: String?
+    public var disallowedTools: [String]?
 
     public init(
         maxTurns: Int? = nil,
@@ -41,7 +43,9 @@ public struct ClaudeSDKSidecarRequestOptions: Codable, Sendable, Equatable {
         includePartialMessages: Bool = true,
         includeHookEvents: Bool = true,
         persistSession: Bool = true,
-        sdkSessionStoreHint: String? = nil
+        sdkSessionStoreHint: String? = nil,
+        appendSystemPrompt: String? = nil,
+        disallowedTools: [String]? = nil
     ) {
         self.maxTurns = maxTurns
         self.model = model
@@ -50,6 +54,8 @@ public struct ClaudeSDKSidecarRequestOptions: Codable, Sendable, Equatable {
         self.includeHookEvents = includeHookEvents
         self.persistSession = persistSession
         self.sdkSessionStoreHint = sdkSessionStoreHint
+        self.appendSystemPrompt = appendSystemPrompt
+        self.disallowedTools = disallowedTools
     }
 }
 
@@ -164,6 +170,9 @@ public struct ClaudeSDKSidecarRequest: Codable, Sendable, Equatable {
             permissionMode: request.permissionMode,
             sdkPermissionMode: "bypassPermissions",
             sdkSessionID: sdkSessionID,
+            options: ClaudeSDKSidecarRequestOptions(
+                appendSystemPrompt: AgentInstructionSection.defaultConnorInstruction
+            ),
             ownsProductState: false
         )
     }
