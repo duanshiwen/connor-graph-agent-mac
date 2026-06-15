@@ -427,6 +427,8 @@ struct AgentChatComposerView: View {
 
             Spacer(minLength: AgentChatLayout.spaceS)
 
+            backgroundTasksButton
+
             Button {
                 withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
                     isSessionInfoPresented.toggle()
@@ -446,6 +448,30 @@ struct AgentChatComposerView: View {
         }
         .padding(.horizontal, 1)
         .padding(.bottom, 2)
+    }
+
+    private var backgroundTasksButton: some View {
+        Button {
+            viewModel.isBackgroundTasksPresented = true
+        } label: {
+            ZStack {
+                RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
+                    .fill(viewModel.hasRunningActiveSessionBackgroundTask ? Color.accentColor.opacity(0.16) : Color.clear)
+                if viewModel.hasRunningActiveSessionBackgroundTask {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: "tray.full")
+                        .font(.system(size: AgentChatTypography.controlIconSize, weight: .medium))
+                        .symbolRenderingMode(.hierarchical)
+                }
+            }
+            .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
+        }
+        .buttonStyle(.plain)
+        .frame(width: AgentChatLayout.hitTargetSize, height: AgentChatLayout.hitTargetSize)
+        .contentShape(Rectangle())
+        .help(viewModel.hasRunningActiveSessionBackgroundTask ? "查看后台任务（运行中）" : "查看后台任务")
     }
 
     private var permissionModeMenu: some View {
