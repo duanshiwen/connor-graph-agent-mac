@@ -57,8 +57,8 @@ public struct AttachmentPreviewLoader: Sendable {
         do {
             let manifest = try store.loadManifest(sessionID: sessionID, attachmentID: attachment.id)
             let subtitle = Self.subtitle(for: manifest)
+            let originalFileURL = store.paths.sessionArtifactDirectories(sessionID: sessionID).root.appendingPathComponent(manifest.storedRelativePath)
             if manifest.kind == .image {
-                let imageURL = store.paths.sessionArtifactDirectories(sessionID: sessionID).root.appendingPathComponent(manifest.storedRelativePath)
                 return AttachmentPreviewModel(
                     attachment: attachment,
                     manifest: manifest,
@@ -67,7 +67,7 @@ public struct AttachmentPreviewLoader: Sendable {
                     body: "",
                     bodyMode: .image,
                     sourceRelativePath: manifest.storedRelativePath,
-                    sourceFileURL: imageURL,
+                    sourceFileURL: originalFileURL,
                     errorMessage: nil
                 )
             }
@@ -81,7 +81,8 @@ public struct AttachmentPreviewLoader: Sendable {
                     subtitle: subtitle,
                     body: fallback,
                     bodyMode: Self.bodyMode(for: manifest),
-                    sourceRelativePath: nil,
+                    sourceRelativePath: manifest.storedRelativePath,
+                    sourceFileURL: originalFileURL,
                     errorMessage: statusMessage
                 )
             }
@@ -95,6 +96,7 @@ public struct AttachmentPreviewLoader: Sendable {
                 body: body.isEmpty ? "当前附件预览为空。" : body,
                 bodyMode: Self.bodyMode(for: manifest),
                 sourceRelativePath: relativePath,
+                sourceFileURL: originalFileURL,
                 errorMessage: nil
             )
         } catch {
