@@ -38,6 +38,10 @@ import Testing
     #expect(AgentChatCollapseScrollSchedule.decisionDelays.contains { $0 >= 0.3 })
 }
 
+@Test func collapseScrollScheduleIncludesLateProbeForVeryTallBubbleLayout() {
+    #expect(AgentChatCollapseScrollSchedule.decisionDelays.contains { $0 >= 0.6 })
+}
+
 @Test func collapseResetScrollIdentityWhenTranscriptShrinksFromOverflowingToFittingViewport() {
     let policy = AgentChatCollapseScrollPolicy()
 
@@ -50,7 +54,7 @@ import Testing
     #expect(shouldReset)
 }
 
-@Test func collapseDoesNotResetScrollIdentityWhenTranscriptStillOverflowsViewport() {
+@Test func collapseDoesNotResetScrollIdentityWhenNormalTranscriptStillOverflowsViewport() {
     let policy = AgentChatCollapseScrollPolicy()
 
     let shouldReset = policy.shouldResetScrollIdentityAfterCollapse(
@@ -60,6 +64,18 @@ import Testing
     )
 
     #expect(!shouldReset)
+}
+
+@Test func collapseResetsScrollIdentityForVeryTallAssistantBubbleEvenWhenTranscriptStillOverflowsViewport() {
+    let policy = AgentChatCollapseScrollPolicy()
+
+    let shouldReset = policy.shouldResetScrollIdentityAfterCollapse(
+        previousContentHeight: 6_400,
+        newContentHeight: 1_050,
+        viewportHeight: 700
+    )
+
+    #expect(shouldReset)
 }
 
 @Test func collapseDoesNotResetScrollIdentityWithoutPriorOverflow() {
