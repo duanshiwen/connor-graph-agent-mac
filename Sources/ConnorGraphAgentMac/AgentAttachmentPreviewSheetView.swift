@@ -10,12 +10,9 @@ struct AgentAttachmentPreviewSheetView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
             header
-            Divider()
             previewBody
-            Divider()
             footer
         }
-        .padding(AgentChatLayout.spaceL)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
@@ -27,7 +24,7 @@ struct AgentAttachmentPreviewSheetView: View {
                 .frame(width: 32)
             VStack(alignment: .leading, spacing: 5) {
                 Text(model.title)
-                    .font(.title3.weight(.semibold))
+                    .font(AgentChatTypography.sectionTitle)
                     .lineLimit(2)
                 Text(model.subtitle)
                     .font(AgentChatTypography.meta)
@@ -84,10 +81,10 @@ struct AgentAttachmentPreviewSheetView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.48), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous)
-                .stroke(Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1)
+            RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
         )
     }
 
@@ -119,6 +116,12 @@ struct AgentAttachmentPreviewSheetView: View {
                 keyValue("Preview source", sourceRelativePath)
             }
         }
+        .padding(AgentChatLayout.spaceM)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.28), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                .stroke(Color.secondary.opacity(0.10), lineWidth: 1)
+        )
     }
 
     private func keyValue(_ key: String, _ value: String) -> some View {
