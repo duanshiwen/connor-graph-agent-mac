@@ -66,6 +66,21 @@ public struct AppChatSessionRepository: Sendable {
     }
 
     @discardableResult
+    public func renameSession(sessionID: String, title: String, now: Date = Date()) throws -> AgentSession {
+        guard var session = try loadSession(id: sessionID) else { throw AppChatSessionRepositoryError.sessionNotFound(sessionID) }
+        session.title = title
+        session.updatedAt = now
+        try store.upsertSession(session)
+        try appendJournalEvent(runID: UUID().uuidString, sessionID: sessionID, kind: .sessionStatusChanged, action: "session_title_changed", message: "Session title changed", metadata: ["title": title])
+        return session
+    }
+
+    public func deleteSession(sessionID: String) throws {
+        guard try loadSession(id: sessionID) != nil else { throw AppChatSessionRepositoryError.sessionNotFound(sessionID) }
+        try store.deleteSession(id: sessionID)
+    }
+
+    @discardableResult
     public func updateGovernance(sessionID: String, mutate: (inout AgentSessionGovernanceMetadata) throws -> Void) throws -> AgentSession {
         guard var session = try loadSession(id: sessionID) else { throw AppChatSessionRepositoryError.sessionNotFound(sessionID) }
         var governance = session.governance
