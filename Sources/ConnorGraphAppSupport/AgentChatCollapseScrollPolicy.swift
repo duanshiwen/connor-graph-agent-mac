@@ -1,7 +1,7 @@
 import Foundation
 
 public enum AgentChatCollapseScrollSchedule {
-    public static let decisionDelays: [TimeInterval] = [0.05, 0.2, 0.35]
+    public static let decisionDelays: [TimeInterval] = [0.05, 0.2, 0.35, 0.65]
 }
 
 public struct AgentChatCollapseScrollPolicy: Sendable {
@@ -12,9 +12,17 @@ public struct AgentChatCollapseScrollPolicy: Sendable {
     }
 
     public var overflowTolerance: Double
+    public var veryTallCollapsePreviousViewportRatio: Double
+    public var veryTallCollapseShrinkViewportRatio: Double
 
-    public init(overflowTolerance: Double = 1) {
+    public init(
+        overflowTolerance: Double = 1,
+        veryTallCollapsePreviousViewportRatio: Double = 3,
+        veryTallCollapseShrinkViewportRatio: Double = 2
+    ) {
         self.overflowTolerance = overflowTolerance
+        self.veryTallCollapsePreviousViewportRatio = veryTallCollapsePreviousViewportRatio
+        self.veryTallCollapseShrinkViewportRatio = veryTallCollapseShrinkViewportRatio
     }
 
     public func decisionAfterAssistantMessageCollapse(
@@ -50,7 +58,12 @@ public struct AgentChatCollapseScrollPolicy: Sendable {
 
         let wasOverflowing = previousContentHeight > viewportHeight + overflowTolerance
         let nowFitsViewport = newContentHeight <= viewportHeight + overflowTolerance
-        return wasOverflowing && nowFitsViewport
+        if wasOverflowing && nowFitsViewport { return true }
+
+        let collapseShrink = previousContentHeight - newContentHeight
+        let wasVeryTall = previousContentHeight >= viewportHeight * veryTallCollapsePreviousViewportRatio
+        let shrankByMultipleViewports = collapseShrink >= viewportHeight * veryTallCollapseShrinkViewportRatio
+        return wasOverflowing && wasVeryTall && shrankByMultipleViewports
     }
 
     private func hasValidDimensions(contentHeight: Double, viewportHeight: Double) -> Bool {
