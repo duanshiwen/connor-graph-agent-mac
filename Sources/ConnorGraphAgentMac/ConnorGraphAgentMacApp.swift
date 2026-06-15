@@ -50,6 +50,13 @@ private func keyEquivalent(for command: ConnorNativeShellCommand) -> KeyEquivale
     }
 }
 
+struct AgentChatToast: Identifiable, Equatable {
+    var id: String = UUID().uuidString
+    var title: String
+    var message: String
+    var systemImage: String
+}
+
 @MainActor
 final class AppViewModel: ObservableObject {
     @Published var selection: SidebarItem? = .agentChat
@@ -65,6 +72,7 @@ final class AppViewModel: ObservableObject {
     @Published var lastContext: AgentContext?
     @Published var lastPromptInspection: AgentChatPromptInspection?
     @Published var errorMessage: String?
+    @Published var attachmentToast: AgentChatToast?
     @Published var entities: [GraphEntity]
     @Published var statements: [GraphStatement]
     @Published var episodes: [GraphEpisodeV3]
@@ -306,22 +314,91 @@ final class AppViewModel: ObservableObject {
         if !imported.isEmpty {
             pendingAttachmentRefs.append(contentsOf: imported)
             pendingAttachmentRefsBySessionID[selectedChatSessionID] = pendingAttachmentRefs
+            Task { await runAttachmentExtractionJobs(sessionID: selectedChatSessionID) }
         }
         let result = AttachmentImportBatchResult(accepted: imported, rejected: rejected)
         if !rejected.isEmpty {
-            errorMessage = attachmentImportSummary(result)
+            showAttachmentImportToast(result)
         }
         return result
     }
 
+    func showAttachmentToast(title: String, message: String, systemImage: String = "exclamationmark.triangle") {
+        let toast = AgentChatToast(title: title, message: message, systemImage: systemImage)
+        attachmentToast = toast
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 4_500_000_000)
+            if self.attachmentToast?.id == toast.id {
+                self.attachmentToast = nil
+            }
+        }
+    }
+
+    func retryAttachmentExtraction(attachmentID: String) {
+        guard let selectedChatSessionID, let storagePaths else { return }
+        do {
+            let manifest = try AppSessionAttachmentStore(paths: storagePaths).loadManifest(sessionID: selectedChatSessionID, attachmentID: attachmentID)
+            _ = try AttachmentExtractionJobStore(paths: storagePaths).appendStatus(
+                AgentAttachmentExtractionJob(
+                    sessionID: selectedChatSessionID,
+                    attachmentID: attachmentID,
+                    requestedCapabilities: AppSessionAttachmentStore.requestedCapabilities(for: manifest.kind)
+                ),
+                status: .queued
+            )
+            showAttachmentToast(title: "已重新排队解析", message: manifest.displayName, systemImage: "arrow.clockwise")
+            Task { await runAttachmentExtractionJobs(sessionID: selectedChatSessionID) }
+        } catch {
+            showAttachmentToast(title: "重新解析失败", message: String(describing: error), systemImage: "xmark.circle")
+        }
+    }
+
+    private func runAttachmentExtractionJobs(sessionID: String) async {
+        guard let storagePaths else { return }
+        do {
+            let queue = AttachmentExtractionQueue(
+                jobStore: AttachmentExtractionJobStore(paths: storagePaths),
+                processor: AttachmentExtractionJobProcessor(paths: storagePaths)
+            )
+            try await queue.drain(sessionID: sessionID)
+            refreshPendingAttachmentRefs(sessionID: sessionID)
+        } catch {
+            showAttachmentToast(title: "附件解析失败", message: String(describing: error), systemImage: "exclamationmark.triangle")
+        }
+    }
+
+    private func refreshPendingAttachmentRefs(sessionID: String) {
+        guard let storagePaths else { return }
+        let store = AppSessionAttachmentStore(paths: storagePaths)
+        let refs = (pendingAttachmentRefsBySessionID[sessionID] ?? []).map { ref -> AgentMessageAttachmentRef in
+            (try? store.loadManifest(sessionID: sessionID, attachmentID: ref.id).messageRef) ?? ref
+        }
+        pendingAttachmentRefsBySessionID[sessionID] = refs
+        if selectedChatSessionID == sessionID {
+            pendingAttachmentRefs = refs
+            if let model = attachmentPreviewModel,
+               refs.contains(where: { $0.id == model.attachment.id }) {
+                attachmentPreviewModel = AttachmentPreviewLoader(store: store).load(sessionID: sessionID, attachment: model.attachment)
+            }
+        }
+    }
+
+    private func showAttachmentImportToast(_ result: AttachmentImportBatchResult) {
+        showAttachmentToast(
+            title: result.accepted.isEmpty ? "附件未添加" : "部分附件未添加",
+            message: attachmentImportSummary(result),
+            systemImage: result.accepted.isEmpty ? "xmark.circle" : "exclamationmark.triangle"
+        )
+    }
+
     private func attachmentImportSummary(_ result: AttachmentImportBatchResult) -> String {
-        let supportedSummary = "Connor 当前支持添加文本、Markdown、日志、JSON/JSONL、CSV/TSV、XML/YAML、代码文件和常见图片（PNG/JPEG/GIF/WebP/HEIC/BMP/ICO/TIFF）。暂不支持 HTML、PDF、音频、视频、Office、iWork、压缩包、SVG/AVIF、数据库、可执行文件或未知格式。"
+        let supportedSummary = "Connor 当前支持添加文本、Markdown、日志、JSON/JSONL、CSV/TSV、XML/YAML、代码文件、常见图片（PNG/JPEG/GIF/WebP/HEIC/BMP/ICO/TIFF），以及 PDF、Word、Excel、PowerPoint 文档附件。暂不支持 HTML、音频、视频、iWork、压缩包、SVG/AVIF、数据库、可执行文件或未知格式。"
         let rejectedLines = result.rejected.prefix(8).map { "- \($0.filename)：\($0.reason.userMessage)" }.joined(separator: "\n")
         let remaining = result.rejected.count > 8 ? "\n…另有 \(result.rejected.count - 8) 个文件未添加" : ""
         if result.accepted.isEmpty {
-            return "不支持的附件类型\n\n\(supportedSummary)\n\n未添加：\n\(rejectedLines)\(remaining)"
+            return "\(supportedSummary)\n\n未添加：\n\(rejectedLines)\(remaining)"
         }
-        return "已添加 \(result.accepted.count) 个附件，拒绝 \(result.rejected.count) 个不支持的文件。\n\n\(supportedSummary)\n\n未添加：\n\(rejectedLines)\(remaining)"
+        return "已添加 \(result.accepted.count) 个附件，\(result.rejected.count) 个文件未添加。\n\n\(supportedSummary)\n\n未添加：\n\(rejectedLines)\(remaining)"
     }
 
     private func buildAttachmentContextPlan(
@@ -358,7 +435,11 @@ final class AppViewModel: ObservableObject {
                     continue
                 }
                 guard let relativePath = manifest.extractedTextRelativePath else {
-                    omissions.append(AttachmentOmission(attachmentID: attachment.id, displayName: attachment.displayName, reason: "No extracted text is available."))
+                    omissions.append(AttachmentOmission(
+                        attachmentID: attachment.id,
+                        displayName: attachment.displayName,
+                        reason: Self.attachmentOmissionReason(for: manifest)
+                    ))
                     continue
                 }
                 let url = storagePaths.sessionArtifactDirectories(sessionID: sessionID).root.appendingPathComponent(relativePath)
@@ -381,6 +462,22 @@ final class AppViewModel: ObservableObject {
         }
         let estimatedTokens = max(1, inlineBlocks.reduce(0) { $0 + $1.content.count } / 4 + imageBlocks.count * 85)
         return AttachmentContextPlan(inlineBlocks: inlineBlocks, omittedAttachments: omissions, imageBlocks: imageBlocks, estimatedTokens: estimatedTokens)
+    }
+
+    private static func attachmentOmissionReason(for manifest: AgentAttachmentManifest) -> String {
+        switch manifest.extractionStatus {
+        case .pending:
+            return "Text extraction is still pending; this attachment is saved locally but its contents are not included in this prompt yet."
+        case .unsupported:
+            return "Text extraction is unsupported or no extractor is currently available; the original file is saved locally but its contents are not included in this prompt."
+        case .failed:
+            let details = manifest.extractionReports.last?.errors.joined(separator: " ") ?? "unknown error"
+            return "Text extraction failed (\(details)); the original file is saved locally but its contents are not included in this prompt."
+        case .skippedOversize:
+            return "Text extraction was skipped because the attachment is too large; the original file is saved locally but its contents are not included in this prompt."
+        case .extracted:
+            return "No extracted text file is available even though extraction is marked complete."
+        }
     }
 
     private func refreshSelectedSubmittingState() {

@@ -10,6 +10,7 @@ public enum AgentAttachmentKind: String, Codable, Sendable, Equatable {
     case pdf
     case document
     case spreadsheet
+    case presentation
     case archive
     case html
     case audio
@@ -46,6 +47,7 @@ public enum AgentAttachmentDerivativeKind: String, Codable, Sendable, Equatable 
 
 public enum AgentAttachmentExtractionEngine: String, Codable, Sendable, Equatable {
     case builtinText
+    case builtinPDFText
     case markItDown
     case docling
     case providerNative
@@ -140,6 +142,55 @@ public struct AgentAttachmentExtractionReport: Codable, Sendable, Equatable {
         self.derivativeRefs = derivativeRefs
         self.startedAt = startedAt
         self.completedAt = completedAt
+    }
+}
+
+public enum AgentAttachmentExtractionJobStatus: String, Codable, Sendable, Equatable {
+    case queued
+    case running
+    case succeeded
+    case unsupported
+    case failed
+    case cancelled
+}
+
+public struct AgentAttachmentExtractionJob: Codable, Sendable, Equatable, Identifiable {
+    public var id: String
+    public var sessionID: String
+    public var attachmentID: String
+    public var requestedCapabilities: [String]
+    public var status: AgentAttachmentExtractionJobStatus
+    public var attempt: Int
+    public var maxAttempts: Int
+    public var createdAt: Date
+    public var startedAt: Date?
+    public var completedAt: Date?
+    public var lastError: String?
+
+    public init(
+        id: String = UUID().uuidString,
+        sessionID: String,
+        attachmentID: String,
+        requestedCapabilities: [String] = [],
+        status: AgentAttachmentExtractionJobStatus = .queued,
+        attempt: Int = 0,
+        maxAttempts: Int = 3,
+        createdAt: Date = Date(),
+        startedAt: Date? = nil,
+        completedAt: Date? = nil,
+        lastError: String? = nil
+    ) {
+        self.id = id
+        self.sessionID = sessionID
+        self.attachmentID = attachmentID
+        self.requestedCapabilities = requestedCapabilities
+        self.status = status
+        self.attempt = attempt
+        self.maxAttempts = maxAttempts
+        self.createdAt = createdAt
+        self.startedAt = startedAt
+        self.completedAt = completedAt
+        self.lastError = lastError
     }
 }
 
