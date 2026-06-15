@@ -1327,7 +1327,7 @@ final class AppViewModel: ObservableObject {
         } catch {
             errorMessage = String(describing: error)
         }
-    }
+    };
 
     private func loadSessionCapsule(sessionID: String) throws {
         guard let chatSessionRepository else { return }
