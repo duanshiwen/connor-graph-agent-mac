@@ -187,10 +187,16 @@ public enum DoclingAttachmentExtractor {
 public struct AttachmentExtractionOrchestrator: Sendable {
     public var sidecars: [any AttachmentExtractionSidecar]
     public var maxBuiltinTextBytes: Int64
+    public var maxBuiltinPDFBytes: Int64
 
-    public init(sidecars: [any AttachmentExtractionSidecar] = [MarkItDownAttachmentExtractor.sidecar(), DoclingAttachmentExtractor.sidecar()], maxBuiltinTextBytes: Int64 = 512_000) {
+    public init(
+        sidecars: [any AttachmentExtractionSidecar] = [MarkItDownAttachmentExtractor.sidecar(), DoclingAttachmentExtractor.sidecar()],
+        maxBuiltinTextBytes: Int64 = 512_000,
+        maxBuiltinPDFBytes: Int64 = 25_000_000
+    ) {
         self.sidecars = sidecars
         self.maxBuiltinTextBytes = maxBuiltinTextBytes
+        self.maxBuiltinPDFBytes = maxBuiltinPDFBytes
     }
 
     public func extract(_ request: AttachmentExtractionRequest) async throws -> AttachmentExtractionResult {
@@ -205,6 +211,17 @@ public struct AttachmentExtractionOrchestrator: Sendable {
                 completedAt: Date()
             )
             return AttachmentExtractionResult(report: report, extractedMarkdown: builtin.markdown, previewText: builtin.previewText)
+        }
+
+        if AttachmentPDFTextExtraction.supports(kind: request.manifest.kind) {
+            let pdf = try AttachmentPDFTextExtraction.extract(
+                fileURL: request.originalFileURL,
+                attachmentID: request.manifest.id,
+                maxBytes: maxBuiltinPDFBytes
+            )
+            if pdf.report.status == .extracted || pdf.report.status == .skippedOversize || pdf.report.status == .failed {
+                return pdf
+            }
         }
 
         for sidecar in sidecars {
