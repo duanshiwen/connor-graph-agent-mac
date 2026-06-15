@@ -1,7 +1,7 @@
 import Testing
 @testable import ConnorGraphAppSupport
 
-@Test func collapsedAssistantMessageDoesNotScrollWhenTranscriptFitsViewport() {
+@Test func collapsedAssistantMessageResetsToTopWhenTranscriptFitsViewport() {
     let policy = AgentChatCollapseScrollPolicy()
 
     let decision = policy.decisionAfterAssistantMessageCollapse(
@@ -9,7 +9,7 @@ import Testing
         viewportHeight: 700
     )
 
-    #expect(decision == .doNotScroll)
+    #expect(decision == .scrollToTop)
 }
 
 @Test func collapsedAssistantMessageScrollsToBottomWhenTranscriptStillOverflowsViewport() {
@@ -21,4 +21,15 @@ import Testing
     )
 
     #expect(decision == .scrollToBottom)
+}
+
+@Test func sessionSwitchResetsToTopWhenTranscriptFitsViewport() {
+    let policy = AgentChatCollapseScrollPolicy()
+
+    let decision = policy.decisionAfterSessionSwitch(
+        contentHeight: 520,
+        viewportHeight: 700
+    )
+
+    #expect(decision == .scrollToTop)
 }
