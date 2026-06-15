@@ -293,8 +293,8 @@ private struct CraftSessionListPane: View {
             .padding(.vertical, 13)
 
             ScrollView {
-                LazyVStack(spacing: 2) {
-                    ForEach(filteredSessions) { session in
+                LazyVStack(spacing: 0) {
+                    ForEach(Array(filteredSessions.enumerated()), id: \.element.id) { index, session in
                         CraftSessionRow(
                             row: AgentChatSessionPresentation(session: session),
                             isSelected: session.id == viewModel.selectedChatSessionID,
@@ -311,6 +311,13 @@ private struct CraftSessionListPane: View {
                             onRegenerateTitle: { viewModel.regenerateChatSessionTitle(session.id) },
                             onDelete: { viewModel.deleteChatSession(session.id) }
                         )
+                        if index < filteredSessions.count - 1 {
+                            Rectangle()
+                                .fill(Color(nsColor: .separatorColor).opacity(0.42))
+                                .frame(height: 0.5)
+                                .padding(.leading, 42)
+                                .padding(.trailing, 10)
+                        }
                     }
                     if filteredSessions.isEmpty {
                         if viewModel.sessionSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
