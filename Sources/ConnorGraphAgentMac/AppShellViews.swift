@@ -439,29 +439,35 @@ private struct CraftSessionRow: View {
 
     @ViewBuilder
     private var contextMenuItems: some View {
-        Menu("更改状态") {
+        Menu {
             ForEach(AgentSessionStatus.allCases.filter { $0 != .archived }, id: \.self) { status in
                 Button {
                     onSetStatus(status)
                 } label: {
-                    Label(status.displayName, systemImage: status == row.status ? "checkmark" : icon(for: status))
+                    Label(status.displayName, systemImage: status == row.status ? "checkmark.circle.fill" : icon(for: status))
                 }
             }
+        } label: {
+            Label("更改状态", systemImage: "circle.dashed")
         }
 
-        Menu("标签") {
+        Menu {
             if labelDefinitions.isEmpty {
-                Button("暂无可切换标签") {}
-                    .disabled(true)
+                Button {} label: {
+                    Label("暂无可切换标签", systemImage: "tag.slash")
+                }
+                .disabled(true)
             } else {
                 ForEach(labelDefinitions) { definition in
                     Button {
                         onToggleLabel(definition.id)
                     } label: {
-                        Label(definition.name, systemImage: row.labels.contains(where: { $0.id == definition.id }) ? "checkmark.circle.fill" : "circle")
+                        Label(definition.name, systemImage: row.labels.contains(where: { $0.id == definition.id }) ? "checkmark.circle.fill" : "tag")
                     }
                 }
             }
+        } label: {
+            Label("标签", systemImage: "tag")
         }
 
         Divider()
