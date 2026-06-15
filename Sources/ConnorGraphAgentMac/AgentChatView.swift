@@ -799,17 +799,23 @@ private struct AgentChatTranscriptViewportHeightKey: PreferenceKey {
 
 private struct AgentChatConversationHeader: View {
     @ObservedObject var viewModel: AppViewModel
+    @State private var isEditingTitle = false
+    @State private var titleDraft = ""
+    @FocusState private var isTitleFocused: Bool
 
     private var selectedTitle: String {
-        viewModel.chatSessions.first(where: { $0.id == viewModel.selectedChatSessionID })?.title ?? "智能体聊天"
+        selectedSession?.title ?? "智能体聊天"
+    }
+
+    private var selectedSession: AgentSession? {
+        guard let selectedID = viewModel.selectedChatSessionID else { return nil }
+        return viewModel.allChatSessions.first { $0.id == selectedID }
+            ?? viewModel.chatSessions.first { $0.id == selectedID }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
-            Text(selectedTitle)
-                .font(AgentChatTypography.title)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .center)
+            titleView
 
             if let summary = viewModel.latestChatSummary {
                 DisclosureGroup {
@@ -840,6 +846,69 @@ private struct AgentChatConversationHeader: View {
                 .background(.quaternary.opacity(0.20), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
             }
         }
+        .onAppear { titleDraft = selectedTitle }
+        .onChange(of: selectedTitle) { _, newTitle in
+            guard !isEditingTitle else { return }
+            titleDraft = newTitle
+        }
+        .onChange(of: viewModel.selectedChatSessionID) { _, _ in
+            isEditingTitle = false
+            isTitleFocused = false
+            titleDraft = selectedTitle
+        }
+        .onChange(of: isTitleFocused) { _, focused in
+            if !focused, isEditingTitle { commitTitleEdit() }
+        }
+    }
+
+    @ViewBuilder
+    private var titleView: some View {
+        if isEditingTitle {
+            TextField("会话标题", text: $titleDraft)
+                .textFieldStyle(.plain)
+                .font(AgentChatTypography.title)
+                .multilineTextAlignment(.center)
+                .lineLimit(1)
+                .focused($isTitleFocused)
+                .onSubmit { commitTitleEdit() }
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.horizontal, AgentChatLayout.spaceXL)
+                .background(
+                    Color(nsColor: .controlBackgroundColor).opacity(0.72),
+                    in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous)
+                        .stroke(Color.accentColor.opacity(0.35), lineWidth: 1)
+                )
+                .onAppear { isTitleFocused = true }
+        } else {
+            Text(selectedTitle)
+                .font(AgentChatTypography.title)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) { beginTitleEdit() }
+                .help("双击编辑会话标题")
+        }
+    }
+
+    private func beginTitleEdit() {
+        guard viewModel.selectedChatSessionID != nil else { return }
+        titleDraft = selectedTitle
+        isEditingTitle = true
+        isTitleFocused = true
+    }
+
+    private func commitTitleEdit() {
+        let trimmed = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        isEditingTitle = false
+        isTitleFocused = false
+        guard let selectedID = viewModel.selectedChatSessionID, !trimmed.isEmpty, trimmed != selectedTitle else {
+            titleDraft = selectedTitle
+            return
+        }
+        viewModel.renameChatSession(selectedID, title: trimmed)
     }
 }
 
