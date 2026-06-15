@@ -56,6 +56,14 @@ struct AgentChatComposerView: View {
         .commaSeparatedText,
         .xml,
         .image,
+        .pdf,
+        UTType(filenameExtension: "doc") ?? .data,
+        UTType(filenameExtension: "docx") ?? .data,
+        UTType(filenameExtension: "rtf") ?? .rtf,
+        UTType(filenameExtension: "xls") ?? .data,
+        UTType(filenameExtension: "xlsx") ?? .data,
+        UTType(filenameExtension: "ppt") ?? .data,
+        UTType(filenameExtension: "pptx") ?? .data,
         UTType(filenameExtension: "jsonl") ?? .json,
         UTType(filenameExtension: "tsv") ?? .commaSeparatedText,
         UTType(filenameExtension: "md") ?? .text,
@@ -196,7 +204,7 @@ struct AgentChatComposerView: View {
             case .success(let urls):
                 Task { await viewModel.importAttachments(urls: urls) }
             case .failure(let error):
-                viewModel.errorMessage = "附件选择失败：\(error)"
+                viewModel.showAttachmentToast(title: "附件选择失败", message: String(describing: error), systemImage: "xmark.circle")
             }
         }
     }

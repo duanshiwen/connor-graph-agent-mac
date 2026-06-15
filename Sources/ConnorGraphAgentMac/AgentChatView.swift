@@ -131,6 +131,16 @@ struct AgentChatView: View {
                     .padding(.trailing, AgentChatLayout.spaceL)
             }
 
+            if let toast = viewModel.attachmentToast {
+                AgentChatToastView(toast: toast) {
+                    viewModel.attachmentToast = nil
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .zIndex(8)
+                .padding(.top, AgentChatLayout.spaceL)
+                .padding(.trailing, AgentChatLayout.spaceL)
+            }
+
             if let model = viewModel.attachmentPreviewModel {
                 AgentAttachmentPreviewOverlay(model: model) {
                     viewModel.attachmentPreviewModel = nil
@@ -150,6 +160,49 @@ struct AgentChatView: View {
                 viewModel.reloadPendingApprovals()
             }
         }
+    }
+}
+
+private struct AgentChatToastView: View {
+    var toast: AgentChatToast
+    var onDismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: AgentChatLayout.spaceM) {
+            Image(systemName: toast.systemImage)
+                .font(.system(size: AgentChatTypography.controlIconSize, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.orange)
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
+                Text(toast.title)
+                    .font(AgentChatTypography.metaEmphasis)
+                Text(toast.message)
+                    .font(AgentChatTypography.micro)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(8)
+                    .textSelection(.enabled)
+            }
+            .frame(maxWidth: 420, alignment: .leading)
+
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .accessibilityLabel("关闭提示")
+        }
+        .padding(.horizontal, AgentChatLayout.spaceM)
+        .padding(.vertical, AgentChatLayout.spaceM)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                .stroke(Color.orange.opacity(0.22), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.16), radius: 18, x: 0, y: 10)
     }
 }
 
