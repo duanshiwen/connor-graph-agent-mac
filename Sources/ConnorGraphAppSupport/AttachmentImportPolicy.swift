@@ -32,6 +32,7 @@ public enum AttachmentImportRejectionReason: Sendable, Equatable, CustomStringCo
     case missingFileExtension
     case unsupportedHTML
     case unsupportedPDF
+    case unsupportedPresentation
     case unsupportedAudio
     case unsupportedVideo
     case unsupportedOffice
@@ -50,6 +51,7 @@ public enum AttachmentImportRejectionReason: Sendable, Equatable, CustomStringCo
         case .missingFileExtension: return "缺少文件扩展名"
         case .unsupportedHTML: return "暂不支持 HTML 文件"
         case .unsupportedPDF: return "暂不支持 PDF 文件"
+        case .unsupportedPresentation: return "暂不支持 PowerPoint 演示文稿"
         case .unsupportedAudio: return "暂不支持音频文件"
         case .unsupportedVideo: return "暂不支持视频文件"
         case .unsupportedOffice: return "暂不支持 Word / Excel / PowerPoint 文件"
@@ -67,10 +69,12 @@ public enum AttachmentImportRejectionReason: Sendable, Equatable, CustomStringCo
 public struct AttachmentImportPolicy: Sendable {
     public var maxAcceptedBytes: Int64
     public var maxImageBytes: Int64
+    public var maxDocumentBytes: Int64
 
-    public init(maxAcceptedBytes: Int64 = 512_000, maxImageBytes: Int64 = 10_000_000) {
+    public init(maxAcceptedBytes: Int64 = 512_000, maxImageBytes: Int64 = 10_000_000, maxDocumentBytes: Int64 = 25_000_000) {
         self.maxAcceptedBytes = maxAcceptedBytes
         self.maxImageBytes = maxImageBytes
+        self.maxDocumentBytes = maxDocumentBytes
     }
 
     public func validate(url: URL, fileManager: FileManager = .default) -> AttachmentImportValidationResult {
@@ -81,7 +85,7 @@ public struct AttachmentImportPolicy: Sendable {
             return .rejected(Self.rejectionReason(forExtension: ext))
         }
 
-        let byteLimit = kind == .image ? maxImageBytes : maxAcceptedBytes
+        let byteLimit = byteLimit(for: kind)
         if let byteCount = try? byteCount(url: url, fileManager: fileManager), byteCount > byteLimit {
             return .rejected(.fileTooLarge(byteLimit))
         }
@@ -100,6 +104,10 @@ public struct AttachmentImportPolicy: Sendable {
             return .code
         case "png", "jpg", "jpeg", "gif", "webp", "heic", "bmp", "ico", "tif", "tiff":
             return .image
+        case "pdf": return .pdf
+        case "doc", "docx", "rtf": return .document
+        case "xls", "xlsx": return .spreadsheet
+        case "ppt", "pptx": return .presentation
         default:
             return nil
         }
@@ -109,15 +117,24 @@ public struct AttachmentImportPolicy: Sendable {
         switch ext.lowercased() {
         case "html", "htm": return .unsupportedHTML
         case "svg", "avif": return .unsupportedSVG
-        case "pdf": return .unsupportedPDF
         case "mp3", "wav", "m4a", "aac", "flac", "ogg": return .unsupportedAudio
         case "mp4", "mov", "mkv", "avi", "webm": return .unsupportedVideo
-        case "doc", "docx", "xls", "xlsx", "ppt", "pptx", "rtf": return .unsupportedOffice
         case "pages", "numbers", "keynote": return .unsupportedIWork
         case "zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz": return .unsupportedArchive
         case "sqlite", "db": return .unsupportedDatabase
         case "dmg", "pkg", "exe", "app", "bin": return .unsupportedExecutableOrBinary
         default: return .unsupportedUnknownExtension(ext.lowercased())
+        }
+    }
+
+    private func byteLimit(for kind: AgentAttachmentKind) -> Int64 {
+        switch kind {
+        case .image:
+            return maxImageBytes
+        case .pdf, .document, .spreadsheet, .presentation:
+            return maxDocumentBytes
+        default:
+            return maxAcceptedBytes
         }
     }
 

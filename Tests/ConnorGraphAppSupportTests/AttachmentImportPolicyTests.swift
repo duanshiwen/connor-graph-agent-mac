@@ -27,17 +27,29 @@ struct AttachmentImportPolicyTests {
         }
     }
 
+    @Test func acceptsCommercialDocumentAttachmentAllowlist() {
+        let accepted: [(String, AgentAttachmentKind)] = [
+            ("paper.pdf", .pdf),
+            ("brief.docx", .document),
+            ("legacy.doc", .document),
+            ("notes.rtf", .document),
+            ("sheet.xlsx", .spreadsheet),
+            ("legacy.xls", .spreadsheet),
+            ("slides.pptx", .presentation),
+            ("legacy.ppt", .presentation)
+        ]
+        for (filename, expectedKind) in accepted {
+            #expect(AttachmentImportPolicy.acceptedKind(forExtension: URL(fileURLWithPath: filename).pathExtension) == expectedKind)
+        }
+    }
+
     @Test func rejectsUnsupportedAttachmentFamilies() {
         let rejected: [(String, AttachmentImportRejectionReason)] = [
             ("page.html", .unsupportedHTML),
             ("page.htm", .unsupportedHTML),
             ("vector.svg", .unsupportedSVG),
-            ("paper.pdf", .unsupportedPDF),
             ("audio.mp3", .unsupportedAudio),
             ("video.mp4", .unsupportedVideo),
-            ("doc.docx", .unsupportedOffice),
-            ("sheet.xlsx", .unsupportedOffice),
-            ("slides.pptx", .unsupportedOffice),
             ("draft.pages", .unsupportedIWork),
             ("archive.zip", .unsupportedArchive),
             ("archive.tar", .unsupportedArchive),
@@ -61,6 +73,31 @@ struct AttachmentImportPolicyTests {
 
         #expect(policy.validate(url: text) == .rejected(.fileTooLarge(512_000)))
         #expect(policy.validate(url: image) == .accepted(kind: .image))
+    }
+
+    @Test func appliesSeparateDocumentSizeLimit() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let text = root.appendingPathComponent("large.json")
+        let document = root.appendingPathComponent("large.pdf")
+        try Data(repeating: 0, count: 900_000).write(to: text)
+        try Data(repeating: 0, count: 900_000).write(to: document)
+
+        let policy = AttachmentImportPolicy(maxAcceptedBytes: 512_000, maxImageBytes: 10_000_000, maxDocumentBytes: 1_000_000)
+
+        #expect(policy.validate(url: text) == .rejected(.fileTooLarge(512_000)))
+        #expect(policy.validate(url: document) == .accepted(kind: .pdf))
+    }
+
+    @Test func rejectsDocumentsAboveDocumentSizeLimit() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let presentation = root.appendingPathComponent("large.pptx")
+        try Data(repeating: 0, count: 1_100_000).write(to: presentation)
+
+        let policy = AttachmentImportPolicy(maxAcceptedBytes: 512_000, maxImageBytes: 10_000_000, maxDocumentBytes: 1_000_000)
+
+        #expect(policy.validate(url: presentation) == .rejected(.fileTooLarge(1_000_000)))
     }
 
     @Test func rejectsMissingAndUnknownExtensions() {
