@@ -8,15 +8,40 @@ import ConnorGraphStore
 import ConnorGraphAppSupport
 
 private enum SettingsListTypography {
-    static let header: Font = .system(size: 15.5, weight: .semibold)
-    static let rowTitle: Font = .system(size: 14.5, weight: .regular)
-    static let rowTitleSelected: Font = .system(size: 14.5, weight: .semibold)
-    static let rowSubtitle: Font = .system(size: 12.5)
-    static let rowCaption: Font = .system(size: 12.5)
-    static let rowCaptionEmphasized: Font = .system(size: 12.5, weight: .semibold)
-    static let actionTitle: Font = .system(size: 13.5, weight: .regular)
-    static let icon: Font = .system(size: 16, weight: .medium)
+    // Mirror the chat detail typography scale so settings feels like part of the
+    // same macOS app. Apple HIG recommends preserving hierarchy with size,
+    // weight, and color while keeping macOS body text legible around 13 pt+.
+    static let header: Font = AgentChatTypography.title
+    static let rowTitle: Font = AgentChatTypography.body
+    static let rowTitleSelected: Font = AgentChatTypography.bodyEmphasis
+    static let rowSubtitle: Font = AgentChatTypography.meta
+    static let rowCaption: Font = AgentChatTypography.micro
+    static let rowCaptionEmphasized: Font = AgentChatTypography.microEmphasis
+    static let actionTitle: Font = AgentChatTypography.callout
+    static let icon: Font = .system(size: AgentChatTypography.controlIconSize, weight: .medium)
     static let largeIcon: Font = .system(size: 22, weight: .semibold)
+}
+
+private enum SettingsListLayout {
+    static let spaceXS = AgentChatLayout.spaceXS
+    static let spaceS = AgentChatLayout.spaceS
+    static let spaceM = AgentChatLayout.spaceM
+    static let spaceL = AgentChatLayout.spaceL
+    static let spaceXL = AgentChatLayout.spaceXL
+
+    static let radiusS = AgentChatLayout.radiusS
+    static let radiusM = AgentChatLayout.radiusM
+    static let radiusL = AgentChatLayout.radiusL
+    static let hairlineOpacity = AgentChatLayout.hairlineOpacity
+
+    static let contentMaxWidth = AgentChatLayout.chatContentMaxWidth
+    static let formMaxWidth: CGFloat = 560
+    static let rowMinHeight = AgentChatLayout.hitTargetSize
+    static let compactRowMinHeight: CGFloat = 38
+    static let prominentRowMinHeight: CGFloat = 58
+    static let fieldHeight = AgentChatLayout.hitTargetSize
+    static let iconButtonSize = AgentChatLayout.iconButtonSize
+    static let optionIconSize = AgentChatLayout.primaryButtonSize
 }
 
 struct LLMSettingsView: View {
@@ -229,8 +254,8 @@ private struct SettingsAISection: View {
     }
 
     private var connectionList: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceXL) {
+            VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
                 Text("连接")
                     .font(SettingsListTypography.header)
                 Text("管理 AI 提供商连接。")
@@ -257,12 +282,12 @@ private struct SettingsAISection: View {
                     }
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 6)
-            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(.horizontal, SettingsListLayout.spaceL)
+            .padding(.vertical, SettingsListLayout.spaceS)
+            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.secondary.opacity(0.14), lineWidth: 1)
+                RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous)
+                    .stroke(Color.secondary.opacity(SettingsListLayout.hairlineOpacity), lineWidth: 1)
             )
             .shadow(color: Color.black.opacity(0.04), radius: 2, x: 0, y: 1)
 
@@ -270,8 +295,8 @@ private struct SettingsAISection: View {
                 Label("添加连接", systemImage: "plus")
                     .font(SettingsListTypography.actionTitle)
                     .labelStyle(.titleAndIcon)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
+                    .padding(.horizontal, SettingsListLayout.spaceM)
+                    .padding(.vertical, SettingsListLayout.spaceXS)
             }
             .buttonStyle(.bordered)
             .controlSize(.large)
@@ -569,8 +594,8 @@ private struct AIConnectionSetupView: View {
         VStack(spacing: 0) {
             Spacer(minLength: 72)
 
-            VStack(spacing: 20) {
-                VStack(spacing: 6) {
+            VStack(spacing: SettingsListLayout.spaceXL) {
+                VStack(spacing: SettingsListLayout.spaceS) {
                     Text(option.setupTitle)
                         .font(SettingsListTypography.header)
                     Text(option.setupSubtitle)
@@ -580,14 +605,14 @@ private struct AIConnectionSetupView: View {
                 }
 
                 setupContent
-                    .frame(maxWidth: 560)
+                    .frame(maxWidth: SettingsListLayout.formMaxWidth)
 
                 if let statusMessage {
                     Text(statusMessage)
                         .font(SettingsListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
-                        .frame(maxWidth: 560)
+                        .frame(maxWidth: SettingsListLayout.formMaxWidth)
                 }
 
                 if let errorMessage {
@@ -595,13 +620,13 @@ private struct AIConnectionSetupView: View {
                         .font(SettingsListTypography.rowSubtitle)
                         .foregroundStyle(.red)
                         .multilineTextAlignment(.center)
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 14)
-                        .frame(maxWidth: 560)
-                        .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .padding(.horizontal, SettingsListLayout.spaceL)
+                        .padding(.vertical, SettingsListLayout.spaceM)
+                        .frame(maxWidth: SettingsListLayout.formMaxWidth)
+                        .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous))
                 }
 
-                HStack(spacing: 14) {
+                HStack(spacing: SettingsListLayout.spaceL) {
                     Button(action: back) {
                         Text("返回")
                             .frame(maxWidth: .infinity)
@@ -617,7 +642,7 @@ private struct AIConnectionSetupView: View {
                     .controlSize(.large)
                     .disabled(isPrimaryButtonDisabled || isAuthenticating)
                 }
-                .frame(maxWidth: 560)
+                .frame(maxWidth: SettingsListLayout.formMaxWidth)
             }
 
             Spacer(minLength: 96)
@@ -659,7 +684,7 @@ private struct AIConnectionSetupView: View {
                         .font(SettingsListTypography.header)
                     TextField("粘贴 Claude 页面显示的授权码", text: $authorizationCode)
                         .textFieldStyle(.roundedBorder)
-                        .font(SettingsListTypography.rowSubtitle)
+                        .font(SettingsListTypography.rowTitle)
                         .textContentType(.oneTimeCode)
                     Text("授权码只用于完成本次连接。康纳同学会先验证，再保存连接。")
                         .font(SettingsListTypography.rowTitle)
@@ -856,7 +881,7 @@ private struct AIConnectionSetupView: View {
                         .font(SettingsListTypography.header)
                     TextField("https://your-api-endpoint.com", text: $baseURLString)
                         .textFieldStyle(.roundedBorder)
-                        .font(SettingsListTypography.rowSubtitle)
+                        .font(SettingsListTypography.rowTitle)
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -882,7 +907,7 @@ private struct AIConnectionSetupView: View {
                 } else {
                     TextField("例如 gpt-4o-mini、deepseek-v4-flash、google/gemini-2.5-flash", text: $model)
                         .textFieldStyle(.roundedBorder)
-                        .font(SettingsListTypography.rowSubtitle)
+                        .font(SettingsListTypography.rowTitle)
                 }
                 Text("使用服务商自己的模型 ID。当前 Connor 会用该模型执行一次真实连接校验。")
                     .font(SettingsListTypography.rowTitle)
@@ -892,10 +917,10 @@ private struct AIConnectionSetupView: View {
     }
 
     private func apiKeyField(placeholder: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceS) {
             Text("API Key")
                 .font(SettingsListTypography.header)
-            HStack(spacing: 8) {
+            HStack(spacing: SettingsListLayout.spaceS) {
                 Group {
                     if showAPIKey {
                         TextField(placeholder, text: $apiKey)
@@ -904,7 +929,7 @@ private struct AIConnectionSetupView: View {
                     }
                 }
                 .textFieldStyle(.plain)
-                .font(SettingsListTypography.rowSubtitle)
+                .font(SettingsListTypography.rowTitle)
                 Button(action: { showAPIKey.toggle() }) {
                     Image(systemName: showAPIKey ? "eye.slash" : "eye")
                         .foregroundStyle(.secondary)
@@ -912,23 +937,23 @@ private struct AIConnectionSetupView: View {
                 .buttonStyle(.plain)
                 .help(showAPIKey ? "隐藏 API Key" : "显示 API Key")
             }
-            .padding(.horizontal, 14)
-            .frame(height: 48)
-            .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .padding(.horizontal, SettingsListLayout.spaceL)
+            .frame(height: SettingsListLayout.fieldHeight)
+            .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous)
                     .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
             )
         }
     }
 
     private func modelMultiSelect(title: String, models: [String]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceM) {
             if !title.isEmpty {
                 Text(title)
                     .font(SettingsListTypography.header)
             }
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: SettingsListLayout.spaceS) {
                 ForEach(models, id: \.self) { modelID in
                     Toggle(isOn: Binding(
                         get: { selectedModelIDs.contains(modelID) },
@@ -947,9 +972,9 @@ private struct AIConnectionSetupView: View {
                     .toggleStyle(.checkbox)
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .padding(.horizontal, SettingsListLayout.spaceL)
+            .padding(.vertical, SettingsListLayout.spaceM)
+            .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous))
 
             HStack {
                 Text("默认模型")
@@ -1793,7 +1818,7 @@ struct WorkspaceRootsSettingsContent: View {
                 Button("选择目录…") { chooseDirectories() }
                     .buttonStyle(.bordered)
             }
-            .frame(minHeight: 42)
+            .frame(minHeight: SettingsListLayout.rowMinHeight)
 
             if !viewModel.workspaceRoots.isEmpty {
                 Divider()
@@ -2528,18 +2553,18 @@ private struct SettingsGroup<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceM) {
             Text(title)
                 .font(SettingsListTypography.header)
             VStack(spacing: 0) {
                 content
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
+                    .padding(.horizontal, SettingsListLayout.spaceL)
+                    .padding(.vertical, SettingsListLayout.spaceM)
             }
-            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.secondary.opacity(0.14), lineWidth: 1)
+                RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous)
+                    .stroke(Color.secondary.opacity(SettingsListLayout.hairlineOpacity), lineWidth: 1)
             )
         }
     }
@@ -2549,9 +2574,9 @@ private struct SettingsAppearanceModeRow: View {
     @Binding var selection: ConnorAppearanceMode
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceM) {
             HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
                     Text("外观")
                         .font(SettingsListTypography.rowTitleSelected)
                     Text("选择应用页面的显示主题。")
@@ -2569,7 +2594,7 @@ private struct SettingsAppearanceModeRow: View {
             .labelsHidden()
             .pickerStyle(.segmented)
         }
-        .frame(minHeight: 68, alignment: .leading)
+        .frame(minHeight: SettingsListLayout.prominentRowMinHeight, alignment: .leading)
     }
 }
 
@@ -2589,7 +2614,7 @@ private struct SettingsToggleRow: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
         }
-        .frame(minHeight: 42)
+        .frame(minHeight: SettingsListLayout.rowMinHeight)
     }
 }
 
@@ -2603,7 +2628,7 @@ private struct SettingsValueRow: View {
             Spacer()
             Text(value).font(SettingsListTypography.rowTitle).foregroundStyle(.secondary)
         }
-        .frame(minHeight: 42)
+        .frame(minHeight: SettingsListLayout.rowMinHeight)
     }
 }
 
@@ -2643,7 +2668,7 @@ private struct SettingsPickerRow<Selection: Hashable, Content: View>: View {
                 .pickerStyle(.menu)
                 .frame(maxWidth: 220)
         }
-        .frame(minHeight: 46)
+        .frame(minHeight: SettingsListLayout.rowMinHeight)
     }
 }
 
@@ -2666,7 +2691,7 @@ private struct ShortcutRow: View {
                 }
             }
         }
-        .frame(minHeight: 38)
+        .frame(minHeight: SettingsListLayout.compactRowMinHeight)
     }
 }
 
