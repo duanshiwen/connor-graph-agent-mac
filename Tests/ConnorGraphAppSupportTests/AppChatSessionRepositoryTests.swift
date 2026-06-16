@@ -95,6 +95,30 @@ private func temporaryAppChatStoragePaths(_ name: String = UUID().uuidString) ->
     #expect(task.updatedAt == Date(timeIntervalSince1970: 1_100))
 }
 
+@Test func appChatRepositoryRejectsDeletingSessionWithRunningBackgroundTasks() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryAppChatDatabaseURL().path)
+    try store.migrate()
+    let repository = AppChatSessionRepository(store: store)
+    try repository.saveSession(AgentSession(id: "session-1", title: "One"))
+    try repository.saveBackgroundTask(PersistedSessionBackgroundTask(
+        id: "task-running",
+        sessionID: "session-1",
+        kind: "title_generation",
+        title: "重新生成会话标题",
+        detail: "生成中",
+        status: .running,
+        createdAt: Date(timeIntervalSince1970: 1_000),
+        updatedAt: Date(timeIntervalSince1970: 1_001),
+        payloadJSON: "{}"
+    ))
+
+    #expect(throws: AppChatSessionRepositoryError.sessionHasRunningBackgroundTasks("session-1")) {
+        try repository.deleteSession(sessionID: "session-1")
+    }
+    let session = try #require(try repository.loadSession(id: "session-1"))
+    #expect(!session.governance.isDeleted)
+}
+
 @Test func appChatRepositorySoftDeletesSessionWithoutRemovingRecordsOrTasks() throws {
     let store = try SQLiteGraphKernelStore(path: temporaryAppChatDatabaseURL().path)
     try store.migrate()
@@ -107,7 +131,7 @@ private func temporaryAppChatStoragePaths(_ name: String = UUID().uuidString) ->
         kind: "title_generation",
         title: "重新生成会话标题",
         detail: "生成中",
-        status: .running,
+        status: .succeeded,
         createdAt: Date(timeIntervalSince1970: 1_000),
         updatedAt: Date(timeIntervalSince1970: 1_001),
         payloadJSON: "{}"
