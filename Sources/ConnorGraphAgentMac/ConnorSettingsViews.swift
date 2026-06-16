@@ -1917,14 +1917,43 @@ private struct SettingsPreferencesSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsGroup(title: "基本信息") {
-                SettingsTextFieldRow(title: "名称", subtitle: "康纳同学如何称呼你。", text: $viewModel.userDisplayName)
+                SettingsTextFieldRow(title: "称呼", subtitle: "康纳同学如何称呼你。默认读取 macOS 账户名称，可手动更改。", text: $viewModel.userDisplayName)
                 Divider()
-                SettingsTextFieldRow(title: "时区", subtitle: "用于相对日期和日程上下文。", text: $viewModel.userTimezone)
+                SettingsTextFieldRow(title: "时区", subtitle: "默认读取系统时区，用于相对日期和日程上下文。", text: $viewModel.userTimezone)
+                Divider()
+                SettingsTextFieldRow(title: "语言偏好", subtitle: "默认读取系统语言；康纳同学会优先按此语言回复。", text: $viewModel.userPreferredLanguage)
+                Divider()
+                HStack {
+                    Text("系统默认")
+                        .font(.subheadline.weight(.medium))
+                    Spacer()
+                    Button("重新读取") { viewModel.refreshSystemPreferenceDefaults() }
+                        .buttonStyle(.bordered)
+                }
             }
             SettingsGroup(title: "位置") {
-                SettingsTextFieldRow(title: "城市", subtitle: "用于本地信息和上下文。", text: $viewModel.userCity)
+                SettingsTextFieldRow(title: "城市", subtitle: "用于本地信息和上下文。可手动填写，或授权后自动读取。", text: $viewModel.userCity)
                 Divider()
-                SettingsTextFieldRow(title: "国家", subtitle: "用于区域格式和上下文。", text: $viewModel.userCountry)
+                SettingsTextFieldRow(title: "国家/地区", subtitle: "用于区域格式和上下文。", text: $viewModel.userCountry)
+                Divider()
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("当前位置")
+                            .font(.subheadline.weight(.medium))
+                        if let message = viewModel.userLocationStatusMessage {
+                            Text(message)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("申请位置权限后自动填写城市和国家/地区。")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    Button("使用当前位置") { viewModel.requestUserLocation() }
+                        .buttonStyle(.bordered)
+                }
             }
             SettingsGroup(title: "备注") {
                 TextEditor(text: $viewModel.userPreferenceNotes)

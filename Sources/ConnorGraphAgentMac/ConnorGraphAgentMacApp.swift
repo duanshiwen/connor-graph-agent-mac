@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import CoreLocation
 import IOKit.pwr_mgt
 import UserNotifications
 import ConnorGraphCore
@@ -178,7 +179,7 @@ private extension AppSessionBackgroundTaskStatus {
 }
 
 @MainActor
-final class AppViewModel: ObservableObject {
+final class AppViewModel: NSObject, ObservableObject {
     @Published var selection: SidebarItem? = .agentChat
     @Published var query: String = "记忆"
     @Published var searchResults: [GraphSearchHit] = []
@@ -288,11 +289,13 @@ final class AppViewModel: ObservableObject {
     @Published var workspaceRoots: [WorkspaceRootDraft] = []
     @Published var recentWorkspacePaths: [String] = []
     @Published var workspaceRootPathInput: String = ""
-    @Published var userDisplayName: String = "诗闻"
-    @Published var userTimezone: String = "Asia/Shanghai"
-    @Published var userCity: String = "杭州"
-    @Published var userCountry: String = "中国"
+    @Published var userDisplayName: String = ""
+    @Published var userTimezone: String = ""
+    @Published var userPreferredLanguage: String = ""
+    @Published var userCity: String = ""
+    @Published var userCountry: String = ""
     @Published var userPreferenceNotes: String = ""
+    @Published var userLocationStatusMessage: String?
     @Published var appSettingsMessage: String?
     @Published var pendingAttachmentRefs: [AgentMessageAttachmentRef] = []
     @Published var attachmentPreviewModel: AttachmentPreviewModel?
@@ -340,6 +343,7 @@ final class AppViewModel: ObservableObject {
     private var isLoadingRuntimeSettings = false
     private var runtimeSettingsAutosaveTask: Task<Void, Never>?
     private var idleSleepAssertionID: IOPMAssertionID = 0
+    private var locationCoordinator: UserLocationCoordinator?
 
     private var activeChatSession: AgentSession {
         nativeSessionManager?.session ?? fallbackChatSession
@@ -366,6 +370,7 @@ final class AppViewModel: ObservableObject {
             requireApprovalForShell.description,
             userDisplayName,
             userTimezone,
+            userPreferredLanguage,
             userCity,
             userCountry,
             userPreferenceNotes
@@ -1072,6 +1077,7 @@ final class AppViewModel: ObservableObject {
         self.databasePath = databasePath
         let initialSession = AgentSession(id: "app-session")
         self.fallbackChatSession = initialSession
+        super.init()
         if let repository {
             self.agentRuntimeFactory = AppGraphAgentRuntimeFactory(
                 store: repository.store,
@@ -1680,11 +1686,25 @@ final class AppViewModel: ObservableObject {
     func loadRuntimeSettings() {
         do {
             isLoadingRuntimeSettings = true
+            var shouldPersistSystemPreferenceDefaults = false
             defer {
                 isLoadingRuntimeSettings = false
                 applyRuntimeSettingsSideEffects()
+                if shouldPersistSystemPreferenceDefaults {
+                    scheduleRuntimeSettingsAutosave()
+                }
             }
-            let settings = try runtimeSettingsRepository?.loadOrCreateDefault() ?? .default
+            var settings = try runtimeSettingsRepository?.loadOrCreateDefault() ?? .default
+            if settings.schemaVersion < 3,
+               settings.preferences.displayName == "诗闻",
+               settings.preferences.timezone == "Asia/Shanghai",
+               settings.preferences.city == "杭州",
+               settings.preferences.country == "中国",
+               settings.preferences.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                settings.preferences = AgentRuntimePreferenceSettings()
+                settings.schemaVersion = 3
+                shouldPersistSystemPreferenceDefaults = true
+            }
             defaultPermissionMode = settings.loop.permissionMode == .allowAll ? .askToWrite : settings.loop.permissionMode
             showProviderIcons = settings.ui.showProviderIcons
             richToolDescriptionsEnabled = settings.ui.richToolDescriptionsEnabled
@@ -1706,8 +1726,13 @@ final class AppViewModel: ObservableObject {
                 defaultWorkingDirectoryPath = ""
                 workspaceRoots = []
             }
-            userDisplayName = settings.preferences.displayName
-            userTimezone = settings.preferences.timezone
+            let displayNameWasEmpty = settings.preferences.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            let timezoneWasEmpty = settings.preferences.timezone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            let languageWasEmpty = settings.preferences.preferredLanguage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            userDisplayName = displayNameWasEmpty ? Self.systemAccountDisplayName() : settings.preferences.displayName
+            userTimezone = timezoneWasEmpty ? TimeZone.current.identifier : settings.preferences.timezone
+            userPreferredLanguage = languageWasEmpty ? Self.systemPreferredLanguage() : settings.preferences.preferredLanguage
+            shouldPersistSystemPreferenceDefaults = displayNameWasEmpty || timezoneWasEmpty || languageWasEmpty
             userCity = settings.preferences.city
             userCountry = settings.preferences.country
             userPreferenceNotes = settings.preferences.notes
@@ -1721,6 +1746,7 @@ final class AppViewModel: ObservableObject {
     func saveRuntimeSettings() {
         do {
             var settings = try runtimeSettingsRepository?.loadOrCreateDefault() ?? .default
+            settings.schemaVersion = 3
             settings.loop.permissionMode = defaultPermissionMode == .allowAll ? .askToWrite : defaultPermissionMode
             settings.ui.showProviderIcons = showProviderIcons
             settings.ui.richToolDescriptionsEnabled = richToolDescriptionsEnabled
@@ -1740,6 +1766,7 @@ final class AppViewModel: ObservableObject {
             settings.workspace.recentWorkspacePaths = recentWorkspacePaths
             settings.preferences.displayName = userDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.timezone = userTimezone.trimmingCharacters(in: .whitespacesAndNewlines)
+            settings.preferences.preferredLanguage = userPreferredLanguage.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.city = userCity.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.country = userCountry.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.notes = userPreferenceNotes.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1799,6 +1826,52 @@ final class AppViewModel: ObservableObject {
         content.sound = .default
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
+    }
+
+    static func systemAccountDisplayName() -> String {
+        let fullName = NSFullUserName().trimmingCharacters(in: .whitespacesAndNewlines)
+        if !fullName.isEmpty { return fullName }
+        return NSUserName().trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func systemPreferredLanguage() -> String {
+        Locale.current.localizedString(forIdentifier: Locale.preferredLanguages.first ?? Locale.current.identifier) ?? Locale.current.identifier
+    }
+
+    func refreshSystemPreferenceDefaults() {
+        if userDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            userDisplayName = Self.systemAccountDisplayName()
+        }
+        if userTimezone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            userTimezone = TimeZone.current.identifier
+        }
+        if userPreferredLanguage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            userPreferredLanguage = Self.systemPreferredLanguage()
+        }
+    }
+
+    func requestUserLocation() {
+        userLocationStatusMessage = "正在请求位置权限…"
+        locationCoordinator = UserLocationCoordinator { [weak self] result in
+            Task { @MainActor in
+                guard let self else { return }
+                switch result {
+                case .success(let placemark):
+                    if let city = placemark.locality ?? placemark.subAdministrativeArea ?? placemark.administrativeArea {
+                        self.userCity = city
+                    }
+                    if let country = placemark.country {
+                        self.userCountry = country
+                    }
+                    self.userLocationStatusMessage = "位置已更新。"
+                    self.scheduleRuntimeSettingsAutosave()
+                case .failure(let error):
+                    self.userLocationStatusMessage = error.localizedDescription
+                }
+                self.locationCoordinator = nil
+            }
+        }
+        locationCoordinator?.requestLocation()
     }
 
     func upsertStatusDefinition(_ definition: AgentSessionStatusDefinition) {
@@ -3353,3 +3426,76 @@ final class AppViewModel: ObservableObject {
     }
 }
 
+
+private final class UserLocationCoordinator: NSObject, CLLocationManagerDelegate {
+    private let manager = CLLocationManager()
+    private let geocoder = CLGeocoder()
+    private let completion: @Sendable (Result<CLPlacemark, Error>) -> Void
+
+    init(completion: @escaping @Sendable (Result<CLPlacemark, Error>) -> Void) {
+        self.completion = completion
+        super.init()
+        manager.delegate = self
+        manager.desiredAccuracy = kCLLocationAccuracyThreeKilometers
+    }
+
+    func requestLocation() {
+        switch manager.authorizationStatus {
+        case .notDetermined:
+            manager.requestWhenInUseAuthorization()
+        case .authorizedAlways, .authorizedWhenInUse:
+            manager.requestLocation()
+        case .denied, .restricted:
+            completion(.failure(LocationPreferenceError.permissionDenied))
+        @unknown default:
+            completion(.failure(LocationPreferenceError.permissionDenied))
+        }
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        switch manager.authorizationStatus {
+        case .authorizedAlways, .authorizedWhenInUse:
+            manager.requestLocation()
+        case .denied, .restricted:
+            completion(.failure(LocationPreferenceError.permissionDenied))
+        case .notDetermined:
+            break
+        @unknown default:
+            completion(.failure(LocationPreferenceError.permissionDenied))
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let location = locations.last else {
+            completion(.failure(LocationPreferenceError.locationUnavailable))
+            return
+        }
+        geocoder.reverseGeocodeLocation(location) { [completion] placemarks, error in
+            if let error {
+                completion(.failure(error))
+            } else if let placemark = placemarks?.first {
+                completion(.success(placemark))
+            } else {
+                completion(.failure(LocationPreferenceError.locationUnavailable))
+            }
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        completion(.failure(error))
+    }
+}
+
+private enum LocationPreferenceError: LocalizedError {
+    case permissionDenied
+    case locationUnavailable
+
+    var errorDescription: String? {
+        switch self {
+        case .permissionDenied:
+            return "定位权限未开启。请在系统设置中允许康纳同学访问位置，或手动填写城市和国家/地区。"
+        case .locationUnavailable:
+            return "暂时无法读取当前位置。你仍可以手动填写城市和国家/地区。"
+        }
+    }
+}
