@@ -475,7 +475,6 @@ Sources/ConnorGraphAppSupport/GraphMemoryProductizationCenter.swift
 Sources/ConnorGraphAppSupport/ConnorNativeCommercialUIPresentation.swift
 Sources/ConnorGraphAppSupport/ConnorNativeShellPresentation.swift
 Sources/ConnorGraphAppSupport/SourceSkillAutomationUIPresentation.swift
-Sources/ConnorGraphAppSupport/ConnorCommandPalettePresentation.swift
 Sources/ConnorGraphAppSupport/ConnorDeepLinkNavigator.swift
 Sources/ConnorGraphAppSupport/CommercialReadinessGate.swift
 ```
@@ -499,14 +498,12 @@ SwiftUI macOS executable target。当前前台体验采用 Native Agent OS shell
 - Skill runtime panel
 - Automation runtime panel
 - Local API / CLI surface entry
-- Command Palette view
 - Browser workspace view
 
 关键文件:
 
 ```text
 Sources/ConnorGraphAgentMac/ConnorGraphAgentMacApp.swift
-Sources/ConnorGraphAgentMac/ConnorCommandPaletteView.swift
 Sources/ConnorGraphAgentMac/SourceSkillAutomationRuntimeViews.swift
 Sources/ConnorGraphAgentMac/AgentChatView.swift
 Sources/ConnorGraphAgentMac/BrowserWorkspaceView.swift
@@ -838,7 +835,6 @@ ConnorSettingsDetailView
 SourceRuntimePanelView
 SkillRuntimePanelView
 AutomationRuntimePanelView
-ConnorCommandPaletteView
 BrowserWorkspaceView
 ```
 
@@ -847,14 +843,13 @@ BrowserWorkspaceView
 Connor 的快捷键策略应遵循 Apple-owned UI first:优先沿用 macOS 用户已熟悉的菜单语义,高频 Agent OS 动作用 `⌘` 组合键,局部浮层和编辑弹窗使用 `Esc` / Return 等系统默认行为。当前代码中快捷键来源主要有三类:
 
 - App menu commands:`Sources/ConnorGraphAgentMac/ConnorGraphAgentMacApp.swift`
-- Command catalog / palette 展示:`Sources/ConnorGraphAppSupport/ConnorNativeShellPresentation.swift` 与 `ConnorCommandPalettePresentation.swift`
+- Native shell command catalog:`Sources/ConnorGraphAppSupport/ConnorNativeShellPresentation.swift`
 - 局部视图快捷键:Browser Workspace、Attachment/Tool/Inspector overlays、Settings editor dialogs
 
 当前设置页可修改且真实可用的快捷键:
 
 | 区域 | 默认快捷键 | 动作 | 生效方式 | 代码入口 |
 | --- | --- | --- | --- | --- |
-| 全局菜单 | `⌘K` | 打开命令面板 | App menu command 读取 `runtime-settings.json` | `ConnorGraphAgentMacApp.commands` |
 | 全局菜单 | `⌘N` | 新建会话并进入聊天 | App menu command 读取 `runtime-settings.json` | `AppViewModel.performShortcutAction(.newSession)` |
 | 全局菜单 / Composer | `⌘B` | 显示 / 隐藏 Browser Workspace | App menu command 读取 `runtime-settings.json` | `AppViewModel.performShortcutAction(.toggleBrowser)` |
 | 全局菜单 | `⌘F` | 聚焦应用顶部搜索 | App menu command 读取 `runtime-settings.json` 并触发 `FocusState` | `AppShellView.isTopSearchFocused` |

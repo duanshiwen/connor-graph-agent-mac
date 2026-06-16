@@ -83,7 +83,6 @@ public struct AgentRuntimePermissionSettings: Codable, Sendable, Equatable {
 }
 
 public enum AgentRuntimeShortcutAction: String, Codable, Sendable, Equatable, Hashable, CaseIterable, Identifiable {
-    case openCommandPalette
     case newSession
     case toggleBrowser
     case focusTopSearch
@@ -97,6 +96,10 @@ public enum AgentRuntimeShortcutAction: String, Codable, Sendable, Equatable, Ha
     case toggleBrowserHistory
 
     public var id: String { rawValue }
+
+    public init?(legacyRawValue rawValue: String) {
+        self.init(rawValue: rawValue)
+    }
 }
 
 public struct AgentRuntimeKeyboardShortcut: Codable, Sendable, Equatable, Hashable {
@@ -153,7 +156,6 @@ public struct AgentRuntimeShortcutSettings: Codable, Sendable, Equatable {
     }
 
     public static let defaultBindings: [AgentRuntimeShortcutAction: AgentRuntimeKeyboardShortcut] = [
-        .openCommandPalette: AgentRuntimeKeyboardShortcut(key: "k"),
         .newSession: AgentRuntimeKeyboardShortcut(key: "n"),
         .toggleBrowser: AgentRuntimeKeyboardShortcut(key: "b"),
         .focusTopSearch: AgentRuntimeKeyboardShortcut(key: "f"),
@@ -181,8 +183,19 @@ public struct AgentRuntimeShortcutSettings: Codable, Sendable, Equatable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let decoded = try container.decodeIfPresent([AgentRuntimeShortcutAction: AgentRuntimeKeyboardShortcut].self, forKey: .bindings) ?? Self.defaultBindings
-        self.bindings = Self.mergedWithDefaults(decoded)
+        let rawBindings = try container.decodeIfPresent([String: AgentRuntimeKeyboardShortcut].self, forKey: .bindings) ?? [:]
+        var decoded: [AgentRuntimeShortcutAction: AgentRuntimeKeyboardShortcut] = [:]
+        for (rawAction, shortcut) in rawBindings {
+            guard let action = AgentRuntimeShortcutAction(legacyRawValue: rawAction) else { continue }
+            decoded[action] = shortcut
+        }
+        self.bindings = Self.mergedWithDefaults(decoded.isEmpty ? Self.defaultBindings : decoded)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        let rawBindings = Dictionary(uniqueKeysWithValues: bindings.map { ($0.key.rawValue, $0.value) })
+        try container.encode(rawBindings, forKey: .bindings)
     }
 }
 
