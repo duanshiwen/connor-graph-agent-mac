@@ -176,10 +176,6 @@ private struct CraftPrimarySidebarView: View {
                             viewModel.setSessionListFilter(.all)
                             select(.agentChat)
                         }
-                        SidebarRow(title: "收件箱", systemImage: "tray.full", count: inboxCount, isSelected: selection == .agentChat && viewModel.sessionListFilter == .inbox) {
-                            viewModel.setSessionListFilter(.inbox)
-                            select(.agentChat)
-                        }
                         ForEach(viewModel.governanceConfig.statuses.sorted { $0.sortOrder < $1.sortOrder }) { status in
                             if let sessionStatus = AgentSessionStatus(rawValue: status.id) {
                                 SidebarRow(title: status.name, systemImage: status.systemImage, count: count(for: sessionStatus), isSelected: selection == .agentChat && viewModel.sessionListFilter == .status(sessionStatus)) {
@@ -232,10 +228,6 @@ private struct CraftPrimarySidebarView: View {
     }
 
     private var allSessionsCount: Int {
-        countSourceSessions.count
-    }
-
-    private var inboxCount: Int {
         countSourceSessions.count
     }
 
@@ -339,7 +331,6 @@ private struct CraftSessionListPane: View {
 
     private var sessionListTitle: String {
         switch viewModel.sessionListFilter {
-        case .inbox: "所有会话"
         case .all: "全部会话"
         case .status(let status): status.displayName
         case .label(let labelID): viewModel.governanceConfig.labels.first(where: { $0.id == labelID })?.name ?? labelID

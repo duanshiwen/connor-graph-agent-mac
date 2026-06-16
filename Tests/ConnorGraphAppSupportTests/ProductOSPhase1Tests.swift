@@ -59,7 +59,6 @@ struct ProductOSPhase1Tests {
 
         let legacyArchived = try repository.markLegacyArchived(sessionID: session.id)
         #expect(legacyArchived.governance.isArchived)
-        #expect(try repository.loadSessions(filter: .inbox).map(\.id) == [session.id])
         #expect(try repository.loadSessions(filter: .all).map(\.id) == [session.id])
 
         let restored = try repository.clearLegacyArchived(sessionID: session.id)

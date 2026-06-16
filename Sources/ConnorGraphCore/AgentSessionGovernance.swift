@@ -125,7 +125,6 @@ public struct AgentSessionGovernanceMetadata: Codable, Sendable, Equatable {
 }
 
 public enum AgentSessionListFilter: Sendable, Equatable {
-    case inbox
     case status(AgentSessionStatus)
     case label(String)
     case all

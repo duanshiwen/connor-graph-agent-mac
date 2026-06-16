@@ -422,7 +422,7 @@ private struct AgentChatSessionListView: View {
 
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                 HStack {
-                    Text("Inbox")
+                    Text("会话")
                         .font(AgentChatTypography.sectionTitle)
                     Spacer()
                     Button(action: { viewModel.reloadChatSessions() }) {
@@ -968,7 +968,6 @@ private struct AgentSessionFilterBar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
             HStack(spacing: AgentChatLayout.spaceS) {
-                FilterButton(title: "Inbox", isSelected: viewModel.sessionListFilter == .inbox) { viewModel.setSessionListFilter(.inbox) }
                 FilterButton(title: "All", isSelected: viewModel.sessionListFilter == .all) { viewModel.setSessionListFilter(.all) }
             }
             ScrollView(.horizontal, showsIndicators: false) {

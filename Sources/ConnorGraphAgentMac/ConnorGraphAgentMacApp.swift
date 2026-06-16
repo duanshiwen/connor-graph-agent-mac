@@ -1594,7 +1594,7 @@ final class AppViewModel: ObservableObject {
         }
         do {
             var sessions = try chatSessionRepository.loadSessions(filter: sessionListFilter)
-            if sessions.isEmpty, sessionListFilter == .inbox || sessionListFilter == .all {
+            if sessions.isEmpty, sessionListFilter == .all {
                 let session = try chatSessionRepository.createSession()
                 sessions = [session]
             }
