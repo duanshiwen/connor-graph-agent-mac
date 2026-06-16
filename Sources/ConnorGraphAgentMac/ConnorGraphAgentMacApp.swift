@@ -1,5 +1,7 @@
 import SwiftUI
 import AppKit
+import IOKit.pwr_mgt
+import UserNotifications
 import ConnorGraphCore
 import ConnorGraphMemory
 import ConnorGraphSearch
@@ -14,6 +16,7 @@ struct ConnorGraphAgentMacApp: App {
     var body: some Scene {
         WindowGroup {
             AppShellView(viewModel: viewModel)
+                .preferredColorScheme(viewModel.appearanceMode.colorScheme)
         }
         .commands {
             CommandMenu("康纳同学") {
@@ -181,7 +184,7 @@ final class AppViewModel: ObservableObject {
     @Published var searchResults: [GraphSearchHit] = []
     @Published var chatInput: String = "" {
         didSet {
-            guard !isRestoringChatInputDraft, let selectedChatSessionID else { return }
+            guard autoSaveDraftsEnabled, !isRestoringChatInputDraft, let selectedChatSessionID else { return }
             chatInputDraftsBySessionID[selectedChatSessionID] = chatInput
         }
     }
@@ -334,6 +337,9 @@ final class AppViewModel: ObservableObject {
     private var agentEventTimelinesByProcessKey: [String: [AgentEventPresentation]] = [:]
     private var browserWorkspaceSessionBinding = BrowserWorkspaceSessionBinding()
     private var chatSessionWorkspaceModes = ChatSessionWorkspaceModeStore()
+    private var isLoadingRuntimeSettings = false
+    private var runtimeSettingsAutosaveTask: Task<Void, Never>?
+    private var idleSleepAssertionID: IOPMAssertionID = 0
 
     private var activeChatSession: AgentSession {
         nativeSessionManager?.session ?? fallbackChatSession
@@ -341,6 +347,29 @@ final class AppViewModel: ObservableObject {
 
     private var activeChatTranscript: [AgentMessage] {
         nativeSessionManager?.session.messages ?? fallbackChatSession.messages
+    }
+
+    var runtimeSettingsAutosaveSignature: String {
+        [
+            desktopNotificationsEnabled.description,
+            keepScreenAwake.description,
+            httpProxyEnabled.description,
+            httpProxyURLString,
+            appearanceMode.rawValue,
+            showProviderIcons.description,
+            richToolDescriptionsEnabled.description,
+            composerSendShortcut,
+            spellCheckEnabled.description,
+            autoSaveDraftsEnabled.description,
+            defaultPermissionMode.rawValue,
+            requireApprovalForNetwork.description,
+            requireApprovalForShell.description,
+            userDisplayName,
+            userTimezone,
+            userCity,
+            userCountry,
+            userPreferenceNotes
+        ].joined(separator: "\u{1F}")
     }
 
     var activeChatPendingApprovals: [AgentPendingApproval] {
@@ -400,12 +429,12 @@ final class AppViewModel: ObservableObject {
     }
 
     func updateSelectedChatInputDraft(_ draft: String) {
-        guard !isRestoringChatInputDraft, let selectedChatSessionID else { return }
+        guard autoSaveDraftsEnabled, !isRestoringChatInputDraft, let selectedChatSessionID else { return }
         chatInputDraftsBySessionID[selectedChatSessionID] = draft
     }
 
     private func restoreChatInputDraft(for sessionID: String?) {
-        setChatInputDraft("", for: sessionID)
+        setChatInputDraft(autoSaveDraftsEnabled ? "" : chatInput, for: autoSaveDraftsEnabled ? sessionID : nil)
         pendingAttachmentRefs = sessionID.flatMap { pendingAttachmentRefsBySessionID[$0] } ?? []
     }
 
@@ -1536,6 +1565,7 @@ final class AppViewModel: ObservableObject {
     private func makeNativeSessionManager(for session: AgentSession) -> NativeSessionManager? {
         agentRuntimeFactory?.makeNativeSessionManager(
             session: session,
+            permissionMode: defaultPermissionMode == .allowAll ? .askToWrite : defaultPermissionMode,
             sessionWorkspace: sessionStateSnapshotsBySessionID[session.id]?.workspace,
             sessionLLMOverride: sessionStateSnapshotsBySessionID[session.id]?.llmOverride
         )
@@ -1649,6 +1679,11 @@ final class AppViewModel: ObservableObject {
 
     func loadRuntimeSettings() {
         do {
+            isLoadingRuntimeSettings = true
+            defer {
+                isLoadingRuntimeSettings = false
+                applyRuntimeSettingsSideEffects()
+            }
             let settings = try runtimeSettingsRepository?.loadOrCreateDefault() ?? .default
             defaultPermissionMode = settings.loop.permissionMode == .allowAll ? .askToWrite : settings.loop.permissionMode
             showProviderIcons = settings.ui.showProviderIcons
@@ -1709,11 +1744,61 @@ final class AppViewModel: ObservableObject {
             settings.preferences.country = userCountry.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.notes = userPreferenceNotes.trimmingCharacters(in: .whitespacesAndNewlines)
             try runtimeSettingsRepository?.save(settings)
-            appSettingsMessage = "设置已保存。"
+            applyRuntimeSettingsSideEffects()
+            if submittingChatSessionIDs.isEmpty {
+                rebuildNativeSessionManagerForActiveSession()
+            } else {
+                nativeSessionManager?.permissionMode = settings.loop.permissionMode
+            }
+            appSettingsMessage = "设置已自动保存。"
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
         }
+    }
+
+    func scheduleRuntimeSettingsAutosave() {
+        guard !isLoadingRuntimeSettings else { return }
+        runtimeSettingsAutosaveTask?.cancel()
+        runtimeSettingsAutosaveTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            await MainActor.run {
+                guard let self, !Task.isCancelled else { return }
+                self.saveRuntimeSettings()
+            }
+        }
+    }
+
+    private func applyRuntimeSettingsSideEffects() {
+        applyKeepScreenAwakeSetting()
+        if desktopNotificationsEnabled {
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        }
+    }
+
+    private func applyKeepScreenAwakeSetting() {
+        if keepScreenAwake && !submittingChatSessionIDs.isEmpty {
+            guard idleSleepAssertionID == 0 else { return }
+            var assertionID = IOPMAssertionID(0)
+            let reason = "Connor session is running" as CFString
+            let result = IOPMAssertionCreateWithName(kIOPMAssertionTypeNoDisplaySleep as CFString, IOPMAssertionLevel(kIOPMAssertionLevelOn), reason, &assertionID)
+            if result == kIOReturnSuccess {
+                idleSleepAssertionID = assertionID
+            }
+        } else if idleSleepAssertionID != 0 {
+            IOPMAssertionRelease(idleSleepAssertionID)
+            idleSleepAssertionID = 0
+        }
+    }
+
+    private func postDesktopNotification(title: String, body: String) {
+        guard desktopNotificationsEnabled else { return }
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
     }
 
     func upsertStatusDefinition(_ definition: AgentSessionStatusDefinition) {
@@ -3089,6 +3174,8 @@ final class AppViewModel: ObservableObject {
         submittingChatSessionIDs.remove(sessionID)
         activeChatRunIDsBySessionID.removeValue(forKey: sessionID)
         refreshSelectedSubmittingState()
+        applyKeepScreenAwakeSetting()
+        postDesktopNotification(title: "康纳同学已取消", body: "当前会话运行已终止。")
     }
 
     private func appendChatCancellationPresentation(sessionID: String, runID: String?, title: String, detail: String) {
@@ -3135,6 +3222,7 @@ final class AppViewModel: ObservableObject {
         submittingChatSessionIDs.insert(submittingSessionID)
         activeChatRunIDsBySessionID.removeValue(forKey: submittingSessionID)
         refreshSelectedSubmittingState()
+        applyKeepScreenAwakeSetting()
         let optimisticTranscript = transcript
         let baselineMessageCount = manager.session.messages.count
         let baselineUserMessageCount = manager.session.messages.filter { $0.role == .user }.count
@@ -3157,6 +3245,7 @@ final class AppViewModel: ObservableObject {
             submittingChatSessionIDs.remove(submittingSessionID)
             activeChatRunIDsBySessionID.removeValue(forKey: submittingSessionID)
             refreshSelectedSubmittingState()
+            applyKeepScreenAwakeSetting()
         }
         do {
             let sessionSummary: AgentSessionSummary?
@@ -3222,6 +3311,7 @@ final class AppViewModel: ObservableObject {
                 regenerateChatSessionTitle(submittingSessionID)
             }
             errorMessage = nil
+            postDesktopNotification(title: "康纳同学完成了工作", body: response.session.title)
             Task { await runBackgroundJobs() }
             return response.session.messages
                 .dropFirst(baselineMessageCount)
@@ -3240,6 +3330,7 @@ final class AppViewModel: ObservableObject {
                 errorMessage = nil
             } else {
                 errorMessage = String(describing: error)
+                postDesktopNotification(title: "康纳同学遇到错误", body: String(describing: error))
             }
             return nil
         }
