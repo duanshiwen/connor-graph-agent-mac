@@ -1610,13 +1610,12 @@ private struct SettingsPermissionsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("控制新会话默认能做什么。")
-                    .font(SettingsListTypography.rowSubtitle)
-                    .foregroundStyle(.primary)
-                Text("运行中的会话仍可在输入框下方的权限按钮临时切换；项目目录在每个会话顶部的“当前会话 Workspace”中配置。")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+            SettingsHeroHeader(
+                title: "权限",
+                subtitle: "控制新会话默认能做什么。运行中的会话仍可在输入框下方临时切换权限；项目目录在每个会话顶部的“当前会话 Workspace”中配置。",
+                systemImage: "checkmark.shield"
+            ) {
+                EmptyView()
             }
 
             SettingsGroup(title: "新会话默认权限") {
@@ -1651,17 +1650,17 @@ private struct SettingsPermissionsSection: View {
                     PermissionPolicyDetailRow(title: "询问", message: "读取、普通模型调用、graph write proposal、外部网络默认允许；文件写入/编辑/删除、graph commit/删除、昂贵模型调用、workspace/network/destructive shell 进入审批。")
                     PermissionPolicyDetailRow(title: "执行", message: "文件写入/编辑、graph commit、workspace shell 可自动通过；图谱删除、文件删除、network shell、destructive shell 和昂贵模型调用仍需审批。")
                 }
-                .padding(.top, 8)
+                .padding(.top, SettingsListLayout.spaceS)
             } label: {
                 Label("查看当前策略说明", systemImage: "list.bullet.rectangle")
                     .font(SettingsListTypography.rowTitleSelected)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(.horizontal, SettingsListLayout.spaceL)
+            .padding(.vertical, SettingsListLayout.spaceM)
+            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.secondary.opacity(0.14), lineWidth: 1)
+                RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous)
+                    .stroke(Color.secondary.opacity(SettingsListLayout.hairlineOpacity), lineWidth: 1)
             )
         }
     }
@@ -2082,20 +2081,20 @@ private struct SettingsHeroHeader<Accessory: View>: View {
     @ViewBuilder var accessory: Accessory
 
     var body: some View {
-        HStack(alignment: .center, spacing: 16) {
+        HStack(alignment: .center, spacing: SettingsListLayout.spaceL) {
             Image(systemName: systemImage)
-                .font(.system(size: 22, weight: .semibold))
+                .font(SettingsListTypography.largeIcon)
                 .foregroundStyle(Color.accentColor)
                 .frame(width: 44, height: 44)
-                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            VStack(alignment: .leading, spacing: 5) {
+                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous))
+            VStack(alignment: .leading, spacing: SettingsListLayout.spaceS) {
                 Text(title).font(SettingsListTypography.header)
                 Text(subtitle)
-                    .font(.callout)
+                    .font(SettingsListTypography.rowSubtitle)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer(minLength: 16)
+            Spacer(minLength: SettingsListLayout.spaceL)
             accessory
         }
         .frame(minHeight: 72)
@@ -2414,6 +2413,14 @@ private struct SettingsShortcutsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
+            SettingsHeroHeader(
+                title: "快捷键",
+                subtitle: "管理应用和 Browser Workspace 的常用键盘操作。修改后会写入 runtime-settings.json 并立即用于菜单命令或局部 key monitor。",
+                systemImage: "keyboard"
+            ) {
+                EmptyView()
+            }
+
             SettingsGroup(title: "全局") {
                 ForEach(generalActions.indices, id: \.self) { index in
                     if index > 0 { Divider() }
@@ -2492,6 +2499,14 @@ private struct SettingsPreferencesSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
+            SettingsHeroHeader(
+                title: "偏好",
+                subtitle: "管理康纳同学用于称呼、语言、时区、位置和个性化上下文的用户信息。",
+                systemImage: "person.crop.circle"
+            ) {
+                EmptyView()
+            }
+
             SettingsGroup(title: "基本信息") {
                 SettingsTextFieldRow(title: "称呼", subtitle: "康纳同学如何称呼你。首次启动且未设置时会读取 macOS 账户名称，可手动更改。", text: $viewModel.userDisplayName)
                 Divider()
@@ -2510,6 +2525,7 @@ private struct SettingsPreferencesSection: View {
                     Spacer()
                     Button("重新读取空白项") { viewModel.refreshSystemPreferenceDefaults() }
                         .buttonStyle(.bordered)
+                        .controlSize(.regular)
                 }
             }
             SettingsGroup(title: "位置") {
@@ -2534,6 +2550,7 @@ private struct SettingsPreferencesSection: View {
                     Spacer()
                     Button("使用当前位置") { viewModel.requestUserLocation() }
                         .buttonStyle(.bordered)
+                        .controlSize(.regular)
                 }
             }
             SettingsGroup(title: "备注") {
@@ -2834,22 +2851,24 @@ struct EditableShortcutRow: View {
     var onReset: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
+        HStack(spacing: SettingsListLayout.spaceM) {
+            VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
                 Text(title).font(SettingsListTypography.rowTitleSelected)
                 Text(subtitle).font(SettingsListTypography.rowCaption).foregroundStyle(.secondary)
             }
-            Spacer()
+            Spacer(minLength: SettingsListLayout.spaceL)
             Text(shortcut.displayText)
-                .font(.caption.weight(.semibold).monospaced())
-                .padding(.horizontal, 9)
-                .padding(.vertical, 5)
-                .background(.quaternary.opacity(0.30), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .font(SettingsListTypography.rowCaptionEmphasized.monospaced())
+                .padding(.horizontal, SettingsListLayout.spaceM)
+                .padding(.vertical, SettingsListLayout.spaceS)
+                .background(.quaternary.opacity(0.30), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusS, style: .continuous))
             Button("修改", action: onRecord)
                 .buttonStyle(.bordered)
+                .controlSize(.regular)
             Button("默认", action: onReset)
                 .buttonStyle(.borderless)
+                .controlSize(.regular)
         }
-        .frame(minHeight: 50)
+        .frame(minHeight: 56)
     }
 }
