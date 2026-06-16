@@ -95,7 +95,7 @@ private func temporaryAppChatStoragePaths(_ name: String = UUID().uuidString) ->
     #expect(task.updatedAt == Date(timeIntervalSince1970: 1_100))
 }
 
-@Test func appChatRepositoryDeletesSessionBackgroundTasksWithSessionOnly() throws {
+@Test func appChatRepositorySoftDeletesSessionWithoutRemovingRecordsOrTasks() throws {
     let store = try SQLiteGraphKernelStore(path: temporaryAppChatDatabaseURL().path)
     try store.migrate()
     let repository = AppChatSessionRepository(store: store)
@@ -126,7 +126,10 @@ private func temporaryAppChatStoragePaths(_ name: String = UUID().uuidString) ->
 
     try repository.deleteSession(sessionID: "session-1")
 
-    #expect(try repository.loadBackgroundTasks(sessionID: "session-1").isEmpty)
+    let deleted = try #require(try repository.loadSession(id: "session-1"))
+    #expect(deleted.governance.isDeleted)
+    #expect(try repository.loadSessions(filter: .all).map(\.id) == ["session-2"])
+    #expect(try repository.loadBackgroundTasks(sessionID: "session-1").map(\.id) == ["task-1"])
     #expect(try repository.loadBackgroundTasks(sessionID: "session-2").map(\.id) == ["task-2"])
 }
 
