@@ -300,11 +300,25 @@ private struct AIConnectionProviderPreset: Identifiable, Equatable {
     var title: String
     var endpoint: String
     var defaultModel: String
+    var supportedModels: [String] = []
     var keyPlaceholder: String
     var protocolKind: AIConnectionCustomProtocol
     var authHeaderKind: AnthropicCompatibleAuthHeaderKind = .xAPIKey
     var openAIAPIKeyHeaderKind: OpenAICompatibleAPIKeyHeaderKind = .bearer
     var hidesEndpoint: Bool = false
+
+    var availableModels: [String] {
+        if !supportedModels.isEmpty { return supportedModels }
+        return defaultModel.isEmpty ? [] : [defaultModel]
+    }
+
+    static let chinaProviderPresetIDs: Set<String> = [
+        "qwen", "doubao", "moonshot", "zhipu", "minimax", "stepfun"
+    ]
+
+    static var chinaProviderPresets: [AIConnectionProviderPreset] {
+        otherProviderPresets.filter { chinaProviderPresetIDs.contains($0.id) }
+    }
 
     static let otherProviderPresets: [AIConnectionProviderPreset] = [
         AIConnectionProviderPreset(id: "openai", title: "OpenAI", endpoint: "https://api.openai.com/v1", defaultModel: "gpt-4o-mini", keyPlaceholder: "sk-...", protocolKind: .openAICompatible, hidesEndpoint: true),
@@ -314,14 +328,14 @@ private struct AIConnectionProviderPreset: Identifiable, Equatable {
         AIConnectionProviderPreset(id: "openrouter", title: "OpenRouter", endpoint: "https://openrouter.ai/api/v1", defaultModel: "openai/gpt-4o-mini", keyPlaceholder: "sk-or-...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "groq", title: "Groq", endpoint: "https://api.groq.com/openai/v1", defaultModel: "llama-3.3-70b-versatile", keyPlaceholder: "gsk_...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "mistral", title: "Mistral", endpoint: "https://api.mistral.ai/v1", defaultModel: "mistral-large-latest", keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
-        AIConnectionProviderPreset(id: "deepseek", title: "DeepSeek", endpoint: "https://api.deepseek.com", defaultModel: "deepseek-v4-flash", keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
-        AIConnectionProviderPreset(id: "xiaomi-mimo", title: "Xiaomi MiMo", endpoint: "https://api.xiaomimimo.com/v1", defaultModel: "mimo-v2.5-pro", keyPlaceholder: "MIMO_API_KEY", protocolKind: .openAICompatible, openAIAPIKeyHeaderKind: .apiKey),
-        AIConnectionProviderPreset(id: "qwen", title: "阿里百炼 · Qwen", endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1", defaultModel: "qwen-plus", keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
-        AIConnectionProviderPreset(id: "doubao", title: "火山方舟 · 豆包", endpoint: "https://ark.cn-beijing.volces.com/api/v3", defaultModel: "doubao-seed-1-6", keyPlaceholder: "Paste your ARK_API_KEY...", protocolKind: .openAICompatible),
-        AIConnectionProviderPreset(id: "moonshot", title: "Moonshot · Kimi", endpoint: "https://api.moonshot.cn/v1", defaultModel: "kimi-k2-0711-preview", keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
-        AIConnectionProviderPreset(id: "zhipu", title: "智谱 GLM", endpoint: "https://open.bigmodel.cn/api/paas/v4", defaultModel: "glm-4.5", keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
-        AIConnectionProviderPreset(id: "minimax", title: "MiniMax", endpoint: "https://api.minimax.chat/v1", defaultModel: "MiniMax-M1", keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
-        AIConnectionProviderPreset(id: "stepfun", title: "阶跃星辰 StepFun", endpoint: "https://api.stepfun.com/v1", defaultModel: "step-2-mini", keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "deepseek", title: "DeepSeek", endpoint: "https://api.deepseek.com", defaultModel: "deepseek-v4-flash", supportedModels: ["deepseek-v4-flash", "deepseek-v4-pro"], keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "xiaomi-mimo", title: "Xiaomi MiMo", endpoint: "https://api.xiaomimimo.com/v1", defaultModel: "mimo-v2.5-pro", supportedModels: ["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-omni", "mimo-v2-flash"], keyPlaceholder: "MIMO_API_KEY", protocolKind: .openAICompatible, openAIAPIKeyHeaderKind: .apiKey),
+        AIConnectionProviderPreset(id: "qwen", title: "阿里百炼 · Qwen", endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1", defaultModel: "qwen-plus", supportedModels: ["qwen-plus", "qwen-max", "qwen-turbo", "qwen-long", "qwen3-coder-plus"], keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "doubao", title: "火山方舟 · 豆包", endpoint: "https://ark.cn-beijing.volces.com/api/v3", defaultModel: "doubao-seed-1-6", supportedModels: ["doubao-seed-1-6", "doubao-seed-1-6-thinking", "doubao-seed-1-6-flash", "doubao-1-5-pro-32k"], keyPlaceholder: "Paste your ARK_API_KEY...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "moonshot", title: "Moonshot · Kimi", endpoint: "https://api.moonshot.cn/v1", defaultModel: "kimi-k2-0711-preview", supportedModels: ["kimi-k2-0711-preview", "kimi-latest", "moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"], keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "zhipu", title: "智谱 GLM", endpoint: "https://open.bigmodel.cn/api/paas/v4", defaultModel: "glm-4.5", supportedModels: ["glm-4.5", "glm-4.5-air", "glm-4-plus", "glm-4-flash"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "minimax", title: "MiniMax", endpoint: "https://api.minimax.chat/v1", defaultModel: "MiniMax-M1", supportedModels: ["MiniMax-M1", "abab6.5s-chat", "abab6.5g-chat", "abab6.5t-chat"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "stepfun", title: "阶跃星辰 StepFun", endpoint: "https://api.stepfun.com/v1", defaultModel: "step-2-mini", supportedModels: ["step-2-mini", "step-2-16k", "step-1-8k", "step-1-32k", "step-1-128k"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "xai", title: "xAI (Grok)", endpoint: "https://api.x.ai/v1", defaultModel: "grok-3-mini", keyPlaceholder: "xai-...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "cerebras", title: "Cerebras", endpoint: "https://api.cerebras.ai/v1", defaultModel: "llama3.1-8b", keyPlaceholder: "csk-...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "zai", title: "z.ai (GLM)", endpoint: "https://api.z.ai/api/paas/v4", defaultModel: "glm-4.5", keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
@@ -344,6 +358,7 @@ private struct AIConnectionOnboardingOption: Identifiable, Equatable {
     var baseURLString: String
     var model: String
     var selectedModel: String
+    var supportedModels: [String] = []
     var setupTitle: String
     var setupSubtitle: String
     var setupInstruction: String
@@ -419,9 +434,10 @@ private struct AIConnectionOnboardingOption: Identifiable, Equatable {
             baseURLString: "https://api.deepseek.com",
             model: "deepseek-v4-flash",
             selectedModel: "deepseek-v4-flash",
+            supportedModels: ["deepseek-v4-flash", "deepseek-v4-pro"],
             setupTitle: "连接 DeepSeek",
             setupSubtitle: "使用 DeepSeek OpenAI Compatible API 驱动康纳同学。",
-            setupInstruction: "填写 DeepSeek API Key。默认使用 deepseek-v4-flash，你也可以改成 deepseek-v4-pro。",
+            setupInstruction: "选择 DeepSeek 模型并填写 API Key。Endpoint 已按官方文档预设。",
             loginButtonTitle: "继续",
             authURLString: "",
             authenticationKind: .direct
@@ -437,9 +453,10 @@ private struct AIConnectionOnboardingOption: Identifiable, Equatable {
             baseURLString: "https://api.xiaomimimo.com/v1",
             model: "mimo-v2.5-pro",
             selectedModel: "mimo-v2.5-pro",
+            supportedModels: ["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-omni", "mimo-v2-flash"],
             setupTitle: "连接 Xiaomi MiMo",
             setupSubtitle: "使用小米 MiMo OpenAI Compatible API 驱动康纳同学。",
-            setupInstruction: "填写 MiMo API Key。康纳同学会按官方 OpenAI 示例使用 api-key 请求头。",
+            setupInstruction: "选择 MiMo 文本生成模型并填写 API Key。Endpoint 与 api-key 请求头已按官方文档预设。",
             loginButtonTitle: "继续",
             authURLString: "",
             authenticationKind: .direct
@@ -457,7 +474,7 @@ private struct AIConnectionOnboardingOption: Identifiable, Equatable {
             selectedModel: "qwen-plus",
             setupTitle: "连接中国常用模型",
             setupSubtitle: "从国内常用模型 API 中选择一个兼容服务。",
-            setupInstruction: "选择服务商并填写 API Key、Endpoint 和模型 ID。",
+            setupInstruction: "选择服务商和模型并填写 API Key。Endpoint 已按常用 OpenAI Compatible 地址预设。",
             loginButtonTitle: "继续",
             authURLString: "",
             authenticationKind: .direct
@@ -690,7 +707,11 @@ private struct AIConnectionSetupView: View {
                 }
             }
         case .direct:
-            if option.id == "other-provider" || option.id == "china-provider" {
+            if option.id == "china-provider" {
+                curatedChinaProviderAPIFields
+            } else if option.id == "deepseek" || option.id == "xiaomi-mimo" {
+                curatedSingleProviderAPIFields
+            } else if option.id == "other-provider" {
                 otherProviderAPIFields
             } else {
                 VStack(spacing: 16) {
@@ -747,7 +768,21 @@ private struct AIConnectionSetupView: View {
         )
     }
 
-    private var otherProviderAPIFields: some View {
+    private var curatedSingleProviderAPIFields: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text(option.setupInstruction)
+                .font(.title3)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+
+            modelPicker(title: "模型", models: option.supportedModels.isEmpty ? [option.selectedModel] : option.supportedModels)
+            providerConnectionSummary
+            apiKeyField(placeholder: option.id == "xiaomi-mimo" ? "MIMO_API_KEY" : "sk-...")
+        }
+    }
+
+    private var curatedChinaProviderAPIFields: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text(option.setupInstruction)
                 .font(.title3)
@@ -756,33 +791,33 @@ private struct AIConnectionSetupView: View {
                 .frame(maxWidth: .infinity)
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("API Key")
+                Text("服务商")
                     .font(.headline)
-                HStack(spacing: 8) {
-                    Group {
-                        if showAPIKey {
-                            TextField(activeProviderPreset.keyPlaceholder, text: $apiKey)
-                        } else {
-                            SecureField(activeProviderPreset.keyPlaceholder, text: $apiKey)
-                        }
+                Picker("服务商", selection: $selectedProviderPresetID) {
+                    ForEach(chinaProviderPresets) { preset in
+                        Text(preset.title).tag(preset.id)
                     }
-                    .textFieldStyle(.plain)
-                    .font(.title3)
-                    Button(action: { showAPIKey.toggle() }) {
-                        Image(systemName: showAPIKey ? "eye.slash" : "eye")
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .help(showAPIKey ? "隐藏 API Key" : "显示 API Key")
                 }
-                .padding(.horizontal, 14)
-                .frame(height: 48)
-                .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
-                )
+                .pickerStyle(.menu)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .onChange(of: selectedProviderPresetID) { _, _ in applySelectedProviderPreset() }
             }
+
+            modelPicker(title: "模型", models: activeProviderPreset.availableModels)
+            providerConnectionSummary
+            apiKeyField(placeholder: activeProviderPreset.keyPlaceholder)
+        }
+    }
+
+    private var otherProviderAPIFields: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text(option.setupInstruction)
+                .font(.title3)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+
+            apiKeyField(placeholder: activeProviderPreset.keyPlaceholder)
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .firstTextBaseline) {
@@ -831,9 +866,13 @@ private struct AIConnectionSetupView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Default Model · required")
                     .font(.headline)
-                TextField("例如 gpt-4o-mini、deepseek-chat、google/gemini-2.5-flash", text: $model)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.title3)
+                if selectedProviderPresetID != "custom" && !activeProviderPreset.supportedModels.isEmpty {
+                    modelPicker(title: "", models: activeProviderPreset.availableModels)
+                } else {
+                    TextField("例如 gpt-4o-mini、deepseek-v4-flash、google/gemini-2.5-flash", text: $model)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.title3)
+                }
                 Text("使用服务商自己的模型 ID。当前 Connor 会用该模型执行一次真实连接校验。")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -841,9 +880,87 @@ private struct AIConnectionSetupView: View {
         }
     }
 
+    private func apiKeyField(placeholder: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("API Key")
+                .font(.headline)
+            HStack(spacing: 8) {
+                Group {
+                    if showAPIKey {
+                        TextField(placeholder, text: $apiKey)
+                    } else {
+                        SecureField(placeholder, text: $apiKey)
+                    }
+                }
+                .textFieldStyle(.plain)
+                .font(.title3)
+                Button(action: { showAPIKey.toggle() }) {
+                    Image(systemName: showAPIKey ? "eye.slash" : "eye")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help(showAPIKey ? "隐藏 API Key" : "显示 API Key")
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 48)
+            .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+            )
+        }
+    }
+
+    private func modelPicker(title: String, models: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if !title.isEmpty {
+                Text(title)
+                    .font(.headline)
+            }
+            Picker(title.isEmpty ? "模型" : title, selection: $selectedModel) {
+                ForEach(models, id: \.self) { modelID in
+                    Text(modelID).tag(modelID)
+                }
+            }
+            .pickerStyle(.menu)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .onChange(of: selectedModel) { _, newValue in
+                model = newValue
+            }
+        }
+    }
+
+    private var providerConnectionSummary: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Endpoint")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(baseURLString)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            HStack {
+                Text("认证方式")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(openAIAPIKeyHeaderKindForCurrentDraft() == .apiKey ? "api-key" : "Bearer")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .font(.subheadline)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
     private var activeProviderPreset: AIConnectionProviderPreset {
         AIConnectionProviderPreset.otherProviderPresets.first { $0.id == selectedProviderPresetID }
             ?? AIConnectionProviderPreset.otherProviderPresets[0]
+    }
+
+    private var chinaProviderPresets: [AIConnectionProviderPreset] {
+        AIConnectionProviderPreset.chinaProviderPresets
     }
 
     private func openAICompatibleFields(includeAPIKey: Bool) -> some View {
