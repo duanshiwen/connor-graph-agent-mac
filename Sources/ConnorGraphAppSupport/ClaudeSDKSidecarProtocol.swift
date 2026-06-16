@@ -160,7 +160,13 @@ public struct ClaudeSDKSidecarRequest: Codable, Sendable, Equatable {
         self.ownsProductState = ownsProductState
     }
 
-    public init(request: AgentChatRequest, workingDirectory: URL, sdkSessionID: String? = nil) {
+    public init(request: AgentChatRequest, workingDirectory: URL, sdkSessionID: String? = nil, instructionAppendix: String = "") {
+        let appendSystemPrompt = [
+            AgentInstructionSection.defaultConnorInstruction.trimmingCharacters(in: .whitespacesAndNewlines),
+            instructionAppendix.trimmingCharacters(in: .whitespacesAndNewlines)
+        ]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
         self.init(
             connorRunID: request.runID,
             connorSessionID: request.sessionID,
@@ -171,7 +177,7 @@ public struct ClaudeSDKSidecarRequest: Codable, Sendable, Equatable {
             sdkPermissionMode: "bypassPermissions",
             sdkSessionID: sdkSessionID,
             options: ClaudeSDKSidecarRequestOptions(
-                appendSystemPrompt: AgentInstructionSection.defaultConnorInstruction
+                appendSystemPrompt: appendSystemPrompt
             ),
             ownsProductState: false
         )

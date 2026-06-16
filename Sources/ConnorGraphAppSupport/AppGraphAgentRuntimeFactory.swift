@@ -139,7 +139,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             currentDirectoryURL: workingDirectory
         )
         return makeClaudeSDKSidecarNativeSessionManager(
-            backend: ClaudeSDKSidecarBackend(transport: transport, workingDirectory: workingDirectory),
+            backend: ClaudeSDKSidecarBackend(transport: transport, workingDirectory: workingDirectory, instructionAppendix: userBasicInfoPromptSection()),
             session: session,
             permissionMode: permissionMode
         )
@@ -253,6 +253,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         registry.register(SearchEngineMCPWebFetchTool(browserAssistedSearchHandler: browserAssistedSearchHandler, browserAssistedWebFetchHandler: browserAssistedWebFetchHandler))
         var effectiveConfiguration = configuration
         effectiveConfiguration.permissionMode = permissionMode
+        effectiveConfiguration.instructionAppendix = userBasicInfoPromptSection()
         return AgentLoopController(
             modelProvider: makeAgentModelProvider(sessionLLMOverride: sessionLLMOverride),
             toolRegistry: registry,
@@ -370,6 +371,10 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     private func loadRuntimeSettings() -> AgentRuntimeSettings {
         guard let storagePaths else { return .default }
         return (try? AppRuntimeSettingsRepository(configDirectory: storagePaths.configDirectory).loadOrCreateDefault()) ?? .default
+    }
+
+    private func userBasicInfoPromptSection() -> String {
+        UserBasicInfoPromptBuilder(preferences: loadRuntimeSettings().preferences).promptSection
     }
 
     private func resolvedProjectWorkingDirectory(
