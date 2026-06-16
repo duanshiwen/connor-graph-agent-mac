@@ -758,6 +758,33 @@ private func repositoryRootURL() -> URL {
     }
 }
 
+@Test func governedClaudeSidecarRuntimeAppendsUserBasicInfoToSystemPrompt() async throws {
+    let transport = FakeClaudeSDKSidecarSessionTransport()
+    let runtime = try GovernedClaudeSDKSidecarRuntime(
+        transport: transport,
+        workingDirectory: URL(fileURLWithPath: "/tmp/project"),
+        permissionMode: .askToWrite,
+        instructionAppendix: "## 用户基本信息\n- 称呼：段诗闻\n- 备注：我喜欢橙色"
+    )
+    let request = AgentChatRequest(
+        runID: "run-user-info-appendix",
+        sessionID: "connor-session-user-info-appendix",
+        groupID: "default",
+        userMessage: "我叫什么？我喜欢什么颜色？",
+        permissionMode: .readOnly
+    )
+
+    var iterator = runtime.chat(request).makeAsyncIterator()
+    _ = try await iterator.next()
+    await runtime.cancel()
+
+    let recorded = await transport.recordedStartRequests()
+    let appendSystemPrompt = try #require(recorded.first?.options.appendSystemPrompt)
+    #expect(appendSystemPrompt.contains("## 用户基本信息"))
+    #expect(appendSystemPrompt.contains("- 称呼：段诗闻"))
+    #expect(appendSystemPrompt.contains("- 备注：我喜欢橙色"))
+}
+
 @Test func governedClaudeSidecarRuntimeSendsNormalizedPromptWithSessionContext() async throws {
     let transport = FakeClaudeSDKSidecarSessionTransport()
     let runtime = try GovernedClaudeSDKSidecarRuntime(

@@ -488,14 +488,16 @@ enum ClaudeSDKSidecarEventMapper {
 public struct ClaudeSDKSidecarBackend<Transport: ClaudeSDKSidecarTransport>: AgentBackend {
     public var transport: Transport
     public var workingDirectory: URL
+    public var instructionAppendix: String
 
-    public init(transport: Transport, workingDirectory: URL) {
+    public init(transport: Transport, workingDirectory: URL, instructionAppendix: String = "") {
         self.transport = transport
         self.workingDirectory = workingDirectory
+        self.instructionAppendix = instructionAppendix
     }
 
     public func chat(_ request: AgentChatRequest) -> AsyncThrowingStream<AgentEvent, Error> {
-        let sidecarRequest = ClaudeSDKSidecarRequest(request: request, workingDirectory: workingDirectory)
+        let sidecarRequest = ClaudeSDKSidecarRequest(request: request, workingDirectory: workingDirectory, instructionAppendix: instructionAppendix)
         return AsyncThrowingStream { continuation in
             Task {
                 let sidecarEvents = await transport.stream(sidecarRequest)

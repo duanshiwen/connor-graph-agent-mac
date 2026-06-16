@@ -48,7 +48,7 @@ public struct AgentChatPromptInspection: Sendable, Equatable {
 }
 
 public extension AgentPromptInspectionSnapshot {
-    init(_ inspection: AgentChatPromptInspection, includeRenderedPrompt: Bool = true) {
+    init(_ inspection: AgentChatPromptInspection, includeRenderedPrompt: Bool = false) {
         self.init(
             includesSummary: inspection.includesSummary,
             recentMessageCount: inspection.recentMessageCount,

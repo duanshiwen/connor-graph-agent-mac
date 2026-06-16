@@ -26,19 +26,22 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     public var groupID: String
     public var storagePaths: AppStoragePaths?
     public var browserAssistedSearchHandler: BrowserAssistedSearchHandler?
+    public var browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler?
 
     public init(
         store: SQLiteGraphKernelStore,
         settingsRepository: AppLLMSettingsRepository,
         groupID: String = "default",
         storagePaths: AppStoragePaths? = nil,
-        browserAssistedSearchHandler: BrowserAssistedSearchHandler? = nil
+        browserAssistedSearchHandler: BrowserAssistedSearchHandler? = nil,
+        browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler? = nil
     ) {
         self.store = store
         self.settingsRepository = settingsRepository
         self.groupID = groupID
         self.storagePaths = storagePaths
         self.browserAssistedSearchHandler = browserAssistedSearchHandler
+        self.browserAssistedWebFetchHandler = browserAssistedWebFetchHandler
     }
 
     public func makeAgentLoopChatController(
@@ -91,6 +94,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             session: session,
             sidecarExecutableURL: URL(fileURLWithPath: executablePath),
             sidecarArguments: Self.splitSidecarArguments(connection.sidecarArguments),
+            sidecarEnvironment: claudeSidecarEnvironment(connectionID: connection.id),
             workingDirectory: resolvedProjectWorkingDirectory(llmSettings: settings, sessionWorkspace: sessionWorkspace).url,
             permissionMode: connection.sidecarPermissionMode
         )
@@ -109,12 +113,14 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         let transport = ClaudeSDKSidecarPersistentProcessTransport(
             executableURL: URL(fileURLWithPath: executablePath),
             arguments: Self.splitSidecarArguments(connection.sidecarArguments),
+            environment: claudeSidecarEnvironment(connectionID: connection.id),
             currentDirectoryURL: workingDirectory
         )
         return try GovernedClaudeSDKSidecarRuntime(
             transport: transport,
             workingDirectory: workingDirectory,
             permissionMode: connection.sidecarPermissionMode,
+            instructionAppendix: userBasicInfoPromptSection(),
             runtimeStore: makeClaudeSDKSidecarRuntimeStore()
         )
     }
@@ -134,7 +140,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             currentDirectoryURL: workingDirectory
         )
         return makeClaudeSDKSidecarNativeSessionManager(
-            backend: ClaudeSDKSidecarBackend(transport: transport, workingDirectory: workingDirectory),
+            backend: ClaudeSDKSidecarBackend(transport: transport, workingDirectory: workingDirectory, instructionAppendix: userBasicInfoPromptSection()),
             session: session,
             permissionMode: permissionMode
         )
@@ -161,6 +167,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             transport: transport,
             workingDirectory: workingDirectory,
             permissionMode: permissionMode,
+            instructionAppendix: userBasicInfoPromptSection(),
             runtimeStore: makeClaudeSDKSidecarRuntimeStore()
         )
         return makeClaudeSDKSidecarNativeSessionManager(
@@ -173,6 +180,16 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     private func makeClaudeSDKSidecarRuntimeStore() -> AppClaudeSDKSidecarRuntimeStore? {
         guard let storagePaths else { return nil }
         return AppClaudeSDKSidecarRuntimeStore(configDirectory: storagePaths.configDirectory)
+    }
+
+    private func claudeSidecarEnvironment(connectionID: String) -> [String: String] {
+        guard let tokens = try? settingsRepository.oauthTokens(for: connectionID) else { return [:] }
+        var environment: [String: String] = [:]
+        environment["CLAUDE_CODE_OAUTH_TOKEN"] = tokens.accessToken
+        if let refreshToken = tokens.refreshToken, !refreshToken.isEmpty {
+            environment["CLAUDE_CODE_OAUTH_REFRESH_TOKEN"] = refreshToken
+        }
+        return environment
     }
 
     private func makeClaudeSDKSidecarNativeSessionManager<Backend: AgentBackend>(
@@ -235,9 +252,15 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         registry.register(ScienceTableComputeTool())
         registry.register(BrowserFetchTool())
         registry.register(SearchEngineMCPTool(browserAssistedSearchHandler: browserAssistedSearchHandler))
-        registry.register(SearchEngineMCPWebFetchTool(browserAssistedSearchHandler: browserAssistedSearchHandler))
+        registry.register(SearchEngineMCPWebFetchTool(browserAssistedSearchHandler: browserAssistedSearchHandler, browserAssistedWebFetchHandler: browserAssistedWebFetchHandler))
         var effectiveConfiguration = configuration
         effectiveConfiguration.permissionMode = permissionMode
+        effectiveConfiguration.instructionAppendix = [
+            configuration.instructionAppendix.trimmingCharacters(in: .whitespacesAndNewlines),
+            userBasicInfoPromptSection().trimmingCharacters(in: .whitespacesAndNewlines)
+        ]
+        .filter { !$0.isEmpty }
+        .joined(separator: "\n\n")
         return AgentLoopController(
             modelProvider: makeAgentModelProvider(sessionLLMOverride: sessionLLMOverride),
             toolRegistry: registry,
@@ -255,16 +278,19 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             let settings = try settingsRepository.loadSettings()
             let connection = settings.connection(id: sessionLLMOverride?.connectionID) ?? settings.defaultConnection
             let effectiveProviderMode: AppLLMProviderMode
+            let effectiveConnectionKind: AppLLMConnectionKind
             let effectiveModel: String
             let effectiveBaseURL: String?
             let effectiveConnectionID: String
             if let override = sessionLLMOverride {
                 effectiveProviderMode = AppLLMProviderMode(rawValue: override.providerMode) ?? connection.providerMode
+                effectiveConnectionKind = connection.connectionKind
                 effectiveModel = override.model
                 effectiveBaseURL = override.baseURLString
                 effectiveConnectionID = override.connectionID ?? connection.id
             } else {
                 effectiveProviderMode = connection.providerMode
+                effectiveConnectionKind = connection.connectionKind
                 effectiveModel = connection.effectiveModel
                 effectiveBaseURL = nil
                 effectiveConnectionID = connection.id
@@ -275,10 +301,28 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                     throw AppGraphAgentRuntimeFactoryError.sidecarRequiresSessionManager
                 }
             case .openAICompatible:
+                if effectiveConnectionKind == .anthropicCompatible {
+                    guard let config = try anthropicCompatibleConfigWithOverride(connectionID: effectiveConnectionID, model: effectiveModel, baseURLOverride: effectiveBaseURL) else {
+                        return AnyAgentModelProvider(modelID: "missing-anthropic-compatible-config") { _ in
+                            throw OpenAICompatibleProviderError.missingAPIKey
+                        }
+                    }
+                    return AnyAgentModelProvider(AnthropicCompatibleProvider(config: config))
+                }
                 guard let config = try openAICompatibleConfigWithOverride(connectionID: effectiveConnectionID, model: effectiveModel, baseURLOverride: effectiveBaseURL) else {
                     return AnyAgentModelProvider(modelID: "missing-openai-compatible-config") { _ in
                         throw OpenAICompatibleProviderError.missingAPIKey
                     }
+                }
+                if effectiveConnectionKind == .githubCopilot {
+                    return AnyAgentModelProvider(GitHubCopilotTokenRefreshingAgentModelProvider(
+                        connectionID: effectiveConnectionID,
+                        modelID: config.model,
+                        capabilities: OpenAICompatibleProvider(config: config).capabilities,
+                        settingsRepository: settingsRepository,
+                        modelOverride: effectiveModel,
+                        baseURLOverride: effectiveBaseURL
+                    ))
                 }
                 return AnyAgentModelProvider(OpenAICompatibleProvider(config: config))
             }
@@ -299,6 +343,18 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         )
     }
 
+    private func anthropicCompatibleConfigWithOverride(
+        connectionID: String,
+        model: String,
+        baseURLOverride: String?
+    ) throws -> AnthropicCompatibleConfig? {
+        try settingsRepository.anthropicCompatibleConfig(
+            connectionID: connectionID,
+            modelOverride: model,
+            baseURLOverride: baseURLOverride
+        )
+    }
+
     public func makeLLMProvider() -> AnyLLMProvider {
         do {
             let settings = try settingsRepository.loadSettings()
@@ -309,6 +365,14 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                     throw AppGraphAgentRuntimeFactoryError.sidecarRequiresSessionManager
                 }
             case .openAICompatible:
+                if connection.connectionKind == .anthropicCompatible {
+                    guard let config = try settingsRepository.anthropicCompatibleConfig(connectionID: connection.id) else {
+                        return AnyLLMProvider { _, _ in
+                            throw OpenAICompatibleProviderError.missingAPIKey
+                        }
+                    }
+                    return AnyLLMProvider(AnthropicCompatibleProvider(config: config))
+                }
                 guard let config = try settingsRepository.openAICompatibleConfig(connectionID: connection.id) else {
                     return AnyLLMProvider { _, _ in
                         throw OpenAICompatibleProviderError.missingAPIKey
@@ -324,6 +388,10 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     private func loadRuntimeSettings() -> AgentRuntimeSettings {
         guard let storagePaths else { return .default }
         return (try? AppRuntimeSettingsRepository(configDirectory: storagePaths.configDirectory).loadOrCreateDefault()) ?? .default
+    }
+
+    private func userBasicInfoPromptSection() -> String {
+        UserBasicInfoPromptBuilder(preferences: loadRuntimeSettings().preferences).promptSection
     }
 
     private func resolvedProjectWorkingDirectory(

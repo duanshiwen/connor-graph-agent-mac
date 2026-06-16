@@ -4,13 +4,11 @@ import ConnorGraphCore
 public enum AppSessionGovernanceConfigError: Error, Equatable, CustomStringConvertible {
     case duplicateStatusID(String)
     case duplicateLabelID(String)
-    case invalidLabelValue(String)
 
     public var description: String {
         switch self {
         case .duplicateStatusID(let id): "duplicateStatusID: \(id)"
         case .duplicateLabelID(let id): "duplicateLabelID: \(id)"
-        case .invalidLabelValue(let message): "invalidLabelValue: \(message)"
         }
     }
 }
@@ -45,28 +43,32 @@ public struct AppSessionGovernanceConfig: Codable, Sendable, Equatable {
     }
 
     public func validate(label: AgentSessionLabel) throws {
-        guard let definition = definition(for: label.id) else { return }
-        switch definition.valueType {
-        case .boolean:
-            if label.value != nil { throw AppSessionGovernanceConfigError.invalidLabelValue("Boolean label \(label.id) must not carry a value") }
-        case .number:
-            if let value = label.value, Double(value) == nil { throw AppSessionGovernanceConfigError.invalidLabelValue("Number label \(label.id) requires numeric value") }
-        case .date:
-            if let value = label.value, Self.dateFormatter.date(from: value) == nil { throw AppSessionGovernanceConfigError.invalidLabelValue("Date label \(label.id) requires yyyy-MM-dd") }
-        case .link:
-            if let value = label.value, URL(string: value)?.scheme == nil { throw AppSessionGovernanceConfigError.invalidLabelValue("Link label \(label.id) requires URL") }
-        case .string, .graphEntityRef:
-            break
-        }
+        _ = definition(for: label.id)
     }
 
-    private static let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
-    }()
+    public func normalizingBuiltInDisplayNames() -> AppSessionGovernanceConfig {
+        let statusNames = Dictionary(uniqueKeysWithValues: AgentSessionStatusDefinition.defaults.map { ($0.id, $0.name) })
+        let labelDefaults = Dictionary(uniqueKeysWithValues: AgentSessionLabelDefinition.defaults.map { ($0.id, $0) })
+        let normalizedStatuses = statuses.map { definition in
+            guard let name = statusNames[definition.id], definition.name != name else { return definition }
+            var copy = definition
+            copy.name = name
+            return copy
+        }
+        let normalizedLabels = labels.map { definition in
+            guard let builtIn = labelDefaults[definition.id] else { return definition }
+            var copy = definition
+            if copy.name != builtIn.name {
+                copy.name = builtIn.name
+            }
+            if copy.systemImage == "tag", builtIn.systemImage != "tag" {
+                copy.systemImage = builtIn.systemImage
+            }
+            return copy
+        }
+        return AppSessionGovernanceConfig(statuses: normalizedStatuses, labels: normalizedLabels)
+    }
+
 }
 
 public struct AppSessionGovernanceConfigRepository: Sendable {
@@ -83,7 +85,11 @@ public struct AppSessionGovernanceConfigRepository: Sendable {
             let data = try Data(contentsOf: configURL)
             let config = try JSONDecoder().decode(AppSessionGovernanceConfig.self, from: data)
             try config.validate()
-            return config
+            let normalizedConfig = config.normalizingBuiltInDisplayNames()
+            if normalizedConfig != config {
+                try save(normalizedConfig)
+            }
+            return normalizedConfig
         }
         let config = AppSessionGovernanceConfig.default
         try save(config)

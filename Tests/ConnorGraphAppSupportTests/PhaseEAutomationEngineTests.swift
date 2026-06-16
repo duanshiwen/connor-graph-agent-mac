@@ -17,7 +17,7 @@ struct PhaseEAutomationEngineTests {
             trigger: ProductOSAutomationTrigger(kind: .sessionStatusChanged, status: .needsReview),
             actions: [
                 ProductOSAutomationAction(kind: .appendTimelineEvent, message: "Record review timeline entry."),
-                ProductOSAutomationAction(kind: .addSessionLabel, label: AgentSessionLabel(id: "graph-review"), message: "Suggest graph review label.")
+                ProductOSAutomationAction(kind: .addSessionLabel, label: AgentSessionLabel(id: "research"), message: "Suggest research label.")
             ],
             requiresReview: true
         )
@@ -80,7 +80,7 @@ struct PhaseEAutomationEngineTests {
             trigger: ProductOSAutomationTrigger(kind: .sessionLabelAdded, labelID: "important"),
             actions: [
                 ProductOSAutomationAction(kind: .appendTimelineEvent, message: "Important label changed."),
-                ProductOSAutomationAction(kind: .addSessionLabel, label: AgentSessionLabel(id: "graph-review"), message: "Add graph-review."),
+                ProductOSAutomationAction(kind: .addSessionLabel, label: AgentSessionLabel(id: "research"), message: "Add research."),
                 ProductOSAutomationAction(kind: .setSessionStatus, status: .needsReview, message: "Move to Needs Review.")
             ],
             requiresReview: false
@@ -99,7 +99,7 @@ struct PhaseEAutomationEngineTests {
         #expect(result.appliedPlans.count == 3)
         #expect(result.skippedPlans.isEmpty)
         #expect(session.governance.status == .needsReview)
-        #expect(session.governance.labels.map(\.id).contains("graph-review"))
+        #expect(session.governance.labels.map(\.id).contains("research"))
         #expect(result.events.contains { $0.kind == .sessionLabelsChanged })
         #expect(result.events.contains { $0.kind == .sessionStatusChanged })
         #expect(result.events.contains { $0.kind == .automationTriggered })
@@ -120,7 +120,7 @@ struct PhaseEAutomationEngineTests {
             id: "review-required-actions",
             name: "Review Required Actions",
             trigger: ProductOSAutomationTrigger(kind: .sessionStatusChanged, status: .needsReview),
-            actions: [ProductOSAutomationAction(kind: .addSessionLabel, label: AgentSessionLabel(id: "graph-review"), message: "Add graph-review.")],
+            actions: [ProductOSAutomationAction(kind: .addSessionLabel, label: AgentSessionLabel(id: "research"), message: "Add research.")],
             requiresReview: true
         )
         try repository.save(ProductOSAutomationConfig(rules: [rule]))

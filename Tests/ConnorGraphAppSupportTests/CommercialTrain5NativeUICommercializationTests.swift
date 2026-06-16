@@ -19,15 +19,15 @@ struct CommercialTrain5NativeUICommercializationTests {
         #expect(shell.commands.filter { $0.keyboardShortcut != nil }.count >= 8)
     }
 
-    @Test func commandPaletteSupportsGroupsRiskAndPrimaryActions() {
-        let palette = ConnorCommandPalettePresentation.build(shell: .default)
+    @Test func nativeShellCommandsSupportGroupsRiskAndPrimaryActions() {
+        let shell = ConnorNativeShellPresentation.default
 
-        let readiness = palette.search("readiness").first { $0.id == "command.checkCommercialReadiness" }
+        let readiness = shell.command(for: .checkCommercialReadiness)
         #expect(readiness?.groupID == "governance")
         #expect(readiness?.riskLevel == .medium)
         #expect(readiness?.isPrimaryAction == true)
-        #expect(palette.search("approval").contains { $0.target == .approvals && $0.riskLevel == .high })
-        #expect(palette.search("session").first?.target == .agentChat)
+        #expect(shell.command(for: .newSession)?.target == .agentChat)
+        #expect(shell.command(for: .openApprovals)?.riskLevel == .high)
     }
 
 
@@ -53,7 +53,6 @@ struct CommercialTrain5NativeUICommercializationTests {
             commandCount: 9,
             settingsPanelsReady: true,
             homeSurfaceReady: true,
-            commandPaletteReady: true,
             readinessDashboardLinked: true,
             primaryActionCount: 5,
             emptyStateCount: 3,

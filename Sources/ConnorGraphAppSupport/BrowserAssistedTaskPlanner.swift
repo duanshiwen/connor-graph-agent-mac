@@ -2,6 +2,7 @@ import Foundation
 
 public enum BrowserAssistedTaskKind: String, Codable, Equatable, Sendable {
     case search
+    case fetch
 }
 
 public enum BrowserAssistedTaskVisibility: String, Codable, Equatable, Sendable {
