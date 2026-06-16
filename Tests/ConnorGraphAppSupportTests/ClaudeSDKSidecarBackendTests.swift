@@ -86,6 +86,8 @@ private actor FakeClaudeSDKSidecarSessionTransport: ClaudeSDKSidecarSessionTrans
     #expect(sidecarRequest.permissionMode == .askToWrite)
     #expect(sidecarRequest.sdkSessionID == nil)
     #expect(sidecarRequest.sdkPermissionMode == "bypassPermissions")
+    #expect(sidecarRequest.options.appendSystemPrompt == AgentInstructionSection.defaultConnorInstruction)
+    #expect(sidecarRequest.options.appendSystemPrompt?.contains("You are Connor, a general-purpose local AI assistant.") == true)
     #expect(sidecarRequest.ownsProductState == false)
 }
 
@@ -590,20 +592,31 @@ private actor FakeClaudeSDKSidecarSessionTransport: ClaudeSDKSidecarSessionTrans
     #expect(sidecarSource.contains("toolUseCompleted"))
 }
 
-@Test func claudeSDKSidecarEngineDisallowsSDKWebToolsForConnorBrowserPolicy() throws {
+@Test func claudeSDKSidecarEngineDoesNotHardCodeBrowserPolicy() throws {
     let root = repositoryRootURL()
     let sidecarSource = try String(
         contentsOf: root.appendingPathComponent("sidecars/claude-agent-engine/claude-sidecar.mjs"),
         encoding: .utf8
     )
 
-    #expect(sidecarSource.contains("CONNOR_BROWSER_POLICY_PROMPT"))
-    #expect(sidecarSource.contains("CONNOR_DISALLOWED_SDK_WEB_TOOLS"))
-    #expect(sidecarSource.contains("'WebSearch'"))
-    #expect(sidecarSource.contains("'WebFetch'"))
-    #expect(sidecarSource.contains("disallowedTools"))
-    #expect(sidecarSource.contains("appendSystemPrompt"))
-    #expect(sidecarSource.contains("built-in Browser Workspace/background WKWebView runner"))
+    #expect(!sidecarSource.contains("CONNOR_BROWSER_POLICY_PROMPT"))
+    #expect(!sidecarSource.contains("CONNOR_DISALLOWED_SDK_WEB_TOOLS"))
+    #expect(!sidecarSource.contains("built-in Browser Workspace/background WKWebView runner"))
+    #expect(sidecarSource.contains("disallowedTools: requestOptions.disallowedTools ?? undefined"))
+    #expect(sidecarSource.contains("appendSystemPrompt: requestOptions.appendSystemPrompt ?? undefined"))
+}
+
+@Test func claudeSDKSidecarEngineNormalizesToolResultContentFallbacks() throws {
+    let root = repositoryRootURL()
+    let sidecarSource = try String(
+        contentsOf: root.appendingPathComponent("sidecars/claude-agent-engine/claude-sidecar.mjs"),
+        encoding: .utf8
+    )
+
+    #expect(sidecarSource.contains("serializeToolResultContent"))
+    #expect(sidecarSource.contains("firstDefined(block?.content, block?.text, block?.result, '')"))
+    #expect(sidecarSource.contains("const { contentText, contentJSON } = serializeToolResultContent(block)"))
+    #expect(sidecarSource.contains("contentJSON,"))
 }
 
 @Test func claudeSDKSidecarEngineDeclaresPersistentCommandLoopSkeleton() throws {

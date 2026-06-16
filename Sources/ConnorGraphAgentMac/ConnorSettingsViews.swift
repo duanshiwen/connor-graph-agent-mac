@@ -194,63 +194,174 @@ private struct SettingsAISection: View {
     @ObservedObject var viewModel: AppViewModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            SettingsGroup(title: "默认") {
-                SettingsPickerRow(title: "连接", subtitle: "新聊天的 API 连接", selection: $viewModel.llmProviderMode) {
-                    Text("OpenAI 兼容").tag(AppLLMProviderMode.openAICompatible)
-                    Text("Claude Sidecar").tag(AppLLMProviderMode.governedClaudeSidecar)
-                }
-                Divider()
-                SettingsTextFieldRow(title: "模型列表", subtitle: "逗号分隔多个候选模型；聊天输入区每次只选择其中一个实际模型", text: $viewModel.llmModel)
-                Divider()
-                SettingsPickerRow(title: "权限", subtitle: "新聊天默认权限", selection: $viewModel.defaultPermissionMode) {
-                    ForEach(AgentPermissionMode.allCases.filter { $0 != .allowAll }, id: \.self) { mode in
-                        Text(mode.displayName).tag(mode)
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("连接")
+                    .font(.largeTitle.weight(.semibold))
+                Text("管理 AI 提供商连接。")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(spacing: 0) {
+                ForEach(viewModel.llmConnectionConfigs) { connection in
+                    AIConnectionEntryRow(
+                        connection: connection,
+                        isDefault: connection.id == viewModel.llmDefaultConnectionID,
+                        canDelete: viewModel.llmConnectionConfigs.count > 1,
+                        select: { viewModel.selectDefaultLLMConnection(connection.id) },
+                        makeDefault: { viewModel.selectDefaultLLMConnection(connection.id) },
+                        delete: {
+                            viewModel.selectDefaultLLMConnection(connection.id)
+                            viewModel.deleteSelectedLLMConnection()
+                        }
+                    )
+                    if connection.id != viewModel.llmConnectionConfigs.last?.id {
+                        Divider()
+                            .padding(.leading, 32)
                     }
                 }
             }
+            .padding(.horizontal, 30)
+            .padding(.vertical, 14)
+            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.14), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.04), radius: 2, x: 0, y: 1)
 
-            SettingsGroup(title: "连接") {
-                SettingsTextFieldRow(title: "Base URL", subtitle: "OpenAI-compatible endpoint", text: $viewModel.llmBaseURLString)
-                Divider()
-                SecureField("API Key", text: $viewModel.llmAPIKeyInput)
-                    .textFieldStyle(.roundedBorder)
-                    .padding(.vertical, 6)
-                Divider()
-                SettingsValueRow(title: "API Key", value: viewModel.llmHasAPIKey ? "已本地加密保存" : "尚未保存")
-                Divider()
-                HStack(spacing: 10) {
-                    Button("保存 AI 设置") {
-                        viewModel.saveLLMSettings()
-                        viewModel.saveRuntimeSettings()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    Button("清除 API Key") { viewModel.clearLLMAPIKey() }
-                    Button(viewModel.isTestingLLMConnection ? "测试中…" : "测试连接") {
-                        Task { await viewModel.testLLMConnection() }
-                    }
-                    .disabled(viewModel.isTestingLLMConnection)
-                }
-                .controlSize(.regular)
+            Button(action: { viewModel.addLLMConnection(providerMode: .openAICompatible) }) {
+                Label("添加连接", systemImage: "plus")
+                    .font(.title3)
+                    .labelStyle(.titleAndIcon)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
             }
-
-            if viewModel.llmProviderMode == .governedClaudeSidecar {
-                SettingsGroup(title: "Claude Sidecar") {
-                    SettingsTextFieldRow(title: "可执行文件", subtitle: "例如 /usr/local/bin/node", text: $viewModel.sidecarExecutablePath)
-                    Divider()
-                    SettingsTextFieldRow(title: "参数", subtitle: "sidecars/claude-agent-engine/claude-sidecar.mjs", text: $viewModel.sidecarArguments)
-                    Divider()
-                    SettingsTextFieldRow(title: "工作目录", subtitle: "兼容旧配置 fallback；当前会话 Workspace 请在会话界面顶部设置", text: $viewModel.sidecarWorkingDirectoryPath)
-                }
-            }
-
-            if let message = viewModel.llmSettingsMessage {
-                Text(message).font(.caption).foregroundStyle(.secondary)
-            }
-            if let message = viewModel.llmHealthCheckMessage {
-                Text(message).font(.caption).foregroundStyle(message.contains("OK") || message.contains("available") ? .green : .secondary)
-            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
         }
+    }
+}
+
+private struct AIConnectionEntryRow: View {
+    var connection: AppLLMConnectionConfig
+    var isDefault: Bool
+    var canDelete: Bool
+    var select: () -> Void
+    var makeDefault: () -> Void
+    var delete: () -> Void
+
+    var body: some View {
+        Button(action: select) {
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: providerSystemImage)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(providerTint)
+                    .frame(width: 24, alignment: .center)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Text(connection.name)
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        if isDefault {
+                            Text("默认")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        }
+                    }
+                    Text(subtitle)
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
+                Spacer(minLength: 16)
+
+                Menu {
+                    Button("设为默认", action: makeDefault)
+                        .disabled(isDefault)
+                    Divider()
+                    Button(role: .destructive, action: delete) {
+                        Text("删除连接")
+                    }
+                    .disabled(!canDelete)
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 32, height: 32)
+                }
+                .menuStyle(.borderlessButton)
+                .buttonStyle(.plain)
+                .help("更多")
+            }
+            .contentShape(Rectangle())
+            .frame(minHeight: 84)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var subtitle: String {
+        "\(providerDisplayName) · \(endpointDisplayName)"
+    }
+
+    private var providerDisplayName: String {
+        switch connection.providerMode {
+        case .openAICompatible:
+            return "Craft Agents Backend Compatible"
+        case .governedClaudeSidecar:
+            return "Claude"
+        }
+    }
+
+    private var endpointDisplayName: String {
+        switch connection.providerMode {
+        case .openAICompatible:
+            return host(from: connection.baseURLString)
+        case .governedClaudeSidecar:
+            let arguments = connection.sidecarArguments.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !arguments.isEmpty { return URL(fileURLWithPath: arguments).lastPathComponent }
+            return "Claude SDK Sidecar"
+        }
+    }
+
+    private var providerSystemImage: String {
+        switch connection.providerMode {
+        case .openAICompatible:
+            return "sparkles"
+        case .governedClaudeSidecar:
+            return "terminal"
+        }
+    }
+
+    private var providerTint: Color {
+        switch connection.providerMode {
+        case .openAICompatible:
+            return .primary
+        case .governedClaudeSidecar:
+            return .purple
+        }
+    }
+
+    private func host(from rawValue: String) -> String {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "未设置 endpoint" }
+        if let url = URL(string: trimmed), let host = url.host, !host.isEmpty {
+            return host
+        }
+        return trimmed
+            .replacingOccurrences(of: "https://", with: "")
+            .replacingOccurrences(of: "http://", with: "")
+            .split(separator: "/")
+            .first
+            .map(String.init) ?? trimmed
     }
 }
 

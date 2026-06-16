@@ -597,6 +597,7 @@ struct AgentChatTurnProcessRow: View {
     var process: AgentChatTurnProcessPresentation
     var events: [AgentEventPresentation]
     var onOpenDetail: (AgentEventPresentation) -> Void
+    var onOpenToolInvocation: (AgentToolInvocationPresentation) -> Void = { _ in }
     @State private var isExpanded: Bool = false
     @State private var startedAt: Date = Date()
 
@@ -622,7 +623,8 @@ struct AgentChatTurnProcessRow: View {
                         events: visibleEvents,
                         isRunning: process.state == .running,
                         startedAt: startedAt,
-                        onOpenDetail: onOpenDetail
+                        onOpenDetail: onOpenDetail,
+                        onOpenToolInvocation: onOpenToolInvocation
                     )
                     .padding(.leading, AgentChatLayout.iconButtonSize + AgentChatLayout.spaceM)
                     .transition(.opacity.combined(with: .move(edge: .top)))
@@ -686,6 +688,7 @@ private struct AgentTurnActivitySummaryDetailView: View {
     var isRunning: Bool
     var startedAt: Date
     var onOpenDetail: (AgentEventPresentation) -> Void
+    var onOpenToolInvocation: (AgentToolInvocationPresentation) -> Void
     @State private var showsRawEvents = false
 
     var body: some View {
@@ -704,13 +707,11 @@ private struct AgentTurnActivitySummaryDetailView: View {
                 detailLine(icon: "exclamationmark.triangle", text: "错误：\(primaryErrorMessage)", color: .red)
             }
 
-            if !toolActivities.isEmpty {
+            if !toolInvocations.isEmpty {
                 VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
-                    ForEach(toolActivities) { activity in
-                        AgentToolActivityRow(activity: activity) {
-                            if let event = events.first(where: { $0.toolActivity?.callID == activity.callID }) {
-                                onOpenDetail(event)
-                            }
+                    ForEach(toolInvocations) { invocation in
+                        AgentToolActivityRow(activity: activityPresentation(for: invocation)) {
+                            onOpenToolInvocation(invocation)
                         }
                     }
                 }
@@ -742,35 +743,26 @@ private struct AgentTurnActivitySummaryDetailView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var toolActivities: [AgentToolActivityPresentation] {
-        var orderedCallIDs: [String] = []
-        var byCallID: [String: AgentToolActivityPresentation] = [:]
-        for activity in events.compactMap(\.toolActivity) {
-            if byCallID[activity.callID] == nil {
-                orderedCallIDs.append(activity.callID)
-                byCallID[activity.callID] = activity
-                continue
-            }
-            if shouldReplace(existing: byCallID[activity.callID], candidate: activity) {
-                byCallID[activity.callID] = activity
-            }
-        }
-        return orderedCallIDs.compactMap { byCallID[$0] }
+    private var toolInvocations: [AgentToolInvocationPresentation] {
+        AgentToolInvocationAssembler().invocations(from: events)
     }
 
-    private func shouldReplace(existing: AgentToolActivityPresentation?, candidate: AgentToolActivityPresentation) -> Bool {
-        guard let existing else { return true }
-        return phaseRank(candidate.phase) >= phaseRank(existing.phase)
-    }
-
-    private func phaseRank(_ phase: AgentToolActivityPhase) -> Int {
-        switch phase {
-        case .requested: 0
-        case .approved: 1
-        case .running: 2
-        case .finished: 3
-        case .failed: 4
-        }
+    private func activityPresentation(for invocation: AgentToolInvocationPresentation) -> AgentToolActivityPresentation {
+        AgentToolActivityPresentation(
+            id: invocation.id,
+            callID: invocation.callID,
+            phase: invocation.phase,
+            rawToolName: invocation.toolName,
+            semanticKind: invocation.semanticKind,
+            title: invocation.title,
+            subtitle: invocation.subtitle,
+            target: invocation.target,
+            detail: invocation.errorText ?? invocation.outputText,
+            icon: invocation.icon,
+            severity: invocation.severity,
+            argumentsJSON: invocation.argumentsJSON,
+            resultJSON: invocation.resultJSON
+        )
     }
 
     private var toolSummaryText: String {

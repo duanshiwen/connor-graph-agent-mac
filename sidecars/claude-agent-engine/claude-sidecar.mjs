@@ -67,6 +67,15 @@ const stableJSONString = (value) => {
   }
 };
 
+const firstDefined = (...values) => values.find((value) => value !== undefined && value !== null);
+
+const serializeToolResultContent = (block) => {
+  const rawContent = firstDefined(block?.content, block?.text, block?.result, '');
+  const contentText = typeof rawContent === 'string' ? rawContent : stableJSONString(rawContent);
+  const contentJSON = typeof rawContent === 'string' ? null : stableJSONString(rawContent);
+  return { contentText, contentJSON };
+};
+
 const validateRequest = (request) => {
   if (request.ownsProductState !== false) {
     throw new Error('Refusing request: sidecar must not own Connor product state');
@@ -194,15 +203,13 @@ const emitToolResultFromBlock = (block) => {
   const toolCallID = block.tool_use_id ?? block.id ?? block.toolCallID ?? 'unknown-tool-call';
   const name = block.name ?? block.tool_name ?? 'unknown';
   const isError = Boolean(block.is_error ?? block.isError ?? false);
-  const contentText = typeof block.content === 'string'
-    ? block.content
-    : stableJSONString(block.content ?? block.result ?? '');
+  const { contentText, contentJSON } = serializeToolResultContent(block);
   writeEvent({
     toolUseCompleted: {
       toolCallID,
       name,
       contentText,
-      contentJSON: typeof block.content === 'string' ? null : stableJSONString(block.content ?? block.result ?? null),
+      contentJSON,
       isError
     }
   });
@@ -270,9 +277,6 @@ const buildConnorDeferHooks = () => ({
   ]
 });
 
-const CONNOR_BROWSER_POLICY_PROMPT = `Connor browser policy: Do not use Claude SDK built-in WebSearch, WebFetch, browser, or external-browser tools. If web browsing/search requires a real browser, explain that Connor will route it through the app's built-in Browser Workspace/background WKWebView runner. Do not launch or request a system/default browser window.`;
-const CONNOR_DISALLOWED_SDK_WEB_TOOLS = ['WebSearch', 'WebFetch'];
-
 const buildDeferredResumeHooks = (deferred, resolution) => ({
   PreToolUse: [
     async () => ({
@@ -307,8 +311,8 @@ const runRequest = async (request) => {
     includePartialMessages: requestOptions.includePartialMessages ?? true,
     includeHookEvents: requestOptions.includeHookEvents ?? true,
     persistSession: requestOptions.persistSession ?? true,
-    disallowedTools: Array.from(new Set([...(requestOptions.disallowedTools ?? []), ...CONNOR_DISALLOWED_SDK_WEB_TOOLS])),
-    appendSystemPrompt: [requestOptions.appendSystemPrompt, CONNOR_BROWSER_POLICY_PROMPT].filter(Boolean).join('\n\n'),
+    disallowedTools: requestOptions.disallowedTools ?? undefined,
+    appendSystemPrompt: requestOptions.appendSystemPrompt ?? undefined,
     abortController,
     hooks: buildConnorDeferHooks()
   };
@@ -400,14 +404,15 @@ const runRequest = async (request) => {
 
 const runDeferredResume = async (deferred, resolution) => {
   const request = deferred.request;
+  const requestOptions = request.options ?? {};
   const options = {
     cwd: request.cwd,
     permissionMode: request.sdkPermissionMode,
     resume: deferred.sdkSessionID,
     includePartialMessages: true,
     includeHookEvents: true,
-    disallowedTools: CONNOR_DISALLOWED_SDK_WEB_TOOLS,
-    appendSystemPrompt: CONNOR_BROWSER_POLICY_PROMPT,
+    disallowedTools: requestOptions.disallowedTools ?? undefined,
+    appendSystemPrompt: requestOptions.appendSystemPrompt ?? undefined,
     hooks: buildDeferredResumeHooks(deferred, resolution)
   };
 

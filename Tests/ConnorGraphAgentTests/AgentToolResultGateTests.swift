@@ -33,11 +33,27 @@ import ConnorGraphAgent
     #expect(!gated.contains("truncated"))
 }
 
-@Test func toolResultGatePrefersJSONContentWhenAvailable() {
+@Test func toolResultGatePrefersTextContentOverJSONMetadataWhenAvailable() {
+    let result = AgentToolResult(
+        toolCallID: "call-bash-1",
+        toolName: "Bash",
+        contentText: "exitCode: 0\nstdout:\nhello\n\nstderr:\n",
+        contentJSON: "{\"exitCode\":0,\"truncated\":false}"
+    )
+    let gate = AgentToolResultGate(configuration: AgentToolResultGateConfiguration(maxResultCharacters: 100))
+
+    let gated = gate.gatedContent(for: result)
+
+    #expect(gated.contains("stdout:"))
+    #expect(gated.contains("hello"))
+    #expect(gated != "{\"exitCode\":0,\"truncated\":false}")
+}
+
+@Test func toolResultGateFallsBackToJSONContentWhenTextIsEmpty() {
     let result = AgentToolResult(
         toolCallID: "call-json-1",
         toolName: "graph_search",
-        contentText: "plain",
+        contentText: "",
         contentJSON: "{\"ok\":true}"
     )
     let gate = AgentToolResultGate(configuration: AgentToolResultGateConfiguration(maxResultCharacters: 100))
