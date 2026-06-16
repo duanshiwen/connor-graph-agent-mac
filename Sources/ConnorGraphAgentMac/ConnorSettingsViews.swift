@@ -1548,11 +1548,7 @@ struct SettingsPermissionsSection: View {
             }
 
             SettingsGroup(title: "新会话默认权限") {
-                SettingsPickerRow(title: "权限模式", subtitle: "作为新会话和重建会话的默认 Policy Engine 模式。", selection: $viewModel.defaultPermissionMode) {
-                    ForEach(AgentPermissionMode.allCases.filter { $0 != .allowAll }, id: \.self) { mode in
-                        Text(mode.displayName).tag(mode)
-                    }
-                }
+                PermissionModePickerRow(selection: $viewModel.defaultPermissionMode)
                 Divider()
                 PermissionModeSummaryRow(mode: viewModel.defaultPermissionMode)
             }
@@ -1591,6 +1587,77 @@ struct SettingsPermissionsSection: View {
                 RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous)
                     .stroke(Color.secondary.opacity(SettingsListLayout.hairlineOpacity), lineWidth: 1)
             )
+        }
+    }
+}
+
+struct PermissionModePickerRow: View {
+    @Binding var selection: AgentPermissionMode
+
+    private var availableModes: [AgentPermissionMode] {
+        AgentPermissionMode.allCases.filter { $0 != .allowAll }
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 16) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("权限模式")
+                    .font(SettingsListTypography.rowTitleSelected)
+                Text("作为新会话和重建会话的默认 Policy Engine 模式。")
+                    .font(SettingsListTypography.rowCaption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 24)
+
+            Menu {
+                ForEach(availableModes, id: \.self) { mode in
+                    Button {
+                        selection = mode
+                    } label: {
+                        Label(mode.displayName, systemImage: mode.systemImage)
+                    }
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Label(selection.displayName, systemImage: selection.systemImage)
+                        .labelStyle(.titleAndIcon)
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .font(SettingsListTypography.rowTitleSelected)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .frame(width: 188, alignment: .leading)
+                .background(.quaternary.opacity(0.32), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .frame(width: 220, alignment: .trailing)
+            .help("选择新会话默认权限模式")
+        }
+        .frame(minHeight: SettingsListLayout.rowMinHeight)
+    }
+}
+
+private extension AgentPermissionMode {
+    var systemImage: String {
+        switch self {
+        case .readOnly:
+            return "eye"
+        case .askToWrite:
+            return "questionmark.circle"
+        case .trustedWrite:
+            return "bolt.circle"
+        case .allowAll:
+            return "exclamationmark.triangle"
         }
     }
 }
