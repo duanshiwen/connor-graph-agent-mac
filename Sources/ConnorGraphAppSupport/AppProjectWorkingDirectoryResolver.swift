@@ -149,10 +149,14 @@ public enum AppProjectWorkingDirectoryResolver {
         url.standardizedFileURL.resolvingSymlinksInPath().standardizedFileURL
     }
 
-    fileprivate static func normalizedPath(_ url: URL) -> String {
+    public static func normalizedDirectoryPath(_ url: URL) -> String {
         var path = canonicalDirectoryURL(url).path
         while path.count > 1 && path.hasSuffix("/") { path.removeLast() }
         return path
+    }
+
+    fileprivate static func normalizedPath(_ url: URL) -> String {
+        normalizedDirectoryPath(url)
     }
 
     private static func resolvedRuntimeRoots(_ roots: [AgentRuntimeWorkspaceRoot]) -> [ResolvedProjectWorkspaceRoot] {

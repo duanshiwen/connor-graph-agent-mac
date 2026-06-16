@@ -125,7 +125,11 @@ public struct AgentTurnActivitySummaryBuilder: Sendable {
     }
 
     private func state(for process: AgentChatTurnProcessPresentation, events: [AgentEventPresentation], hasPermissionRequest: Bool) -> AgentTurnActivitySummaryState {
-        if events.contains(where: { $0.severity == .error || $0.kind == "runFailed" || $0.kind == "toolFailed" }) {
+        // A failed tool call is recoverable: the agent loop may retry, choose another path,
+        // or continue producing a final answer. Only an explicit run-level failure should mark
+        // the whole turn as failed. This prevents an in-progress turn from showing “已失败”
+        // just because one tool invocation failed along the way.
+        if events.contains(where: { $0.kind == "runFailed" }) {
             return .failed
         }
         if hasPermissionRequest && !events.contains(where: { $0.kind == "permissionResolved" && $0.severity == .success }) {
@@ -221,6 +225,12 @@ public struct AgentTurnActivitySummaryBuilder: Sendable {
     }
 
     private func parseToolEvent(_ event: AgentEventPresentation) -> (name: String, phase: ToolPhase)? {
+        if let activity = event.toolActivity {
+            let name = activity.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { return nil }
+            return (name, phase(from: activity.phase))
+        }
+
         let mappings: [(prefix: String, phase: ToolPhase)] = [
             ("Tool requested: ", .requested),
             ("Tool running: ", .running),
@@ -234,6 +244,16 @@ public struct AgentTurnActivitySummaryBuilder: Sendable {
             return (name, mapping.phase)
         }
         return nil
+    }
+
+    private func phase(from activityPhase: AgentToolActivityPhase) -> ToolPhase {
+        switch activityPhase {
+        case .requested: .requested
+        case .approved: .requested
+        case .running: .running
+        case .finished: .finished
+        case .failed: .failed
+        }
     }
 }
 

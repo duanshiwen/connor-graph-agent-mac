@@ -62,8 +62,8 @@ public struct BrowserFetchTool: AgentTool {
         let (data, response) = try await URLSession.shared.data(for: request)
         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
         let mimeType = response.mimeType ?? "unknown"
-        let raw = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) ?? ""
-        let extracted = Self.extractReadableText(from: raw)
+        let decoded = Self.decodeWebPageText(data: data, responseEncodingName: response.textEncodingName)
+        let extracted = Self.extractReadableText(from: decoded.text)
         let truncated = String(extracted.prefix(maxChars))
         let wasTruncated = extracted.count > maxChars
 
@@ -72,6 +72,8 @@ public struct BrowserFetchTool: AgentTool {
             "statusCode": statusCode,
             "mimeType": mimeType,
             "contentLength": data.count,
+            "decodedEncoding": decoded.encodingName,
+            "mojibakeRepaired": decoded.mojibakeRepaired,
             "returnedCharacters": truncated.count,
             "truncated": wasTruncated,
             "text": truncated
@@ -84,6 +86,133 @@ public struct BrowserFetchTool: AgentTool {
             contentJSON: json,
             citations: [url.absoluteString]
         )
+    }
+
+    struct DecodedWebPageText: Sendable, Equatable {
+        var text: String
+        var encodingName: String
+        var mojibakeRepaired: Bool
+    }
+
+    static func decodeWebPageText(data: Data, responseEncodingName: String?) -> DecodedWebPageText {
+        let declaredEncodingNames = [responseEncodingName, declaredMetaCharset(in: data)]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        var candidates: [(String, String.Encoding)] = []
+        for name in declaredEncodingNames {
+            if let encoding = stringEncoding(forCharsetName: name) {
+                candidates.append((normalizedCharsetName(name), encoding))
+            }
+        }
+        candidates.append(contentsOf: [
+            ("utf-8", .utf8),
+            ("gb18030", gb18030Encoding),
+            ("gbk", gb18030Encoding),
+            ("big5", big5Encoding),
+            ("windows-1252", windows1252Encoding),
+            ("iso-8859-1", .isoLatin1)
+        ])
+
+        var seen: Set<String> = []
+        for (name, encoding) in candidates where seen.insert("\(name)-\(encoding.rawValue)").inserted {
+            guard let text = String(data: data, encoding: encoding) else { continue }
+            let repaired = repairMojibakeIfNeeded(text)
+            return DecodedWebPageText(
+                text: repaired.text,
+                encodingName: repaired.wasRepaired ? "\(name)→\(repaired.encodingName)" : name,
+                mojibakeRepaired: repaired.wasRepaired
+            )
+        }
+
+        return DecodedWebPageText(text: String(decoding: data, as: UTF8.self), encodingName: "utf-8-lossy", mojibakeRepaired: false)
+    }
+
+    private static func declaredMetaCharset(in data: Data) -> String? {
+        let prefix = data.prefix(4096)
+        let probe = String(data: prefix, encoding: .ascii)
+            ?? String(data: prefix, encoding: .isoLatin1)
+            ?? ""
+        let patterns = [
+            #"(?i)<meta\s+[^>]*charset\s*=\s*["']?\s*([^\s"'>/;]+)"#,
+            #"(?i)<meta\s+[^>]*http-equiv\s*=\s*["']?content-type["']?[^>]*content\s*=\s*["'][^"']*charset\s*=\s*([^\s"'>/;]+)"#
+        ]
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let range = NSRange(probe.startIndex..<probe.endIndex, in: probe)
+            guard let match = regex.firstMatch(in: probe, range: range), match.numberOfRanges > 1,
+                  let charsetRange = Range(match.range(at: 1), in: probe) else { continue }
+            return String(probe[charsetRange])
+        }
+        return nil
+    }
+
+    private static func stringEncoding(forCharsetName name: String) -> String.Encoding? {
+        switch normalizedCharsetName(name) {
+        case "utf-8", "utf8": return .utf8
+        case "iso-8859-1", "latin1", "latin-1": return .isoLatin1
+        case "windows-1252", "cp1252": return windows1252Encoding
+        case "gbk", "gb2312", "gb18030", "hz-gb-2312": return gb18030Encoding
+        case "big5", "big-5": return big5Encoding
+        default:
+            let cfEncoding = CFStringConvertIANACharSetNameToEncoding(name as CFString)
+            guard cfEncoding != kCFStringEncodingInvalidId else { return nil }
+            return String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(cfEncoding))
+        }
+    }
+
+    private static func normalizedCharsetName(_ name: String) -> String {
+        name.trimmingCharacters(in: CharacterSet(charactersIn: " \t\r\n\"'"))
+            .lowercased()
+            .replacingOccurrences(of: "_", with: "-")
+    }
+
+    static var gb18030TestEncoding: String.Encoding { gb18030Encoding }
+
+    private static var gb18030Encoding: String.Encoding {
+        String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue)))
+    }
+
+    private static var big5Encoding: String.Encoding {
+        String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(CFStringEncoding(CFStringEncodings.big5.rawValue)))
+    }
+
+    private static var windows1252Encoding: String.Encoding {
+        String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(CFStringEncoding(CFStringEncodings.dosLatin1.rawValue)))
+    }
+
+    private static func repairMojibakeIfNeeded(_ text: String) -> (text: String, wasRepaired: Bool, encodingName: String) {
+        guard looksLikeMojibake(text), let latin1Data = text.data(using: .isoLatin1) else {
+            return (text, false, "")
+        }
+        let repairCandidates: [(String, String.Encoding)] = [
+            ("gb18030", gb18030Encoding),
+            ("utf-8", .utf8),
+            ("big5", big5Encoding)
+        ]
+        let originalScore = mojibakeScore(text)
+        var best: (text: String, score: Int, encodingName: String)?
+        for (name, encoding) in repairCandidates {
+            guard let repaired = String(data: latin1Data, encoding: encoding) else { continue }
+            let score = mojibakeScore(repaired)
+            if best == nil || score < best!.score {
+                best = (repaired, score, name)
+            }
+        }
+        guard let best, best.score + 2 < originalScore else { return (text, false, "") }
+        return (best.text, true, best.encodingName)
+    }
+
+    private static func looksLikeMojibake(_ text: String) -> Bool {
+        mojibakeScore(text) >= 3
+    }
+
+    private static func mojibakeScore(_ text: String) -> Int {
+        let markers = CharacterSet(charactersIn: "¿ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖ×ØÙÚÛÜÝÞß¼½¾µ")
+        return text.unicodeScalars.reduce(into: 0) { score, scalar in
+            if markers.contains(scalar) { score += 1 }
+            if scalar.value == 0xFFFD { score += 4 }
+        }
     }
 
     private static func extractReadableText(from html: String) -> String {

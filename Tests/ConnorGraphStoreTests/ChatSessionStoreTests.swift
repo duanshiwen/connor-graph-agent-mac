@@ -92,40 +92,6 @@ private func temporaryChatDatabaseURL(_ name: String = UUID().uuidString) -> URL
     #expect(sessions.allSatisfy { $0.messages.isEmpty })
 }
 
-@Test func graphKernelStoreLoadsRecentSessionListItemsWithoutDecodingMessages() throws {
-    let store = try SQLiteGraphKernelStore(path: temporaryChatDatabaseURL().path)
-    try store.migrate()
-    let old = AgentSession(
-        id: "session-old",
-        title: "Old",
-        messages: [AgentMessage(id: "old-message", role: .user, content: "old", createdAt: Date(timeIntervalSince1970: 1_000))],
-        createdAt: Date(timeIntervalSince1970: 1_000),
-        updatedAt: Date(timeIntervalSince1970: 1_000)
-    )
-    let new = AgentSession(
-        id: "session-new",
-        title: "New",
-        messages: [
-            AgentMessage(id: "new-message-1", role: .user, content: "new", createdAt: Date(timeIntervalSince1970: 2_000)),
-            AgentMessage(id: "new-message-2", role: .assistant, content: "answer", createdAt: Date(timeIntervalSince1970: 2_100))
-        ],
-        createdAt: Date(timeIntervalSince1970: 2_000),
-        updatedAt: Date(timeIntervalSince1970: 3_000),
-        governance: AgentSessionGovernanceMetadata(status: .inProgress, labels: [AgentSessionLabel(id: "project", value: "connor")], isArchived: false, isFlagged: true)
-    )
-
-    try store.upsertSession(old)
-    try store.upsertSession(new)
-
-    let items = try store.recentSessionListItems(limit: 10)
-
-    #expect(items.map(\.id) == ["session-new", "session-old"])
-    #expect(items.first?.messageCount == 2)
-    #expect(items.first?.governance.status == .inProgress)
-    #expect(items.first?.governance.labels == [AgentSessionLabel(id: "project", value: "connor")])
-    #expect(items.first?.governance.isFlagged == true)
-}
-
 @Test func graphKernelStoreMigratesAgentSessionsTable() throws {
     let store = try SQLiteGraphKernelStore(path: temporaryChatDatabaseURL().path)
     try store.migrate()
@@ -214,11 +180,11 @@ private func temporaryChatDatabaseURL(_ name: String = UUID().uuidString) -> URL
     #expect(tasks.first?.detail == "已更新为：新标题")
 }
 
-@Test func graphKernelStoreDeletesBackgroundTasksWhenDeletingSession() throws {
+@Test func graphKernelStoreSoftDeletesSessionWithoutRemovingRecordsOrTasks() throws {
     let store = try SQLiteGraphKernelStore(path: temporaryChatDatabaseURL().path)
     try store.migrate()
-    try store.upsertSession(AgentSession(id: "session-1", title: "One"))
-    try store.upsertSession(AgentSession(id: "session-2", title: "Two"))
+    try store.upsertSession(AgentSession(id: "session-1", title: "One", createdAt: Date(timeIntervalSince1970: 1_000), updatedAt: Date(timeIntervalSince1970: 1_000)))
+    try store.upsertSession(AgentSession(id: "session-2", title: "Two", createdAt: Date(timeIntervalSince1970: 2_000), updatedAt: Date(timeIntervalSince1970: 2_000)))
     try store.upsertSessionBackgroundTask(PersistedSessionBackgroundTask(
         id: "task-1",
         sessionID: "session-1",
@@ -243,9 +209,14 @@ private func temporaryChatDatabaseURL(_ name: String = UUID().uuidString) -> URL
         errorMessage: nil,
         payloadJSON: "{}"
     ))
+    let deletedAt = Date(timeIntervalSince1970: 3_000)
 
-    try store.deleteSession(id: "session-1")
+    try store.deleteSession(id: "session-1", deletedAt: deletedAt)
 
-    #expect(try store.sessionBackgroundTasks(sessionID: "session-1").isEmpty)
+    let deleted = try #require(try store.session(id: "session-1"))
+    #expect(deleted.governance.deletedAt == deletedAt)
+    #expect(try store.recentSessions(limit: 10).map(\.id) == ["session-2"])
+    #expect(try store.recentSessions(limit: 10, includeDeleted: true).map(\.id) == ["session-1", "session-2"])
+    #expect(try store.sessionBackgroundTasks(sessionID: "session-1").map(\.id) == ["task-1"])
     #expect(try store.sessionBackgroundTasks(sessionID: "session-2").map(\.id) == ["task-2"])
 }

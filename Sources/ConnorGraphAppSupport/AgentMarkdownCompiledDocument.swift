@@ -1,4 +1,5 @@
 import Foundation
+import ConnorGraphCore
 
 public enum AgentMarkdownCompiledBlockKind: String, Sendable, Equatable {
     case heading
@@ -68,6 +69,9 @@ public struct AgentMarkdownCompiledDocument: Identifiable, Sendable, Equatable {
 }
 
 public struct AgentMarkdownDocumentCompiler: Sendable {
+    public static let parserVersion = 1
+    public static let rendererVersion = 1
+
     private let parser: AgentMarkdownBlockParser
 
     public init(parser: AgentMarkdownBlockParser = AgentMarkdownBlockParser()) {
@@ -75,7 +79,10 @@ public struct AgentMarkdownDocumentCompiler: Sendable {
     }
 
     public func compile(_ markdown: String) -> AgentMarkdownCompiledDocument {
-        let blocks = parser.parse(markdown)
+        compile(source: markdown, blocks: parser.parse(markdown))
+    }
+
+    public func compile(source markdown: String, blocks: [AgentMarkdownBlock]) -> AgentMarkdownCompiledDocument {
         let compiledBlocks = blocks.enumerated().map { index, block in
             compile(block, at: index)
         }
@@ -142,7 +149,7 @@ public struct AgentMarkdownDocumentCompiler: Sendable {
         }
     }
 
-    static func stableFingerprint(_ string: String) -> String {
+    public static func stableFingerprint(_ string: String) -> String {
         var hash: UInt64 = 14_695_981_039_346_656_037
         for byte in string.utf8 {
             hash ^= UInt64(byte)
@@ -183,7 +190,7 @@ public struct AgentMarkdownCompiledRenderWindowPolicy: Sendable {
     }
 }
 
-public final class AgentMarkdownCompiledDocumentCache {
+public final class AgentMarkdownCompiledDocumentCache: @unchecked Sendable {
     private var documents: [String: AgentMarkdownCompiledDocument] = [:]
     private var insertionOrder: [String] = []
     private let limit: Int
@@ -195,7 +202,14 @@ public final class AgentMarkdownCompiledDocumentCache {
 
     public func document(
         for markdown: String,
-        compile: (String) -> AgentMarkdownCompiledDocument = { AgentMarkdownDocumentCompiler().compile($0) }
+        loadBlocks: ((String) -> [AgentMarkdownBlock]?)? = nil,
+        persistBlocks: ((String, [AgentMarkdownBlock]) -> Void)? = nil,
+        compile: (String, [AgentMarkdownBlock]?) -> AgentMarkdownCompiledDocument = { source, cachedBlocks in
+            if let cachedBlocks {
+                return AgentMarkdownDocumentCompiler().compile(source: source, blocks: cachedBlocks)
+            }
+            return AgentMarkdownDocumentCompiler().compile(source)
+        }
     ) -> AgentMarkdownCompiledDocument {
         lock.lock()
         if let cached = documents[markdown] {
@@ -204,7 +218,11 @@ public final class AgentMarkdownCompiledDocumentCache {
         }
         lock.unlock()
 
-        let compiled = compile(markdown)
+        let cachedBlocks = loadBlocks?(markdown)
+        let compiled = compile(markdown, cachedBlocks)
+        if cachedBlocks == nil {
+            persistBlocks?(markdown, AgentMarkdownBlockParser().parse(markdown))
+        }
 
         lock.lock()
         if let cached = documents[markdown] {
@@ -226,5 +244,120 @@ public final class AgentMarkdownCompiledDocumentCache {
         documents.removeAll(keepingCapacity: keepingCapacity)
         insertionOrder.removeAll(keepingCapacity: keepingCapacity)
         lock.unlock()
+    }
+}
+
+public struct AgentMarkdownRenderCacheFile: Codable, Sendable, Equatable {
+    public var schemaVersion: Int
+    public var parserVersion: Int
+    public var rendererVersion: Int
+    public var sessionID: String
+    public var messageID: String
+    public var contentHash: String
+    public var blocks: [AgentMarkdownBlock]
+    public var createdAt: Date
+
+    public init(
+        schemaVersion: Int = 1,
+        parserVersion: Int = AgentMarkdownDocumentCompiler.parserVersion,
+        rendererVersion: Int = AgentMarkdownDocumentCompiler.rendererVersion,
+        sessionID: String,
+        messageID: String,
+        contentHash: String,
+        blocks: [AgentMarkdownBlock],
+        createdAt: Date = Date()
+    ) {
+        self.schemaVersion = schemaVersion
+        self.parserVersion = parserVersion
+        self.rendererVersion = rendererVersion
+        self.sessionID = sessionID
+        self.messageID = messageID
+        self.contentHash = contentHash
+        self.blocks = blocks
+        self.createdAt = createdAt
+    }
+}
+
+public struct AgentMarkdownRenderCacheStore: @unchecked Sendable {
+    public var storagePaths: AppStoragePaths
+    public var fileManager: FileManager
+
+    public init(storagePaths: AppStoragePaths, fileManager: FileManager = .default) {
+        self.storagePaths = storagePaths
+        self.fileManager = fileManager
+    }
+
+    public func loadBlocks(sessionID: String, messageID: String, content: String) throws -> [AgentMarkdownBlock]? {
+        let url = try cacheURL(sessionID: sessionID, messageID: messageID)
+        guard fileManager.fileExists(atPath: url.path) else { return nil }
+        let data = try Data(contentsOf: url)
+        let file = try decoder().decode(AgentMarkdownRenderCacheFile.self, from: data)
+        guard file.schemaVersion == 1,
+              file.parserVersion == AgentMarkdownDocumentCompiler.parserVersion,
+              file.rendererVersion == AgentMarkdownDocumentCompiler.rendererVersion,
+              file.sessionID == sessionID,
+              file.messageID == messageID,
+              file.contentHash == Self.contentHash(content) else {
+            return nil
+        }
+        return file.blocks
+    }
+
+    public func saveBlocks(sessionID: String, messageID: String, content: String, blocks: [AgentMarkdownBlock], createdAt: Date = Date()) throws {
+        let url = try cacheURL(sessionID: sessionID, messageID: messageID)
+        try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let file = AgentMarkdownRenderCacheFile(
+            sessionID: sessionID,
+            messageID: messageID,
+            contentHash: Self.contentHash(content),
+            blocks: blocks,
+            createdAt: createdAt
+        )
+        let data = try encoder().encode(file)
+        try data.write(to: url, options: [.atomic])
+    }
+
+    public func prewarm(session: AgentSession, minimumContentLength: Int = 800) throws {
+        for message in session.messages where message.role == .assistant && message.content.count >= minimumContentLength {
+            if try loadBlocks(sessionID: session.id, messageID: message.id, content: message.content) != nil { continue }
+            let blocks = AgentMarkdownBlockParser().parse(message.content)
+            try saveBlocks(sessionID: session.id, messageID: message.id, content: message.content, blocks: blocks)
+        }
+    }
+
+    public func cacheURL(sessionID: String, messageID: String) throws -> URL {
+        let directories = try storagePaths.ensureSessionArtifactDirectories(sessionID: sessionID, fileManager: fileManager)
+        let filename = Self.safeFilename(messageID) + ".json"
+        return directories.state
+            .appendingPathComponent("markdown-render-cache", isDirectory: true)
+            .appendingPathComponent(filename)
+    }
+
+    public static func contentHash(_ content: String) -> String {
+        AgentMarkdownDocumentCompiler.stableFingerprint(content)
+    }
+
+    private static func safeFilename(_ value: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        let scalars = value.unicodeScalars.map { allowed.contains($0) ? Character($0) : "-" }
+        let filename = String(scalars).trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return filename.isEmpty ? stableFallbackFilename(value) : filename
+    }
+
+    private static func stableFallbackFilename(_ value: String) -> String {
+        AgentMarkdownDocumentCompiler.stableFingerprint(value)
+    }
+
+    private func encoder() -> JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return encoder
+    }
+
+    private func decoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
     }
 }
