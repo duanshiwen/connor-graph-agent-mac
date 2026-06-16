@@ -97,11 +97,12 @@ struct EditableShortcutRow: View {
                 .padding(.vertical, SettingsListLayout.spaceS)
                 .background(.quaternary.opacity(0.30), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusS, style: .continuous))
             Button("修改", action: onRecord)
-                .buttonStyle(.bordered)
                 .controlSize(.regular)
+                .frame(minHeight: 44)
             Button("默认", action: onReset)
                 .buttonStyle(.borderless)
                 .controlSize(.regular)
+                .frame(minWidth: 44, minHeight: 44)
         }
         .frame(minHeight: 56)
     }
