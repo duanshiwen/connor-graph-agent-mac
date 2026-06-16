@@ -193,12 +193,23 @@ private struct SettingsAppSection: View {
 private struct SettingsAISection: View {
     @ObservedObject var viewModel: AppViewModel
     @State private var isShowingAddConnectionGuide = false
+    @State private var setupOption: AIConnectionOnboardingOption?
 
     var body: some View {
         Group {
-            if isShowingAddConnectionGuide {
+            if let setupOption {
+                AIConnectionSetupView(
+                    option: setupOption,
+                    complete: { addConnection(from: setupOption) },
+                    back: { self.setupOption = nil },
+                    cancel: {
+                        self.setupOption = nil
+                        isShowingAddConnectionGuide = false
+                    }
+                )
+            } else if isShowingAddConnectionGuide {
                 AIConnectionOnboardingView(
-                    choose: addConnection(from:),
+                    choose: beginConnectionSetup(from:),
                     cancel: { isShowingAddConnectionGuide = false }
                 )
             } else {
@@ -257,6 +268,14 @@ private struct SettingsAISection: View {
         }
     }
 
+    private func beginConnectionSetup(from option: AIConnectionOnboardingOption) {
+        if option.requiresWebAuthentication {
+            setupOption = option
+        } else {
+            addConnection(from: option)
+        }
+    }
+
     private func addConnection(from option: AIConnectionOnboardingOption) {
         viewModel.addLLMConnection(
             providerMode: option.providerMode,
@@ -265,8 +284,16 @@ private struct SettingsAISection: View {
             model: option.model,
             selectedModel: option.selectedModel
         )
+        setupOption = nil
         isShowingAddConnectionGuide = false
     }
+}
+
+private enum AIConnectionAuthenticationKind: Equatable {
+    case authorizationCode
+    case browserCallback
+    case deviceCode(code: String, verificationURL: String)
+    case direct
 }
 
 private struct AIConnectionOnboardingOption: Identifiable, Equatable {
@@ -280,6 +307,14 @@ private struct AIConnectionOnboardingOption: Identifiable, Equatable {
     var baseURLString: String
     var model: String
     var selectedModel: String
+    var setupTitle: String
+    var setupSubtitle: String
+    var setupInstruction: String
+    var loginButtonTitle: String
+    var authURLString: String
+    var authenticationKind: AIConnectionAuthenticationKind
+
+    var requiresWebAuthentication: Bool { authenticationKind != .direct }
 
     static let all: [AIConnectionOnboardingOption] = [
         AIConnectionOnboardingOption(
@@ -292,7 +327,13 @@ private struct AIConnectionOnboardingOption: Identifiable, Equatable {
             connectionName: "Claude Pro / Max",
             baseURLString: "",
             model: "claude-sdk-default",
-            selectedModel: "claude-sdk-default"
+            selectedModel: "claude-sdk-default",
+            setupTitle: "连接 Claude",
+            setupSubtitle: "使用 Claude Pro / Max 订阅驱动康纳同学。",
+            setupInstruction: "点击下方按钮打开 Claude 登录页。完成登录后，复制浏览器页面显示的授权码并粘贴到这里。",
+            loginButtonTitle: "使用 Claude 登录",
+            authURLString: "https://claude.ai/login",
+            authenticationKind: .authorizationCode
         ),
         AIConnectionOnboardingOption(
             id: "codex-chatgpt-plus",
@@ -304,7 +345,13 @@ private struct AIConnectionOnboardingOption: Identifiable, Equatable {
             connectionName: "Codex · ChatGPT Plus",
             baseURLString: AppLLMSettings.default.baseURLString,
             model: AppLLMSettings.default.model,
-            selectedModel: AppLLMSettings.default.effectiveModel
+            selectedModel: AppLLMSettings.default.effectiveModel,
+            setupTitle: "连接 ChatGPT",
+            setupSubtitle: "使用 ChatGPT Plus 订阅驱动康纳同学。",
+            setupInstruction: "点击下方按钮使用 OpenAI 账号登录。康纳同学会打开浏览器窗口进行认证。",
+            loginButtonTitle: "使用 ChatGPT 登录",
+            authURLString: "https://chatgpt.com/",
+            authenticationKind: .browserCallback
         ),
         AIConnectionOnboardingOption(
             id: "github-copilot",
@@ -316,7 +363,13 @@ private struct AIConnectionOnboardingOption: Identifiable, Equatable {
             connectionName: "GitHub Copilot",
             baseURLString: "",
             model: "gpt-4.1",
-            selectedModel: "gpt-4.1"
+            selectedModel: "gpt-4.1",
+            setupTitle: "连接 GitHub Copilot",
+            setupSubtitle: "使用 GitHub Copilot 订阅驱动康纳同学。",
+            setupInstruction: "在 GitHub 页面输入此代码以授权。浏览器会打开 github.com/login/device。",
+            loginButtonTitle: "打开 GitHub 授权页",
+            authURLString: "https://github.com/login/device",
+            authenticationKind: .deviceCode(code: "B3D1-87D5", verificationURL: "https://github.com/login/device")
         ),
         AIConnectionOnboardingOption(
             id: "other-provider",
@@ -328,7 +381,13 @@ private struct AIConnectionOnboardingOption: Identifiable, Equatable {
             connectionName: "其他提供商",
             baseURLString: AppLLMSettings.default.baseURLString,
             model: AppLLMSettings.default.model,
-            selectedModel: AppLLMSettings.default.effectiveModel
+            selectedModel: AppLLMSettings.default.effectiveModel,
+            setupTitle: "连接其他提供商",
+            setupSubtitle: "接入 Anthropic、AWS Bedrock、OpenRouter、Google 或其他兼容服务。",
+            setupInstruction: "下一步将填写 Base URL、模型和 API Key。",
+            loginButtonTitle: "继续",
+            authURLString: "",
+            authenticationKind: .direct
         ),
         AIConnectionOnboardingOption(
             id: "local-model",
@@ -340,9 +399,219 @@ private struct AIConnectionOnboardingOption: Identifiable, Equatable {
             connectionName: "本地模型",
             baseURLString: "http://localhost:11434/v1",
             model: "llama3.2",
-            selectedModel: "llama3.2"
+            selectedModel: "llama3.2",
+            setupTitle: "连接本地模型",
+            setupSubtitle: "通过 Ollama 等本地服务，让康纳同学在你的电脑上运行模型。",
+            setupInstruction: "下一步将检查本地模型服务地址。",
+            loginButtonTitle: "继续",
+            authURLString: "",
+            authenticationKind: .direct
         )
     ]
+}
+
+private struct AIConnectionSetupView: View {
+    var option: AIConnectionOnboardingOption
+    var complete: () -> Void
+    var back: () -> Void
+    var cancel: () -> Void
+
+    @State private var authorizationCode = ""
+    @State private var didOpenBrowser = false
+    @State private var statusMessage: String?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 180)
+
+            VStack(spacing: 32) {
+                VStack(spacing: 14) {
+                    Text(option.setupTitle)
+                        .font(.largeTitle.weight(.semibold))
+                    Text(option.setupSubtitle)
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+
+                setupContent
+                    .frame(maxWidth: 560)
+
+                if let statusMessage {
+                    Text(statusMessage)
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 560)
+                }
+
+                HStack(spacing: 14) {
+                    Button(action: back) {
+                        Text("Back")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+
+                    Button(action: primaryAction) {
+                        Label(primaryButtonTitle, systemImage: primaryButtonIcon)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .disabled(isPrimaryButtonDisabled)
+                }
+                .frame(maxWidth: 560)
+            }
+
+            Spacer(minLength: 220)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(minHeight: 760)
+    }
+
+    @ViewBuilder
+    private var setupContent: some View {
+        switch option.authenticationKind {
+        case .authorizationCode:
+            VStack(alignment: .leading, spacing: 12) {
+                Text(option.setupInstruction)
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+                    .padding(.bottom, 12)
+                Button(action: openAuthenticationURL) {
+                    Label(option.loginButtonTitle, systemImage: "arrow.up.right.square")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("授权码")
+                        .font(.headline)
+                    TextField("在此粘贴授权码", text: $authorizationCode)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.title3)
+                }
+            }
+        case .browserCallback:
+            VStack(spacing: 22) {
+                Text(option.setupInstruction)
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+                if didOpenBrowser {
+                    Text("浏览器已打开。完成网页认证后，回到康纳同学继续。")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 14)
+                        .frame(maxWidth: .infinity)
+                        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+            }
+        case .deviceCode(let code, let verificationURL):
+            VStack(spacing: 24) {
+                Text(option.setupInstruction)
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Text(code)
+                    .font(.system(size: 38, weight: .bold, design: .monospaced))
+                    .kerning(4)
+                    .padding(.horizontal, 28)
+                    .padding(.vertical, 18)
+                    .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color.secondary.opacity(0.14), lineWidth: 1)
+                    )
+                    .textSelection(.enabled)
+                Text(didOpenBrowser ? "浏览器已打开 \(displayURL(verificationURL))" : "点击下方按钮打开 \(displayURL(verificationURL))")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+            }
+        case .direct:
+            Text(option.setupInstruction)
+                .font(.title3)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+    }
+
+    private var primaryButtonTitle: String {
+        switch option.authenticationKind {
+        case .authorizationCode:
+            return "Continue"
+        case .browserCallback:
+            return didOpenBrowser ? "完成并添加连接" : option.loginButtonTitle
+        case .deviceCode:
+            return didOpenBrowser ? "等待授权…" : option.loginButtonTitle
+        case .direct:
+            return option.loginButtonTitle
+        }
+    }
+
+    private var primaryButtonIcon: String {
+        switch option.authenticationKind {
+        case .authorizationCode:
+            return "arrow.right"
+        case .browserCallback:
+            return didOpenBrowser ? "checkmark" : "arrow.up.right.square"
+        case .deviceCode:
+            return didOpenBrowser ? "circle.grid.3x3" : "arrow.up.right.square"
+        case .direct:
+            return "arrow.right"
+        }
+    }
+
+    private var isPrimaryButtonDisabled: Bool {
+        switch option.authenticationKind {
+        case .authorizationCode:
+            return authorizationCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        default:
+            return false
+        }
+    }
+
+    private func primaryAction() {
+        switch option.authenticationKind {
+        case .authorizationCode:
+            statusMessage = "已收到授权码。真实 token 交换接入后，这一步会完成认证并保存凭据。"
+            complete()
+        case .browserCallback:
+            if didOpenBrowser {
+                complete()
+            } else {
+                openAuthenticationURL()
+            }
+        case .deviceCode:
+            if didOpenBrowser {
+                statusMessage = "正在等待网页授权完成。真实设备码轮询接入后，这里会自动完成。"
+                complete()
+            } else {
+                openAuthenticationURL()
+            }
+        case .direct:
+            complete()
+        }
+    }
+
+    private func openAuthenticationURL() {
+        guard let url = URL(string: option.authURLString), !option.authURLString.isEmpty else { return }
+        NSWorkspace.shared.open(url)
+        didOpenBrowser = true
+        statusMessage = nil
+    }
+
+    private func displayURL(_ rawValue: String) -> String {
+        rawValue
+            .replacingOccurrences(of: "https://", with: "")
+            .replacingOccurrences(of: "http://", with: "")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
 }
 
 private struct AIConnectionOnboardingView: View {

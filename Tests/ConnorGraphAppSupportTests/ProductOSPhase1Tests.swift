@@ -38,7 +38,7 @@ struct ProductOSPhase1Tests {
         }
     }
 
-    @Test func chatRepositoryPersistsStatusLabelsArchiveAndArtifacts() throws {
+    @Test func chatRepositoryPersistsStatusLabelsLegacyArchiveCompatibilityAndArtifacts() throws {
         let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString, isDirectory: true)
         let paths = AppStoragePaths(applicationSupportDirectory: root)
         try paths.ensureDirectoryHierarchy()
@@ -57,13 +57,13 @@ struct ProductOSPhase1Tests {
         #expect(dirs != nil)
         #expect(FileManager.default.fileExists(atPath: dirs!.plans.path))
 
-        let archived = try repository.archive(sessionID: session.id)
-        #expect(archived.governance.isArchived)
-        #expect(try repository.loadSessions(filter: .inbox).isEmpty)
-        #expect(try repository.loadSessions(filter: .archived).map(\.id) == [session.id])
+        let legacyArchived = try repository.markLegacyArchived(sessionID: session.id)
+        #expect(legacyArchived.governance.isArchived)
+        #expect(try repository.loadSessions(filter: .inbox).map(\.id) == [session.id])
+        #expect(try repository.loadSessions(filter: .all).map(\.id) == [session.id])
 
-        let restored = try repository.restore(sessionID: session.id)
+        let restored = try repository.clearLegacyArchived(sessionID: session.id)
         #expect(!restored.governance.isArchived)
-        #expect(restored.governance.status == .todo)
+        #expect(restored.governance.status == .inProgress)
     }
 }

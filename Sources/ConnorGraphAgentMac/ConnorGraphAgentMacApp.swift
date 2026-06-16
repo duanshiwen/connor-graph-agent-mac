@@ -2346,33 +2346,6 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    func archiveSelectedSession() {
-        guard let selectedChatSessionID, let chatSessionRepository else { return }
-        do {
-            let session = try chatSessionRepository.archive(sessionID: selectedChatSessionID)
-            appendGovernanceEvent(.sessionArchived(AgentSessionGovernanceEvent(sessionID: session.id, message: "会话已归档", status: session.governance.status)))
-            evaluateAutomation(ProductOSAutomationEventContext(triggerKind: .sessionArchived, sessionID: session.id, status: session.governance.status))
-            self.selectedChatSessionID = nil
-            reloadChatSessions()
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func restoreSelectedSession() {
-        guard let selectedChatSessionID, let chatSessionRepository else { return }
-        do {
-            let session = try chatSessionRepository.restore(sessionID: selectedChatSessionID)
-            appendGovernanceEvent(.sessionRestored(AgentSessionGovernanceEvent(sessionID: session.id, message: "会话已恢复", status: session.governance.status)))
-            evaluateAutomation(ProductOSAutomationEventContext(triggerKind: .sessionRestored, sessionID: session.id, status: session.governance.status))
-            setSessionListFilter(.inbox)
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
     private func appendGovernanceEvent(_ event: AgentEvent) {
         agentEventTimeline.insert(AgentEventPresenter().presentation(for: event), at: 0)
     }
