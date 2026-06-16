@@ -243,6 +243,10 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
         "llm-connection-\(connectionID)-api-key"
     }
 
+    public static func oauthAccount(for connectionID: String) -> String {
+        "llm-connection-\(connectionID)-oauth"
+    }
+
     public func loadSettings() throws -> AppLLMSettings {
         if let raw = settingsStore.string(forKey: Keys.connections), let data = raw.data(using: .utf8) {
             let decoded = try JSONDecoder().decode([AppLLMConnectionConfig].self, from: data)
@@ -322,13 +326,28 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
 
     public func clearAPIKey(connectionID: String) throws {
         try credentialStore.deleteSecret(service: Self.keychainService, account: Self.apiKeyAccount(for: connectionID))
+        try credentialStore.deleteSecret(service: Self.keychainService, account: Self.oauthAccount(for: connectionID))
         if connectionID == "openai-compatible" {
             try credentialStore.deleteSecret(service: Self.keychainService, account: Self.apiKeyAccount)
         }
     }
 
+    public func saveOAuthTokens(_ tokens: AppLLMOAuthTokens, connectionID: String) throws {
+        let data = try JSONEncoder().encode(tokens)
+        try credentialStore.saveSecret(String(decoding: data, as: UTF8.self), service: Self.keychainService, account: Self.oauthAccount(for: connectionID))
+    }
+
+    public func oauthTokens(for connectionID: String) throws -> AppLLMOAuthTokens? {
+        guard let raw = try credentialStore.readSecret(service: Self.keychainService, account: Self.oauthAccount(for: connectionID)),
+              let data = raw.data(using: .utf8) else { return nil }
+        return try JSONDecoder().decode(AppLLMOAuthTokens.self, from: data)
+    }
+
     public func hasAPIKey(for connectionID: String) throws -> Bool {
         if let key = try credentialStore.readSecret(service: Self.keychainService, account: Self.apiKeyAccount(for: connectionID)), !key.isEmpty {
+            return true
+        }
+        if let oauth = try credentialStore.readSecret(service: Self.keychainService, account: Self.oauthAccount(for: connectionID)), !oauth.isEmpty {
             return true
         }
         if connectionID == "openai-compatible", let key = try credentialStore.readSecret(service: Self.keychainService, account: Self.apiKeyAccount), !key.isEmpty {

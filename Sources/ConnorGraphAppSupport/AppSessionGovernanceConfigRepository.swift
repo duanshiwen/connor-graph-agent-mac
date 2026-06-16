@@ -60,6 +60,24 @@ public struct AppSessionGovernanceConfig: Codable, Sendable, Equatable {
         }
     }
 
+    public func normalizingBuiltInDisplayNames() -> AppSessionGovernanceConfig {
+        let statusNames = Dictionary(uniqueKeysWithValues: AgentSessionStatusDefinition.defaults.map { ($0.id, $0.name) })
+        let labelNames = Dictionary(uniqueKeysWithValues: AgentSessionLabelDefinition.defaults.map { ($0.id, $0.name) })
+        let normalizedStatuses = statuses.map { definition in
+            guard let name = statusNames[definition.id], definition.name != name else { return definition }
+            var copy = definition
+            copy.name = name
+            return copy
+        }
+        let normalizedLabels = labels.map { definition in
+            guard let name = labelNames[definition.id], definition.name != name else { return definition }
+            var copy = definition
+            copy.name = name
+            return copy
+        }
+        return AppSessionGovernanceConfig(statuses: normalizedStatuses, labels: normalizedLabels)
+    }
+
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
@@ -83,7 +101,11 @@ public struct AppSessionGovernanceConfigRepository: Sendable {
             let data = try Data(contentsOf: configURL)
             let config = try JSONDecoder().decode(AppSessionGovernanceConfig.self, from: data)
             try config.validate()
-            return config
+            let normalizedConfig = config.normalizingBuiltInDisplayNames()
+            if normalizedConfig != config {
+                try save(normalizedConfig)
+            }
+            return normalizedConfig
         }
         let config = AppSessionGovernanceConfig.default
         try save(config)

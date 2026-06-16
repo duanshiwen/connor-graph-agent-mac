@@ -1209,6 +1209,57 @@ final class AppViewModel: ObservableObject {
     ) {
         let idBase = providerMode == .openAICompatible ? "openai-compatible" : "claude"
         let id = "\(idBase)-\(UUID().uuidString.prefix(8).lowercased())"
+        addLLMConnection(
+            id: id,
+            providerMode: providerMode,
+            name: name,
+            baseURLString: baseURLString,
+            model: model,
+            selectedModel: selectedModel,
+            hasAPIKey: false
+        )
+    }
+
+    @discardableResult
+    func addAuthenticatedLLMConnection(
+        id: String,
+        providerMode: AppLLMProviderMode,
+        name: String,
+        baseURLString: String,
+        model: String,
+        selectedModel: String,
+        apiKey: String? = nil,
+        oauthTokens: AppLLMOAuthTokens? = nil
+    ) throws -> AppLLMConnectionConfig {
+        let connection = addLLMConnection(
+            id: id,
+            providerMode: providerMode,
+            name: name,
+            baseURLString: baseURLString,
+            model: model,
+            selectedModel: selectedModel,
+            hasAPIKey: apiKey?.isEmpty == false || oauthTokens != nil
+        )
+        let settings = AppLLMSettings(connections: llmConnectionConfigs, defaultConnectionID: connection.id)
+        try llmSettingsRepository.save(settings: settings, apiKey: apiKey)
+        if let oauthTokens {
+            try llmSettingsRepository.saveOAuthTokens(oauthTokens, connectionID: connection.id)
+        }
+        loadLLMSettings()
+        rebuildNativeSessionManagerForActiveSession()
+        Task { await reloadLLMModelConnections() }
+        return connection
+    }
+
+    private func addLLMConnection(
+        id: String,
+        providerMode: AppLLMProviderMode,
+        name: String? = nil,
+        baseURLString: String? = nil,
+        model: String? = nil,
+        selectedModel: String? = nil,
+        hasAPIKey: Bool
+    ) -> AppLLMConnectionConfig {
         let defaultName = providerMode == .openAICompatible ? "新 OpenAI Compatible 连接" : "新 Claude 连接"
         let defaultBaseURL = providerMode == .openAICompatible ? AppLLMSettings.default.baseURLString : ""
         let defaultModel = providerMode == .openAICompatible ? AppLLMSettings.default.model : "claude-sdk-default"
@@ -1220,11 +1271,14 @@ final class AppViewModel: ObservableObject {
             providerMode: providerMode,
             baseURLString: baseURLString ?? defaultBaseURL,
             model: normalizedModel,
-            selectedModel: normalizedSelectedModel
+            selectedModel: normalizedSelectedModel,
+            hasAPIKey: hasAPIKey
         )
+        llmConnectionConfigs.removeAll { $0.id == connection.id }
         llmConnectionConfigs.append(connection)
-        llmDefaultConnectionID = id
-        selectDefaultLLMConnection(id)
+        llmDefaultConnectionID = connection.id
+        selectDefaultLLMConnection(connection.id)
+        return connection
     }
 
     func deleteSelectedLLMConnection() {

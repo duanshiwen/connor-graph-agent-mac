@@ -199,6 +199,7 @@ private struct SettingsAISection: View {
         Group {
             if let setupOption {
                 AIConnectionSetupView(
+                    viewModel: viewModel,
                     option: setupOption,
                     complete: { addConnection(from: setupOption) },
                     back: { self.setupOption = nil },
@@ -411,6 +412,7 @@ private struct AIConnectionOnboardingOption: Identifiable, Equatable {
 }
 
 private struct AIConnectionSetupView: View {
+    @ObservedObject var viewModel: AppViewModel
     var option: AIConnectionOnboardingOption
     var complete: () -> Void
     var back: () -> Void
@@ -418,7 +420,11 @@ private struct AIConnectionSetupView: View {
 
     @State private var authorizationCode = ""
     @State private var didOpenBrowser = false
+    @State private var isAuthenticating = false
     @State private var statusMessage: String?
+    @State private var errorMessage: String?
+    @State private var claudeFlow: AppLLMOAuthService.ClaudePreparedFlow?
+    @State private var githubDeviceCode: AppLLMGitHubDeviceCode?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -445,6 +451,17 @@ private struct AIConnectionSetupView: View {
                         .frame(maxWidth: 560)
                 }
 
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.title3)
+                        .foregroundStyle(.red)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 14)
+                        .frame(maxWidth: 560)
+                        .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+
                 HStack(spacing: 14) {
                     Button(action: back) {
                         Text("Back")
@@ -459,7 +476,7 @@ private struct AIConnectionSetupView: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.large)
-                    .disabled(isPrimaryButtonDisabled)
+                    .disabled(isPrimaryButtonDisabled || isAuthenticating)
                 }
                 .frame(maxWidth: 560)
             }
@@ -481,8 +498,8 @@ private struct AIConnectionSetupView: View {
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
                     .padding(.bottom, 12)
-                Button(action: openAuthenticationURL) {
-                    Label(option.loginButtonTitle, systemImage: "arrow.up.right.square")
+                Button(action: startClaudeOAuth) {
+                    Label(didOpenBrowser ? "重新打开 Claude 登录页" : option.loginButtonTitle, systemImage: "arrow.up.right.square")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
@@ -512,26 +529,32 @@ private struct AIConnectionSetupView: View {
                         .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
             }
-        case .deviceCode(let code, let verificationURL):
+        case .deviceCode:
             VStack(spacing: 24) {
                 Text(option.setupInstruction)
                     .font(.title3)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                Text(code)
-                    .font(.system(size: 38, weight: .bold, design: .monospaced))
-                    .kerning(4)
-                    .padding(.horizontal, 28)
-                    .padding(.vertical, 18)
-                    .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(Color.secondary.opacity(0.14), lineWidth: 1)
-                    )
-                    .textSelection(.enabled)
-                Text(didOpenBrowser ? "浏览器已打开 \(displayURL(verificationURL))" : "点击下方按钮打开 \(displayURL(verificationURL))")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
+                if let githubDeviceCode {
+                    Text(githubDeviceCode.userCode)
+                        .font(.system(size: 38, weight: .bold, design: .monospaced))
+                        .kerning(4)
+                        .padding(.horizontal, 28)
+                        .padding(.vertical, 18)
+                        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Color.secondary.opacity(0.14), lineWidth: 1)
+                        )
+                        .textSelection(.enabled)
+                    Text(didOpenBrowser ? "浏览器已打开 \(displayURL(githubDeviceCode.verificationURI))" : "点击下方按钮打开 \(displayURL(githubDeviceCode.verificationURI))")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("点击下方按钮获取 GitHub 授权码。")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                }
             }
         case .direct:
             Text(option.setupInstruction)
@@ -542,26 +565,28 @@ private struct AIConnectionSetupView: View {
     }
 
     private var primaryButtonTitle: String {
+        if isAuthenticating { return "正在认证…" }
         switch option.authenticationKind {
         case .authorizationCode:
-            return "Continue"
+            return "验证并添加连接"
         case .browserCallback:
-            return didOpenBrowser ? "完成并添加连接" : option.loginButtonTitle
+            return option.loginButtonTitle
         case .deviceCode:
-            return didOpenBrowser ? "等待授权…" : option.loginButtonTitle
+            return githubDeviceCode == nil ? option.loginButtonTitle : "等待授权…"
         case .direct:
             return option.loginButtonTitle
         }
     }
 
     private var primaryButtonIcon: String {
+        if isAuthenticating { return "hourglass" }
         switch option.authenticationKind {
         case .authorizationCode:
-            return "arrow.right"
+            return "checkmark.shield"
         case .browserCallback:
-            return didOpenBrowser ? "checkmark" : "arrow.up.right.square"
+            return "arrow.up.right.square"
         case .deviceCode:
-            return didOpenBrowser ? "circle.grid.3x3" : "arrow.up.right.square"
+            return githubDeviceCode == nil ? "arrow.up.right.square" : "circle.grid.3x3"
         case .direct:
             return "arrow.right"
         }
@@ -579,31 +604,146 @@ private struct AIConnectionSetupView: View {
     private func primaryAction() {
         switch option.authenticationKind {
         case .authorizationCode:
-            statusMessage = "已收到授权码。真实 token 交换接入后，这一步会完成认证并保存凭据。"
-            complete()
+            exchangeClaudeCodeAndAddConnection()
         case .browserCallback:
-            if didOpenBrowser {
-                complete()
-            } else {
-                openAuthenticationURL()
-            }
+            authenticateChatGPTAndAddConnection()
         case .deviceCode:
-            if didOpenBrowser {
-                statusMessage = "正在等待网页授权完成。真实设备码轮询接入后，这里会自动完成。"
-                complete()
-            } else {
-                openAuthenticationURL()
-            }
+            authenticateGitHubCopilotAndAddConnection()
         case .direct:
             complete()
         }
     }
 
-    private func openAuthenticationURL() {
-        guard let url = URL(string: option.authURLString), !option.authURLString.isEmpty else { return }
-        NSWorkspace.shared.open(url)
+    private func startClaudeOAuth() {
+        do {
+            let flow = try AppLLMOAuthService.shared.prepareClaudeOAuth()
+            claudeFlow = flow
+            NSWorkspace.shared.open(flow.authURL)
+            didOpenBrowser = true
+            statusMessage = "浏览器已打开。完成 Claude 登录后，复制授权码并粘贴到这里。"
+            errorMessage = nil
+        } catch {
+            errorMessage = displayError(error)
+        }
+    }
+
+    private func exchangeClaudeCodeAndAddConnection() {
+        isAuthenticating = true
+        statusMessage = "正在验证 Claude 授权码…"
+        errorMessage = nil
+        Task {
+            do {
+                let tokens = try await AppLLMOAuthService.shared.exchangeClaudeCode(authorizationCode)
+                try await MainActor.run {
+                    _ = try viewModel.addAuthenticatedLLMConnection(
+                        id: stableConnectionID,
+                        providerMode: option.providerMode,
+                        name: option.connectionName,
+                        baseURLString: option.baseURLString,
+                        model: option.model,
+                        selectedModel: option.selectedModel,
+                        oauthTokens: tokens
+                    )
+                    isAuthenticating = false
+                    complete()
+                }
+            } catch {
+                await MainActor.run {
+                    isAuthenticating = false
+                    statusMessage = nil
+                    errorMessage = displayError(error)
+                }
+            }
+        }
+    }
+
+    private func authenticateChatGPTAndAddConnection() {
+        isAuthenticating = true
         didOpenBrowser = true
-        statusMessage = nil
+        statusMessage = "正在打开 ChatGPT 登录页，并等待浏览器回调…"
+        errorMessage = nil
+        Task {
+            do {
+                let result = try await AppLLMOAuthService.shared.authenticateChatGPT { url in
+                    NSWorkspace.shared.open(url)
+                }
+                try await MainActor.run {
+                    _ = try viewModel.addAuthenticatedLLMConnection(
+                        id: stableConnectionID,
+                        providerMode: option.providerMode,
+                        name: option.connectionName,
+                        baseURLString: option.baseURLString,
+                        model: option.model,
+                        selectedModel: option.selectedModel,
+                        apiKey: result.apiKey,
+                        oauthTokens: result.tokens
+                    )
+                    isAuthenticating = false
+                    complete()
+                }
+            } catch {
+                await MainActor.run {
+                    isAuthenticating = false
+                    statusMessage = nil
+                    errorMessage = displayError(error)
+                }
+            }
+        }
+    }
+
+    private func authenticateGitHubCopilotAndAddConnection() {
+        isAuthenticating = true
+        statusMessage = githubDeviceCode == nil ? "正在向 GitHub 申请设备码…" : "正在等待 GitHub 授权完成…"
+        errorMessage = nil
+        Task {
+            do {
+                let code = try await AppLLMOAuthService.shared.startGitHubCopilotDeviceFlow()
+                await MainActor.run {
+                    githubDeviceCode = code
+                    didOpenBrowser = true
+                    if let url = URL(string: code.verificationURI) {
+                        NSWorkspace.shared.open(url)
+                    }
+                    statusMessage = "在 GitHub 页面输入授权码后，康纳同学会自动继续。"
+                }
+                let tokens = try await AppLLMOAuthService.shared.pollGitHubCopilotTokens(deviceCode: code)
+                try await MainActor.run {
+                    let baseURL = AppLLMOAuthService.copilotBaseURL(from: tokens.accessToken) ?? option.baseURLString
+                    _ = try viewModel.addAuthenticatedLLMConnection(
+                        id: stableConnectionID,
+                        providerMode: option.providerMode,
+                        name: option.connectionName,
+                        baseURLString: baseURL,
+                        model: option.model,
+                        selectedModel: option.selectedModel,
+                        apiKey: tokens.accessToken,
+                        oauthTokens: tokens
+                    )
+                    isAuthenticating = false
+                    complete()
+                }
+            } catch {
+                await MainActor.run {
+                    isAuthenticating = false
+                    statusMessage = nil
+                    errorMessage = displayError(error)
+                }
+            }
+        }
+    }
+
+    private var stableConnectionID: String {
+        switch option.id {
+        case "claude-pro-max": "claude-pro-max"
+        case "codex-chatgpt-plus": "codex-chatgpt-plus"
+        case "github-copilot": "github-copilot"
+        default: option.id
+        }
+    }
+
+    private func displayError(_ error: Error) -> String {
+        if let localized = (error as? LocalizedError)?.errorDescription, !localized.isEmpty { return localized }
+        return String(describing: error)
     }
 
     private func displayURL(_ rawValue: String) -> String {

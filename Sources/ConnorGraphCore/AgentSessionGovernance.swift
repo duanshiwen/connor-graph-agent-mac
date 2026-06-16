@@ -11,13 +11,13 @@ public enum AgentSessionStatus: String, Codable, Sendable, Equatable, CaseIterab
 
     public var displayName: String {
         switch self {
-        case .todo: "Todo"
-        case .inProgress: "In Progress"
-        case .waiting: "Waiting"
-        case .needsReview: "Needs Review"
-        case .done: "Done"
-        case .blocked: "Blocked"
-        case .archived: "Archived"
+        case .todo: "待办"
+        case .inProgress: "进行中"
+        case .waiting: "等待中"
+        case .needsReview: "待审阅"
+        case .done: "已完成"
+        case .blocked: "受阻"
+        case .archived: "已归档"
         }
     }
 }
@@ -47,13 +47,13 @@ public struct AgentSessionStatusDefinition: Codable, Sendable, Equatable, Identi
     }
 
     public static let defaults: [AgentSessionStatusDefinition] = [
-        .init(id: AgentSessionStatus.todo.rawValue, name: "Todo", systemImage: "circle", sortOrder: 10),
-        .init(id: AgentSessionStatus.inProgress.rawValue, name: "In Progress", systemImage: "play.circle", sortOrder: 20),
-        .init(id: AgentSessionStatus.waiting.rawValue, name: "Waiting", systemImage: "clock", sortOrder: 30),
-        .init(id: AgentSessionStatus.needsReview.rawValue, name: "Needs Review", systemImage: "exclamationmark.bubble", sortOrder: 40),
-        .init(id: AgentSessionStatus.blocked.rawValue, name: "Blocked", systemImage: "nosign", sortOrder: 50),
-        .init(id: AgentSessionStatus.done.rawValue, name: "Done", systemImage: "checkmark.circle", sortOrder: 60, isTerminal: true),
-        .init(id: AgentSessionStatus.archived.rawValue, name: "Archived", systemImage: "archivebox", sortOrder: 70, isTerminal: true)
+        .init(id: AgentSessionStatus.todo.rawValue, name: "待办", systemImage: "circle", sortOrder: 10),
+        .init(id: AgentSessionStatus.inProgress.rawValue, name: "进行中", systemImage: "play.circle", sortOrder: 20),
+        .init(id: AgentSessionStatus.waiting.rawValue, name: "等待中", systemImage: "clock", sortOrder: 30),
+        .init(id: AgentSessionStatus.needsReview.rawValue, name: "待审阅", systemImage: "exclamationmark.bubble", sortOrder: 40),
+        .init(id: AgentSessionStatus.blocked.rawValue, name: "受阻", systemImage: "nosign", sortOrder: 50),
+        .init(id: AgentSessionStatus.done.rawValue, name: "已完成", systemImage: "checkmark.circle", sortOrder: 60, isTerminal: true),
+        .init(id: AgentSessionStatus.archived.rawValue, name: "已归档", systemImage: "archivebox", sortOrder: 70, isTerminal: true)
     ]
 }
 
@@ -73,12 +73,12 @@ public struct AgentSessionLabelDefinition: Codable, Sendable, Equatable, Identif
     }
 
     public static let defaults: [AgentSessionLabelDefinition] = [
-        .init(id: "important", name: "Important", colorName: "orange"),
-        .init(id: "research", name: "Research", colorName: "purple"),
-        .init(id: "graph-review", name: "Graph Review", colorName: "teal"),
-        .init(id: "priority", name: "Priority", valueType: .number, colorName: "red"),
-        .init(id: "due", name: "Due", valueType: .date, colorName: "yellow"),
-        .init(id: "project", name: "Project", valueType: .graphEntityRef, colorName: "green", graphBindingKind: "project")
+        .init(id: "important", name: "重要", colorName: "orange"),
+        .init(id: "research", name: "研究", colorName: "purple"),
+        .init(id: "graph-review", name: "图谱审阅", colorName: "teal"),
+        .init(id: "priority", name: "优先级", valueType: .number, colorName: "red"),
+        .init(id: "due", name: "截止日期", valueType: .date, colorName: "yellow"),
+        .init(id: "project", name: "项目", valueType: .graphEntityRef, colorName: "green", graphBindingKind: "project")
     ]
 }
 
