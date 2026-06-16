@@ -187,9 +187,7 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, Ag
     }
 
     private var systemPrompt: String {
-        """
-        You are Connor Graph Agent, a graph-backed assistant. Answer using the provided graph context when relevant. If context is insufficient, say what is missing. Keep citations implicit in the response; the runtime tracks source IDs separately.
-        """
+        AgentInstructionSection.defaultConnorInstruction
     }
 
     private func makeToolCallingRequest(_ request: AgentModelRequest) throws -> AgentHTTPRequest {

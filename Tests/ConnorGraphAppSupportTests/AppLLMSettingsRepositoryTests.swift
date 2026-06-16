@@ -184,3 +184,38 @@ private struct FakeAgentHTTPClient: AgentHTTPClient, Sendable {
     #expect(loaded.sidecarWorkingDirectoryPath == "/tmp/project")
     #expect(loaded.sidecarPermissionMode == .readOnly)
 }
+
+@Test func settingsRepositoryPersistsMultipleConnectionsWithIndependentCredentials() throws {
+    let credentialStore = FakeCredentialStore()
+    let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: credentialStore)
+    let primary = AppLLMConnectionConfig(
+        id: "mimo",
+        name: "小米 MiMo",
+        providerMode: .openAICompatible,
+        baseURLString: "https://token-plan-cn.xiaomimimo.com/v1",
+        model: "mimo-v2.5-pro,mimo-v2.5",
+        selectedModel: "mimo-v2.5-pro"
+    )
+    let secondary = AppLLMConnectionConfig(
+        id: "deepseek",
+        name: "DeepSeek",
+        providerMode: .openAICompatible,
+        baseURLString: "https://api.deepseek.com/v1",
+        model: "deepseek-chat",
+        selectedModel: "deepseek-chat"
+    )
+
+    try repository.save(settings: AppLLMSettings(connections: [primary, secondary], defaultConnectionID: "mimo"), apiKey: "mimo-key")
+    try repository.save(settings: AppLLMSettings(connections: [primary, secondary], defaultConnectionID: "deepseek"), apiKey: "deepseek-key")
+
+    let loaded = try repository.loadSettings()
+    let mimoConfig = try #require(try repository.openAICompatibleConfig(connectionID: "mimo"))
+    let deepseekConfig = try #require(try repository.openAICompatibleConfig(connectionID: "deepseek"))
+
+    #expect(loaded.connections.map(\.id) == ["mimo", "deepseek"])
+    #expect(loaded.defaultConnectionID == "deepseek")
+    #expect(mimoConfig.apiKey == "mimo-key")
+    #expect(mimoConfig.model == "mimo-v2.5-pro")
+    #expect(deepseekConfig.apiKey == "deepseek-key")
+    #expect(deepseekConfig.baseURL.absoluteString == "https://api.deepseek.com/v1")
+}

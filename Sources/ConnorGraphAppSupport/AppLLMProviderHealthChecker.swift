@@ -36,19 +36,20 @@ public struct AppLLMProviderHealthChecker: Sendable {
     public func testConnection() async -> AppLLMProviderHealthCheckResult {
         do {
             let settings = try settingsRepository.loadSettings()
-            switch settings.providerMode {
+            let connection = settings.defaultConnection
+            switch connection.providerMode {
             case .governedClaudeSidecar:
-                let path = settings.sidecarExecutablePath.trimmingCharacters(in: .whitespacesAndNewlines)
+                let path = connection.sidecarExecutablePath.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !path.isEmpty else {
-                    return AppLLMProviderHealthCheckResult(status: .notConfigured, message: "Governed Claude Sidecar 缺少 executable path。")
+                    return AppLLMProviderHealthCheckResult(status: .notConfigured, message: "Claude 连接缺少 sidecar executable path。")
                 }
-                guard settings.sidecarPermissionMode != .allowAll else {
-                    return AppLLMProviderHealthCheckResult(status: .failed, message: "Governed Claude Sidecar 不允许 allowAll 权限模式。")
+                guard connection.sidecarPermissionMode != .allowAll else {
+                    return AppLLMProviderHealthCheckResult(status: .failed, message: "Claude 连接不允许 allowAll 权限模式。")
                 }
-                return AppLLMProviderHealthCheckResult(status: .success, message: "Governed Claude Sidecar 配置可用；实际 SDK 登录和依赖由 sidecar 运行时验证。")
+                return AppLLMProviderHealthCheckResult(status: .success, message: "Claude 连接配置可用；实际 SDK 登录和依赖由 sidecar 运行时验证。")
             case .openAICompatible:
-                guard let config = try settingsRepository.openAICompatibleConfig() else {
-                    return AppLLMProviderHealthCheckResult(status: .notConfigured, message: "OpenAI 兼容模型提供方缺少 API Key。")
+                guard let config = try settingsRepository.openAICompatibleConfig(connectionID: connection.id) else {
+                    return AppLLMProviderHealthCheckResult(status: .notConfigured, message: "OpenAI Compatible 连接缺少 API Key。")
                 }
                 let result = try await openAICompatibleHealthCheck(config)
                 return AppLLMProviderHealthCheckResult(
@@ -64,7 +65,7 @@ public struct AppLLMProviderHealthChecker: Sendable {
     private static func safeMessage(for error: Error) -> String {
         switch error {
         case OpenAICompatibleProviderError.missingAPIKey:
-            return "OpenAI 兼容模型提供方缺少 API Key。"
+            return "OpenAI Compatible 连接缺少 API Key。"
         case let OpenAICompatibleProviderError.invalidBaseURL(value):
             return "Base URL 无效：\(value)"
         case OpenAICompatibleProviderError.invalidResponse:

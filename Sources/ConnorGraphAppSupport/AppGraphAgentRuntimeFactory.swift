@@ -82,42 +82,39 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         sessionLLMOverride: SessionLLMOverride? = nil
     ) throws -> NativeSessionManager? {
         let settings = try settingsRepository.loadSettings()
-        let effectiveProviderMode: AppLLMProviderMode
-        if let override = sessionLLMOverride, let overrideMode = AppLLMProviderMode(rawValue: override.providerMode) {
-            effectiveProviderMode = overrideMode
-        } else {
-            effectiveProviderMode = settings.providerMode
-        }
+        let connection = settings.connection(id: sessionLLMOverride?.connectionID) ?? settings.defaultConnection
+        let effectiveProviderMode = sessionLLMOverride.flatMap { AppLLMProviderMode(rawValue: $0.providerMode) } ?? connection.providerMode
         guard effectiveProviderMode == .governedClaudeSidecar else { return nil }
-        let executablePath = settings.sidecarExecutablePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        let executablePath = connection.sidecarExecutablePath.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !executablePath.isEmpty else { throw AppGraphAgentRuntimeFactoryError.missingSidecarExecutablePath }
         return try makeGovernedClaudeSDKSidecarNativeSessionManager(
             session: session,
             sidecarExecutableURL: URL(fileURLWithPath: executablePath),
-            sidecarArguments: Self.splitSidecarArguments(settings.sidecarArguments),
+            sidecarArguments: Self.splitSidecarArguments(connection.sidecarArguments),
             workingDirectory: resolvedProjectWorkingDirectory(llmSettings: settings, sessionWorkspace: sessionWorkspace).url,
-            permissionMode: settings.sidecarPermissionMode
+            permissionMode: connection.sidecarPermissionMode
         )
     }
 
     public func makeConfiguredGovernedClaudeSDKSidecarRuntime() throws -> GovernedClaudeSDKSidecarRuntime<ClaudeSDKSidecarPersistentProcessTransport>? {
         let settings = try settingsRepository.loadSettings()
-        guard settings.providerMode == .governedClaudeSidecar else { return nil }
-        let executablePath = settings.sidecarExecutablePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        let connection = settings.defaultConnection
+        guard connection.providerMode == .governedClaudeSidecar else { return nil }
+        let executablePath = connection.sidecarExecutablePath.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !executablePath.isEmpty else { throw AppGraphAgentRuntimeFactoryError.missingSidecarExecutablePath }
-        guard settings.sidecarPermissionMode != .allowAll else {
-            throw AppGraphAgentRuntimeFactoryError.unsafeSidecarPermissionMode(settings.sidecarPermissionMode)
+        guard connection.sidecarPermissionMode != .allowAll else {
+            throw AppGraphAgentRuntimeFactoryError.unsafeSidecarPermissionMode(connection.sidecarPermissionMode)
         }
         let workingDirectory = resolvedProjectWorkingDirectory(llmSettings: settings).url
         let transport = ClaudeSDKSidecarPersistentProcessTransport(
             executableURL: URL(fileURLWithPath: executablePath),
-            arguments: Self.splitSidecarArguments(settings.sidecarArguments),
+            arguments: Self.splitSidecarArguments(connection.sidecarArguments),
             currentDirectoryURL: workingDirectory
         )
         return try GovernedClaudeSDKSidecarRuntime(
             transport: transport,
             workingDirectory: workingDirectory,
-            permissionMode: settings.sidecarPermissionMode,
+            permissionMode: connection.sidecarPermissionMode,
             runtimeStore: makeClaudeSDKSidecarRuntimeStore()
         )
     }
@@ -216,7 +213,9 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         )
         let localWorkspacePolicy = LocalWorkspacePolicy(
             workingDirectory: resolvedWorkspace.primary.url,
-            additionalAllowedDirectories: resolvedWorkspace.additionalAllowedDirectories
+            additionalAllowedDirectories: hiddenConnorDataAllowedDirectories(
+                appendingTo: resolvedWorkspace.additionalAllowedDirectories
+            )
         )
         registry.register(LocalReadFileTool(policy: localWorkspacePolicy))
         registry.register(LocalListDirectoryTool(policy: localWorkspacePolicy))
@@ -254,17 +253,21 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     ) -> AnyAgentModelProvider {
         do {
             let settings = try settingsRepository.loadSettings()
+            let connection = settings.connection(id: sessionLLMOverride?.connectionID) ?? settings.defaultConnection
             let effectiveProviderMode: AppLLMProviderMode
             let effectiveModel: String
             let effectiveBaseURL: String?
+            let effectiveConnectionID: String
             if let override = sessionLLMOverride {
-                effectiveProviderMode = AppLLMProviderMode(rawValue: override.providerMode) ?? settings.providerMode
+                effectiveProviderMode = AppLLMProviderMode(rawValue: override.providerMode) ?? connection.providerMode
                 effectiveModel = override.model
                 effectiveBaseURL = override.baseURLString
+                effectiveConnectionID = override.connectionID ?? connection.id
             } else {
-                effectiveProviderMode = settings.providerMode
-                effectiveModel = settings.effectiveModel
+                effectiveProviderMode = connection.providerMode
+                effectiveModel = connection.effectiveModel
                 effectiveBaseURL = nil
+                effectiveConnectionID = connection.id
             }
             switch effectiveProviderMode {
             case .governedClaudeSidecar:
@@ -272,7 +275,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                     throw AppGraphAgentRuntimeFactoryError.sidecarRequiresSessionManager
                 }
             case .openAICompatible:
-                guard let config = try openAICompatibleConfigWithOverride(model: effectiveModel, baseURLOverride: effectiveBaseURL) else {
+                guard let config = try openAICompatibleConfigWithOverride(connectionID: effectiveConnectionID, model: effectiveModel, baseURLOverride: effectiveBaseURL) else {
                     return AnyAgentModelProvider(modelID: "missing-openai-compatible-config") { _ in
                         throw OpenAICompatibleProviderError.missingAPIKey
                     }
@@ -285,33 +288,28 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     }
 
     private func openAICompatibleConfigWithOverride(
+        connectionID: String,
         model: String,
         baseURLOverride: String?
     ) throws -> OpenAICompatibleConfig? {
-        let settings = try settingsRepository.loadSettings()
-        guard let apiKey = try settingsRepository.credentialStore.readSecret(
-            service: AppLLMSettingsRepository.keychainService,
-            account: AppLLMSettingsRepository.apiKeyAccount
-        ), !apiKey.isEmpty else {
-            return nil
-        }
-        let urlString = baseURLOverride ?? settings.baseURLString
-        guard let baseURL = URL(string: urlString) else {
-            throw OpenAICompatibleProviderError.invalidBaseURL(urlString)
-        }
-        return OpenAICompatibleConfig(baseURL: baseURL, apiKey: apiKey, model: model)
+        try settingsRepository.openAICompatibleConfig(
+            connectionID: connectionID,
+            modelOverride: model,
+            baseURLOverride: baseURLOverride
+        )
     }
 
     public func makeLLMProvider() -> AnyLLMProvider {
         do {
             let settings = try settingsRepository.loadSettings()
-            switch settings.providerMode {
+            let connection = settings.defaultConnection
+            switch connection.providerMode {
             case .governedClaudeSidecar:
                 return AnyLLMProvider { _, _ in
                     throw AppGraphAgentRuntimeFactoryError.sidecarRequiresSessionManager
                 }
             case .openAICompatible:
-                guard let config = try settingsRepository.openAICompatibleConfig() else {
+                guard let config = try settingsRepository.openAICompatibleConfig(connectionID: connection.id) else {
                     return AnyLLMProvider { _, _ in
                         throw OpenAICompatibleProviderError.missingAPIKey
                     }
@@ -338,6 +336,15 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             runtimeSettings: loadRuntimeSettings(),
             llmSettings: llmSettings
         ).primary
+    }
+
+    private func hiddenConnorDataAllowedDirectories(appendingTo visibleDirectories: [URL]) -> [URL] {
+        guard let storagePaths else { return visibleDirectories }
+        let hiddenDirectory = storagePaths.applicationSupportDirectory
+        let hiddenPath = AppProjectWorkingDirectoryResolver.normalizedDirectoryPath(hiddenDirectory)
+        let visiblePaths = Set(visibleDirectories.map { AppProjectWorkingDirectoryResolver.normalizedDirectoryPath($0) })
+        guard !visiblePaths.contains(hiddenPath) else { return visibleDirectories }
+        return visibleDirectories + [hiddenDirectory]
     }
 
     private static func splitSidecarArguments(_ arguments: String) -> [String] {

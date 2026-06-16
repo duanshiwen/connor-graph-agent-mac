@@ -261,34 +261,6 @@ public enum BrowserBuiltInPage: Sendable {
     }
 }
 
-public struct BrowserHistoryEntry: Codable, Equatable, Identifiable, Sendable {
-    public var id: UUID
-    public var url: String
-    public var title: String
-    public var visitedAt: Date
-    public var sessionID: String
-    public var sessionTitle: String
-    public var contentPath: String? // relative path to extracted page text file
-
-    public init(
-        id: UUID = UUID(),
-        url: String,
-        title: String,
-        visitedAt: Date = Date(),
-        sessionID: String,
-        sessionTitle: String,
-        contentPath: String? = nil
-    ) {
-        self.id = id
-        self.url = url
-        self.title = title
-        self.visitedAt = visitedAt
-        self.sessionID = sessionID
-        self.sessionTitle = sessionTitle
-        self.contentPath = contentPath
-    }
-}
-
 public struct AppBrowserStateSnapshot: Codable, Equatable, Sendable {
     public var schemaVersion: Int
     public var updatedAt: Date
@@ -296,7 +268,6 @@ public struct AppBrowserStateSnapshot: Codable, Equatable, Sendable {
     public var selectedTabID: UUID?
     public var selectionPopover: AppBrowserSelectionPopoverSnapshot?
     public var threads: [UUID: AppBrowserSelectionThreadSnapshot]
-    public var historyEntries: [BrowserHistoryEntry]
 
     public init(
         schemaVersion: Int = 1,
@@ -304,8 +275,7 @@ public struct AppBrowserStateSnapshot: Codable, Equatable, Sendable {
         tabs: [AppBrowserTabSnapshot] = [],
         selectedTabID: UUID? = nil,
         selectionPopover: AppBrowserSelectionPopoverSnapshot? = nil,
-        threads: [UUID: AppBrowserSelectionThreadSnapshot] = [:],
-        historyEntries: [BrowserHistoryEntry] = []
+        threads: [UUID: AppBrowserSelectionThreadSnapshot] = [:]
     ) {
         self.schemaVersion = schemaVersion
         self.updatedAt = updatedAt
@@ -313,7 +283,6 @@ public struct AppBrowserStateSnapshot: Codable, Equatable, Sendable {
         self.selectedTabID = selectedTabID
         self.selectionPopover = selectionPopover
         self.threads = threads
-        self.historyEntries = historyEntries
     }
 }
 
@@ -440,5 +409,79 @@ public struct AppBrowserSelectionThreadMessageSnapshot: Codable, Equatable, Iden
         self.text = try container.decode(String.self, forKey: .text)
         self.createdAt = try container.decode(Date.self, forKey: .createdAt)
         self.isPending = try container.decodeIfPresent(Bool.self, forKey: .isPending) ?? false
+    }
+}
+
+// MARK: - Browser History
+
+public enum BrowserHistoryContentFetchStatus: String, Codable, Sendable {
+    case pending
+    case fetched
+    case failed
+}
+
+public struct BrowserHistoryRecord: Codable, Equatable, Identifiable, Sendable {
+    public var id: UUID
+    public var url: String
+    public var title: String
+    public var sessionID: String
+    public var sessionTitle: String
+    public var visitedAt: Date
+    public var contentMarkdown: String?
+    public var contentFetchedAt: Date?
+    public var contentFetchStatus: BrowserHistoryContentFetchStatus?
+    public var contentFetchError: String?
+
+    public init(
+        id: UUID = UUID(),
+        url: String,
+        title: String,
+        sessionID: String,
+        sessionTitle: String,
+        visitedAt: Date = Date(),
+        contentMarkdown: String? = nil,
+        contentFetchedAt: Date? = nil,
+        contentFetchStatus: BrowserHistoryContentFetchStatus? = nil,
+        contentFetchError: String? = nil
+    ) {
+        self.id = id
+        self.url = url
+        self.title = title
+        self.sessionID = sessionID
+        self.sessionTitle = sessionTitle
+        self.visitedAt = visitedAt
+        self.contentMarkdown = contentMarkdown
+        self.contentFetchedAt = contentFetchedAt
+        self.contentFetchStatus = contentFetchStatus
+        self.contentFetchError = contentFetchError
+    }
+}
+
+// MARK: - Browser Bookmarks
+
+public struct BrowserBookmarkRecord: Codable, Equatable, Identifiable, Sendable {
+    public static let defaultGroupName = "默认"
+
+    public var id: UUID
+    public var url: String
+    public var title: String
+    public var groupName: String
+    public var createdAt: Date
+    public var updatedAt: Date
+
+    public init(
+        id: UUID = UUID(),
+        url: String,
+        title: String,
+        groupName: String = BrowserBookmarkRecord.defaultGroupName,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date()
+    ) {
+        self.id = id
+        self.url = url
+        self.title = title
+        self.groupName = groupName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? Self.defaultGroupName : groupName
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
     }
 }

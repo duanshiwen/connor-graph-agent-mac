@@ -439,16 +439,16 @@ private struct AgentChatSessionListView: View {
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
-                    ForEach(viewModel.chatSessionListItems) { item in
-                        let row = AgentChatSessionPresentation(listItem: item)
+                    ForEach(viewModel.chatSessions) { session in
+                        let row = AgentChatSessionPresentation(session: session)
                         AgentChatSessionRow(
                             row: row,
-                            isSelected: item.id == viewModel.selectedChatSessionID
+                            isSelected: session.id == viewModel.selectedChatSessionID
                         ) {
                             var transaction = Transaction()
                             transaction.disablesAnimations = true
                             withTransaction(transaction) {
-                                viewModel.selectChatSession(item.id)
+                                viewModel.selectChatSession(session.id)
                             }
                         }
                     }
@@ -511,6 +511,7 @@ private struct AgentChatConversationView: View {
     @ObservedObject var viewModel: AppViewModel
     @Binding var isSessionInfoPresented: Bool
     @State private var activityDetailEvent: AgentEventPresentation?
+    @State private var selectedToolInvocation: AgentToolInvocationPresentation?
     @State private var lastObservedSessionID: String?
     @State private var lastObservedTranscriptCount: Int = 0
     @State private var pendingSessionTranscriptReloadID: String?
@@ -717,6 +718,7 @@ private struct AgentChatConversationView: View {
                                 if let message = item.message {
                                     AgentChatMessageRow(
                                         row: message,
+                                        persistentCacheContext: viewModel.markdownPersistentCacheContext(messageID: message.message.id),
                                         onAssistantMessageCollapsed: {
                                             scrollAfterCollapsedMessageLayout(proxy: proxy)
                                         },
@@ -731,6 +733,9 @@ private struct AgentChatConversationView: View {
                                         events: activityEvents(for: process, latestProcessID: latestProcessID),
                                         onOpenDetail: { event in
                                             activityDetailEvent = event
+                                        },
+                                        onOpenToolInvocation: { invocation in
+                                            selectedToolInvocation = invocation
                                         }
                                     )
                                     .id(item.id)
@@ -806,11 +811,19 @@ private struct AgentChatConversationView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
         .overlay {
-            if let event = activityDetailEvent {
+            if let event = activityDetailEvent, selectedToolInvocation == nil {
                 AgentActivityDetailOverlay(event: event) {
                     activityDetailEvent = nil
                 }
-                .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                .transition(AnyTransition.opacity.combined(with: AnyTransition.scale(scale: 0.985)))
+            }
+        }
+        .overlay {
+            if let invocation = selectedToolInvocation {
+                AgentToolInvocationDetailOverlay(invocation: invocation) {
+                    selectedToolInvocation = nil
+                }
+                .transition(AnyTransition.opacity.combined(with: AnyTransition.scale(scale: 0.985)))
             }
         }
         .padding(.horizontal, AgentChatLayout.spaceL)

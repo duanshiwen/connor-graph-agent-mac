@@ -203,6 +203,69 @@ import ConnorGraphStore
     #expect(result.contentJSON?.contains("shared-docs") == true)
 }
 
+@Test func agentLoopRuntimeFactoryAllowsHiddenConnorDataDirectoryWithoutShowingItAsWorkspaceRoot() async throws {
+    let tempBase = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorFactoryHiddenDataWorkspace-", isDirectory: true)
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: tempBase, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tempBase) }
+
+    let appDirectory = tempBase.appendingPathComponent("ConnorData", isDirectory: true)
+    let projectDirectory = tempBase.appendingPathComponent("VisibleProject", isDirectory: true)
+    let storagePaths = AppStoragePaths(applicationSupportDirectory: appDirectory)
+    try storagePaths.ensureDirectoryHierarchy()
+    try FileManager.default.createDirectory(at: projectDirectory, withIntermediateDirectories: true)
+
+    let skillFile = storagePaths.skillsDirectory.appendingPathComponent("assistant-skill.md")
+    try "Hidden Connor skill content".write(to: skillFile, atomically: true, encoding: .utf8)
+
+    var runtimeSettings = AgentRuntimeSettings.default
+    runtimeSettings.workspace.roots = [
+        AgentRuntimeWorkspaceRoot(id: "project", displayName: "Visible Project", path: projectDirectory.path, role: "project", isPrimary: true)
+    ]
+    runtimeSettings.workspace.syncLegacyFieldsFromRoots()
+    try AppRuntimeSettingsRepository(configDirectory: storagePaths.configDirectory).save(runtimeSettings)
+
+    let storeURL = tempBase.appendingPathComponent("store.sqlite")
+    let store = try SQLiteGraphKernelStore(path: storeURL.path)
+    try store.migrate()
+    let settings = AppLLMSettingsRepository(
+        settingsStore: LocalToolsSettingsStore(),
+        credentialStore: LocalToolsCredentialStore()
+    )
+    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: settings, storagePaths: storagePaths)
+    let controller = factory.makeAgentLoopController(permissionMode: .readOnly)
+
+    let readResult = try await controller.toolRegistry.execute(
+        AgentToolCall(name: "Read", argumentsJSON: #"{"file_path":"\#(skillFile.path)"}"#),
+        context: AgentToolExecutionContext(
+            runID: "run-hidden-data-read",
+            sessionID: "session-hidden-data-read",
+            groupID: "default",
+            userPrompt: "read hidden Connor data",
+            toolCallID: "read-hidden-data",
+            policyEngine: AgentPolicyEngine(permissionMode: .allowAll)
+        )
+    )
+
+    let listResult = try await controller.toolRegistry.execute(
+        AgentToolCall(name: "LS", argumentsJSON: #"{"path":"."}"#),
+        context: AgentToolExecutionContext(
+            runID: "run-hidden-data-ls",
+            sessionID: "session-hidden-data-ls",
+            groupID: "default",
+            userPrompt: "list visible workspace",
+            toolCallID: "ls-visible-workspace",
+            policyEngine: AgentPolicyEngine(permissionMode: .allowAll)
+        )
+    )
+
+    #expect(readResult.contentText.contains("Hidden Connor skill content"))
+    #expect(readResult.contentJSON?.contains("ConnorData") == true)
+    #expect(listResult.contentJSON?.contains("VisibleProject") == true)
+    #expect(listResult.contentJSON?.contains("ConnorData") != true)
+}
+
 private final class LocalToolsSettingsStore: LLMSettingsStore, @unchecked Sendable {
     private var values: [String: String] = [:]
 

@@ -85,19 +85,39 @@ struct AgentMarkdownPreviewText: View {
     var monospacedFallback: Bool = false
     var lineLimit: Int? = nil
     var maxRenderedBlocks: Int? = nil
+    var persistentCacheContext: AgentMarkdownPersistentCacheContext? = nil
 
     @MainActor
     private final class RenderCache {
         static let shared = RenderCache()
         private let documentCache = AgentMarkdownCompiledDocumentCache(limit: 600)
 
-        func document(_ markdown: String) -> AgentMarkdownCompiledDocument {
-            documentCache.document(for: markdown)
+        func document(_ markdown: String, context: AgentMarkdownPersistentCacheContext?) -> AgentMarkdownCompiledDocument {
+            documentCache.document(
+                for: markdown,
+                loadBlocks: { source in
+                    guard let context else { return nil }
+                    return try? context.store.loadBlocks(
+                        sessionID: context.sessionID,
+                        messageID: context.messageID,
+                        content: source
+                    )
+                },
+                persistBlocks: { source, blocks in
+                    guard let context else { return }
+                    try? context.store.saveBlocks(
+                        sessionID: context.sessionID,
+                        messageID: context.messageID,
+                        content: source,
+                        blocks: blocks
+                    )
+                }
+            )
         }
     }
 
     private var compiledDocument: AgentMarkdownCompiledDocument {
-        RenderCache.shared.document(markdown)
+        RenderCache.shared.document(markdown, context: persistentCacheContext)
     }
 
     private var renderWindow: AgentMarkdownCompiledRenderWindow {
@@ -331,6 +351,7 @@ struct AgentChatTurnTimestampRow: View {
 
 struct AgentChatMessageRow: View {
     var row: AgentChatMessagePresentation
+    var persistentCacheContext: AgentMarkdownPersistentCacheContext? = nil
     var onAssistantMessageCollapsed: (() -> Void)? = nil
     var onPreviewAttachment: (AgentMessageAttachmentRef) -> Void = { _ in }
     @State private var isAssistantMessageExpanded = false
@@ -474,15 +495,24 @@ struct AgentChatMessageRow: View {
     }
 
     private var assistantMarkdownBody: some View {
-        AgentMarkdownPreviewText(markdown: row.message.content, font: AgentChatTypography.body)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.trailing, AgentChatLayout.spaceXS)
+        AgentMarkdownPreviewText(
+            markdown: row.message.content,
+            font: AgentChatTypography.body,
+            persistentCacheContext: persistentCacheContext
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.trailing, AgentChatLayout.spaceXS)
     }
 
     private var assistantCollapsedMarkdownBody: some View {
-        AgentMarkdownPreviewText(markdown: row.message.content, font: AgentChatTypography.body, maxRenderedBlocks: 16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.trailing, AgentChatLayout.spaceXS)
+        AgentMarkdownPreviewText(
+            markdown: row.message.content,
+            font: AgentChatTypography.body,
+            maxRenderedBlocks: 16,
+            persistentCacheContext: persistentCacheContext
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.trailing, AgentChatLayout.spaceXS)
     }
 
     private var messageBackground: Color {
@@ -567,6 +597,7 @@ struct AgentChatTurnProcessRow: View {
     var process: AgentChatTurnProcessPresentation
     var events: [AgentEventPresentation]
     var onOpenDetail: (AgentEventPresentation) -> Void
+    var onOpenToolInvocation: (AgentToolInvocationPresentation) -> Void = { _ in }
     @State private var isExpanded: Bool = false
     @State private var startedAt: Date = Date()
 
@@ -592,7 +623,8 @@ struct AgentChatTurnProcessRow: View {
                         events: visibleEvents,
                         isRunning: process.state == .running,
                         startedAt: startedAt,
-                        onOpenDetail: onOpenDetail
+                        onOpenDetail: onOpenDetail,
+                        onOpenToolInvocation: onOpenToolInvocation
                     )
                     .padding(.leading, AgentChatLayout.iconButtonSize + AgentChatLayout.spaceM)
                     .transition(.opacity.combined(with: .move(edge: .top)))
@@ -656,6 +688,7 @@ private struct AgentTurnActivitySummaryDetailView: View {
     var isRunning: Bool
     var startedAt: Date
     var onOpenDetail: (AgentEventPresentation) -> Void
+    var onOpenToolInvocation: (AgentToolInvocationPresentation) -> Void
     @State private var showsRawEvents = false
 
     var body: some View {
@@ -672,6 +705,17 @@ private struct AgentTurnActivitySummaryDetailView: View {
 
             if let primaryErrorMessage = summary.primaryErrorMessage {
                 detailLine(icon: "exclamationmark.triangle", text: "错误：\(primaryErrorMessage)", color: .red)
+            }
+
+            if !toolInvocations.isEmpty {
+                VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
+                    ForEach(toolInvocations) { invocation in
+                        AgentToolActivityRow(activity: activityPresentation(for: invocation)) {
+                            onOpenToolInvocation(invocation)
+                        }
+                    }
+                }
+                .padding(.top, AgentChatLayout.spaceXS)
             }
 
             if isRunning {
@@ -697,6 +741,28 @@ private struct AgentTurnActivitySummaryDetailView: View {
             .tint(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var toolInvocations: [AgentToolInvocationPresentation] {
+        AgentToolInvocationAssembler().invocations(from: events)
+    }
+
+    private func activityPresentation(for invocation: AgentToolInvocationPresentation) -> AgentToolActivityPresentation {
+        AgentToolActivityPresentation(
+            id: invocation.id,
+            callID: invocation.callID,
+            phase: invocation.phase,
+            rawToolName: invocation.toolName,
+            semanticKind: invocation.semanticKind,
+            title: invocation.title,
+            subtitle: invocation.subtitle,
+            target: invocation.target,
+            detail: invocation.errorText ?? invocation.outputText,
+            icon: invocation.icon,
+            severity: invocation.severity,
+            argumentsJSON: invocation.argumentsJSON,
+            resultJSON: invocation.resultJSON
+        )
     }
 
     private var toolSummaryText: String {
@@ -734,6 +800,88 @@ private struct AgentTurnActivitySummaryDetailView: View {
         .padding(.horizontal, AgentChatLayout.spaceM)
         .padding(.vertical, 2)
         .frame(maxWidth: .infinity, minHeight: AgentChatLayout.activityRowMinHeight, alignment: .leading)
+    }
+}
+
+private struct AgentToolActivityRow: View {
+    var activity: AgentToolActivityPresentation
+    var onOpenDetail: () -> Void
+
+    var body: some View {
+        Button(action: onOpenDetail) {
+            HStack(spacing: AgentChatLayout.spaceS) {
+                Image(systemName: leadingIcon)
+                    .font(.system(size: AgentChatTypography.chevronIconSize, weight: .semibold))
+                    .foregroundStyle(color)
+                    .frame(width: AgentChatTypography.controlIconSize)
+
+                Text(activity.title)
+                    .font(AgentChatTypography.micro.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                if let target = activity.target, !target.isEmpty {
+                    Text(target)
+                        .font(AgentChatTypography.monoMicro)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .padding(.horizontal, 7)
+                        .frame(height: AgentChatLayout.chipHeight)
+                        .background(.quaternary.opacity(0.28), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
+                }
+
+                if let subtitle = activity.subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(AgentChatTypography.micro)
+                        .foregroundStyle(activity.severity == .error ? AnyShapeStyle(Color.red) : AnyShapeStyle(.tertiary))
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 0)
+
+                Text(phaseText)
+                    .font(AgentChatTypography.monoMicro)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: AgentChatTypography.smallIconSize, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, AgentChatLayout.spaceM)
+            .padding(.vertical, 2)
+            .frame(minHeight: AgentChatLayout.activityRowMinHeight)
+            .contentShape(RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var leadingIcon: String {
+        if activity.severity == .error { return "xmark.octagon" }
+        switch activity.phase {
+        case .finished: return "checkmark.circle"
+        case .failed: return "xmark.octagon"
+        default: return activity.icon
+        }
+    }
+
+    private var phaseText: String {
+        switch activity.phase {
+        case .requested: return "queued"
+        case .approved: return "approved"
+        case .running: return "running"
+        case .finished: return "done"
+        case .failed: return "error"
+        }
+    }
+
+    private var color: Color {
+        switch activity.severity {
+        case .info: return .secondary
+        case .success: return .green
+        case .warning: return .orange
+        case .error: return .red
+        }
     }
 }
 

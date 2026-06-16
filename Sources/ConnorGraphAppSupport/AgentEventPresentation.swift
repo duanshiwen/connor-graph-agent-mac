@@ -16,6 +16,7 @@ public struct AgentEventPresentation: Codable, Sendable, Equatable, Identifiable
     public var severity: AgentEventPresentationSeverity
     public var runID: String?
     public var sessionID: String?
+    public var toolActivity: AgentToolActivityPresentation?
 
     public init(
         id: String = UUID().uuidString,
@@ -24,7 +25,8 @@ public struct AgentEventPresentation: Codable, Sendable, Equatable, Identifiable
         detail: String,
         severity: AgentEventPresentationSeverity,
         runID: String?,
-        sessionID: String?
+        sessionID: String?,
+        toolActivity: AgentToolActivityPresentation? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -33,6 +35,7 @@ public struct AgentEventPresentation: Codable, Sendable, Equatable, Identifiable
         self.severity = severity
         self.runID = runID
         self.sessionID = sessionID
+        self.toolActivity = toolActivity
     }
 }
 
@@ -75,25 +78,40 @@ public struct AgentEventPresenter: Sendable {
                 event,
                 title: "Tool requested: \(call.name)",
                 detail: "Call \(call.id) · Arguments: \(compactJSON(call.argumentsJSON))",
-                severity: .info
+                severity: .info,
+                toolActivity: AgentToolActivityClassifier().activity(forRequestedCall: call)
             )
         case .toolApproved(let call):
-            return item(event, title: "Tool approved: \(call.name)", detail: "Call \(call.id) approved for execution.", severity: .success)
+            return item(
+                event,
+                title: "Tool approved: \(call.name)",
+                detail: "Call \(call.id) approved for execution.",
+                severity: .success,
+                toolActivity: AgentToolActivityClassifier().activity(forApprovedCall: call)
+            )
         case .toolStarted(let call):
-            return item(event, title: "Tool running: \(call.name)", detail: "Call \(call.id) is executing.", severity: .info)
+            return item(
+                event,
+                title: "Tool running: \(call.name)",
+                detail: "Call \(call.id) is executing.",
+                severity: .info,
+                toolActivity: AgentToolActivityClassifier().activity(forStartedCall: call)
+            )
         case .toolFinished(let result):
             return item(
                 event,
                 title: "Tool finished: \(result.toolName)",
                 detail: "Call \(result.toolCallID) · \(trimmedDetail(result.contentText))",
-                severity: .success
+                severity: result.error == nil ? .success : .error,
+                toolActivity: AgentToolActivityClassifier().activity(forFinishedResult: result)
             )
         case .toolFailed(let failure):
             return item(
                 event,
                 title: "Tool failed: \(failure.toolName)",
                 detail: "Call \(failure.toolCallID) · \(trimmedDetail(failure.message))",
-                severity: .error
+                severity: .error,
+                toolActivity: AgentToolActivityClassifier().activity(forFailure: failure)
             )
         case .permissionRequested(let request):
             let toolDetail = request.toolName.map { " · Tool: \($0)" } ?? ""
@@ -144,14 +162,21 @@ public struct AgentEventPresenter: Sendable {
         }
     }
 
-    private func item(_ event: AgentEvent, title: String, detail: String, severity: AgentEventPresentationSeverity) -> AgentEventPresentation {
+    private func item(
+        _ event: AgentEvent,
+        title: String,
+        detail: String,
+        severity: AgentEventPresentationSeverity,
+        toolActivity: AgentToolActivityPresentation? = nil
+    ) -> AgentEventPresentation {
         AgentEventPresentation(
             kind: event.kind.rawValue,
             title: title,
             detail: detail,
             severity: severity,
             runID: event.runID,
-            sessionID: event.sessionID
+            sessionID: event.sessionID,
+            toolActivity: toolActivity
         )
     }
 
