@@ -2065,7 +2065,6 @@ private struct SettingsShortcutsSection: View {
     @ObservedObject var viewModel: AppViewModel
 
     private let generalActions: [AgentRuntimeShortcutAction] = [
-        .openCommandPalette,
         .newSession,
         .toggleBrowser,
         .focusTopSearch,
@@ -2126,7 +2125,6 @@ private struct SettingsShortcutsSection: View {
 
     private func title(for action: AgentRuntimeShortcutAction) -> String {
         switch action {
-        case .openCommandPalette: "命令面板"
         case .newSession: "新建聊天"
         case .toggleBrowser: "显示 / 隐藏浏览器"
         case .focusTopSearch: "聚焦顶部搜索"
@@ -2143,7 +2141,6 @@ private struct SettingsShortcutsSection: View {
 
     private func subtitle(for action: AgentRuntimeShortcutAction) -> String {
         switch action {
-        case .openCommandPalette: "打开 Connor 命令面板。"
         case .newSession: "创建新会话并进入聊天。"
         case .toggleBrowser: "在当前会话中切换内置浏览器工作区。"
         case .focusTopSearch: "聚焦应用顶部的会话搜索框。"
@@ -2371,7 +2368,7 @@ private struct ShortcutRow: View {
 extension AgentRuntimeShortcutAction {
     var supportsGlobalCommandMenu: Bool {
         switch self {
-        case .openCommandPalette, .newSession, .toggleBrowser, .focusTopSearch, .openSettings:
+        case .newSession, .toggleBrowser, .focusTopSearch, .openSettings:
             true
         default:
             false

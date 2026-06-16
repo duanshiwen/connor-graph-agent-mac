@@ -85,9 +85,6 @@ struct AppShellView: View {
         .onChange(of: viewModel.runtimeSettingsAutosaveSignature) { _, _ in
             viewModel.scheduleRuntimeSettingsAutosave()
         }
-        .sheet(isPresented: $viewModel.isCommandPalettePresented) {
-            ConnorCommandPaletteView(viewModel: viewModel)
-        }
     }
 
 }

@@ -104,7 +104,6 @@ public struct CommercialReadinessSnapshotBuilder: Sendable, Equatable {
             commandCount: shell.commands.count,
             settingsPanelsReady: settingsPanelsReady,
             homeSurfaceReady: shell.item(for: shell.defaultSelection) != nil,
-            commandPaletteReady: !shell.commands.isEmpty,
             readinessDashboardLinked: shell.command(for: .checkCommercialReadiness) != nil,
             primaryActionCount: shell.commands.filter(\.isPrimaryAction).count,
             emptyStateCount: shell.sidebarGroups.flatMap(\.items).filter { $0.emptyStateTitle != nil }.count,
