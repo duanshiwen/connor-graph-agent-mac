@@ -14,6 +14,9 @@ import ConnorGraphAppSupport
     #expect(paths.graphDirectory.path == "/tmp/Application Support/Connor/graph")
     #expect(paths.logsDirectory.path == "/tmp/Application Support/Connor/logs")
     #expect(paths.sidecarsDirectory.path == "/tmp/Application Support/Connor/sidecars")
+    #expect(paths.browserDirectory.path == "/tmp/Application Support/Connor/browser")
+    #expect(paths.browserHistoryURL.path == "/tmp/Application Support/Connor/browser/history.jsonl")
+    #expect(paths.browserBookmarksURL.path == "/tmp/Application Support/Connor/browser/bookmarks.jsonl")
     #expect(paths.databaseURL.path == "/tmp/Application Support/Connor/graph/connor.sqlite")
 
     #expect(!paths.applicationSupportDirectory.path.contains("workspaces"))
@@ -41,7 +44,8 @@ import ConnorGraphAppSupport
         paths.logsDirectory,
         paths.auditLogsDirectory,
         paths.runtimeLogsDirectory,
-        paths.sidecarsDirectory
+        paths.sidecarsDirectory,
+        paths.browserDirectory
     ]
 
     for directory in expectedDirectories {
