@@ -367,13 +367,11 @@ private func makeSessionOSStore(_ name: String = UUID().uuidString) throws -> SQ
     try repository.saveSession(session)
 
     _ = try repository.setStatus(sessionID: session.id, status: .inProgress)
-    _ = try repository.setLabels(sessionID: session.id, labels: [AgentSessionLabel(id: "project", value: "graph-agent")])
-    _ = try repository.archive(sessionID: session.id)
-    _ = try repository.restore(sessionID: session.id)
+    _ = try repository.setLabels(sessionID: session.id, labels: [AgentSessionLabel(id: "project")])
 
     let events = try repository.loadRecentJournalEvents(sessionID: session.id, limit: 20)
     #expect(events.map(\.kind).contains(AgentEventKind.sessionStatusChanged))
     #expect(events.map(\.kind).contains(AgentEventKind.sessionLabelsChanged))
-    #expect(events.map(\.kind).contains(AgentEventKind.sessionArchived))
-    #expect(events.map(\.kind).contains(AgentEventKind.sessionRestored))
+    #expect(!events.map(\.kind).contains(AgentEventKind.sessionArchived))
+    #expect(!events.map(\.kind).contains(AgentEventKind.sessionRestored))
 }

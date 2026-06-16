@@ -26,20 +26,16 @@ public struct AppChatSessionRepository: Sendable {
         self.governanceConfig = governanceConfig
     }
 
-    public func loadRecentSessions(limit: Int = 50, includeArchived: Bool = false) throws -> [AgentSession] {
-        try store.recentSessions(limit: limit, includeArchived: includeArchived)
+    public func loadRecentSessions(limit: Int = 50, includeArchived: Bool = true) throws -> [AgentSession] {
+        try store.recentSessions(limit: limit, includeArchived: true)
     }
 
     public func loadSessions(filter: AgentSessionListFilter, limit: Int = 100) throws -> [AgentSession] {
         switch filter {
-        case .inbox:
-            try store.recentSessions(limit: limit, includeArchived: false)
-        case .archived:
-            try store.sessions(archived: true, limit: limit)
         case .status(let status):
-            try store.sessions(status: status, archived: false, limit: limit)
+            try store.sessions(status: status, archived: nil, limit: limit)
         case .label(let labelID):
-            try store.sessions(labelID: labelID, archived: false, limit: limit)
+            try store.sessions(labelID: labelID, archived: nil, limit: limit)
         case .all:
             try store.recentSessions(limit: limit, includeArchived: true)
         }
@@ -151,10 +147,6 @@ public struct AppChatSessionRepository: Sendable {
     public func setStatus(sessionID: String, status: AgentSessionStatus) throws -> AgentSession {
         let updated = try updateGovernance(sessionID: sessionID) { governance in
             governance.status = status
-            if status == .archived {
-                governance.isArchived = true
-                governance.archivedAt = Date()
-            }
         }
         try appendJournalEvent(runID: UUID().uuidString, sessionID: sessionID, kind: .sessionStatusChanged, action: "session_status_changed", message: "Session status changed to \(status.rawValue)", metadata: ["status": status.rawValue])
         return updated
@@ -163,7 +155,7 @@ public struct AppChatSessionRepository: Sendable {
     @discardableResult
     public func setLabels(sessionID: String, labels: [AgentSessionLabel]) throws -> AgentSession {
         let updated = try updateGovernance(sessionID: sessionID) { governance in governance.labels = labels }
-        try appendJournalEvent(runID: UUID().uuidString, sessionID: sessionID, kind: .sessionLabelsChanged, action: "session_labels_changed", message: "Session labels changed", metadata: ["labels": labels.map(\.stableID).joined(separator: ",")])
+        try appendJournalEvent(runID: UUID().uuidString, sessionID: sessionID, kind: .sessionLabelsChanged, action: "session_labels_changed", message: "Session labels changed", metadata: ["labels": labels.map(\.id).joined(separator: ",")])
         return updated
     }
 
@@ -173,25 +165,19 @@ public struct AppChatSessionRepository: Sendable {
     }
 
     @discardableResult
-    public func archive(sessionID: String, now: Date = Date()) throws -> AgentSession {
-        let updated = try updateGovernance(sessionID: sessionID) { governance in
+    public func markLegacyArchived(sessionID: String, now: Date = Date()) throws -> AgentSession {
+        try updateGovernance(sessionID: sessionID) { governance in
             governance.isArchived = true
-            governance.status = .archived
             governance.archivedAt = now
         }
-        try appendJournalEvent(runID: UUID().uuidString, sessionID: sessionID, kind: .sessionArchived, action: "session_archived", message: "Session archived", metadata: ["status": AgentSessionStatus.archived.rawValue])
-        return updated
     }
 
     @discardableResult
-    public func restore(sessionID: String) throws -> AgentSession {
-        let updated = try updateGovernance(sessionID: sessionID) { governance in
+    public func clearLegacyArchived(sessionID: String) throws -> AgentSession {
+        try updateGovernance(sessionID: sessionID) { governance in
             governance.isArchived = false
-            governance.status = .todo
             governance.archivedAt = nil
         }
-        try appendJournalEvent(runID: UUID().uuidString, sessionID: sessionID, kind: .sessionRestored, action: "session_restored", message: "Session restored", metadata: ["status": AgentSessionStatus.todo.rawValue])
-        return updated
     }
 
     public func artifactDirectories(sessionID: String) throws -> AgentSessionArtifactDirectories? {

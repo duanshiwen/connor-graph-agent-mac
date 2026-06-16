@@ -11,24 +11,15 @@ public enum AgentSessionStatus: String, Codable, Sendable, Equatable, CaseIterab
 
     public var displayName: String {
         switch self {
-        case .todo: "Todo"
-        case .inProgress: "In Progress"
-        case .waiting: "Waiting"
-        case .needsReview: "Needs Review"
-        case .done: "Done"
-        case .blocked: "Blocked"
-        case .archived: "Archived"
+        case .todo: "待办"
+        case .inProgress: "进行中"
+        case .waiting: "等待中"
+        case .needsReview: "待审阅"
+        case .done: "已完成"
+        case .blocked: "受阻"
+        case .archived: "已归档"
         }
     }
-}
-
-public enum AgentSessionLabelValueType: String, Codable, Sendable, Equatable, CaseIterable, Hashable {
-    case boolean
-    case string
-    case number
-    case date
-    case link
-    case graphEntityRef = "graph_entity_ref"
 }
 
 public struct AgentSessionStatusDefinition: Codable, Sendable, Equatable, Identifiable, Hashable {
@@ -47,52 +38,74 @@ public struct AgentSessionStatusDefinition: Codable, Sendable, Equatable, Identi
     }
 
     public static let defaults: [AgentSessionStatusDefinition] = [
-        .init(id: AgentSessionStatus.todo.rawValue, name: "Todo", systemImage: "circle", sortOrder: 10),
-        .init(id: AgentSessionStatus.inProgress.rawValue, name: "In Progress", systemImage: "play.circle", sortOrder: 20),
-        .init(id: AgentSessionStatus.waiting.rawValue, name: "Waiting", systemImage: "clock", sortOrder: 30),
-        .init(id: AgentSessionStatus.needsReview.rawValue, name: "Needs Review", systemImage: "exclamationmark.bubble", sortOrder: 40),
-        .init(id: AgentSessionStatus.blocked.rawValue, name: "Blocked", systemImage: "nosign", sortOrder: 50),
-        .init(id: AgentSessionStatus.done.rawValue, name: "Done", systemImage: "checkmark.circle", sortOrder: 60, isTerminal: true),
-        .init(id: AgentSessionStatus.archived.rawValue, name: "Archived", systemImage: "archivebox", sortOrder: 70, isTerminal: true)
+        .init(id: AgentSessionStatus.todo.rawValue, name: "待办", systemImage: "circle", sortOrder: 10),
+        .init(id: AgentSessionStatus.inProgress.rawValue, name: "进行中", systemImage: "play.circle", sortOrder: 20),
+        .init(id: AgentSessionStatus.waiting.rawValue, name: "等待中", systemImage: "clock", sortOrder: 30),
+        .init(id: AgentSessionStatus.needsReview.rawValue, name: "待审阅", systemImage: "exclamationmark.bubble", sortOrder: 40),
+        .init(id: AgentSessionStatus.blocked.rawValue, name: "受阻", systemImage: "nosign", sortOrder: 50),
+        .init(id: AgentSessionStatus.done.rawValue, name: "已完成", systemImage: "checkmark.circle", sortOrder: 60, isTerminal: true),
+        .init(id: AgentSessionStatus.archived.rawValue, name: "已归档", systemImage: "archivebox", sortOrder: 70, isTerminal: true)
     ]
 }
 
 public struct AgentSessionLabelDefinition: Codable, Sendable, Equatable, Identifiable, Hashable {
     public var id: String
     public var name: String
-    public var valueType: AgentSessionLabelValueType
     public var colorName: String
-    public var graphBindingKind: String?
+    public var systemImage: String
 
-    public init(id: String, name: String, valueType: AgentSessionLabelValueType = .boolean, colorName: String = "blue", graphBindingKind: String? = nil) {
+    public init(id: String, name: String, colorName: String = "blue") {
         self.id = id
         self.name = name
-        self.valueType = valueType
         self.colorName = colorName
-        self.graphBindingKind = graphBindingKind
+        self.systemImage = "tag"
+    }
+
+    public init(id: String, name: String, colorName: String, systemImage: String) {
+        self.id = id
+        self.name = name
+        self.colorName = colorName
+        self.systemImage = systemImage
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case colorName
+        case systemImage
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        colorName = try container.decodeIfPresent(String.self, forKey: .colorName) ?? "blue"
+        systemImage = try container.decodeIfPresent(String.self, forKey: .systemImage) ?? "tag"
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(colorName, forKey: .colorName)
+        try container.encode(systemImage, forKey: .systemImage)
     }
 
     public static let defaults: [AgentSessionLabelDefinition] = [
-        .init(id: "important", name: "Important", colorName: "orange"),
-        .init(id: "research", name: "Research", colorName: "purple"),
-        .init(id: "graph-review", name: "Graph Review", colorName: "teal"),
-        .init(id: "priority", name: "Priority", valueType: .number, colorName: "red"),
-        .init(id: "due", name: "Due", valueType: .date, colorName: "yellow"),
-        .init(id: "project", name: "Project", valueType: .graphEntityRef, colorName: "green", graphBindingKind: "project")
+        .init(id: "important", name: "重要", colorName: "orange", systemImage: "star.fill"),
+        .init(id: "research", name: "研究", colorName: "purple", systemImage: "doc.text.magnifyingglass"),
+        .init(id: "priority", name: "优先级", colorName: "red", systemImage: "flag.fill"),
+        .init(id: "due", name: "截止日期", colorName: "yellow", systemImage: "calendar.badge.clock"),
+        .init(id: "project", name: "项目", colorName: "green", systemImage: "folder.fill")
     ]
 }
 
 public struct AgentSessionLabel: Codable, Sendable, Equatable, Identifiable, Hashable {
     public var id: String
-    public var value: String?
 
-    public init(id: String, value: String? = nil) {
+    public init(id: String) {
         self.id = id
-        self.value = value?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true ? nil : value
     }
-
-    public var stableID: String { value.map { "\(id)::\($0)" } ?? id }
-    public var displayText: String { value.map { "\(id): \($0)" } ?? id }
 }
 
 public struct AgentSessionGovernanceMetadata: Codable, Sendable, Equatable {
@@ -125,8 +138,6 @@ public struct AgentSessionGovernanceMetadata: Codable, Sendable, Equatable {
 }
 
 public enum AgentSessionListFilter: Sendable, Equatable {
-    case inbox
-    case archived
     case status(AgentSessionStatus)
     case label(String)
     case all

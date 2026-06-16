@@ -223,6 +223,7 @@ final class AppViewModel: ObservableObject {
     @Published var llmSettingsMessage: String?
     @Published var llmHealthCheckMessage: String?
     @Published var isTestingLLMConnection: Bool = false
+    @Published var isAddingLLMConnection: Bool = false
     @Published var llmModelConnections: [AppLLMModelConnection] = []
     @Published var isLoadingLLMModelConnections: Bool = false
     @Published var chatSessions: [AgentSession] = []
@@ -256,6 +257,7 @@ final class AppViewModel: ObservableObject {
     @Published var sessionRecordsBySessionID: [String: [AppSessionRecord]] = [:]
     @Published var browserWorkspaceSnapshotsBySessionID: [String: AppBrowserStateSnapshot] = [:]
     @Published var browserAssistedTasksByID: [UUID: BrowserAssistedTaskState] = [:]
+    @Published var browserAssistedWebFetchRequestsByTaskID: [UUID: BrowserAssistedWebFetchRequest] = [:]
     @Published var isBrowserBookmarksPanelVisible: Bool = false
     @Published var browserBookmarkRecords: [BrowserBookmarkRecord] = []
     @Published var filteredBrowserBookmarkRecords: [BrowserBookmarkRecord] = []
@@ -300,6 +302,7 @@ final class AppViewModel: ObservableObject {
     private var admissionHoldQueueRepository: AppGraphAdmissionHoldQueueRepository?
     private var memoryChangeLogRepository: AppGraphMemoryChangeLogRepository?
     private var chatSessionRepository: AppChatSessionRepository?
+    private var governanceConfigRepository: AppSessionGovernanceConfigRepository?
     private var productOSRegistryRepository: AppProductOSRegistryRepository?
     private var automationRepository: AppProductOSAutomationRepository?
     private var sourceRuntimeRepository: AppMCPSourceRuntimeRepository?
@@ -325,6 +328,7 @@ final class AppViewModel: ObservableObject {
     private var pendingChatCancellationReasonsBySessionID: [String: String] = [:]
     private var chatInputDraftsBySessionID: [String: String] = [:]
     private var pendingAttachmentRefsBySessionID: [String: [AgentMessageAttachmentRef]] = [:]
+    private var browserAssistedWebFetchContinuationsByTaskID: [UUID: CheckedContinuation<BrowserAssistedWebFetchResult, Never>] = [:]
     private var isRestoringChatInputDraft = false
     private var agentEventTimelinesBySessionID: [String: [AgentEventPresentation]] = [:]
     private var agentEventTimelinesByProcessKey: [String: [AgentEventPresentation]] = [:]
@@ -724,10 +728,124 @@ final class AppViewModel: ObservableObject {
         return plan.task
     }
 
+    func performBrowserAssistedWebFetch(_ request: BrowserAssistedWebFetchRequest) async -> BrowserAssistedWebFetchResult? {
+        let task = startBrowserAssistedWebFetch(request)
+        let timeout = max(3_000, min(request.timeoutMilliseconds, 720_000))
+        return await withCheckedContinuation { continuation in
+            browserAssistedWebFetchContinuationsByTaskID[task.id] = continuation
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(timeout) * 1_000_000)
+                await MainActor.run {
+                    guard let self, self.browserAssistedWebFetchContinuationsByTaskID[task.id] != nil else { return }
+                    let result = BrowserAssistedWebFetchResult(
+                        status: .timedOut,
+                        urlString: request.urlString,
+                        finalURLString: request.urlString,
+                        title: "",
+                        contentText: "",
+                        taskID: task.id.uuidString,
+                        sessionID: task.sessionID,
+                        tabID: task.tabID.uuidString,
+                        errorMessage: "Connor WKWebView web_fetch(js) timed out after \(timeout)ms",
+                        interventionReason: nil,
+                        truncated: false,
+                        originalCharacterCount: 0
+                    )
+                    if let current = self.browserAssistedTasksByID[task.id] {
+                        self.browserAssistedTasksByID[task.id] = BrowserAssistedTaskPlanner().fail(current, message: result.errorMessage ?? "Timed out")
+                    }
+                    self.browserAssistedWebFetchContinuationsByTaskID[task.id]?.resume(returning: result)
+                    self.browserAssistedWebFetchContinuationsByTaskID[task.id] = nil
+                    self.browserAssistedWebFetchRequestsByTaskID[task.id] = nil
+                }
+            }
+        }
+    }
+
+    @discardableResult
+    private func startBrowserAssistedWebFetch(_ request: BrowserAssistedWebFetchRequest) -> BrowserAssistedTaskState {
+        let sessionID = selectedChatSessionID ?? activeChatSession.id
+        let currentSnapshot = browserWorkspaceSnapshotsBySessionID[sessionID] ?? AppBrowserStateSnapshot()
+        let taskRequest = BrowserAssistedTaskRequest(
+            kind: .fetch,
+            sessionID: sessionID,
+            urlString: request.urlString,
+            title: "Fetch: \(request.urlString)",
+            visibility: request.revealImmediately ? .foreground : .background
+        )
+        let plan = BrowserAssistedTaskPlanner().start(taskRequest, in: currentSnapshot)
+        browserAssistedTasksByID[plan.task.id] = plan.task
+        browserAssistedWebFetchRequestsByTaskID[plan.task.id] = request
+        browserTargetURLString = request.urlString
+        saveBrowserWorkspaceSnapshot(plan.snapshot, for: sessionID)
+        if plan.shouldRevealBrowser { showBrowserWorkspace(for: sessionID) }
+        return plan.task
+    }
+
+    func completeBrowserAssistedWebFetch(_ taskID: UUID, title: String, finalURLString: String, text: String) {
+        guard let task = browserAssistedTasksByID[taskID], let request = browserAssistedWebFetchRequestsByTaskID[taskID] else { return }
+        let originalCount = text.count
+        let maxCharacters = 100_000
+        let truncated = originalCount > maxCharacters
+        let returnedText = truncated ? String(text.prefix(maxCharacters)) : text
+        let content: String
+        if request.extractMode == "text" {
+            content = returnedText + (truncated ? "\n\n[Content truncated by Connor web_fetch(js-wkwebview): original characters = \(originalCount), returned characters = \(maxCharacters)]" : "")
+        } else {
+            let heading = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Fetched Page" : title
+            content = """
+            # \(heading)
+            **Source:** \(finalURLString.isEmpty ? request.urlString : finalURLString)
+            **Render mode:** js-wkwebview
+
+            ---
+
+            \(returnedText)\(truncated ? "\n\n[Content truncated by Connor web_fetch(js-wkwebview): original characters = \(originalCount), returned characters = \(maxCharacters)]" : "")
+            """
+        }
+        let result = BrowserAssistedWebFetchResult(
+            status: .fetched,
+            urlString: request.urlString,
+            finalURLString: finalURLString.isEmpty ? request.urlString : finalURLString,
+            title: title,
+            contentText: content,
+            taskID: task.id.uuidString,
+            sessionID: task.sessionID,
+            tabID: task.tabID.uuidString,
+            errorMessage: nil,
+            interventionReason: nil,
+            truncated: truncated,
+            originalCharacterCount: originalCount
+        )
+        browserAssistedTasksByID[taskID] = BrowserAssistedTaskPlanner().complete(task, message: "Fetched rendered page content")
+        browserAssistedWebFetchContinuationsByTaskID[taskID]?.resume(returning: result)
+        browserAssistedWebFetchContinuationsByTaskID[taskID] = nil
+        browserAssistedWebFetchRequestsByTaskID[taskID] = nil
+    }
+
     func revealBrowserAssistedTask(_ taskID: UUID, reason: String) {
         guard let task = browserAssistedTasksByID[taskID] else { return }
         let updated = BrowserAssistedTaskPlanner().requireUserIntervention(task, reason: reason)
         browserAssistedTasksByID[taskID] = updated
+        if let request = browserAssistedWebFetchRequestsByTaskID[taskID], browserAssistedWebFetchContinuationsByTaskID[taskID] != nil {
+            let result = BrowserAssistedWebFetchResult(
+                status: .needsUserIntervention,
+                urlString: request.urlString,
+                finalURLString: updated.urlString,
+                title: updated.title,
+                contentText: "",
+                taskID: updated.id.uuidString,
+                sessionID: updated.sessionID,
+                tabID: updated.tabID.uuidString,
+                errorMessage: nil,
+                interventionReason: reason,
+                truncated: false,
+                originalCharacterCount: 0
+            )
+            browserAssistedWebFetchContinuationsByTaskID[taskID]?.resume(returning: result)
+            browserAssistedWebFetchContinuationsByTaskID[taskID] = nil
+            browserAssistedWebFetchRequestsByTaskID[taskID] = nil
+        }
         focusBrowserTab(updated.tabID, in: updated.sessionID, urlString: updated.urlString)
         showBrowserWorkspace(for: updated.sessionID)
     }
@@ -740,6 +858,25 @@ final class AppViewModel: ObservableObject {
     func failBrowserAssistedTask(_ taskID: UUID, message: String) {
         guard let task = browserAssistedTasksByID[taskID] else { return }
         browserAssistedTasksByID[taskID] = BrowserAssistedTaskPlanner().fail(task, message: message)
+        if let request = browserAssistedWebFetchRequestsByTaskID[taskID], browserAssistedWebFetchContinuationsByTaskID[taskID] != nil {
+            let result = BrowserAssistedWebFetchResult(
+                status: .failed,
+                urlString: request.urlString,
+                finalURLString: task.urlString,
+                title: task.title,
+                contentText: "",
+                taskID: task.id.uuidString,
+                sessionID: task.sessionID,
+                tabID: task.tabID.uuidString,
+                errorMessage: message,
+                interventionReason: nil,
+                truncated: false,
+                originalCharacterCount: 0
+            )
+            browserAssistedWebFetchContinuationsByTaskID[taskID]?.resume(returning: result)
+            browserAssistedWebFetchContinuationsByTaskID[taskID] = nil
+            browserAssistedWebFetchRequestsByTaskID[taskID] = nil
+        }
     }
 
     private func focusBrowserTab(_ tabID: UUID, in sessionID: String, urlString: String) {
@@ -881,6 +1018,7 @@ final class AppViewModel: ObservableObject {
         self.llmSettingsRepository = llmSettingsRepository
         self.llmProviderHealthChecker = AppLLMProviderHealthChecker(settingsRepository: llmSettingsRepository)
         if let storagePaths {
+            self.governanceConfigRepository = AppSessionGovernanceConfigRepository(configDirectory: storagePaths.configDirectory)
             self.productOSRegistryRepository = AppProductOSRegistryRepository(storagePaths: storagePaths)
             self.automationRepository = AppProductOSAutomationRepository(storagePaths: storagePaths)
             self.sourceRuntimeRepository = AppMCPSourceRuntimeRepository(storagePaths: storagePaths)
@@ -925,6 +1063,10 @@ final class AppViewModel: ObservableObject {
                             status: state.status.rawValue
                         )
                     }
+                },
+                browserAssistedWebFetchHandler: { [weak self] request in
+                    guard let self else { return nil }
+                    return await self.performBrowserAssistedWebFetch(request)
                 }
             )
         }
@@ -1200,20 +1342,102 @@ final class AppViewModel: ObservableObject {
         persistLLMSettings(rebuildRuntime: true)
     }
 
-    func addLLMConnection(providerMode: AppLLMProviderMode) {
+    @discardableResult
+    func addLLMConnection(
+        providerMode: AppLLMProviderMode,
+        name: String? = nil,
+        baseURLString: String? = nil,
+        model: String? = nil,
+        selectedModel: String? = nil
+    ) -> AppLLMConnectionConfig {
         let idBase = providerMode == .openAICompatible ? "openai-compatible" : "claude"
         let id = "\(idBase)-\(UUID().uuidString.prefix(8).lowercased())"
+        return addLLMConnection(
+            id: id,
+            providerMode: providerMode,
+            name: name,
+            baseURLString: baseURLString,
+            model: model,
+            selectedModel: selectedModel,
+            hasAPIKey: false
+        )
+    }
+
+    @discardableResult
+    func addAuthenticatedLLMConnection(
+        id: String,
+        providerMode: AppLLMProviderMode,
+        name: String,
+        baseURLString: String,
+        model: String,
+        selectedModel: String,
+        apiKey: String? = nil,
+        oauthTokens: AppLLMOAuthTokens? = nil
+    ) throws -> AppLLMConnectionConfig {
+        let connection = addLLMConnection(
+            id: id,
+            providerMode: providerMode,
+            name: name,
+            baseURLString: baseURLString,
+            model: model,
+            selectedModel: selectedModel,
+            hasAPIKey: apiKey?.isEmpty == false || oauthTokens != nil
+        )
+        let settings = AppLLMSettings(connections: llmConnectionConfigs, defaultConnectionID: connection.id)
+        try llmSettingsRepository.save(settings: settings, apiKey: apiKey)
+        if let oauthTokens {
+            try llmSettingsRepository.saveOAuthTokens(oauthTokens, connectionID: connection.id)
+        }
+        loadLLMSettings()
+        rebuildNativeSessionManagerForActiveSession()
+        Task { await reloadLLMModelConnections() }
+        return connection
+    }
+
+    @discardableResult
+    func setupLLMConnection(_ input: AppLLMConnectionSetupInput) async throws -> AppLLMConnectionConfig {
+        isAddingLLMConnection = true
+        defer { isAddingLLMConnection = false }
+        let service = AppLLMConnectionSetupService(settingsRepository: llmSettingsRepository)
+        let result = try await service.setupConnection(input)
+        loadLLMSettings()
+        rebuildNativeSessionManagerForActiveSession()
+        await reloadLLMModelConnections()
+        llmSettingsMessage = result.message
+        llmHealthCheckMessage = result.message
+        errorMessage = nil
+        return result.connection
+    }
+
+    @discardableResult
+    private func addLLMConnection(
+        id: String,
+        providerMode: AppLLMProviderMode,
+        name: String? = nil,
+        baseURLString: String? = nil,
+        model: String? = nil,
+        selectedModel: String? = nil,
+        hasAPIKey: Bool
+    ) -> AppLLMConnectionConfig {
+        let defaultName = providerMode == .openAICompatible ? "新 OpenAI Compatible 连接" : "新 Claude 连接"
+        let defaultBaseURL = providerMode == .openAICompatible ? AppLLMSettings.default.baseURLString : ""
+        let defaultModel = providerMode == .openAICompatible ? AppLLMSettings.default.model : "claude-sdk-default"
+        let normalizedModel = model?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? model! : defaultModel
+        let normalizedSelectedModel = selectedModel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? selectedModel! : AppLLMConnectionConfig.firstModel(in: normalizedModel)
         let connection = AppLLMConnectionConfig(
             id: id,
-            name: providerMode == .openAICompatible ? "新 OpenAI Compatible 连接" : "新 Claude 连接",
+            name: name?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? name! : defaultName,
             providerMode: providerMode,
-            baseURLString: providerMode == .openAICompatible ? AppLLMSettings.default.baseURLString : "",
-            model: providerMode == .openAICompatible ? AppLLMSettings.default.model : "claude-sdk-default",
-            selectedModel: providerMode == .openAICompatible ? AppLLMSettings.default.effectiveModel : "claude-sdk-default"
+            baseURLString: baseURLString ?? defaultBaseURL,
+            model: normalizedModel,
+            selectedModel: normalizedSelectedModel,
+            hasAPIKey: hasAPIKey
         )
+        llmConnectionConfigs.removeAll { $0.id == connection.id }
         llmConnectionConfigs.append(connection)
-        llmDefaultConnectionID = id
-        selectDefaultLLMConnection(id)
+        llmDefaultConnectionID = connection.id
+        selectDefaultLLMConnection(connection.id)
+        return connection
     }
 
     func deleteSelectedLLMConnection() {
@@ -1492,6 +1716,140 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    func upsertStatusDefinition(_ definition: AgentSessionStatusDefinition) {
+        var config = governanceConfig
+        let trimmedID = definition.id.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedID.isEmpty, let index = config.statuses.firstIndex(where: { $0.id == trimmedID }) {
+            var updatedDefinition = definition
+            updatedDefinition.id = trimmedID
+            config.statuses[index] = updatedDefinition
+        } else {
+            var newDefinition = definition
+            newDefinition.id = makeUniqueGovernanceStatusID(existingIDs: Set(config.statuses.map(\.id)), preferredName: definition.name)
+            config.statuses.append(newDefinition)
+        }
+        saveGovernanceConfig(config, successMessage: "状态定义已保存。")
+    }
+
+    func canDeleteStatusDefinition(_ definition: AgentSessionStatusDefinition) -> Bool {
+        governanceConfig.statuses.count > 1 && !allChatSessions.contains { $0.governance.status.rawValue == definition.id }
+    }
+
+    func deleteStatusDefinition(_ definition: AgentSessionStatusDefinition) {
+        guard governanceConfig.statuses.count > 1 else {
+            errorMessage = "至少需要保留一个状态。"
+            return
+        }
+        do {
+            let sessions = try chatSessionRepository?.loadSessions(filter: .all) ?? allChatSessions
+            let sessionsUsingStatus = sessions.filter { $0.governance.status.rawValue == definition.id }
+            guard sessionsUsingStatus.isEmpty else {
+                errorMessage = "无法删除状态“\(definition.name)”: 仍有 \(sessionsUsingStatus.count) 个会话处于此状态。"
+                return
+            }
+            var config = governanceConfig
+            config.statuses.removeAll { $0.id == definition.id }
+            saveGovernanceConfig(config, successMessage: "状态“\(definition.name)”已删除。")
+            if case .status(let selectedStatus) = sessionListFilter, selectedStatus.rawValue == definition.id {
+                setSessionListFilter(.all)
+            } else {
+                reloadChatSessions()
+            }
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    private func makeUniqueGovernanceStatusID(existingIDs: Set<String>, preferredName: String = "") -> String {
+        makeUniqueGovernanceSlug(existingIDs: existingIDs, prefix: "status", preferredName: preferredName)
+    }
+
+    func upsertLabelDefinition(_ definition: AgentSessionLabelDefinition) {
+        var config = governanceConfig
+        let trimmedID = definition.id.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedID.isEmpty, let index = config.labels.firstIndex(where: { $0.id == trimmedID }) {
+            var updatedDefinition = definition
+            updatedDefinition.id = trimmedID
+            config.labels[index] = updatedDefinition
+        } else {
+            var newDefinition = definition
+            newDefinition.id = makeUniqueGovernanceLabelID(existingIDs: Set(config.labels.map(\.id)), preferredName: definition.name)
+            config.labels.append(newDefinition)
+        }
+        saveGovernanceConfig(config, successMessage: "标签定义已保存。")
+    }
+
+    func deleteLabelDefinition(_ definition: AgentSessionLabelDefinition) {
+        guard let chatSessionRepository else { return }
+        do {
+            let sessions = try chatSessionRepository.loadSessions(filter: .all)
+            var removedFromSessionCount = 0
+            for session in sessions where session.governance.labels.contains(where: { $0.id == definition.id }) {
+                let remainingLabels = session.governance.labels.filter { $0.id != definition.id }
+                _ = try chatSessionRepository.setLabels(sessionID: session.id, labels: remainingLabels)
+                removedFromSessionCount += 1
+            }
+
+            var config = governanceConfig
+            config.labels.removeAll { $0.id == definition.id }
+            saveGovernanceConfig(config, successMessage: "标签“\(definition.name)”已删除，并已从 \(removedFromSessionCount) 个会话移除。")
+            if case .label(let selectedLabelID) = sessionListFilter, selectedLabelID == definition.id {
+                setSessionListFilter(.all)
+            } else {
+                reloadChatSessions()
+            }
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    private func makeUniqueGovernanceLabelID(existingIDs: Set<String>, preferredName: String = "") -> String {
+        makeUniqueGovernanceSlug(existingIDs: existingIDs, prefix: "label", preferredName: preferredName)
+    }
+
+    private func makeUniqueGovernanceSlug(existingIDs: Set<String>, prefix: String, preferredName: String) -> String {
+        let allowedScalars = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789")
+        let slug = preferredName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .unicodeScalars
+            .map { scalar -> Character in
+                allowedScalars.contains(scalar) ? Character(scalar) : "-"
+            }
+            .reduce(into: "") { partial, character in
+                if character == "-", partial.last == "-" { return }
+                partial.append(character)
+            }
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+            .replacingOccurrences(of: "-", with: "_")
+        let base = slug.isEmpty ? "\(prefix)_\(shortGovernanceIDFragment())" : slug
+        var candidate = base
+        var suffix = 2
+        while existingIDs.contains(candidate) {
+            candidate = "\(base)_\(suffix)"
+            suffix += 1
+        }
+        return candidate
+    }
+
+    private func shortGovernanceIDFragment() -> String {
+        String(UUID().uuidString.lowercased().prefix(8))
+    }
+
+    private func saveGovernanceConfig(_ config: AppSessionGovernanceConfig, successMessage: String) {
+        do {
+            let normalizedConfig = AppSessionGovernanceConfig(statuses: config.statuses, labels: config.labels)
+            try governanceConfigRepository?.save(normalizedConfig)
+            governanceConfig = normalizedConfig
+            chatSessionRepository?.governanceConfig = normalizedConfig
+            automationConfig = try automationRepository?.loadOrCreateDefault(governanceConfig: normalizedConfig) ?? automationConfig
+            appSettingsMessage = successMessage
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
     var primaryWorkspaceRootDraft: WorkspaceRootDraft? {
         workspaceRoots.first(where: \.isPrimary) ?? workspaceRoots.first
     }
@@ -1583,7 +1941,7 @@ final class AppViewModel: ObservableObject {
         }
         do {
             var sessions = try chatSessionRepository.loadSessions(filter: sessionListFilter)
-            if sessions.isEmpty, sessionListFilter == .inbox || sessionListFilter == .all {
+            if sessions.isEmpty, sessionListFilter == .all {
                 let session = try chatSessionRepository.createSession()
                 sessions = [session]
             }
@@ -1653,15 +2011,25 @@ final class AppViewModel: ObservableObject {
         guard !trimmed.isEmpty, let chatSessionRepository else { return }
         do {
             let updated = try chatSessionRepository.renameSession(sessionID: sessionID, title: trimmed)
-            if selectedChatSessionID == sessionID {
-                fallbackChatSession = updated
-                nativeSessionManager = makeNativeSessionManager(for: updated)
-                transcript = updated.messages
-            }
+            synchronizeRenamedChatSession(updated)
             reloadChatSessions()
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
+        }
+    }
+
+    private func synchronizeRenamedChatSession(_ updated: AgentSession) {
+        if let index = chatSessions.firstIndex(where: { $0.id == updated.id }) {
+            chatSessions[index] = updated
+        }
+        if let index = allChatSessions.firstIndex(where: { $0.id == updated.id }) {
+            allChatSessions[index] = updated
+        }
+        if selectedChatSessionID == updated.id {
+            fallbackChatSession = updated
+            nativeSessionManager = makeNativeSessionManager(for: updated)
+            transcript = updated.messages
         }
     }
 
@@ -1682,6 +2050,16 @@ final class AppViewModel: ObservableObject {
     func hasRunningBackgroundTask(sessionID: String) -> Bool {
         backgroundTasksBySessionID[sessionID, default: []]
             .contains { $0.status == .queued || $0.status == .running }
+    }
+
+    private func runningBackgroundTasksForDeletionCheck(sessionID: String) throws -> [AppSessionBackgroundTask] {
+        let persistedTasks = try chatSessionRepository?.loadBackgroundTasks(sessionID: sessionID).map(AppSessionBackgroundTask.init(persisted:)) ?? []
+        let memoryTasks = backgroundTasksBySessionID[sessionID, default: []]
+        return (persistedTasks + memoryTasks).filter { $0.status == .queued || $0.status == .running }
+    }
+
+    func canDeleteChatSession(_ sessionID: String) -> Bool {
+        (try? runningBackgroundTasksForDeletionCheck(sessionID: sessionID).isEmpty) ?? !hasRunningBackgroundTask(sessionID: sessionID)
     }
 
     private func loadBackgroundTasks(sessionID: String) throws {
@@ -1814,6 +2192,11 @@ final class AppViewModel: ObservableObject {
     func deleteChatSession(_ sessionID: String) {
         guard let chatSessionRepository else { return }
         do {
+            let runningTasks = try runningBackgroundTasksForDeletionCheck(sessionID: sessionID)
+            guard runningTasks.isEmpty else {
+                errorMessage = "无法删除会话: 仍有 \(runningTasks.count) 个后台任务正在运行。"
+                return
+            }
             try chatSessionRepository.deleteSession(sessionID: sessionID)
             regeneratingTitleSessionIDs.remove(sessionID)
             backgroundTasksBySessionID.removeValue(forKey: sessionID)
@@ -2327,35 +2710,8 @@ final class AppViewModel: ObservableObject {
                 fallbackChatSession = updated
             }
             reloadChatSessions()
-            appendGovernanceEvent(.sessionLabelsChanged(AgentSessionGovernanceEvent(sessionID: updated.id, message: "标签已更新：\(updated.governance.labels.map(\.displayText).joined(separator: ", "))", labels: updated.governance.labels)))
+            appendGovernanceEvent(.sessionLabelsChanged(AgentSessionGovernanceEvent(sessionID: updated.id, message: "标签已更新：\(updated.governance.labels.map(\.id).joined(separator: ", "))", labels: updated.governance.labels)))
             evaluateAutomation(ProductOSAutomationEventContext(triggerKind: didRemove ? .sessionLabelRemoved : .sessionLabelAdded, sessionID: updated.id, labelID: labelID))
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func archiveSelectedSession() {
-        guard let selectedChatSessionID, let chatSessionRepository else { return }
-        do {
-            let session = try chatSessionRepository.archive(sessionID: selectedChatSessionID)
-            appendGovernanceEvent(.sessionArchived(AgentSessionGovernanceEvent(sessionID: session.id, message: "会话已归档", status: session.governance.status)))
-            evaluateAutomation(ProductOSAutomationEventContext(triggerKind: .sessionArchived, sessionID: session.id, status: session.governance.status))
-            self.selectedChatSessionID = nil
-            reloadChatSessions()
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func restoreSelectedSession() {
-        guard let selectedChatSessionID, let chatSessionRepository else { return }
-        do {
-            let session = try chatSessionRepository.restore(sessionID: selectedChatSessionID)
-            appendGovernanceEvent(.sessionRestored(AgentSessionGovernanceEvent(sessionID: session.id, message: "会话已恢复", status: session.governance.status)))
-            evaluateAutomation(ProductOSAutomationEventContext(triggerKind: .sessionRestored, sessionID: session.id, status: session.governance.status))
-            setSessionListFilter(.inbox)
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -2824,9 +3180,6 @@ final class AppViewModel: ObservableObject {
                         self.activeChatRunIDsBySessionID[submittingSessionID] = runID
                         self.activeChatBackendsByRunID[runID] = liveBackend
                         self.activeChatBackendsBySessionID[submittingSessionID] = liveBackend
-                        if shouldAutoGenerateInitialTitle {
-                            self.regenerateChatSessionTitle(submittingSessionID)
-                        }
                         if let reason = self.pendingChatCancellationReasonsBySessionID[submittingSessionID] {
                             self.cancelRunningChatRun(sessionID: submittingSessionID, runID: runID, reason: reason)
                         }
@@ -2861,6 +3214,10 @@ final class AppViewModel: ObservableObject {
             reloadPendingApprovals()
             if let chatSessionRepository {
                 chatSessions = try chatSessionRepository.loadSessions(filter: sessionListFilter)
+                allChatSessions = try chatSessionRepository.loadSessions(filter: .all)
+            }
+            if shouldAutoGenerateInitialTitle {
+                regenerateChatSessionTitle(submittingSessionID)
             }
             errorMessage = nil
             Task { await runBackgroundJobs() }

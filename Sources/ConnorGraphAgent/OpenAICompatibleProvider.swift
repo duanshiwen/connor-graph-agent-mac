@@ -8,11 +8,13 @@ public struct OpenAICompatibleConfig: Sendable, Equatable {
     public var baseURL: URL
     public var apiKey: String
     public var model: String
+    public var extraHeaders: [String: String]
 
-    public init(baseURL: URL, apiKey: String, model: String) {
+    public init(baseURL: URL, apiKey: String, model: String, extraHeaders: [String: String] = [:]) {
         self.baseURL = baseURL
         self.apiKey = apiKey
         self.model = model
+        self.extraHeaders = extraHeaders
     }
 
     public var requestModel: String {
@@ -178,16 +180,20 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, Ag
         return AgentHTTPRequest(
             url: endpoint,
             method: "POST",
-            headers: [
-                "Authorization": "Bearer \(config.apiKey)",
-                "Content-Type": "application/json"
-            ],
+            headers: requestHeaders(),
             body: try encoder.encode(body)
         )
     }
 
     private var systemPrompt: String {
         AgentInstructionSection.defaultConnorInstruction
+    }
+
+    private func requestHeaders() -> [String: String] {
+        var headers = config.extraHeaders
+        headers["Authorization"] = "Bearer \(config.apiKey)"
+        headers["Content-Type"] = "application/json"
+        return headers
     }
 
     private func makeToolCallingRequest(_ request: AgentModelRequest) throws -> AgentHTTPRequest {
@@ -227,7 +233,7 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, Ag
         return AgentHTTPRequest(
             url: endpoint,
             method: "POST",
-            headers: ["Authorization": "Bearer \(config.apiKey)", "Content-Type": "application/json"],
+            headers: requestHeaders(),
             body: data
         )
     }

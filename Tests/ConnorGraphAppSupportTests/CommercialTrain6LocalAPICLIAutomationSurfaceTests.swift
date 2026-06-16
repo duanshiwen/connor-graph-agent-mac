@@ -29,25 +29,25 @@ struct CommercialTrain6LocalAPICLIAutomationSurfaceTests {
 
     @Test func automationDryRunEvaluationProducesGovernedPlanWithoutExecution() {
         let request = ConnorAutomationSurfaceTriggerRequest(
-            triggerKind: .sessionStatusChanged,
+            triggerKind: .sessionLabelAdded,
             sessionID: "session-1",
-            status: .needsReview,
+            labelID: "important",
             dryRun: true
         )
         let evaluation = ConnorAutomationSurfaceEvaluator().evaluate(request: request, config: .default)
 
-        #expect(evaluation.matchedRuleIDs == ["needs-review-flags-graph-review"])
-        #expect(evaluation.actionPlans.count == 2)
-        #expect(evaluation.pendingReviewActionCount == 2)
-        #expect(!evaluation.canExecuteWithoutReview)
+        #expect(evaluation.matchedRuleIDs == ["important-label-adds-review-note"])
+        #expect(evaluation.actionPlans.count == 1)
+        #expect(evaluation.pendingReviewActionCount == 0)
+        #expect(evaluation.canExecuteWithoutReview)
         #expect(evaluation.auditSummary.contains("dry-run"))
     }
 
     @Test func reviewedExecutionGateBlocksUnreviewedAndKeepsPendingReviewBlocked() throws {
         let request = ConnorAutomationSurfaceTriggerRequest(
-            triggerKind: .sessionStatusChanged,
+            triggerKind: .sessionLabelAdded,
             sessionID: "session-1",
-            status: .needsReview,
+            labelID: "important",
             dryRun: true
         )
         let evaluator = ConnorAutomationSurfaceEvaluator()
@@ -59,9 +59,9 @@ struct CommercialTrain6LocalAPICLIAutomationSurfaceTests {
         #expect(unreviewedGate.blockedPlanIDs.count == evaluation.actionPlans.count)
 
         let reviewedGate = evaluator.executionGate(for: evaluation, reviewed: true)
-        #expect(reviewedGate.status == .reviewRequired)
-        #expect(reviewedGate.executablePlanIDs.isEmpty)
-        #expect(reviewedGate.blockedPlanIDs.count == evaluation.actionPlans.count)
+        #expect(reviewedGate.status == .stateChanging)
+        #expect(reviewedGate.executablePlanIDs.count == evaluation.actionPlans.count)
+        #expect(reviewedGate.blockedPlanIDs.isEmpty)
     }
 
 

@@ -64,9 +64,7 @@ struct ProductOSRegistryView: View {
                                 Text(label.name).font(.headline)
                                 Text(label.id).font(.caption).foregroundStyle(.secondary)
                                 Spacer()
-                                ProductOSRegistryChip(label.valueType.rawValue)
                                 ProductOSRegistryChip(label.colorName)
-                                if let binding = label.graphBindingKind { ProductOSRegistryChip("graph: \(binding)") }
                             }
                         }
                     }

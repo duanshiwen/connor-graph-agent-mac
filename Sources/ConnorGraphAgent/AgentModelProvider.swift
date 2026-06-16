@@ -36,6 +36,18 @@ public struct AgentModelMessageContentPart: Codable, Sendable, Equatable {
     }
 }
 
+public struct AgentModelProviderMetadata: Codable, Sendable, Equatable {
+    public var providerID: String
+    public var rawAssistantContentJSON: String?
+    public var stopReason: String?
+
+    public init(providerID: String, rawAssistantContentJSON: String? = nil, stopReason: String? = nil) {
+        self.providerID = providerID
+        self.rawAssistantContentJSON = rawAssistantContentJSON
+        self.stopReason = stopReason
+    }
+}
+
 public struct AgentModelMessage: Codable, Sendable, Equatable, Identifiable {
     public var id: String
     public var role: AgentModelMessageRole
@@ -44,6 +56,7 @@ public struct AgentModelMessage: Codable, Sendable, Equatable, Identifiable {
     public var toolCallID: String?
     public var name: String?
     public var toolCalls: [AgentToolCall]?
+    public var providerMetadata: AgentModelProviderMetadata?
 
     public init(
         id: String = UUID().uuidString,
@@ -52,7 +65,8 @@ public struct AgentModelMessage: Codable, Sendable, Equatable, Identifiable {
         contentParts: [AgentModelMessageContentPart]? = nil,
         toolCallID: String? = nil,
         name: String? = nil,
-        toolCalls: [AgentToolCall]? = nil
+        toolCalls: [AgentToolCall]? = nil,
+        providerMetadata: AgentModelProviderMetadata? = nil
     ) {
         self.id = id
         self.role = role
@@ -61,6 +75,7 @@ public struct AgentModelMessage: Codable, Sendable, Equatable, Identifiable {
         self.toolCallID = toolCallID
         self.name = name
         self.toolCalls = toolCalls
+        self.providerMetadata = providerMetadata
     }
 }
 
@@ -106,11 +121,19 @@ public struct AgentModelUsage: Codable, Sendable, Equatable {
     public var promptTokens: Int
     public var completionTokens: Int
     public var totalTokens: Int
+    public var cacheCreationInputTokens: Int?
+    public var cacheReadInputTokens: Int?
 
-    public init(promptTokens: Int, completionTokens: Int, totalTokens: Int? = nil) {
+    public init(promptTokens: Int, completionTokens: Int, totalTokens: Int? = nil, cacheCreationInputTokens: Int? = nil, cacheReadInputTokens: Int? = nil) {
         self.promptTokens = promptTokens
         self.completionTokens = completionTokens
         self.totalTokens = totalTokens ?? (promptTokens + completionTokens)
+        self.cacheCreationInputTokens = cacheCreationInputTokens
+        self.cacheReadInputTokens = cacheReadInputTokens
+    }
+
+    public init(promptTokens: Int, completionTokens: Int, totalTokens: Int?) {
+        self.init(promptTokens: promptTokens, completionTokens: completionTokens, totalTokens: totalTokens, cacheCreationInputTokens: nil, cacheReadInputTokens: nil)
     }
 }
 
@@ -128,14 +151,28 @@ public struct AgentModelResponse: Sendable, Equatable {
     public var usage: AgentModelUsage?
     public var finishReason: AgentModelFinishReason
     public var rawResponseJSON: String?
+    public var providerMetadata: AgentModelProviderMetadata?
 
-    public init(text: String?, toolCalls: [AgentToolCall] = [], usage: AgentModelUsage? = nil, finishReason: AgentModelFinishReason = .stop, rawResponseJSON: String? = nil) {
+    public init(text: String?, toolCalls: [AgentToolCall] = [], usage: AgentModelUsage? = nil, finishReason: AgentModelFinishReason = .stop, rawResponseJSON: String? = nil, providerMetadata: AgentModelProviderMetadata? = nil) {
         self.text = text
         self.toolCalls = toolCalls
         self.usage = usage
         self.finishReason = finishReason
         self.rawResponseJSON = rawResponseJSON
+        self.providerMetadata = providerMetadata
     }
+
+    public init(text: String?, toolCalls: [AgentToolCall], usage: AgentModelUsage?, finishReason: AgentModelFinishReason, rawResponseJSON: String?) {
+        self.init(text: text, toolCalls: toolCalls, usage: usage, finishReason: finishReason, rawResponseJSON: rawResponseJSON, providerMetadata: nil)
+    }
+}
+
+public enum AgentModelStreamEvent: Sendable, Equatable {
+    case textDelta(String)
+    case thinkingDelta(String)
+    case toolInputDelta(toolCallID: String?, name: String?, partialJSON: String)
+    case rawProviderEvent(String)
+    case completed(AgentModelResponse)
 }
 
 public protocol AgentModelProvider: Sendable {
@@ -143,4 +180,8 @@ public protocol AgentModelProvider: Sendable {
     var capabilities: AgentModelCapabilities { get }
 
     func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse
+}
+
+public protocol StreamingAgentModelProvider: AgentModelProvider {
+    func streamComplete(_ request: AgentModelRequest) -> AsyncThrowingStream<AgentModelStreamEvent, Error>
 }
