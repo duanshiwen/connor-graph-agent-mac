@@ -40,6 +40,28 @@ struct BrowserAssistedTaskPlannerTests {
         #expect(plan.shouldRevealBrowser == true)
     }
 
+    @Test func backgroundFetchOpensSelectedTabWithoutRevealingBrowser() {
+        let planner = BrowserAssistedTaskPlanner()
+        let request = BrowserAssistedTaskRequest(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000301")!,
+            kind: .fetch,
+            sessionID: "session-fetch",
+            urlString: "https://example.com/app",
+            title: "Fetch: https://example.com/app",
+            visibility: .background
+        )
+
+        let plan = planner.start(request, in: AppBrowserStateSnapshot(), now: Date(timeIntervalSince1970: 60))
+
+        #expect(plan.snapshot.tabs.count == 1)
+        #expect(plan.snapshot.selectedTabID == plan.task.tabID)
+        #expect(plan.task.kind == .fetch)
+        #expect(plan.task.sessionID == "session-fetch")
+        #expect(plan.task.urlString == "https://example.com/app")
+        #expect(plan.task.status == .running)
+        #expect(plan.shouldRevealBrowser == false)
+    }
+
     @Test func userInterventionMarksTaskAndPreservesTabBinding() {
         let planner = BrowserAssistedTaskPlanner()
         let request = BrowserAssistedTaskRequest(
