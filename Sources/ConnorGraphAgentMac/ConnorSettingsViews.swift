@@ -1307,10 +1307,20 @@ struct AIConnectionOnboardingView: View {
             HStack {
                 Button(action: cancel) {
                     Label("返回", systemImage: "chevron.left")
+                        .font(SettingsListTypography.rowTitleSelected)
                         .labelStyle(.titleAndIcon)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 9)
+                        .contentShape(Capsule(style: .continuous))
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
+                .background(.quaternary.opacity(0.28), in: Capsule(style: .continuous))
+                .overlay(
+                    Capsule(style: .continuous)
+                        .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+                )
+                .help("返回上一页")
                 Spacer()
             }
             .padding(.top, 6)
