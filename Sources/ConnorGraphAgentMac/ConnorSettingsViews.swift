@@ -1623,7 +1623,7 @@ struct PermissionModePickerRow: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Spacer(minLength: 24)
+            Spacer(minLength: SettingsListLayout.spaceL)
 
             Menu {
                 ForEach(availableModes, id: \.self) { mode in
@@ -1634,27 +1634,26 @@ struct PermissionModePickerRow: View {
                     }
                 }
             } label: {
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     Label(selection.displayName, systemImage: selection.systemImage)
                         .labelStyle(.titleAndIcon)
-                    Spacer(minLength: 8)
+                    Spacer(minLength: 6)
                     Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 10.5, weight: .semibold))
                         .foregroundStyle(.secondary)
                 }
-                .font(SettingsListTypography.rowTitleSelected)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
-                .frame(width: SettingsListLayout.compactPickerControlWidth - 32, alignment: .leading)
-                .background(.quaternary.opacity(0.32), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .font(SettingsListTypography.rowTitle)
+                .padding(.horizontal, 10)
+                .frame(width: 144, height: 34, alignment: .leading)
+                .background(.quaternary.opacity(0.24), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
                 )
-                .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
             .buttonStyle(.plain)
-            .frame(width: SettingsListLayout.compactPickerControlWidth, alignment: .trailing)
+            .frame(width: 160, alignment: .trailing)
             .help("选择新会话默认权限模式")
         }
         .frame(minHeight: SettingsListLayout.rowMinHeight)
