@@ -264,28 +264,26 @@ struct BrowserWorkspaceView: View {
             .frame(height: 28)
 
             Button(action: { viewModel.toggleBrowserBookmarksPanel() }) {
-                SidebarActionButtonLabel(
-                    title: "收藏夹",
+                BrowserToolbarIconButtonLabel(
                     systemImage: activeURLIsBookmarked ? "star.fill" : "star",
-                    fillsWidth: false,
-                    titleFont: BrowserFloatingTypography.askButton,
-                    iconFont: BrowserFloatingTypography.askButtonIcon
+                    isActive: viewModel.isBrowserBookmarksPanelVisible || activeURLIsBookmarked,
+                    iconFont: .system(size: 16, weight: .semibold)
                 )
             }
-            .buttonStyle(SidebarActionButtonStyle())
+            .buttonStyle(.plain)
             .help(activeURLIsBookmarked ? "当前页已收藏，打开收藏夹" : "打开收藏夹")
+            .accessibilityLabel("收藏夹")
 
             Button(action: { viewModel.toggleBrowserHistoryPanel() }) {
-                SidebarActionButtonLabel(
-                    title: "历史",
+                BrowserToolbarIconButtonLabel(
                     systemImage: viewModel.isBrowserHistoryPanelVisible ? "clock.arrow.circlepath" : "clock",
-                    fillsWidth: false,
-                    titleFont: BrowserFloatingTypography.askButton,
-                    iconFont: BrowserFloatingTypography.askButtonIcon
+                    isActive: viewModel.isBrowserHistoryPanelVisible,
+                    iconFont: .system(size: 16, weight: .semibold)
                 )
             }
-            .buttonStyle(SidebarActionButtonStyle())
+            .buttonStyle(.plain)
             .help("浏览历史")
+            .accessibilityLabel("历史")
 
             Button(action: showPageQuestionPopover) {
                 BrowserAskAIButtonLabel()

@@ -1476,7 +1476,7 @@ final class AppViewModel: ObservableObject {
             settings.input.composerSendShortcut = composerSendShortcut
             settings.permissions.requireApprovalForNetwork = requireApprovalForNetwork
             settings.permissions.requireApprovalForShell = requireApprovalForShell
-            // Workspace roots are session-scoped and saved into Session Capsule.
+                // Workspace roots are session-scoped and saved into Session Capsule.
             // Keep runtime-settings.workspace as a legacy fallback/template only.
             settings.workspace.recentWorkspacePaths = recentWorkspacePaths
             settings.preferences.displayName = userDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
