@@ -36,6 +36,56 @@ struct AgentRuntimePreferenceSettingsTests {
         #expect(preferences.notes == "Prefers concise answers.")
     }
 
+    @Test func fillsEmptyPreferenceFieldsFromSystemDefaultsWithoutOverwritingUserValues() {
+        var preferences = AgentRuntimePreferenceSettings(
+            displayName: "Alex",
+            timezone: "",
+            preferredLanguage: "",
+            city: "London",
+            country: "",
+            notes: "Prefers concise answers."
+        )
+
+        let didChange = preferences.fillEmptyFields(from: AgentRuntimePreferenceSystemDefaults(
+            displayName: "System User",
+            timezone: "Europe/London",
+            preferredLanguage: "English",
+            country: "United Kingdom"
+        ))
+
+        #expect(didChange)
+        #expect(preferences.displayName == "Alex")
+        #expect(preferences.timezone == "Europe/London")
+        #expect(preferences.preferredLanguage == "English")
+        #expect(preferences.city == "London")
+        #expect(preferences.country == "United Kingdom")
+        #expect(preferences.notes == "Prefers concise answers.")
+    }
+
+    @Test func fillEmptyPreferenceFieldsReportsNoChangeWhenEverythingRelevantExists() {
+        var preferences = AgentRuntimePreferenceSettings(
+            displayName: "Alex",
+            timezone: "Europe/London",
+            preferredLanguage: "English",
+            city: "London",
+            country: "United Kingdom",
+            notes: "Prefers concise answers."
+        )
+
+        let didChange = preferences.fillEmptyFields(from: AgentRuntimePreferenceSystemDefaults(
+            displayName: "System User",
+            timezone: "Asia/Shanghai",
+            preferredLanguage: "简体中文",
+            country: "中国"
+        ))
+
+        #expect(!didChange)
+        #expect(preferences.displayName == "Alex")
+        #expect(preferences.timezone == "Europe/London")
+        #expect(preferences.preferredLanguage == "English")
+        #expect(preferences.country == "United Kingdom")
+    }
+
     @Test func promptBuilderIncludesOnlyFilledUserBasicInfo() {
         let preferences = AgentRuntimePreferenceSettings(
             displayName: "诗闻",
