@@ -580,9 +580,9 @@ struct AgentChatComposerView: View {
                         } else {
                             ForEach(connection.models) { model in
                                 Button {
-                                    viewModel.selectLLMModel(model.id, providerMode: connection.providerMode)
+                                    viewModel.selectLLMModel(model.id, providerMode: connection.providerMode, connectionID: connection.id)
                                 } label: {
-                                    if model.id == viewModel.llmSelectedModel && connection.providerMode == viewModel.llmProviderMode {
+                                    if model.id == viewModel.llmSelectedModel && connection.id == viewModel.llmDefaultConnectionID {
                                         Label(model.displayName, systemImage: "checkmark")
                                     } else {
                                         Text(model.displayName)

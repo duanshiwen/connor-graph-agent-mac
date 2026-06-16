@@ -47,13 +47,15 @@ private func makeSessionLLMOverrideStore() throws -> (SQLiteGraphKernelStore, UR
     let override = SessionLLMOverride(
         providerMode: "openai_compatible",
         model: "gpt-4o",
-        baseURLString: "https://api.openai.com/v1"
+        baseURLString: "https://api.openai.com/v1",
+        connectionID: "openai-us"
     )
     let data = try JSONEncoder().encode(override)
     let decoded = try JSONDecoder().decode(SessionLLMOverride.self, from: data)
     #expect(decoded.providerMode == "openai_compatible")
     #expect(decoded.model == "gpt-4o")
     #expect(decoded.baseURLString == "https://api.openai.com/v1")
+    #expect(decoded.connectionID == "openai-us")
 }
 
 @Test func sessionLLMOverrideDecodesWithNilBaseURL() throws {
@@ -64,6 +66,7 @@ private func makeSessionLLMOverrideStore() throws -> (SQLiteGraphKernelStore, UR
     #expect(decoded.providerMode == "openai_compatible")
     #expect(decoded.model == "claude-sonnet-4-20250514")
     #expect(decoded.baseURLString == nil)
+    #expect(decoded.connectionID == nil)
 }
 
 // MARK: - AppSessionStateSnapshot with llmOverride

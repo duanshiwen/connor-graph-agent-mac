@@ -7,13 +7,14 @@ extension AppViewModel {
 static func makeLLMProvider(settingsRepository: AppLLMSettingsRepository) -> AnyLLMProvider {
     do {
         let settings = try settingsRepository.loadSettings()
-        switch settings.providerMode {
+        let connection = settings.defaultConnection
+        switch connection.providerMode {
         case .governedClaudeSidecar:
             return AnyLLMProvider { _, _ in
                 throw AppGraphAgentRuntimeFactoryError.sidecarRequiresSessionManager
             }
         case .openAICompatible:
-            guard let config = try settingsRepository.openAICompatibleConfig() else {
+            guard let config = try settingsRepository.openAICompatibleConfig(connectionID: connection.id) else {
                 return AnyLLMProvider { _, _ in
                     throw OpenAICompatibleProviderError.missingAPIKey
                 }
