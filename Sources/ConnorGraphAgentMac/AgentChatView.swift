@@ -970,7 +970,6 @@ private struct AgentSessionFilterBar: View {
             HStack(spacing: AgentChatLayout.spaceS) {
                 FilterButton(title: "Inbox", isSelected: viewModel.sessionListFilter == .inbox) { viewModel.setSessionListFilter(.inbox) }
                 FilterButton(title: "All", isSelected: viewModel.sessionListFilter == .all) { viewModel.setSessionListFilter(.all) }
-                FilterButton(title: "Archive", isSelected: viewModel.sessionListFilter == .archived) { viewModel.setSessionListFilter(.archived) }
             }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: AgentChatLayout.spaceS) {
@@ -1135,11 +1134,6 @@ private struct AgentChatInspectorView: View {
 
             HStack(spacing: AgentChatLayout.spaceS) {
                 Button(session.governance.isFlagged ? "取消标记" : "标记") { viewModel.toggleSelectedSessionFlag() }
-                if session.governance.isArchived {
-                    Button("恢复") { viewModel.restoreSelectedSession() }
-                } else {
-                    Button("归档") { viewModel.archiveSelectedSession() }
-                }
             }
             .buttonStyle(.bordered)
             .controlSize(.regular)
