@@ -301,6 +301,7 @@ final class AppViewModel: ObservableObject {
     private var admissionHoldQueueRepository: AppGraphAdmissionHoldQueueRepository?
     private var memoryChangeLogRepository: AppGraphMemoryChangeLogRepository?
     private var chatSessionRepository: AppChatSessionRepository?
+    private var governanceConfigRepository: AppSessionGovernanceConfigRepository?
     private var productOSRegistryRepository: AppProductOSRegistryRepository?
     private var automationRepository: AppProductOSAutomationRepository?
     private var sourceRuntimeRepository: AppMCPSourceRuntimeRepository?
@@ -882,6 +883,7 @@ final class AppViewModel: ObservableObject {
         self.llmSettingsRepository = llmSettingsRepository
         self.llmProviderHealthChecker = AppLLMProviderHealthChecker(settingsRepository: llmSettingsRepository)
         if let storagePaths {
+            self.governanceConfigRepository = AppSessionGovernanceConfigRepository(configDirectory: storagePaths.configDirectory)
             self.productOSRegistryRepository = AppProductOSRegistryRepository(storagePaths: storagePaths)
             self.automationRepository = AppProductOSAutomationRepository(storagePaths: storagePaths)
             self.sourceRuntimeRepository = AppMCPSourceRuntimeRepository(storagePaths: storagePaths)
@@ -1569,6 +1571,40 @@ final class AppViewModel: ObservableObject {
             settings.preferences.notes = userPreferenceNotes.trimmingCharacters(in: .whitespacesAndNewlines)
             try runtimeSettingsRepository?.save(settings)
             appSettingsMessage = "设置已保存。"
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func upsertStatusDefinition(_ definition: AgentSessionStatusDefinition) {
+        var config = governanceConfig
+        if let index = config.statuses.firstIndex(where: { $0.id == definition.id }) {
+            config.statuses[index] = definition
+        } else {
+            config.statuses.append(definition)
+        }
+        saveGovernanceConfig(config, successMessage: "状态定义已保存。")
+    }
+
+    func upsertLabelDefinition(_ definition: AgentSessionLabelDefinition) {
+        var config = governanceConfig
+        if let index = config.labels.firstIndex(where: { $0.id == definition.id }) {
+            config.labels[index] = definition
+        } else {
+            config.labels.append(definition)
+        }
+        saveGovernanceConfig(config, successMessage: "标签定义已保存。")
+    }
+
+    private func saveGovernanceConfig(_ config: AppSessionGovernanceConfig, successMessage: String) {
+        do {
+            let normalizedConfig = AppSessionGovernanceConfig(statuses: config.statuses, labels: config.labels)
+            try governanceConfigRepository?.save(normalizedConfig)
+            governanceConfig = normalizedConfig
+            chatSessionRepository?.governanceConfig = normalizedConfig
+            automationConfig = try automationRepository?.loadOrCreateDefault(governanceConfig: normalizedConfig) ?? automationConfig
+            appSettingsMessage = successMessage
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)

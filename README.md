@@ -946,6 +946,8 @@ AI
 偏好
 ```
 
+会话侧栏的"所有会话"状态列表和"标签"列表支持 macOS 右键菜单:状态项可"编辑状态…"或"创建状态…",标签项可"编辑标签…"或"创建标签…"。这些操作写入 `config/session-governance.json`,并立即刷新当前 AppViewModel、会话标签菜单、侧栏筛选计数和 automation governance mirror。当前底层会话状态仍由内置 `AgentSessionStatus` 枚举约束;因此自定义状态定义先作为治理配置维护能力落地,真正把任意自定义状态用于会话状态切换需要后续将 session status storage 从 enum 升级为 string-backed status ID。
+
 核心视图:
 
 ```text
@@ -1252,6 +1254,10 @@ P1/P2 combined optimization final targeted regression status (2026-06-14 14:10 G
 - swift test --filter PhaseGCraftGradeNativeUITests: passed, 3 tests.
 - swift test --filter CommercialReadinessReleaseGateTests: passed, 4 tests.
 - SwiftPM `Assets.xcassets` unhandled-file warning is resolved by declaring `.process("Assets.xcassets")` on the mac app executable target.
+
+Status / label context menu targeted regression (2026-06-16 17:05 GMT+8):
+- swift test --filter ProductOSPhase1Tests: passed, 5 tests.
+- SwiftPM debug build completed while compiling `AppShellViews.swift`, `ConnorGraphAgentMacApp.swift`, and `ConnorSettingsViews.swift`.
 ```
 
 ---
