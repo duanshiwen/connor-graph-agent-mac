@@ -491,7 +491,7 @@ private struct AgentChatSessionRow: View {
                         .foregroundStyle(.secondary)
                 }
                 if !row.labels.isEmpty {
-                    FlowLikeChips(values: row.labels.prefix(3).map(\.displayText))
+                    FlowLikeChips(values: row.labels.prefix(3).map(\.id))
                 }
             }
             .padding(.horizontal, AgentChatLayout.spaceM)
@@ -1197,11 +1197,7 @@ private struct AgentChatInspectorView: View {
     }
 
     private func displayText(for label: AgentSessionLabel) -> String {
-        guard let definition = viewModel.governanceConfig.definition(for: label.id) else {
-            return label.displayText
-        }
-        guard let value = label.value else { return definition.name }
-        return "\(definition.name): \(value)"
+        viewModel.governanceConfig.definition(for: label.id)?.name ?? label.id
     }
 
     private var artifacts: some View {
