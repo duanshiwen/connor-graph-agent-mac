@@ -1153,8 +1153,8 @@ AI 设置页支持:
 - Claude 连接走 Claude SDK sidecar:验证 sidecar executable 存在且可执行,禁止 `allowAll`;OAuth token 保存到 credential store,运行 sidecar 时通过 `CLAUDE_CODE_OAUTH_TOKEN` / refresh token 环境变量注入,不让 Claude SDK 拥有 Connor session / permission / audit / graph state
 - Codex · ChatGPT Plus 连接走 ChatGPT/Codex OAuth:浏览器回调拿到 OAuth tokens,再用 `id_token` token-exchange 派生 OpenAI API key,随后复用 Connor 原生 OpenAI-Compatible runtime 做真实 health check;OAuth tokens 和派生 API key 都只进 credential store
 - GitHub Copilot 连接走 GitHub device flow:拿到 Copilot token 后构造 Connor 原生 HTTP runtime config,补充 Copilot integration headers,并用 chat/completions health check 验证后才保存
-- DeepSeek 和 Xiaomi MiMo 作为 Add Connection 一等入口:DeepSeek 默认 `https://api.deepseek.com` + `deepseek-v4-flash`;Xiaomi MiMo 默认 `https://api.xiaomimimo.com/v1` + `mimo-v2.5-pro`,并按官方 OpenAI 示例使用 `api-key` 请求头
-- "中国常用模型"入口复用 provider preset 表单,内置阿里百炼/Qwen、火山方舟/豆包、Moonshot/Kimi、智谱 GLM、MiniMax、阶跃星辰等国内 OpenAI-compatible 服务商
+- DeepSeek 和 Xiaomi MiMo 作为 Add Connection 一等入口:DeepSeek 默认 `https://api.deepseek.com`,可在 `deepseek-v4-flash` / `deepseek-v4-pro` 中选择模型;Xiaomi MiMo 默认 `https://api.xiaomimimo.com/v1`,可在 `mimo-v2.5-pro` / `mimo-v2.5` / `mimo-v2-omni` / `mimo-v2-flash` 中选择文本生成模型,并按官方 OpenAI 示例使用 `api-key` 请求头;这些特定入口隐藏连接名、Endpoint 和 raw model 输入,只让用户选择模型并填写 API Key
+- "中国常用模型"入口使用 curated provider 表单,内置阿里百炼/Qwen、火山方舟/豆包、Moonshot/Kimi、智谱 GLM、MiniMax、阶跃星辰等国内 OpenAI-compatible 服务商;用户选择服务商与模型并填写 API Key,Endpoint 和认证头由 preset 管理;只有"使用其他提供商"保留 Endpoint、Protocol 和 raw model 高级自定义字段
 - 每个连接拥有独立名称、模型列表、selected model、Base URL / Sidecar 配置;API Key / OAuth token 不会明文写入 JSON 设置文件
 - 全局默认连接用于新聊天;composer 模型选择器可把单个会话覆盖到某个具体连接的某个模型
 - 默认权限、外观、输入和用户偏好
