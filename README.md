@@ -521,8 +521,17 @@ Sources/ConnorGraphAgentMac/AgentChatMessageRows.swift
 Sources/ConnorGraphAgentMac/AgentChatProcessRows.swift
 Sources/ConnorGraphAgentMac/AgentActivityDetailViews.swift
 Sources/ConnorGraphAgentMac/AgentChatComposerView.swift
+Sources/ConnorGraphAgentMac/AgentComposerOptionBadge.swift
+Sources/ConnorGraphAgentMac/AgentComposerTextViewBridge.swift
 Sources/ConnorGraphAgentMac/BrowserWorkspaceView.swift
 Sources/ConnorGraphAgentMac/BrowserWebViewRepresentable.swift
+Sources/ConnorGraphAgentMac/BrowserHistoryPanelView.swift
+Sources/ConnorGraphAgentMac/BrowserBookmarksPanelView.swift
+Sources/ConnorGraphAgentMac/WorkspaceDiagnosticViews.swift
+Sources/ConnorGraphAgentMac/AgentPendingApprovalReviewView.swift
+Sources/ConnorGraphAgentMac/GraphWriteCandidateReviewView.swift
+Sources/ConnorGraphAgentMac/MemoryChangeLogView.swift
+Sources/ConnorGraphAgentMac/GraphExtractionDiagnosticsView.swift
 Sources/ConnorGraphAgentMac/ConnorSettingsViews.swift
 Sources/ConnorGraphAgentMac/SettingsAIViews.swift
 Sources/ConnorGraphAgentMac/SettingsGovernanceViews.swift
@@ -533,7 +542,7 @@ Sources/ConnorGraphAgentMac/SourceSkillAutomationRuntimeViews.swift
 Sources/ConnorGraphAgentMac/EmptyGraphHybridSearchService.swift
 ```
 
-重构边界说明:当前 Native UI 代码按 App entry / AppViewModel runtime state / App shell panes / Chat rendering rows / Chat design system / Browser WebView bridge / Settings 子域进行文件级拆分,但不改变产品布局、Session OS、Policy Engine、Graph Memory、Source Platform、Attachment Store 或 Browser Workspace 的运行语义。`ConnorGraphAgentMacApp.swift` 只保留 app entry 与 menu command wiring;`AppViewModel.swift` 仍作为同 target 的主状态对象持有现有运行状态,避免为了拆分而扩大私有状态访问级别。App shell 的顶部搜索、主侧栏、列表/详情 panes 和共享 sidebar row 单独维护;Chat activity 的 Markdown preview、message rows、process rows 和 detail overlay 单独维护。Settings 通用 row、AI 连接、治理配置、快捷键和 workspace roots 分文件维护;Browser 的 `WKWebView` representable 与 selection bridge 独立到 `BrowserWebViewRepresentable.swift`,继续保持 Connor-owned WebKit 治理边界。
+重构边界说明:当前 Native UI 代码按 App entry / AppViewModel runtime state / App shell panes / Chat rendering rows / Chat composer controls / Chat design system / Browser WebView bridge / Browser history-bookmarks panels / Diagnostics panels / Settings 子域进行文件级拆分,但不改变产品布局、Session OS、Policy Engine、Graph Memory、Source Platform、Attachment Store 或 Browser Workspace 的运行语义。`ConnorGraphAgentMacApp.swift` 只保留 app entry 与 menu command wiring;`AppViewModel.swift` 仍作为同 target 的主状态对象持有现有运行状态,避免为了拆分而扩大私有状态访问级别。App shell 的顶部搜索、主侧栏、列表/详情 panes 和共享 sidebar row 单独维护;Chat activity 的 Markdown preview、message rows、process rows 和 detail overlay 单独维护;Composer 的 option badge 与 `NSTextView` bridge 独立维护。Settings 通用 row、AI 连接、治理配置、快捷键和 workspace roots 分文件维护;Browser 的 `WKWebView` representable 与 selection bridge 独立到 `BrowserWebViewRepresentable.swift`,history/bookmarks panels 分文件维护;Diagnostics 的 pending approval、graph write candidate、memory change log 和 extraction diagnostics 分文件维护。
 
 ### ConnorCLI
 
