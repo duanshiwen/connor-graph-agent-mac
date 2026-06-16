@@ -118,7 +118,7 @@ struct ConnorSettingsDetailView: View {
                     case .statuses:
                         SettingsStatusesSection(viewModel: viewModel)
                     case .shortcuts:
-                        SettingsShortcutsSection()
+                        SettingsShortcutsSection(viewModel: viewModel)
                     case .preferences:
                         SettingsPreferencesSection(viewModel: viewModel)
                     }
@@ -1275,23 +1275,192 @@ private struct AIConnectionEntryRow: View {
 
 private struct SettingsPermissionsSection: View {
     @ObservedObject var viewModel: AppViewModel
+    @State private var isShowingPolicyDetails = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
-            SettingsGroup(title: "默认权限") {
-                SettingsPickerRow(title: "新会话权限", subtitle: "控制工具调用和写入操作", selection: $viewModel.defaultPermissionMode) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("控制新会话默认能做什么。")
+                    .font(.title3)
+                    .foregroundStyle(.primary)
+                Text("运行中的会话仍可在输入框下方的权限按钮临时切换；项目目录在每个会话顶部的“当前会话 Workspace”中配置。")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            SettingsGroup(title: "新会话默认权限") {
+                SettingsPickerRow(title: "权限模式", subtitle: "作为新会话和重建会话的默认 Policy Engine 模式。", selection: $viewModel.defaultPermissionMode) {
                     ForEach(AgentPermissionMode.allCases.filter { $0 != .allowAll }, id: \.self) { mode in
                         Text(mode.displayName).tag(mode)
                     }
                 }
                 Divider()
-                SettingsToggleRow(title: "网络访问需要审批", subtitle: "外部网络请求默认进入审批流程。", isOn: $viewModel.requireApprovalForNetwork)
-                Divider()
-                SettingsToggleRow(title: "Shell 写入需要审批", subtitle: "本地命令涉及写入时默认要求确认。", isOn: $viewModel.requireApprovalForShell)
+                PermissionModeSummaryRow(mode: viewModel.defaultPermissionMode)
             }
-            Text("项目工作目录已改为每个会话内设置：打开任意会话，在会话顶部的 ‘当前会话 Workspace’ 中配置。")
+
+            SettingsGroup(title: "当前真实生效") {
+                PermissionBoundaryRow(systemImage: "checkmark.shield", title: "权限模式会影响新会话", message: "这里选择的模式会写入 runtime-settings.json → loop.permissionMode，并用于创建或重建 NativeSessionManager。")
+                Divider()
+                PermissionBoundaryRow(systemImage: "network", title: "网络访问默认不单独审批", message: "在“询问”和“执行”模式下，externalNetwork 当前由 Policy Engine 默认通过；只读模式仍会拒绝外部网络。")
+                Divider()
+                PermissionBoundaryRow(systemImage: "terminal", title: "Shell 由风险分类决定", message: "只读 shell、workspace shell、network shell 和 destructive shell 由 LocalShellCommandPolicy 分类后交给 Policy Engine 决策。")
+            }
+
+            SettingsGroup(title: "安全边界") {
+                PermissionBoundaryRow(systemImage: "lock.shield", title: "不提供全部允许", message: "allowAll 不在界面中开放。Claude Sidecar 的 bypassPermissions 只表示 Connor 接管审批，不代表无限制授权。")
+                Divider()
+                PermissionBoundaryRow(systemImage: "folder", title: "Workspace 属于会话", message: "Primary root 和 additional roots 在会话顶部设置，不在全局权限页管理。")
+                Divider()
+                PermissionBoundaryRow(systemImage: "person.crop.circle.badge.xmark", title: "本地单用户边界", message: "Connor 当前是单一 Home / Runtime Root，不做团队成员、组织角色或多用户权限。")
+            }
+
+            DisclosureGroup(isExpanded: $isShowingPolicyDetails) {
+                VStack(alignment: .leading, spacing: 10) {
+                    PermissionPolicyDetailRow(title: "只读", message: "允许读取图谱、会话、workspace 文件、搜索文件、只读 shell、模型调用和本地科学计算；拒绝写入、删除、外部网络和危险 shell。")
+                    PermissionPolicyDetailRow(title: "询问", message: "读取、普通模型调用、graph write proposal、外部网络默认允许；文件写入/编辑/删除、graph commit/删除、昂贵模型调用、workspace/network/destructive shell 进入审批。")
+                    PermissionPolicyDetailRow(title: "执行", message: "文件写入/编辑、graph commit、workspace shell 可自动通过；图谱删除、文件删除、network shell、destructive shell 和昂贵模型调用仍需审批。")
+                }
+                .padding(.top, 8)
+            } label: {
+                Label("查看当前策略说明", systemImage: "list.bullet.rectangle")
+                    .font(.subheadline.weight(.medium))
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.14), lineWidth: 1)
+            )
+        }
+    }
+}
+
+private struct PermissionModeSummaryRow: View {
+    var mode: AgentPermissionMode
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 28, height: 28)
+                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(mode.displayName)
+                    .font(.subheadline.weight(.semibold))
+                Text(summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(minHeight: 52, alignment: .leading)
+    }
+
+    private var systemImage: String {
+        switch mode {
+        case .readOnly:
+            return "eye"
+        case .askToWrite:
+            return "questionmark.circle"
+        case .trustedWrite:
+            return "bolt.circle"
+        case .allowAll:
+            return "exclamationmark.triangle"
+        }
+    }
+
+    private var tint: Color {
+        switch mode {
+        case .readOnly:
+            return .blue
+        case .askToWrite:
+            return .orange
+        case .trustedWrite:
+            return .green
+        case .allowAll:
+            return .red
+        }
+    }
+
+    private var summary: String {
+        switch mode {
+        case .readOnly:
+            return "适合探索、阅读和分析。写入、删除、网络和高风险 shell 会被拒绝。"
+        case .askToWrite:
+            return "适合日常协作。读取和普通工具可直接运行，写入、删除和高风险操作会先询问。"
+        case .trustedWrite:
+            return "适合你明确要让 Connor 连续执行修改时使用。普通写入和 workspace shell 可自动通过，删除和危险操作仍需审批。"
+        case .allowAll:
+            return "内部保留模式，不在产品界面中开放。"
+        }
+    }
+}
+
+private struct PermissionNoteRow: View {
+    var systemImage: String
+    var title: String
+    var message: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: systemImage)
+                .foregroundStyle(.secondary)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct PermissionBoundaryRow: View {
+    var systemImage: String
+    var title: String
+    var message: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 24, height: 24)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.subheadline.weight(.medium))
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(minHeight: 46, alignment: .leading)
+    }
+}
+
+private struct PermissionPolicyDetailRow: View {
+    var title: String
+    var message: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+            Text(message)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -1893,20 +2062,99 @@ private func settingsColorStorageName(from color: Color) -> String {
 }
 
 private struct SettingsShortcutsSection: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    private let generalActions: [AgentRuntimeShortcutAction] = [
+        .openCommandPalette,
+        .newSession,
+        .toggleBrowser,
+        .focusTopSearch,
+        .openSettings
+    ]
+
+    private let browserActions: [AgentRuntimeShortcutAction] = [
+        .focusBrowserAddress,
+        .newBrowserTab,
+        .closeBrowserTab,
+        .browserBack,
+        .browserForward,
+        .toggleBrowserBookmarks,
+        .toggleBrowserHistory
+    ]
+
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
-            SettingsGroup(title: "通用") {
-                ShortcutRow(title: "新建聊天", keys: ["⌘", "N"])
-                ShortcutRow(title: "设置", keys: ["⌘", ","])
-                ShortcutRow(title: "搜索", keys: ["⌘", "F"])
-                ShortcutRow(title: "命令面板", keys: ["⌘", "/"])
+            SettingsGroup(title: "全局") {
+                ForEach(generalActions.indices, id: \.self) { index in
+                    if index > 0 { Divider() }
+                    EditableShortcutRow(
+                        title: title(for: generalActions[index]),
+                        subtitle: subtitle(for: generalActions[index]),
+                        shortcut: viewModel.shortcut(for: generalActions[index]),
+                        onRecord: { viewModel.beginRecordingShortcut(for: generalActions[index]) },
+                        onReset: { viewModel.resetShortcut(generalActions[index]) }
+                    )
+                }
             }
-            SettingsGroup(title: "导航") {
-                ShortcutRow(title: "聚焦侧栏", keys: ["⌘", "1"])
-                ShortcutRow(title: "聚焦会话列表", keys: ["⌘", "2"])
-                ShortcutRow(title: "聚焦聊天", keys: ["⌘", "3"])
-                ShortcutRow(title: "聚焦下一块区域", keys: ["Tab"])
+
+            SettingsGroup(title: "Browser Workspace") {
+                ForEach(browserActions.indices, id: \.self) { index in
+                    if index > 0 { Divider() }
+                    EditableShortcutRow(
+                        title: title(for: browserActions[index]),
+                        subtitle: subtitle(for: browserActions[index]),
+                        shortcut: viewModel.shortcut(for: browserActions[index]),
+                        onRecord: { viewModel.beginRecordingShortcut(for: browserActions[index]) },
+                        onReset: { viewModel.resetShortcut(browserActions[index]) }
+                    )
+                }
             }
+
+            Text("修改后会写入 runtime-settings.json,并由菜单命令或 Browser Workspace 局部 key monitor 真实生效。Governance / Source / Skill 等低频入口不在此页暴露快捷键,避免占用过多 ⌘ 数字键。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .sheet(item: $viewModel.recordingShortcutAction) { action in
+            ShortcutRecorderSheet(
+                title: title(for: action),
+                currentShortcut: viewModel.shortcut(for: action),
+                onCancel: { viewModel.recordingShortcutAction = nil },
+                onSave: { shortcut in viewModel.updateShortcut(action, shortcut: shortcut) }
+            )
+        }
+    }
+
+    private func title(for action: AgentRuntimeShortcutAction) -> String {
+        switch action {
+        case .openCommandPalette: "命令面板"
+        case .newSession: "新建聊天"
+        case .toggleBrowser: "显示 / 隐藏浏览器"
+        case .focusTopSearch: "聚焦顶部搜索"
+        case .openSettings: "打开设置"
+        case .focusBrowserAddress: "聚焦地址栏"
+        case .newBrowserTab: "新建浏览器标签"
+        case .closeBrowserTab: "关闭当前标签"
+        case .browserBack: "后退"
+        case .browserForward: "前进"
+        case .toggleBrowserBookmarks: "打开 / 关闭书签"
+        case .toggleBrowserHistory: "打开 / 关闭历史"
+        }
+    }
+
+    private func subtitle(for action: AgentRuntimeShortcutAction) -> String {
+        switch action {
+        case .openCommandPalette: "打开 Connor 命令面板。"
+        case .newSession: "创建新会话并进入聊天。"
+        case .toggleBrowser: "在当前会话中切换内置浏览器工作区。"
+        case .focusTopSearch: "聚焦应用顶部的会话搜索框。"
+        case .openSettings: "打开设置中心。"
+        case .focusBrowserAddress: "Browser Workspace 可见时聚焦地址栏。"
+        case .newBrowserTab: "Browser Workspace 可见时创建新标签。"
+        case .closeBrowserTab: "Browser Workspace 可见时关闭当前标签,不关闭 macOS 窗口。"
+        case .browserBack: "Browser Workspace 当前标签后退。"
+        case .browserForward: "Browser Workspace 当前标签前进。"
+        case .toggleBrowserBookmarks: "切换浏览器书签面板。"
+        case .toggleBrowserHistory: "切换浏览器历史面板。"
         }
     }
 }
@@ -2115,5 +2363,164 @@ private struct ShortcutRow: View {
             }
         }
         .frame(minHeight: 38)
+    }
+}
+
+// MARK: - Shortcut editing support
+
+extension AgentRuntimeShortcutAction {
+    var supportsGlobalCommandMenu: Bool {
+        switch self {
+        case .openCommandPalette, .newSession, .toggleBrowser, .focusTopSearch, .openSettings:
+            true
+        default:
+            false
+        }
+    }
+}
+
+extension AgentRuntimeKeyboardShortcut {
+    var keyEquivalent: KeyEquivalent {
+        switch key.lowercased() {
+        case ",": return ","
+        case ".": return "."
+        case "/": return "/"
+        case "[": return "["
+        case "]": return "]"
+        default:
+            return KeyEquivalent(Character(String(key.lowercased().prefix(1))))
+        }
+    }
+
+    var eventModifierFlags: EventModifiers {
+        var flags: EventModifiers = []
+        if command { flags.insert(.command) }
+        if shift { flags.insert(.shift) }
+        if option { flags.insert(.option) }
+        if control { flags.insert(.control) }
+        return flags
+    }
+
+    static func from(event: NSEvent) -> AgentRuntimeKeyboardShortcut? {
+        let flags = event.modifierFlags
+        let character = event.charactersIgnoringModifiers?.lowercased()
+        guard let rawKey = character, !rawKey.isEmpty else { return nil }
+        let supported = [",", ".", "/", "[", "]"]
+        let key: String
+        if let scalar = rawKey.unicodeScalars.first, CharacterSet.alphanumerics.contains(scalar) {
+            key = String(rawKey.prefix(1))
+        } else if supported.contains(String(rawKey.prefix(1))) {
+            key = String(rawKey.prefix(1))
+        } else {
+            return nil
+        }
+        return AgentRuntimeKeyboardShortcut(
+            key: key,
+            command: flags.contains(.command),
+            shift: flags.contains(.shift),
+            option: flags.contains(.option),
+            control: flags.contains(.control)
+        )
+    }
+}
+
+struct ShortcutRecorderSheet: View {
+    var title: String
+    var currentShortcut: AgentRuntimeKeyboardShortcut
+    var onCancel: () -> Void
+    var onSave: (AgentRuntimeKeyboardShortcut) -> Void
+
+    @State private var capturedShortcut: AgentRuntimeKeyboardShortcut?
+    @State private var message: String = "按下新的快捷键。建议至少包含 ⌘。"
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("修改快捷键")
+                .font(.headline)
+            Text(title)
+                .font(.subheadline.weight(.medium))
+            ZStack {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+                Text((capturedShortcut ?? currentShortcut).displayText)
+                    .font(.system(size: 28, weight: .semibold, design: .rounded))
+                    .monospaced()
+            }
+            .frame(height: 86)
+            .background(ShortcutCaptureView { shortcut in
+                capturedShortcut = shortcut
+                message = shortcut.command ? "已捕捉: \(shortcut.displayText)" : "已捕捉: \(shortcut.displayText)。建议包含 ⌘。"
+            })
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack {
+                Button("恢复当前") { capturedShortcut = currentShortcut }
+                Spacer()
+                Button("取消", action: onCancel)
+                Button("保存") { onSave(capturedShortcut ?? currentShortcut) }
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(22)
+        .frame(width: 420)
+    }
+}
+
+private struct ShortcutCaptureView: NSViewRepresentable {
+    var onCapture: (AgentRuntimeKeyboardShortcut) -> Void
+
+    func makeNSView(context: Context) -> CaptureView {
+        let view = CaptureView()
+        view.onCapture = onCapture
+        DispatchQueue.main.async { view.window?.makeFirstResponder(view) }
+        return view
+    }
+
+    func updateNSView(_ nsView: CaptureView, context: Context) {
+        nsView.onCapture = onCapture
+        DispatchQueue.main.async { nsView.window?.makeFirstResponder(nsView) }
+    }
+
+    final class CaptureView: NSView {
+        var onCapture: ((AgentRuntimeKeyboardShortcut) -> Void)?
+        override var acceptsFirstResponder: Bool { true }
+
+        override func keyDown(with event: NSEvent) {
+            if let shortcut = AgentRuntimeKeyboardShortcut.from(event: event) {
+                onCapture?(shortcut)
+            } else {
+                super.keyDown(with: event)
+            }
+        }
+    }
+}
+
+struct EditableShortcutRow: View {
+    var title: String
+    var subtitle: String
+    var shortcut: AgentRuntimeKeyboardShortcut
+    var onRecord: () -> Void
+    var onReset: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.subheadline.weight(.medium))
+                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text(shortcut.displayText)
+                .font(.caption.weight(.semibold).monospaced())
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(.quaternary.opacity(0.30), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            Button("修改", action: onRecord)
+                .buttonStyle(.bordered)
+            Button("默认", action: onReset)
+                .buttonStyle(.borderless)
+        }
+        .frame(minHeight: 50)
     }
 }

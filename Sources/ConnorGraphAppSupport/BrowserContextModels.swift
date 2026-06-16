@@ -70,7 +70,13 @@ public enum BrowserPopoverDismissalPolicy: Equatable, Sendable {
 
 public enum BrowserKeyboardShortcut: Equatable, Sendable {
     case closeSelectionPopover
+    case focusAddress
+    case newTab
     case closeSelectedTab
+    case goBack
+    case goForward
+    case toggleBookmarks
+    case toggleHistory
 }
 
 public struct BrowserKeyboardShortcutResolver: Sendable {
@@ -83,17 +89,32 @@ public struct BrowserKeyboardShortcutResolver: Sendable {
         isShiftDown: Bool = false,
         isControlDown: Bool = false,
         isOptionDown: Bool = false,
-        hasSelectionPopover: Bool = false
+        hasSelectionPopover: Bool = false,
+        settings: AgentRuntimeShortcutSettings = AgentRuntimeShortcutSettings()
     ) -> BrowserKeyboardShortcut? {
         if isEscape, hasSelectionPopover {
             return .closeSelectionPopover
         }
 
-        guard isCommandDown, !isShiftDown, !isControlDown, !isOptionDown else { return nil }
-        if character?.lowercased() == "w" {
-            return .closeSelectedTab
-        }
-        return nil
+        let candidates: [(AgentRuntimeShortcutAction, BrowserKeyboardShortcut)] = [
+            (.focusBrowserAddress, .focusAddress),
+            (.newBrowserTab, .newTab),
+            (.closeBrowserTab, .closeSelectedTab),
+            (.browserBack, .goBack),
+            (.browserForward, .goForward),
+            (.toggleBrowserBookmarks, .toggleBookmarks),
+            (.toggleBrowserHistory, .toggleHistory)
+        ]
+
+        return candidates.first { action, _ in
+            settings.shortcut(for: action).matches(
+                character: character,
+                isCommandDown: isCommandDown,
+                isShiftDown: isShiftDown,
+                isControlDown: isControlDown,
+                isOptionDown: isOptionDown
+            )
+        }?.1
     }
 }
 
