@@ -7,7 +7,7 @@ import ConnorGraphAgent
 import ConnorGraphStore
 import ConnorGraphAppSupport
 
-private enum SettingsListTypography {
+enum SettingsListTypography {
     // Mirror the chat detail typography scale so settings feels like part of the
     // same macOS app. Apple HIG recommends preserving hierarchy with size,
     // weight, and color while keeping macOS body text legible around 13 pt+.
@@ -22,7 +22,7 @@ private enum SettingsListTypography {
     static let largeIcon: Font = .system(size: 22, weight: .semibold)
 }
 
-private enum SettingsListLayout {
+enum SettingsListLayout {
     static let spaceXS = AgentChatLayout.spaceXS
     static let spaceS = AgentChatLayout.spaceS
     static let spaceM = AgentChatLayout.spaceM
@@ -40,89 +40,10 @@ private enum SettingsListLayout {
     static let compactRowMinHeight: CGFloat = 38
     static let prominentRowMinHeight: CGFloat = 58
     static let fieldHeight = AgentChatLayout.hitTargetSize
+    static let pickerControlWidth: CGFloat = 260
+    static let compactPickerControlWidth: CGFloat = 220
     static let iconButtonSize = AgentChatLayout.iconButtonSize
     static let optionIconSize = AgentChatLayout.primaryButtonSize
-}
-
-struct LLMSettingsView: View {
-    @ObservedObject var viewModel: AppViewModel
-
-    var body: some View {
-        Form {
-            Picker("模型提供方", selection: $viewModel.llmProviderMode) {
-                Text("OpenAI 兼容").tag(AppLLMProviderMode.openAICompatible)
-                Text("Claude Sidecar").tag(AppLLMProviderMode.governedClaudeSidecar)
-            }
-            .pickerStyle(.segmented)
-
-            if viewModel.llmProviderMode == .governedClaudeSidecar {
-                GroupBox("Governed Claude SDK Sidecar") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        TextField("Sidecar executable path，例如 /usr/local/bin/node", text: $viewModel.sidecarExecutablePath)
-                            .textFieldStyle(.roundedBorder)
-                        TextField("Sidecar arguments，例如 sidecars/claude-agent-engine/claude-sidecar.mjs", text: $viewModel.sidecarArguments)
-                            .textFieldStyle(.roundedBorder)
-                        TextField("Working directory", text: $viewModel.sidecarWorkingDirectoryPath)
-                            .textFieldStyle(.roundedBorder)
-                        Picker("康纳同学权限模式", selection: $viewModel.sidecarPermissionMode) {
-                            Text("只读").tag(AgentPermissionMode.readOnly)
-                            Text("询问").tag(AgentPermissionMode.askToWrite)
-                            Text("执行").tag(AgentPermissionMode.trustedWrite)
-                        }
-                        .pickerStyle(.segmented)
-                        Text("安全边界：SDK permissionMode 固定为 bypassPermissions；康纳同学保留 session、pending approval、audit、graph memory 和 product state 主权。Sidecar 模式不允许 allowAll。")
-                            .font(SettingsListTypography.rowCaption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            } else {
-                TextField("Base URL", text: $viewModel.llmBaseURLString)
-                    .textFieldStyle(.roundedBorder)
-                TextField("模型列表（逗号分隔）", text: $viewModel.llmModel)
-                    .textFieldStyle(.roundedBorder)
-                SecureField("API Key", text: $viewModel.llmAPIKeyInput)
-                    .textFieldStyle(.roundedBorder)
-            }
-
-            HStack {
-                Button("保存设置") { viewModel.saveLLMSettings() }
-                Button("清除 API Key") { viewModel.clearLLMAPIKey() }
-                Button("重新加载") { viewModel.loadLLMSettings() }
-                Button(viewModel.isTestingLLMConnection ? "测试中…" : "测试连接") {
-                    Task { await viewModel.testLLMConnection() }
-                }
-                .disabled(viewModel.isTestingLLMConnection)
-            }
-
-            Text(viewModel.llmHasAPIKey ? "API Key：已本地加密保存" : "API Key：尚未保存")
-                .foregroundStyle(viewModel.llmHasAPIKey ? .green : .secondary)
-
-            GroupBox {
-                VStack(alignment: .leading, spacing: 6) {
-                    Label("安全提示：API Key 会保存到康纳同学 Home 的本地加密凭据文件", systemImage: "lock.shield")
-                        .font(SettingsListTypography.rowCaptionEmphasized)
-                    Text("为减少钥匙串弹窗，康纳同学会使用本机生成的 master key 对 API Key 进行 AES-GCM 加密，并写入 Application Support/Connor/config/credentials。")
-                    Text("API Key 不会以明文写入应用设置、项目文件或 Git 仓库；删除 API Key 会移除对应加密凭据文件。")
-                    Text("这是本机本地加密存储，不依赖 macOS 钥匙串授权弹窗。")
-                }
-                .font(SettingsListTypography.rowCaption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            if let message = viewModel.llmSettingsMessage {
-                Text(message).foregroundStyle(.secondary)
-            }
-            if let message = viewModel.llmHealthCheckMessage {
-                Text(message).foregroundStyle(message.contains("OK") || message.contains("available") ? .green : .secondary)
-            }
-            if let error = viewModel.errorMessage {
-                Text(error).foregroundStyle(.red)
-            }
-        }
-        .padding()
-        .navigationTitle("模型设置")
-    }
 }
 
 struct ConnorSettingsDetailView: View {
@@ -131,16 +52,9 @@ struct ConnorSettingsDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                HStack(alignment: .center) {
-                    Text(viewModel.selectedSettingsSection.title)
-                        .font(SettingsListTypography.header)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                    Button(action: { viewModel.resetRuntimeSettings() }) {
-                        Image(systemName: "ellipsis")
-                    }
-                    .buttonStyle(.borderless)
-                    .help("更多")
-                }
+                Text(viewModel.selectedSettingsSection.title)
+                    .font(SettingsListTypography.header)
+                    .frame(maxWidth: .infinity, alignment: .center)
 
                 Group {
                     switch viewModel.selectedSettingsSection {
@@ -189,7 +103,7 @@ struct ConnorSettingsDetailView: View {
     }
 }
 
-private struct SettingsAppSection: View {
+struct SettingsAppSection: View {
     @ObservedObject var viewModel: AppViewModel
 
     var body: some View {
@@ -224,7 +138,7 @@ private struct SettingsAppSection: View {
     }
 }
 
-private struct SettingsAISection: View {
+struct SettingsAISection: View {
     @ObservedObject var viewModel: AppViewModel
     @State private var isShowingAddConnectionGuide = false
     @State private var setupOption: AIConnectionOnboardingOption?
@@ -313,14 +227,14 @@ private struct SettingsAISection: View {
     }
 }
 
-private enum AIConnectionAuthenticationKind: Equatable {
+enum AIConnectionAuthenticationKind: Equatable {
     case authorizationCode
     case browserCallback
     case deviceCode(code: String, verificationURL: String)
     case direct
 }
 
-private enum AIConnectionCustomProtocol: String, CaseIterable, Equatable {
+enum AIConnectionCustomProtocol: String, CaseIterable, Equatable {
     case openAICompatible
     case anthropicCompatible
 
@@ -332,7 +246,7 @@ private enum AIConnectionCustomProtocol: String, CaseIterable, Equatable {
     }
 }
 
-private struct AIConnectionProviderPreset: Identifiable, Equatable {
+struct AIConnectionProviderPreset: Identifiable, Equatable {
     var id: String
     var title: String
     var endpoint: String
@@ -350,7 +264,7 @@ private struct AIConnectionProviderPreset: Identifiable, Equatable {
     }
 
     static let chinaProviderPresetIDs: Set<String> = [
-        "qwen", "doubao", "moonshot", "zhipu", "minimax", "stepfun"
+        "deepseek", "xiaomi-mimo", "qwen", "doubao", "moonshot", "zhipu", "minimax", "stepfun", "zai"
     ]
 
     static var chinaProviderPresets: [AIConnectionProviderPreset] {
@@ -366,16 +280,16 @@ private struct AIConnectionProviderPreset: Identifiable, Equatable {
         AIConnectionProviderPreset(id: "groq", title: "Groq", endpoint: "https://api.groq.com/openai/v1", defaultModel: "llama-3.3-70b-versatile", keyPlaceholder: "gsk_...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "mistral", title: "Mistral", endpoint: "https://api.mistral.ai/v1", defaultModel: "mistral-large-latest", keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "deepseek", title: "DeepSeek", endpoint: "https://api.deepseek.com", defaultModel: "deepseek-v4-flash", supportedModels: ["deepseek-v4-flash", "deepseek-v4-pro"], keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
-        AIConnectionProviderPreset(id: "xiaomi-mimo", title: "Xiaomi MiMo", endpoint: "https://api.xiaomimimo.com/v1", defaultModel: "mimo-v2.5-pro", supportedModels: ["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-omni", "mimo-v2-flash"], keyPlaceholder: "MIMO_API_KEY", protocolKind: .openAICompatible, openAIAPIKeyHeaderKind: .apiKey),
-        AIConnectionProviderPreset(id: "qwen", title: "阿里百炼 · Qwen", endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1", defaultModel: "qwen-plus", supportedModels: ["qwen-plus", "qwen-max", "qwen-turbo", "qwen-long", "qwen3-coder-plus"], keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
-        AIConnectionProviderPreset(id: "doubao", title: "火山方舟 · 豆包", endpoint: "https://ark.cn-beijing.volces.com/api/v3", defaultModel: "doubao-seed-1-6", supportedModels: ["doubao-seed-1-6", "doubao-seed-1-6-thinking", "doubao-seed-1-6-flash", "doubao-1-5-pro-32k"], keyPlaceholder: "Paste your ARK_API_KEY...", protocolKind: .openAICompatible),
-        AIConnectionProviderPreset(id: "moonshot", title: "Moonshot · Kimi", endpoint: "https://api.moonshot.cn/v1", defaultModel: "kimi-k2-0711-preview", supportedModels: ["kimi-k2-0711-preview", "kimi-latest", "moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"], keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
-        AIConnectionProviderPreset(id: "zhipu", title: "智谱 GLM", endpoint: "https://open.bigmodel.cn/api/paas/v4", defaultModel: "glm-4.5", supportedModels: ["glm-4.5", "glm-4.5-air", "glm-4-plus", "glm-4-flash"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
-        AIConnectionProviderPreset(id: "minimax", title: "MiniMax", endpoint: "https://api.minimax.chat/v1", defaultModel: "MiniMax-M1", supportedModels: ["MiniMax-M1", "abab6.5s-chat", "abab6.5g-chat", "abab6.5t-chat"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
-        AIConnectionProviderPreset(id: "stepfun", title: "阶跃星辰 StepFun", endpoint: "https://api.stepfun.com/v1", defaultModel: "step-2-mini", supportedModels: ["step-2-mini", "step-2-16k", "step-1-8k", "step-1-32k", "step-1-128k"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "xiaomi-mimo", title: "Xiaomi MiMo", endpoint: "https://api.xiaomimimo.com/v1", defaultModel: "mimo-v2.5-pro", supportedModels: ["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2.5-asr", "mimo-v2.5-tts-voiceclone", "mimo-v2.5-tts-voicedesign", "mimo-v2.5-tts", "mimo-v2-pro", "mimo-v2-omni", "mimo-v2-tts"], keyPlaceholder: "MIMO_API_KEY", protocolKind: .openAICompatible, openAIAPIKeyHeaderKind: .apiKey),
+        AIConnectionProviderPreset(id: "qwen", title: "阿里百炼 · Qwen", endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1", defaultModel: "qwen-plus", supportedModels: ["qwen-plus", "qwen-max", "qwen-turbo", "qwen-long", "qwen3.5-plus", "qwen3.5-flash", "qwen3-max", "qwen3-coder-plus", "qwen3-vl-plus", "qwen3-vl-flash", "qwen3-omni-flash", "qwen3-asr-flash", "qwen3-tts-flash", "qwen-image-plus", "qwen-image-edit"], keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "doubao", title: "火山方舟 · 豆包", endpoint: "https://ark.cn-beijing.volces.com/api/v3", defaultModel: "doubao-seed-1-6", supportedModels: ["doubao-seed-1-6", "doubao-seed-1-6-thinking", "doubao-seed-1-6-flash", "doubao-seed-1-6-vision", "doubao-seed-1-6-embedding", "doubao-1-5-pro-32k"], keyPlaceholder: "Paste your ARK_API_KEY...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "moonshot", title: "Moonshot · Kimi", endpoint: "https://api.moonshot.cn/v1", defaultModel: "kimi-k2.6", supportedModels: ["kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6", "kimi-k2.5", "moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k", "moonshot-v1-8k-vision-preview", "moonshot-v1-32k-vision-preview", "moonshot-v1-128k-vision-preview"], keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "zhipu", title: "智谱 GLM", endpoint: "https://open.bigmodel.cn/api/paas/v4", defaultModel: "glm-5.1", supportedModels: ["glm-5.2", "glm-5.1", "glm-5", "glm-5-turbo", "glm-4.7", "glm-4.7-flashx", "glm-4.6", "glm-4.5", "glm-4.5-air", "glm-4.5-airx", "glm-4-long", "glm-4-flashx-250414", "glm-4.7-flash", "glm-4.5-flash", "glm-4-flash-250414", "glm-4-plus", "glm-4-flash", "glm-z1-air", "glm-4.5v", "glm-5v-turbo", "glm-4.6v", "glm-ocr", "glm-realtime", "glm-4-voice", "glm-tts", "glm-tts-clone", "glm-asr-2512", "embedding-2"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "minimax", title: "MiniMax", endpoint: "https://api.minimax.chat/v1", defaultModel: "MiniMax-M3", supportedModels: ["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5", "MiniMax-M2.5-highspeed", "MiniMax-M2.1", "MiniMax-M2.1-highspeed", "MiniMax-M2", "M2-her", "MiniMax-M1", "MiniMax-Text-01", "MiniMax-VL-01", "abab6.5s-chat", "abab6.5g-chat", "abab6.5t-chat"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "stepfun", title: "阶跃星辰 StepFun", endpoint: "https://api.stepfun.com/v1", defaultModel: "step3.7-flash", supportedModels: ["step3.7-flash", "step3.5-flash", "step-2-mini", "step-2-16k", "step-1-8k", "step-1-32k", "step-1-128k"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "xai", title: "xAI (Grok)", endpoint: "https://api.x.ai/v1", defaultModel: "grok-3-mini", keyPlaceholder: "xai-...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "cerebras", title: "Cerebras", endpoint: "https://api.cerebras.ai/v1", defaultModel: "llama3.1-8b", keyPlaceholder: "csk-...", protocolKind: .openAICompatible),
-        AIConnectionProviderPreset(id: "zai", title: "z.ai (GLM)", endpoint: "https://api.z.ai/api/paas/v4", defaultModel: "glm-4.5", keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "zai", title: "z.ai (GLM)", endpoint: "https://api.z.ai/api/paas/v4", defaultModel: "glm-4.5", supportedModels: ["glm-4.5", "glm-4.5-air", "glm-4.5-flash", "glm-4-plus", "glm-4-flash"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "huggingface", title: "Hugging Face", endpoint: "https://router.huggingface.co/v1", defaultModel: "openai/gpt-oss-120b", keyPlaceholder: "hf_...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "anthropic", title: "Anthropic API", endpoint: "https://api.anthropic.com", defaultModel: "claude-sonnet-4-5", keyPlaceholder: "sk-ant-...", protocolKind: .anthropicCompatible, authHeaderKind: .xAPIKey),
         AIConnectionProviderPreset(id: "openrouter-anthropic", title: "OpenRouter · Anthropic", endpoint: "https://openrouter.ai/api", defaultModel: "anthropic/claude-sonnet-4.5", keyPlaceholder: "sk-or-...", protocolKind: .anthropicCompatible, authHeaderKind: .bearer),
@@ -384,7 +298,7 @@ private struct AIConnectionProviderPreset: Identifiable, Equatable {
     ]
 }
 
-private struct AIConnectionOnboardingOption: Identifiable, Equatable {
+struct AIConnectionOnboardingOption: Identifiable, Equatable {
     var id: String
     var title: String
     var subtitle: String
@@ -497,10 +411,10 @@ private struct AIConnectionOnboardingOption: Identifiable, Equatable {
             baseURLString: "https://api.xiaomimimo.com/v1",
             model: "mimo-v2.5-pro",
             selectedModel: "mimo-v2.5-pro",
-            supportedModels: ["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-omni", "mimo-v2-flash"],
+            supportedModels: ["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2.5-asr", "mimo-v2.5-tts-voiceclone", "mimo-v2.5-tts-voicedesign", "mimo-v2.5-tts", "mimo-v2-pro", "mimo-v2-omni", "mimo-v2-tts"],
             setupTitle: "连接 Xiaomi MiMo",
             setupSubtitle: "使用小米 MiMo OpenAI Compatible API 驱动康纳同学。",
-            setupInstruction: "选择 MiMo 文本生成模型并填写 API Key。Endpoint 与 api-key 请求头已按官方文档预设。",
+            setupInstruction: "选择 MiMo 模型并填写 API Key。Endpoint 与 api-key 请求头已按官方文档预设。",
             loginButtonTitle: "继续",
             authURLString: "",
             authenticationKind: .direct
@@ -562,7 +476,7 @@ private struct AIConnectionOnboardingOption: Identifiable, Equatable {
     ]
 }
 
-private struct AIConnectionSetupView: View {
+struct AIConnectionSetupView: View {
     @ObservedObject var viewModel: AppViewModel
     var option: AIConnectionOnboardingOption
     var complete: () -> Void
@@ -834,18 +748,22 @@ private struct AIConnectionSetupView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
 
-            VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: SettingsListLayout.spaceL) {
                 Text("服务商")
                     .font(SettingsListTypography.header)
+                Spacer(minLength: SettingsListLayout.spaceL)
                 Picker("服务商", selection: $selectedProviderPresetID) {
                     ForEach(chinaProviderPresets) { preset in
                         Text(preset.title).tag(preset.id)
                     }
                 }
+                .labelsHidden()
                 .pickerStyle(.menu)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .controlSize(.large)
+                .frame(width: SettingsListLayout.pickerControlWidth, alignment: .trailing)
                 .onChange(of: selectedProviderPresetID) { _, _ in applySelectedProviderPreset() }
             }
+            .frame(maxWidth: .infinity, minHeight: SettingsListLayout.rowMinHeight)
 
             modelMultiSelect(title: "启用模型", models: activeProviderPreset.availableModels)
             apiKeyField(placeholder: activeProviderPreset.keyPlaceholder)
@@ -862,18 +780,22 @@ private struct AIConnectionSetupView: View {
 
             apiKeyField(placeholder: activeProviderPreset.keyPlaceholder)
 
-            VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: SettingsListLayout.spaceL) {
                 Text("服务商")
                     .font(SettingsListTypography.header)
+                Spacer(minLength: SettingsListLayout.spaceL)
                 Picker("服务商", selection: $selectedProviderPresetID) {
                     ForEach(AIConnectionProviderPreset.otherProviderPresets) { preset in
                         Text(preset.title).tag(preset.id)
                     }
                 }
+                .labelsHidden()
                 .pickerStyle(.menu)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .controlSize(.large)
+                .frame(width: SettingsListLayout.pickerControlWidth, alignment: .trailing)
                 .onChange(of: selectedProviderPresetID) { _, _ in applySelectedProviderPreset() }
             }
+            .frame(maxWidth: .infinity, minHeight: SettingsListLayout.rowMinHeight)
 
             if selectedProviderPresetID == "custom" {
                 VStack(alignment: .leading, spacing: 8) {
@@ -893,6 +815,8 @@ private struct AIConnectionSetupView: View {
                         }
                     }
                     .pickerStyle(.segmented)
+                    .controlSize(.large)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
                     Text(customProtocol == .anthropicCompatible ? "Anthropic Compatible 使用 /v1/messages 协议，适合 Anthropic API、OpenRouter Anthropic Skin、Vercel AI Gateway 等兼容服务。" : "大多数第三方接口（Ollama、vLLM、DashScope 等）使用 OpenAI Compatible。")
                         .font(SettingsListTypography.rowTitle)
                         .foregroundStyle(.secondary)
@@ -987,7 +911,9 @@ private struct AIConnectionSetupView: View {
                     }
                 }
                 .labelsHidden()
-                .frame(maxWidth: 260)
+                .pickerStyle(.menu)
+                .controlSize(.large)
+                .frame(width: SettingsListLayout.pickerControlWidth, alignment: .trailing)
                 .onChange(of: selectedModel) { _, newValue in
                     if !selectedModelIDs.contains(newValue) { selectedModelIDs.insert(newValue) }
                     syncModelListFromSelection(fallbackModels: models)
@@ -1379,7 +1305,7 @@ private struct AIConnectionSetupView: View {
     }
 }
 
-private struct AIConnectionOnboardingView: View {
+struct AIConnectionOnboardingView: View {
     var choose: (AIConnectionOnboardingOption) -> Void
     var cancel: () -> Void
 
@@ -1388,10 +1314,20 @@ private struct AIConnectionOnboardingView: View {
             HStack {
                 Button(action: cancel) {
                     Label("返回", systemImage: "chevron.left")
+                        .font(SettingsListTypography.rowTitleSelected)
                         .labelStyle(.titleAndIcon)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 9)
+                        .contentShape(Capsule(style: .continuous))
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
+                .background(.quaternary.opacity(0.28), in: Capsule(style: .continuous))
+                .overlay(
+                    Capsule(style: .continuous)
+                        .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+                )
+                .help("返回上一页")
                 Spacer()
             }
             .padding(.top, 6)
@@ -1429,7 +1365,7 @@ private struct AIConnectionOnboardingView: View {
     }
 }
 
-private struct ConnorConnectionMark: View {
+struct ConnorConnectionMark: View {
     var body: some View {
         Image(nsImage: NSApp.applicationIconImage)
             .resizable()
@@ -1441,7 +1377,7 @@ private struct ConnorConnectionMark: View {
     }
 }
 
-private struct AIConnectionOnboardingOptionRow: View {
+struct AIConnectionOnboardingOptionRow: View {
     var option: AIConnectionOnboardingOption
     var action: () -> Void
 
@@ -1483,7 +1419,7 @@ private struct AIConnectionOnboardingOptionRow: View {
     }
 }
 
-private struct AIConnectionEntryRow: View {
+struct AIConnectionEntryRow: View {
     var connection: AppLLMConnectionConfig
     var isDefault: Bool
     var canDelete: Bool
@@ -1604,7 +1540,7 @@ private struct AIConnectionEntryRow: View {
     }
 }
 
-private struct SettingsPermissionsSection: View {
+struct SettingsPermissionsSection: View {
     @ObservedObject var viewModel: AppViewModel
     @State private var isShowingPolicyDetails = false
 
@@ -1619,11 +1555,7 @@ private struct SettingsPermissionsSection: View {
             }
 
             SettingsGroup(title: "新会话默认权限") {
-                SettingsPickerRow(title: "权限模式", subtitle: "作为新会话和重建会话的默认 Policy Engine 模式。", selection: $viewModel.defaultPermissionMode) {
-                    ForEach(AgentPermissionMode.allCases.filter { $0 != .allowAll }, id: \.self) { mode in
-                        Text(mode.displayName).tag(mode)
-                    }
-                }
+                PermissionModePickerRow(selection: $viewModel.defaultPermissionMode)
                 Divider()
                 PermissionModeSummaryRow(mode: viewModel.defaultPermissionMode)
             }
@@ -1666,7 +1598,77 @@ private struct SettingsPermissionsSection: View {
     }
 }
 
-private struct PermissionModeSummaryRow: View {
+struct PermissionModePickerRow: View {
+    @Binding var selection: AgentPermissionMode
+
+    private var availableModes: [AgentPermissionMode] {
+        AgentPermissionMode.allCases.filter { $0 != .allowAll }
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 16) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("权限模式")
+                    .font(SettingsListTypography.rowTitleSelected)
+                Text("作为新会话和重建会话的默认 Policy Engine 模式。")
+                    .font(SettingsListTypography.rowCaption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: SettingsListLayout.spaceL)
+
+            Menu {
+                ForEach(availableModes, id: \.self) { mode in
+                    Button {
+                        selection = mode
+                    } label: {
+                        Label(mode.displayName, systemImage: mode.systemImage)
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Label(selection.displayName, systemImage: selection.systemImage)
+                        .labelStyle(.titleAndIcon)
+                    Spacer(minLength: 6)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .font(SettingsListTypography.rowTitle)
+                .padding(.horizontal, 10)
+                .frame(width: 144, height: 34, alignment: .leading)
+                .background(.quaternary.opacity(0.24), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .frame(width: 160, alignment: .trailing)
+            .help("选择新会话默认权限模式")
+        }
+        .frame(minHeight: SettingsListLayout.rowMinHeight)
+    }
+}
+
+private extension AgentPermissionMode {
+    var systemImage: String {
+        switch self {
+        case .readOnly:
+            return "eye"
+        case .askToWrite:
+            return "questionmark.circle"
+        case .trustedWrite:
+            return "bolt.circle"
+        case .allowAll:
+            return "exclamationmark.triangle"
+        }
+    }
+}
+
+struct PermissionModeSummaryRow: View {
     var mode: AgentPermissionMode
 
     var body: some View {
@@ -1729,7 +1731,7 @@ private struct PermissionModeSummaryRow: View {
     }
 }
 
-private struct PermissionNoteRow: View {
+struct PermissionNoteRow: View {
     var systemImage: String
     var title: String
     var message: String
@@ -1754,7 +1756,7 @@ private struct PermissionNoteRow: View {
     }
 }
 
-private struct PermissionBoundaryRow: View {
+struct PermissionBoundaryRow: View {
     var systemImage: String
     var title: String
     var message: String
@@ -1779,7 +1781,7 @@ private struct PermissionBoundaryRow: View {
     }
 }
 
-private struct PermissionPolicyDetailRow: View {
+struct PermissionPolicyDetailRow: View {
     var title: String
     var message: String
 
@@ -1792,1083 +1794,5 @@ private struct PermissionPolicyDetailRow: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-    }
-}
-
-struct WorkspaceRootsSettingsContent: View {
-    @ObservedObject var viewModel: AppViewModel
-
-    private var primaryRoot: WorkspaceRootDraft? {
-        viewModel.workspaceRoots.first(where: \.isPrimary) ?? viewModel.workspaceRoots.first
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("当前会话 Workspace")
-                        .font(SettingsListTypography.rowTitleSelected)
-                    Text(summaryText)
-                        .font(SettingsListTypography.rowCaption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-                Spacer()
-                Button("选择目录…") { chooseDirectories() }
-                    .buttonStyle(.bordered)
-            }
-            .frame(minHeight: SettingsListLayout.rowMinHeight)
-
-            if !viewModel.workspaceRoots.isEmpty {
-                Divider()
-                VStack(spacing: 0) {
-                    ForEach(viewModel.workspaceRoots) { root in
-                        WorkspaceRootRow(
-                            root: root,
-                            setPrimary: { viewModel.setPrimaryWorkspaceRoot(id: root.id) },
-                            remove: { viewModel.removeWorkspaceRoot(id: root.id) }
-                        )
-                        if root.id != viewModel.workspaceRoots.last?.id { Divider() }
-                    }
-                }
-            }
-
-            Divider()
-            HStack(spacing: 8) {
-                TextField("输入目录路径", text: $viewModel.workspaceRootPathInput)
-                    .textFieldStyle(.roundedBorder)
-                Button("添加路径") {
-                    viewModel.addWorkspaceRoot(path: viewModel.workspaceRootPathInput)
-                }
-                .buttonStyle(.bordered)
-                .disabled(viewModel.workspaceRootPathInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-            Text("保存到当前 Session Capsule。Native local tools 可访问所有 roots；Claude Sidecar cwd 使用主目录。为空时兼容旧 Sidecar 目录，再回退到进程 cwd。")
-                .font(SettingsListTypography.rowCaption)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.vertical, 4)
-    }
-
-    private var summaryText: String {
-        if let primaryRoot {
-            return "主目录：\(primaryRoot.path) · 共 \(viewModel.workspaceRoots.count) 个 root"
-        }
-        let fallback = viewModel.defaultWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !fallback.isEmpty { return "默认项目目录：\(fallback)" }
-        return "尚未设置；将使用旧 Sidecar 工作目录或进程 cwd。"
-    }
-
-    private func chooseDirectories() {
-        let panel = NSOpenPanel()
-        panel.title = "选择当前会话项目工作目录"
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = true
-        panel.canCreateDirectories = true
-        if panel.runModal() == .OK {
-            viewModel.addWorkspaceRoots(paths: panel.urls.map(\.path))
-        }
-    }
-}
-
-private struct WorkspaceRootRow: View {
-    var root: WorkspaceRootDraft
-    var setPrimary: () -> Void
-    var remove: () -> Void
-
-    var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Text(root.displayName.isEmpty ? URL(fileURLWithPath: root.path).lastPathComponent : root.displayName)
-                        .font(SettingsListTypography.rowTitleSelected)
-                    Text(root.role)
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(Color.secondary.opacity(0.10), in: Capsule())
-                    if root.isPrimary {
-                        Text("主目录")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.orange)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(Color.orange.opacity(0.12), in: Capsule())
-                    }
-                }
-                Text(root.path)
-                    .font(SettingsListTypography.rowCaption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            Spacer()
-            if !root.isPrimary {
-                Button("设为主目录", action: setPrimary)
-                    .buttonStyle(.bordered)
-            }
-            Button(role: .destructive, action: remove) {
-                Image(systemName: "minus.circle")
-            }
-            .buttonStyle(.borderless)
-        }
-        .frame(minHeight: 50)
-        .padding(.vertical, 6)
-    }
-}
-
-private struct SettingsLabelsSection: View {
-    @ObservedObject var viewModel: AppViewModel
-    @State private var editorRequest: SettingsLabelEditorRequest?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            SettingsHeroHeader(
-                title: "标签",
-                subtitle: "用颜色和名称整理会话。标签是纯标签：系统 UID、显示名、颜色和图标；不再承担值类型、图谱绑定或字段校验。",
-                systemImage: "tag"
-            ) {
-                Button("新建标签…") { presentNewLabelEditor() }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-            }
-
-            SettingsGroup(title: "标签") {
-                if viewModel.governanceConfig.labels.isEmpty {
-                    SettingsEmptyStateRow(systemImage: "tag.slash", title: "暂无标签", subtitle: "点击“新建标签…”创建第一个会话标签。")
-                } else {
-                    ForEach(viewModel.governanceConfig.labels) { label in
-                        SettingsLabelDefinitionRow(
-                            definition: label,
-                            usageCount: countSessions(using: label.id),
-                            edit: { presentLabelEditor(label) },
-                            delete: { viewModel.deleteLabelDefinition(label) }
-                        )
-                        if label.id != viewModel.governanceConfig.labels.last?.id { Divider().padding(.leading, 48) }
-                    }
-                }
-            }
-
-            SettingsGroup(title: "删除行为") {
-                Text("删除标签会自动从所有会话中移除该标签，然后删除标签定义。")
-                    .font(SettingsListTypography.rowTitle)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .sheet(item: $editorRequest) { request in
-            SettingsLabelEditorSheet(
-                title: request.isCreating ? "新建标签" : "编辑标签",
-                definition: request.definition,
-                onCancel: { editorRequest = nil },
-                onSave: { updated in
-                    viewModel.upsertLabelDefinition(updated)
-                    editorRequest = nil
-                }
-            )
-        }
-    }
-
-    private func presentLabelEditor(_ definition: AgentSessionLabelDefinition) {
-        editorRequest = SettingsLabelEditorRequest(definition: definition, isCreating: false)
-    }
-
-    private func presentNewLabelEditor() {
-        editorRequest = SettingsLabelEditorRequest(
-            definition: AgentSessionLabelDefinition(id: "", name: "", colorName: "blue", systemImage: "tag"),
-            isCreating: true
-        )
-    }
-
-    private func countSessions(using labelID: String) -> Int {
-        viewModel.allChatSessions.filter { session in
-            session.governance.labels.contains { $0.id == labelID }
-        }.count
-    }
-}
-
-private struct SettingsStatusesSection: View {
-    @ObservedObject var viewModel: AppViewModel
-    @State private var editorRequest: SettingsStatusEditorRequest?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            SettingsHeroHeader(
-                title: "状态",
-                subtitle: "管理会话状态的显示名和图标。状态 UID 由系统生成；排序、终态等治理字段不在设置页暴露。",
-                systemImage: "circle.dashed"
-            ) {
-                Button("新建状态…") { presentNewStatusEditor() }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-            }
-
-            SettingsGroup(title: "状态") {
-                ForEach(sortedStatuses) { status in
-                    SettingsStatusDefinitionRow(
-                        definition: status,
-                        usageCount: countSessions(using: status),
-                        canDelete: viewModel.canDeleteStatusDefinition(status),
-                        edit: { presentStatusEditor(status) },
-                        delete: { viewModel.deleteStatusDefinition(status) }
-                    )
-                    if status.id != sortedStatuses.last?.id { Divider().padding(.leading, 48) }
-                }
-            }
-
-            SettingsGroup(title: "删除限制") {
-                Text("至少保留一个状态；如果已有会话正在使用某个状态，该状态不能删除。当前底层会话状态仍受 AgentSessionStatus 枚举约束，自定义状态定义会保存到治理配置，完整自定义状态切换需要后续迁移到 string-backed status ID。")
-                    .font(SettingsListTypography.rowTitle)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .sheet(item: $editorRequest) { request in
-            SettingsStatusEditorSheet(
-                title: request.isCreating ? "新建状态" : "编辑状态",
-                definition: request.definition,
-                onCancel: { editorRequest = nil },
-                onSave: { updated in
-                    viewModel.upsertStatusDefinition(updated)
-                    editorRequest = nil
-                }
-            )
-        }
-    }
-
-    private var sortedStatuses: [AgentSessionStatusDefinition] {
-        viewModel.governanceConfig.statuses.sorted { lhs, rhs in
-            if lhs.sortOrder == rhs.sortOrder { return lhs.name < rhs.name }
-            return lhs.sortOrder < rhs.sortOrder
-        }
-    }
-
-    private func presentStatusEditor(_ definition: AgentSessionStatusDefinition) {
-        editorRequest = SettingsStatusEditorRequest(definition: definition, isCreating: false)
-    }
-
-    private func presentNewStatusEditor() {
-        let nextSortOrder = (viewModel.governanceConfig.statuses.map(\.sortOrder).max() ?? 0) + 10
-        editorRequest = SettingsStatusEditorRequest(
-            definition: AgentSessionStatusDefinition(id: "", name: "", systemImage: "circle", sortOrder: nextSortOrder, isTerminal: false),
-            isCreating: true
-        )
-    }
-
-    private func countSessions(using definition: AgentSessionStatusDefinition) -> Int {
-        viewModel.allChatSessions.filter { $0.governance.status.rawValue == definition.id }.count
-    }
-}
-
-private struct SettingsLabelEditorRequest: Identifiable {
-    var id = UUID()
-    var definition: AgentSessionLabelDefinition
-    var isCreating: Bool
-}
-
-private struct SettingsStatusEditorRequest: Identifiable {
-    var id = UUID()
-    var definition: AgentSessionStatusDefinition
-    var isCreating: Bool
-}
-
-private struct SettingsHeroHeader<Accessory: View>: View {
-    var title: String
-    var subtitle: String
-    var systemImage: String
-    @ViewBuilder var accessory: Accessory
-
-    var body: some View {
-        HStack(alignment: .center, spacing: SettingsListLayout.spaceL) {
-            Image(systemName: systemImage)
-                .font(SettingsListTypography.largeIcon)
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 44, height: 44)
-                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous))
-            VStack(alignment: .leading, spacing: SettingsListLayout.spaceS) {
-                Text(title).font(SettingsListTypography.header)
-                Text(subtitle)
-                    .font(SettingsListTypography.rowSubtitle)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: SettingsListLayout.spaceL)
-            accessory
-        }
-        .frame(minHeight: 72)
-    }
-}
-
-private struct SettingsEmptyStateRow: View {
-    var systemImage: String
-    var title: String
-    var subtitle: String
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .font(SettingsListTypography.rowSubtitle)
-                .foregroundStyle(.secondary)
-                .frame(width: 44, height: 44)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(SettingsListTypography.rowTitleSelected)
-                Text(subtitle).font(SettingsListTypography.rowCaption).foregroundStyle(.secondary)
-            }
-            Spacer()
-        }
-        .frame(minHeight: 54)
-    }
-}
-
-private struct SettingsLabelDefinitionRow: View {
-    var definition: AgentSessionLabelDefinition
-    var usageCount: Int
-    var edit: () -> Void
-    var delete: () -> Void
-
-    var body: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                Circle().fill(settingsLabelColor(from: definition.colorName)).frame(width: 28, height: 28)
-                Image(systemName: definition.systemImage)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-            .frame(width: 44, height: 44)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(definition.name).font(SettingsListTypography.rowTitleSelected)
-                Text("用于 \(usageCount) 个会话")
-                    .font(SettingsListTypography.rowCaption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button("编辑…", action: edit)
-                .controlSize(.regular)
-            Button(role: .destructive, action: delete) {
-                Image(systemName: "trash")
-            }
-            .buttonStyle(.borderless)
-            .frame(width: 44, height: 44)
-            .help("删除标签")
-        }
-        .frame(minHeight: 56)
-        .contextMenu {
-            Button("编辑标签…", systemImage: "pencil", action: edit)
-            Button(role: .destructive, action: delete) { Label("删除标签", systemImage: "trash") }
-        }
-    }
-}
-
-private struct SettingsStatusDefinitionRow: View {
-    var definition: AgentSessionStatusDefinition
-    var usageCount: Int
-    var canDelete: Bool
-    var edit: () -> Void
-    var delete: () -> Void
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: definition.systemImage)
-                .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 44, height: 44)
-                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-            VStack(alignment: .leading, spacing: 3) {
-                Text(definition.name).font(SettingsListTypography.rowTitleSelected)
-                Text("用于 \(usageCount) 个会话")
-                    .font(SettingsListTypography.rowCaption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button("编辑…", action: edit)
-                .controlSize(.regular)
-            Button(role: .destructive, action: delete) {
-                Image(systemName: "trash")
-            }
-            .buttonStyle(.borderless)
-            .frame(width: 44, height: 44)
-            .disabled(!canDelete)
-            .help(canDelete ? "删除状态" : "至少保留一个状态，且不能删除正在被会话使用的状态")
-        }
-        .frame(minHeight: 56)
-        .contextMenu {
-            Button("编辑状态…", systemImage: "pencil", action: edit)
-            Button(role: .destructive, action: delete) { Label("删除状态", systemImage: "trash") }
-                .disabled(!canDelete)
-        }
-    }
-}
-
-private struct SettingsLabelEditorSheet: View {
-    var title: String
-    var definition: AgentSessionLabelDefinition
-    var onCancel: () -> Void
-    var onSave: (AgentSessionLabelDefinition) -> Void
-
-    @State private var name: String
-    @State private var color: Color
-    @State private var systemImage: String
-
-    init(title: String, definition: AgentSessionLabelDefinition, onCancel: @escaping () -> Void, onSave: @escaping (AgentSessionLabelDefinition) -> Void) {
-        self.title = title
-        self.definition = definition
-        self.onCancel = onCancel
-        self.onSave = onSave
-        _name = State(initialValue: definition.name)
-        _color = State(initialValue: settingsLabelColor(from: definition.colorName))
-        _systemImage = State(initialValue: definition.systemImage)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text(title).font(SettingsListTypography.header)
-            TextField("标签名称", text: $name)
-                .textFieldStyle(.roundedBorder)
-            Picker("图标", selection: $systemImage) {
-                ForEach(settingsLabelIconOptions, id: \.self) { icon in
-                    Label(settingsLabelIconTitle(for: icon), systemImage: icon).tag(icon)
-                }
-            }
-            .pickerStyle(.menu)
-            ColorPicker("颜色", selection: $color, supportsOpacity: false)
-            HStack {
-                Spacer()
-                Button("取消", action: onCancel)
-                Button("保存") {
-                    onSave(AgentSessionLabelDefinition(id: definition.id, name: settingsTrimmed(name), colorName: settingsColorStorageName(from: color), systemImage: systemImage))
-                }
-                .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
-                .disabled(settingsTrimmed(name).isEmpty)
-            }
-        }
-        .padding(20)
-        .frame(width: 420)
-    }
-}
-
-private struct SettingsStatusEditorSheet: View {
-    var title: String
-    var definition: AgentSessionStatusDefinition
-    var onCancel: () -> Void
-    var onSave: (AgentSessionStatusDefinition) -> Void
-
-    @State private var name: String
-    @State private var systemImage: String
-
-    init(title: String, definition: AgentSessionStatusDefinition, onCancel: @escaping () -> Void, onSave: @escaping (AgentSessionStatusDefinition) -> Void) {
-        self.title = title
-        self.definition = definition
-        self.onCancel = onCancel
-        self.onSave = onSave
-        _name = State(initialValue: definition.name)
-        _systemImage = State(initialValue: definition.systemImage)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text(title).font(SettingsListTypography.header)
-            TextField("状态名称", text: $name)
-                .textFieldStyle(.roundedBorder)
-            Picker("图标", selection: $systemImage) {
-                ForEach(settingsStatusIconOptions, id: \.self) { icon in
-                    Label(settingsStatusIconTitle(for: icon), systemImage: icon).tag(icon)
-                }
-            }
-            .pickerStyle(.menu)
-            HStack {
-                Spacer()
-                Button("取消", action: onCancel)
-                Button("保存") {
-                    onSave(AgentSessionStatusDefinition(id: definition.id, name: settingsTrimmed(name), systemImage: systemImage, sortOrder: definition.sortOrder, isTerminal: definition.isTerminal))
-                }
-                .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
-                .disabled(settingsTrimmed(name).isEmpty)
-            }
-        }
-        .padding(20)
-        .frame(width: 420)
-    }
-}
-
-private let settingsStatusIconOptions: [String] = [
-    "circle", "clock", "pause.circle", "play.circle", "checkmark.circle", "checkmark.circle.fill", "xmark.circle", "nosign", "exclamationmark.circle", "exclamationmark.bubble", "questionmark.circle", "flag", "star", "bolt", "flame", "tray", "archivebox", "paperplane", "hammer", "wrench.and.screwdriver", "lightbulb", "sparkles", "target"
-]
-
-private func settingsStatusIconTitle(for icon: String) -> String {
-    switch icon {
-    case "circle": return "圆点"
-    case "clock": return "时钟"
-    case "pause.circle": return "暂停"
-    case "play.circle": return "进行中"
-    case "checkmark.circle": return "完成"
-    case "checkmark.circle.fill": return "完成（填充）"
-    case "xmark.circle": return "关闭"
-    case "nosign": return "受阻"
-    case "exclamationmark.circle": return "提醒"
-    case "exclamationmark.bubble": return "待审阅"
-    case "questionmark.circle": return "询问"
-    case "flag": return "旗标"
-    case "star": return "星标"
-    case "bolt": return "闪电"
-    case "flame": return "火焰"
-    case "tray": return "收件箱"
-    case "archivebox": return "归档"
-    case "paperplane": return "发送"
-    case "hammer": return "构建"
-    case "wrench.and.screwdriver": return "工具"
-    case "lightbulb": return "想法"
-    case "sparkles": return "闪光"
-    case "target": return "目标"
-    default: return icon
-    }
-}
-
-private let settingsLabelIconOptions: [String] = [
-    "tag", "tag.fill", "star", "star.fill", "flag", "flag.fill", "bookmark", "bookmark.fill", "doc.text", "doc.text.magnifyingglass", "folder", "folder.fill", "calendar", "calendar.badge.clock", "person.2", "link", "paperclip", "lightbulb", "sparkles", "flame"
-]
-
-private func settingsLabelIconTitle(for icon: String) -> String {
-    switch icon {
-    case "tag": return "标签"
-    case "tag.fill": return "标签（填充）"
-    case "star": return "星标"
-    case "star.fill": return "星标（填充）"
-    case "flag": return "旗标"
-    case "flag.fill": return "旗标（填充）"
-    case "bookmark": return "书签"
-    case "bookmark.fill": return "书签（填充）"
-    case "doc.text": return "文档"
-    case "doc.text.magnifyingglass": return "研究"
-    case "folder": return "文件夹"
-    case "folder.fill": return "项目"
-    case "calendar": return "日期"
-    case "calendar.badge.clock": return "截止日期"
-    case "person.2": return "协作"
-    case "link": return "链接"
-    case "paperclip": return "附件"
-    case "lightbulb": return "想法"
-    case "sparkles": return "闪光"
-    case "flame": return "火焰"
-    default: return icon
-    }
-}
-
-private func settingsTrimmed(_ value: String) -> String {
-    value.trimmingCharacters(in: .whitespacesAndNewlines)
-}
-
-private func settingsLabelColor(from storageName: String) -> Color {
-    switch storageName {
-    case "orange": return .orange
-    case "purple": return .purple
-    case "teal": return .teal
-    case "red": return .red
-    case "yellow": return .yellow
-    case "green": return .green
-    case "blue": return .blue
-    default:
-        guard storageName.hasPrefix("#"), storageName.count == 7 else { return .blue }
-        let hex = String(storageName.dropFirst())
-        guard let value = Int(hex, radix: 16) else { return .blue }
-        return Color(
-            red: Double((value >> 16) & 0xFF) / 255.0,
-            green: Double((value >> 8) & 0xFF) / 255.0,
-            blue: Double(value & 0xFF) / 255.0
-        )
-    }
-}
-
-private func settingsColorStorageName(from color: Color) -> String {
-    let nsColor = NSColor(color).usingColorSpace(.sRGB) ?? .systemBlue
-    let red = Int((nsColor.redComponent * 255).rounded())
-    let green = Int((nsColor.greenComponent * 255).rounded())
-    let blue = Int((nsColor.blueComponent * 255).rounded())
-    return String(format: "#%02X%02X%02X", red, green, blue)
-}
-
-private struct SettingsShortcutsSection: View {
-    @ObservedObject var viewModel: AppViewModel
-
-    private let generalActions: [AgentRuntimeShortcutAction] = [
-        .newSession,
-        .toggleBrowser,
-        .focusTopSearch,
-        .openSettings
-    ]
-
-    private let browserActions: [AgentRuntimeShortcutAction] = [
-        .focusBrowserAddress,
-        .newBrowserTab,
-        .closeBrowserTab,
-        .browserBack,
-        .browserForward,
-        .toggleBrowserBookmarks,
-        .toggleBrowserHistory
-    ]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            SettingsHeroHeader(
-                title: "快捷键",
-                subtitle: "管理应用和 Browser Workspace 的常用键盘操作。修改后会写入 runtime-settings.json 并立即用于菜单命令或局部 key monitor。",
-                systemImage: "keyboard"
-            ) {
-                EmptyView()
-            }
-
-            SettingsGroup(title: "全局") {
-                ForEach(generalActions.indices, id: \.self) { index in
-                    if index > 0 { Divider() }
-                    EditableShortcutRow(
-                        title: title(for: generalActions[index]),
-                        subtitle: subtitle(for: generalActions[index]),
-                        shortcut: viewModel.shortcut(for: generalActions[index]),
-                        onRecord: { viewModel.beginRecordingShortcut(for: generalActions[index]) },
-                        onReset: { viewModel.resetShortcut(generalActions[index]) }
-                    )
-                }
-            }
-
-            SettingsGroup(title: "Browser Workspace") {
-                ForEach(browserActions.indices, id: \.self) { index in
-                    if index > 0 { Divider() }
-                    EditableShortcutRow(
-                        title: title(for: browserActions[index]),
-                        subtitle: subtitle(for: browserActions[index]),
-                        shortcut: viewModel.shortcut(for: browserActions[index]),
-                        onRecord: { viewModel.beginRecordingShortcut(for: browserActions[index]) },
-                        onReset: { viewModel.resetShortcut(browserActions[index]) }
-                    )
-                }
-            }
-
-            Text("修改后会写入 runtime-settings.json,并由菜单命令或 Browser Workspace 局部 key monitor 真实生效。Governance / Source / Skill 等低频入口不在此页暴露快捷键,避免占用过多 ⌘ 数字键。")
-                .font(SettingsListTypography.rowCaption)
-                .foregroundStyle(.secondary)
-        }
-        .sheet(item: $viewModel.recordingShortcutAction) { action in
-            ShortcutRecorderSheet(
-                title: title(for: action),
-                currentShortcut: viewModel.shortcut(for: action),
-                onCancel: { viewModel.recordingShortcutAction = nil },
-                onSave: { shortcut in viewModel.updateShortcut(action, shortcut: shortcut) }
-            )
-        }
-    }
-
-    private func title(for action: AgentRuntimeShortcutAction) -> String {
-        switch action {
-        case .newSession: "新建聊天"
-        case .toggleBrowser: "显示 / 隐藏浏览器"
-        case .focusTopSearch: "聚焦顶部搜索"
-        case .openSettings: "打开设置"
-        case .focusBrowserAddress: "聚焦地址栏"
-        case .newBrowserTab: "新建浏览器标签"
-        case .closeBrowserTab: "关闭当前标签"
-        case .browserBack: "后退"
-        case .browserForward: "前进"
-        case .toggleBrowserBookmarks: "打开 / 关闭书签"
-        case .toggleBrowserHistory: "打开 / 关闭历史"
-        }
-    }
-
-    private func subtitle(for action: AgentRuntimeShortcutAction) -> String {
-        switch action {
-        case .newSession: "创建新会话并进入聊天。"
-        case .toggleBrowser: "在当前会话中切换内置浏览器工作区。"
-        case .focusTopSearch: "聚焦应用顶部的会话搜索框。"
-        case .openSettings: "打开设置中心。"
-        case .focusBrowserAddress: "Browser Workspace 可见时聚焦地址栏。"
-        case .newBrowserTab: "Browser Workspace 可见时创建新标签。"
-        case .closeBrowserTab: "Browser Workspace 可见时关闭当前标签,不关闭 macOS 窗口。"
-        case .browserBack: "Browser Workspace 当前标签后退。"
-        case .browserForward: "Browser Workspace 当前标签前进。"
-        case .toggleBrowserBookmarks: "切换浏览器书签面板。"
-        case .toggleBrowserHistory: "切换浏览器历史面板。"
-        }
-    }
-}
-
-private struct SettingsPreferencesSection: View {
-    @ObservedObject var viewModel: AppViewModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            SettingsHeroHeader(
-                title: "偏好",
-                subtitle: "管理康纳同学用于称呼、语言、时区、位置和个性化上下文的用户信息。",
-                systemImage: "person.crop.circle"
-            ) {
-                EmptyView()
-            }
-
-            SettingsGroup(title: "基本信息") {
-                SettingsTextFieldRow(title: "称呼", subtitle: "康纳同学如何称呼你。首次启动且未设置时会读取 macOS 账户名称，可手动更改。", text: $viewModel.userDisplayName)
-                Divider()
-                SettingsTextFieldRow(title: "时区", subtitle: "未设置时自动读取系统时区，用于相对日期和日程上下文。", text: $viewModel.userTimezone)
-                Divider()
-                SettingsTextFieldRow(title: "语言偏好", subtitle: "未设置时自动读取系统语言；康纳同学会优先按此语言回复。", text: $viewModel.userPreferredLanguage)
-                Divider()
-                HStack {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("系统默认")
-                            .font(SettingsListTypography.rowTitleSelected)
-                        Text("只补全仍为空的项目，不覆盖你已经手动填写的偏好。")
-                            .font(SettingsListTypography.rowCaption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button("重新读取空白项") { viewModel.refreshSystemPreferenceDefaults() }
-                        .buttonStyle(.bordered)
-                        .controlSize(.regular)
-                }
-            }
-            SettingsGroup(title: "位置") {
-                SettingsTextFieldRow(title: "城市", subtitle: "用于本地信息和上下文。不会在启动时自动请求定位权限，可手动填写或主动授权读取。", text: $viewModel.userCity)
-                Divider()
-                SettingsTextFieldRow(title: "国家/地区", subtitle: "未设置时会优先从系统地区推断，也可手动更改。", text: $viewModel.userCountry)
-                Divider()
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("当前位置")
-                            .font(SettingsListTypography.rowTitleSelected)
-                        if let message = viewModel.userLocationStatusMessage {
-                            Text(message)
-                                .font(SettingsListTypography.rowCaption)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Text("申请位置权限后自动填写城市和国家/地区。")
-                                .font(SettingsListTypography.rowCaption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    Spacer()
-                    Button("使用当前位置") { viewModel.requestUserLocation() }
-                        .buttonStyle(.bordered)
-                        .controlSize(.regular)
-                }
-            }
-            SettingsGroup(title: "备注") {
-                TextEditor(text: $viewModel.userPreferenceNotes)
-                    .font(SettingsListTypography.rowTitle)
-                    .frame(minHeight: 150)
-                    .scrollContentBackground(.hidden)
-                    .padding(8)
-                    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            }
-        }
-    }
-}
-
-private struct SettingsGroup<Content: View>: View {
-    var title: String
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: SettingsListLayout.spaceM) {
-            Text(title)
-                .font(SettingsListTypography.header)
-            VStack(spacing: 0) {
-                content
-                    .padding(.horizontal, SettingsListLayout.spaceL)
-                    .padding(.vertical, SettingsListLayout.spaceM)
-            }
-            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous)
-                    .stroke(Color.secondary.opacity(SettingsListLayout.hairlineOpacity), lineWidth: 1)
-            )
-        }
-    }
-}
-
-private struct SettingsAppearanceModeRow: View {
-    @Binding var selection: ConnorAppearanceMode
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: SettingsListLayout.spaceM) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
-                    Text("外观")
-                        .font(SettingsListTypography.rowTitleSelected)
-                    Text("选择应用页面的显示主题。")
-                        .font(SettingsListTypography.rowCaption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-            }
-
-            Picker("页面显示主题", selection: $selection) {
-                ForEach(ConnorAppearanceMode.allCases) { mode in
-                    Label(mode.displayName, systemImage: mode.systemImage).tag(mode)
-                }
-            }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-        }
-        .frame(minHeight: SettingsListLayout.prominentRowMinHeight, alignment: .leading)
-    }
-}
-
-private struct SettingsToggleRow: View {
-    var title: String
-    var subtitle: String
-    @Binding var isOn: Bool
-
-    var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(SettingsListTypography.rowTitleSelected)
-                Text(subtitle).font(SettingsListTypography.rowCaption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            Toggle("", isOn: $isOn)
-                .labelsHidden()
-                .toggleStyle(.switch)
-        }
-        .frame(minHeight: SettingsListLayout.rowMinHeight)
-    }
-}
-
-private struct SettingsValueRow: View {
-    var title: String
-    var value: String
-
-    var body: some View {
-        HStack {
-            Text(title).font(SettingsListTypography.rowTitleSelected)
-            Spacer()
-            Text(value).font(SettingsListTypography.rowTitle).foregroundStyle(.secondary)
-        }
-        .frame(minHeight: SettingsListLayout.rowMinHeight)
-    }
-}
-
-private struct SettingsTextFieldRow: View {
-    var title: String
-    var subtitle: String
-    @Binding var text: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(SettingsListTypography.rowTitleSelected)
-            Text(subtitle).font(SettingsListTypography.rowCaption).foregroundStyle(.secondary)
-            TextField(title, text: $text)
-                .font(SettingsListTypography.rowTitle)
-                .textFieldStyle(.roundedBorder)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 4)
-    }
-}
-
-private struct SettingsPickerRow<Selection: Hashable, Content: View>: View {
-    var title: String
-    var subtitle: String
-    @Binding var selection: Selection
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(SettingsListTypography.rowTitleSelected)
-                Text(subtitle).font(SettingsListTypography.rowCaption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            Picker(title, selection: $selection) { content }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .frame(maxWidth: 220)
-        }
-        .frame(minHeight: SettingsListLayout.rowMinHeight)
-    }
-}
-
-
-private struct ShortcutRow: View {
-    var title: String
-    var keys: [String]
-
-    var body: some View {
-        HStack {
-            Text(title).font(SettingsListTypography.rowTitleSelected)
-            Spacer()
-            HStack(spacing: 4) {
-                ForEach(keys, id: \.self) { key in
-                    Text(key)
-                        .font(SettingsListTypography.rowCaptionEmphasized)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(.quaternary.opacity(0.30), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                }
-            }
-        }
-        .frame(minHeight: SettingsListLayout.compactRowMinHeight)
-    }
-}
-
-// MARK: - Shortcut editing support
-
-extension AgentRuntimeShortcutAction {
-    var supportsGlobalCommandMenu: Bool {
-        switch self {
-        case .newSession, .toggleBrowser, .focusTopSearch, .openSettings:
-            true
-        default:
-            false
-        }
-    }
-}
-
-extension AgentRuntimeKeyboardShortcut {
-    var keyEquivalent: KeyEquivalent {
-        switch key.lowercased() {
-        case ",": return ","
-        case ".": return "."
-        case "/": return "/"
-        case "[": return "["
-        case "]": return "]"
-        default:
-            return KeyEquivalent(Character(String(key.lowercased().prefix(1))))
-        }
-    }
-
-    var eventModifierFlags: EventModifiers {
-        var flags: EventModifiers = []
-        if command { flags.insert(.command) }
-        if shift { flags.insert(.shift) }
-        if option { flags.insert(.option) }
-        if control { flags.insert(.control) }
-        return flags
-    }
-
-    static func from(event: NSEvent) -> AgentRuntimeKeyboardShortcut? {
-        let flags = event.modifierFlags
-        let character = event.charactersIgnoringModifiers?.lowercased()
-        guard let rawKey = character, !rawKey.isEmpty else { return nil }
-        let supported = [",", ".", "/", "[", "]"]
-        let key: String
-        if let scalar = rawKey.unicodeScalars.first, CharacterSet.alphanumerics.contains(scalar) {
-            key = String(rawKey.prefix(1))
-        } else if supported.contains(String(rawKey.prefix(1))) {
-            key = String(rawKey.prefix(1))
-        } else {
-            return nil
-        }
-        return AgentRuntimeKeyboardShortcut(
-            key: key,
-            command: flags.contains(.command),
-            shift: flags.contains(.shift),
-            option: flags.contains(.option),
-            control: flags.contains(.control)
-        )
-    }
-}
-
-struct ShortcutRecorderSheet: View {
-    var title: String
-    var currentShortcut: AgentRuntimeKeyboardShortcut
-    var onCancel: () -> Void
-    var onSave: (AgentRuntimeKeyboardShortcut) -> Void
-
-    @State private var capturedShortcut: AgentRuntimeKeyboardShortcut?
-    @State private var message: String = "按下新的快捷键。建议至少包含 ⌘。"
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("修改快捷键")
-                .font(SettingsListTypography.header)
-            Text(title)
-                .font(SettingsListTypography.rowTitleSelected)
-            ZStack {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor))
-                Text((capturedShortcut ?? currentShortcut).displayText)
-                    .font(.system(size: 28, weight: .semibold, design: .rounded))
-                    .monospaced()
-            }
-            .frame(height: 86)
-            .background(ShortcutCaptureView { shortcut in
-                capturedShortcut = shortcut
-                message = shortcut.command ? "已捕捉: \(shortcut.displayText)" : "已捕捉: \(shortcut.displayText)。建议包含 ⌘。"
-            })
-            Text(message)
-                .font(SettingsListTypography.rowCaption)
-                .foregroundStyle(.secondary)
-            HStack {
-                Button("恢复当前") { capturedShortcut = currentShortcut }
-                Spacer()
-                Button("取消", action: onCancel)
-                Button("保存") { onSave(capturedShortcut ?? currentShortcut) }
-                    .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
-            }
-        }
-        .padding(22)
-        .frame(width: 420)
-    }
-}
-
-private struct ShortcutCaptureView: NSViewRepresentable {
-    var onCapture: (AgentRuntimeKeyboardShortcut) -> Void
-
-    func makeNSView(context: Context) -> CaptureView {
-        let view = CaptureView()
-        view.onCapture = onCapture
-        DispatchQueue.main.async { view.window?.makeFirstResponder(view) }
-        return view
-    }
-
-    func updateNSView(_ nsView: CaptureView, context: Context) {
-        nsView.onCapture = onCapture
-        DispatchQueue.main.async { nsView.window?.makeFirstResponder(nsView) }
-    }
-
-    final class CaptureView: NSView {
-        var onCapture: ((AgentRuntimeKeyboardShortcut) -> Void)?
-        override var acceptsFirstResponder: Bool { true }
-
-        override func keyDown(with event: NSEvent) {
-            if let shortcut = AgentRuntimeKeyboardShortcut.from(event: event) {
-                onCapture?(shortcut)
-            } else {
-                super.keyDown(with: event)
-            }
-        }
-    }
-}
-
-struct EditableShortcutRow: View {
-    var title: String
-    var subtitle: String
-    var shortcut: AgentRuntimeKeyboardShortcut
-    var onRecord: () -> Void
-    var onReset: () -> Void
-
-    var body: some View {
-        HStack(spacing: SettingsListLayout.spaceM) {
-            VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
-                Text(title).font(SettingsListTypography.rowTitleSelected)
-                Text(subtitle).font(SettingsListTypography.rowCaption).foregroundStyle(.secondary)
-            }
-            Spacer(minLength: SettingsListLayout.spaceL)
-            Text(shortcut.displayText)
-                .font(SettingsListTypography.rowCaptionEmphasized.monospaced())
-                .padding(.horizontal, SettingsListLayout.spaceM)
-                .padding(.vertical, SettingsListLayout.spaceS)
-                .background(.quaternary.opacity(0.30), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusS, style: .continuous))
-            Button("修改", action: onRecord)
-                .buttonStyle(.bordered)
-                .controlSize(.regular)
-            Button("默认", action: onReset)
-                .buttonStyle(.borderless)
-                .controlSize(.regular)
-        }
-        .frame(minHeight: 56)
     }
 }
