@@ -40,6 +40,8 @@ enum SettingsListLayout {
     static let compactRowMinHeight: CGFloat = 38
     static let prominentRowMinHeight: CGFloat = 58
     static let fieldHeight = AgentChatLayout.hitTargetSize
+    static let pickerControlWidth: CGFloat = 260
+    static let compactPickerControlWidth: CGFloat = 220
     static let iconButtonSize = AgentChatLayout.iconButtonSize
     static let optionIconSize = AgentChatLayout.primaryButtonSize
 }
@@ -50,16 +52,9 @@ struct ConnorSettingsDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                HStack(alignment: .center) {
-                    Text(viewModel.selectedSettingsSection.title)
-                        .font(SettingsListTypography.header)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                    Button(action: { viewModel.resetRuntimeSettings() }) {
-                        Image(systemName: "ellipsis")
-                    }
-                    .buttonStyle(.borderless)
-                    .help("更多")
-                }
+                Text(viewModel.selectedSettingsSection.title)
+                    .font(SettingsListTypography.header)
+                    .frame(maxWidth: .infinity, alignment: .center)
 
                 Group {
                     switch viewModel.selectedSettingsSection {
@@ -269,7 +264,7 @@ struct AIConnectionProviderPreset: Identifiable, Equatable {
     }
 
     static let chinaProviderPresetIDs: Set<String> = [
-        "qwen", "doubao", "moonshot", "zhipu", "minimax", "stepfun"
+        "deepseek", "xiaomi-mimo", "qwen", "doubao", "moonshot", "zhipu", "minimax", "stepfun", "zai"
     ]
 
     static var chinaProviderPresets: [AIConnectionProviderPreset] {
@@ -285,16 +280,16 @@ struct AIConnectionProviderPreset: Identifiable, Equatable {
         AIConnectionProviderPreset(id: "groq", title: "Groq", endpoint: "https://api.groq.com/openai/v1", defaultModel: "llama-3.3-70b-versatile", keyPlaceholder: "gsk_...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "mistral", title: "Mistral", endpoint: "https://api.mistral.ai/v1", defaultModel: "mistral-large-latest", keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "deepseek", title: "DeepSeek", endpoint: "https://api.deepseek.com", defaultModel: "deepseek-v4-flash", supportedModels: ["deepseek-v4-flash", "deepseek-v4-pro"], keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
-        AIConnectionProviderPreset(id: "xiaomi-mimo", title: "Xiaomi MiMo", endpoint: "https://api.xiaomimimo.com/v1", defaultModel: "mimo-v2.5-pro", supportedModels: ["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-omni", "mimo-v2-flash"], keyPlaceholder: "MIMO_API_KEY", protocolKind: .openAICompatible, openAIAPIKeyHeaderKind: .apiKey),
-        AIConnectionProviderPreset(id: "qwen", title: "阿里百炼 · Qwen", endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1", defaultModel: "qwen-plus", supportedModels: ["qwen-plus", "qwen-max", "qwen-turbo", "qwen-long", "qwen3-coder-plus"], keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
-        AIConnectionProviderPreset(id: "doubao", title: "火山方舟 · 豆包", endpoint: "https://ark.cn-beijing.volces.com/api/v3", defaultModel: "doubao-seed-1-6", supportedModels: ["doubao-seed-1-6", "doubao-seed-1-6-thinking", "doubao-seed-1-6-flash", "doubao-1-5-pro-32k"], keyPlaceholder: "Paste your ARK_API_KEY...", protocolKind: .openAICompatible),
-        AIConnectionProviderPreset(id: "moonshot", title: "Moonshot · Kimi", endpoint: "https://api.moonshot.cn/v1", defaultModel: "kimi-k2-0711-preview", supportedModels: ["kimi-k2-0711-preview", "kimi-latest", "moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"], keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
-        AIConnectionProviderPreset(id: "zhipu", title: "智谱 GLM", endpoint: "https://open.bigmodel.cn/api/paas/v4", defaultModel: "glm-4.5", supportedModels: ["glm-4.5", "glm-4.5-air", "glm-4-plus", "glm-4-flash"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
-        AIConnectionProviderPreset(id: "minimax", title: "MiniMax", endpoint: "https://api.minimax.chat/v1", defaultModel: "MiniMax-M1", supportedModels: ["MiniMax-M1", "abab6.5s-chat", "abab6.5g-chat", "abab6.5t-chat"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
-        AIConnectionProviderPreset(id: "stepfun", title: "阶跃星辰 StepFun", endpoint: "https://api.stepfun.com/v1", defaultModel: "step-2-mini", supportedModels: ["step-2-mini", "step-2-16k", "step-1-8k", "step-1-32k", "step-1-128k"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "xiaomi-mimo", title: "Xiaomi MiMo", endpoint: "https://api.xiaomimimo.com/v1", defaultModel: "mimo-v2.5-pro", supportedModels: ["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2.5-asr", "mimo-v2.5-tts-voiceclone", "mimo-v2.5-tts-voicedesign", "mimo-v2.5-tts", "mimo-v2-pro", "mimo-v2-omni", "mimo-v2-tts"], keyPlaceholder: "MIMO_API_KEY", protocolKind: .openAICompatible, openAIAPIKeyHeaderKind: .apiKey),
+        AIConnectionProviderPreset(id: "qwen", title: "阿里百炼 · Qwen", endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1", defaultModel: "qwen-plus", supportedModels: ["qwen-plus", "qwen-max", "qwen-turbo", "qwen-long", "qwen3.5-plus", "qwen3.5-flash", "qwen3-max", "qwen3-coder-plus", "qwen3-vl-plus", "qwen3-vl-flash", "qwen3-omni-flash", "qwen3-asr-flash", "qwen3-tts-flash", "qwen-image-plus", "qwen-image-edit"], keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "doubao", title: "火山方舟 · 豆包", endpoint: "https://ark.cn-beijing.volces.com/api/v3", defaultModel: "doubao-seed-1-6", supportedModels: ["doubao-seed-1-6", "doubao-seed-1-6-thinking", "doubao-seed-1-6-flash", "doubao-seed-1-6-vision", "doubao-seed-1-6-embedding", "doubao-1-5-pro-32k"], keyPlaceholder: "Paste your ARK_API_KEY...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "moonshot", title: "Moonshot · Kimi", endpoint: "https://api.moonshot.cn/v1", defaultModel: "kimi-k2.6", supportedModels: ["kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6", "kimi-k2.5", "moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k", "moonshot-v1-8k-vision-preview", "moonshot-v1-32k-vision-preview", "moonshot-v1-128k-vision-preview"], keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "zhipu", title: "智谱 GLM", endpoint: "https://open.bigmodel.cn/api/paas/v4", defaultModel: "glm-5.1", supportedModels: ["glm-5.2", "glm-5.1", "glm-5", "glm-5-turbo", "glm-4.7", "glm-4.7-flashx", "glm-4.6", "glm-4.5", "glm-4.5-air", "glm-4.5-airx", "glm-4-long", "glm-4-flashx-250414", "glm-4.7-flash", "glm-4.5-flash", "glm-4-flash-250414", "glm-4-plus", "glm-4-flash", "glm-z1-air", "glm-4.5v", "glm-5v-turbo", "glm-4.6v", "glm-ocr", "glm-realtime", "glm-4-voice", "glm-tts", "glm-tts-clone", "glm-asr-2512", "embedding-2"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "minimax", title: "MiniMax", endpoint: "https://api.minimax.chat/v1", defaultModel: "MiniMax-M3", supportedModels: ["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5", "MiniMax-M2.5-highspeed", "MiniMax-M2.1", "MiniMax-M2.1-highspeed", "MiniMax-M2", "M2-her", "MiniMax-M1", "MiniMax-Text-01", "MiniMax-VL-01", "abab6.5s-chat", "abab6.5g-chat", "abab6.5t-chat"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "stepfun", title: "阶跃星辰 StepFun", endpoint: "https://api.stepfun.com/v1", defaultModel: "step3.7-flash", supportedModels: ["step3.7-flash", "step3.5-flash", "step-2-mini", "step-2-16k", "step-1-8k", "step-1-32k", "step-1-128k"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "xai", title: "xAI (Grok)", endpoint: "https://api.x.ai/v1", defaultModel: "grok-3-mini", keyPlaceholder: "xai-...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "cerebras", title: "Cerebras", endpoint: "https://api.cerebras.ai/v1", defaultModel: "llama3.1-8b", keyPlaceholder: "csk-...", protocolKind: .openAICompatible),
-        AIConnectionProviderPreset(id: "zai", title: "z.ai (GLM)", endpoint: "https://api.z.ai/api/paas/v4", defaultModel: "glm-4.5", keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "zai", title: "z.ai (GLM)", endpoint: "https://api.z.ai/api/paas/v4", defaultModel: "glm-4.5", supportedModels: ["glm-4.5", "glm-4.5-air", "glm-4.5-flash", "glm-4-plus", "glm-4-flash"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "huggingface", title: "Hugging Face", endpoint: "https://router.huggingface.co/v1", defaultModel: "openai/gpt-oss-120b", keyPlaceholder: "hf_...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "anthropic", title: "Anthropic API", endpoint: "https://api.anthropic.com", defaultModel: "claude-sonnet-4-5", keyPlaceholder: "sk-ant-...", protocolKind: .anthropicCompatible, authHeaderKind: .xAPIKey),
         AIConnectionProviderPreset(id: "openrouter-anthropic", title: "OpenRouter · Anthropic", endpoint: "https://openrouter.ai/api", defaultModel: "anthropic/claude-sonnet-4.5", keyPlaceholder: "sk-or-...", protocolKind: .anthropicCompatible, authHeaderKind: .bearer),
@@ -416,10 +411,10 @@ struct AIConnectionOnboardingOption: Identifiable, Equatable {
             baseURLString: "https://api.xiaomimimo.com/v1",
             model: "mimo-v2.5-pro",
             selectedModel: "mimo-v2.5-pro",
-            supportedModels: ["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-omni", "mimo-v2-flash"],
+            supportedModels: ["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2.5-asr", "mimo-v2.5-tts-voiceclone", "mimo-v2.5-tts-voicedesign", "mimo-v2.5-tts", "mimo-v2-pro", "mimo-v2-omni", "mimo-v2-tts"],
             setupTitle: "连接 Xiaomi MiMo",
             setupSubtitle: "使用小米 MiMo OpenAI Compatible API 驱动康纳同学。",
-            setupInstruction: "选择 MiMo 文本生成模型并填写 API Key。Endpoint 与 api-key 请求头已按官方文档预设。",
+            setupInstruction: "选择 MiMo 模型并填写 API Key。Endpoint 与 api-key 请求头已按官方文档预设。",
             loginButtonTitle: "继续",
             authURLString: "",
             authenticationKind: .direct
@@ -753,18 +748,22 @@ struct AIConnectionSetupView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
 
-            VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: SettingsListLayout.spaceL) {
                 Text("服务商")
                     .font(SettingsListTypography.header)
+                Spacer(minLength: SettingsListLayout.spaceL)
                 Picker("服务商", selection: $selectedProviderPresetID) {
                     ForEach(chinaProviderPresets) { preset in
                         Text(preset.title).tag(preset.id)
                     }
                 }
+                .labelsHidden()
                 .pickerStyle(.menu)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .controlSize(.large)
+                .frame(width: SettingsListLayout.pickerControlWidth, alignment: .trailing)
                 .onChange(of: selectedProviderPresetID) { _, _ in applySelectedProviderPreset() }
             }
+            .frame(maxWidth: .infinity, minHeight: SettingsListLayout.rowMinHeight)
 
             modelMultiSelect(title: "启用模型", models: activeProviderPreset.availableModels)
             apiKeyField(placeholder: activeProviderPreset.keyPlaceholder)
@@ -781,18 +780,22 @@ struct AIConnectionSetupView: View {
 
             apiKeyField(placeholder: activeProviderPreset.keyPlaceholder)
 
-            VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: SettingsListLayout.spaceL) {
                 Text("服务商")
                     .font(SettingsListTypography.header)
+                Spacer(minLength: SettingsListLayout.spaceL)
                 Picker("服务商", selection: $selectedProviderPresetID) {
                     ForEach(AIConnectionProviderPreset.otherProviderPresets) { preset in
                         Text(preset.title).tag(preset.id)
                     }
                 }
+                .labelsHidden()
                 .pickerStyle(.menu)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .controlSize(.large)
+                .frame(width: SettingsListLayout.pickerControlWidth, alignment: .trailing)
                 .onChange(of: selectedProviderPresetID) { _, _ in applySelectedProviderPreset() }
             }
+            .frame(maxWidth: .infinity, minHeight: SettingsListLayout.rowMinHeight)
 
             if selectedProviderPresetID == "custom" {
                 VStack(alignment: .leading, spacing: 8) {
@@ -812,6 +815,8 @@ struct AIConnectionSetupView: View {
                         }
                     }
                     .pickerStyle(.segmented)
+                    .controlSize(.large)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
                     Text(customProtocol == .anthropicCompatible ? "Anthropic Compatible 使用 /v1/messages 协议，适合 Anthropic API、OpenRouter Anthropic Skin、Vercel AI Gateway 等兼容服务。" : "大多数第三方接口（Ollama、vLLM、DashScope 等）使用 OpenAI Compatible。")
                         .font(SettingsListTypography.rowTitle)
                         .foregroundStyle(.secondary)
@@ -906,7 +911,9 @@ struct AIConnectionSetupView: View {
                     }
                 }
                 .labelsHidden()
-                .frame(maxWidth: 260)
+                .pickerStyle(.menu)
+                .controlSize(.large)
+                .frame(width: SettingsListLayout.pickerControlWidth, alignment: .trailing)
                 .onChange(of: selectedModel) { _, newValue in
                     if !selectedModelIDs.contains(newValue) { selectedModelIDs.insert(newValue) }
                     syncModelListFromSelection(fallbackModels: models)
@@ -1307,10 +1314,20 @@ struct AIConnectionOnboardingView: View {
             HStack {
                 Button(action: cancel) {
                     Label("返回", systemImage: "chevron.left")
+                        .font(SettingsListTypography.rowTitleSelected)
                         .labelStyle(.titleAndIcon)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 9)
+                        .contentShape(Capsule(style: .continuous))
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
+                .background(.quaternary.opacity(0.28), in: Capsule(style: .continuous))
+                .overlay(
+                    Capsule(style: .continuous)
+                        .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+                )
+                .help("返回上一页")
                 Spacer()
             }
             .padding(.top, 6)
@@ -1538,11 +1555,7 @@ struct SettingsPermissionsSection: View {
             }
 
             SettingsGroup(title: "新会话默认权限") {
-                SettingsPickerRow(title: "权限模式", subtitle: "作为新会话和重建会话的默认 Policy Engine 模式。", selection: $viewModel.defaultPermissionMode) {
-                    ForEach(AgentPermissionMode.allCases.filter { $0 != .allowAll }, id: \.self) { mode in
-                        Text(mode.displayName).tag(mode)
-                    }
-                }
+                PermissionModePickerRow(selection: $viewModel.defaultPermissionMode)
                 Divider()
                 PermissionModeSummaryRow(mode: viewModel.defaultPermissionMode)
             }
@@ -1581,6 +1594,76 @@ struct SettingsPermissionsSection: View {
                 RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous)
                     .stroke(Color.secondary.opacity(SettingsListLayout.hairlineOpacity), lineWidth: 1)
             )
+        }
+    }
+}
+
+struct PermissionModePickerRow: View {
+    @Binding var selection: AgentPermissionMode
+
+    private var availableModes: [AgentPermissionMode] {
+        AgentPermissionMode.allCases.filter { $0 != .allowAll }
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 16) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("权限模式")
+                    .font(SettingsListTypography.rowTitleSelected)
+                Text("作为新会话和重建会话的默认 Policy Engine 模式。")
+                    .font(SettingsListTypography.rowCaption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: SettingsListLayout.spaceL)
+
+            Menu {
+                ForEach(availableModes, id: \.self) { mode in
+                    Button {
+                        selection = mode
+                    } label: {
+                        Label(mode.displayName, systemImage: mode.systemImage)
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Label(selection.displayName, systemImage: selection.systemImage)
+                        .labelStyle(.titleAndIcon)
+                    Spacer(minLength: 6)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .font(SettingsListTypography.rowTitle)
+                .padding(.horizontal, 10)
+                .frame(width: 144, height: 34, alignment: .leading)
+                .background(.quaternary.opacity(0.24), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .frame(width: 160, alignment: .trailing)
+            .help("选择新会话默认权限模式")
+        }
+        .frame(minHeight: SettingsListLayout.rowMinHeight)
+    }
+}
+
+private extension AgentPermissionMode {
+    var systemImage: String {
+        switch self {
+        case .readOnly:
+            return "eye"
+        case .askToWrite:
+            return "questionmark.circle"
+        case .trustedWrite:
+            return "bolt.circle"
+        case .allowAll:
+            return "exclamationmark.triangle"
         }
     }
 }

@@ -359,6 +359,7 @@ struct CraftSessionRow: View {
         case .needsReview: "exclamationmark.bubble"
         case .done: "checkmark.circle.fill"
         case .blocked: "nosign"
+        case .cancelled: "xmark.circle"
         case .archived: "archivebox"
         }
     }
@@ -371,6 +372,7 @@ struct CraftSessionRow: View {
         case .needsReview: .purple
         case .done: .green
         case .blocked: .red
+        case .cancelled: .gray
         case .archived: .gray
         }
     }
