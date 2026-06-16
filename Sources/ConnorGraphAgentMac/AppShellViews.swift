@@ -635,6 +635,7 @@ private struct CraftSessionListPane: View {
                         isSelected: session.id == viewModel.selectedChatSessionID,
                         isRunning: viewModel.isChatSessionSubmitting(session.id),
                         isRegeneratingTitle: viewModel.regeneratingTitleSessionIDs.contains(session.id),
+                        hasRunningBackgroundTask: !viewModel.canDeleteChatSession(session.id),
                         labelDefinitions: viewModel.governanceConfig.labels,
                         onSelect: {
                             var transaction = Transaction()
@@ -720,6 +721,7 @@ private struct CraftSessionRow: View {
     var isSelected: Bool
     var isRunning: Bool
     var isRegeneratingTitle: Bool
+    var hasRunningBackgroundTask: Bool
     var labelDefinitions: [AgentSessionLabelDefinition]
     var onSelect: () -> Void
     var onRename: (String) -> Void
@@ -749,6 +751,7 @@ private struct CraftSessionRow: View {
                 } label: {
                     Label("删除", systemImage: "trash")
                 }
+                .disabled(hasRunningBackgroundTask)
             }
             .contextMenu { contextMenuItems }
             .onChange(of: row.title) { _, newTitle in
@@ -758,9 +761,10 @@ private struct CraftSessionRow: View {
             .onAppear { titleDraft = row.title }
             .confirmationDialog("删除这个会话？", isPresented: $isDeleteConfirmationPresented, titleVisibility: .visible) {
             Button("删除", role: .destructive, action: onDelete)
+                .disabled(hasRunningBackgroundTask)
             Button("取消", role: .cancel) {}
             } message: {
-                Text("删除后会话将从列表中移除。")
+                Text(hasRunningBackgroundTask ? "此会话仍有后台任务正在运行,请等待任务结束后再删除。" : "删除后会话将从列表中移除。")
             }
     }
 
@@ -819,6 +823,7 @@ private struct CraftSessionRow: View {
         } label: {
             Label("删除", systemImage: "trash")
         }
+        .disabled(hasRunningBackgroundTask)
     }
 
     private var rowContent: some View {

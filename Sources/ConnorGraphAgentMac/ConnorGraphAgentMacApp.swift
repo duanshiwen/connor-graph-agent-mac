@@ -1872,15 +1872,25 @@ final class AppViewModel: ObservableObject {
         guard !trimmed.isEmpty, let chatSessionRepository else { return }
         do {
             let updated = try chatSessionRepository.renameSession(sessionID: sessionID, title: trimmed)
-            if selectedChatSessionID == sessionID {
-                fallbackChatSession = updated
-                nativeSessionManager = makeNativeSessionManager(for: updated)
-                transcript = updated.messages
-            }
+            synchronizeRenamedChatSession(updated)
             reloadChatSessions()
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
+        }
+    }
+
+    private func synchronizeRenamedChatSession(_ updated: AgentSession) {
+        if let index = chatSessions.firstIndex(where: { $0.id == updated.id }) {
+            chatSessions[index] = updated
+        }
+        if let index = allChatSessions.firstIndex(where: { $0.id == updated.id }) {
+            allChatSessions[index] = updated
+        }
+        if selectedChatSessionID == updated.id {
+            fallbackChatSession = updated
+            nativeSessionManager = makeNativeSessionManager(for: updated)
+            transcript = updated.messages
         }
     }
 
@@ -1901,6 +1911,16 @@ final class AppViewModel: ObservableObject {
     func hasRunningBackgroundTask(sessionID: String) -> Bool {
         backgroundTasksBySessionID[sessionID, default: []]
             .contains { $0.status == .queued || $0.status == .running }
+    }
+
+    private func runningBackgroundTasksForDeletionCheck(sessionID: String) throws -> [AppSessionBackgroundTask] {
+        let persistedTasks = try chatSessionRepository?.loadBackgroundTasks(sessionID: sessionID).map(AppSessionBackgroundTask.init(persisted:)) ?? []
+        let memoryTasks = backgroundTasksBySessionID[sessionID, default: []]
+        return (persistedTasks + memoryTasks).filter { $0.status == .queued || $0.status == .running }
+    }
+
+    func canDeleteChatSession(_ sessionID: String) -> Bool {
+        (try? runningBackgroundTasksForDeletionCheck(sessionID: sessionID).isEmpty) ?? !hasRunningBackgroundTask(sessionID: sessionID)
     }
 
     private func loadBackgroundTasks(sessionID: String) throws {
@@ -2033,6 +2053,11 @@ final class AppViewModel: ObservableObject {
     func deleteChatSession(_ sessionID: String) {
         guard let chatSessionRepository else { return }
         do {
+            let runningTasks = try runningBackgroundTasksForDeletionCheck(sessionID: sessionID)
+            guard runningTasks.isEmpty else {
+                errorMessage = "无法删除会话: 仍有 \(runningTasks.count) 个后台任务正在运行。"
+                return
+            }
             try chatSessionRepository.deleteSession(sessionID: sessionID)
             regeneratingTitleSessionIDs.remove(sessionID)
             backgroundTasksBySessionID.removeValue(forKey: sessionID)
@@ -3016,9 +3041,6 @@ final class AppViewModel: ObservableObject {
                         self.activeChatRunIDsBySessionID[submittingSessionID] = runID
                         self.activeChatBackendsByRunID[runID] = liveBackend
                         self.activeChatBackendsBySessionID[submittingSessionID] = liveBackend
-                        if shouldAutoGenerateInitialTitle {
-                            self.regenerateChatSessionTitle(submittingSessionID)
-                        }
                         if let reason = self.pendingChatCancellationReasonsBySessionID[submittingSessionID] {
                             self.cancelRunningChatRun(sessionID: submittingSessionID, runID: runID, reason: reason)
                         }
@@ -3053,6 +3075,10 @@ final class AppViewModel: ObservableObject {
             reloadPendingApprovals()
             if let chatSessionRepository {
                 chatSessions = try chatSessionRepository.loadSessions(filter: sessionListFilter)
+                allChatSessions = try chatSessionRepository.loadSessions(filter: .all)
+            }
+            if shouldAutoGenerateInitialTitle {
+                regenerateChatSessionTitle(submittingSessionID)
             }
             errorMessage = nil
             Task { await runBackgroundJobs() }

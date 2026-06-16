@@ -17,6 +17,7 @@ public struct AnthropicCompatibleConfig: Sendable, Equatable {
     public var anthropicVersion: String
     public var extraHeaders: [String: String]
     public var maxTokens: Int
+    public var featureOptions: AnthropicCompatibleFeatureOptions
 
     public init(
         baseURL: URL,
@@ -25,7 +26,8 @@ public struct AnthropicCompatibleConfig: Sendable, Equatable {
         authHeaderKind: AnthropicCompatibleAuthHeaderKind = .xAPIKey,
         anthropicVersion: String = "2023-06-01",
         extraHeaders: [String: String] = [:],
-        maxTokens: Int = 4096
+        maxTokens: Int = 4096,
+        featureOptions: AnthropicCompatibleFeatureOptions = AnthropicCompatibleFeatureOptions()
     ) {
         self.baseURL = baseURL
         self.apiKey = apiKey
@@ -34,6 +36,7 @@ public struct AnthropicCompatibleConfig: Sendable, Equatable {
         self.anthropicVersion = anthropicVersion
         self.extraHeaders = extraHeaders
         self.maxTokens = maxTokens
+        self.featureOptions = featureOptions
     }
 
     public var requestModel: String {
@@ -48,16 +51,18 @@ public enum AnthropicCompatibleProviderError: Error, Equatable, Sendable {
     case invalidResponse
     case httpStatus(Int)
     case missingAssistantMessage
+    case streamError(String)
 }
 
-public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider, AgentModelProvider, Sendable {
+public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider, StreamingAgentModelProvider, Sendable {
     public var config: AnthropicCompatibleConfig
     public var httpClient: Client
+    public var sseClient: (any AgentSSEHTTPClient)?
 
     public var modelID: String { config.requestModel }
     public var capabilities: AgentModelCapabilities {
         AgentModelCapabilities(
-            supportsStreaming: false,
+            supportsStreaming: config.featureOptions.streamingEnabled,
             supportsToolCalling: true,
             supportsParallelToolCalls: false,
             supportsStructuredOutput: false,
@@ -65,14 +70,16 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
         )
     }
 
-    public init(config: AnthropicCompatibleConfig, httpClient: Client) {
+    public init(config: AnthropicCompatibleConfig, httpClient: Client, sseClient: (any AgentSSEHTTPClient)? = nil) {
         self.config = config
         self.httpClient = httpClient
+        self.sseClient = sseClient
     }
 
     public init(config: AnthropicCompatibleConfig) where Client == URLSessionAgentHTTPClient {
         self.config = config
         self.httpClient = URLSessionAgentHTTPClient()
+        self.sseClient = URLSessionAgentSSEHTTPClient()
     }
 
     public func complete(prompt: String, context: AgentContext) async throws -> LLMResponse {
@@ -94,6 +101,39 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
         return try parseMessagesResponse(httpResponse.body)
     }
 
+    public func streamComplete(_ request: AgentModelRequest) -> AsyncThrowingStream<AgentModelStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                do {
+                    guard config.featureOptions.streamingEnabled, let sseClient else {
+                        continuation.yield(.completed(try await complete(request)))
+                        continuation.finish()
+                        return
+                    }
+                    let httpRequest = try makeMessagesRequest(request, stream: true)
+                    let frames = try await sseClient.stream(httpRequest)
+                    let parser = AnthropicSSEParser()
+                    var accumulator = AnthropicStreamAccumulator()
+                    for try await frame in frames {
+                        for event in parser.parse(frame) {
+                            if case .error(let message) = event {
+                                continuation.finish(throwing: AnthropicCompatibleProviderError.streamError(message))
+                                return
+                            }
+                            if let mapped = accumulator.append(event) {
+                                continuation.yield(mapped)
+                            }
+                        }
+                    }
+                    continuation.yield(.completed(accumulator.response()))
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+    }
+
     public func healthCheck() async throws -> LLMProviderHealthCheckResult {
         let response = try await complete(AgentModelRequest(messages: [
             AgentModelMessage(role: .system, content: "You are a connection health checker."),
@@ -103,12 +143,15 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
         return LLMProviderHealthCheckResult(ok: true, model: config.requestModel, message: "Connection OK: \(config.requestModel)")
     }
 
-    private func makeMessagesRequest(_ request: AgentModelRequest) throws -> AgentHTTPRequest {
+    private func makeMessagesRequest(_ request: AgentModelRequest, stream: Bool = false) throws -> AgentHTTPRequest {
         var body: [String: Any] = [
             "model": config.requestModel,
             "max_tokens": config.maxTokens,
             "messages": request.messages.compactMap { anthropicMessage(for: $0) }
         ]
+        if stream { body["stream"] = true }
+        if let thinking = config.featureOptions.thinking { body["thinking"] = thinking.jsonObject }
+        if let cache = config.featureOptions.promptCache.jsonObject { body["cache_control"] = cache }
         let system = request.messages
             .filter { $0.role == .system }
             .map(\.content)
@@ -118,14 +161,19 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
         if !system.isEmpty {
             body["system"] = system
         }
-        if !request.tools.isEmpty {
-            body["tools"] = request.tools.map { tool in
-                [
+        if !request.tools.isEmpty || !config.featureOptions.serverTools.isEmpty {
+            var tools: [[String: Any]] = request.tools.map { tool in
+                var object: [String: Any] = [
                     "name": tool.name,
                     "description": tool.description,
                     "input_schema": tool.inputSchema.jsonObject
-                ] as [String: Any]
+                ]
+                if config.featureOptions.eagerInputStreamingToolNames.contains(tool.name) { object["eager_input_streaming"] = true }
+                if config.featureOptions.cachedToolNames.contains(tool.name) { object["cache_control"] = ["type": "ephemeral"] }
+                return object
             }
+            tools.append(contentsOf: config.featureOptions.serverTools.map(\.jsonObject))
+            body["tools"] = tools
             body["tool_choice"] = ["type": "auto"]
         }
         let data = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
@@ -139,6 +187,12 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
         case .user:
             return ["role": "user", "content": contentBlocks(for: message)]
         case .assistant:
+            if message.providerMetadata?.providerID == "anthropic-compatible",
+               let raw = message.providerMetadata?.rawAssistantContentJSON,
+               let data = raw.data(using: .utf8),
+               let blocks = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                return ["role": "assistant", "content": blocks]
+            }
             var content: [[String: Any]] = []
             let text = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
             if !text.isEmpty { content.append(["type": "text", "text": text]) }
@@ -192,6 +246,7 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
         var headers = config.extraHeaders
         headers["Content-Type"] = "application/json"
         headers["anthropic-version"] = config.anthropicVersion
+        if !config.featureOptions.betaHeaders.isEmpty { headers["anthropic-beta"] = config.featureOptions.betaHeaders.joined(separator: ",") }
         switch config.authHeaderKind {
         case .xAPIKey:
             headers["x-api-key"] = config.apiKey
@@ -228,16 +283,19 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
         let usageObject = object["usage"] as? [String: Any]
         let inputTokens = usageObject?["input_tokens"] as? Int ?? 0
         let outputTokens = usageObject?["output_tokens"] as? Int ?? 0
-        let usage = usageObject == nil ? nil : AgentModelUsage(promptTokens: inputTokens, completionTokens: outputTokens)
+        let usage = usageObject == nil ? nil : AgentModelUsage(promptTokens: inputTokens, completionTokens: outputTokens, cacheCreationInputTokens: usageObject?["cache_creation_input_tokens"] as? Int, cacheReadInputTokens: usageObject?["cache_read_input_tokens"] as? Int)
         let stopReason = object["stop_reason"] as? String
-        let finishReason: AgentModelFinishReason = stopReason == "tool_use" ? .toolCalls : .stop
+        let finishReason: AgentModelFinishReason = stopReason == "tool_use" ? .toolCalls : (stopReason == "max_tokens" ? .length : .stop)
         let rawJSON = String(data: data, encoding: .utf8)
+        let contentData = try? JSONSerialization.data(withJSONObject: content, options: [.sortedKeys])
+        let rawContentJSON = contentData.flatMap { String(data: $0, encoding: .utf8) }
         return AgentModelResponse(
             text: textBlocks.isEmpty ? nil : textBlocks.joined(separator: ""),
             toolCalls: toolCalls,
             usage: usage,
             finishReason: finishReason,
-            rawResponseJSON: rawJSON
+            rawResponseJSON: rawJSON,
+            providerMetadata: AgentModelProviderMetadata(providerID: "anthropic-compatible", rawAssistantContentJSON: rawContentJSON, stopReason: stopReason)
         )
     }
 }
