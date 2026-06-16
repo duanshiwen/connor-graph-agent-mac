@@ -105,8 +105,12 @@ struct BrowserWorkspaceView: View {
                 if viewModel.isBrowserBookmarksPanelVisible {
                     HStack(spacing: 0) {
                         Spacer(minLength: 0)
-                        BrowserBookmarksPanelView(viewModel: viewModel)
-                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                        BrowserBookmarksPanelView(
+                            viewModel: viewModel,
+                            currentPageURL: activeTabCanBeBookmarked ? activeTab?.displayURL : nil,
+                            currentPageTitle: activeTabCanBeBookmarked ? activeTab?.displayTitle : nil
+                        )
+                        .transition(AnyTransition.move(edge: Edge.trailing).combined(with: AnyTransition.opacity))
                     }
                 }
 
@@ -114,7 +118,7 @@ struct BrowserWorkspaceView: View {
                     HStack(spacing: 0) {
                         Spacer(minLength: 0)
                         BrowserHistoryPanelView(viewModel: viewModel)
-                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                            .transition(AnyTransition.move(edge: Edge.trailing).combined(with: AnyTransition.opacity))
                     }
                 }
             }
@@ -259,29 +263,28 @@ struct BrowserWorkspaceView: View {
             )
             .frame(height: 28)
 
-            Button(action: openBookmarksPanelAndBookmarkCurrentPageIfNeeded) {
-                BrowserToolbarIconButtonLabel(
+            Button(action: { viewModel.toggleBrowserBookmarksPanel() }) {
+                SidebarActionButtonLabel(
+                    title: "收藏夹",
                     systemImage: activeURLIsBookmarked ? "star.fill" : "star",
-                    isActive: viewModel.isBrowserBookmarksPanelVisible || activeURLIsBookmarked
+                    fillsWidth: false,
+                    titleFont: BrowserFloatingTypography.askButton,
+                    iconFont: BrowserFloatingTypography.askButtonIcon
                 )
             }
-            .buttonStyle(.plain)
-            .disabled(activeTab == nil || !activeTabCanBeBookmarked)
-            .opacity(activeTab == nil || !activeTabCanBeBookmarked ? 0.48 : 1)
-            .help("收藏夹")
-            .contextMenu {
-                Button(activeURLIsBookmarked ? "取消收藏当前页" : "收藏当前页") {
-                    toggleActivePageBookmark()
-                }
-            }
+            .buttonStyle(SidebarActionButtonStyle())
+            .help(activeURLIsBookmarked ? "当前页已收藏，打开收藏夹" : "打开收藏夹")
 
             Button(action: { viewModel.toggleBrowserHistoryPanel() }) {
-                BrowserToolbarIconButtonLabel(
+                SidebarActionButtonLabel(
+                    title: "历史",
                     systemImage: viewModel.isBrowserHistoryPanelVisible ? "clock.arrow.circlepath" : "clock",
-                    isActive: viewModel.isBrowserHistoryPanelVisible
+                    fillsWidth: false,
+                    titleFont: BrowserFloatingTypography.askButton,
+                    iconFont: BrowserFloatingTypography.askButtonIcon
                 )
             }
-            .buttonStyle(.plain)
+            .buttonStyle(SidebarActionButtonStyle())
             .help("浏览历史")
 
             Button(action: showPageQuestionPopover) {
@@ -396,28 +399,6 @@ struct BrowserWorkspaceView: View {
     private func syncAddressTextWithActiveTab() {
         guard let activeTab else { return }
         addressText = activeTab.navigationState.url.isEmpty ? activeTab.initialURLString : activeTab.navigationState.url
-    }
-
-    private func openBookmarksPanelAndBookmarkCurrentPageIfNeeded() {
-        if activeTabCanBeBookmarked, !activeURLIsBookmarked, let tab = activeTab {
-            viewModel.addBrowserBookmark(
-                url: tab.displayURL,
-                title: tab.displayTitle,
-                groupName: viewModel.selectedBrowserBookmarkGroupName
-            )
-        }
-        if !viewModel.isBrowserBookmarksPanelVisible {
-            viewModel.toggleBrowserBookmarksPanel()
-        }
-    }
-
-    private func toggleActivePageBookmark() {
-        guard activeTabCanBeBookmarked, let tab = activeTab else { return }
-        viewModel.toggleBrowserBookmark(
-            url: tab.displayURL,
-            title: tab.displayTitle,
-            groupName: viewModel.selectedBrowserBookmarkGroupName
-        )
     }
 
     private func reloadOrStopActiveWebView() {
