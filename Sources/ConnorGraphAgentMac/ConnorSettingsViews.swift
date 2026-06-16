@@ -167,9 +167,6 @@ private struct SettingsAppSection: View {
             SettingsGroup(title: "电源") {
                 SettingsToggleRow(title: "保持屏幕常亮", subtitle: "会话运行时防止屏幕关闭。", isOn: $viewModel.keepScreenAwake)
             }
-            SettingsGroup(title: "工具") {
-                SettingsToggleRow(title: "内置浏览器", subtitle: "如果使用外部浏览器工具，则禁用。", isOn: $viewModel.internalBrowserEnabled)
-            }
             SettingsGroup(title: "网络") {
                 SettingsToggleRow(title: "HTTP 代理", subtitle: "通过代理服务器路由网络流量。", isOn: $viewModel.httpProxyEnabled)
                 if viewModel.httpProxyEnabled {
