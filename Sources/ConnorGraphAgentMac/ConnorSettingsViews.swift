@@ -368,6 +368,13 @@ private struct AIConnectionOnboardingOption: Identifiable, Equatable {
 
     var requiresWebAuthentication: Bool { authenticationKind != .direct }
 
+    var modelOptionsFallback: [String] {
+        if !supportedModels.isEmpty { return supportedModels }
+        let parsed = model.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        if !parsed.isEmpty { return parsed }
+        return selectedModel.isEmpty ? [] : [selectedModel]
+    }
+
     static let all: [AIConnectionOnboardingOption] = [
         AIConnectionOnboardingOption(
             id: "claude-pro-max",
@@ -536,6 +543,7 @@ private struct AIConnectionSetupView: View {
     @State private var baseURLString = ""
     @State private var model = ""
     @State private var selectedModel = ""
+    @State private var selectedModelIDs: Set<String> = []
     @State private var apiKey = ""
     @State private var showAPIKey = false
     @State private var selectedProviderPresetID = "openai"
@@ -776,8 +784,7 @@ private struct AIConnectionSetupView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
 
-            modelPicker(title: "模型", models: option.supportedModels.isEmpty ? [option.selectedModel] : option.supportedModels)
-            providerConnectionSummary
+            modelMultiSelect(title: "启用模型", models: option.supportedModels.isEmpty ? [option.selectedModel] : option.supportedModels)
             apiKeyField(placeholder: option.id == "xiaomi-mimo" ? "MIMO_API_KEY" : "sk-...")
         }
     }
@@ -803,8 +810,7 @@ private struct AIConnectionSetupView: View {
                 .onChange(of: selectedProviderPresetID) { _, _ in applySelectedProviderPreset() }
             }
 
-            modelPicker(title: "模型", models: activeProviderPreset.availableModels)
-            providerConnectionSummary
+            modelMultiSelect(title: "启用模型", models: activeProviderPreset.availableModels)
             apiKeyField(placeholder: activeProviderPreset.keyPlaceholder)
         }
     }
@@ -820,34 +826,27 @@ private struct AIConnectionSetupView: View {
             apiKeyField(placeholder: activeProviderPreset.keyPlaceholder)
 
             VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Endpoint")
-                        .font(.headline)
-                    Spacer()
-                    Picker("服务商", selection: $selectedProviderPresetID) {
-                        ForEach(AIConnectionProviderPreset.otherProviderPresets) { preset in
-                            Text(preset.title).tag(preset.id)
-                        }
+                Text("服务商")
+                    .font(.headline)
+                Picker("服务商", selection: $selectedProviderPresetID) {
+                    ForEach(AIConnectionProviderPreset.otherProviderPresets) { preset in
+                        Text(preset.title).tag(preset.id)
                     }
-                    .labelsHidden()
-                    .frame(maxWidth: 220)
-                    .onChange(of: selectedProviderPresetID) { _, _ in applySelectedProviderPreset() }
                 }
-
-                if !activeProviderPreset.hidesEndpoint {
-                    TextField("https://your-api-endpoint.com", text: $baseURLString)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.title3)
-                } else {
-                    Text(activeProviderPreset.endpoint)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
+                .pickerStyle(.menu)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .onChange(of: selectedProviderPresetID) { _, _ in applySelectedProviderPreset() }
             }
 
             if selectedProviderPresetID == "custom" {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Endpoint")
+                        .font(.headline)
+                    TextField("https://your-api-endpoint.com", text: $baseURLString)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.title3)
+                }
+
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Protocol")
                         .font(.headline)
@@ -867,7 +866,7 @@ private struct AIConnectionSetupView: View {
                 Text("Default Model · required")
                     .font(.headline)
                 if selectedProviderPresetID != "custom" && !activeProviderPreset.supportedModels.isEmpty {
-                    modelPicker(title: "", models: activeProviderPreset.availableModels)
+                    modelMultiSelect(title: "", models: activeProviderPreset.availableModels)
                 } else {
                     TextField("例如 gpt-4o-mini、deepseek-v4-flash、google/gemini-2.5-flash", text: $model)
                         .textFieldStyle(.roundedBorder)
@@ -911,47 +910,56 @@ private struct AIConnectionSetupView: View {
         }
     }
 
-    private func modelPicker(title: String, models: [String]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+    private func modelMultiSelect(title: String, models: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
             if !title.isEmpty {
                 Text(title)
                     .font(.headline)
             }
-            Picker(title.isEmpty ? "模型" : title, selection: $selectedModel) {
+            VStack(alignment: .leading, spacing: 8) {
                 ForEach(models, id: \.self) { modelID in
-                    Text(modelID).tag(modelID)
+                    Toggle(isOn: Binding(
+                        get: { selectedModelIDs.contains(modelID) },
+                        set: { isOn in updateSelectedModels(modelID: modelID, isSelected: isOn, availableModels: models) }
+                    )) {
+                        HStack {
+                            Text(modelID)
+                            Spacer()
+                            if selectedModel == modelID {
+                                Text("默认")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(option.tint)
+                            }
+                        }
+                    }
+                    .toggleStyle(.checkbox)
                 }
             }
-            .pickerStyle(.menu)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .onChange(of: selectedModel) { _, newValue in
-                model = newValue
-            }
-        }
-    }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-    private var providerConnectionSummary: some View {
-        VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Endpoint")
+                Text("默认模型")
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Text(baseURLString)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                Picker("默认模型", selection: $selectedModel) {
+                    ForEach(enabledModels(in: models), id: \.self) { modelID in
+                        Text(modelID).tag(modelID)
+                    }
+                }
+                .labelsHidden()
+                .frame(maxWidth: 260)
+                .onChange(of: selectedModel) { _, newValue in
+                    if !selectedModelIDs.contains(newValue) { selectedModelIDs.insert(newValue) }
+                    syncModelListFromSelection(fallbackModels: models)
+                }
             }
-            HStack {
-                Text("认证方式")
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text(openAIAPIKeyHeaderKindForCurrentDraft() == .apiKey ? "api-key" : "Bearer")
-                    .foregroundStyle(.secondary)
-            }
+            Text("可启用多个模型；默认模型用于首次 health check 和新会话默认选择。")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
         }
-        .font(.subheadline)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private var activeProviderPreset: AIConnectionProviderPreset {
@@ -1015,7 +1023,7 @@ private struct AIConnectionSetupView: View {
         case .direct:
             return connectionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || baseURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || effectiveModelListForSubmit().isEmpty
                 || (apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isLoopbackEndpoint(baseURLString))
         default:
             return false
@@ -1166,13 +1174,15 @@ private struct AIConnectionSetupView: View {
             do {
                 let usesProviderPreset = option.id == "other-provider" || option.id == "china-provider"
                 let connectionKind: AppLLMConnectionKind = usesProviderPreset && customProtocol == .anthropicCompatible ? .anthropicCompatible : .openAICompatible
+                let submittedModelList = effectiveModelListForSubmit()
+                let submittedSelectedModel = selectedModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? submittedModelList : selectedModel
                 let input = AppLLMConnectionSetupInput(
                     id: nil,
                     kind: connectionKind,
                     name: connectionName,
                     baseURLString: baseURLString,
-                    model: model,
-                    selectedModel: selectedModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? model : selectedModel,
+                    model: submittedModelList,
+                    selectedModel: submittedSelectedModel,
                     apiKey: apiKey,
                     anthropicAuthHeaderKind: activeProviderPreset.authHeaderKind,
                     openAIAPIKeyHeaderKind: openAIAPIKeyHeaderKindForCurrentDraft()
@@ -1198,6 +1208,8 @@ private struct AIConnectionSetupView: View {
         baseURLString = option.baseURLString
         model = option.model
         selectedModel = option.selectedModel
+        selectedModelIDs = Set(option.modelOptionsFallback)
+        if selectedModelIDs.isEmpty, !selectedModel.isEmpty { selectedModelIDs = [selectedModel] }
         if option.id == "other-provider" {
             selectedProviderPresetID = "openai"
             applySelectedProviderPreset()
@@ -1218,16 +1230,66 @@ private struct AIConnectionSetupView: View {
         if preset.id != "custom" {
             connectionName = preset.title
             baseURLString = preset.endpoint
-            model = preset.defaultModel
+            model = preset.availableModels.joined(separator: ",")
             selectedModel = preset.defaultModel
+            selectedModelIDs = Set(preset.availableModels)
             customProtocol = preset.protocolKind
         } else {
             connectionName = option.connectionName
             baseURLString = ""
             model = ""
             selectedModel = ""
+            selectedModelIDs = []
             customProtocol = .openAICompatible
         }
+    }
+
+    private func updateSelectedModels(modelID: String, isSelected: Bool, availableModels: [String]) {
+        if isSelected {
+            selectedModelIDs.insert(modelID)
+            if selectedModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { selectedModel = modelID }
+        } else {
+            selectedModelIDs.remove(modelID)
+            if selectedModelIDs.isEmpty, let fallback = availableModels.first {
+                selectedModelIDs.insert(fallback)
+            }
+            if selectedModel == modelID || !selectedModelIDs.contains(selectedModel) {
+                selectedModel = enabledModels(in: availableModels).first ?? ""
+            }
+        }
+        syncModelListFromSelection(fallbackModels: availableModels)
+    }
+
+    private func enabledModels(in availableModels: [String]) -> [String] {
+        let selected = availableModels.filter { selectedModelIDs.contains($0) }
+        return selected.isEmpty ? Array(availableModels.prefix(1)) : selected
+    }
+
+    private func syncModelListFromSelection(fallbackModels: [String]) {
+        let models = enabledModels(in: fallbackModels)
+        model = models.joined(separator: ",")
+        if selectedModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !models.contains(selectedModel) {
+            selectedModel = models.first ?? ""
+        }
+    }
+
+    private func effectiveModelListForSubmit() -> String {
+        if !selectedModelIDs.isEmpty {
+            let sourceModels = currentPresetModelOptions()
+            let enabled = sourceModels.filter { selectedModelIDs.contains($0) }
+            if !enabled.isEmpty { return enabled.joined(separator: ",") }
+        }
+        return model.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func currentPresetModelOptions() -> [String] {
+        if option.id == "deepseek" || option.id == "xiaomi-mimo" {
+            return option.supportedModels.isEmpty ? [option.selectedModel] : option.supportedModels
+        }
+        if option.id == "china-provider" || (option.id == "other-provider" && selectedProviderPresetID != "custom") {
+            return activeProviderPreset.availableModels
+        }
+        return model.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
     }
 
     private func openAIAPIKeyHeaderKindForCurrentDraft() -> OpenAICompatibleAPIKeyHeaderKind {
