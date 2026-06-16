@@ -111,10 +111,6 @@ struct ConnorSettingsDetailView: View {
                         SettingsAppSection(viewModel: viewModel)
                     case .ai:
                         SettingsAISection(viewModel: viewModel)
-                    case .appearance:
-                        SettingsAppearanceSection(viewModel: viewModel)
-                    case .input:
-                        SettingsInputSection(viewModel: viewModel)
                     case .permissions:
                         SettingsPermissionsSection(viewModel: viewModel)
                     case .labels:
@@ -166,6 +162,9 @@ private struct SettingsAppSection: View {
             }
             SettingsGroup(title: "电源") {
                 SettingsToggleRow(title: "保持屏幕常亮", subtitle: "会话运行时防止屏幕关闭。", isOn: $viewModel.keepScreenAwake)
+            }
+            SettingsGroup(title: "页面显示主题") {
+                SettingsAppearanceModeRow(selection: $viewModel.appearanceMode)
             }
             SettingsGroup(title: "网络") {
                 SettingsToggleRow(title: "HTTP 代理", subtitle: "通过代理服务器路由网络流量。", isOn: $viewModel.httpProxyEnabled)
@@ -1274,59 +1273,6 @@ private struct AIConnectionEntryRow: View {
     }
 }
 
-private struct SettingsAppearanceSection: View {
-    @ObservedObject var viewModel: AppViewModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            SettingsGroup(title: "默认主题") {
-                HStack {
-                    Text("模式")
-                        .font(.subheadline.weight(.medium))
-                    Spacer()
-                    Picker("模式", selection: $viewModel.appearanceMode) {
-                        ForEach(ConnorAppearanceMode.allCases) { mode in
-                            Label(mode.displayName, systemImage: mode.systemImage).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 260)
-                }
-                Divider()
-                SettingsValueRow(title: "颜色主题", value: "使用默认")
-                Divider()
-                SettingsValueRow(title: "字体", value: "系统")
-                Divider()
-                SettingsValueRow(title: "语言", value: "简体中文")
-            }
-            SettingsGroup(title: "界面") {
-                SettingsToggleRow(title: "连接图标", subtitle: "在会话列表和模型选择器中显示提供商图标。", isOn: $viewModel.showProviderIcons)
-                Divider()
-                SettingsToggleRow(title: "丰富的工具描述", subtitle: "为工具调用添加操作名称和意图描述。", isOn: $viewModel.richToolDescriptionsEnabled)
-            }
-        }
-    }
-}
-
-private struct SettingsInputSection: View {
-    @ObservedObject var viewModel: AppViewModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            SettingsGroup(title: "发送") {
-                SettingsPickerRow(title: "发送消息", subtitle: "选择默认发送快捷键", selection: $viewModel.composerSendShortcut) {
-                    Text("Return").tag("return")
-                    Text("⌘ Return").tag("cmd-return")
-                }
-                Divider()
-                SettingsToggleRow(title: "自动保存草稿", subtitle: "切换会话时保留未发送输入。", isOn: $viewModel.autoSaveDraftsEnabled)
-                Divider()
-                SettingsToggleRow(title: "拼写检查", subtitle: "使用系统拼写检查。", isOn: $viewModel.spellCheckEnabled)
-            }
-        }
-    }
-}
-
 private struct SettingsPermissionsSection: View {
     @ObservedObject var viewModel: AppViewModel
 
@@ -2011,6 +1957,34 @@ private struct SettingsGroup<Content: View>: View {
                     .stroke(Color.secondary.opacity(0.14), lineWidth: 1)
             )
         }
+    }
+}
+
+private struct SettingsAppearanceModeRow: View {
+    @Binding var selection: ConnorAppearanceMode
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("外观")
+                        .font(.subheadline.weight(.medium))
+                    Text("选择应用页面的显示主题。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+
+            Picker("页面显示主题", selection: $selection) {
+                ForEach(ConnorAppearanceMode.allCases) { mode in
+                    Label(mode.displayName, systemImage: mode.systemImage).tag(mode)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+        }
+        .frame(minHeight: 68, alignment: .leading)
     }
 }
 
