@@ -113,6 +113,10 @@ public struct AppStoragePaths: Sendable, Equatable {
         browserDirectory.appendingPathComponent("history.jsonl")
     }
 
+    public var browserBookmarksURL: URL {
+        browserDirectory.appendingPathComponent("bookmarks.jsonl")
+    }
+
     public func sessionArtifactDirectories(sessionID: String) -> AgentSessionArtifactDirectories {
         AgentSessionArtifactDirectories(root: sessionsDirectory.appendingPathComponent(sessionID, isDirectory: true))
     }
