@@ -101,20 +101,25 @@ public struct AgentSessionGovernanceMetadata: Codable, Sendable, Equatable {
     public var isArchived: Bool
     public var isFlagged: Bool
     public var archivedAt: Date?
+    public var deletedAt: Date?
 
     public init(
         status: AgentSessionStatus = .todo,
         labels: [AgentSessionLabel] = [],
         isArchived: Bool = false,
         isFlagged: Bool = false,
-        archivedAt: Date? = nil
+        archivedAt: Date? = nil,
+        deletedAt: Date? = nil
     ) {
         self.status = status
         self.labels = labels
         self.isArchived = isArchived
         self.isFlagged = isFlagged
         self.archivedAt = archivedAt
+        self.deletedAt = deletedAt
     }
+
+    public var isDeleted: Bool { deletedAt != nil }
 
     public static let `default` = AgentSessionGovernanceMetadata()
 }
