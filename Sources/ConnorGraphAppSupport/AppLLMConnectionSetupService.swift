@@ -3,6 +3,7 @@ import ConnorGraphAgent
 
 public typealias AppLLMConnectionSidecarValidator = @Sendable (AppLLMConnectionConfig) async throws -> LLMProviderHealthCheckResult
 public typealias AppLLMCodexAPIKeyExchange = @Sendable (String) async throws -> String
+public typealias AnthropicCompatibleHealthCheck = @Sendable (AnthropicCompatibleConfig) async throws -> LLMProviderHealthCheckResult
 
 public struct AppLLMConnectionSetupInput: Sendable, Equatable {
     public var id: String?
@@ -17,6 +18,7 @@ public struct AppLLMConnectionSetupInput: Sendable, Equatable {
     public var sidecarArguments: String
     public var sidecarWorkingDirectoryPath: String
     public var sidecarPermissionMode: AgentPermissionMode
+    public var anthropicAuthHeaderKind: AnthropicCompatibleAuthHeaderKind
     public var makeDefault: Bool
 
     public init(
@@ -32,6 +34,7 @@ public struct AppLLMConnectionSetupInput: Sendable, Equatable {
         sidecarArguments: String = "",
         sidecarWorkingDirectoryPath: String = "",
         sidecarPermissionMode: AgentPermissionMode = .readOnly,
+        anthropicAuthHeaderKind: AnthropicCompatibleAuthHeaderKind = .xAPIKey,
         makeDefault: Bool = true
     ) {
         self.id = id
@@ -46,6 +49,7 @@ public struct AppLLMConnectionSetupInput: Sendable, Equatable {
         self.sidecarArguments = sidecarArguments
         self.sidecarWorkingDirectoryPath = sidecarWorkingDirectoryPath
         self.sidecarPermissionMode = sidecarPermissionMode
+        self.anthropicAuthHeaderKind = anthropicAuthHeaderKind
         self.makeDefault = makeDefault
     }
 }
@@ -101,6 +105,7 @@ public enum AppLLMConnectionSetupError: Error, Sendable, Equatable, LocalizedErr
 public struct AppLLMConnectionSetupService: Sendable {
     public var settingsRepository: AppLLMSettingsRepository
     public var openAICompatibleHealthCheck: OpenAICompatibleHealthCheck
+    public var anthropicCompatibleHealthCheck: AnthropicCompatibleHealthCheck
     public var sidecarValidator: AppLLMConnectionSidecarValidator
     public var codexAPIKeyExchange: AppLLMCodexAPIKeyExchange
 
@@ -108,6 +113,9 @@ public struct AppLLMConnectionSetupService: Sendable {
         settingsRepository: AppLLMSettingsRepository = AppLLMSettingsRepository(),
         openAICompatibleHealthCheck: @escaping OpenAICompatibleHealthCheck = { config in
             try await OpenAICompatibleProvider(config: config).healthCheck()
+        },
+        anthropicCompatibleHealthCheck: @escaping AnthropicCompatibleHealthCheck = { config in
+            try await AnthropicCompatibleProvider(config: config).healthCheck()
         },
         sidecarValidator: @escaping AppLLMConnectionSidecarValidator = { connection in
             try Self.defaultSidecarValidation(connection: connection)
@@ -118,6 +126,7 @@ public struct AppLLMConnectionSetupService: Sendable {
     ) {
         self.settingsRepository = settingsRepository
         self.openAICompatibleHealthCheck = openAICompatibleHealthCheck
+        self.anthropicCompatibleHealthCheck = anthropicCompatibleHealthCheck
         self.sidecarValidator = sidecarValidator
         self.codexAPIKeyExchange = codexAPIKeyExchange
     }
@@ -135,6 +144,8 @@ public struct AppLLMConnectionSetupService: Sendable {
             return try await setupChatGPTCodex(input, name: name)
         case .githubCopilot:
             return try await setupGitHubCopilot(input, name: name)
+        case .anthropicCompatible:
+            return try await setupAnthropicCompatible(input, name: name)
         }
     }
 
@@ -261,6 +272,33 @@ public struct AppLLMConnectionSetupService: Sendable {
         )
         try settingsRepository.saveConnection(connection, apiKey: runtimeToken, oauthTokens: tokens, makeDefault: input.makeDefault)
         return AppLLMConnectionSetupResult(connection: connection, message: "GitHub Copilot 连接验证成功：\(health.model)")
+    }
+
+    private func setupAnthropicCompatible(_ input: AppLLMConnectionSetupInput, name: String) async throws -> AppLLMConnectionSetupResult {
+        let baseURLString = input.baseURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let baseURL = URL(string: baseURLString), !baseURLString.isEmpty else { throw AppLLMConnectionSetupError.invalidBaseURL(baseURLString) }
+        let model = normalizedModel(input.model)
+        guard !model.isEmpty else { throw AppLLMConnectionSetupError.missingModel }
+        let apiKey = input.apiKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !apiKey.isEmpty else { throw AppLLMConnectionSetupError.missingAPIKey }
+
+        let config = AnthropicCompatibleConfig(baseURL: baseURL, apiKey: apiKey, model: model, authHeaderKind: input.anthropicAuthHeaderKind)
+        let health = try await anthropicCompatibleHealthCheck(config)
+        guard health.ok else { throw AppLLMConnectionSetupError.healthCheckFailed(health.message) }
+
+        let connection = AppLLMConnectionConfig(
+            id: normalizedID(input.id, fallbackPrefix: "anthropic-compatible"),
+            name: name,
+            providerMode: .openAICompatible,
+            connectionKind: .anthropicCompatible,
+            baseURLString: baseURLString,
+            model: model,
+            selectedModel: normalizedSelectedModel(input.selectedModel, model: model),
+            hasAPIKey: true,
+            extraHTTPHeaders: [AppLLMSettingsRepository.anthropicAuthHeaderKindMetadataKey: input.anthropicAuthHeaderKind.rawValue]
+        )
+        try settingsRepository.saveConnection(connection, apiKey: apiKey, oauthTokens: input.oauthTokens, makeDefault: input.makeDefault)
+        return AppLLMConnectionSetupResult(connection: connection, message: "Anthropic Compatible 连接验证成功：\(health.model)")
     }
 
     private static func isLocalBaseURL(_ url: URL) -> Bool {

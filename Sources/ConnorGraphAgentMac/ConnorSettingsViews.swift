@@ -305,6 +305,7 @@ private struct AIConnectionProviderPreset: Identifiable, Equatable {
     var defaultModel: String
     var keyPlaceholder: String
     var protocolKind: AIConnectionCustomProtocol
+    var authHeaderKind: AnthropicCompatibleAuthHeaderKind = .xAPIKey
     var hidesEndpoint: Bool = false
 
     static let otherProviderPresets: [AIConnectionProviderPreset] = [
@@ -320,6 +321,9 @@ private struct AIConnectionProviderPreset: Identifiable, Equatable {
         AIConnectionProviderPreset(id: "cerebras", title: "Cerebras", endpoint: "https://api.cerebras.ai/v1", defaultModel: "llama3.1-8b", keyPlaceholder: "csk-...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "zai", title: "z.ai (GLM)", endpoint: "https://api.z.ai/api/paas/v4", defaultModel: "glm-4.5", keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "huggingface", title: "Hugging Face", endpoint: "https://router.huggingface.co/v1", defaultModel: "openai/gpt-oss-120b", keyPlaceholder: "hf_...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "anthropic", title: "Anthropic API", endpoint: "https://api.anthropic.com", defaultModel: "claude-sonnet-4-5", keyPlaceholder: "sk-ant-...", protocolKind: .anthropicCompatible, authHeaderKind: .xAPIKey),
+        AIConnectionProviderPreset(id: "openrouter-anthropic", title: "OpenRouter · Anthropic", endpoint: "https://openrouter.ai/api", defaultModel: "anthropic/claude-sonnet-4.5", keyPlaceholder: "sk-or-...", protocolKind: .anthropicCompatible, authHeaderKind: .bearer),
+        AIConnectionProviderPreset(id: "vercel-anthropic", title: "Vercel AI Gateway · Anthropic", endpoint: "https://ai-gateway.vercel.sh/v1", defaultModel: "anthropic/claude-sonnet-4", keyPlaceholder: "vck_...", protocolKind: .anthropicCompatible, authHeaderKind: .bearer),
         AIConnectionProviderPreset(id: "custom", title: "Custom", endpoint: "", defaultModel: "", keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible)
     ]
 }
@@ -712,9 +716,9 @@ private struct AIConnectionSetupView: View {
                         }
                     }
                     .pickerStyle(.segmented)
-                    Text(customProtocol == .anthropicCompatible ? "当前 Connor 原生运行时尚未启用 Anthropic-compatible 自定义适配器。请先使用 OpenAI Compatible，或通过 Claude Pro / Max 连接 Claude。" : "大多数第三方接口（Ollama、vLLM、DashScope 等）使用 OpenAI Compatible。")
+                    Text(customProtocol == .anthropicCompatible ? "Anthropic Compatible 使用 /v1/messages 协议，适合 Anthropic API、OpenRouter Anthropic Skin、Vercel AI Gateway 等兼容服务。" : "大多数第三方接口（Ollama、vLLM、DashScope 等）使用 OpenAI Compatible。")
                         .font(.subheadline)
-                        .foregroundStyle(customProtocol == .anthropicCompatible ? .orange : .secondary)
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -791,7 +795,6 @@ private struct AIConnectionSetupView: View {
                     || baseURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     || model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     || (apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isLoopbackEndpoint(baseURLString))
-                    || customProtocol == .anthropicCompatible
             }
             return connectionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || baseURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -943,14 +946,16 @@ private struct AIConnectionSetupView: View {
         errorMessage = nil
         Task {
             do {
+                let connectionKind: AppLLMConnectionKind = option.id == "other-provider" && customProtocol == .anthropicCompatible ? .anthropicCompatible : .openAICompatible
                 let input = AppLLMConnectionSetupInput(
                     id: nil,
-                    kind: .openAICompatible,
+                    kind: connectionKind,
                     name: connectionName,
                     baseURLString: baseURLString,
                     model: model,
                     selectedModel: selectedModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? model : selectedModel,
-                    apiKey: apiKey
+                    apiKey: apiKey,
+                    anthropicAuthHeaderKind: activeProviderPreset.authHeaderKind
                 )
                 _ = try await viewModel.setupLLMConnection(input)
                 await MainActor.run {

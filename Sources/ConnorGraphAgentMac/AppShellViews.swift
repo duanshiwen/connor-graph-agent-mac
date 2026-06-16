@@ -190,6 +190,11 @@ private struct CraftPrimarySidebarView: View {
                                 .contextMenu {
                                     Button("编辑状态…", systemImage: "pencil") { presentStatusEditor(status) }
                                     Button("创建状态…", systemImage: "plus.circle") { presentNewStatusEditor(after: status) }
+                                    Divider()
+                                    Button(role: .destructive) { viewModel.deleteStatusDefinition(status) } label: {
+                                        Label("删除状态", systemImage: "trash")
+                                    }
+                                    .disabled(!viewModel.canDeleteStatusDefinition(status))
                                 }
                             } else {
                                 SidebarRow(title: status.name, systemImage: status.systemImage, count: 0, isSelected: false) {
@@ -198,6 +203,11 @@ private struct CraftPrimarySidebarView: View {
                                 .contextMenu {
                                     Button("编辑状态…", systemImage: "pencil") { presentStatusEditor(status) }
                                     Button("创建状态…", systemImage: "plus.circle") { presentNewStatusEditor(after: status) }
+                                    Divider()
+                                    Button(role: .destructive) { viewModel.deleteStatusDefinition(status) } label: {
+                                        Label("删除状态", systemImage: "trash")
+                                    }
+                                    .disabled(!viewModel.canDeleteStatusDefinition(status))
                                 }
                             }
                         }
@@ -218,6 +228,10 @@ private struct CraftPrimarySidebarView: View {
                                 .contextMenu {
                                     Button("编辑标签…", systemImage: "pencil") { presentLabelEditor(label) }
                                     Button("创建标签…", systemImage: "plus.circle") { presentNewLabelEditor() }
+                                    Divider()
+                                    Button(role: .destructive) { viewModel.deleteLabelDefinition(label) } label: {
+                                        Label("删除标签", systemImage: "trash")
+                                    }
                                 }
                             }
                         }

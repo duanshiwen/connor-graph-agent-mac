@@ -1592,6 +1592,35 @@ final class AppViewModel: ObservableObject {
         saveGovernanceConfig(config, successMessage: "状态定义已保存。")
     }
 
+    func canDeleteStatusDefinition(_ definition: AgentSessionStatusDefinition) -> Bool {
+        governanceConfig.statuses.count > 1 && !allChatSessions.contains { $0.governance.status.rawValue == definition.id }
+    }
+
+    func deleteStatusDefinition(_ definition: AgentSessionStatusDefinition) {
+        guard governanceConfig.statuses.count > 1 else {
+            errorMessage = "至少需要保留一个状态。"
+            return
+        }
+        do {
+            let sessions = try chatSessionRepository?.loadSessions(filter: .all) ?? allChatSessions
+            let sessionsUsingStatus = sessions.filter { $0.governance.status.rawValue == definition.id }
+            guard sessionsUsingStatus.isEmpty else {
+                errorMessage = "无法删除状态“\(definition.name)”: 仍有 \(sessionsUsingStatus.count) 个会话处于此状态。"
+                return
+            }
+            var config = governanceConfig
+            config.statuses.removeAll { $0.id == definition.id }
+            saveGovernanceConfig(config, successMessage: "状态“\(definition.name)”已删除。")
+            if case .status(let selectedStatus) = sessionListFilter, selectedStatus.rawValue == definition.id {
+                setSessionListFilter(.all)
+            } else {
+                reloadChatSessions()
+            }
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
     private func makeUniqueGovernanceStatusID(existingIDs: Set<String>, preferredName: String = "") -> String {
         makeUniqueGovernanceSlug(existingIDs: existingIDs, prefix: "status", preferredName: preferredName)
     }
@@ -1609,6 +1638,30 @@ final class AppViewModel: ObservableObject {
             config.labels.append(newDefinition)
         }
         saveGovernanceConfig(config, successMessage: "标签定义已保存。")
+    }
+
+    func deleteLabelDefinition(_ definition: AgentSessionLabelDefinition) {
+        guard let chatSessionRepository else { return }
+        do {
+            let sessions = try chatSessionRepository.loadSessions(filter: .all)
+            var removedFromSessionCount = 0
+            for session in sessions where session.governance.labels.contains(where: { $0.id == definition.id }) {
+                let remainingLabels = session.governance.labels.filter { $0.id != definition.id }
+                _ = try chatSessionRepository.setLabels(sessionID: session.id, labels: remainingLabels)
+                removedFromSessionCount += 1
+            }
+
+            var config = governanceConfig
+            config.labels.removeAll { $0.id == definition.id }
+            saveGovernanceConfig(config, successMessage: "标签“\(definition.name)”已删除，并已从 \(removedFromSessionCount) 个会话移除。")
+            if case .label(let selectedLabelID) = sessionListFilter, selectedLabelID == definition.id {
+                setSessionListFilter(.all)
+            } else {
+                reloadChatSessions()
+            }
+        } catch {
+            errorMessage = String(describing: error)
+        }
     }
 
     private func makeUniqueGovernanceLabelID(existingIDs: Set<String>, preferredName: String = "") -> String {
