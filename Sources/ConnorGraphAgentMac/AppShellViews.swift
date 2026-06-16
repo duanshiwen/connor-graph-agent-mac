@@ -156,6 +156,8 @@ private struct CraftPrimarySidebarView: View {
     @State private var labelsExpanded = true
     @State private var sourcesExpanded = true
     @State private var automationExpanded = true
+    @State private var statusEditorRequest: StatusDefinitionEditorRequest?
+    @State private var labelEditorRequest: LabelDefinitionEditorRequest?
 
     var body: some View {
         VStack(spacing: 10) {
@@ -176,11 +178,26 @@ private struct CraftPrimarySidebarView: View {
                             viewModel.setSessionListFilter(.all)
                             select(.agentChat)
                         }
+                        .contextMenu {
+                            Button("创建状态…", systemImage: "plus.circle") { presentNewStatusEditor() }
+                        }
                         ForEach(viewModel.governanceConfig.statuses.sorted { $0.sortOrder < $1.sortOrder }) { status in
                             if let sessionStatus = AgentSessionStatus(rawValue: status.id) {
                                 SidebarRow(title: status.name, systemImage: status.systemImage, count: count(for: sessionStatus), isSelected: selection == .agentChat && viewModel.sessionListFilter == .status(sessionStatus)) {
                                     viewModel.setSessionListFilter(.status(sessionStatus))
                                     select(.agentChat)
+                                }
+                                .contextMenu {
+                                    Button("编辑状态…", systemImage: "pencil") { presentStatusEditor(status) }
+                                    Button("创建状态…", systemImage: "plus.circle") { presentNewStatusEditor(after: status) }
+                                }
+                            } else {
+                                SidebarRow(title: status.name, systemImage: status.systemImage, count: 0, isSelected: false) {
+                                    presentStatusEditor(status)
+                                }
+                                .contextMenu {
+                                    Button("编辑状态…", systemImage: "pencil") { presentStatusEditor(status) }
+                                    Button("创建状态…", systemImage: "plus.circle") { presentNewStatusEditor(after: status) }
                                 }
                             }
                         }
@@ -189,11 +206,18 @@ private struct CraftPrimarySidebarView: View {
                     SidebarDisclosure(title: "标签", systemImage: "tag", isExpanded: $labelsExpanded) {
                         if viewModel.governanceConfig.labels.isEmpty {
                             SidebarMutedText("暂无标签")
+                                .contextMenu {
+                                    Button("创建标签…", systemImage: "plus.circle") { presentNewLabelEditor() }
+                                }
                         } else {
                             ForEach(viewModel.governanceConfig.labels) { label in
                                 SidebarRow(title: label.name, systemImage: "tag", count: count(forLabel: label.id), isSelected: selection == .agentChat && viewModel.sessionListFilter == .label(label.id)) {
                                     viewModel.setSessionListFilter(.label(label.id))
                                     select(.agentChat)
+                                }
+                                .contextMenu {
+                                    Button("编辑标签…", systemImage: "pencil") { presentLabelEditor(label) }
+                                    Button("创建标签…", systemImage: "plus.circle") { presentNewLabelEditor() }
                                 }
                             }
                         }
@@ -221,6 +245,30 @@ private struct CraftPrimarySidebarView: View {
             .padding(.horizontal, 10)
             .padding(.bottom, 10)
         }
+        .sheet(item: $statusEditorRequest) { request in
+            StatusDefinitionEditorSheet(
+                title: request.isCreating ? "创建状态" : "编辑状态",
+                definition: request.definition,
+                isCreating: request.isCreating,
+                onCancel: { statusEditorRequest = nil },
+                onSave: { definition in
+                    viewModel.upsertStatusDefinition(definition)
+                    statusEditorRequest = nil
+                }
+            )
+        }
+        .sheet(item: $labelEditorRequest) { request in
+            LabelDefinitionEditorSheet(
+                title: request.isCreating ? "创建标签" : "编辑标签",
+                definition: request.definition,
+                isCreating: request.isCreating,
+                onCancel: { labelEditorRequest = nil },
+                onSave: { definition in
+                    viewModel.upsertLabelDefinition(definition)
+                    labelEditorRequest = nil
+                }
+            )
+        }
     }
 
     private var countSourceSessions: [AgentSession] {
@@ -245,6 +293,173 @@ private struct CraftPrimarySidebarView: View {
         selection = item
         viewModel.selection = item
     }
+
+    private func presentStatusEditor(_ definition: AgentSessionStatusDefinition) {
+        statusEditorRequest = StatusDefinitionEditorRequest(definition: definition, isCreating: false)
+    }
+
+    private func presentNewStatusEditor(after definition: AgentSessionStatusDefinition? = nil) {
+        let nextSortOrder = (definition?.sortOrder ?? viewModel.governanceConfig.statuses.map(\.sortOrder).max() ?? 0) + 10
+        statusEditorRequest = StatusDefinitionEditorRequest(
+            definition: AgentSessionStatusDefinition(
+                id: "custom_status_\(nextSortOrder)",
+                name: "新状态",
+                systemImage: "circle",
+                sortOrder: nextSortOrder,
+                isTerminal: false
+            ),
+            isCreating: true
+        )
+    }
+
+    private func presentLabelEditor(_ definition: AgentSessionLabelDefinition) {
+        labelEditorRequest = LabelDefinitionEditorRequest(definition: definition, isCreating: false)
+    }
+
+    private func presentNewLabelEditor() {
+        labelEditorRequest = LabelDefinitionEditorRequest(
+            definition: AgentSessionLabelDefinition(id: "custom_label_\(viewModel.governanceConfig.labels.count + 1)", name: "新标签", colorName: "blue"),
+            isCreating: true
+        )
+    }
+}
+
+private struct StatusDefinitionEditorRequest: Identifiable {
+    var id = UUID()
+    var definition: AgentSessionStatusDefinition
+    var isCreating: Bool
+}
+
+private struct LabelDefinitionEditorRequest: Identifiable {
+    var id = UUID()
+    var definition: AgentSessionLabelDefinition
+    var isCreating: Bool
+}
+
+private struct StatusDefinitionEditorSheet: View {
+    var title: String
+    var definition: AgentSessionStatusDefinition
+    var isCreating: Bool
+    var onCancel: () -> Void
+    var onSave: (AgentSessionStatusDefinition) -> Void
+
+    @State private var id: String
+    @State private var name: String
+    @State private var systemImage: String
+    @State private var sortOrder: Int
+    @State private var isTerminal: Bool
+
+    init(title: String, definition: AgentSessionStatusDefinition, isCreating: Bool, onCancel: @escaping () -> Void, onSave: @escaping (AgentSessionStatusDefinition) -> Void) {
+        self.title = title
+        self.definition = definition
+        self.isCreating = isCreating
+        self.onCancel = onCancel
+        self.onSave = onSave
+        _id = State(initialValue: definition.id)
+        _name = State(initialValue: definition.name)
+        _systemImage = State(initialValue: definition.systemImage)
+        _sortOrder = State(initialValue: definition.sortOrder)
+        _isTerminal = State(initialValue: definition.isTerminal)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(title).font(.headline)
+            TextField("ID", text: $id)
+                .textFieldStyle(.roundedBorder)
+                .disabled(!isCreating)
+            TextField("显示名", text: $name)
+                .textFieldStyle(.roundedBorder)
+            TextField("SF Symbol", text: $systemImage)
+                .textFieldStyle(.roundedBorder)
+            Stepper("排序：\(sortOrder)", value: $sortOrder, in: 0...999, step: 10)
+            Toggle("终态", isOn: $isTerminal)
+            HStack {
+                Spacer()
+                Button("取消", action: onCancel)
+                Button("保存") {
+                    onSave(AgentSessionStatusDefinition(id: normalized(id), name: trimmed(name), systemImage: trimmed(systemImage).isEmpty ? "circle" : trimmed(systemImage), sortOrder: sortOrder, isTerminal: isTerminal))
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(trimmed(id).isEmpty || trimmed(name).isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 420)
+    }
+}
+
+private struct LabelDefinitionEditorSheet: View {
+    var title: String
+    var definition: AgentSessionLabelDefinition
+    var isCreating: Bool
+    var onCancel: () -> Void
+    var onSave: (AgentSessionLabelDefinition) -> Void
+
+    @State private var id: String
+    @State private var name: String
+    @State private var valueType: AgentSessionLabelValueType
+    @State private var colorName: String
+    @State private var graphBindingKind: String
+
+    init(title: String, definition: AgentSessionLabelDefinition, isCreating: Bool, onCancel: @escaping () -> Void, onSave: @escaping (AgentSessionLabelDefinition) -> Void) {
+        self.title = title
+        self.definition = definition
+        self.isCreating = isCreating
+        self.onCancel = onCancel
+        self.onSave = onSave
+        _id = State(initialValue: definition.id)
+        _name = State(initialValue: definition.name)
+        _valueType = State(initialValue: definition.valueType)
+        _colorName = State(initialValue: definition.colorName)
+        _graphBindingKind = State(initialValue: definition.graphBindingKind ?? "")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(title).font(.headline)
+            TextField("ID", text: $id)
+                .textFieldStyle(.roundedBorder)
+                .disabled(!isCreating)
+            TextField("显示名", text: $name)
+                .textFieldStyle(.roundedBorder)
+            Picker("值类型", selection: $valueType) {
+                ForEach(AgentSessionLabelValueType.allCases, id: \.self) { type in
+                    Text(type.rawValue).tag(type)
+                }
+            }
+            .pickerStyle(.menu)
+            Picker("颜色", selection: $colorName) {
+                ForEach(["blue", "orange", "purple", "teal", "red", "yellow", "green"], id: \.self) { color in
+                    Text(color).tag(color)
+                }
+            }
+            .pickerStyle(.menu)
+            TextField("图谱绑定类型（可选）", text: $graphBindingKind)
+                .textFieldStyle(.roundedBorder)
+            HStack {
+                Spacer()
+                Button("取消", action: onCancel)
+                Button("保存") {
+                    onSave(AgentSessionLabelDefinition(id: normalized(id), name: trimmed(name), valueType: valueType, colorName: colorName, graphBindingKind: trimmed(graphBindingKind).isEmpty ? nil : trimmed(graphBindingKind)))
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(trimmed(id).isEmpty || trimmed(name).isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 420)
+    }
+}
+
+private func trimmed(_ value: String) -> String {
+    value.trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+private func normalized(_ value: String) -> String {
+    trimmed(value)
+        .lowercased()
+        .replacingOccurrences(of: " ", with: "_")
 }
 
 private struct CraftListPaneView: View {

@@ -191,4 +191,25 @@ struct LLMConnectionSetupTests {
         let settings = try repository.loadSettings()
         #expect(settings.defaultConnection.connectionKind == .openAICompatible)
     }
+
+    @Test func chatGPTCodexOAuthURLMatchesCraftOSSConfiguration() throws {
+        let flow = try AppLLMOAuthService().prepareChatGPTOAuth()
+        let components = try #require(URLComponents(url: flow.authURL, resolvingAgainstBaseURL: false))
+        let queryItems = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).compactMap { item in
+            item.value.map { (item.name, $0) }
+        })
+
+        #expect(components.scheme == "https")
+        #expect(components.host == "auth.openai.com")
+        #expect(components.path == "/oauth/authorize")
+        #expect(queryItems["client_id"] == "app_EMoamEEZ73f0CkXaXp7hrann")
+        #expect(queryItems["response_type"] == "code")
+        #expect(queryItems["redirect_uri"] == "http://localhost:1455/auth/callback")
+        #expect(queryItems["scope"] == "openid profile email offline_access")
+        #expect(queryItems["code_challenge_method"] == "S256")
+        #expect(queryItems["codex_cli_simplified_flow"] == "true")
+        #expect(queryItems["id_token_add_organizations"] == "true")
+        #expect(queryItems["state"]?.isEmpty == false)
+        #expect(queryItems["code_challenge"]?.isEmpty == false)
+    }
 }

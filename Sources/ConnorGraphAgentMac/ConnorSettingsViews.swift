@@ -338,9 +338,9 @@ private struct AIConnectionOnboardingOption: Identifiable, Equatable {
             selectedModel: AppLLMSettings.default.effectiveModel,
             setupTitle: "连接 ChatGPT",
             setupSubtitle: "使用 ChatGPT Plus 订阅驱动康纳同学。",
-            setupInstruction: "点击下方按钮使用 OpenAI 账号登录。康纳同学会打开浏览器窗口进行认证。",
+            setupInstruction: "点击下方按钮使用 OpenAI 账号登录。登录完成后，康纳同学会自动验证并保存连接。",
             loginButtonTitle: "使用 ChatGPT 登录",
-            authURLString: "https://chatgpt.com/",
+            authURLString: "https://auth.openai.com/oauth/authorize",
             authenticationKind: .browserCallback
         ),
         AIConnectionOnboardingOption(
@@ -462,7 +462,7 @@ private struct AIConnectionSetupView: View {
 
                 HStack(spacing: 14) {
                     Button(action: back) {
-                        Text("Back")
+                        Text("返回")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
@@ -472,7 +472,7 @@ private struct AIConnectionSetupView: View {
                         Label(primaryButtonTitle, systemImage: primaryButtonIcon)
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.borderedProminent)
                     .controlSize(.large)
                     .disabled(isPrimaryButtonDisabled || isAuthenticating)
                 }
@@ -490,38 +490,61 @@ private struct AIConnectionSetupView: View {
     private var setupContent: some View {
         switch option.authenticationKind {
         case .authorizationCode:
-            VStack(alignment: .leading, spacing: 12) {
-                Text(option.setupInstruction)
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity)
-                    .padding(.bottom, 12)
+            VStack(spacing: 20) {
+                VStack(spacing: 10) {
+                    Image(systemName: "lock.shield")
+                        .font(.system(size: 34, weight: .semibold))
+                        .foregroundStyle(option.tint)
+                    Text(option.setupInstruction)
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 22)
+                .frame(maxWidth: .infinity)
+                .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+
                 Button(action: startClaudeOAuth) {
                     Label(didOpenBrowser ? "重新打开 Claude 登录页" : option.loginButtonTitle, systemImage: "arrow.up.right.square")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.large)
-                claudeSidecarFields
-                VStack(alignment: .leading, spacing: 6) {
+
+                VStack(alignment: .leading, spacing: 8) {
                     Text("授权码")
                         .font(.headline)
-                    TextField("在此粘贴授权码", text: $authorizationCode)
+                    TextField("粘贴 Claude 页面显示的授权码", text: $authorizationCode)
                         .textFieldStyle(.roundedBorder)
                         .font(.title3)
+                        .textContentType(.oneTimeCode)
+                    Text("授权码只用于完成本次连接。康纳同学会先验证，再保存连接。")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         case .browserCallback:
-            VStack(spacing: 22) {
-                Text(option.setupInstruction)
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity)
-                openAICompatibleFields(includeAPIKey: false)
+            VStack(spacing: 20) {
+                VStack(spacing: 10) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 34, weight: .semibold))
+                        .foregroundStyle(option.tint)
+                    Text(option.setupInstruction)
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 22)
+                .frame(maxWidth: .infinity)
+                .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+
                 if didOpenBrowser {
-                    Text("浏览器已打开。完成网页认证后，回到康纳同学继续。")
+                    Text("浏览器已打开。完成网页认证后，康纳同学会自动验证并保存连接。")
                         .font(.headline)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 18)
@@ -566,25 +589,6 @@ private struct AIConnectionSetupView: View {
                     .multilineTextAlignment(.center)
                 openAICompatibleFields(includeAPIKey: true)
             }
-        }
-    }
-
-    private var claudeSidecarFields: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            TextField("连接名称", text: $connectionName)
-                .textFieldStyle(.roundedBorder)
-            TextField("Sidecar executable path，例如 /opt/homebrew/bin/node", text: $sidecarExecutablePath)
-                .textFieldStyle(.roundedBorder)
-            TextField("Sidecar arguments，例如 sidecars/claude-agent-engine/claude-sidecar.mjs", text: $sidecarArguments)
-                .textFieldStyle(.roundedBorder)
-            TextField("Working directory", text: $sidecarWorkingDirectoryPath)
-                .textFieldStyle(.roundedBorder)
-            Picker("权限模式", selection: $sidecarPermissionMode) {
-                Text("只读").tag(AgentPermissionMode.readOnly)
-                Text("写入需审批").tag(AgentPermissionMode.askToWrite)
-                Text("受信写入").tag(AgentPermissionMode.trustedWrite)
-            }
-            .pickerStyle(.segmented)
         }
     }
 
@@ -637,8 +641,6 @@ private struct AIConnectionSetupView: View {
         switch option.authenticationKind {
         case .authorizationCode:
             return authorizationCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || connectionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || sidecarExecutablePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .direct:
             return connectionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || baseURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
