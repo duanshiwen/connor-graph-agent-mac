@@ -196,12 +196,22 @@ private struct SettingsAISection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsGroup(title: "默认") {
-                SettingsPickerRow(title: "连接", subtitle: "新聊天的 API 连接", selection: $viewModel.llmProviderMode) {
-                    Text("OpenAI 兼容").tag(AppLLMProviderMode.openAICompatible)
-                    Text("Claude Sidecar").tag(AppLLMProviderMode.governedClaudeSidecar)
+                SettingsPickerRow(title: "默认连接", subtitle: "新聊天使用的 AI 连接；每个连接有自己的协议类型和凭据。", selection: $viewModel.llmDefaultConnectionID) {
+                    ForEach(viewModel.llmConnectionConfigs) { connection in
+                        Text("\(connection.name) · \(connection.providerMode.displayName)").tag(connection.id)
+                    }
+                }
+                .onChange(of: viewModel.llmDefaultConnectionID) { _, newValue in
+                    viewModel.selectDefaultLLMConnection(newValue)
                 }
                 Divider()
-                SettingsTextFieldRow(title: "模型列表", subtitle: "逗号分隔多个候选模型；聊天输入区每次只选择其中一个实际模型", text: $viewModel.llmModel)
+                HStack(spacing: 10) {
+                    Button("添加 OpenAI Compatible") { viewModel.addLLMConnection(providerMode: .openAICompatible) }
+                    Button("添加 Claude") { viewModel.addLLMConnection(providerMode: .governedClaudeSidecar) }
+                    Button("删除当前连接") { viewModel.deleteSelectedLLMConnection() }
+                        .disabled(viewModel.llmConnectionConfigs.count <= 1)
+                }
+                .controlSize(.regular)
                 Divider()
                 SettingsPickerRow(title: "权限", subtitle: "新聊天默认权限", selection: $viewModel.defaultPermissionMode) {
                     ForEach(AgentPermissionMode.allCases.filter { $0 != .allowAll }, id: \.self) { mode in
@@ -210,14 +220,25 @@ private struct SettingsAISection: View {
                 }
             }
 
-            SettingsGroup(title: "连接") {
-                SettingsTextFieldRow(title: "Base URL", subtitle: "OpenAI-compatible endpoint", text: $viewModel.llmBaseURLString)
+            SettingsGroup(title: "当前连接") {
+                SettingsTextFieldRow(title: "名称", subtitle: "显示在连接列表和聊天模型选择器中。", text: $viewModel.llmConnectionName)
                 Divider()
-                SecureField("API Key", text: $viewModel.llmAPIKeyInput)
-                    .textFieldStyle(.roundedBorder)
-                    .padding(.vertical, 6)
+                SettingsPickerRow(title: "协议", subtitle: "同一个连接只能选择一种调用协议。", selection: $viewModel.llmProviderMode) {
+                    Text("OpenAI Compatible").tag(AppLLMProviderMode.openAICompatible)
+                    Text("Claude").tag(AppLLMProviderMode.governedClaudeSidecar)
+                }
                 Divider()
-                SettingsValueRow(title: "API Key", value: viewModel.llmHasAPIKey ? "已本地加密保存" : "尚未保存")
+                SettingsTextFieldRow(title: "模型列表", subtitle: "逗号分隔多个候选模型；聊天输入区每次只选择其中一个实际模型。", text: $viewModel.llmModel)
+                if viewModel.llmProviderMode == .openAICompatible {
+                    Divider()
+                    SettingsTextFieldRow(title: "Base URL", subtitle: "OpenAI-compatible endpoint", text: $viewModel.llmBaseURLString)
+                    Divider()
+                    SecureField("API Key", text: $viewModel.llmAPIKeyInput)
+                        .textFieldStyle(.roundedBorder)
+                        .padding(.vertical, 6)
+                    Divider()
+                    SettingsValueRow(title: "API Key", value: viewModel.llmHasAPIKey ? "已本地加密保存" : "尚未保存")
+                }
                 Divider()
                 HStack(spacing: 10) {
                     Button("保存 AI 设置") {
@@ -226,6 +247,7 @@ private struct SettingsAISection: View {
                     }
                     .buttonStyle(.borderedProminent)
                     Button("清除 API Key") { viewModel.clearLLMAPIKey() }
+                        .disabled(viewModel.llmProviderMode != .openAICompatible)
                     Button(viewModel.isTestingLLMConnection ? "测试中…" : "测试连接") {
                         Task { await viewModel.testLLMConnection() }
                     }

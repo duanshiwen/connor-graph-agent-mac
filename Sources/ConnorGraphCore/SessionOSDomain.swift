@@ -89,15 +89,18 @@ public struct SessionLLMOverride: Codable, Sendable, Equatable {
     public var providerMode: String
     public var model: String
     public var baseURLString: String?
+    public var connectionID: String?
 
     public init(
         providerMode: String,
         model: String,
-        baseURLString: String? = nil
+        baseURLString: String? = nil,
+        connectionID: String? = nil
     ) {
         self.providerMode = providerMode
         self.model = model
         self.baseURLString = baseURLString
+        self.connectionID = connectionID
     }
 }
 
