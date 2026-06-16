@@ -1750,7 +1750,7 @@ final class AppViewModel: ObservableObject {
             } else {
                 nativeSessionManager?.permissionMode = settings.loop.permissionMode
             }
-            appSettingsMessage = "设置已自动保存。"
+            appSettingsMessage = nil
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
