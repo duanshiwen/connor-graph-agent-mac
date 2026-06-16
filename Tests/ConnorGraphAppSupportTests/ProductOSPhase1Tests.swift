@@ -33,8 +33,8 @@ struct ProductOSPhase1Tests {
 
     @Test func governanceDefaultsUseChineseDisplayNames() throws {
         let config = AppSessionGovernanceConfig.default
-        #expect(AgentSessionStatus.allCases.map(\.displayName) == ["待办", "进行中", "等待中", "待审阅", "已完成", "受阻", "已归档"])
-        #expect(config.statuses.map(\.name) == ["待办", "进行中", "等待中", "待审阅", "受阻", "已完成", "已归档"])
+        #expect(AgentSessionStatus.allCases.map(\.displayName) == ["待办", "进行中", "等待中", "待审阅", "已完成", "受阻", "已取消", "已归档"])
+        #expect(config.statuses.map(\.name) == ["待办", "进行中", "等待中", "待审阅", "受阻", "已完成", "已取消", "已归档"])
         #expect(config.labels.map(\.name) == ["重要", "研究", "优先级", "截止日期", "项目"])
     }
 
@@ -55,7 +55,7 @@ struct ProductOSPhase1Tests {
 
         let loaded = try repository.loadOrCreateDefault()
 
-        #expect(loaded.statuses.map(\.name) == ["待办", "进行中"])
+        #expect(loaded.statuses.map(\.name) == ["待办", "进行中", "已取消"])
         #expect(loaded.labels.map(\.name) == ["重要", "Custom"])
     }
 
