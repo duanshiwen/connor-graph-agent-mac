@@ -264,6 +264,7 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
     public static let keychainService = "ConnorGraphAgent"
     public static let apiKeyAccount = "openai-compatible-api-key"
     public static let anthropicAuthHeaderKindMetadataKey = "x-connor-anthropic-auth-header-kind"
+    public static let openAIAPIKeyHeaderKindMetadataKey = "x-connor-openai-api-key-header-kind"
 
     private enum Keys {
         static let connections = "llm.connections"
@@ -443,7 +444,16 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
         guard let baseURL = URL(string: urlString) else {
             throw OpenAICompatibleProviderError.invalidBaseURL(urlString)
         }
-        return OpenAICompatibleConfig(baseURL: baseURL, apiKey: apiKey, model: modelOverride ?? connection.effectiveModel, extraHeaders: connection.extraHTTPHeaders)
+        let apiKeyHeaderKind = OpenAICompatibleAPIKeyHeaderKind(rawValue: connection.extraHTTPHeaders[Self.openAIAPIKeyHeaderKindMetadataKey] ?? "") ?? .bearer
+        var extraHeaders = connection.extraHTTPHeaders
+        extraHeaders.removeValue(forKey: Self.openAIAPIKeyHeaderKindMetadataKey)
+        return OpenAICompatibleConfig(
+            baseURL: baseURL,
+            apiKey: apiKey,
+            model: modelOverride ?? connection.effectiveModel,
+            extraHeaders: extraHeaders,
+            apiKeyHeaderKind: apiKeyHeaderKind
+        )
     }
 
     public func anthropicCompatibleConfig(connectionID: String? = nil, modelOverride: String? = nil, baseURLOverride: String? = nil) throws -> AnthropicCompatibleConfig? {
