@@ -46,8 +46,6 @@ struct WorkspaceRootDraft: Identifiable, Equatable {
 enum ConnorSettingsSection: String, CaseIterable, Identifiable {
     case app
     case ai
-    case appearance
-    case input
     case permissions
     case labels
     case statuses
@@ -60,8 +58,6 @@ enum ConnorSettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .app: "应用"
         case .ai: "AI"
-        case .appearance: "外观"
-        case .input: "输入"
         case .permissions: "权限"
         case .labels: "标签"
         case .statuses: "状态"
@@ -74,8 +70,6 @@ enum ConnorSettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .app: "通知和更新"
         case .ai: "模型、思考、连接"
-        case .appearance: "主题、字体、工具图标"
-        case .input: "发送键、拼写检查"
         case .permissions: "默认权限和审批"
         case .labels: "管理会话标签"
         case .statuses: "管理会话状态"
@@ -88,8 +82,6 @@ enum ConnorSettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .app: "app.badge"
         case .ai: "sparkles"
-        case .appearance: "paintpalette"
-        case .input: "keyboard"
         case .permissions: "shield"
         case .labels: "tag"
         case .statuses: "circle.dashed"
