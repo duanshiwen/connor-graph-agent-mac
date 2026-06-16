@@ -1,0 +1,262 @@
+import SwiftUI
+import ConnorGraphAgent
+import ConnorGraphAppSupport
+
+struct AgentChatTurnTimestampRow: View {
+    var timestamp: AgentChatTurnTimestampPresentation
+
+    var body: some View {
+        Text(timestamp.text)
+            .font(AgentChatTypography.micro.weight(.medium))
+            .foregroundStyle(.tertiary)
+            .lineLimit(1)
+            .padding(.vertical, 2)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .accessibilityLabel("对话时间 \(timestamp.text)")
+    }
+}
+
+struct AgentChatMessageRow: View {
+    var row: AgentChatMessagePresentation
+    var persistentCacheContext: AgentMarkdownPersistentCacheContext? = nil
+    var onAssistantMessageCollapsed: (() -> Void)? = nil
+    var onPreviewAttachment: (AgentMessageAttachmentRef) -> Void = { _ in }
+    @State private var isAssistantMessageExpanded = false
+
+    @MainActor
+    private final class BrowserPromptFoldingCache {
+        static let shared = BrowserPromptFoldingCache()
+        private var hits: [String: BrowserPromptFoldingParts] = [:]
+        private var misses = Set<String>()
+        private let limit = 600
+
+        func parts(for messageID: String, content: String) -> BrowserPromptFoldingParts? {
+            if let cached = hits[messageID] { return cached }
+            if misses.contains(messageID) { return nil }
+
+            guard content.contains("网页正文：") else {
+                storeMiss(messageID)
+                return nil
+            }
+
+            guard let parsed = BrowserPromptFoldingParser().parse(content) else {
+                storeMiss(messageID)
+                return nil
+            }
+            storeHit(parsed, for: messageID)
+            return parsed
+        }
+
+        private func storeHit(_ parts: BrowserPromptFoldingParts, for messageID: String) {
+            pruneIfNeeded()
+            hits[messageID] = parts
+        }
+
+        private func storeMiss(_ messageID: String) {
+            pruneIfNeeded()
+            misses.insert(messageID)
+        }
+
+        private func pruneIfNeeded() {
+            if hits.count + misses.count >= limit {
+                hits.removeAll(keepingCapacity: true)
+                misses.removeAll(keepingCapacity: true)
+            }
+        }
+    }
+
+    private var isUser: Bool { row.message.role == .user }
+    private var shouldFoldAssistantMessage: Bool {
+        guard !isUser else { return false }
+        let content = row.message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lineCount = content.components(separatedBy: .newlines).count
+        return content.count > 1_200 || lineCount > 18
+    }
+
+    private var assistantCollapsedMaxHeight: CGFloat { 260 }
+
+    private var browserPromptFoldingParts: BrowserPromptFoldingParts? {
+        BrowserPromptFoldingCache.shared.parts(for: row.id, content: row.message.content)
+    }
+
+    var body: some View {
+        HStack(alignment: .top) {
+            if isUser { Spacer(minLength: AgentChatLayout.messageSideInset) }
+
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+                messageContent
+                if !row.attachments.isEmpty {
+                    AgentMessageAttachmentRefsView(attachments: row.attachments) { attachment in
+                        onPreviewAttachment(attachment)
+                    }
+                }
+            }
+            .foregroundStyle(Color.primary)
+            .padding(AgentChatLayout.spaceM)
+            .frame(maxWidth: isUser ? AgentChatLayout.userMessageMaxWidth : .infinity, alignment: .leading)
+            .background(messageBackground, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                    .stroke(isUser ? Color.clear : Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1)
+            )
+        }
+        .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+    }
+
+    @ViewBuilder
+    private var messageContent: some View {
+        if isUser {
+            if let browserPromptFoldingParts {
+                BrowserPromptFoldedMessageView(parts: browserPromptFoldingParts)
+            } else {
+                AgentMarkdownPreviewText(markdown: row.message.content, font: AgentChatTypography.body)
+            }
+        } else {
+            assistantMessageContent
+        }
+    }
+
+    @ViewBuilder
+    private var assistantMessageContent: some View {
+        if shouldFoldAssistantMessage {
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+                if isAssistantMessageExpanded {
+                    assistantMarkdownBody
+                } else {
+                    assistantCollapsedMarkdownBody
+                        .frame(maxHeight: assistantCollapsedMaxHeight, alignment: .top)
+                        .clipped()
+                        .overlay(alignment: .bottom) {
+                            LinearGradient(
+                                colors: [
+                                    Color(nsColor: .controlBackgroundColor).opacity(0),
+                                    Color(nsColor: .controlBackgroundColor).opacity(0.92)
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                            .frame(height: 56)
+                            .allowsHitTesting(false)
+                        }
+                }
+
+                Button {
+                    let wasExpanded = isAssistantMessageExpanded
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        isAssistantMessageExpanded.toggle()
+                    }
+                    if wasExpanded, !isAssistantMessageExpanded {
+                        onAssistantMessageCollapsed?()
+                    }
+                } label: {
+                    Label(isAssistantMessageExpanded ? "收起回答" : "展开完整回答", systemImage: isAssistantMessageExpanded ? "chevron.up" : "chevron.down")
+                        .font(AgentChatTypography.metaEmphasis)
+                        .foregroundStyle(ConnorCraftPalette.accent)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isAssistantMessageExpanded ? "收起助手回答" : "展开助手完整回答")
+            }
+        } else {
+            assistantMarkdownBody
+        }
+    }
+
+    private var assistantMarkdownBody: some View {
+        AgentMarkdownPreviewText(
+            markdown: row.message.content,
+            font: AgentChatTypography.body,
+            persistentCacheContext: persistentCacheContext
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.trailing, AgentChatLayout.spaceXS)
+    }
+
+    private var assistantCollapsedMarkdownBody: some View {
+        AgentMarkdownPreviewText(
+            markdown: row.message.content,
+            font: AgentChatTypography.body,
+            maxRenderedBlocks: 16,
+            persistentCacheContext: persistentCacheContext
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.trailing, AgentChatLayout.spaceXS)
+    }
+
+    private var messageBackground: Color {
+        if isUser { return ConnorCraftPalette.userBubble }
+        return Color(nsColor: .controlBackgroundColor).opacity(0.85)
+    }
+}
+
+struct AgentMessageAttachmentRefsView: View {
+    var attachments: [AgentMessageAttachmentRef]
+    var onPreview: (AgentMessageAttachmentRef) -> Void
+
+    var body: some View {
+        HStack(spacing: AgentChatLayout.spaceS) {
+            ForEach(attachments) { attachment in
+                Button {
+                    onPreview(attachment)
+                } label: {
+                    Text("\(iconPrefix(for: attachment.kind)) \(attachment.displayName)")
+                        .font(AgentChatTypography.meta)
+                        .lineLimit(1)
+                        .padding(.horizontal, AgentChatLayout.spaceS)
+                        .padding(.vertical, 4)
+                        .background(ConnorCraftPalette.accentSubtleFill, in: Capsule())
+                        .overlay(Capsule().stroke(ConnorCraftPalette.accentBorder, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("预览附件 \(attachment.displayName)")
+            }
+        }
+        .accessibilityLabel("消息附件 \(attachments.count) 个")
+    }
+
+    private func iconPrefix(for kind: AgentAttachmentKind) -> String {
+        switch kind {
+        case .image: return "图片"
+        case .pdf: return "PDF"
+        case .csv, .spreadsheet: return "表格"
+        case .code, .json, .html: return "代码"
+        case .archive: return "压缩包"
+        case .audio: return "音频"
+        case .video: return "视频"
+        default: return "附件"
+        }
+    }
+}
+
+struct BrowserPromptFoldedMessageView: View {
+    var parts: BrowserPromptFoldingParts
+    @State private var isWebPageBodyExpanded: Bool = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+            if !parts.leadingMarkdown.isEmpty {
+                AgentMarkdownPreviewText(markdown: parts.leadingMarkdown, font: AgentChatTypography.body)
+            }
+
+            DisclosureGroup(isExpanded: $isWebPageBodyExpanded) {
+                ScrollView {
+                    Text(parts.webPageBody)
+                        .font(AgentChatTypography.monoMeta)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(AgentChatLayout.spaceS)
+                }
+                .frame(maxHeight: 220, alignment: .top)
+                .background(Color.black.opacity(0.05), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
+            } label: {
+                Label("网页正文", systemImage: "doc.text.magnifyingglass")
+                    .font(AgentChatTypography.metaEmphasis)
+            }
+            .tint(.primary)
+
+            if !parts.trailingMarkdown.isEmpty {
+                AgentMarkdownPreviewText(markdown: parts.trailingMarkdown, font: AgentChatTypography.body)
+            }
+        }
+    }
+}
+
