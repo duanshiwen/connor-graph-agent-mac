@@ -7,6 +7,18 @@ import ConnorGraphAgent
 import ConnorGraphStore
 import ConnorGraphAppSupport
 
+private enum SettingsListTypography {
+    static let header: Font = .system(size: 15.5, weight: .semibold)
+    static let rowTitle: Font = .system(size: 14.5, weight: .regular)
+    static let rowTitleSelected: Font = .system(size: 14.5, weight: .semibold)
+    static let rowSubtitle: Font = .system(size: 12.5)
+    static let rowCaption: Font = .system(size: 12.5)
+    static let rowCaptionEmphasized: Font = .system(size: 12.5, weight: .semibold)
+    static let actionTitle: Font = .system(size: 13.5, weight: .regular)
+    static let icon: Font = .system(size: 16, weight: .medium)
+    static let largeIcon: Font = .system(size: 22, weight: .semibold)
+}
+
 struct LLMSettingsView: View {
     @ObservedObject var viewModel: AppViewModel
 
@@ -34,7 +46,7 @@ struct LLMSettingsView: View {
                         }
                         .pickerStyle(.segmented)
                         Text("安全边界：SDK permissionMode 固定为 bypassPermissions；康纳同学保留 session、pending approval、audit、graph memory 和 product state 主权。Sidecar 模式不允许 allowAll。")
-                            .font(.caption)
+                            .font(SettingsListTypography.rowCaption)
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -63,12 +75,12 @@ struct LLMSettingsView: View {
             GroupBox {
                 VStack(alignment: .leading, spacing: 6) {
                     Label("安全提示：API Key 会保存到康纳同学 Home 的本地加密凭据文件", systemImage: "lock.shield")
-                        .font(.caption.weight(.semibold))
+                        .font(SettingsListTypography.rowCaptionEmphasized)
                     Text("为减少钥匙串弹窗，康纳同学会使用本机生成的 master key 对 API Key 进行 AES-GCM 加密，并写入 Application Support/Connor/config/credentials。")
                     Text("API Key 不会以明文写入应用设置、项目文件或 Git 仓库；删除 API Key 会移除对应加密凭据文件。")
                     Text("这是本机本地加密存储，不依赖 macOS 钥匙串授权弹窗。")
                 }
-                .font(.caption)
+                .font(SettingsListTypography.rowCaption)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -96,7 +108,7 @@ struct ConnorSettingsDetailView: View {
             VStack(alignment: .leading, spacing: 24) {
                 HStack(alignment: .center) {
                     Text(viewModel.selectedSettingsSection.title)
-                        .font(.headline)
+                        .font(SettingsListTypography.header)
                         .frame(maxWidth: .infinity, alignment: .center)
                     Button(action: { viewModel.resetRuntimeSettings() }) {
                         Image(systemName: "ellipsis")
@@ -128,14 +140,14 @@ struct ConnorSettingsDetailView: View {
 
                 if let message = viewModel.appSettingsMessage {
                     Text(message)
-                        .font(.caption)
+                        .font(SettingsListTypography.rowCaption)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: 760, alignment: .leading)
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
                 if let error = viewModel.errorMessage {
                     Text(error)
-                        .font(.caption)
+                        .font(SettingsListTypography.rowCaption)
                         .foregroundStyle(.red)
                         .textSelection(.enabled)
                         .frame(maxWidth: 760, alignment: .leading)
@@ -181,7 +193,7 @@ private struct SettingsAppSection: View {
                     Spacer()
                     Button("立即检查") { viewModel.appSettingsMessage = "当前为本地开发版本。" }
                 }
-                .font(.subheadline)
+                .font(SettingsListTypography.rowTitle)
             }
         }
     }
@@ -218,11 +230,11 @@ private struct SettingsAISection: View {
 
     private var connectionList: some View {
         VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text("连接")
-                    .font(.largeTitle.weight(.semibold))
+                    .font(SettingsListTypography.header)
                 Text("管理 AI 提供商连接。")
-                    .font(.title3)
+                    .font(SettingsListTypography.rowSubtitle)
                     .foregroundStyle(.secondary)
             }
 
@@ -245,18 +257,18 @@ private struct SettingsAISection: View {
                     }
                 }
             }
-            .padding(.horizontal, 30)
-            .padding(.vertical, 14)
-            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .stroke(Color.secondary.opacity(0.14), lineWidth: 1)
             )
             .shadow(color: Color.black.opacity(0.04), radius: 2, x: 0, y: 1)
 
             Button(action: { isShowingAddConnectionGuide = true }) {
                 Label("添加连接", systemImage: "plus")
-                    .font(.title3)
+                    .font(SettingsListTypography.actionTitle)
                     .labelStyle(.titleAndIcon)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
@@ -555,14 +567,14 @@ private struct AIConnectionSetupView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Spacer(minLength: 180)
+            Spacer(minLength: 72)
 
-            VStack(spacing: 32) {
-                VStack(spacing: 14) {
+            VStack(spacing: 20) {
+                VStack(spacing: 6) {
                     Text(option.setupTitle)
-                        .font(.largeTitle.weight(.semibold))
+                        .font(SettingsListTypography.header)
                     Text(option.setupSubtitle)
-                        .font(.title2)
+                        .font(SettingsListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                 }
@@ -572,7 +584,7 @@ private struct AIConnectionSetupView: View {
 
                 if let statusMessage {
                     Text(statusMessage)
-                        .font(.title3)
+                        .font(SettingsListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: 560)
@@ -580,7 +592,7 @@ private struct AIConnectionSetupView: View {
 
                 if let errorMessage {
                     Text(errorMessage)
-                        .font(.title3)
+                        .font(SettingsListTypography.rowSubtitle)
                         .foregroundStyle(.red)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 18)
@@ -608,7 +620,7 @@ private struct AIConnectionSetupView: View {
                 .frame(maxWidth: 560)
             }
 
-            Spacer(minLength: 220)
+            Spacer(minLength: 96)
         }
         .frame(maxWidth: .infinity)
         .frame(minHeight: 760)
@@ -625,7 +637,7 @@ private struct AIConnectionSetupView: View {
                         .font(.system(size: 34, weight: .semibold))
                         .foregroundStyle(option.tint)
                     Text(option.setupInstruction)
-                        .font(.title3)
+                        .font(SettingsListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
@@ -644,13 +656,13 @@ private struct AIConnectionSetupView: View {
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("授权码")
-                        .font(.headline)
+                        .font(SettingsListTypography.header)
                     TextField("粘贴 Claude 页面显示的授权码", text: $authorizationCode)
                         .textFieldStyle(.roundedBorder)
-                        .font(.title3)
+                        .font(SettingsListTypography.rowSubtitle)
                         .textContentType(.oneTimeCode)
                     Text("授权码只用于完成本次连接。康纳同学会先验证，再保存连接。")
-                        .font(.subheadline)
+                        .font(SettingsListTypography.rowTitle)
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -662,7 +674,7 @@ private struct AIConnectionSetupView: View {
                         .font(.system(size: 34, weight: .semibold))
                         .foregroundStyle(option.tint)
                     Text(option.setupInstruction)
-                        .font(.title3)
+                        .font(SettingsListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
@@ -674,7 +686,7 @@ private struct AIConnectionSetupView: View {
 
                 if didOpenBrowser {
                     Text("浏览器已打开。完成网页认证后，康纳同学会自动验证并保存连接。")
-                        .font(.headline)
+                        .font(SettingsListTypography.header)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 18)
                         .padding(.vertical, 14)
@@ -685,7 +697,7 @@ private struct AIConnectionSetupView: View {
         case .deviceCode:
             VStack(spacing: 24) {
                 Text(option.setupInstruction)
-                    .font(.title3)
+                    .font(SettingsListTypography.rowSubtitle)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                 if option.id == "github-copilot" {
@@ -706,11 +718,11 @@ private struct AIConnectionSetupView: View {
                         )
                         .textSelection(.enabled)
                     Text(didOpenBrowser ? "浏览器已打开 \(displayURL(githubDeviceCode.verificationURI))" : "点击下方按钮打开 \(displayURL(githubDeviceCode.verificationURI))")
-                        .font(.title3)
+                        .font(SettingsListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
                 } else {
                     Text("点击下方按钮获取 GitHub 授权码。")
-                        .font(.title3)
+                        .font(SettingsListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -724,7 +736,7 @@ private struct AIConnectionSetupView: View {
             } else {
                 VStack(spacing: 16) {
                     Text(option.setupInstruction)
-                        .font(.title3)
+                        .font(SettingsListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                     openAICompatibleFields(includeAPIKey: true)
@@ -740,9 +752,9 @@ private struct AIConnectionSetupView: View {
                     .foregroundStyle(option.tint)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("自动配置 GitHub Copilot")
-                        .font(.headline)
+                        .font(SettingsListTypography.header)
                     Text("授权成功后，康纳同学会使用 Copilot token 中的 proxy endpoint 自动选择正确 API 地址，不需要手动填写 Base URL 或 API Key。")
-                        .font(.subheadline)
+                        .font(SettingsListTypography.rowTitle)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -779,7 +791,7 @@ private struct AIConnectionSetupView: View {
     private var curatedSingleProviderAPIFields: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text(option.setupInstruction)
-                .font(.title3)
+                .font(SettingsListTypography.rowSubtitle)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
@@ -792,14 +804,14 @@ private struct AIConnectionSetupView: View {
     private var curatedChinaProviderAPIFields: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text(option.setupInstruction)
-                .font(.title3)
+                .font(SettingsListTypography.rowSubtitle)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("服务商")
-                    .font(.headline)
+                    .font(SettingsListTypography.header)
                 Picker("服务商", selection: $selectedProviderPresetID) {
                     ForEach(chinaProviderPresets) { preset in
                         Text(preset.title).tag(preset.id)
@@ -818,7 +830,7 @@ private struct AIConnectionSetupView: View {
     private var otherProviderAPIFields: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text(option.setupInstruction)
-                .font(.title3)
+                .font(SettingsListTypography.rowSubtitle)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
@@ -827,7 +839,7 @@ private struct AIConnectionSetupView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("服务商")
-                    .font(.headline)
+                    .font(SettingsListTypography.header)
                 Picker("服务商", selection: $selectedProviderPresetID) {
                     ForEach(AIConnectionProviderPreset.otherProviderPresets) { preset in
                         Text(preset.title).tag(preset.id)
@@ -841,15 +853,15 @@ private struct AIConnectionSetupView: View {
             if selectedProviderPresetID == "custom" {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Endpoint")
-                        .font(.headline)
+                        .font(SettingsListTypography.header)
                     TextField("https://your-api-endpoint.com", text: $baseURLString)
                         .textFieldStyle(.roundedBorder)
-                        .font(.title3)
+                        .font(SettingsListTypography.rowSubtitle)
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Protocol")
-                        .font(.headline)
+                        .font(SettingsListTypography.header)
                     Picker("Protocol", selection: $customProtocol) {
                         ForEach(AIConnectionCustomProtocol.allCases, id: \.self) { protocolKind in
                             Text(protocolKind.title).tag(protocolKind)
@@ -857,23 +869,23 @@ private struct AIConnectionSetupView: View {
                     }
                     .pickerStyle(.segmented)
                     Text(customProtocol == .anthropicCompatible ? "Anthropic Compatible 使用 /v1/messages 协议，适合 Anthropic API、OpenRouter Anthropic Skin、Vercel AI Gateway 等兼容服务。" : "大多数第三方接口（Ollama、vLLM、DashScope 等）使用 OpenAI Compatible。")
-                        .font(.subheadline)
+                        .font(SettingsListTypography.rowTitle)
                         .foregroundStyle(.secondary)
                 }
             }
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("Default Model · required")
-                    .font(.headline)
+                    .font(SettingsListTypography.header)
                 if selectedProviderPresetID != "custom" && !activeProviderPreset.supportedModels.isEmpty {
                     modelMultiSelect(title: "", models: activeProviderPreset.availableModels)
                 } else {
                     TextField("例如 gpt-4o-mini、deepseek-v4-flash、google/gemini-2.5-flash", text: $model)
                         .textFieldStyle(.roundedBorder)
-                        .font(.title3)
+                        .font(SettingsListTypography.rowSubtitle)
                 }
                 Text("使用服务商自己的模型 ID。当前 Connor 会用该模型执行一次真实连接校验。")
-                    .font(.subheadline)
+                    .font(SettingsListTypography.rowTitle)
                     .foregroundStyle(.secondary)
             }
         }
@@ -882,7 +894,7 @@ private struct AIConnectionSetupView: View {
     private func apiKeyField(placeholder: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("API Key")
-                .font(.headline)
+                .font(SettingsListTypography.header)
             HStack(spacing: 8) {
                 Group {
                     if showAPIKey {
@@ -892,7 +904,7 @@ private struct AIConnectionSetupView: View {
                     }
                 }
                 .textFieldStyle(.plain)
-                .font(.title3)
+                .font(SettingsListTypography.rowSubtitle)
                 Button(action: { showAPIKey.toggle() }) {
                     Image(systemName: showAPIKey ? "eye.slash" : "eye")
                         .foregroundStyle(.secondary)
@@ -914,7 +926,7 @@ private struct AIConnectionSetupView: View {
         VStack(alignment: .leading, spacing: 10) {
             if !title.isEmpty {
                 Text(title)
-                    .font(.headline)
+                    .font(SettingsListTypography.header)
             }
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(models, id: \.self) { modelID in
@@ -927,7 +939,7 @@ private struct AIConnectionSetupView: View {
                             Spacer()
                             if selectedModel == modelID {
                                 Text("默认")
-                                    .font(.caption.weight(.semibold))
+                                    .font(SettingsListTypography.rowCaptionEmphasized)
                                     .foregroundStyle(option.tint)
                             }
                         }
@@ -941,7 +953,7 @@ private struct AIConnectionSetupView: View {
 
             HStack {
                 Text("默认模型")
-                    .font(.subheadline)
+                    .font(SettingsListTypography.rowTitle)
                     .foregroundStyle(.secondary)
                 Spacer()
                 Picker("默认模型", selection: $selectedModel) {
@@ -957,7 +969,7 @@ private struct AIConnectionSetupView: View {
                 }
             }
             Text("可启用多个模型；默认模型用于首次 health check 和新会话默认选择。")
-                .font(.subheadline)
+                .font(SettingsListTypography.rowTitle)
                 .foregroundStyle(.secondary)
         }
     }
@@ -1359,16 +1371,16 @@ private struct AIConnectionOnboardingView: View {
             }
             .padding(.top, 6)
 
-            Spacer(minLength: 70)
+            Spacer(minLength: 42)
 
-            VStack(spacing: 28) {
-                VStack(spacing: 22) {
+            VStack(spacing: 18) {
+                VStack(spacing: 12) {
                     ConnorConnectionMark()
                     VStack(spacing: 14) {
                         Text("欢迎使用康纳同学")
-                            .font(.largeTitle.weight(.semibold))
+                            .font(SettingsListTypography.header)
                         Text("先选择一种连接方式，康纳同学会在下一步帮你完成配置。")
-                            .font(.title2)
+                            .font(SettingsListTypography.rowSubtitle)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                             .lineLimit(2)
@@ -1385,7 +1397,7 @@ private struct AIConnectionOnboardingView: View {
                 .frame(maxWidth: 760)
             }
 
-            Spacer(minLength: 80)
+            Spacer(minLength: 56)
         }
         .frame(maxWidth: .infinity)
         .frame(minHeight: 760)
@@ -1410,38 +1422,37 @@ private struct AIConnectionOnboardingOptionRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 22) {
+            HStack(spacing: 10) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .fill(Color.secondary.opacity(0.09))
                     Image(systemName: option.systemImage)
-                        .font(.system(size: 28, weight: .semibold))
+                        .font(SettingsListTypography.icon)
                         .foregroundStyle(option.tint)
                 }
-                .frame(width: 70, height: 70)
+                .frame(width: 34, height: 34)
 
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(option.title)
-                        .font(.title2.weight(.semibold))
+                        .font(SettingsListTypography.rowTitleSelected)
                         .foregroundStyle(.primary)
                     Text(option.subtitle)
-                        .font(.title3)
+                        .font(SettingsListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Spacer(minLength: 16)
             }
-            .padding(.horizontal, 30)
-            .padding(.vertical, 20)
+            .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .stroke(Color.secondary.opacity(0.14), lineWidth: 1)
             )
             .shadow(color: Color.black.opacity(0.04), radius: 2, x: 0, y: 1)
-            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -1459,27 +1470,27 @@ private struct AIConnectionEntryRow: View {
         Button(action: select) {
             HStack(alignment: .center, spacing: 12) {
                 Image(systemName: providerSystemImage)
-                    .font(.title3.weight(.semibold))
+                    .font(SettingsListTypography.icon)
                     .foregroundStyle(providerTint)
-                    .frame(width: 24, alignment: .center)
+                    .frame(width: 18, alignment: .center)
 
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
                         Text(connection.name)
-                            .font(.title3.weight(.semibold))
+                            .font(isDefault ? SettingsListTypography.rowTitleSelected : SettingsListTypography.rowTitle)
                             .foregroundStyle(.primary)
                             .lineLimit(1)
                         if isDefault {
                             Text("默认")
-                                .font(.subheadline.weight(.medium))
+                                .font(SettingsListTypography.rowCaptionEmphasized)
                                 .foregroundStyle(.secondary)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.secondary.opacity(0.10), in: Capsule())
                         }
                     }
                     Text(subtitle)
-                        .font(.title3)
+                        .font(SettingsListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -1497,16 +1508,16 @@ private struct AIConnectionEntryRow: View {
                     .disabled(!canDelete)
                 } label: {
                     Image(systemName: "ellipsis")
-                        .font(.title2.weight(.semibold))
+                        .font(SettingsListTypography.icon)
                         .foregroundStyle(.secondary)
-                        .frame(width: 32, height: 32)
+                        .frame(width: 28, height: 28)
                 }
                 .menuStyle(.borderlessButton)
                 .buttonStyle(.plain)
                 .help("更多")
             }
             .contentShape(Rectangle())
-            .frame(minHeight: 84)
+            .frame(minHeight: 58)
         }
         .buttonStyle(.plain)
     }
@@ -1576,7 +1587,7 @@ private struct SettingsPermissionsSection: View {
         VStack(alignment: .leading, spacing: 24) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("控制新会话默认能做什么。")
-                    .font(.title3)
+                    .font(SettingsListTypography.rowSubtitle)
                     .foregroundStyle(.primary)
                 Text("运行中的会话仍可在输入框下方的权限按钮临时切换；项目目录在每个会话顶部的“当前会话 Workspace”中配置。")
                     .font(.callout)
@@ -1618,7 +1629,7 @@ private struct SettingsPermissionsSection: View {
                 .padding(.top, 8)
             } label: {
                 Label("查看当前策略说明", systemImage: "list.bullet.rectangle")
-                    .font(.subheadline.weight(.medium))
+                    .font(SettingsListTypography.rowTitleSelected)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
@@ -1643,9 +1654,9 @@ private struct PermissionModeSummaryRow: View {
                 .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             VStack(alignment: .leading, spacing: 4) {
                 Text(mode.displayName)
-                    .font(.subheadline.weight(.semibold))
+                    .font(SettingsListTypography.rowTitleSelected)
                 Text(summary)
-                    .font(.caption)
+                    .font(SettingsListTypography.rowCaption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -1706,10 +1717,10 @@ private struct PermissionNoteRow: View {
                 .frame(width: 20)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
-                    .font(.caption.weight(.semibold))
+                    .font(SettingsListTypography.rowCaptionEmphasized)
                     .foregroundStyle(.secondary)
                 Text(message)
-                    .font(.caption)
+                    .font(SettingsListTypography.rowCaption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -1732,9 +1743,9 @@ private struct PermissionBoundaryRow: View {
                 .frame(width: 24, height: 24)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
-                    .font(.subheadline.weight(.medium))
+                    .font(SettingsListTypography.rowTitleSelected)
                 Text(message)
-                    .font(.caption)
+                    .font(SettingsListTypography.rowCaption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -1751,9 +1762,9 @@ private struct PermissionPolicyDetailRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(title)
-                .font(.caption.weight(.semibold))
+                .font(SettingsListTypography.rowCaptionEmphasized)
             Text(message)
-                .font(.caption)
+                .font(SettingsListTypography.rowCaption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -1772,9 +1783,9 @@ struct WorkspaceRootsSettingsContent: View {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("当前会话 Workspace")
-                        .font(.subheadline.weight(.medium))
+                        .font(SettingsListTypography.rowTitleSelected)
                     Text(summaryText)
-                        .font(.caption)
+                        .font(SettingsListTypography.rowCaption)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
@@ -1809,7 +1820,7 @@ struct WorkspaceRootsSettingsContent: View {
                 .disabled(viewModel.workspaceRootPathInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             Text("保存到当前 Session Capsule。Native local tools 可访问所有 roots；Claude Sidecar cwd 使用主目录。为空时兼容旧 Sidecar 目录，再回退到进程 cwd。")
-                .font(.caption)
+                .font(SettingsListTypography.rowCaption)
                 .foregroundStyle(.secondary)
         }
         .padding(.vertical, 4)
@@ -1847,7 +1858,7 @@ private struct WorkspaceRootRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
                     Text(root.displayName.isEmpty ? URL(fileURLWithPath: root.path).lastPathComponent : root.displayName)
-                        .font(.subheadline.weight(.medium))
+                        .font(SettingsListTypography.rowTitleSelected)
                     Text(root.role)
                         .font(.caption2.weight(.medium))
                         .foregroundStyle(.secondary)
@@ -1864,7 +1875,7 @@ private struct WorkspaceRootRow: View {
                     }
                 }
                 Text(root.path)
-                    .font(.caption)
+                    .font(SettingsListTypography.rowCaption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -1918,7 +1929,7 @@ private struct SettingsLabelsSection: View {
 
             SettingsGroup(title: "删除行为") {
                 Text("删除标签会自动从所有会话中移除该标签，然后删除标签定义。")
-                    .font(.subheadline)
+                    .font(SettingsListTypography.rowTitle)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -1985,7 +1996,7 @@ private struct SettingsStatusesSection: View {
 
             SettingsGroup(title: "删除限制") {
                 Text("至少保留一个状态；如果已有会话正在使用某个状态，该状态不能删除。当前底层会话状态仍受 AgentSessionStatus 枚举约束，自定义状态定义会保存到治理配置，完整自定义状态切换需要后续迁移到 string-backed status ID。")
-                    .font(.subheadline)
+                    .font(SettingsListTypography.rowTitle)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -2053,7 +2064,7 @@ private struct SettingsHeroHeader<Accessory: View>: View {
                 .frame(width: 44, height: 44)
                 .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             VStack(alignment: .leading, spacing: 5) {
-                Text(title).font(.largeTitle.weight(.semibold))
+                Text(title).font(SettingsListTypography.header)
                 Text(subtitle)
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -2074,12 +2085,12 @@ private struct SettingsEmptyStateRow: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: systemImage)
-                .font(.title3)
+                .font(SettingsListTypography.rowSubtitle)
                 .foregroundStyle(.secondary)
                 .frame(width: 44, height: 44)
             VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.subheadline.weight(.medium))
-                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                Text(title).font(SettingsListTypography.rowTitleSelected)
+                Text(subtitle).font(SettingsListTypography.rowCaption).foregroundStyle(.secondary)
             }
             Spacer()
         }
@@ -2104,9 +2115,9 @@ private struct SettingsLabelDefinitionRow: View {
             .frame(width: 44, height: 44)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(definition.name).font(.subheadline.weight(.medium))
+                Text(definition.name).font(SettingsListTypography.rowTitleSelected)
                 Text("用于 \(usageCount) 个会话")
-                    .font(.caption)
+                    .font(SettingsListTypography.rowCaption)
                     .foregroundStyle(.secondary)
             }
             Spacer()
@@ -2142,9 +2153,9 @@ private struct SettingsStatusDefinitionRow: View {
                 .frame(width: 44, height: 44)
                 .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
             VStack(alignment: .leading, spacing: 3) {
-                Text(definition.name).font(.subheadline.weight(.medium))
+                Text(definition.name).font(SettingsListTypography.rowTitleSelected)
                 Text("用于 \(usageCount) 个会话")
-                    .font(.caption)
+                    .font(SettingsListTypography.rowCaption)
                     .foregroundStyle(.secondary)
             }
             Spacer()
@@ -2189,7 +2200,7 @@ private struct SettingsLabelEditorSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text(title).font(.headline)
+            Text(title).font(SettingsListTypography.header)
             TextField("标签名称", text: $name)
                 .textFieldStyle(.roundedBorder)
             Picker("图标", selection: $systemImage) {
@@ -2235,7 +2246,7 @@ private struct SettingsStatusEditorSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text(title).font(.headline)
+            Text(title).font(SettingsListTypography.header)
             TextField("状态名称", text: $name)
                 .textFieldStyle(.roundedBorder)
             Picker("图标", selection: $systemImage) {
@@ -2405,7 +2416,7 @@ private struct SettingsShortcutsSection: View {
             }
 
             Text("修改后会写入 runtime-settings.json,并由菜单命令或 Browser Workspace 局部 key monitor 真实生效。Governance / Source / Skill 等低频入口不在此页暴露快捷键,避免占用过多 ⌘ 数字键。")
-                .font(.caption)
+                .font(SettingsListTypography.rowCaption)
                 .foregroundStyle(.secondary)
         }
         .sheet(item: $viewModel.recordingShortcutAction) { action in
@@ -2466,9 +2477,9 @@ private struct SettingsPreferencesSection: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("系统默认")
-                            .font(.subheadline.weight(.medium))
+                            .font(SettingsListTypography.rowTitleSelected)
                         Text("只补全仍为空的项目，不覆盖你已经手动填写的偏好。")
-                            .font(.caption)
+                            .font(SettingsListTypography.rowCaption)
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
@@ -2484,14 +2495,14 @@ private struct SettingsPreferencesSection: View {
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("当前位置")
-                            .font(.subheadline.weight(.medium))
+                            .font(SettingsListTypography.rowTitleSelected)
                         if let message = viewModel.userLocationStatusMessage {
                             Text(message)
-                                .font(.caption)
+                                .font(SettingsListTypography.rowCaption)
                                 .foregroundStyle(.secondary)
                         } else {
                             Text("申请位置权限后自动填写城市和国家/地区。")
-                                .font(.caption)
+                                .font(SettingsListTypography.rowCaption)
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -2502,7 +2513,7 @@ private struct SettingsPreferencesSection: View {
             }
             SettingsGroup(title: "备注") {
                 TextEditor(text: $viewModel.userPreferenceNotes)
-                    .font(.subheadline)
+                    .font(SettingsListTypography.rowTitle)
                     .frame(minHeight: 150)
                     .scrollContentBackground(.hidden)
                     .padding(8)
@@ -2519,7 +2530,7 @@ private struct SettingsGroup<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title)
-                .font(.headline)
+                .font(SettingsListTypography.header)
             VStack(spacing: 0) {
                 content
                     .padding(.horizontal, 14)
@@ -2542,9 +2553,9 @@ private struct SettingsAppearanceModeRow: View {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("外观")
-                        .font(.subheadline.weight(.medium))
+                        .font(SettingsListTypography.rowTitleSelected)
                     Text("选择应用页面的显示主题。")
-                        .font(.caption)
+                        .font(SettingsListTypography.rowCaption)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -2570,8 +2581,8 @@ private struct SettingsToggleRow: View {
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.subheadline.weight(.medium))
-                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                Text(title).font(SettingsListTypography.rowTitleSelected)
+                Text(subtitle).font(SettingsListTypography.rowCaption).foregroundStyle(.secondary)
             }
             Spacer()
             Toggle("", isOn: $isOn)
@@ -2588,9 +2599,9 @@ private struct SettingsValueRow: View {
 
     var body: some View {
         HStack {
-            Text(title).font(.subheadline.weight(.medium))
+            Text(title).font(SettingsListTypography.rowTitleSelected)
             Spacer()
-            Text(value).font(.subheadline).foregroundStyle(.secondary)
+            Text(value).font(SettingsListTypography.rowTitle).foregroundStyle(.secondary)
         }
         .frame(minHeight: 42)
     }
@@ -2603,9 +2614,10 @@ private struct SettingsTextFieldRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.subheadline.weight(.medium))
-            Text(subtitle).font(.caption).foregroundStyle(.secondary)
+            Text(title).font(SettingsListTypography.rowTitleSelected)
+            Text(subtitle).font(SettingsListTypography.rowCaption).foregroundStyle(.secondary)
             TextField(title, text: $text)
+                .font(SettingsListTypography.rowTitle)
                 .textFieldStyle(.roundedBorder)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -2622,8 +2634,8 @@ private struct SettingsPickerRow<Selection: Hashable, Content: View>: View {
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.subheadline.weight(.medium))
-                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                Text(title).font(SettingsListTypography.rowTitleSelected)
+                Text(subtitle).font(SettingsListTypography.rowCaption).foregroundStyle(.secondary)
             }
             Spacer()
             Picker(title, selection: $selection) { content }
@@ -2642,12 +2654,12 @@ private struct ShortcutRow: View {
 
     var body: some View {
         HStack {
-            Text(title).font(.subheadline.weight(.medium))
+            Text(title).font(SettingsListTypography.rowTitleSelected)
             Spacer()
             HStack(spacing: 4) {
                 ForEach(keys, id: \.self) { key in
                     Text(key)
-                        .font(.caption.weight(.semibold))
+                        .font(SettingsListTypography.rowCaptionEmphasized)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
                         .background(.quaternary.opacity(0.30), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
@@ -2728,9 +2740,9 @@ struct ShortcutRecorderSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text("修改快捷键")
-                .font(.headline)
+                .font(SettingsListTypography.header)
             Text(title)
-                .font(.subheadline.weight(.medium))
+                .font(SettingsListTypography.rowTitleSelected)
             ZStack {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(Color(nsColor: .controlBackgroundColor))
@@ -2744,7 +2756,7 @@ struct ShortcutRecorderSheet: View {
                 message = shortcut.command ? "已捕捉: \(shortcut.displayText)" : "已捕捉: \(shortcut.displayText)。建议包含 ⌘。"
             })
             Text(message)
-                .font(.caption)
+                .font(SettingsListTypography.rowCaption)
                 .foregroundStyle(.secondary)
             HStack {
                 Button("恢复当前") { capturedShortcut = currentShortcut }
@@ -2799,8 +2811,8 @@ struct EditableShortcutRow: View {
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.subheadline.weight(.medium))
-                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                Text(title).font(SettingsListTypography.rowTitleSelected)
+                Text(subtitle).font(SettingsListTypography.rowCaption).foregroundStyle(.secondary)
             }
             Spacer()
             Text(shortcut.displayText)
