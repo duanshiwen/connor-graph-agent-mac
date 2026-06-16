@@ -647,7 +647,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 )
             },
             totalEstimatedTokenCount: diagnostics.totalEstimatedTokenCount,
-            appliedTransformers: diagnostics.appliedTransformers
+            appliedTransformers: diagnostics.appliedTransformers,
+            renderedPromptSnapshot: nil
         )
     }
 
