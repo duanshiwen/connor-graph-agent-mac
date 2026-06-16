@@ -200,10 +200,10 @@ struct SettingsShortcutsSection: View {
 
     private func title(for action: AgentRuntimeShortcutAction) -> String {
         switch action {
-        case .newSession: "新建聊天"
-        case .toggleBrowser: "显示 / 隐藏浏览器"
-        case .focusTopSearch: "聚焦顶部搜索"
-        case .openSettings: "打开设置"
+        case .newSession: "新建会话"
+        case .toggleBrowser: "切换浏览器"
+        case .focusTopSearch: "搜索"
+        case .openSettings: "设置…"
         case .focusBrowserAddress: "聚焦地址栏"
         case .newBrowserTab: "新建浏览器标签"
         case .closeBrowserTab: "关闭当前标签"

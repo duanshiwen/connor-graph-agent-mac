@@ -59,6 +59,13 @@ struct SettingsAppearanceModeRow: View {
 }
 
 private struct SettingsAppearanceOptionCard: View {
+    private enum Layout {
+        static let previewWidth: CGFloat = 96
+        static let previewHeight: CGFloat = 60
+        static let previewCornerRadius: CGFloat = 10
+        static let systemPaneWidth: CGFloat = previewWidth / 2
+    }
+
     var mode: ConnorAppearanceMode
     var isSelected: Bool
     var action: () -> Void
@@ -67,10 +74,11 @@ private struct SettingsAppearanceOptionCard: View {
         Button(action: action) {
             VStack(spacing: 6) {
                 preview
-                    .frame(width: 96, height: 60)
-                    .background(previewBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .frame(width: Layout.previewWidth, height: Layout.previewHeight)
+                    .background(previewBackground, in: RoundedRectangle(cornerRadius: Layout.previewCornerRadius, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: Layout.previewCornerRadius, style: .continuous))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        RoundedRectangle(cornerRadius: Layout.previewCornerRadius, style: .continuous)
                             .strokeBorder(isSelected ? Color.accentColor : Color.secondary.opacity(0.16), lineWidth: isSelected ? 3 : 1)
                     )
                     .shadow(color: .black.opacity(isSelected ? 0.14 : 0.06), radius: isSelected ? 6 : 3, x: 0, y: 2)
@@ -92,13 +100,18 @@ private struct SettingsAppearanceOptionCard: View {
         case .system:
             HStack(spacing: 0) {
                 previewPane(isDark: false)
+                    .frame(width: Layout.systemPaneWidth, height: Layout.previewHeight)
+                    .clipped()
                 previewPane(isDark: true)
+                    .frame(width: Layout.systemPaneWidth, height: Layout.previewHeight)
+                    .clipped()
             }
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         case .light:
             previewPane(isDark: false)
+                .frame(width: Layout.previewWidth, height: Layout.previewHeight)
         case .dark:
             previewPane(isDark: true)
+                .frame(width: Layout.previewWidth, height: Layout.previewHeight)
         }
     }
 
