@@ -985,9 +985,6 @@ enum AgentActivityFallbackEvents {
         if !process.citationIDs.isEmpty {
             items.append(AgentEventPresentation(kind: "citations", title: "Citations attached", detail: process.citationIDs.joined(separator: ", "), severity: .success, runID: nil, sessionID: nil))
         }
-        if let prompt = process.promptSnapshotText, !prompt.isEmpty {
-            items.append(AgentEventPresentation(kind: "prompt_snapshot", title: "Prompt snapshot", detail: prompt, severity: .info, runID: nil, sessionID: nil))
-        }
         if let response = process.assistantResponse, !response.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             items.append(AgentEventPresentation(kind: "assistant_response", title: "Answer completed", detail: response, severity: .success, runID: nil, sessionID: nil))
         }
@@ -1188,13 +1185,6 @@ private struct AgentChatTurnInspectorView: View {
                         }
                     }
 
-                    if let prompt = row.promptSnapshotText, !prompt.isEmpty {
-                        MetadataBlock(title: "提示词快照", text: prompt, monospaced: true)
-                    } else if row.message.promptInspection != nil {
-                        Text("本轮没有保存渲染后的提示词快照。")
-                            .font(AgentChatTypography.meta)
-                            .foregroundStyle(.secondary)
-                    }
                 }
                 .padding(.top, 8)
             } label: {

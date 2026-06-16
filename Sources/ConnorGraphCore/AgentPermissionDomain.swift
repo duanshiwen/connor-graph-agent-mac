@@ -32,8 +32,8 @@ public enum AgentPermissionMode: String, Codable, Sendable, Equatable, CaseItera
     public var displayName: String {
         switch self {
         case .readOnly: "只读"
-        case .askToWrite: "询问后编辑"
-        case .trustedWrite: "信任编辑"
+        case .askToWrite: "询问"
+        case .trustedWrite: "执行"
         case .allowAll: "全部允许"
         }
     }

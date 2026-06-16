@@ -41,7 +41,7 @@ let package = Package(
             name: "ConnorGraphAgentMac",
             dependencies: ["ConnorGraphAgent", "ConnorGraphStore", "ConnorGraphAppSupport"],
             resources: [.process("Assets.xcassets")],
-            linkerSettings: [.linkedFramework("WebKit")]
+            linkerSettings: [.linkedFramework("WebKit"), .linkedFramework("CoreLocation")]
         ),
         .executableTarget(
             name: "ConnorCLI",

@@ -389,6 +389,74 @@ public struct SearchEngineMCPTool: AgentTool {
     }
 }
 
+public struct BrowserAssistedWebFetchRequest: Equatable, Sendable {
+    public var urlString: String
+    public var extractMode: String
+    public var waitUntil: String
+    public var timeoutMilliseconds: Int
+    public var revealImmediately: Bool
+
+    public init(urlString: String, extractMode: String, waitUntil: String, timeoutMilliseconds: Int, revealImmediately: Bool = false) {
+        self.urlString = urlString
+        self.extractMode = extractMode
+        self.waitUntil = waitUntil
+        self.timeoutMilliseconds = timeoutMilliseconds
+        self.revealImmediately = revealImmediately
+    }
+}
+
+public enum BrowserAssistedWebFetchStatus: String, Sendable {
+    case fetched
+    case needsUserIntervention
+    case failed
+    case timedOut
+}
+
+public struct BrowserAssistedWebFetchResult: Equatable, Sendable {
+    public var status: BrowserAssistedWebFetchStatus
+    public var urlString: String
+    public var finalURLString: String
+    public var title: String
+    public var contentText: String
+    public var taskID: String
+    public var sessionID: String
+    public var tabID: String
+    public var errorMessage: String?
+    public var interventionReason: String?
+    public var truncated: Bool
+    public var originalCharacterCount: Int
+
+    public init(
+        status: BrowserAssistedWebFetchStatus,
+        urlString: String,
+        finalURLString: String,
+        title: String,
+        contentText: String,
+        taskID: String,
+        sessionID: String,
+        tabID: String,
+        errorMessage: String?,
+        interventionReason: String?,
+        truncated: Bool,
+        originalCharacterCount: Int
+    ) {
+        self.status = status
+        self.urlString = urlString
+        self.finalURLString = finalURLString
+        self.title = title
+        self.contentText = contentText
+        self.taskID = taskID
+        self.sessionID = sessionID
+        self.tabID = tabID
+        self.errorMessage = errorMessage
+        self.interventionReason = interventionReason
+        self.truncated = truncated
+        self.originalCharacterCount = originalCharacterCount
+    }
+}
+
+public typealias BrowserAssistedWebFetchHandler = @Sendable (BrowserAssistedWebFetchRequest) async -> BrowserAssistedWebFetchResult?
+
 public struct SearchEngineMCPWebFetchTool: AgentTool {
     public let name = "web_fetch"
     public let description = "Fetch and extract a web page through search-engine-mcp. Prefer this over browser_fetch when you want cleaned Markdown/text, tables, and optional JavaScript rendering."
@@ -403,13 +471,16 @@ public struct SearchEngineMCPWebFetchTool: AgentTool {
 
     private let configuration: SearchEngineMCPConfiguration
     private let browserAssistedSearchHandler: BrowserAssistedSearchHandler?
+    private let browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler?
 
     public init(
         configuration: SearchEngineMCPConfiguration = SearchEngineMCPConfiguration(),
-        browserAssistedSearchHandler: BrowserAssistedSearchHandler? = nil
+        browserAssistedSearchHandler: BrowserAssistedSearchHandler? = nil,
+        browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler? = nil
     ) {
         self.configuration = configuration
         self.browserAssistedSearchHandler = browserAssistedSearchHandler
+        self.browserAssistedWebFetchHandler = browserAssistedWebFetchHandler
     }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
@@ -417,48 +488,72 @@ public struct SearchEngineMCPWebFetchTool: AgentTool {
             throw AgentToolError.invalidArguments("web_fetch requires url")
         }
         let renderMode = (arguments.string("render_mode") ?? "auto").lowercased()
-        if renderMode == "js", let browserAssistedSearchHandler {
-            let request = BrowserAssistedSearchRequest(
-                query: url,
-                engine: "direct-url",
+        let extractMode = (arguments.string("extract_mode") ?? "markdown").lowercased()
+        let waitUntil = (arguments.string("wait_until") ?? "networkidle").lowercased()
+        let timeoutMilliseconds = arguments.int("timeout_ms") ?? 720_000
+        if renderMode == "js", let browserAssistedWebFetchHandler {
+            let request = BrowserAssistedWebFetchRequest(
                 urlString: url,
-                title: "Fetch: \(url)",
+                extractMode: extractMode,
+                waitUntil: waitUntil,
+                timeoutMilliseconds: timeoutMilliseconds,
                 revealImmediately: false
             )
-            if let browserResult = await browserAssistedSearchHandler(request) {
-                let text = """
-                URL opened in Connor's built-in browser background runner for JavaScript-capable loading.
-                URL: \(browserResult.urlString)
-                Task ID: \(browserResult.taskID)
-                Browser session ID: \(browserResult.sessionID)
-                Browser tab ID: \(browserResult.tabID)
-                Status: \(browserResult.status)
-
-                If the page loads without a challenge, it remains in the background. If it requires CAPTCHA, human verification, unusual-traffic handling, login, or a browser security challenge, Connor will switch to the corresponding built-in browser tab and ask the user to intervene.
-                """
-                return AgentToolResult(
-                    toolCallID: context.toolCallID,
-                    toolName: name,
-                    contentText: text,
-                    contentJSON: BrowserFetchTool.encodeJSONObject([
-                        "url": browserResult.urlString,
-                        "renderMode": renderMode,
-                        "browserAssisted": true,
-                        "taskID": browserResult.taskID,
-                        "sessionID": browserResult.sessionID,
-                        "tabID": browserResult.tabID,
-                        "status": browserResult.status
-                    ]),
-                    citations: [browserResult.urlString]
-                )
+            if let browserResult = await browserAssistedWebFetchHandler(request) {
+                let json: [String: Any] = [
+                    "url": browserResult.urlString,
+                    "finalURL": browserResult.finalURLString,
+                    "title": browserResult.title,
+                    "renderMode": renderMode,
+                    "engine": "wkwebview",
+                    "browserAssisted": true,
+                    "taskID": browserResult.taskID,
+                    "sessionID": browserResult.sessionID,
+                    "tabID": browserResult.tabID,
+                    "status": browserResult.status.rawValue,
+                    "errorMessage": browserResult.errorMessage as Any,
+                    "interventionReason": browserResult.interventionReason as Any,
+                    "truncated": browserResult.truncated,
+                    "originalCharacterCount": browserResult.originalCharacterCount
+                ]
+                switch browserResult.status {
+                case .fetched:
+                    return AgentToolResult(
+                        toolCallID: context.toolCallID,
+                        toolName: name,
+                        contentText: browserResult.contentText,
+                        contentJSON: BrowserFetchTool.encodeJSONObject(json),
+                        citations: [browserResult.finalURLString.isEmpty ? browserResult.urlString : browserResult.finalURLString]
+                    )
+                case .needsUserIntervention:
+                    let reason = browserResult.interventionReason ?? "Browser page requires user intervention."
+                    let text = """
+                    Connor opened this page in the built-in browser, but it requires user intervention.
+                    URL: \(browserResult.urlString)
+                    Final URL: \(browserResult.finalURLString)
+                    Reason: \(reason)
+                    Task ID: \(browserResult.taskID)
+                    Browser session ID: \(browserResult.sessionID)
+                    Browser tab ID: \(browserResult.tabID)
+                    """
+                    return AgentToolResult(
+                        toolCallID: context.toolCallID,
+                        toolName: name,
+                        contentText: text,
+                        contentJSON: BrowserFetchTool.encodeJSONObject(json),
+                        citations: [browserResult.urlString]
+                    )
+                case .failed, .timedOut:
+                    throw AgentToolError.invalidArguments(browserResult.errorMessage ?? "Connor WKWebView web_fetch(js) failed with status \(browserResult.status.rawValue)")
+                }
             }
         }
         let payload: [String: Any] = [
             "url": url,
-            "extract_mode": arguments.string("extract_mode") ?? "markdown",
+            "extract_mode": extractMode,
             "render_mode": renderMode,
-            "wait_until": arguments.string("wait_until") ?? "networkidle",
-            "timeout_ms": arguments.int("timeout_ms") ?? 720_000
+            "wait_until": waitUntil,
+            "timeout_ms": timeoutMilliseconds
         ]
         let text = try await SearchEngineMCPSubprocess.call(tool: "web_fetch", arguments: payload, configuration: configuration)
         return AgentToolResult(
