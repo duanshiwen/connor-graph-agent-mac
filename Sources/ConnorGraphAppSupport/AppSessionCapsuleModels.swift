@@ -414,6 +414,12 @@ public struct AppBrowserSelectionThreadMessageSnapshot: Codable, Equatable, Iden
 
 // MARK: - Browser History
 
+public enum BrowserHistoryContentFetchStatus: String, Codable, Sendable {
+    case pending
+    case fetched
+    case failed
+}
+
 public struct BrowserHistoryRecord: Codable, Equatable, Identifiable, Sendable {
     public var id: UUID
     public var url: String
@@ -421,6 +427,10 @@ public struct BrowserHistoryRecord: Codable, Equatable, Identifiable, Sendable {
     public var sessionID: String
     public var sessionTitle: String
     public var visitedAt: Date
+    public var contentMarkdown: String?
+    public var contentFetchedAt: Date?
+    public var contentFetchStatus: BrowserHistoryContentFetchStatus?
+    public var contentFetchError: String?
 
     public init(
         id: UUID = UUID(),
@@ -428,7 +438,11 @@ public struct BrowserHistoryRecord: Codable, Equatable, Identifiable, Sendable {
         title: String,
         sessionID: String,
         sessionTitle: String,
-        visitedAt: Date = Date()
+        visitedAt: Date = Date(),
+        contentMarkdown: String? = nil,
+        contentFetchedAt: Date? = nil,
+        contentFetchStatus: BrowserHistoryContentFetchStatus? = nil,
+        contentFetchError: String? = nil
     ) {
         self.id = id
         self.url = url
@@ -436,6 +450,10 @@ public struct BrowserHistoryRecord: Codable, Equatable, Identifiable, Sendable {
         self.sessionID = sessionID
         self.sessionTitle = sessionTitle
         self.visitedAt = visitedAt
+        self.contentMarkdown = contentMarkdown
+        self.contentFetchedAt = contentFetchedAt
+        self.contentFetchStatus = contentFetchStatus
+        self.contentFetchError = contentFetchError
     }
 }
 
