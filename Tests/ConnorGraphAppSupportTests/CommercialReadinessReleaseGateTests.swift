@@ -70,14 +70,12 @@ struct CommercialReadinessReleaseGateTests {
         }
     }
 
-    @Test func commandPaletteIncludesOneClickCommercialReadinessCheck() {
-        let palette = ConnorCommandPalettePresentation.build(shell: .default)
-        let matches = palette.search("commercial readiness")
+    @Test func nativeShellIncludesOneClickCommercialReadinessCheck() {
+        let command = ConnorNativeShellPresentation.default.command(for: .checkCommercialReadiness)
 
-        let command = matches.first { $0.id == "command.checkCommercialReadiness" }
         #expect(command?.title == "Check Commercial Readiness")
         #expect(command?.target == .productOS)
-        #expect(command?.kind == .command)
         #expect(command?.systemImage == "checkmark.seal")
+        #expect(command?.isPrimaryAction == true)
     }
 }

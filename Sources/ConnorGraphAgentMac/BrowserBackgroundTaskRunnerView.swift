@@ -17,6 +17,7 @@ struct BrowserBackgroundTaskRunnerView: View {
                 BrowserBackgroundTaskWebView(
                     task: task,
                     onCompleted: { state in viewModel.completeBrowserAssistedTask(state.id, message: "Completed in background") },
+                    onFetched: { state, title, finalURLString, text in viewModel.completeBrowserAssistedWebFetch(state.id, title: title, finalURLString: finalURLString, text: text) },
                     onNeedsUserIntervention: { state, reason in viewModel.revealBrowserAssistedTask(state.id, reason: reason) },
                     onFailed: { state, message in viewModel.failBrowserAssistedTask(state.id, message: message) }
                 )
@@ -35,11 +36,12 @@ struct BrowserBackgroundTaskRunnerView: View {
 private struct BrowserBackgroundTaskWebView: NSViewRepresentable {
     var task: BrowserAssistedTaskState
     var onCompleted: (BrowserAssistedTaskState) -> Void
+    var onFetched: (BrowserAssistedTaskState, String, String, String) -> Void
     var onNeedsUserIntervention: (BrowserAssistedTaskState, String) -> Void
     var onFailed: (BrowserAssistedTaskState, String) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(task: task, onCompleted: onCompleted, onNeedsUserIntervention: onNeedsUserIntervention, onFailed: onFailed)
+        Coordinator(task: task, onCompleted: onCompleted, onFetched: onFetched, onNeedsUserIntervention: onNeedsUserIntervention, onFailed: onFailed)
     }
 
     func makeNSView(context: Context) -> WKWebView {
@@ -55,6 +57,7 @@ private struct BrowserBackgroundTaskWebView: NSViewRepresentable {
     func updateNSView(_ nsView: WKWebView, context: Context) {
         context.coordinator.task = task
         context.coordinator.onCompleted = onCompleted
+        context.coordinator.onFetched = onFetched
         context.coordinator.onNeedsUserIntervention = onNeedsUserIntervention
         context.coordinator.onFailed = onFailed
         context.coordinator.load(task: task, in: nsView)
@@ -63,6 +66,7 @@ private struct BrowserBackgroundTaskWebView: NSViewRepresentable {
     final class Coordinator: NSObject, WKNavigationDelegate {
         var task: BrowserAssistedTaskState
         var onCompleted: (BrowserAssistedTaskState) -> Void
+        var onFetched: (BrowserAssistedTaskState, String, String, String) -> Void
         var onNeedsUserIntervention: (BrowserAssistedTaskState, String) -> Void
         var onFailed: (BrowserAssistedTaskState, String) -> Void
         private var loadedTaskID: UUID?
@@ -71,11 +75,13 @@ private struct BrowserBackgroundTaskWebView: NSViewRepresentable {
         init(
             task: BrowserAssistedTaskState,
             onCompleted: @escaping (BrowserAssistedTaskState) -> Void,
+            onFetched: @escaping (BrowserAssistedTaskState, String, String, String) -> Void,
             onNeedsUserIntervention: @escaping (BrowserAssistedTaskState, String) -> Void,
             onFailed: @escaping (BrowserAssistedTaskState, String) -> Void
         ) {
             self.task = task
             self.onCompleted = onCompleted
+            self.onFetched = onFetched
             self.onNeedsUserIntervention = onNeedsUserIntervention
             self.onFailed = onFailed
         }
@@ -95,8 +101,47 @@ private struct BrowserBackgroundTaskWebView: NSViewRepresentable {
             let title = webView.title ?? task.title
             if let reason = detector.interventionReason(urlString: urlString, title: title) {
                 DispatchQueue.main.async { self.onNeedsUserIntervention(self.task, reason) }
-            } else {
+                return
+            }
+            guard task.kind == .fetch else {
                 DispatchQueue.main.async { self.onCompleted(self.task) }
+                return
+            }
+            extractRenderedPage(from: webView, fallbackTitle: title, fallbackURLString: urlString)
+        }
+
+        private func extractRenderedPage(from webView: WKWebView, fallbackTitle: String, fallbackURLString: String) {
+            let script = """
+            (() => {
+              const title = document.title || '';
+              const url = location.href || '';
+              const text = document.body ? document.body.innerText : '';
+              const lang = document.documentElement ? (document.documentElement.lang || '') : '';
+              return JSON.stringify({ title, url, text, lang });
+            })()
+            """
+            webView.evaluateJavaScript(script) { result, error in
+                if let error {
+                    DispatchQueue.main.async { self.onFailed(self.task, error.localizedDescription) }
+                    return
+                }
+                let jsonString = result as? String ?? ""
+                guard let data = jsonString.data(using: .utf8),
+                      let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    DispatchQueue.main.async { self.onFetched(self.task, fallbackTitle, fallbackURLString, "") }
+                    return
+                }
+                let title = (payload["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let url = (payload["url"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let text = payload["text"] as? String ?? ""
+                DispatchQueue.main.async {
+                    self.onFetched(
+                        self.task,
+                        title?.isEmpty == false ? title! : fallbackTitle,
+                        url?.isEmpty == false ? url! : fallbackURLString,
+                        text
+                    )
+                }
             }
         }
 

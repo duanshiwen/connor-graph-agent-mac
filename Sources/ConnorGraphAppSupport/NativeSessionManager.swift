@@ -247,6 +247,7 @@ public struct NativeSessionManager: Sendable {
         var collectedEvents: [AgentEvent] = []
         var collectedPresentations: [AgentEventPresentation] = []
         var assistantMessage: AgentMessage?
+        var promptInspectionSnapshot: AgentPromptInspectionSnapshot?
 
         do {
             for try await event in backend.chat(request) {
@@ -279,11 +280,24 @@ public struct NativeSessionManager: Sendable {
                     await onEventPresentation(presentation)
                 }
 
+                if case .promptAssembled(let payload) = event {
+                    promptInspectionSnapshot = AgentPromptInspectionSnapshot(
+                        includesSummary: payload.sections.contains { $0.id == "conversation" || $0.id == "memory" },
+                        recentMessageCount: recentMessages.count,
+                        currentRequest: prompt,
+                        renderedPrompt: nil,
+                        renderedPromptCharacterCount: 0,
+                        estimatedPromptTokenCount: payload.totalEstimatedTokenCount,
+                        promptBudgetStatus: AgentPromptBudgetEstimator().status(estimatedTokenCount: payload.totalEstimatedTokenCount)
+                    )
+                }
+
                 if case .textComplete(let payload) = event {
                     assistantMessage = session.appendAssistantMessage(
                         payload.text,
                         citations: payload.citations,
-                        contextSnapshot: payload.contextSnapshot
+                        contextSnapshot: payload.contextSnapshot,
+                        promptInspection: promptInspectionSnapshot
                     )
                     try persistSession()
                     if let assistantMessage {

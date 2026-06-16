@@ -11,6 +11,7 @@ struct AppShellView: View {
     @StateObject var viewModel: AppViewModel
     @State private var sidebarSelection: SidebarItem? = .agentChat
     @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
+    @State private var topSearchKeyMonitor: Any?
 
     var body: some View {
         NavigationSplitView(columnVisibility: $splitViewVisibility) {
@@ -34,9 +35,12 @@ struct AppShellView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary)
-                    TextField("搜索会话标题和内容", text: $viewModel.sessionSearchQuery)
-                        .textFieldStyle(.plain)
-                        .frame(minWidth: 220, idealWidth: 320, maxWidth: 420)
+                    TopSearchTextField(
+                        text: $viewModel.sessionSearchQuery,
+                        placeholder: "搜索会话标题和内容",
+                        focusRequestID: viewModel.focusTopSearchRequestID
+                    )
+                    .frame(minWidth: 220, idealWidth: 320, maxWidth: 420, minHeight: 20, idealHeight: 22, maxHeight: 24)
                     if !viewModel.sessionSearchQuery.isEmpty {
                         Button(action: { viewModel.sessionSearchQuery = "" }) {
                             Image(systemName: "xmark.circle.fill")
@@ -65,6 +69,10 @@ struct AppShellView: View {
         .onAppear {
             sidebarSelection = viewModel.selection ?? .agentChat
             viewModel.reloadChatSessions()
+            installTopSearchKeyMonitorIfNeeded()
+        }
+        .onDisappear {
+            removeTopSearchKeyMonitor()
         }
         .onChange(of: sidebarSelection) { _, newSelection in
             viewModel.deferViewUpdate {
@@ -76,11 +84,101 @@ struct AppShellView: View {
                 sidebarSelection = newSelection
             }
         }
-        .sheet(isPresented: $viewModel.isCommandPalettePresented) {
-            ConnorCommandPaletteView(viewModel: viewModel)
+        .onChange(of: viewModel.runtimeSettingsAutosaveSignature) { _, _ in
+            viewModel.scheduleRuntimeSettingsAutosave()
         }
     }
 
+    private func installTopSearchKeyMonitorIfNeeded() {
+        guard topSearchKeyMonitor == nil else { return }
+        topSearchKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let shortcut = viewModel.shortcut(for: .focusTopSearch)
+            guard shortcut.matches(
+                character: event.charactersIgnoringModifiers,
+                isCommandDown: event.modifierFlags.contains(.command),
+                isShiftDown: event.modifierFlags.contains(.shift),
+                isControlDown: event.modifierFlags.contains(.control),
+                isOptionDown: event.modifierFlags.contains(.option)
+            ) else {
+                return event
+            }
+            viewModel.performShortcutAction(.focusTopSearch)
+            return nil
+        }
+    }
+
+    private func removeTopSearchKeyMonitor() {
+        if let topSearchKeyMonitor {
+            NSEvent.removeMonitor(topSearchKeyMonitor)
+            self.topSearchKeyMonitor = nil
+        }
+    }
+
+}
+
+private struct TopSearchTextField: NSViewRepresentable {
+    @Binding var text: String
+    var placeholder: String
+    var focusRequestID: UUID?
+
+    func makeNSView(context: Context) -> NSTextField {
+        let textField = SelectAllOnFocusTextField()
+        textField.delegate = context.coordinator
+        textField.placeholderString = placeholder
+        textField.font = .systemFont(ofSize: 13)
+        textField.isBordered = false
+        textField.isBezeled = false
+        textField.drawsBackground = false
+        textField.focusRingType = .none
+        textField.lineBreakMode = .byTruncatingTail
+        textField.cell?.sendsActionOnEndEditing = false
+        return textField
+    }
+
+    func updateNSView(_ nsView: NSTextField, context: Context) {
+        if nsView.stringValue != text {
+            nsView.stringValue = text
+        }
+        nsView.placeholderString = placeholder
+        if context.coordinator.lastFocusRequestID != focusRequestID {
+            context.coordinator.lastFocusRequestID = focusRequestID
+            guard focusRequestID != nil else { return }
+            DispatchQueue.main.async {
+                nsView.window?.makeFirstResponder(nsView)
+                nsView.selectText(nil)
+            }
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text)
+    }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        @Binding var text: String
+        var lastFocusRequestID: UUID?
+
+        init(text: Binding<String>) {
+            _text = text
+        }
+
+        func controlTextDidChange(_ notification: Notification) {
+            guard let field = notification.object as? NSTextField else { return }
+            text = field.stringValue
+        }
+    }
+}
+
+private final class SelectAllOnFocusTextField: NSTextField {
+    override func becomeFirstResponder() -> Bool {
+        let didBecomeFirstResponder = super.becomeFirstResponder()
+        if didBecomeFirstResponder {
+            DispatchQueue.main.async { [weak self] in
+                self?.selectText(nil)
+            }
+        }
+        return didBecomeFirstResponder
+    }
 }
 
 private enum AppListTypography {
@@ -156,6 +254,8 @@ private struct CraftPrimarySidebarView: View {
     @State private var labelsExpanded = true
     @State private var sourcesExpanded = true
     @State private var automationExpanded = true
+    @State private var statusEditorRequest: StatusDefinitionEditorRequest?
+    @State private var labelEditorRequest: LabelDefinitionEditorRequest?
 
     var body: some View {
         VStack(spacing: 10) {
@@ -176,15 +276,36 @@ private struct CraftPrimarySidebarView: View {
                             viewModel.setSessionListFilter(.all)
                             select(.agentChat)
                         }
-                        SidebarRow(title: "收件箱", systemImage: "tray.full", count: inboxCount, isSelected: selection == .agentChat && viewModel.sessionListFilter == .inbox) {
-                            viewModel.setSessionListFilter(.inbox)
-                            select(.agentChat)
+                        .contextMenu {
+                            Button("创建状态…", systemImage: "plus.circle") { presentNewStatusEditor() }
                         }
                         ForEach(viewModel.governanceConfig.statuses.sorted { $0.sortOrder < $1.sortOrder }) { status in
                             if let sessionStatus = AgentSessionStatus(rawValue: status.id) {
                                 SidebarRow(title: status.name, systemImage: status.systemImage, count: count(for: sessionStatus), isSelected: selection == .agentChat && viewModel.sessionListFilter == .status(sessionStatus)) {
                                     viewModel.setSessionListFilter(.status(sessionStatus))
                                     select(.agentChat)
+                                }
+                                .contextMenu {
+                                    Button("编辑状态…", systemImage: "pencil") { presentStatusEditor(status) }
+                                    Button("创建状态…", systemImage: "plus.circle") { presentNewStatusEditor(after: status) }
+                                    Divider()
+                                    Button(role: .destructive) { viewModel.deleteStatusDefinition(status) } label: {
+                                        Label("删除状态", systemImage: "trash")
+                                    }
+                                    .disabled(!viewModel.canDeleteStatusDefinition(status))
+                                }
+                            } else {
+                                SidebarRow(title: status.name, systemImage: status.systemImage, count: 0, isSelected: false) {
+                                    presentStatusEditor(status)
+                                }
+                                .contextMenu {
+                                    Button("编辑状态…", systemImage: "pencil") { presentStatusEditor(status) }
+                                    Button("创建状态…", systemImage: "plus.circle") { presentNewStatusEditor(after: status) }
+                                    Divider()
+                                    Button(role: .destructive) { viewModel.deleteStatusDefinition(status) } label: {
+                                        Label("删除状态", systemImage: "trash")
+                                    }
+                                    .disabled(!viewModel.canDeleteStatusDefinition(status))
                                 }
                             }
                         }
@@ -193,11 +314,22 @@ private struct CraftPrimarySidebarView: View {
                     SidebarDisclosure(title: "标签", systemImage: "tag", isExpanded: $labelsExpanded) {
                         if viewModel.governanceConfig.labels.isEmpty {
                             SidebarMutedText("暂无标签")
+                                .contextMenu {
+                                    Button("创建标签…", systemImage: "plus.circle") { presentNewLabelEditor() }
+                                }
                         } else {
                             ForEach(viewModel.governanceConfig.labels) { label in
-                                SidebarRow(title: label.name, systemImage: "tag", count: count(forLabel: label.id), isSelected: selection == .agentChat && viewModel.sessionListFilter == .label(label.id)) {
+                                SidebarRow(title: label.name, systemImage: label.systemImage, count: count(forLabel: label.id), isSelected: selection == .agentChat && viewModel.sessionListFilter == .label(label.id)) {
                                     viewModel.setSessionListFilter(.label(label.id))
                                     select(.agentChat)
+                                }
+                                .contextMenu {
+                                    Button("编辑标签…", systemImage: "pencil") { presentLabelEditor(label) }
+                                    Button("创建标签…", systemImage: "plus.circle") { presentNewLabelEditor() }
+                                    Divider()
+                                    Button(role: .destructive) { viewModel.deleteLabelDefinition(label) } label: {
+                                        Label("删除标签", systemImage: "trash")
+                                    }
                                 }
                             }
                         }
@@ -225,6 +357,30 @@ private struct CraftPrimarySidebarView: View {
             .padding(.horizontal, 10)
             .padding(.bottom, 10)
         }
+        .sheet(item: $statusEditorRequest) { request in
+            StatusDefinitionEditorSheet(
+                title: request.isCreating ? "创建状态" : "编辑状态",
+                definition: request.definition,
+                isCreating: request.isCreating,
+                onCancel: { statusEditorRequest = nil },
+                onSave: { definition in
+                    viewModel.upsertStatusDefinition(definition)
+                    statusEditorRequest = nil
+                }
+            )
+        }
+        .sheet(item: $labelEditorRequest) { request in
+            LabelDefinitionEditorSheet(
+                title: request.isCreating ? "创建标签" : "编辑标签",
+                definition: request.definition,
+                isCreating: request.isCreating,
+                onCancel: { labelEditorRequest = nil },
+                onSave: { definition in
+                    viewModel.upsertLabelDefinition(definition)
+                    labelEditorRequest = nil
+                }
+            )
+        }
     }
 
     private var countSourceSessions: [AgentSession] {
@@ -235,17 +391,13 @@ private struct CraftPrimarySidebarView: View {
         countSourceSessions.count
     }
 
-    private var inboxCount: Int {
-        countSourceSessions.filter { !$0.governance.isArchived }.count
-    }
-
     private func count(for status: AgentSessionStatus) -> Int {
-        countSourceSessions.filter { !$0.governance.isArchived && $0.governance.status == status }.count
+        countSourceSessions.filter { $0.governance.status == status }.count
     }
 
     private func count(forLabel labelID: String) -> Int {
         countSourceSessions.filter { session in
-            !session.governance.isArchived && session.governance.labels.contains { $0.id == labelID }
+            session.governance.labels.contains { $0.id == labelID }
         }.count
     }
 
@@ -253,6 +405,280 @@ private struct CraftPrimarySidebarView: View {
         selection = item
         viewModel.selection = item
     }
+
+    private func presentStatusEditor(_ definition: AgentSessionStatusDefinition) {
+        statusEditorRequest = StatusDefinitionEditorRequest(definition: definition, isCreating: false)
+    }
+
+    private func presentNewStatusEditor(after definition: AgentSessionStatusDefinition? = nil) {
+        let nextSortOrder = (definition?.sortOrder ?? viewModel.governanceConfig.statuses.map(\.sortOrder).max() ?? 0) + 10
+        statusEditorRequest = StatusDefinitionEditorRequest(
+            definition: AgentSessionStatusDefinition(
+                id: "",
+                name: "",
+                systemImage: "circle",
+                sortOrder: nextSortOrder,
+                isTerminal: false
+            ),
+            isCreating: true
+        )
+    }
+
+    private func presentLabelEditor(_ definition: AgentSessionLabelDefinition) {
+        labelEditorRequest = LabelDefinitionEditorRequest(definition: definition, isCreating: false)
+    }
+
+    private func presentNewLabelEditor() {
+        labelEditorRequest = LabelDefinitionEditorRequest(
+            definition: AgentSessionLabelDefinition(id: "", name: "", colorName: "blue", systemImage: "tag"),
+            isCreating: true
+        )
+    }
+
+}
+
+private struct StatusDefinitionEditorRequest: Identifiable {
+    var id = UUID()
+    var definition: AgentSessionStatusDefinition
+    var isCreating: Bool
+}
+
+private struct LabelDefinitionEditorRequest: Identifiable {
+    var id = UUID()
+    var definition: AgentSessionLabelDefinition
+    var isCreating: Bool
+}
+
+private struct StatusDefinitionEditorSheet: View {
+    var title: String
+    var definition: AgentSessionStatusDefinition
+    var isCreating: Bool
+    var onCancel: () -> Void
+    var onSave: (AgentSessionStatusDefinition) -> Void
+
+    @State private var name: String
+    @State private var systemImage: String
+
+    init(title: String, definition: AgentSessionStatusDefinition, isCreating: Bool, onCancel: @escaping () -> Void, onSave: @escaping (AgentSessionStatusDefinition) -> Void) {
+        self.title = title
+        self.definition = definition
+        self.isCreating = isCreating
+        self.onCancel = onCancel
+        self.onSave = onSave
+        _name = State(initialValue: definition.name)
+        _systemImage = State(initialValue: definition.systemImage)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(title).font(.headline)
+            TextField("状态名称", text: $name)
+                .textFieldStyle(.roundedBorder)
+            Picker("图标", selection: $systemImage) {
+                ForEach(statusIconOptions, id: \.self) { icon in
+                    Label(statusIconTitle(for: icon), systemImage: icon).tag(icon)
+                }
+            }
+            .pickerStyle(.menu)
+            HStack {
+                Spacer()
+                Button("取消", action: onCancel)
+                Button("保存") {
+                    onSave(AgentSessionStatusDefinition(id: definition.id, name: trimmed(name), systemImage: systemImage, sortOrder: definition.sortOrder, isTerminal: definition.isTerminal))
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(trimmed(name).isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 420)
+    }
+}
+
+private struct LabelDefinitionEditorSheet: View {
+    var title: String
+    var definition: AgentSessionLabelDefinition
+    var isCreating: Bool
+    var onCancel: () -> Void
+    var onSave: (AgentSessionLabelDefinition) -> Void
+
+    @State private var name: String
+    @State private var color: Color
+    @State private var systemImage: String
+
+    init(title: String, definition: AgentSessionLabelDefinition, isCreating: Bool, onCancel: @escaping () -> Void, onSave: @escaping (AgentSessionLabelDefinition) -> Void) {
+        self.title = title
+        self.definition = definition
+        self.isCreating = isCreating
+        self.onCancel = onCancel
+        self.onSave = onSave
+        _name = State(initialValue: definition.name)
+        _color = State(initialValue: labelColor(from: definition.colorName))
+        _systemImage = State(initialValue: definition.systemImage)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(title).font(.headline)
+            TextField("标签名称", text: $name)
+                .textFieldStyle(.roundedBorder)
+            Picker("图标", selection: $systemImage) {
+                ForEach(labelIconOptions, id: \.self) { icon in
+                    Label(labelIconTitle(for: icon), systemImage: icon).tag(icon)
+                }
+            }
+            .pickerStyle(.menu)
+            ColorPicker("颜色", selection: $color, supportsOpacity: false)
+            HStack {
+                Spacer()
+                Button("取消", action: onCancel)
+                Button("保存") {
+                    onSave(AgentSessionLabelDefinition(id: definition.id, name: trimmed(name), colorName: colorStorageName(from: color), systemImage: systemImage))
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(trimmed(name).isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 420)
+    }
+}
+
+private let statusIconOptions: [String] = [
+    "circle",
+    "clock",
+    "pause.circle",
+    "play.circle",
+    "checkmark.circle",
+    "checkmark.circle.fill",
+    "xmark.circle",
+    "nosign",
+    "exclamationmark.circle",
+    "exclamationmark.bubble",
+    "questionmark.circle",
+    "flag",
+    "star",
+    "bolt",
+    "flame",
+    "tray",
+    "archivebox",
+    "paperplane",
+    "hammer",
+    "wrench.and.screwdriver",
+    "lightbulb",
+    "sparkles",
+    "target"
+]
+
+private func statusIconTitle(for icon: String) -> String {
+    switch icon {
+    case "circle": return "圆点"
+    case "clock": return "时钟"
+    case "pause.circle": return "暂停"
+    case "play.circle": return "进行中"
+    case "checkmark.circle": return "完成"
+    case "checkmark.circle.fill": return "完成（填充）"
+    case "xmark.circle": return "关闭"
+    case "nosign": return "受阻"
+    case "exclamationmark.circle": return "提醒"
+    case "exclamationmark.bubble": return "待审阅"
+    case "questionmark.circle": return "询问"
+    case "flag": return "旗标"
+    case "star": return "星标"
+    case "bolt": return "闪电"
+    case "flame": return "火焰"
+    case "tray": return "收件箱"
+    case "archivebox": return "归档"
+    case "paperplane": return "发送"
+    case "hammer": return "构建"
+    case "wrench.and.screwdriver": return "工具"
+    case "lightbulb": return "想法"
+    case "sparkles": return "闪光"
+    case "target": return "目标"
+    default: return icon
+    }
+}
+
+private let labelIconOptions: [String] = [
+    "tag",
+    "tag.fill",
+    "star",
+    "star.fill",
+    "flag",
+    "flag.fill",
+    "bookmark",
+    "bookmark.fill",
+    "doc.text",
+    "doc.text.magnifyingglass",
+    "folder",
+    "folder.fill",
+    "calendar",
+    "calendar.badge.clock",
+    "person.2",
+    "link",
+    "paperclip",
+    "lightbulb",
+    "sparkles",
+    "flame"
+]
+
+private func labelIconTitle(for icon: String) -> String {
+    switch icon {
+    case "tag": return "标签"
+    case "tag.fill": return "标签（填充）"
+    case "star": return "星标"
+    case "star.fill": return "星标（填充）"
+    case "flag": return "旗标"
+    case "flag.fill": return "旗标（填充）"
+    case "bookmark": return "书签"
+    case "bookmark.fill": return "书签（填充）"
+    case "doc.text": return "文档"
+    case "doc.text.magnifyingglass": return "研究"
+    case "folder": return "文件夹"
+    case "folder.fill": return "项目"
+    case "calendar": return "日期"
+    case "calendar.badge.clock": return "截止日期"
+    case "person.2": return "协作"
+    case "link": return "链接"
+    case "paperclip": return "附件"
+    case "lightbulb": return "想法"
+    case "sparkles": return "闪光"
+    case "flame": return "火焰"
+    default: return icon
+    }
+}
+
+private func trimmed(_ value: String) -> String {
+    value.trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+private func labelColor(from storageName: String) -> Color {
+    switch storageName {
+    case "orange": return .orange
+    case "purple": return .purple
+    case "teal": return .teal
+    case "red": return .red
+    case "yellow": return .yellow
+    case "green": return .green
+    case "blue": return .blue
+    default:
+        guard storageName.hasPrefix("#"), storageName.count == 7 else { return .blue }
+        let hex = String(storageName.dropFirst())
+        guard let value = Int(hex, radix: 16) else { return .blue }
+        return Color(
+            red: Double((value >> 16) & 0xFF) / 255.0,
+            green: Double((value >> 8) & 0xFF) / 255.0,
+            blue: Double(value & 0xFF) / 255.0
+        )
+    }
+}
+
+private func colorStorageName(from color: Color) -> String {
+    let nsColor = NSColor(color).usingColorSpace(.sRGB) ?? .systemBlue
+    let red = Int((nsColor.redComponent * 255).rounded())
+    let green = Int((nsColor.greenComponent * 255).rounded())
+    let blue = Int((nsColor.blueComponent * 255).rounded())
+    return String(format: "#%02X%02X%02X", red, green, blue)
 }
 
 private struct CraftListPaneView: View {
@@ -307,6 +733,7 @@ private struct CraftSessionListPane: View {
                         isSelected: session.id == viewModel.selectedChatSessionID,
                         isRunning: viewModel.isChatSessionSubmitting(session.id),
                         isRegeneratingTitle: viewModel.regeneratingTitleSessionIDs.contains(session.id),
+                        hasRunningBackgroundTask: !viewModel.canDeleteChatSession(session.id),
                         labelDefinitions: viewModel.governanceConfig.labels,
                         onSelect: {
                             var transaction = Transaction()
@@ -329,6 +756,7 @@ private struct CraftSessionListPane: View {
                 .scrollContentBackground(.hidden)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .task { viewModel.reloadChatSessions() }
     }
 
@@ -338,8 +766,6 @@ private struct CraftSessionListPane: View {
 
     private var sessionListTitle: String {
         switch viewModel.sessionListFilter {
-        case .inbox: "所有会话"
-        case .archived: "已归档"
         case .all: "全部会话"
         case .status(let status): status.displayName
         case .label(let labelID): viewModel.governanceConfig.labels.first(where: { $0.id == labelID })?.name ?? labelID
@@ -393,6 +819,7 @@ private struct CraftSessionRow: View {
     var isSelected: Bool
     var isRunning: Bool
     var isRegeneratingTitle: Bool
+    var hasRunningBackgroundTask: Bool
     var labelDefinitions: [AgentSessionLabelDefinition]
     var onSelect: () -> Void
     var onRename: (String) -> Void
@@ -422,6 +849,7 @@ private struct CraftSessionRow: View {
                 } label: {
                     Label("删除", systemImage: "trash")
                 }
+                .disabled(hasRunningBackgroundTask)
             }
             .contextMenu { contextMenuItems }
             .onChange(of: row.title) { _, newTitle in
@@ -431,9 +859,10 @@ private struct CraftSessionRow: View {
             .onAppear { titleDraft = row.title }
             .confirmationDialog("删除这个会话？", isPresented: $isDeleteConfirmationPresented, titleVisibility: .visible) {
             Button("删除", role: .destructive, action: onDelete)
+                .disabled(hasRunningBackgroundTask)
             Button("取消", role: .cancel) {}
             } message: {
-                Text("删除后会话将从列表中移除。")
+                Text(hasRunningBackgroundTask ? "此会话仍有后台任务正在运行,请等待任务结束后再删除。" : "删除后会话将从列表中移除。")
             }
     }
 
@@ -492,6 +921,7 @@ private struct CraftSessionRow: View {
         } label: {
             Label("删除", systemImage: "trash")
         }
+        .disabled(hasRunningBackgroundTask)
     }
 
     private var rowContent: some View {
@@ -547,8 +977,8 @@ private struct CraftSessionRow: View {
                 }
                 if !row.labels.isEmpty {
                     HStack(spacing: 4) {
-                        ForEach(Array(row.labels.prefix(3)), id: \.stableID) { label in
-                            Text(label.displayText)
+                        ForEach(Array(row.labels.prefix(3)), id: \.id) { label in
+                            Text(label.id)
                                 .font(AppListTypography.rowCaption)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
@@ -631,7 +1061,6 @@ private struct CraftSettingsListPane: View {
                 .font(AppListTypography.header)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
-            Divider()
             VStack(spacing: 0) {
                 ForEach(ConnorSettingsSection.allCases) { section in
                     SettingsCategoryRow(
@@ -669,11 +1098,6 @@ private struct SettingsCategoryRow: View {
                     Text(subtitle).font(AppListTypography.rowSubtitle).foregroundStyle(.secondary)
                 }
                 Spacer()
-                if isSelected {
-                    Image(systemName: "ellipsis")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 10)

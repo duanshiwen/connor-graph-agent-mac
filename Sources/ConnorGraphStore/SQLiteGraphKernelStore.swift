@@ -966,9 +966,11 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         return try decodeSession(row)
     }
 
-    public func recentSessions(limit: Int = 50, includeArchived: Bool = false, includeDeleted: Bool = false) throws -> [AgentSession] {
+    public func recentSessions(limit: Int = 50, includeArchived: Bool = true, includeDeleted: Bool = false) throws -> [AgentSession] {
         var conditions: [String] = []
-        if !includeArchived { conditions.append("is_archived = 0") }
+        // Archive is no longer a product capability. Keep the stored is_archived
+        // column for legacy compatibility, but do not hide sessions because of it.
+        _ = includeArchived
         if !includeDeleted { conditions.append("deleted_at IS NULL") }
         let whereClause = conditions.isEmpty ? "" : "WHERE \(conditions.joined(separator: " AND "))"
         return try query(sql: "SELECT id, title, messages_json, created_at, updated_at, status, labels_json, is_archived, is_flagged, archived_at, deleted_at FROM agent_sessions \(whereClause) ORDER BY updated_at DESC LIMIT \(limit)").map(decodeSession)

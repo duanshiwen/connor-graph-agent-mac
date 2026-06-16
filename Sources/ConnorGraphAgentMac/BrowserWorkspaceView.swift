@@ -14,6 +14,7 @@ struct BrowserWorkspaceView: View {
     @ObservedObject var viewModel: AppViewModel
     @State private var webViewsByTabID: [UUID: WKWebView] = [:]
     @State private var addressText: String = ""
+    @State private var focusAddressRequestID = UUID()
     @State private var questionText = ""
     @State private var browserKeyMonitor: Any?
 
@@ -259,6 +260,7 @@ struct BrowserWorkspaceView: View {
             BrowserAddressTextField(
                 text: $addressText,
                 placeholder: "输入网址或搜索词，按 Return 打开",
+                focusRequestID: focusAddressRequestID,
                 onSubmit: navigateFromAddressBar
             )
             .frame(height: 28)
@@ -520,16 +522,36 @@ struct BrowserWorkspaceView: View {
                 isShiftDown: event.modifierFlags.contains(.shift),
                 isControlDown: event.modifierFlags.contains(.control),
                 isOptionDown: event.modifierFlags.contains(.option),
-                hasSelectionPopover: activeSession.selectionPopover != nil
+                hasSelectionPopover: activeSession.selectionPopover != nil,
+                settings: viewModel.shortcutSettings
             )
 
             switch shortcut {
             case .closeSelectionPopover:
                 closeSelectionPopover(policy: .escape)
                 return nil
+            case .focusAddress:
+                focusAddressRequestID = UUID()
+                return nil
+            case .newTab:
+                openNewTab(urlString: BrowserBuiltInPage.blankURLString, select: true)
+                focusAddressRequestID = UUID()
+                return nil
             case .closeSelectedTab:
                 guard let selectedTabID = activeSelectedTabID else { return event }
                 closeTab(selectedTabID)
+                return nil
+            case .goBack:
+                activeWebView?.goBack()
+                return nil
+            case .goForward:
+                activeWebView?.goForward()
+                return nil
+            case .toggleBookmarks:
+                viewModel.toggleBrowserBookmarksPanel()
+                return nil
+            case .toggleHistory:
+                viewModel.toggleBrowserHistoryPanel()
                 return nil
             case nil:
                 return event
@@ -660,6 +682,7 @@ struct BrowserWorkspaceView: View {
 private struct BrowserAddressTextField: NSViewRepresentable {
     @Binding var text: String
     var placeholder: String
+    var focusRequestID: UUID
     var onSubmit: () -> Void
 
     func makeNSView(context: Context) -> NSTextField {
@@ -681,6 +704,13 @@ private struct BrowserAddressTextField: NSViewRepresentable {
             nsView.stringValue = text
         }
         nsView.placeholderString = placeholder
+        if context.coordinator.lastFocusRequestID != focusRequestID {
+            context.coordinator.lastFocusRequestID = focusRequestID
+            DispatchQueue.main.async {
+                nsView.window?.makeFirstResponder(nsView)
+                nsView.selectText(nil)
+            }
+        }
     }
 
     func makeCoordinator() -> Coordinator {
@@ -690,6 +720,7 @@ private struct BrowserAddressTextField: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextFieldDelegate {
         @Binding var text: String
         var onSubmit: () -> Void
+        var lastFocusRequestID: UUID?
 
         init(text: Binding<String>, onSubmit: @escaping () -> Void) {
             _text = text

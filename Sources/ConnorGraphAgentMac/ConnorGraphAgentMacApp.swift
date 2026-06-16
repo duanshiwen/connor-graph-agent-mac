@@ -1,5 +1,8 @@
 import SwiftUI
 import AppKit
+import CoreLocation
+import IOKit.pwr_mgt
+import UserNotifications
 import ConnorGraphCore
 import ConnorGraphMemory
 import ConnorGraphSearch
@@ -11,42 +14,50 @@ import ConnorGraphAppSupport
 struct ConnorGraphAgentMacApp: App {
     @StateObject private var viewModel = AppViewModel.live()
 
+    init() {
+        AppKitSecureCodingWarningMitigator.clearLegacyOpenPanelRootDirectoryState()
+    }
+
     var body: some Scene {
         WindowGroup {
             AppShellView(viewModel: viewModel)
+                .preferredColorScheme(viewModel.appearanceMode.colorScheme)
         }
         .commands {
             CommandMenu("康纳同学") {
-                Button("打开命令面板") {
-                    viewModel.isCommandPalettePresented = true
+                Button("新建聊天") {
+                    viewModel.performShortcutAction(.newSession)
                 }
-                .keyboardShortcut("k", modifiers: .command)
+                .keyboardShortcut(viewModel.shortcut(for: .newSession).keyEquivalent, modifiers: viewModel.shortcut(for: .newSession).eventModifierFlags)
 
-                Divider()
-
-                ForEach(ConnorNativeShellPresentation.default.commands) { command in
-                    Button(command.title) {
-                        viewModel.performShellCommand(command.id)
-                    }
-                    .keyboardShortcut(keyEquivalent(for: command), modifiers: .command)
+                Button("显示 / 隐藏浏览器") {
+                    viewModel.performShortcutAction(.toggleBrowser)
                 }
+                .keyboardShortcut(viewModel.shortcut(for: .toggleBrowser).keyEquivalent, modifiers: viewModel.shortcut(for: .toggleBrowser).eventModifierFlags)
+
+                Button("聚焦顶部搜索") {
+                    viewModel.performShortcutAction(.focusTopSearch)
+                }
+                .keyboardShortcut(viewModel.shortcut(for: .focusTopSearch).keyEquivalent, modifiers: viewModel.shortcut(for: .focusTopSearch).eventModifierFlags)
+
+                Button("打开设置") {
+                    viewModel.performShortcutAction(.openSettings)
+                }
+                .keyboardShortcut(viewModel.shortcut(for: .openSettings).keyEquivalent, modifiers: viewModel.shortcut(for: .openSettings).eventModifierFlags)
             }
         }
     }
 }
 
-private func keyEquivalent(for command: ConnorNativeShellCommand) -> KeyEquivalent {
-    switch command.id {
-    case .newSession: "n"
-    case .toggleBrowser: "b"
-    case .openGraphMemoryReview: "2"
-    case .openApprovals: "3"
-    case .openSources: "4"
-    case .openSkills: "5"
-    case .openAutomation: "6"
-    case .openLocalAutomationSurface: "7"
-    case .checkCommercialReadiness: "r"
-    case .openSettings: ","
+private enum AppKitSecureCodingWarningMitigator {
+    static func clearLegacyOpenPanelRootDirectoryState(userDefaults: UserDefaults = .standard) {
+        // NSOpenPanel can persist the last root directory as an AppKit bookmark/archive
+        // under this key. On newer macOS builds that legacy archive may be decoded
+        // through an overly broad NSObject allowed-class list inside AppKit/XPC,
+        // producing a console warning that is expected to become a future error.
+        // Connor stores its own runtime settings as JSON, so this system panel cache
+        // is not required for app correctness and is safe to discard at launch.
+        userDefaults.removeObject(forKey: "NSOSPLastRootDirectory")
     }
 }
 
@@ -175,13 +186,13 @@ private extension AppSessionBackgroundTaskStatus {
 }
 
 @MainActor
-final class AppViewModel: ObservableObject {
+final class AppViewModel: NSObject, ObservableObject {
     @Published var selection: SidebarItem? = .agentChat
     @Published var query: String = "记忆"
     @Published var searchResults: [GraphSearchHit] = []
     @Published var chatInput: String = "" {
         didSet {
-            guard !isRestoringChatInputDraft, let selectedChatSessionID else { return }
+            guard autoSaveDraftsEnabled, !isRestoringChatInputDraft, let selectedChatSessionID else { return }
             chatInputDraftsBySessionID[selectedChatSessionID] = chatInput
         }
     }
@@ -223,6 +234,7 @@ final class AppViewModel: ObservableObject {
     @Published var llmSettingsMessage: String?
     @Published var llmHealthCheckMessage: String?
     @Published var isTestingLLMConnection: Bool = false
+    @Published var isAddingLLMConnection: Bool = false
     @Published var llmModelConnections: [AppLLMModelConnection] = []
     @Published var isLoadingLLMModelConnections: Bool = false
     @Published var chatSessions: [AgentSession] = []
@@ -256,6 +268,7 @@ final class AppViewModel: ObservableObject {
     @Published var sessionRecordsBySessionID: [String: [AppSessionRecord]] = [:]
     @Published var browserWorkspaceSnapshotsBySessionID: [String: AppBrowserStateSnapshot] = [:]
     @Published var browserAssistedTasksByID: [UUID: BrowserAssistedTaskState] = [:]
+    @Published var browserAssistedWebFetchRequestsByTaskID: [UUID: BrowserAssistedWebFetchRequest] = [:]
     @Published var isBrowserBookmarksPanelVisible: Bool = false
     @Published var browserBookmarkRecords: [BrowserBookmarkRecord] = []
     @Published var filteredBrowserBookmarkRecords: [BrowserBookmarkRecord] = []
@@ -263,7 +276,6 @@ final class AppViewModel: ObservableObject {
     @Published var isBrowserHistoryPanelVisible: Bool = false
     @Published var browserHistoryRecords: [BrowserHistoryRecord] = []
     @Published var filteredBrowserHistoryRecords: [BrowserHistoryRecord] = []
-    @Published var isCommandPalettePresented: Bool = false
     @Published var selectedSettingsSection: ConnorSettingsSection = .app
     @Published var desktopNotificationsEnabled: Bool = true
     @Published var keepScreenAwake: Bool = false
@@ -276,18 +288,23 @@ final class AppViewModel: ObservableObject {
     @Published var composerSendShortcut: String = "return"
     @Published var spellCheckEnabled: Bool = true
     @Published var autoSaveDraftsEnabled: Bool = true
+    @Published var shortcutSettings: AgentRuntimeShortcutSettings = AgentRuntimeShortcutSettings()
+    @Published var recordingShortcutAction: AgentRuntimeShortcutAction?
+    @Published var focusTopSearchRequestID: UUID?
     @Published var defaultPermissionMode: AgentPermissionMode = .askToWrite
-    @Published var requireApprovalForNetwork: Bool = true
+    @Published var requireApprovalForNetwork: Bool = false
     @Published var requireApprovalForShell: Bool = true
     @Published var defaultWorkingDirectoryPath: String = ""
     @Published var workspaceRoots: [WorkspaceRootDraft] = []
     @Published var recentWorkspacePaths: [String] = []
     @Published var workspaceRootPathInput: String = ""
-    @Published var userDisplayName: String = "诗闻"
-    @Published var userTimezone: String = "Asia/Shanghai"
-    @Published var userCity: String = "杭州"
-    @Published var userCountry: String = "中国"
+    @Published var userDisplayName: String = ""
+    @Published var userTimezone: String = ""
+    @Published var userPreferredLanguage: String = ""
+    @Published var userCity: String = ""
+    @Published var userCountry: String = ""
     @Published var userPreferenceNotes: String = ""
+    @Published var userLocationStatusMessage: String?
     @Published var appSettingsMessage: String?
     @Published var pendingAttachmentRefs: [AgentMessageAttachmentRef] = []
     @Published var attachmentPreviewModel: AttachmentPreviewModel?
@@ -300,6 +317,7 @@ final class AppViewModel: ObservableObject {
     private var admissionHoldQueueRepository: AppGraphAdmissionHoldQueueRepository?
     private var memoryChangeLogRepository: AppGraphMemoryChangeLogRepository?
     private var chatSessionRepository: AppChatSessionRepository?
+    private var governanceConfigRepository: AppSessionGovernanceConfigRepository?
     private var productOSRegistryRepository: AppProductOSRegistryRepository?
     private var automationRepository: AppProductOSAutomationRepository?
     private var sourceRuntimeRepository: AppMCPSourceRuntimeRepository?
@@ -325,11 +343,16 @@ final class AppViewModel: ObservableObject {
     private var pendingChatCancellationReasonsBySessionID: [String: String] = [:]
     private var chatInputDraftsBySessionID: [String: String] = [:]
     private var pendingAttachmentRefsBySessionID: [String: [AgentMessageAttachmentRef]] = [:]
+    private var browserAssistedWebFetchContinuationsByTaskID: [UUID: CheckedContinuation<BrowserAssistedWebFetchResult, Never>] = [:]
     private var isRestoringChatInputDraft = false
     private var agentEventTimelinesBySessionID: [String: [AgentEventPresentation]] = [:]
     private var agentEventTimelinesByProcessKey: [String: [AgentEventPresentation]] = [:]
     private var browserWorkspaceSessionBinding = BrowserWorkspaceSessionBinding()
     private var chatSessionWorkspaceModes = ChatSessionWorkspaceModeStore()
+    private var isLoadingRuntimeSettings = false
+    private var runtimeSettingsAutosaveTask: Task<Void, Never>?
+    private var idleSleepAssertionID: IOPMAssertionID = 0
+    private var locationCoordinator: UserLocationCoordinator?
 
     private var activeChatSession: AgentSession {
         nativeSessionManager?.session ?? fallbackChatSession
@@ -339,10 +362,71 @@ final class AppViewModel: ObservableObject {
         nativeSessionManager?.session.messages ?? fallbackChatSession.messages
     }
 
+    var runtimeSettingsAutosaveSignature: String {
+        [
+            desktopNotificationsEnabled.description,
+            keepScreenAwake.description,
+            httpProxyEnabled.description,
+            httpProxyURLString,
+            appearanceMode.rawValue,
+            showProviderIcons.description,
+            richToolDescriptionsEnabled.description,
+            composerSendShortcut,
+            spellCheckEnabled.description,
+            autoSaveDraftsEnabled.description,
+            shortcutSettings.bindings.sorted { $0.key.rawValue < $1.key.rawValue }.map { "\($0.key.rawValue)=\($0.value.displayText)" }.joined(separator: ","),
+            defaultPermissionMode.rawValue,
+            requireApprovalForNetwork.description,
+            requireApprovalForShell.description,
+            userDisplayName,
+            userTimezone,
+            userPreferredLanguage,
+            userCity,
+            userCountry,
+            userPreferenceNotes
+        ].joined(separator: "\u{1F}")
+    }
+
     var activeChatPendingApprovals: [AgentPendingApproval] {
         let activeSessionID = activeChatSession.id
         return pendingApprovals.filter { approval in
             approval.sessionID == activeSessionID && !shouldAutoApprovePendingApproval(approval)
+        }
+    }
+
+    func shortcut(for action: AgentRuntimeShortcutAction) -> AgentRuntimeKeyboardShortcut {
+        shortcutSettings.shortcut(for: action)
+    }
+
+    func beginRecordingShortcut(for action: AgentRuntimeShortcutAction) {
+        recordingShortcutAction = action
+    }
+
+    func updateShortcut(_ action: AgentRuntimeShortcutAction, shortcut: AgentRuntimeKeyboardShortcut) {
+        shortcutSettings.bindings[action] = shortcut
+        recordingShortcutAction = nil
+        scheduleRuntimeSettingsAutosave()
+    }
+
+    func resetShortcut(_ action: AgentRuntimeShortcutAction) {
+        if let defaultShortcut = AgentRuntimeShortcutSettings.defaultBindings[action] {
+            shortcutSettings.bindings[action] = defaultShortcut
+            scheduleRuntimeSettingsAutosave()
+        }
+    }
+
+    func performShortcutAction(_ action: AgentRuntimeShortcutAction) {
+        switch action {
+        case .newSession:
+            performShellCommand(.newSession)
+        case .toggleBrowser:
+            performShellCommand(.toggleBrowser)
+        case .focusTopSearch:
+            focusTopSearchRequestID = UUID()
+        case .openSettings:
+            performShellCommand(.openSettings)
+        case .focusBrowserAddress, .newBrowserTab, .closeBrowserTab, .browserBack, .browserForward, .toggleBrowserBookmarks, .toggleBrowserHistory:
+            break
         }
     }
 
@@ -396,12 +480,12 @@ final class AppViewModel: ObservableObject {
     }
 
     func updateSelectedChatInputDraft(_ draft: String) {
-        guard !isRestoringChatInputDraft, let selectedChatSessionID else { return }
+        guard autoSaveDraftsEnabled, !isRestoringChatInputDraft, let selectedChatSessionID else { return }
         chatInputDraftsBySessionID[selectedChatSessionID] = draft
     }
 
     private func restoreChatInputDraft(for sessionID: String?) {
-        setChatInputDraft("", for: sessionID)
+        setChatInputDraft(autoSaveDraftsEnabled ? "" : chatInput, for: autoSaveDraftsEnabled ? sessionID : nil)
         pendingAttachmentRefs = sessionID.flatMap { pendingAttachmentRefsBySessionID[$0] } ?? []
     }
 
@@ -724,10 +808,124 @@ final class AppViewModel: ObservableObject {
         return plan.task
     }
 
+    func performBrowserAssistedWebFetch(_ request: BrowserAssistedWebFetchRequest) async -> BrowserAssistedWebFetchResult? {
+        let task = startBrowserAssistedWebFetch(request)
+        let timeout = max(3_000, min(request.timeoutMilliseconds, 720_000))
+        return await withCheckedContinuation { continuation in
+            browserAssistedWebFetchContinuationsByTaskID[task.id] = continuation
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(timeout) * 1_000_000)
+                await MainActor.run {
+                    guard let self, self.browserAssistedWebFetchContinuationsByTaskID[task.id] != nil else { return }
+                    let result = BrowserAssistedWebFetchResult(
+                        status: .timedOut,
+                        urlString: request.urlString,
+                        finalURLString: request.urlString,
+                        title: "",
+                        contentText: "",
+                        taskID: task.id.uuidString,
+                        sessionID: task.sessionID,
+                        tabID: task.tabID.uuidString,
+                        errorMessage: "Connor WKWebView web_fetch(js) timed out after \(timeout)ms",
+                        interventionReason: nil,
+                        truncated: false,
+                        originalCharacterCount: 0
+                    )
+                    if let current = self.browserAssistedTasksByID[task.id] {
+                        self.browserAssistedTasksByID[task.id] = BrowserAssistedTaskPlanner().fail(current, message: result.errorMessage ?? "Timed out")
+                    }
+                    self.browserAssistedWebFetchContinuationsByTaskID[task.id]?.resume(returning: result)
+                    self.browserAssistedWebFetchContinuationsByTaskID[task.id] = nil
+                    self.browserAssistedWebFetchRequestsByTaskID[task.id] = nil
+                }
+            }
+        }
+    }
+
+    @discardableResult
+    private func startBrowserAssistedWebFetch(_ request: BrowserAssistedWebFetchRequest) -> BrowserAssistedTaskState {
+        let sessionID = selectedChatSessionID ?? activeChatSession.id
+        let currentSnapshot = browserWorkspaceSnapshotsBySessionID[sessionID] ?? AppBrowserStateSnapshot()
+        let taskRequest = BrowserAssistedTaskRequest(
+            kind: .fetch,
+            sessionID: sessionID,
+            urlString: request.urlString,
+            title: "Fetch: \(request.urlString)",
+            visibility: request.revealImmediately ? .foreground : .background
+        )
+        let plan = BrowserAssistedTaskPlanner().start(taskRequest, in: currentSnapshot)
+        browserAssistedTasksByID[plan.task.id] = plan.task
+        browserAssistedWebFetchRequestsByTaskID[plan.task.id] = request
+        browserTargetURLString = request.urlString
+        saveBrowserWorkspaceSnapshot(plan.snapshot, for: sessionID)
+        if plan.shouldRevealBrowser { showBrowserWorkspace(for: sessionID) }
+        return plan.task
+    }
+
+    func completeBrowserAssistedWebFetch(_ taskID: UUID, title: String, finalURLString: String, text: String) {
+        guard let task = browserAssistedTasksByID[taskID], let request = browserAssistedWebFetchRequestsByTaskID[taskID] else { return }
+        let originalCount = text.count
+        let maxCharacters = 100_000
+        let truncated = originalCount > maxCharacters
+        let returnedText = truncated ? String(text.prefix(maxCharacters)) : text
+        let content: String
+        if request.extractMode == "text" {
+            content = returnedText + (truncated ? "\n\n[Content truncated by Connor web_fetch(js-wkwebview): original characters = \(originalCount), returned characters = \(maxCharacters)]" : "")
+        } else {
+            let heading = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Fetched Page" : title
+            content = """
+            # \(heading)
+            **Source:** \(finalURLString.isEmpty ? request.urlString : finalURLString)
+            **Render mode:** js-wkwebview
+
+            ---
+
+            \(returnedText)\(truncated ? "\n\n[Content truncated by Connor web_fetch(js-wkwebview): original characters = \(originalCount), returned characters = \(maxCharacters)]" : "")
+            """
+        }
+        let result = BrowserAssistedWebFetchResult(
+            status: .fetched,
+            urlString: request.urlString,
+            finalURLString: finalURLString.isEmpty ? request.urlString : finalURLString,
+            title: title,
+            contentText: content,
+            taskID: task.id.uuidString,
+            sessionID: task.sessionID,
+            tabID: task.tabID.uuidString,
+            errorMessage: nil,
+            interventionReason: nil,
+            truncated: truncated,
+            originalCharacterCount: originalCount
+        )
+        browserAssistedTasksByID[taskID] = BrowserAssistedTaskPlanner().complete(task, message: "Fetched rendered page content")
+        browserAssistedWebFetchContinuationsByTaskID[taskID]?.resume(returning: result)
+        browserAssistedWebFetchContinuationsByTaskID[taskID] = nil
+        browserAssistedWebFetchRequestsByTaskID[taskID] = nil
+    }
+
     func revealBrowserAssistedTask(_ taskID: UUID, reason: String) {
         guard let task = browserAssistedTasksByID[taskID] else { return }
         let updated = BrowserAssistedTaskPlanner().requireUserIntervention(task, reason: reason)
         browserAssistedTasksByID[taskID] = updated
+        if let request = browserAssistedWebFetchRequestsByTaskID[taskID], browserAssistedWebFetchContinuationsByTaskID[taskID] != nil {
+            let result = BrowserAssistedWebFetchResult(
+                status: .needsUserIntervention,
+                urlString: request.urlString,
+                finalURLString: updated.urlString,
+                title: updated.title,
+                contentText: "",
+                taskID: updated.id.uuidString,
+                sessionID: updated.sessionID,
+                tabID: updated.tabID.uuidString,
+                errorMessage: nil,
+                interventionReason: reason,
+                truncated: false,
+                originalCharacterCount: 0
+            )
+            browserAssistedWebFetchContinuationsByTaskID[taskID]?.resume(returning: result)
+            browserAssistedWebFetchContinuationsByTaskID[taskID] = nil
+            browserAssistedWebFetchRequestsByTaskID[taskID] = nil
+        }
         focusBrowserTab(updated.tabID, in: updated.sessionID, urlString: updated.urlString)
         showBrowserWorkspace(for: updated.sessionID)
     }
@@ -740,6 +938,25 @@ final class AppViewModel: ObservableObject {
     func failBrowserAssistedTask(_ taskID: UUID, message: String) {
         guard let task = browserAssistedTasksByID[taskID] else { return }
         browserAssistedTasksByID[taskID] = BrowserAssistedTaskPlanner().fail(task, message: message)
+        if let request = browserAssistedWebFetchRequestsByTaskID[taskID], browserAssistedWebFetchContinuationsByTaskID[taskID] != nil {
+            let result = BrowserAssistedWebFetchResult(
+                status: .failed,
+                urlString: request.urlString,
+                finalURLString: task.urlString,
+                title: task.title,
+                contentText: "",
+                taskID: task.id.uuidString,
+                sessionID: task.sessionID,
+                tabID: task.tabID.uuidString,
+                errorMessage: message,
+                interventionReason: nil,
+                truncated: false,
+                originalCharacterCount: 0
+            )
+            browserAssistedWebFetchContinuationsByTaskID[taskID]?.resume(returning: result)
+            browserAssistedWebFetchContinuationsByTaskID[taskID] = nil
+            browserAssistedWebFetchRequestsByTaskID[taskID] = nil
+        }
     }
 
     private func focusBrowserTab(_ tabID: UUID, in sessionID: String, urlString: String) {
@@ -881,6 +1098,7 @@ final class AppViewModel: ObservableObject {
         self.llmSettingsRepository = llmSettingsRepository
         self.llmProviderHealthChecker = AppLLMProviderHealthChecker(settingsRepository: llmSettingsRepository)
         if let storagePaths {
+            self.governanceConfigRepository = AppSessionGovernanceConfigRepository(configDirectory: storagePaths.configDirectory)
             self.productOSRegistryRepository = AppProductOSRegistryRepository(storagePaths: storagePaths)
             self.automationRepository = AppProductOSAutomationRepository(storagePaths: storagePaths)
             self.sourceRuntimeRepository = AppMCPSourceRuntimeRepository(storagePaths: storagePaths)
@@ -905,10 +1123,12 @@ final class AppViewModel: ObservableObject {
         self.databasePath = databasePath
         let initialSession = AgentSession(id: "app-session")
         self.fallbackChatSession = initialSession
+        super.init()
         if let repository {
             self.agentRuntimeFactory = AppGraphAgentRuntimeFactory(
                 store: repository.store,
                 settingsRepository: llmSettingsRepository,
+                storagePaths: storagePaths,
                 browserAssistedSearchHandler: { [weak self] request in
                     await MainActor.run {
                         guard let self else { return nil }
@@ -925,14 +1145,18 @@ final class AppViewModel: ObservableObject {
                             status: state.status.rawValue
                         )
                     }
+                },
+                browserAssistedWebFetchHandler: { [weak self] request in
+                    guard let self else { return nil }
+                    return await self.performBrowserAssistedWebFetch(request)
                 }
             )
         }
-        self.nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: initialSession)
         self.searchResults = []
         loadLLMSettings()
         Task { await reloadLLMModelConnections() }
         loadRuntimeSettings()
+        self.nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: initialSession)
         reloadProductOSRegistry()
         reloadAutomationConfig()
         reloadAutomationExecutionHistory()
@@ -1200,20 +1424,102 @@ final class AppViewModel: ObservableObject {
         persistLLMSettings(rebuildRuntime: true)
     }
 
-    func addLLMConnection(providerMode: AppLLMProviderMode) {
+    @discardableResult
+    func addLLMConnection(
+        providerMode: AppLLMProviderMode,
+        name: String? = nil,
+        baseURLString: String? = nil,
+        model: String? = nil,
+        selectedModel: String? = nil
+    ) -> AppLLMConnectionConfig {
         let idBase = providerMode == .openAICompatible ? "openai-compatible" : "claude"
         let id = "\(idBase)-\(UUID().uuidString.prefix(8).lowercased())"
+        return addLLMConnection(
+            id: id,
+            providerMode: providerMode,
+            name: name,
+            baseURLString: baseURLString,
+            model: model,
+            selectedModel: selectedModel,
+            hasAPIKey: false
+        )
+    }
+
+    @discardableResult
+    func addAuthenticatedLLMConnection(
+        id: String,
+        providerMode: AppLLMProviderMode,
+        name: String,
+        baseURLString: String,
+        model: String,
+        selectedModel: String,
+        apiKey: String? = nil,
+        oauthTokens: AppLLMOAuthTokens? = nil
+    ) throws -> AppLLMConnectionConfig {
+        let connection = addLLMConnection(
+            id: id,
+            providerMode: providerMode,
+            name: name,
+            baseURLString: baseURLString,
+            model: model,
+            selectedModel: selectedModel,
+            hasAPIKey: apiKey?.isEmpty == false || oauthTokens != nil
+        )
+        let settings = AppLLMSettings(connections: llmConnectionConfigs, defaultConnectionID: connection.id)
+        try llmSettingsRepository.save(settings: settings, apiKey: apiKey)
+        if let oauthTokens {
+            try llmSettingsRepository.saveOAuthTokens(oauthTokens, connectionID: connection.id)
+        }
+        loadLLMSettings()
+        rebuildNativeSessionManagerForActiveSession()
+        Task { await reloadLLMModelConnections() }
+        return connection
+    }
+
+    @discardableResult
+    func setupLLMConnection(_ input: AppLLMConnectionSetupInput) async throws -> AppLLMConnectionConfig {
+        isAddingLLMConnection = true
+        defer { isAddingLLMConnection = false }
+        let service = AppLLMConnectionSetupService(settingsRepository: llmSettingsRepository)
+        let result = try await service.setupConnection(input)
+        loadLLMSettings()
+        rebuildNativeSessionManagerForActiveSession()
+        await reloadLLMModelConnections()
+        llmSettingsMessage = result.message
+        llmHealthCheckMessage = result.message
+        errorMessage = nil
+        return result.connection
+    }
+
+    @discardableResult
+    private func addLLMConnection(
+        id: String,
+        providerMode: AppLLMProviderMode,
+        name: String? = nil,
+        baseURLString: String? = nil,
+        model: String? = nil,
+        selectedModel: String? = nil,
+        hasAPIKey: Bool
+    ) -> AppLLMConnectionConfig {
+        let defaultName = providerMode == .openAICompatible ? "新 OpenAI Compatible 连接" : "新 Claude 连接"
+        let defaultBaseURL = providerMode == .openAICompatible ? AppLLMSettings.default.baseURLString : ""
+        let defaultModel = providerMode == .openAICompatible ? AppLLMSettings.default.model : "claude-sdk-default"
+        let normalizedModel = model?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? model! : defaultModel
+        let normalizedSelectedModel = selectedModel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? selectedModel! : AppLLMConnectionConfig.firstModel(in: normalizedModel)
         let connection = AppLLMConnectionConfig(
             id: id,
-            name: providerMode == .openAICompatible ? "新 OpenAI Compatible 连接" : "新 Claude 连接",
+            name: name?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? name! : defaultName,
             providerMode: providerMode,
-            baseURLString: providerMode == .openAICompatible ? AppLLMSettings.default.baseURLString : "",
-            model: providerMode == .openAICompatible ? AppLLMSettings.default.model : "claude-sdk-default",
-            selectedModel: providerMode == .openAICompatible ? AppLLMSettings.default.effectiveModel : "claude-sdk-default"
+            baseURLString: baseURLString ?? defaultBaseURL,
+            model: normalizedModel,
+            selectedModel: normalizedSelectedModel,
+            hasAPIKey: hasAPIKey
         )
+        llmConnectionConfigs.removeAll { $0.id == connection.id }
         llmConnectionConfigs.append(connection)
-        llmDefaultConnectionID = id
-        selectDefaultLLMConnection(id)
+        llmDefaultConnectionID = connection.id
+        selectDefaultLLMConnection(connection.id)
+        return connection
     }
 
     func deleteSelectedLLMConnection() {
@@ -1312,6 +1618,7 @@ final class AppViewModel: ObservableObject {
     private func makeNativeSessionManager(for session: AgentSession) -> NativeSessionManager? {
         agentRuntimeFactory?.makeNativeSessionManager(
             session: session,
+            permissionMode: defaultPermissionMode == .allowAll ? .askToWrite : defaultPermissionMode,
             sessionWorkspace: sessionStateSnapshotsBySessionID[session.id]?.workspace,
             sessionLLMOverride: sessionStateSnapshotsBySessionID[session.id]?.llmOverride
         )
@@ -1425,7 +1732,26 @@ final class AppViewModel: ObservableObject {
 
     func loadRuntimeSettings() {
         do {
-            let settings = try runtimeSettingsRepository?.loadOrCreateDefault() ?? .default
+            isLoadingRuntimeSettings = true
+            var shouldPersistSystemPreferenceDefaults = false
+            defer {
+                isLoadingRuntimeSettings = false
+                applyRuntimeSettingsSideEffects()
+                if shouldPersistSystemPreferenceDefaults {
+                    scheduleRuntimeSettingsAutosave()
+                }
+            }
+            var settings = try runtimeSettingsRepository?.loadOrCreateDefault() ?? .default
+            if settings.schemaVersion < 3,
+               settings.preferences.displayName == "诗闻",
+               settings.preferences.timezone == "Asia/Shanghai",
+               settings.preferences.city == "杭州",
+               settings.preferences.country == "中国",
+               settings.preferences.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                settings.preferences = AgentRuntimePreferenceSettings()
+                settings.schemaVersion = 3
+                shouldPersistSystemPreferenceDefaults = true
+            }
             defaultPermissionMode = settings.loop.permissionMode == .allowAll ? .askToWrite : settings.loop.permissionMode
             showProviderIcons = settings.ui.showProviderIcons
             richToolDescriptionsEnabled = settings.ui.richToolDescriptionsEnabled
@@ -1438,6 +1764,7 @@ final class AppViewModel: ObservableObject {
             spellCheckEnabled = settings.input.spellCheckEnabled
             autoSaveDraftsEnabled = settings.input.autoSaveDraftsEnabled
             composerSendShortcut = settings.input.composerSendShortcut
+            shortcutSettings = settings.shortcuts
             requireApprovalForNetwork = settings.permissions.requireApprovalForNetwork
             requireApprovalForShell = settings.permissions.requireApprovalForShell
             recentWorkspacePaths = settings.workspace.recentWorkspacePaths
@@ -1447,8 +1774,10 @@ final class AppViewModel: ObservableObject {
                 defaultWorkingDirectoryPath = ""
                 workspaceRoots = []
             }
+            shouldPersistSystemPreferenceDefaults = settings.preferences.fillEmptyFields(from: .current())
             userDisplayName = settings.preferences.displayName
             userTimezone = settings.preferences.timezone
+            userPreferredLanguage = settings.preferences.preferredLanguage
             userCity = settings.preferences.city
             userCountry = settings.preferences.country
             userPreferenceNotes = settings.preferences.notes
@@ -1462,6 +1791,7 @@ final class AppViewModel: ObservableObject {
     func saveRuntimeSettings() {
         do {
             var settings = try runtimeSettingsRepository?.loadOrCreateDefault() ?? .default
+            settings.schemaVersion = 4
             settings.loop.permissionMode = defaultPermissionMode == .allowAll ? .askToWrite : defaultPermissionMode
             settings.ui.showProviderIcons = showProviderIcons
             settings.ui.richToolDescriptionsEnabled = richToolDescriptionsEnabled
@@ -1474,6 +1804,7 @@ final class AppViewModel: ObservableObject {
             settings.input.spellCheckEnabled = spellCheckEnabled
             settings.input.autoSaveDraftsEnabled = autoSaveDraftsEnabled
             settings.input.composerSendShortcut = composerSendShortcut
+            settings.shortcuts = shortcutSettings
             settings.permissions.requireApprovalForNetwork = requireApprovalForNetwork
             settings.permissions.requireApprovalForShell = requireApprovalForShell
                 // Workspace roots are session-scoped and saved into Session Capsule.
@@ -1481,11 +1812,236 @@ final class AppViewModel: ObservableObject {
             settings.workspace.recentWorkspacePaths = recentWorkspacePaths
             settings.preferences.displayName = userDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.timezone = userTimezone.trimmingCharacters(in: .whitespacesAndNewlines)
+            settings.preferences.preferredLanguage = userPreferredLanguage.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.city = userCity.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.country = userCountry.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.notes = userPreferenceNotes.trimmingCharacters(in: .whitespacesAndNewlines)
             try runtimeSettingsRepository?.save(settings)
-            appSettingsMessage = "设置已保存。"
+            applyRuntimeSettingsSideEffects()
+            if submittingChatSessionIDs.isEmpty {
+                rebuildNativeSessionManagerForActiveSession()
+            } else {
+                nativeSessionManager?.permissionMode = settings.loop.permissionMode
+            }
+            appSettingsMessage = nil
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func scheduleRuntimeSettingsAutosave() {
+        guard !isLoadingRuntimeSettings else { return }
+        runtimeSettingsAutosaveTask?.cancel()
+        runtimeSettingsAutosaveTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            await MainActor.run {
+                guard let self, !Task.isCancelled else { return }
+                self.saveRuntimeSettings()
+            }
+        }
+    }
+
+    private func applyRuntimeSettingsSideEffects() {
+        applyKeepScreenAwakeSetting()
+        if desktopNotificationsEnabled {
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        }
+    }
+
+    private func applyKeepScreenAwakeSetting() {
+        if keepScreenAwake && !submittingChatSessionIDs.isEmpty {
+            guard idleSleepAssertionID == 0 else { return }
+            var assertionID = IOPMAssertionID(0)
+            let reason = "Connor session is running" as CFString
+            let result = IOPMAssertionCreateWithName(kIOPMAssertionTypeNoDisplaySleep as CFString, IOPMAssertionLevel(kIOPMAssertionLevelOn), reason, &assertionID)
+            if result == kIOReturnSuccess {
+                idleSleepAssertionID = assertionID
+            }
+        } else if idleSleepAssertionID != 0 {
+            IOPMAssertionRelease(idleSleepAssertionID)
+            idleSleepAssertionID = 0
+        }
+    }
+
+    private func postDesktopNotification(title: String, body: String) {
+        guard desktopNotificationsEnabled else { return }
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
+    }
+
+    func refreshSystemPreferenceDefaults() {
+        let systemDefaults = AgentRuntimePreferenceSystemDefaults.current()
+        if userDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            userDisplayName = systemDefaults.displayName
+        }
+        if userTimezone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            userTimezone = systemDefaults.timezone
+        }
+        if userPreferredLanguage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            userPreferredLanguage = systemDefaults.preferredLanguage
+        }
+        if userCountry.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            userCountry = systemDefaults.country
+        }
+    }
+
+    func requestUserLocation() {
+        userLocationStatusMessage = "正在请求位置权限…"
+        locationCoordinator = UserLocationCoordinator { [weak self] result in
+            Task { @MainActor in
+                guard let self else { return }
+                switch result {
+                case .success(let placemark):
+                    if let city = placemark.locality ?? placemark.subAdministrativeArea ?? placemark.administrativeArea {
+                        self.userCity = city
+                    }
+                    if let country = placemark.country {
+                        self.userCountry = country
+                    }
+                    self.userLocationStatusMessage = "位置已更新。"
+                    self.scheduleRuntimeSettingsAutosave()
+                case .failure(let error):
+                    self.userLocationStatusMessage = error.localizedDescription
+                }
+                self.locationCoordinator = nil
+            }
+        }
+        locationCoordinator?.requestLocation()
+    }
+
+    func upsertStatusDefinition(_ definition: AgentSessionStatusDefinition) {
+        var config = governanceConfig
+        let trimmedID = definition.id.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedID.isEmpty, let index = config.statuses.firstIndex(where: { $0.id == trimmedID }) {
+            var updatedDefinition = definition
+            updatedDefinition.id = trimmedID
+            config.statuses[index] = updatedDefinition
+        } else {
+            var newDefinition = definition
+            newDefinition.id = makeUniqueGovernanceStatusID(existingIDs: Set(config.statuses.map(\.id)), preferredName: definition.name)
+            config.statuses.append(newDefinition)
+        }
+        saveGovernanceConfig(config, successMessage: "状态定义已保存。")
+    }
+
+    func canDeleteStatusDefinition(_ definition: AgentSessionStatusDefinition) -> Bool {
+        governanceConfig.statuses.count > 1 && !allChatSessions.contains { $0.governance.status.rawValue == definition.id }
+    }
+
+    func deleteStatusDefinition(_ definition: AgentSessionStatusDefinition) {
+        guard governanceConfig.statuses.count > 1 else {
+            errorMessage = "至少需要保留一个状态。"
+            return
+        }
+        do {
+            let sessions = try chatSessionRepository?.loadSessions(filter: .all) ?? allChatSessions
+            let sessionsUsingStatus = sessions.filter { $0.governance.status.rawValue == definition.id }
+            guard sessionsUsingStatus.isEmpty else {
+                errorMessage = "无法删除状态“\(definition.name)”: 仍有 \(sessionsUsingStatus.count) 个会话处于此状态。"
+                return
+            }
+            var config = governanceConfig
+            config.statuses.removeAll { $0.id == definition.id }
+            saveGovernanceConfig(config, successMessage: "状态“\(definition.name)”已删除。")
+            if case .status(let selectedStatus) = sessionListFilter, selectedStatus.rawValue == definition.id {
+                setSessionListFilter(.all, restoreWorkspaceMode: false)
+            } else {
+                reloadChatSessions(restoreWorkspaceMode: false)
+            }
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    private func makeUniqueGovernanceStatusID(existingIDs: Set<String>, preferredName: String = "") -> String {
+        makeUniqueGovernanceSlug(existingIDs: existingIDs, prefix: "status", preferredName: preferredName)
+    }
+
+    func upsertLabelDefinition(_ definition: AgentSessionLabelDefinition) {
+        var config = governanceConfig
+        let trimmedID = definition.id.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedID.isEmpty, let index = config.labels.firstIndex(where: { $0.id == trimmedID }) {
+            var updatedDefinition = definition
+            updatedDefinition.id = trimmedID
+            config.labels[index] = updatedDefinition
+        } else {
+            var newDefinition = definition
+            newDefinition.id = makeUniqueGovernanceLabelID(existingIDs: Set(config.labels.map(\.id)), preferredName: definition.name)
+            config.labels.append(newDefinition)
+        }
+        saveGovernanceConfig(config, successMessage: "标签定义已保存。")
+    }
+
+    func deleteLabelDefinition(_ definition: AgentSessionLabelDefinition) {
+        guard let chatSessionRepository else { return }
+        do {
+            let sessions = try chatSessionRepository.loadSessions(filter: .all)
+            var removedFromSessionCount = 0
+            for session in sessions where session.governance.labels.contains(where: { $0.id == definition.id }) {
+                let remainingLabels = session.governance.labels.filter { $0.id != definition.id }
+                _ = try chatSessionRepository.setLabels(sessionID: session.id, labels: remainingLabels)
+                removedFromSessionCount += 1
+            }
+
+            var config = governanceConfig
+            config.labels.removeAll { $0.id == definition.id }
+            saveGovernanceConfig(config, successMessage: "标签“\(definition.name)”已删除，并已从 \(removedFromSessionCount) 个会话移除。")
+            if case .label(let selectedLabelID) = sessionListFilter, selectedLabelID == definition.id {
+                setSessionListFilter(.all, restoreWorkspaceMode: false)
+            } else {
+                reloadChatSessions(restoreWorkspaceMode: false)
+            }
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    private func makeUniqueGovernanceLabelID(existingIDs: Set<String>, preferredName: String = "") -> String {
+        makeUniqueGovernanceSlug(existingIDs: existingIDs, prefix: "label", preferredName: preferredName)
+    }
+
+    private func makeUniqueGovernanceSlug(existingIDs: Set<String>, prefix: String, preferredName: String) -> String {
+        let allowedScalars = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789")
+        let slug = preferredName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .unicodeScalars
+            .map { scalar -> Character in
+                allowedScalars.contains(scalar) ? Character(scalar) : "-"
+            }
+            .reduce(into: "") { partial, character in
+                if character == "-", partial.last == "-" { return }
+                partial.append(character)
+            }
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+            .replacingOccurrences(of: "-", with: "_")
+        let base = slug.isEmpty ? "\(prefix)_\(shortGovernanceIDFragment())" : slug
+        var candidate = base
+        var suffix = 2
+        while existingIDs.contains(candidate) {
+            candidate = "\(base)_\(suffix)"
+            suffix += 1
+        }
+        return candidate
+    }
+
+    private func shortGovernanceIDFragment() -> String {
+        String(UUID().uuidString.lowercased().prefix(8))
+    }
+
+    private func saveGovernanceConfig(_ config: AppSessionGovernanceConfig, successMessage: String) {
+        do {
+            let normalizedConfig = AppSessionGovernanceConfig(statuses: config.statuses, labels: config.labels)
+            try governanceConfigRepository?.save(normalizedConfig)
+            governanceConfig = normalizedConfig
+            chatSessionRepository?.governanceConfig = normalizedConfig
+            automationConfig = try automationRepository?.loadOrCreateDefault(governanceConfig: normalizedConfig) ?? automationConfig
+            appSettingsMessage = successMessage
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -1573,7 +2129,7 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    func reloadChatSessions() {
+    func reloadChatSessions(restoreWorkspaceMode shouldRestoreWorkspaceMode: Bool = true) {
         guard let chatSessionRepository else {
             transcript = activeChatTranscript
             chatSessions = [activeChatSession]
@@ -1583,7 +2139,7 @@ final class AppViewModel: ObservableObject {
         }
         do {
             var sessions = try chatSessionRepository.loadSessions(filter: sessionListFilter)
-            if sessions.isEmpty, sessionListFilter == .inbox || sessionListFilter == .all {
+            if sessions.isEmpty, sessionListFilter == .all {
                 let session = try chatSessionRepository.createSession()
                 sessions = [session]
             }
@@ -1606,7 +2162,9 @@ final class AppViewModel: ObservableObject {
                 }
                 latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: selectedID)
                 selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: selectedID)
-                restoreWorkspaceMode(for: selectedID)
+                if shouldRestoreWorkspaceMode {
+                    restoreWorkspaceMode(for: selectedID)
+                }
             } else {
                 selectedSessionArtifactDirectories = nil
                 latestChatSummary = nil
@@ -1653,15 +2211,25 @@ final class AppViewModel: ObservableObject {
         guard !trimmed.isEmpty, let chatSessionRepository else { return }
         do {
             let updated = try chatSessionRepository.renameSession(sessionID: sessionID, title: trimmed)
-            if selectedChatSessionID == sessionID {
-                fallbackChatSession = updated
-                nativeSessionManager = makeNativeSessionManager(for: updated)
-                transcript = updated.messages
-            }
+            synchronizeRenamedChatSession(updated)
             reloadChatSessions()
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
+        }
+    }
+
+    private func synchronizeRenamedChatSession(_ updated: AgentSession) {
+        if let index = chatSessions.firstIndex(where: { $0.id == updated.id }) {
+            chatSessions[index] = updated
+        }
+        if let index = allChatSessions.firstIndex(where: { $0.id == updated.id }) {
+            allChatSessions[index] = updated
+        }
+        if selectedChatSessionID == updated.id {
+            fallbackChatSession = updated
+            nativeSessionManager = makeNativeSessionManager(for: updated)
+            transcript = updated.messages
         }
     }
 
@@ -1682,6 +2250,16 @@ final class AppViewModel: ObservableObject {
     func hasRunningBackgroundTask(sessionID: String) -> Bool {
         backgroundTasksBySessionID[sessionID, default: []]
             .contains { $0.status == .queued || $0.status == .running }
+    }
+
+    private func runningBackgroundTasksForDeletionCheck(sessionID: String) throws -> [AppSessionBackgroundTask] {
+        let persistedTasks = try chatSessionRepository?.loadBackgroundTasks(sessionID: sessionID).map(AppSessionBackgroundTask.init(persisted:)) ?? []
+        let memoryTasks = backgroundTasksBySessionID[sessionID, default: []]
+        return (persistedTasks + memoryTasks).filter { $0.status == .queued || $0.status == .running }
+    }
+
+    func canDeleteChatSession(_ sessionID: String) -> Bool {
+        (try? runningBackgroundTasksForDeletionCheck(sessionID: sessionID).isEmpty) ?? !hasRunningBackgroundTask(sessionID: sessionID)
     }
 
     private func loadBackgroundTasks(sessionID: String) throws {
@@ -1814,6 +2392,11 @@ final class AppViewModel: ObservableObject {
     func deleteChatSession(_ sessionID: String) {
         guard let chatSessionRepository else { return }
         do {
+            let runningTasks = try runningBackgroundTasksForDeletionCheck(sessionID: sessionID)
+            guard runningTasks.isEmpty else {
+                errorMessage = "无法删除会话: 仍有 \(runningTasks.count) 个后台任务正在运行。"
+                return
+            }
             try chatSessionRepository.deleteSession(sessionID: sessionID)
             regeneratingTitleSessionIDs.remove(sessionID)
             backgroundTasksBySessionID.removeValue(forKey: sessionID)
@@ -2265,9 +2848,9 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    func setSessionListFilter(_ filter: AgentSessionListFilter) {
+    func setSessionListFilter(_ filter: AgentSessionListFilter, restoreWorkspaceMode: Bool = true) {
         sessionListFilter = filter
-        reloadChatSessions()
+        reloadChatSessions(restoreWorkspaceMode: restoreWorkspaceMode)
     }
 
     func setSelectedSessionStatus(_ status: AgentSessionStatus) {
@@ -2327,35 +2910,8 @@ final class AppViewModel: ObservableObject {
                 fallbackChatSession = updated
             }
             reloadChatSessions()
-            appendGovernanceEvent(.sessionLabelsChanged(AgentSessionGovernanceEvent(sessionID: updated.id, message: "标签已更新：\(updated.governance.labels.map(\.displayText).joined(separator: ", "))", labels: updated.governance.labels)))
+            appendGovernanceEvent(.sessionLabelsChanged(AgentSessionGovernanceEvent(sessionID: updated.id, message: "标签已更新：\(updated.governance.labels.map(\.id).joined(separator: ", "))", labels: updated.governance.labels)))
             evaluateAutomation(ProductOSAutomationEventContext(triggerKind: didRemove ? .sessionLabelRemoved : .sessionLabelAdded, sessionID: updated.id, labelID: labelID))
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func archiveSelectedSession() {
-        guard let selectedChatSessionID, let chatSessionRepository else { return }
-        do {
-            let session = try chatSessionRepository.archive(sessionID: selectedChatSessionID)
-            appendGovernanceEvent(.sessionArchived(AgentSessionGovernanceEvent(sessionID: session.id, message: "会话已归档", status: session.governance.status)))
-            evaluateAutomation(ProductOSAutomationEventContext(triggerKind: .sessionArchived, sessionID: session.id, status: session.governance.status))
-            self.selectedChatSessionID = nil
-            reloadChatSessions()
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func restoreSelectedSession() {
-        guard let selectedChatSessionID, let chatSessionRepository else { return }
-        do {
-            let session = try chatSessionRepository.restore(sessionID: selectedChatSessionID)
-            appendGovernanceEvent(.sessionRestored(AgentSessionGovernanceEvent(sessionID: session.id, message: "会话已恢复", status: session.governance.status)))
-            evaluateAutomation(ProductOSAutomationEventContext(triggerKind: .sessionRestored, sessionID: session.id, status: session.governance.status))
-            setSessionListFilter(.inbox)
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -2731,6 +3287,8 @@ final class AppViewModel: ObservableObject {
         submittingChatSessionIDs.remove(sessionID)
         activeChatRunIDsBySessionID.removeValue(forKey: sessionID)
         refreshSelectedSubmittingState()
+        applyKeepScreenAwakeSetting()
+        postDesktopNotification(title: "康纳同学已取消", body: "当前会话运行已终止。")
     }
 
     private func appendChatCancellationPresentation(sessionID: String, runID: String?, title: String, detail: String) {
@@ -2777,6 +3335,7 @@ final class AppViewModel: ObservableObject {
         submittingChatSessionIDs.insert(submittingSessionID)
         activeChatRunIDsBySessionID.removeValue(forKey: submittingSessionID)
         refreshSelectedSubmittingState()
+        applyKeepScreenAwakeSetting()
         let optimisticTranscript = transcript
         let baselineMessageCount = manager.session.messages.count
         let baselineUserMessageCount = manager.session.messages.filter { $0.role == .user }.count
@@ -2799,6 +3358,7 @@ final class AppViewModel: ObservableObject {
             submittingChatSessionIDs.remove(submittingSessionID)
             activeChatRunIDsBySessionID.removeValue(forKey: submittingSessionID)
             refreshSelectedSubmittingState()
+            applyKeepScreenAwakeSetting()
         }
         do {
             let sessionSummary: AgentSessionSummary?
@@ -2824,9 +3384,6 @@ final class AppViewModel: ObservableObject {
                         self.activeChatRunIDsBySessionID[submittingSessionID] = runID
                         self.activeChatBackendsByRunID[runID] = liveBackend
                         self.activeChatBackendsBySessionID[submittingSessionID] = liveBackend
-                        if shouldAutoGenerateInitialTitle {
-                            self.regenerateChatSessionTitle(submittingSessionID)
-                        }
                         if let reason = self.pendingChatCancellationReasonsBySessionID[submittingSessionID] {
                             self.cancelRunningChatRun(sessionID: submittingSessionID, runID: runID, reason: reason)
                         }
@@ -2861,8 +3418,13 @@ final class AppViewModel: ObservableObject {
             reloadPendingApprovals()
             if let chatSessionRepository {
                 chatSessions = try chatSessionRepository.loadSessions(filter: sessionListFilter)
+                allChatSessions = try chatSessionRepository.loadSessions(filter: .all)
+            }
+            if shouldAutoGenerateInitialTitle {
+                regenerateChatSessionTitle(submittingSessionID)
             }
             errorMessage = nil
+            postDesktopNotification(title: "康纳同学完成了工作", body: response.session.title)
             Task { await runBackgroundJobs() }
             return response.session.messages
                 .dropFirst(baselineMessageCount)
@@ -2881,6 +3443,7 @@ final class AppViewModel: ObservableObject {
                 errorMessage = nil
             } else {
                 errorMessage = String(describing: error)
+                postDesktopNotification(title: "康纳同学遇到错误", body: String(describing: error))
             }
             return nil
         }
@@ -2903,3 +3466,76 @@ final class AppViewModel: ObservableObject {
     }
 }
 
+
+private final class UserLocationCoordinator: NSObject, CLLocationManagerDelegate {
+    private let manager = CLLocationManager()
+    private let geocoder = CLGeocoder()
+    private let completion: @Sendable (Result<CLPlacemark, Error>) -> Void
+
+    init(completion: @escaping @Sendable (Result<CLPlacemark, Error>) -> Void) {
+        self.completion = completion
+        super.init()
+        manager.delegate = self
+        manager.desiredAccuracy = kCLLocationAccuracyThreeKilometers
+    }
+
+    func requestLocation() {
+        switch manager.authorizationStatus {
+        case .notDetermined:
+            manager.requestWhenInUseAuthorization()
+        case .authorizedAlways, .authorizedWhenInUse:
+            manager.requestLocation()
+        case .denied, .restricted:
+            completion(.failure(LocationPreferenceError.permissionDenied))
+        @unknown default:
+            completion(.failure(LocationPreferenceError.permissionDenied))
+        }
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        switch manager.authorizationStatus {
+        case .authorizedAlways, .authorizedWhenInUse:
+            manager.requestLocation()
+        case .denied, .restricted:
+            completion(.failure(LocationPreferenceError.permissionDenied))
+        case .notDetermined:
+            break
+        @unknown default:
+            completion(.failure(LocationPreferenceError.permissionDenied))
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let location = locations.last else {
+            completion(.failure(LocationPreferenceError.locationUnavailable))
+            return
+        }
+        geocoder.reverseGeocodeLocation(location) { [completion] placemarks, error in
+            if let error {
+                completion(.failure(error))
+            } else if let placemark = placemarks?.first {
+                completion(.success(placemark))
+            } else {
+                completion(.failure(LocationPreferenceError.locationUnavailable))
+            }
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        completion(.failure(error))
+    }
+}
+
+private enum LocationPreferenceError: LocalizedError {
+    case permissionDenied
+    case locationUnavailable
+
+    var errorDescription: String? {
+        switch self {
+        case .permissionDenied:
+            return "定位权限未开启。请在系统设置中允许康纳同学访问位置，或手动填写城市和国家/地区。"
+        case .locationUnavailable:
+            return "暂时无法读取当前位置。你仍可以手动填写城市和国家/地区。"
+        }
+    }
+}
