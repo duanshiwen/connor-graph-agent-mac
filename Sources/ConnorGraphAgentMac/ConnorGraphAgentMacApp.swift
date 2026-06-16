@@ -12,6 +12,7 @@ import ConnorGraphAppSupport
 
 @main
 struct ConnorGraphAgentMacApp: App {
+    @NSApplicationDelegateAdaptor(ConnorMenuBarDelegate.self) private var menuBarDelegate
     @StateObject private var viewModel = AppViewModel.live()
 
     init() {
@@ -31,6 +32,30 @@ struct ConnorGraphAgentMacApp: App {
             CommandGroup(replacing: .help) {}
 
             CommandMenu("指示") {}
+        }
+    }
+}
+
+private final class ConnorMenuBarDelegate: NSObject, NSApplicationDelegate {
+    private let hiddenTopLevelMenuTitles: Set<String> = [
+        "Edit", "View", "Window", "Help",
+        "编辑", "显示", "窗口", "帮助"
+    ]
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        pruneStandardMenus()
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        pruneStandardMenus()
+    }
+
+    private func pruneStandardMenus() {
+        DispatchQueue.main.async { [hiddenTopLevelMenuTitles] in
+            guard let mainMenu = NSApp.mainMenu else { return }
+            for item in mainMenu.items.reversed() where hiddenTopLevelMenuTitles.contains(item.title) {
+                mainMenu.removeItem(item)
+            }
         }
     }
 }
