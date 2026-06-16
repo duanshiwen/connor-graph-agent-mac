@@ -21,11 +21,6 @@ struct ConnorGraphAgentMacApp: App {
         }
         .commands {
             CommandMenu("康纳同学") {
-                Button("打开命令面板") {
-                    viewModel.performShortcutAction(.openCommandPalette)
-                }
-                .keyboardShortcut(viewModel.shortcut(for: .openCommandPalette).keyEquivalent, modifiers: viewModel.shortcut(for: .openCommandPalette).eventModifierFlags)
-
                 Button("新建聊天") {
                     viewModel.performShortcutAction(.newSession)
                 }
@@ -265,7 +260,6 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var isBrowserHistoryPanelVisible: Bool = false
     @Published var browserHistoryRecords: [BrowserHistoryRecord] = []
     @Published var filteredBrowserHistoryRecords: [BrowserHistoryRecord] = []
-    @Published var isCommandPalettePresented: Bool = false
     @Published var selectedSettingsSection: ConnorSettingsSection = .app
     @Published var desktopNotificationsEnabled: Bool = true
     @Published var keepScreenAwake: Bool = false
@@ -407,8 +401,6 @@ final class AppViewModel: NSObject, ObservableObject {
 
     func performShortcutAction(_ action: AgentRuntimeShortcutAction) {
         switch action {
-        case .openCommandPalette:
-            isCommandPalettePresented = true
         case .newSession:
             performShellCommand(.newSession)
         case .toggleBrowser:
