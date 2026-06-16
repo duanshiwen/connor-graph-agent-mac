@@ -29,8 +29,8 @@ struct LLMSettingsView: View {
                             .textFieldStyle(.roundedBorder)
                         Picker("康纳同学权限模式", selection: $viewModel.sidecarPermissionMode) {
                             Text("只读").tag(AgentPermissionMode.readOnly)
-                            Text("写入需审批").tag(AgentPermissionMode.askToWrite)
-                            Text("受信写入").tag(AgentPermissionMode.trustedWrite)
+                            Text("询问").tag(AgentPermissionMode.askToWrite)
+                            Text("执行").tag(AgentPermissionMode.trustedWrite)
                         }
                         .pickerStyle(.segmented)
                         Text("安全边界：SDK permissionMode 固定为 bypassPermissions；康纳同学保留 session、pending approval、audit、graph memory 和 product state 主权。Sidecar 模式不允许 allowAll。")
@@ -1917,24 +1917,29 @@ private struct SettingsPreferencesSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsGroup(title: "基本信息") {
-                SettingsTextFieldRow(title: "称呼", subtitle: "康纳同学如何称呼你。默认读取 macOS 账户名称，可手动更改。", text: $viewModel.userDisplayName)
+                SettingsTextFieldRow(title: "称呼", subtitle: "康纳同学如何称呼你。首次启动且未设置时会读取 macOS 账户名称，可手动更改。", text: $viewModel.userDisplayName)
                 Divider()
-                SettingsTextFieldRow(title: "时区", subtitle: "默认读取系统时区，用于相对日期和日程上下文。", text: $viewModel.userTimezone)
+                SettingsTextFieldRow(title: "时区", subtitle: "未设置时自动读取系统时区，用于相对日期和日程上下文。", text: $viewModel.userTimezone)
                 Divider()
-                SettingsTextFieldRow(title: "语言偏好", subtitle: "默认读取系统语言；康纳同学会优先按此语言回复。", text: $viewModel.userPreferredLanguage)
+                SettingsTextFieldRow(title: "语言偏好", subtitle: "未设置时自动读取系统语言；康纳同学会优先按此语言回复。", text: $viewModel.userPreferredLanguage)
                 Divider()
                 HStack {
-                    Text("系统默认")
-                        .font(.subheadline.weight(.medium))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("系统默认")
+                            .font(.subheadline.weight(.medium))
+                        Text("只补全仍为空的项目，不覆盖你已经手动填写的偏好。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     Spacer()
-                    Button("重新读取") { viewModel.refreshSystemPreferenceDefaults() }
+                    Button("重新读取空白项") { viewModel.refreshSystemPreferenceDefaults() }
                         .buttonStyle(.bordered)
                 }
             }
             SettingsGroup(title: "位置") {
-                SettingsTextFieldRow(title: "城市", subtitle: "用于本地信息和上下文。可手动填写，或授权后自动读取。", text: $viewModel.userCity)
+                SettingsTextFieldRow(title: "城市", subtitle: "用于本地信息和上下文。不会在启动时自动请求定位权限，可手动填写或主动授权读取。", text: $viewModel.userCity)
                 Divider()
-                SettingsTextFieldRow(title: "国家/地区", subtitle: "用于区域格式和上下文。", text: $viewModel.userCountry)
+                SettingsTextFieldRow(title: "国家/地区", subtitle: "未设置时会优先从系统地区推断，也可手动更改。", text: $viewModel.userCountry)
                 Divider()
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 3) {

@@ -1726,13 +1726,10 @@ final class AppViewModel: NSObject, ObservableObject {
                 defaultWorkingDirectoryPath = ""
                 workspaceRoots = []
             }
-            let displayNameWasEmpty = settings.preferences.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            let timezoneWasEmpty = settings.preferences.timezone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            let languageWasEmpty = settings.preferences.preferredLanguage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            userDisplayName = displayNameWasEmpty ? Self.systemAccountDisplayName() : settings.preferences.displayName
-            userTimezone = timezoneWasEmpty ? TimeZone.current.identifier : settings.preferences.timezone
-            userPreferredLanguage = languageWasEmpty ? Self.systemPreferredLanguage() : settings.preferences.preferredLanguage
-            shouldPersistSystemPreferenceDefaults = displayNameWasEmpty || timezoneWasEmpty || languageWasEmpty
+            shouldPersistSystemPreferenceDefaults = settings.preferences.fillEmptyFields(from: .current())
+            userDisplayName = settings.preferences.displayName
+            userTimezone = settings.preferences.timezone
+            userPreferredLanguage = settings.preferences.preferredLanguage
             userCity = settings.preferences.city
             userCountry = settings.preferences.country
             userPreferenceNotes = settings.preferences.notes
@@ -1828,25 +1825,19 @@ final class AppViewModel: NSObject, ObservableObject {
         UNUserNotificationCenter.current().add(request)
     }
 
-    static func systemAccountDisplayName() -> String {
-        let fullName = NSFullUserName().trimmingCharacters(in: .whitespacesAndNewlines)
-        if !fullName.isEmpty { return fullName }
-        return NSUserName().trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    static func systemPreferredLanguage() -> String {
-        Locale.current.localizedString(forIdentifier: Locale.preferredLanguages.first ?? Locale.current.identifier) ?? Locale.current.identifier
-    }
-
     func refreshSystemPreferenceDefaults() {
+        let systemDefaults = AgentRuntimePreferenceSystemDefaults.current()
         if userDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            userDisplayName = Self.systemAccountDisplayName()
+            userDisplayName = systemDefaults.displayName
         }
         if userTimezone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            userTimezone = TimeZone.current.identifier
+            userTimezone = systemDefaults.timezone
         }
         if userPreferredLanguage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            userPreferredLanguage = Self.systemPreferredLanguage()
+            userPreferredLanguage = systemDefaults.preferredLanguage
+        }
+        if userCountry.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            userCountry = systemDefaults.country
         }
     }
 

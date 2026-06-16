@@ -948,11 +948,35 @@ AI
 输入
 权限
 标签
+状态
 快捷键
 偏好
 ```
 
-会话侧栏的"所有会话"状态列表和"标签"列表支持 macOS 右键菜单:状态项可"编辑状态…"或"创建状态…",标签项可"编辑标签…"或"创建标签…"。状态创建/编辑只面向显示名和图标;UID 是系统主键,创建时自动生成不重复的 `status_<uuid>`,编辑时只读展示、不可修改;排序和终态不暴露在弹窗中。状态图标使用常用 SF Symbol 菜单选择器。标签创建/编辑只面向显示名和颜色;UID 是系统主键,创建时自动生成不重复的 `label_<uuid>`,编辑时只读展示、不可修改。标签色彩选择使用 SwiftUI 原生 `ColorPicker("颜色", selection:..., supportsOpacity: false)`,保存时兼容旧命名色并可写入十六进制颜色。以上操作写入 `config/session-governance.json`,并立即刷新当前 AppViewModel、会话标签菜单、侧栏筛选计数和 automation governance mirror。当前底层会话状态仍由内置 `AgentSessionStatus` 枚举约束;因此自定义状态定义先作为治理配置维护能力落地,真正把任意自定义状态用于会话状态切换需要后续将 session status storage 从 enum 升级为 string-backed status ID。
+权限设置页的规划必须贴合当前 Connor 真实运行边界,不要把它设计成系统隐私权限页、团队权限页或完整安全策略编辑器。当前 `SettingsPermissionsSection` 的真实职责是 **新会话默认 Policy Engine 模式 + 少量审批偏好说明**;会话运行中的权限调整仍在 composer 底部权限 badge 完成;每个会话的 Workspace Roots 仍在会话界面设置,不回流到 Settings Center。
+
+权限设置页建议采用三块信息结构:
+
+1. **新会话默认权限**
+   - 主控件:`新会话权限` picker / segmented control,只展示 `只读`、`询问`、`执行`,继续隐藏 `allowAll`。
+   - 文案说明:该设置写入 `runtime-settings.json` → `loop.permissionMode`,用于创建或重建新会话的 `NativeSessionManager` 默认权限;当前正在运行的会话可以通过 composer 权限 badge 临时调整。
+   - 三种模式需要用用户语言解释:
+     - `只读`:允许读取图谱、会话、workspace 文件、搜索文件、只读 shell、模型调用和本地科学计算;拒绝写入、删除、外部网络和危险 shell。
+     - `询问`:读取、普通模型调用、graph write proposal、外部网络默认允许;文件写入/编辑/删除、graph commit/删除、昂贵模型调用、workspace/network/destructive shell 进入审批。
+     - `执行`:文件写入/编辑、graph commit、workspace shell 可自动通过;图谱删除、文件删除、network shell、destructive shell 和昂贵模型调用仍需审批。
+2. **审批偏好**
+   - 保留当前两个 toggle:`网络访问需要审批`、`Shell 写入需要审批`。
+   - 当前代码中这两个字段已持久化到 `runtime-settings.json` → `permissions.requireApprovalForNetwork` / `permissions.requireApprovalForShell`,但 README 必须明确它们还不是完整 capability matrix,也不要承诺已经覆盖所有 provider / MCP / sidecar 路径。
+   - UI 文案应写成"默认偏好 / 即将作为细粒度策略输入",避免暗示它们已经覆盖所有 runtime enforcement。
+3. **不可在设置页放开的安全边界**
+   - 不提供 `全部允许 / allowAll` 开关。Claude SDK sidecar 的 `bypassPermissions` 只是让 Connor Policy Engine 成为唯一审批层,不代表产品层无限制授权。
+   - 不在权限页管理 Workspace Roots。用户必须到会话顶部的"当前会话 Workspace"配置 primary root / additional roots;Settings Center 只提示这个入口。
+   - 不在权限页编辑 protected paths、MCP per-tool policy、graph admission policy 或 automation reviewed gate。这些属于后续高级治理页或各自领域页面。
+   - 不做团队成员/组织角色权限。Connor 当前是本地单用户 Home / Runtime Root,明确不做 multi-user permissions。
+
+界面布局上建议沿用当前 Settings Center 卡片风格:顶部标题"权限"居中;内容最大宽度 760;第一张 `SettingsGroup(title: "默认权限")` 放新会话权限 picker;第二张 `SettingsGroup(title: "审批偏好")` 放网络和 Shell toggle;底部放一条低强调说明:`项目工作目录已改为每个会话内设置:打开任意会话,在会话顶部的“当前会话 Workspace”中配置。` 如果需要解释能力矩阵,优先用可折叠的"查看当前策略说明" disclosure,不要默认展示工程化 capability 表,以符合 Apple 设置页只暴露必要选项的原则。
+
+会话侧栏的"所有会话"状态列表和"标签"列表支持 macOS 右键菜单:状态项可"编辑状态…"或"创建状态…",标签项可"编辑标签…"或"创建标签…"。状态创建/编辑只面向显示名和图标;UID 是系统主键,创建时自动生成不重复的 `status_<uuid>`,编辑时只读展示、不可修改;排序和终态不暴露在弹窗中。状态图标使用常用 SF Symbol 菜单选择器。标签创建/编辑只面向显示名和颜色;UID 是系统主键,创建时自动生成不重复的 `label_<uuid>`。标签色彩选择使用 SwiftUI 原生 `ColorPicker("颜色", selection:..., supportsOpacity: false)`,保存时兼容旧命名色并可写入十六进制颜色。以上操作写入 `config/session-governance.json`,并立即刷新当前 AppViewModel、会话标签菜单、侧栏筛选计数和 automation governance mirror。当前底层会话状态仍由内置 `AgentSessionStatus` 枚举约束;因此自定义状态定义先作为治理配置维护能力落地,真正把任意自定义状态用于会话状态切换需要后续将 session status storage 从 enum 升级为 string-backed status ID。
 
 核心视图:
 
