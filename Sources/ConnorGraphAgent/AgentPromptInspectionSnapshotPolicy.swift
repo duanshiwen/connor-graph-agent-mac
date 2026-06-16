@@ -6,7 +6,7 @@ public struct AgentPromptInspectionSnapshotPolicy: Sendable, Equatable {
     public var maxRenderedPromptCharacters: Int
 
     public init(
-        includeRenderedPrompt: Bool = true,
+        includeRenderedPrompt: Bool = false,
         maxRenderedPromptCharacters: Int = 4_000
     ) {
         self.includeRenderedPrompt = includeRenderedPrompt

@@ -1082,6 +1082,7 @@ final class AppViewModel: NSObject, ObservableObject {
             self.agentRuntimeFactory = AppGraphAgentRuntimeFactory(
                 store: repository.store,
                 settingsRepository: llmSettingsRepository,
+                storagePaths: storagePaths,
                 browserAssistedSearchHandler: { [weak self] request in
                     await MainActor.run {
                         guard let self else { return nil }
@@ -1105,11 +1106,11 @@ final class AppViewModel: NSObject, ObservableObject {
                 }
             )
         }
-        self.nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: initialSession)
         self.searchResults = []
         loadLLMSettings()
         Task { await reloadLLMModelConnections() }
         loadRuntimeSettings()
+        self.nativeSessionManager = agentRuntimeFactory?.makeNativeSessionManager(session: initialSession)
         reloadProductOSRegistry()
         reloadAutomationConfig()
         reloadAutomationExecutionHistory()

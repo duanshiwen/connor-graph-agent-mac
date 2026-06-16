@@ -65,7 +65,10 @@ import ConnorGraphAgent
     #expect(snapshot.includesSummary)
     #expect(snapshot.recentMessageCount == 2)
     #expect(snapshot.currentRequest == "What next?")
-    #expect(snapshot.renderedPrompt == "Rendered prompt")
+    #expect(snapshot.renderedPrompt == nil)
+
+    let explicitSnapshot = AgentPromptInspectionSnapshot(inspection, includeRenderedPrompt: true)
+    #expect(explicitSnapshot.renderedPrompt == "Rendered prompt")
 }
 
 @Test func agentChatPromptInspectionIncludesPromptBudgetEstimate() {

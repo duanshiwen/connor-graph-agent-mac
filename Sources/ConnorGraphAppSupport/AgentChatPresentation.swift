@@ -79,7 +79,7 @@ public struct AgentChatTurnProcessPresentation: Sendable, Equatable, Identifiabl
         self.title = "第 \(row.turnNumber) 轮处理详情"
         self.currentRequest = row.currentRequest
         self.assistantResponse = row.message.content
-        self.promptSnapshotText = row.promptSnapshotText
+        self.promptSnapshotText = nil
         self.citationIDs = row.citationIDs
         self.expandedContextItems = row.expandedContextItems
     }
@@ -282,7 +282,7 @@ public struct AgentChatMessagePresentation: Sendable, Equatable, Identifiable {
         if message.role == .assistant, let inspection = message.promptInspection {
             self.turnMetadataSummary = Self.turnMetadataSummary(turnNumber: turnNumber, inspection: inspection)
             self.currentRequest = inspection.currentRequest
-            self.promptSnapshotText = inspection.renderedPrompt
+            self.promptSnapshotText = nil
         } else {
             self.turnMetadataSummary = nil
             self.currentRequest = nil
