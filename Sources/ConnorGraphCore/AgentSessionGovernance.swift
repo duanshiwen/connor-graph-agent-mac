@@ -7,6 +7,7 @@ public enum AgentSessionStatus: String, Codable, Sendable, Equatable, CaseIterab
     case needsReview = "needs_review"
     case done
     case blocked
+    case cancelled
     case archived
 
     public var displayName: String {
@@ -17,6 +18,7 @@ public enum AgentSessionStatus: String, Codable, Sendable, Equatable, CaseIterab
         case .needsReview: "待审阅"
         case .done: "已完成"
         case .blocked: "受阻"
+        case .cancelled: "已取消"
         case .archived: "已归档"
         }
     }
@@ -44,6 +46,7 @@ public struct AgentSessionStatusDefinition: Codable, Sendable, Equatable, Identi
         .init(id: AgentSessionStatus.needsReview.rawValue, name: "待审阅", systemImage: "exclamationmark.bubble", sortOrder: 40),
         .init(id: AgentSessionStatus.blocked.rawValue, name: "受阻", systemImage: "nosign", sortOrder: 50),
         .init(id: AgentSessionStatus.done.rawValue, name: "已完成", systemImage: "checkmark.circle", sortOrder: 60, isTerminal: true),
+        .init(id: AgentSessionStatus.cancelled.rawValue, name: "已取消", systemImage: "xmark.circle", sortOrder: 65, isTerminal: true),
         .init(id: AgentSessionStatus.archived.rawValue, name: "已归档", systemImage: "archivebox", sortOrder: 70, isTerminal: true)
     ]
 }

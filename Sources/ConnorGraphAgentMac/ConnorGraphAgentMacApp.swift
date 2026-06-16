@@ -12,6 +12,7 @@ import ConnorGraphAppSupport
 
 @main
 struct ConnorGraphAgentMacApp: App {
+    @NSApplicationDelegateAdaptor(ConnorMenuBarDelegate.self) private var menuBarDelegate
     @StateObject private var viewModel = AppViewModel.live()
 
     init() {
@@ -24,26 +25,36 @@ struct ConnorGraphAgentMacApp: App {
                 .preferredColorScheme(viewModel.appearanceMode.colorScheme)
         }
         .commands {
-            CommandMenu("康纳同学") {
-                Button("新建聊天") {
-                    viewModel.performShortcutAction(.newSession)
-                }
-                .keyboardShortcut(viewModel.shortcut(for: .newSession).keyEquivalent, modifiers: viewModel.shortcut(for: .newSession).eventModifierFlags)
+            CommandGroup(replacing: .newItem) {}
+            CommandGroup(replacing: .saveItem) {}
+            CommandGroup(replacing: .importExport) {}
+            CommandGroup(replacing: .printItem) {}
+            CommandGroup(replacing: .help) {}
 
-                Button("显示 / 隐藏浏览器") {
-                    viewModel.performShortcutAction(.toggleBrowser)
-                }
-                .keyboardShortcut(viewModel.shortcut(for: .toggleBrowser).keyEquivalent, modifiers: viewModel.shortcut(for: .toggleBrowser).eventModifierFlags)
+            CommandMenu("指示") {}
+        }
+    }
+}
 
-                Button("聚焦顶部搜索") {
-                    viewModel.performShortcutAction(.focusTopSearch)
-                }
-                .keyboardShortcut(viewModel.shortcut(for: .focusTopSearch).keyEquivalent, modifiers: viewModel.shortcut(for: .focusTopSearch).eventModifierFlags)
+private final class ConnorMenuBarDelegate: NSObject, NSApplicationDelegate {
+    private let hiddenTopLevelMenuTitles: Set<String> = [
+        "Edit", "View", "Window", "Help",
+        "编辑", "显示", "窗口", "帮助"
+    ]
 
-                Button("打开设置") {
-                    viewModel.performShortcutAction(.openSettings)
-                }
-                .keyboardShortcut(viewModel.shortcut(for: .openSettings).keyEquivalent, modifiers: viewModel.shortcut(for: .openSettings).eventModifierFlags)
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        pruneStandardMenus()
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        pruneStandardMenus()
+    }
+
+    private func pruneStandardMenus() {
+        DispatchQueue.main.async { [hiddenTopLevelMenuTitles] in
+            guard let mainMenu = NSApp.mainMenu else { return }
+            for item in mainMenu.items.reversed() where hiddenTopLevelMenuTitles.contains(item.title) {
+                mainMenu.removeItem(item)
             }
         }
     }
