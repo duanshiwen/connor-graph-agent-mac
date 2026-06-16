@@ -1061,7 +1061,6 @@ private struct CraftSettingsListPane: View {
                 .font(AppListTypography.header)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
-            Divider()
             VStack(spacing: 0) {
                 ForEach(ConnorSettingsSection.allCases) { section in
                     SettingsCategoryRow(
@@ -1099,11 +1098,6 @@ private struct SettingsCategoryRow: View {
                     Text(subtitle).font(AppListTypography.rowSubtitle).foregroundStyle(.secondary)
                 }
                 Spacer()
-                if isSelected {
-                    Image(systemName: "ellipsis")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 10)
