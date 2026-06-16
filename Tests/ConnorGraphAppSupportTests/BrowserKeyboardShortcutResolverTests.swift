@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 import ConnorGraphAppSupport
 
@@ -54,5 +55,26 @@ struct BrowserKeyboardShortcutResolverTests {
 
         #expect(settings.shortcut(for: .focusTopSearch).displayText == "⌘J")
         #expect(settings.shortcut(for: .closeBrowserTab).displayText == "⌘W")
+    }
+
+    @Test func shortcutSettingsDecodeLegacyArrayBindingsAndSkipRemovedActions() throws {
+        let json = """
+        {
+          "bindings": [
+            "focusTopSearch",
+            { "command": true, "control": false, "key": "g", "option": false, "shift": false },
+            "openCommandPalette",
+            { "command": true, "control": false, "key": "k", "option": false, "shift": false },
+            "newBrowserTab",
+            { "command": true, "control": false, "key": "u", "option": false, "shift": true }
+          ]
+        }
+        """
+
+        let settings = try JSONDecoder().decode(AgentRuntimeShortcutSettings.self, from: Data(json.utf8))
+
+        #expect(settings.shortcut(for: .focusTopSearch).displayText == "⌘G")
+        #expect(settings.shortcut(for: .newBrowserTab).displayText == "⌘⇧U")
+        #expect(settings.bindings.keys.contains(.newSession))
     }
 }

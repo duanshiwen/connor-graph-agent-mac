@@ -154,6 +154,30 @@ private struct CapturingHTTPClient: AgentHTTPClient {
     #expect(function["description"] as? String == "Search graph memory")
 }
 
+@Test func openAICompatibleProviderCanUseAPIKeyHeaderInsteadOfBearer() async throws {
+    let body = """
+    {
+      "choices": [{"message": {"role": "assistant", "content": "OK"}}],
+      "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+    }
+    """.data(using: .utf8)!
+    let client = CapturingHTTPClient(responseBody: body)
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(
+            baseURL: URL(string: "https://api.xiaomimimo.com/v1")!,
+            apiKey: "mimo-secret",
+            model: "mimo-v2.5-pro",
+            apiKeyHeaderKind: .apiKey
+        ),
+        httpClient: client
+    )
+
+    _ = try await provider.complete(prompt: "hello", context: AgentContext(query: "hello", items: []))
+
+    #expect(client.captured?.headers["api-key"] == "mimo-secret")
+    #expect(client.captured?.headers["Authorization"] == nil)
+}
+
 @Test func openAICompatibleProviderReportsHTTPError() async throws {
     let body = #"{"error":{"message":"bad key"}}"#.data(using: .utf8)!
     let client = CapturingHTTPClient(responseBody: body, statusCode: 401)

@@ -11,7 +11,7 @@ struct AppShellView: View {
     @StateObject var viewModel: AppViewModel
     @State private var sidebarSelection: SidebarItem? = .agentChat
     @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
-    @FocusState private var isTopSearchFocused: Bool
+    @State private var topSearchKeyMonitor: Any?
 
     var body: some View {
         NavigationSplitView(columnVisibility: $splitViewVisibility) {
@@ -35,10 +35,12 @@ struct AppShellView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary)
-                    TextField("搜索会话标题和内容", text: $viewModel.sessionSearchQuery)
-                        .textFieldStyle(.plain)
-                        .focused($isTopSearchFocused)
-                        .frame(minWidth: 220, idealWidth: 320, maxWidth: 420)
+                    TopSearchTextField(
+                        text: $viewModel.sessionSearchQuery,
+                        placeholder: "搜索会话标题和内容",
+                        focusRequestID: viewModel.focusTopSearchRequestID
+                    )
+                    .frame(minWidth: 220, idealWidth: 320, maxWidth: 420, minHeight: 20, idealHeight: 22, maxHeight: 24)
                     if !viewModel.sessionSearchQuery.isEmpty {
                         Button(action: { viewModel.sessionSearchQuery = "" }) {
                             Image(systemName: "xmark.circle.fill")
@@ -67,6 +69,10 @@ struct AppShellView: View {
         .onAppear {
             sidebarSelection = viewModel.selection ?? .agentChat
             viewModel.reloadChatSessions()
+            installTopSearchKeyMonitorIfNeeded()
+        }
+        .onDisappear {
+            removeTopSearchKeyMonitor()
         }
         .onChange(of: sidebarSelection) { _, newSelection in
             viewModel.deferViewUpdate {
@@ -78,15 +84,101 @@ struct AppShellView: View {
                 sidebarSelection = newSelection
             }
         }
-        .onChange(of: viewModel.focusTopSearchRequestID) { _, requestID in
-            guard requestID != nil else { return }
-            isTopSearchFocused = true
-        }
         .onChange(of: viewModel.runtimeSettingsAutosaveSignature) { _, _ in
             viewModel.scheduleRuntimeSettingsAutosave()
         }
     }
 
+    private func installTopSearchKeyMonitorIfNeeded() {
+        guard topSearchKeyMonitor == nil else { return }
+        topSearchKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let shortcut = viewModel.shortcut(for: .focusTopSearch)
+            guard shortcut.matches(
+                character: event.charactersIgnoringModifiers,
+                isCommandDown: event.modifierFlags.contains(.command),
+                isShiftDown: event.modifierFlags.contains(.shift),
+                isControlDown: event.modifierFlags.contains(.control),
+                isOptionDown: event.modifierFlags.contains(.option)
+            ) else {
+                return event
+            }
+            viewModel.performShortcutAction(.focusTopSearch)
+            return nil
+        }
+    }
+
+    private func removeTopSearchKeyMonitor() {
+        if let topSearchKeyMonitor {
+            NSEvent.removeMonitor(topSearchKeyMonitor)
+            self.topSearchKeyMonitor = nil
+        }
+    }
+
+}
+
+private struct TopSearchTextField: NSViewRepresentable {
+    @Binding var text: String
+    var placeholder: String
+    var focusRequestID: UUID?
+
+    func makeNSView(context: Context) -> NSTextField {
+        let textField = SelectAllOnFocusTextField()
+        textField.delegate = context.coordinator
+        textField.placeholderString = placeholder
+        textField.font = .systemFont(ofSize: 13)
+        textField.isBordered = false
+        textField.isBezeled = false
+        textField.drawsBackground = false
+        textField.focusRingType = .none
+        textField.lineBreakMode = .byTruncatingTail
+        textField.cell?.sendsActionOnEndEditing = false
+        return textField
+    }
+
+    func updateNSView(_ nsView: NSTextField, context: Context) {
+        if nsView.stringValue != text {
+            nsView.stringValue = text
+        }
+        nsView.placeholderString = placeholder
+        if context.coordinator.lastFocusRequestID != focusRequestID {
+            context.coordinator.lastFocusRequestID = focusRequestID
+            guard focusRequestID != nil else { return }
+            DispatchQueue.main.async {
+                nsView.window?.makeFirstResponder(nsView)
+                nsView.selectText(nil)
+            }
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text)
+    }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        @Binding var text: String
+        var lastFocusRequestID: UUID?
+
+        init(text: Binding<String>) {
+            _text = text
+        }
+
+        func controlTextDidChange(_ notification: Notification) {
+            guard let field = notification.object as? NSTextField else { return }
+            text = field.stringValue
+        }
+    }
+}
+
+private final class SelectAllOnFocusTextField: NSTextField {
+    override func becomeFirstResponder() -> Bool {
+        let didBecomeFirstResponder = super.becomeFirstResponder()
+        if didBecomeFirstResponder {
+            DispatchQueue.main.async { [weak self] in
+                self?.selectText(nil)
+            }
+        }
+        return didBecomeFirstResponder
+    }
 }
 
 private enum AppListTypography {
