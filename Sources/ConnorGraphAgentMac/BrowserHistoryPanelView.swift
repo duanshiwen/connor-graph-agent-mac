@@ -1,0 +1,700 @@
+import SwiftUI
+import AppKit
+import ConnorGraphAppSupport
+
+// MARK: - History Panel
+
+struct BrowserHistoryPanelView: View {
+    @ObservedObject var viewModel: AppViewModel
+    @State private var searchText: String = ""
+    @State private var clearConfirmation: Bool = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            headerBar
+            Divider()
+            searchBar
+            Divider()
+
+            if groupedRecords.isEmpty {
+                emptyState
+            } else {
+                historyList
+            }
+
+            Divider()
+            footerBar
+        }
+        .frame(width: 300)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    // MARK: - Header
+
+    private var headerBar: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "clock.arrow.circlepath")
+                .font(BrowserFloatingTypography.popoverTitle)
+                .foregroundStyle(.secondary)
+            Text("浏览历史")
+                .font(BrowserFloatingTypography.popoverTitle)
+            Spacer()
+            Button(action: { viewModel.toggleBrowserHistoryPanel() }) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22, height: 22)
+                    .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .help("关闭历史面板")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
+
+    // MARK: - Search
+
+    private var searchBar: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 12))
+                .foregroundStyle(.tertiary)
+            TextField("搜索网址或标题", text: $searchText)
+                .textFieldStyle(.plain)
+                .font(BrowserFloatingTypography.input)
+                .onChange(of: searchText) { _, newValue in
+                    viewModel.filterBrowserHistory(query: newValue)
+                }
+            if !searchText.isEmpty {
+                Button(action: {
+                    searchText = ""
+                    viewModel.filterBrowserHistory(query: "")
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+    }
+
+    // MARK: - Empty State
+
+    private var emptyState: some View {
+        VStack(spacing: 8) {
+            Spacer()
+            Image(systemName: "clock")
+                .font(.system(size: 32))
+                .foregroundStyle(.tertiary)
+            Text(searchText.isEmpty ? "暂无浏览记录" : "没有匹配的记录")
+                .font(BrowserFloatingTypography.hint)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - List
+
+    private var groupedRecords: [BrowserHistoryDateGroup] {
+        BrowserHistoryGrouper().group(viewModel.filteredBrowserHistoryRecords)
+    }
+
+    private var historyList: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                ForEach(groupedRecords) { group in
+                    sectionHeader(group.label)
+                    ForEach(group.records) { record in
+                        BrowserHistoryRow(record: record) {
+                            viewModel.navigateToHistoryRecord(record)
+                        } onDelete: {
+                            viewModel.deleteBrowserHistoryRecord(record.id)
+                        }
+                    }
+                }
+            }
+            .padding(.vertical, 6)
+        }
+    }
+
+    @ViewBuilder
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 12)
+            .padding(.top, 10)
+            .padding(.bottom, 4)
+    }
+
+    // MARK: - Footer
+
+    private var footerBar: some View {
+        HStack {
+            Text("\(viewModel.filteredBrowserHistoryRecords.count) 条记录")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+            Spacer()
+            Button(action: { clearConfirmation = true }) {
+                Text("清空")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.red)
+            }
+            .buttonStyle(.plain)
+            .disabled(viewModel.browserHistoryRecords.isEmpty)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .confirmationDialog("确认清空所有浏览历史？", isPresented: $clearConfirmation, titleVisibility: .visible) {
+            Button("清空所有历史", role: .destructive) {
+                viewModel.clearBrowserHistory()
+                searchText = ""
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("此操作无法撤销。")
+        }
+    }
+}
+
+// MARK: - History Row
+
+private struct BrowserHistoryRow: View {
+    var record: BrowserHistoryRecord
+    var onTap: () -> Void
+    var onDelete: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 8) {
+                favicon
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(displayTitle)
+                        .font(BrowserFloatingTypography.pageTitle)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    HStack(spacing: 4) {
+                        Text(displayURL)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                }
+                Spacer(minLength: 4)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(record.sessionTitle)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Color.accentColor)
+                        .lineLimit(1)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color.accentColor.opacity(0.10), in: Capsule())
+                    Text(timeString)
+                        .font(.system(size: 10).monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(isHovering ? Color.secondary.opacity(0.06) : Color.clear)
+        .onHover { isHovering = $0 }
+        .contextMenu {
+            Button("删除此记录", role: .destructive, action: onDelete)
+            Divider()
+            Button("复制网址") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(record.url, forType: .string)
+            }
+        }
+        .help(record.url)
+    }
+
+    private var displayTitle: String {
+        let title = record.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.isEmpty ? (URL(string: record.url)?.host ?? record.url) : title
+    }
+
+    private var displayURL: String {
+        if let url = URL(string: record.url), let host = url.host {
+            return host + (url.path == "/" ? "" : url.path)
+        }
+        return record.url
+    }
+
+    private var timeString: String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: record.visitedAt)
+    }
+
+    @ViewBuilder
+    private var favicon: some View {
+        AsyncImage(url: faviconURL) { phase in
+            switch phase {
+            case .success(let image):
+                image.resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 16, height: 16)
+            default:
+                Image(systemName: "globe")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16, height: 16)
+            }
+        }
+        .frame(width: 16, height: 16)
+    }
+
+    private var faviconURL: URL? {
+        guard let host = URL(string: record.url)?.host else { return nil }
+        return URL(string: "https://www.google.com/s2/favicons?domain=\(host)&sz=32")
+    }
+}
+
+// MARK: - Date Grouping
+
+struct BrowserHistoryDateGroup: Identifiable {
+    let id: String
+    let label: String
+    let records: [BrowserHistoryRecord]
+}
+
+struct BrowserHistoryGrouper {
+    private let calendar = Calendar.current
+
+    func group(_ records: [BrowserHistoryRecord]) -> [BrowserHistoryDateGroup] {
+        let sorted = records.sorted { $0.visitedAt > $1.visitedAt }
+        guard !sorted.isEmpty else { return [] }
+
+        var groups: [(label: String, bucket: Date, records: [BrowserHistoryRecord])] = []
+
+        for record in sorted {
+            let bucket = dateBucket(for: record.visitedAt)
+            if let index = groups.firstIndex(where: { $0.bucket == bucket }) {
+                groups[index].records.append(record)
+            } else {
+                groups.append((label: labelForBucket(bucket), bucket: bucket, records: [record]))
+            }
+        }
+
+        return groups.map {
+            BrowserHistoryDateGroup(
+                id: ISO8601DateFormatter().string(from: $0.bucket),
+                label: $0.label,
+                records: $0.records
+            )
+        }
+    }
+
+    private func dateBucket(for date: Date) -> Date {
+        calendar.startOfDay(for: date)
+    }
+
+    private func labelForBucket(_ bucket: Date) -> String {
+        let now = Date()
+        let today = calendar.startOfDay(for: now)
+        let days = calendar.dateComponents([.day], from: bucket, to: today).day ?? 0
+
+        switch days {
+        case 0: return "今天"
+        case 1: return "昨天"
+        case 2...7: return "本周"
+        case 8...30: return "本月"
+        default:
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "zh_CN")
+            formatter.dateFormat = "yyyy年M月"
+            return formatter.string(from: bucket)
+        }
+    }
+}
+
+// MARK: - Bookmarks Panel
+
+struct BrowserBookmarksPanelView: View {
+    @ObservedObject var viewModel: AppViewModel
+    var currentPageURL: String?
+    var currentPageTitle: String?
+    @State private var searchText: String = ""
+    @State private var groupText: String = ""
+
+    var body: some View {
+        VStack(spacing: 0) {
+            headerBar
+            Divider()
+            searchBar
+            Divider()
+            groupFilterBar
+            Divider()
+            groupInputBar
+            Divider()
+
+            if viewModel.filteredBrowserBookmarkRecords.isEmpty {
+                emptyState
+            } else {
+                bookmarksList
+            }
+
+            Divider()
+            footerBar
+        }
+        .frame(width: 300)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear {
+            viewModel.loadBrowserBookmarks()
+            viewModel.filterBrowserBookmarks(query: searchText, groupName: viewModel.selectedBrowserBookmarkGroupName)
+        }
+    }
+
+    // MARK: - Header
+
+    private var headerBar: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "star.fill")
+                .font(BrowserFloatingTypography.popoverTitle)
+                .foregroundStyle(.secondary)
+            Text("收藏夹")
+                .font(BrowserFloatingTypography.popoverTitle)
+            Spacer()
+            Button(action: addCurrentPageToBookmarks) {
+                Label(currentPageIsBookmarked ? "已收藏" : "收藏当前页", systemImage: currentPageIsBookmarked ? "checkmark" : "plus")
+                    .font(.system(size: 11, weight: .semibold))
+                    .labelStyle(.titleAndIcon)
+                    .padding(.horizontal, 8)
+                    .frame(height: 22)
+                    .background(Color.accentColor.opacity(currentPageIsBookmarked ? 0.08 : 0.12), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(!canBookmarkCurrentPage || currentPageIsBookmarked)
+            .opacity(canBookmarkCurrentPage ? 1 : 0.48)
+            .help(currentPageIsBookmarked ? "当前页已在收藏夹中" : "将当前页添加到收藏夹")
+
+            Button(action: { viewModel.toggleBrowserBookmarksPanel() }) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22, height: 22)
+                    .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .help("关闭收藏夹面板")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
+
+    private var canBookmarkCurrentPage: Bool {
+        guard let url = currentPageURL?.trimmingCharacters(in: .whitespacesAndNewlines), !url.isEmpty else { return false }
+        return !url.hasPrefix("connor://") && !url.hasPrefix("about:") && !url.hasPrefix("data:")
+    }
+
+    private var currentPageIsBookmarked: Bool {
+        guard canBookmarkCurrentPage, let url = currentPageURL else { return false }
+        return viewModel.isBrowserBookmarked(url: url)
+    }
+
+    private func addCurrentPageToBookmarks() {
+        guard canBookmarkCurrentPage, let url = currentPageURL else { return }
+        viewModel.addBrowserBookmark(
+            url: url,
+            title: currentPageTitle ?? "",
+            groupName: viewModel.selectedBrowserBookmarkGroupName
+        )
+        viewModel.filterBrowserBookmarks(query: searchText, groupName: viewModel.selectedBrowserBookmarkGroupName)
+    }
+
+    // MARK: - Search
+
+    private var searchBar: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 12))
+                .foregroundStyle(.tertiary)
+            TextField("搜索网址、标题或分组", text: $searchText)
+                .textFieldStyle(.plain)
+                .font(BrowserFloatingTypography.input)
+                .onChange(of: searchText) { _, newValue in
+                    viewModel.filterBrowserBookmarks(query: newValue, groupName: viewModel.selectedBrowserBookmarkGroupName)
+                }
+            if !searchText.isEmpty {
+                Button(action: {
+                    searchText = ""
+                    viewModel.filterBrowserBookmarks(query: "", groupName: viewModel.selectedBrowserBookmarkGroupName)
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+    }
+
+    // MARK: - Group Filter
+
+    private var groupFilterBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                groupChip(title: "全部", groupName: nil)
+                ForEach(viewModel.browserBookmarkGroupNames, id: \.self) { group in
+                    groupChip(title: group, groupName: group)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+        }
+    }
+
+    private func groupChip(title: String, groupName: String?) -> some View {
+        let isSelected = viewModel.selectedBrowserBookmarkGroupName == groupName
+        return Button(action: {
+            viewModel.filterBrowserBookmarks(query: searchText, groupName: groupName)
+        }) {
+            Text(title)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(isSelected ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.07), in: Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var groupInputBar: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "folder.badge.plus")
+                .font(.system(size: 12))
+                .foregroundStyle(.tertiary)
+            TextField("输入分组名，按 Return 切换/创建", text: $groupText)
+                .textFieldStyle(.plain)
+                .font(BrowserFloatingTypography.input)
+                .onSubmit {
+                    let trimmed = groupText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmed.isEmpty else { return }
+                    viewModel.filterBrowserBookmarks(query: searchText, groupName: trimmed)
+                    groupText = ""
+                }
+            if viewModel.selectedBrowserBookmarkGroupName != nil {
+                Button("清除") {
+                    viewModel.filterBrowserBookmarks(query: searchText, groupName: nil)
+                }
+                .font(.system(size: 11, weight: .medium))
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+    }
+
+    // MARK: - Empty State
+
+    private var emptyState: some View {
+        VStack(spacing: 8) {
+            Spacer()
+            Image(systemName: "star")
+                .font(.system(size: 32))
+                .foregroundStyle(.tertiary)
+            Text(searchText.isEmpty ? "暂无收藏" : "没有匹配的收藏")
+                .font(BrowserFloatingTypography.hint)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - List
+
+    private var groupedRecords: [BrowserBookmarkGroup] {
+        BrowserBookmarkGrouper().group(viewModel.filteredBrowserBookmarkRecords)
+    }
+
+    private var bookmarksList: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                ForEach(groupedRecords) { group in
+                    sectionHeader(group.label)
+                    ForEach(group.records) { record in
+                        BrowserBookmarkRow(record: record) {
+                            viewModel.navigateToBookmark(record)
+                        } onDelete: {
+                            viewModel.deleteBrowserBookmark(record.id)
+                            viewModel.filterBrowserBookmarks(query: searchText, groupName: viewModel.selectedBrowserBookmarkGroupName)
+                        }
+                    }
+                }
+            }
+            .padding(.vertical, 6)
+        }
+    }
+
+    @ViewBuilder
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 12)
+            .padding(.top, 10)
+            .padding(.bottom, 4)
+    }
+
+    // MARK: - Footer
+
+    private var footerBar: some View {
+        HStack {
+            Text("\(viewModel.filteredBrowserBookmarkRecords.count) 个收藏")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+            Spacer()
+            Text(viewModel.selectedBrowserBookmarkGroupName ?? "全部分组")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+}
+
+// MARK: - Bookmark Row
+
+private struct BrowserBookmarkRow: View {
+    var record: BrowserBookmarkRecord
+    var onTap: () -> Void
+    var onDelete: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 8) {
+                favicon
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(displayTitle)
+                        .font(BrowserFloatingTypography.pageTitle)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Text(displayURL)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer(minLength: 4)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(record.groupName)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Color.accentColor)
+                        .lineLimit(1)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color.accentColor.opacity(0.10), in: Capsule())
+                    Text(timeString)
+                        .font(.system(size: 10).monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(isHovering ? Color.secondary.opacity(0.06) : Color.clear)
+        .onHover { isHovering = $0 }
+        .contextMenu {
+            Button("删除此收藏", role: .destructive, action: onDelete)
+            Divider()
+            Button("复制网址") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(record.url, forType: .string)
+            }
+        }
+        .help(record.url)
+    }
+
+    private var displayTitle: String {
+        let title = record.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.isEmpty ? (URL(string: record.url)?.host ?? record.url) : title
+    }
+
+    private var displayURL: String {
+        if let url = URL(string: record.url), let host = url.host {
+            return host + (url.path == "/" ? "" : url.path)
+        }
+        return record.url
+    }
+
+    private var timeString: String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "M/d"
+        return formatter.string(from: record.updatedAt)
+    }
+
+    @ViewBuilder
+    private var favicon: some View {
+        AsyncImage(url: faviconURL) { phase in
+            switch phase {
+            case .success(let image):
+                image.resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 16, height: 16)
+            default:
+                Image(systemName: "globe")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16, height: 16)
+            }
+        }
+        .frame(width: 16, height: 16)
+    }
+
+    private var faviconURL: URL? {
+        guard let host = URL(string: record.url)?.host else { return nil }
+        return URL(string: "https://www.google.com/s2/favicons?domain=\(host)&sz=32")
+    }
+}
+
+// MARK: - Grouping
+
+struct BrowserBookmarkGroup: Identifiable {
+    let id: String
+    let label: String
+    let records: [BrowserBookmarkRecord]
+}
+
+struct BrowserBookmarkGrouper {
+    func group(_ records: [BrowserBookmarkRecord]) -> [BrowserBookmarkGroup] {
+        let sorted = records.sorted { lhs, rhs in
+            if lhs.groupName == rhs.groupName { return lhs.updatedAt > rhs.updatedAt }
+            if lhs.groupName == BrowserBookmarkRecord.defaultGroupName { return true }
+            if rhs.groupName == BrowserBookmarkRecord.defaultGroupName { return false }
+            return lhs.groupName.localizedStandardCompare(rhs.groupName) == .orderedAscending
+        }
+
+        var groups: [(label: String, records: [BrowserBookmarkRecord])] = []
+        for record in sorted {
+            let label = record.groupName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? BrowserBookmarkRecord.defaultGroupName : record.groupName
+            if let index = groups.firstIndex(where: { $0.label == label }) {
+                groups[index].records.append(record)
+            } else {
+                groups.append((label: label, records: [record]))
+            }
+        }
+
+        return groups.map { BrowserBookmarkGroup(id: $0.label, label: $0.label, records: $0.records) }
+    }
+}

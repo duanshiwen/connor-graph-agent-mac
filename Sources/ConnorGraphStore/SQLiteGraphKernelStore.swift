@@ -461,7 +461,8 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
             labels_json TEXT NOT NULL DEFAULT '[]',
             is_archived INTEGER NOT NULL DEFAULT 0,
             is_flagged INTEGER NOT NULL DEFAULT 0,
-            archived_at TEXT
+            archived_at TEXT,
+            deleted_at TEXT
         );
         """)
         try addColumnIfMissing(table: "agent_sessions", column: "status", definition: "TEXT NOT NULL DEFAULT 'todo'")
@@ -469,8 +470,9 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         try addColumnIfMissing(table: "agent_sessions", column: "is_archived", definition: "INTEGER NOT NULL DEFAULT 0")
         try addColumnIfMissing(table: "agent_sessions", column: "is_flagged", definition: "INTEGER NOT NULL DEFAULT 0")
         try addColumnIfMissing(table: "agent_sessions", column: "archived_at", definition: "TEXT")
+        try addColumnIfMissing(table: "agent_sessions", column: "deleted_at", definition: "TEXT")
         try execute("CREATE INDEX IF NOT EXISTS idx_agent_sessions_updated ON agent_sessions(updated_at DESC);")
-        try execute("CREATE INDEX IF NOT EXISTS idx_agent_sessions_governance ON agent_sessions(is_archived, status, updated_at DESC);")
+        try execute("CREATE INDEX IF NOT EXISTS idx_agent_sessions_governance ON agent_sessions(deleted_at, is_archived, status, updated_at DESC);")
         try execute("""
         CREATE TABLE IF NOT EXISTS session_background_tasks (
             id TEXT PRIMARY KEY,
@@ -941,59 +943,62 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
 
     public func upsertSession(_ session: AgentSession) throws {
         try execute("""
-        INSERT OR REPLACE INTO agent_sessions
-        (id, title, messages_json, created_at, updated_at, status, labels_json, is_archived, is_flagged, archived_at)
-        VALUES (\(quote(session.id)), \(quote(session.title)), \(quote(json(session.messages))), \(quote(iso(session.createdAt))), \(quote(iso(session.updatedAt))), \(quote(session.governance.status.rawValue)), \(quote(json(session.governance.labels))), \(session.governance.isArchived ? 1 : 0), \(session.governance.isFlagged ? 1 : 0), \(quote(session.governance.archivedAt.map(iso))))
+        INSERT INTO agent_sessions
+        (id, title, messages_json, created_at, updated_at, status, labels_json, is_archived, is_flagged, archived_at, deleted_at)
+        VALUES (\(quote(session.id)), \(quote(session.title)), \(quote(json(session.messages))), \(quote(iso(session.createdAt))), \(quote(iso(session.updatedAt))), \(quote(session.governance.status.rawValue)), \(quote(json(session.governance.labels))), \(session.governance.isArchived ? 1 : 0), \(session.governance.isFlagged ? 1 : 0), \(quote(session.governance.archivedAt.map(iso))), \(quote(session.governance.deletedAt.map(iso))))
+        ON CONFLICT(id) DO UPDATE SET
+            title = excluded.title,
+            messages_json = excluded.messages_json,
+            created_at = excluded.created_at,
+            updated_at = excluded.updated_at,
+            status = excluded.status,
+            labels_json = excluded.labels_json,
+            is_archived = excluded.is_archived,
+            is_flagged = excluded.is_flagged,
+            archived_at = excluded.archived_at,
+            deleted_at = COALESCE(excluded.deleted_at, agent_sessions.deleted_at)
         """)
     }
 
     public func session(id: String) throws -> AgentSession? {
-        let rows = try query(sql: "SELECT id, title, messages_json, created_at, updated_at, status, labels_json, is_archived, is_flagged, archived_at FROM agent_sessions WHERE id = \(quote(id))")
+        let rows = try query(sql: "SELECT id, title, messages_json, created_at, updated_at, status, labels_json, is_archived, is_flagged, archived_at, deleted_at FROM agent_sessions WHERE id = \(quote(id))")
         guard let row = rows.first else { return nil }
         return try decodeSession(row)
     }
 
-    public func recentSessions(limit: Int = 50, includeArchived: Bool = false) throws -> [AgentSession] {
-        let archivePredicate = includeArchived ? "" : "WHERE is_archived = 0"
-        return try query(sql: "SELECT id, title, messages_json, created_at, updated_at, status, labels_json, is_archived, is_flagged, archived_at FROM agent_sessions \(archivePredicate) ORDER BY updated_at DESC LIMIT \(limit)").map(decodeSession)
+    public func recentSessions(limit: Int = 50, includeArchived: Bool = false, includeDeleted: Bool = false) throws -> [AgentSession] {
+        var conditions: [String] = []
+        if !includeArchived { conditions.append("is_archived = 0") }
+        if !includeDeleted { conditions.append("deleted_at IS NULL") }
+        let whereClause = conditions.isEmpty ? "" : "WHERE \(conditions.joined(separator: " AND "))"
+        return try query(sql: "SELECT id, title, messages_json, created_at, updated_at, status, labels_json, is_archived, is_flagged, archived_at, deleted_at FROM agent_sessions \(whereClause) ORDER BY updated_at DESC LIMIT \(limit)").map(decodeSession)
     }
 
-    public func recentSessionListItems(limit: Int = 50, includeArchived: Bool = false) throws -> [AgentSessionListItem] {
-        let archivePredicate = includeArchived ? "" : "WHERE is_archived = 0"
-        return try query(sql: "SELECT \(sessionListItemColumns) FROM agent_sessions \(archivePredicate) ORDER BY updated_at DESC LIMIT \(limit)").map(decodeSessionListItem)
-    }
-
-    public func sessions(status: AgentSessionStatus? = nil, labelID: String? = nil, archived: Bool? = nil, limit: Int = 100) throws -> [AgentSession] {
+    public func sessions(status: AgentSessionStatus? = nil, labelID: String? = nil, archived: Bool? = nil, includeDeleted: Bool = false, limit: Int = 100) throws -> [AgentSession] {
         var conditions: [String] = []
         if let status { conditions.append("status = \(quote(status.rawValue))") }
         if let archived { conditions.append("is_archived = \(archived ? 1 : 0)") }
+        if !includeDeleted { conditions.append("deleted_at IS NULL") }
         let whereClause = conditions.isEmpty ? "" : "WHERE \(conditions.joined(separator: " AND "))"
-        let sessions = try query(sql: "SELECT id, title, messages_json, created_at, updated_at, status, labels_json, is_archived, is_flagged, archived_at FROM agent_sessions \(whereClause) ORDER BY updated_at DESC LIMIT \(limit)").map(decodeSession)
+        let sessions = try query(sql: "SELECT id, title, messages_json, created_at, updated_at, status, labels_json, is_archived, is_flagged, archived_at, deleted_at FROM agent_sessions \(whereClause) ORDER BY updated_at DESC LIMIT \(limit)").map(decodeSession)
         guard let labelID else { return sessions }
         return sessions.filter { session in session.governance.labels.contains { $0.id == labelID } }
-    }
-
-    public func sessionListItems(status: AgentSessionStatus? = nil, labelID: String? = nil, archived: Bool? = nil, limit: Int = 100) throws -> [AgentSessionListItem] {
-        var conditions: [String] = []
-        if let status { conditions.append("status = \(quote(status.rawValue))") }
-        if let archived { conditions.append("is_archived = \(archived ? 1 : 0)") }
-        let whereClause = conditions.isEmpty ? "" : "WHERE \(conditions.joined(separator: " AND "))"
-        let items = try query(sql: "SELECT \(sessionListItemColumns) FROM agent_sessions \(whereClause) ORDER BY updated_at DESC LIMIT \(limit)").map(decodeSessionListItem)
-        guard let labelID else { return items }
-        return items.filter { item in item.governance.labels.contains { $0.id == labelID } }
     }
 
     public func updateSessionGovernance(sessionID: String, governance: AgentSessionGovernanceMetadata, updatedAt: Date = Date()) throws {
         try execute("""
         UPDATE agent_sessions
-        SET status = \(quote(governance.status.rawValue)), labels_json = \(quote(json(governance.labels))), is_archived = \(governance.isArchived ? 1 : 0), is_flagged = \(governance.isFlagged ? 1 : 0), archived_at = \(quote(governance.archivedAt.map(iso))), updated_at = \(quote(iso(updatedAt)))
+        SET status = \(quote(governance.status.rawValue)), labels_json = \(quote(json(governance.labels))), is_archived = \(governance.isArchived ? 1 : 0), is_flagged = \(governance.isFlagged ? 1 : 0), archived_at = \(quote(governance.archivedAt.map(iso))), deleted_at = \(quote(governance.deletedAt.map(iso))), updated_at = \(quote(iso(updatedAt)))
         WHERE id = \(quote(sessionID))
         """)
     }
 
-    public func deleteSession(id: String) throws {
-        try deleteSessionBackgroundTasks(sessionID: id)
-        try execute("DELETE FROM agent_sessions WHERE id = \(quote(id));")
+    public func deleteSession(id: String, deletedAt: Date = Date()) throws {
+        try execute("""
+        UPDATE agent_sessions
+        SET deleted_at = COALESCE(deleted_at, \(quote(iso(deletedAt)))), updated_at = \(quote(iso(deletedAt)))
+        WHERE id = \(quote(id));
+        """)
     }
 
     public func upsertSessionBackgroundTask(_ task: PersistedSessionBackgroundTask) throws {
@@ -1033,41 +1038,20 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         )
     }
 
-    private var sessionListItemColumns: String {
-        "id, title, created_at, updated_at, status, labels_json, is_archived, is_flagged, archived_at, json_array_length(messages_json)"
-    }
-
     private func decodeSession(_ row: [String]) throws -> AgentSession {
         let governance = AgentSessionGovernanceMetadata(
             status: AgentSessionStatus(rawValue: row[safe: 5] ?? "") ?? .todo,
             labels: try decode([AgentSessionLabel].self, row[safe: 6] ?? "[]"),
             isArchived: (Int(row[safe: 7] ?? "0") ?? 0) != 0,
             isFlagged: (Int(row[safe: 8] ?? "0") ?? 0) != 0,
-            archivedAt: try optionalDate(row[safe: 9] ?? "")
+            archivedAt: try optionalDate(row[safe: 9] ?? ""),
+            deletedAt: try optionalDate(row[safe: 10] ?? "")
         )
         return AgentSession(
             id: row[0], title: row[1],
             messages: try decode([AgentMessage].self, row[2]),
             createdAt: try date(row[3]), updatedAt: try date(row[4]),
             governance: governance
-        )
-    }
-
-    private func decodeSessionListItem(_ row: [String]) throws -> AgentSessionListItem {
-        let governance = AgentSessionGovernanceMetadata(
-            status: AgentSessionStatus(rawValue: row[safe: 4] ?? "") ?? .todo,
-            labels: try decode([AgentSessionLabel].self, row[safe: 5] ?? "[]"),
-            isArchived: (Int(row[safe: 6] ?? "0") ?? 0) != 0,
-            isFlagged: (Int(row[safe: 7] ?? "0") ?? 0) != 0,
-            archivedAt: try optionalDate(row[safe: 8] ?? "")
-        )
-        return AgentSessionListItem(
-            id: row[0],
-            title: row[1],
-            createdAt: try date(row[2]),
-            updatedAt: try date(row[3]),
-            governance: governance,
-            messageCount: Int(row[safe: 9] ?? "0") ?? 0
         )
     }
 

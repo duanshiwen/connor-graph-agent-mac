@@ -5,10 +5,12 @@ import ConnorGraphStore
 
 public enum AppChatSessionRepositoryError: Error, Equatable, CustomStringConvertible {
     case sessionNotFound(String)
+    case sessionHasRunningBackgroundTasks(String)
 
     public var description: String {
         switch self {
         case .sessionNotFound(let id): "sessionNotFound: \(id)"
+        case .sessionHasRunningBackgroundTasks(let id): "sessionHasRunningBackgroundTasks: \(id)"
         }
     }
 }
@@ -43,21 +45,6 @@ public struct AppChatSessionRepository: Sendable {
         }
     }
 
-    public func loadSessionListItems(filter: AgentSessionListFilter, limit: Int = 100) throws -> [AgentSessionListItem] {
-        switch filter {
-        case .inbox:
-            try store.recentSessionListItems(limit: limit, includeArchived: false)
-        case .archived:
-            try store.sessionListItems(archived: true, limit: limit)
-        case .status(let status):
-            try store.sessionListItems(status: status, archived: false, limit: limit)
-        case .label(let labelID):
-            try store.sessionListItems(labelID: labelID, archived: false, limit: limit)
-        case .all:
-            try store.recentSessionListItems(limit: limit, includeArchived: true)
-        }
-    }
-
     public func loadSession(id: String) throws -> AgentSession? {
         try store.session(id: id)
     }
@@ -77,7 +64,26 @@ public struct AppChatSessionRepository: Sendable {
     public func saveSession(_ session: AgentSession, previousMessageCount: Int = 0) throws -> AgentSession {
         try store.upsertSession(session)
         _ = try storagePaths?.ensureSessionArtifactDirectories(sessionID: session.id)
+        try prewarmMarkdownRenderCacheIfNeeded(for: session, previousMessageCount: previousMessageCount)
         return session
+    }
+
+    private func prewarmMarkdownRenderCacheIfNeeded(for session: AgentSession, previousMessageCount: Int) throws {
+        guard let storagePaths else { return }
+        guard session.messages.count > previousMessageCount else { return }
+        let cacheStore = AgentMarkdownRenderCacheStore(storagePaths: storagePaths)
+        let newMessages = session.messages.dropFirst(max(0, previousMessageCount))
+        for message in newMessages where message.role == .assistant {
+            if try cacheStore.loadBlocks(sessionID: session.id, messageID: message.id, content: message.content) != nil { continue }
+            let blocks = AgentMarkdownBlockParser().parse(message.content)
+            try cacheStore.saveBlocks(
+                sessionID: session.id,
+                messageID: message.id,
+                content: message.content,
+                blocks: blocks,
+                createdAt: message.createdAt
+            )
+        }
     }
 
     @discardableResult
@@ -92,6 +98,12 @@ public struct AppChatSessionRepository: Sendable {
 
     public func deleteSession(sessionID: String) throws {
         guard try loadSession(id: sessionID) != nil else { throw AppChatSessionRepositoryError.sessionNotFound(sessionID) }
+        let activeBackgroundTaskStatuses: Set<PersistedSessionBackgroundTaskStatus> = [.queued, .running]
+        let hasActiveBackgroundTasks = try loadBackgroundTasks(sessionID: sessionID)
+            .contains { activeBackgroundTaskStatuses.contains($0.status) }
+        guard !hasActiveBackgroundTasks else {
+            throw AppChatSessionRepositoryError.sessionHasRunningBackgroundTasks(sessionID)
+        }
         try store.deleteSession(id: sessionID)
     }
 
