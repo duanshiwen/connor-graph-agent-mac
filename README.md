@@ -1,6 +1,6 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-16 19:39 GMT+8  
+文档更新时间：2026-06-16 22:24 GMT+8  
 当前代码基线:`feature/apple-iwork-attachment-support`,在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface / session-scoped multi-root project workspace / Connor-owned Scientific Compute Runtime skeleton / 商用级 Document Attachment OS / WKWebView-backed `web_fetch(js)` 基础上,继续收紧 Apple 原生 UI 边界:PDF/Word/Excel/PowerPoint 与 Apple iWork（Pages/Numbers/Keynote）一等附件仍由 Connor Session Capsule 和 Attachment Store 管理;PDF selectable text 抽取和多页原文预览继续使用 PDFKit;Office/iWork/Presentation/Spreadsheet 抽取继续通过 MarkItDown/Docling sidecar best-effort 编排与 hardening;Office/iWork/Presentation/Spreadsheet 原文件预览优先交给 macOS Quick Look / QuickLookUI,Connor 自有 UI 只负责 manifest、extraction status、retry、omitted attachment summary 和治理证据。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package,目标是把 Connor 建成 **graph-memory-native Agent OS**:它不是"图谱编辑器",也不是"Claude SDK 外壳",而是以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI 和 Local Automation Surface 共同构成的本地 Agent 操作系统。
@@ -842,6 +842,43 @@ ConnorCommandPaletteView
 BrowserWorkspaceView
 ```
 
+### Keyboard Shortcuts
+
+Connor 的快捷键策略应遵循 Apple-owned UI first:优先沿用 macOS 用户已熟悉的菜单语义,高频 Agent OS 动作用 `⌘` 组合键,局部浮层和编辑弹窗使用 `Esc` / Return 等系统默认行为。当前代码中快捷键来源主要有三类:
+
+- App menu commands:`Sources/ConnorGraphAgentMac/ConnorGraphAgentMacApp.swift`
+- Command catalog / palette 展示:`Sources/ConnorGraphAppSupport/ConnorNativeShellPresentation.swift` 与 `ConnorCommandPalettePresentation.swift`
+- 局部视图快捷键:Browser Workspace、Attachment/Tool/Inspector overlays、Settings editor dialogs
+
+当前设置页可修改且真实可用的快捷键:
+
+| 区域 | 默认快捷键 | 动作 | 生效方式 | 代码入口 |
+| --- | --- | --- | --- | --- |
+| 全局菜单 | `⌘K` | 打开命令面板 | App menu command 读取 `runtime-settings.json` | `ConnorGraphAgentMacApp.commands` |
+| 全局菜单 | `⌘N` | 新建会话并进入聊天 | App menu command 读取 `runtime-settings.json` | `AppViewModel.performShortcutAction(.newSession)` |
+| 全局菜单 / Composer | `⌘B` | 显示 / 隐藏 Browser Workspace | App menu command 读取 `runtime-settings.json` | `AppViewModel.performShortcutAction(.toggleBrowser)` |
+| 全局菜单 | `⌘F` | 聚焦应用顶部搜索 | App menu command 读取 `runtime-settings.json` 并触发 `FocusState` | `AppShellView.isTopSearchFocused` |
+| 全局菜单 | `⌘,` | 打开 Settings | App menu command 读取 `runtime-settings.json` | `AppViewModel.performShortcutAction(.openSettings)` |
+| Browser Workspace | `⌘L` | 聚焦地址栏 | Browser 局部 key monitor 读取 `runtime-settings.json` | `BrowserKeyboardShortcutResolver.focusAddress` |
+| Browser Workspace | `⌘T` | 新建浏览器标签页并聚焦地址栏 | Browser 局部 key monitor 读取 `runtime-settings.json` | `BrowserKeyboardShortcutResolver.newTab` |
+| Browser Workspace | `⌘W` | 关闭当前浏览器标签页,不是关闭 macOS 窗口 | Browser 局部 key monitor 读取 `runtime-settings.json` | `BrowserKeyboardShortcutResolver.closeSelectedTab` |
+| Browser Workspace | `⌘[` | 后退 | Browser 局部 key monitor 读取 `runtime-settings.json` | `BrowserKeyboardShortcutResolver.goBack` |
+| Browser Workspace | `⌘]` | 前进 | Browser 局部 key monitor 读取 `runtime-settings.json` | `BrowserKeyboardShortcutResolver.goForward` |
+| Browser Workspace | `⌘⇧B` | 打开 / 关闭书签面板 | Browser 局部 key monitor 读取 `runtime-settings.json` | `BrowserKeyboardShortcutResolver.toggleBookmarks` |
+| Browser Workspace | `⌘Y` | 打开 / 关闭历史面板 | Browser 局部 key monitor 读取 `runtime-settings.json` | `BrowserKeyboardShortcutResolver.toggleHistory` |
+| Browser Workspace | `Esc` | 关闭网页选区 / 整页提问浮窗,并保留草稿 | 固定局部快捷键,不进入设置页 | `BrowserKeyboardShortcutResolver.closeSelectionPopover` |
+| 附件预览 / 后台任务 / Inspector / Tool Overlay | `Esc` | 关闭当前 overlay / panel | 固定 SwiftUI `.keyboardShortcut` | `AgentChatView`, `AgentChatActivityViews`, `AgentToolInvocationDetailOverlay` |
+| 标签 / 状态编辑弹窗 | Return | 保存 | 固定 default action | `SettingsLabelEditorSheet`, `SettingsStatusEditorSheet`, sidebar editor sheets |
+
+快捷键修改能力已经落地到 `SettingsShortcutsSection`:用户点击“修改”后进入原生 recorder sheet,按下新组合键即可保存;配置写入 `runtime-settings.json` 的 `shortcuts.bindings`,并由菜单命令或 Browser Workspace key monitor 直接读取。低频治理/扩展入口（Graph Memory、Approvals、Data Sources、Skills、Automations、Local API / CLI、Commercial Readiness）不在快捷键设置页暴露,避免占用过多 `⌘` 数字键和高频键位。
+
+实现注意事项:
+
+- 不要只在 `SettingsShortcutsSection` 展示快捷键;必须同时在 `ConnorGraphAgentMacApp.commands`、局部 key monitor 或 SwiftUI `.keyboardShortcut` 中绑定,否则会形成“文档/设置页承诺但实际不可用”的商业体验缺口。
+- `AgentRuntimeShortcutSettings` 是当前快捷键单一配置源;全局菜单和 Browser Workspace resolver 都应从它读取。
+- Browser Workspace 的 `⌘W` 当前是局部 key monitor,需要继续保证只在 Browser Workspace 可见时拦截,避免破坏系统窗口关闭行为。
+- 对 destructive / governance 动作不要设计单键直达执行;快捷键最多打开 review surface,实际执行仍由 Connor Policy Engine / reviewed gate 控制。
+
 Session Workspace 当前支持:
 
 - 每个 Connor Session 都可以拥有自己的 project workspace roots,随 Session Capsule 持久化,而不是依赖全局设置页里的单一工作目录。
@@ -953,9 +990,9 @@ AI
 偏好
 ```
 
-权限设置页的规划必须贴合当前 Connor 真实运行边界,不要把它设计成系统隐私权限页、团队权限页或完整安全策略编辑器。当前 `SettingsPermissionsSection` 的真实职责是 **新会话默认 Policy Engine 模式 + 少量审批偏好说明**;会话运行中的权限调整仍在 composer 底部权限 badge 完成;每个会话的 Workspace Roots 仍在会话界面设置,不回流到 Settings Center。
+权限设置页必须贴合当前 Connor 真实运行边界,不要把它设计成系统隐私权限页、团队权限页或完整安全策略编辑器。当前 `SettingsPermissionsSection` 的真实职责是 **新会话默认 Policy Engine 模式 + 真实生效边界说明**;会话运行中的权限调整仍在 composer 底部权限 badge 完成;每个会话的 Workspace Roots 仍在会话界面设置,不回流到 Settings Center。
 
-权限设置页建议采用三块信息结构:
+权限设置页采用三块信息结构:
 
 1. **新会话默认权限**
    - 主控件:`新会话权限` picker / segmented control,只展示 `只读`、`询问`、`执行`,继续隐藏 `allowAll`。
@@ -964,17 +1001,17 @@ AI
      - `只读`:允许读取图谱、会话、workspace 文件、搜索文件、只读 shell、模型调用和本地科学计算;拒绝写入、删除、外部网络和危险 shell。
      - `询问`:读取、普通模型调用、graph write proposal、外部网络默认允许;文件写入/编辑/删除、graph commit/删除、昂贵模型调用、workspace/network/destructive shell 进入审批。
      - `执行`:文件写入/编辑、graph commit、workspace shell 可自动通过;图谱删除、文件删除、network shell、destructive shell 和昂贵模型调用仍需审批。
-2. **审批偏好**
-   - 保留当前两个 toggle:`网络访问需要审批`、`Shell 写入需要审批`。
-   - 当前代码中这两个字段已持久化到 `runtime-settings.json` → `permissions.requireApprovalForNetwork` / `permissions.requireApprovalForShell`,但 README 必须明确它们还不是完整 capability matrix,也不要承诺已经覆盖所有 provider / MCP / sidecar 路径。
-   - UI 文案应写成"默认偏好 / 即将作为细粒度策略输入",避免暗示它们已经覆盖所有 runtime enforcement。
+2. **当前真实生效**
+   - 不展示 `网络访问需要审批` / `Shell 写入需要审批` toggle,因为这两个字段目前只是历史持久化字段,不是完整接入 Policy Engine 的真实开关。
+   - 网络访问默认不单独审批:`AgentRuntimePermissionSettings.requireApprovalForNetwork` 默认值为 `false`;在 `询问` / `执行` 模式下,`externalNetwork` 当前由 `AgentPolicyEngine` 默认通过;在 `只读` 模式下仍会拒绝。
+   - Shell 不用全局 toggle 控制,而是由 `LocalShellCommandPolicy` 分类为 readOnly / workspaceWrite / network / destructive / unknown 后映射到 capability,再交给 `AgentPolicyEngine` 决策。
 3. **不可在设置页放开的安全边界**
    - 不提供 `全部允许 / allowAll` 开关。Claude SDK sidecar 的 `bypassPermissions` 只是让 Connor Policy Engine 成为唯一审批层,不代表产品层无限制授权。
    - 不在权限页管理 Workspace Roots。用户必须到会话顶部的"当前会话 Workspace"配置 primary root / additional roots;Settings Center 只提示这个入口。
    - 不在权限页编辑 protected paths、MCP per-tool policy、graph admission policy 或 automation reviewed gate。这些属于后续高级治理页或各自领域页面。
    - 不做团队成员/组织角色权限。Connor 当前是本地单用户 Home / Runtime Root,明确不做 multi-user permissions。
 
-界面布局上建议沿用当前 Settings Center 卡片风格:顶部标题"权限"居中;内容最大宽度 760;第一张 `SettingsGroup(title: "默认权限")` 放新会话权限 picker;第二张 `SettingsGroup(title: "审批偏好")` 放网络和 Shell toggle;底部放一条低强调说明:`项目工作目录已改为每个会话内设置:打开任意会话,在会话顶部的“当前会话 Workspace”中配置。` 如果需要解释能力矩阵,优先用可折叠的"查看当前策略说明" disclosure,不要默认展示工程化 capability 表,以符合 Apple 设置页只暴露必要选项的原则。
+界面布局已按当前 Settings Center 卡片风格落地:顶部标题"权限"居中;内容最大宽度 760;`SettingsPermissionsSection` 先展示页面说明,再用 `新会话默认权限` 卡片承载权限模式 picker 和当前模式摘要,用 `当前真实生效` 卡片说明权限模式、网络和 Shell 的实际决策来源,用 `安全边界` 卡片说明不开放 allowAll、Workspace 属于会话、本地单用户边界。能力矩阵说明放入可折叠的"查看当前策略说明" disclosure,默认不展示工程化 capability 表,以符合 Apple 设置页只暴露必要选项的原则。
 
 会话侧栏的"所有会话"状态列表和"标签"列表支持 macOS 右键菜单:状态项可"编辑状态…"或"创建状态…",标签项可"编辑标签…"或"创建标签…"。状态创建/编辑只面向显示名和图标;UID 是系统主键,创建时自动生成不重复的 `status_<uuid>`,编辑时只读展示、不可修改;排序和终态不暴露在弹窗中。状态图标使用常用 SF Symbol 菜单选择器。标签创建/编辑只面向显示名和颜色;UID 是系统主键,创建时自动生成不重复的 `label_<uuid>`。标签色彩选择使用 SwiftUI 原生 `ColorPicker("颜色", selection:..., supportsOpacity: false)`,保存时兼容旧命名色并可写入十六进制颜色。以上操作写入 `config/session-governance.json`,并立即刷新当前 AppViewModel、会话标签菜单、侧栏筛选计数和 automation governance mirror。当前底层会话状态仍由内置 `AgentSessionStatus` 枚举约束;因此自定义状态定义先作为治理配置维护能力落地,真正把任意自定义状态用于会话状态切换需要后续将 session status storage 从 enum 升级为 string-backed status ID。
 
