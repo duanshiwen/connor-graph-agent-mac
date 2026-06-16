@@ -134,8 +134,8 @@ public struct ConnorNativeSettingsPresentation: Codable, Sendable, Equatable {
             .init(id: "defaultPermissionMode", title: "Default permission mode", detail: "Read-only, ask-to-write, or allow-all guarded by Connor", isRequiredForCommercialReadiness: true),
             .init(id: "networkApproval", title: "Network approval", detail: "Require review for network actions")
         ]),
-        ConnorNativeSettingsSectionPresentation(id: "shortcuts", title: "Shortcuts", subtitle: "Command palette and navigation", systemImage: "command", fields: [
-            .init(id: "commandPalette", title: "Command palette", detail: "⌘K global command surface", isRequiredForCommercialReadiness: true)
+        ConnorNativeSettingsSectionPresentation(id: "shortcuts", title: "Shortcuts", subtitle: "Global and browser navigation", systemImage: "command", fields: [
+            .init(id: "keyboardShortcuts", title: "Keyboard shortcuts", detail: "Configurable global and browser shortcuts", isRequiredForCommercialReadiness: true)
         ]),
         ConnorNativeSettingsSectionPresentation(id: "preferences", title: "Preferences", subtitle: "User profile and locale", systemImage: "person.crop.circle", fields: [
             .init(id: "profile", title: "User profile", detail: "Name, timezone, city, and preference notes")

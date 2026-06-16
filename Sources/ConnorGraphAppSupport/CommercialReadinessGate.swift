@@ -108,7 +108,6 @@ public enum CommercialNativeUIReadiness: Codable, Sendable, Equatable {
         commandCount: Int,
         settingsPanelsReady: Bool,
         homeSurfaceReady: Bool = false,
-        commandPaletteReady: Bool = false,
         readinessDashboardLinked: Bool = false,
         primaryActionCount: Int = 0,
         emptyStateCount: Int = 0,
@@ -391,20 +390,18 @@ public struct CommercialReadinessGate: Sendable, Equatable {
             let commandCount,
             let settingsPanelsReady,
             let homeSurfaceReady,
-            let commandPaletteReady,
             let readinessDashboardLinked,
             let primaryActionCount,
             let emptyStateCount,
             let keyboardShortcutCount,
             let settingsSectionCount
         ):
-            let hasTrain5Evidence = homeSurfaceReady || commandPaletteReady || readinessDashboardLinked || primaryActionCount > 0 || emptyStateCount > 0 || keyboardShortcutCount > 0 || settingsSectionCount > 0
+            let hasTrain5Evidence = homeSurfaceReady || readinessDashboardLinked || primaryActionCount > 0 || emptyStateCount > 0 || keyboardShortcutCount > 0 || settingsSectionCount > 0
             let blockingReasons = hasTrain5Evidence ? [
                 shellItemCount > 0 ? nil : "Native shell has no navigation items",
-                commandCount > 0 ? nil : "Command palette has no commands",
+                commandCount > 0 ? nil : "Native shell has no commands",
                 settingsPanelsReady ? nil : "Settings panels are not ready",
                 homeSurfaceReady ? nil : "Default home surface is not available",
-                commandPaletteReady ? nil : "Command palette is not ready",
                 readinessDashboardLinked ? nil : "Commercial readiness dashboard is not linked",
                 primaryActionCount >= 4 ? nil : "Not enough primary native actions",
                 emptyStateCount >= 3 ? nil : "Not enough empty states for commercial UI",
@@ -420,7 +417,6 @@ public struct CommercialReadinessGate: Sendable, Equatable {
                     "commands": "\(commandCount)",
                     "settings": settingsPanelsReady ? "ready" : "partial",
                     "homeSurfaceReady": homeSurfaceReady ? "true" : "false",
-                    "commandPaletteReady": commandPaletteReady ? "true" : "false",
                     "readinessDashboardLinked": readinessDashboardLinked ? "true" : "false",
                     "primaryActions": "\(primaryActionCount)",
                     "emptyStates": "\(emptyStateCount)",

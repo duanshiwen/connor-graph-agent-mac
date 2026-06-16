@@ -14,6 +14,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
     public var promptProjectionMode: AgentPromptProjectionMode
     public var promptMaxEstimatedTokens: Int
     public var permissionMode: AgentPermissionMode
+    public var instructionAppendix: String
     public var budget: AgentBudgetConfiguration
 
     public init(
@@ -27,6 +28,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         promptProjectionMode: AgentPromptProjectionMode = .legacySingleUserMessage,
         promptMaxEstimatedTokens: Int = 8_000,
         permissionMode: AgentPermissionMode = .askToWrite,
+        instructionAppendix: String = "",
         budget: AgentBudgetConfiguration = AgentBudgetConfiguration()
     ) {
         self.maxToolIterations = maxToolIterations
@@ -39,6 +41,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         self.promptProjectionMode = promptProjectionMode
         self.promptMaxEstimatedTokens = promptMaxEstimatedTokens
         self.permissionMode = permissionMode
+        self.instructionAppendix = instructionAppendix
         self.budget = budget
     }
 
@@ -53,6 +56,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         case promptProjectionMode
         case promptMaxEstimatedTokens
         case permissionMode
+        case instructionAppendix
         case budget
     }
 
@@ -68,6 +72,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         self.promptProjectionMode = try container.decodeIfPresent(AgentPromptProjectionMode.self, forKey: .promptProjectionMode) ?? .legacySingleUserMessage
         self.promptMaxEstimatedTokens = try container.decodeIfPresent(Int.self, forKey: .promptMaxEstimatedTokens) ?? 8_000
         self.permissionMode = try container.decodeIfPresent(AgentPermissionMode.self, forKey: .permissionMode) ?? .askToWrite
+        self.instructionAppendix = try container.decodeIfPresent(String.self, forKey: .instructionAppendix) ?? ""
         self.budget = try container.decodeIfPresent(AgentBudgetConfiguration.self, forKey: .budget) ?? AgentBudgetConfiguration()
     }
 
@@ -83,6 +88,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         try container.encode(promptProjectionMode, forKey: .promptProjectionMode)
         try container.encode(promptMaxEstimatedTokens, forKey: .promptMaxEstimatedTokens)
         try container.encode(permissionMode, forKey: .permissionMode)
+        try container.encode(instructionAppendix, forKey: .instructionAppendix)
         try container.encode(budget, forKey: .budget)
     }
 }
@@ -599,6 +605,12 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
 
     private func buildPromptAssembly(for request: AgentChatRequest, memoryContract: AgentGraphMemoryContextContract?) async -> AgentPromptAssembly {
         var assembly = AgentPromptAssembler().assemble(request: request, memoryContract: memoryContract)
+        let appendix = configuration.instructionAppendix.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !appendix.isEmpty {
+            assembly.instruction.text = [assembly.instruction.text.trimmingCharacters(in: .whitespacesAndNewlines), appendix]
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n\n")
+        }
         let transformers: [any AgentContextTransformer] = [
             AgentPromptBudgetTransformer(maxEstimatedTokens: configuration.promptMaxEstimatedTokens),
             AgentPromptDedupeTransformer(),
@@ -635,7 +647,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 )
             },
             totalEstimatedTokenCount: diagnostics.totalEstimatedTokenCount,
-            appliedTransformers: diagnostics.appliedTransformers
+            appliedTransformers: diagnostics.appliedTransformers,
+            renderedPromptSnapshot: nil
         )
     }
 

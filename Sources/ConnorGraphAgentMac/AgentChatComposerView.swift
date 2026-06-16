@@ -114,8 +114,9 @@ struct AgentChatComposerView: View {
 
                     SafeChatComposerTextView(
                         text: localChatInputBinding,
-                        placeholder: "按 Shift + Return 换行",
+                        placeholder: viewModel.composerSendShortcut == "cmd-return" ? "按 ⌘ + Return 发送" : "按 Shift + Return 换行",
                         isSpellCheckEnabled: viewModel.spellCheckEnabled,
+                        sendShortcut: viewModel.composerSendShortcut,
                         onSubmit: submitLocalChatInput,
                         onImportFiles: { urls in Task { await viewModel.importAttachments(urls: urls) } }
                     )
@@ -765,6 +766,7 @@ struct SafeChatComposerTextView: NSViewRepresentable {
     @Binding var text: String
     var placeholder: String
     var isSpellCheckEnabled: Bool
+    var sendShortcut: String
     var onSubmit: () -> Void
     var onImportFiles: ([URL]) -> Void
 
@@ -780,6 +782,7 @@ struct SafeChatComposerTextView: NSViewRepresentable {
         textView.delegate = context.coordinator
         textView.onSubmit = onSubmit
         textView.onImportFiles = onImportFiles
+        textView.sendShortcut = sendShortcut
         textView.placeholderString = placeholder
         textView.isRichText = false
         textView.importsGraphics = false
@@ -816,6 +819,7 @@ struct SafeChatComposerTextView: NSViewRepresentable {
         guard let textView = scrollView.documentView as? SubmitAwareTextView else { return }
         textView.onSubmit = onSubmit
         textView.onImportFiles = onImportFiles
+        textView.sendShortcut = sendShortcut
         textView.placeholderString = placeholder
         textView.font = AgentChatTypography.composerNSFont
         if textView.string != text {
@@ -846,6 +850,7 @@ struct SafeChatComposerTextView: NSViewRepresentable {
 final class SubmitAwareTextView: NSTextView {
     var onSubmit: (() -> Void)?
     var onImportFiles: (([URL]) -> Void)?
+    var sendShortcut: String = "return"
     var placeholderString: String = "" {
         didSet { needsDisplay = true }
     }
@@ -858,7 +863,12 @@ final class SubmitAwareTextView: NSTextView {
         let flags = NSApp.currentEvent?.modifierFlags ?? []
         if flags.contains(.shift) || flags.contains(.option) {
             super.insertNewline(sender)
-        } else {
+            return
+        }
+        switch sendShortcut {
+        case "cmd-return":
+            flags.contains(.command) ? onSubmit?() : super.insertNewline(sender)
+        default:
             onSubmit?()
         }
     }

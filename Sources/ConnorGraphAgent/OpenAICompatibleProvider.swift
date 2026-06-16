@@ -4,17 +4,30 @@ import ConnorGraphSearch
 import FoundationNetworking
 #endif
 
+public enum OpenAICompatibleAPIKeyHeaderKind: String, Sendable, Equatable, Codable, CaseIterable {
+    case bearer
+    case apiKey = "api-key"
+}
+
 public struct OpenAICompatibleConfig: Sendable, Equatable {
     public var baseURL: URL
     public var apiKey: String
     public var model: String
     public var extraHeaders: [String: String]
+    public var apiKeyHeaderKind: OpenAICompatibleAPIKeyHeaderKind
 
-    public init(baseURL: URL, apiKey: String, model: String, extraHeaders: [String: String] = [:]) {
+    public init(
+        baseURL: URL,
+        apiKey: String,
+        model: String,
+        extraHeaders: [String: String] = [:],
+        apiKeyHeaderKind: OpenAICompatibleAPIKeyHeaderKind = .bearer
+    ) {
         self.baseURL = baseURL
         self.apiKey = apiKey
         self.model = model
         self.extraHeaders = extraHeaders
+        self.apiKeyHeaderKind = apiKeyHeaderKind
     }
 
     public var requestModel: String {
@@ -191,7 +204,12 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, Ag
 
     private func requestHeaders() -> [String: String] {
         var headers = config.extraHeaders
-        headers["Authorization"] = "Bearer \(config.apiKey)"
+        switch config.apiKeyHeaderKind {
+        case .bearer:
+            headers["Authorization"] = "Bearer \(config.apiKey)"
+        case .apiKey:
+            headers["api-key"] = config.apiKey
+        }
         headers["Content-Type"] = "application/json"
         return headers
     }

@@ -157,7 +157,7 @@ import ConnorGraphAppSupport
     let row = AgentChatMessagePresentation(message: message, turnNumber: 3, isLatestAssistantMessage: true, lastContext: nil)
 
     #expect(row.turnMetadataSummary == "第 3 轮 · 本轮提示词：摘要已包含 · 对话上下文 4 条 · 约 100 tokens · 安全")
-    #expect(row.promptSnapshotText == "Rendered prompt")
+    #expect(row.promptSnapshotText == nil)
     #expect(row.currentRequest == "What changed?")
 }
 
@@ -174,6 +174,35 @@ import ConnorGraphAppSupport
     #expect(pending.turnNumber == 2)
     #expect(pending.title == "助手正在思考…")
     #expect(pending.processingSummary == "正在准备图谱上下文和提示词…")
+}
+
+@Test func agentEventPresenterHidesRenderedPromptSnapshotFromDebugDetail() {
+    let presenter = AgentEventPresenter()
+    let event = AgentPromptAssembledEvent(
+        runID: "run-1",
+        sessionID: "session-1",
+        projectionMode: "legacySingleUserMessage",
+        sections: [
+            AgentPromptSectionSnapshot(
+                id: "instruction",
+                title: "Instruction",
+                role: "system",
+                characterCount: 42,
+                estimatedTokenCount: 10
+            )
+        ],
+        totalEstimatedTokenCount: 10,
+        appliedTransformers: ["diagnostics"],
+        renderedPromptSnapshot: "### SYSTEM\n## 用户基本信息\n- 称呼：段诗闻\n\n### USER\n用户询问姓名"
+    )
+
+    let row = presenter.presentation(for: .promptAssembled(event))
+
+    #expect(row.title == "Prompt assembled")
+    #expect(row.detail.contains("Projection: legacySingleUserMessage"))
+    #expect(!row.detail.contains("### Rendered prompt snapshot"))
+    #expect(!row.detail.contains("## 用户基本信息"))
+    #expect(!row.detail.contains("- 称呼：段诗闻"))
 }
 
 @Test func agentEventPresenterSummarizesToolAndPermissionTimelineEvents() {

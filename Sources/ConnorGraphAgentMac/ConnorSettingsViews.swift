@@ -7,6 +7,43 @@ import ConnorGraphAgent
 import ConnorGraphStore
 import ConnorGraphAppSupport
 
+private enum SettingsListTypography {
+    // Mirror the chat detail typography scale so settings feels like part of the
+    // same macOS app. Apple HIG recommends preserving hierarchy with size,
+    // weight, and color while keeping macOS body text legible around 13 pt+.
+    static let header: Font = AgentChatTypography.title
+    static let rowTitle: Font = AgentChatTypography.body
+    static let rowTitleSelected: Font = AgentChatTypography.bodyEmphasis
+    static let rowSubtitle: Font = AgentChatTypography.meta
+    static let rowCaption: Font = AgentChatTypography.micro
+    static let rowCaptionEmphasized: Font = AgentChatTypography.microEmphasis
+    static let actionTitle: Font = AgentChatTypography.callout
+    static let icon: Font = .system(size: AgentChatTypography.controlIconSize, weight: .medium)
+    static let largeIcon: Font = .system(size: 22, weight: .semibold)
+}
+
+private enum SettingsListLayout {
+    static let spaceXS = AgentChatLayout.spaceXS
+    static let spaceS = AgentChatLayout.spaceS
+    static let spaceM = AgentChatLayout.spaceM
+    static let spaceL = AgentChatLayout.spaceL
+    static let spaceXL = AgentChatLayout.spaceXL
+
+    static let radiusS = AgentChatLayout.radiusS
+    static let radiusM = AgentChatLayout.radiusM
+    static let radiusL = AgentChatLayout.radiusL
+    static let hairlineOpacity = AgentChatLayout.hairlineOpacity
+
+    static let contentMaxWidth = AgentChatLayout.chatContentMaxWidth
+    static let formMaxWidth: CGFloat = 560
+    static let rowMinHeight = AgentChatLayout.hitTargetSize
+    static let compactRowMinHeight: CGFloat = 38
+    static let prominentRowMinHeight: CGFloat = 58
+    static let fieldHeight = AgentChatLayout.hitTargetSize
+    static let iconButtonSize = AgentChatLayout.iconButtonSize
+    static let optionIconSize = AgentChatLayout.primaryButtonSize
+}
+
 struct LLMSettingsView: View {
     @ObservedObject var viewModel: AppViewModel
 
@@ -29,12 +66,12 @@ struct LLMSettingsView: View {
                             .textFieldStyle(.roundedBorder)
                         Picker("康纳同学权限模式", selection: $viewModel.sidecarPermissionMode) {
                             Text("只读").tag(AgentPermissionMode.readOnly)
-                            Text("写入需审批").tag(AgentPermissionMode.askToWrite)
-                            Text("受信写入").tag(AgentPermissionMode.trustedWrite)
+                            Text("询问").tag(AgentPermissionMode.askToWrite)
+                            Text("执行").tag(AgentPermissionMode.trustedWrite)
                         }
                         .pickerStyle(.segmented)
                         Text("安全边界：SDK permissionMode 固定为 bypassPermissions；康纳同学保留 session、pending approval、audit、graph memory 和 product state 主权。Sidecar 模式不允许 allowAll。")
-                            .font(.caption)
+                            .font(SettingsListTypography.rowCaption)
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -63,12 +100,12 @@ struct LLMSettingsView: View {
             GroupBox {
                 VStack(alignment: .leading, spacing: 6) {
                     Label("安全提示：API Key 会保存到康纳同学 Home 的本地加密凭据文件", systemImage: "lock.shield")
-                        .font(.caption.weight(.semibold))
+                        .font(SettingsListTypography.rowCaptionEmphasized)
                     Text("为减少钥匙串弹窗，康纳同学会使用本机生成的 master key 对 API Key 进行 AES-GCM 加密，并写入 Application Support/Connor/config/credentials。")
                     Text("API Key 不会以明文写入应用设置、项目文件或 Git 仓库；删除 API Key 会移除对应加密凭据文件。")
                     Text("这是本机本地加密存储，不依赖 macOS 钥匙串授权弹窗。")
                 }
-                .font(.caption)
+                .font(SettingsListTypography.rowCaption)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -96,7 +133,7 @@ struct ConnorSettingsDetailView: View {
             VStack(alignment: .leading, spacing: 24) {
                 HStack(alignment: .center) {
                     Text(viewModel.selectedSettingsSection.title)
-                        .font(.headline)
+                        .font(SettingsListTypography.header)
                         .frame(maxWidth: .infinity, alignment: .center)
                     Button(action: { viewModel.resetRuntimeSettings() }) {
                         Image(systemName: "ellipsis")
@@ -111,10 +148,6 @@ struct ConnorSettingsDetailView: View {
                         SettingsAppSection(viewModel: viewModel)
                     case .ai:
                         SettingsAISection(viewModel: viewModel)
-                    case .appearance:
-                        SettingsAppearanceSection(viewModel: viewModel)
-                    case .input:
-                        SettingsInputSection(viewModel: viewModel)
                     case .permissions:
                         SettingsPermissionsSection(viewModel: viewModel)
                     case .labels:
@@ -122,7 +155,7 @@ struct ConnorSettingsDetailView: View {
                     case .statuses:
                         SettingsStatusesSection(viewModel: viewModel)
                     case .shortcuts:
-                        SettingsShortcutsSection()
+                        SettingsShortcutsSection(viewModel: viewModel)
                     case .preferences:
                         SettingsPreferencesSection(viewModel: viewModel)
                     }
@@ -132,14 +165,14 @@ struct ConnorSettingsDetailView: View {
 
                 if let message = viewModel.appSettingsMessage {
                     Text(message)
-                        .font(.caption)
+                        .font(SettingsListTypography.rowCaption)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: 760, alignment: .leading)
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
                 if let error = viewModel.errorMessage {
                     Text(error)
-                        .font(.caption)
+                        .font(SettingsListTypography.rowCaption)
                         .foregroundStyle(.red)
                         .textSelection(.enabled)
                         .frame(maxWidth: 760, alignment: .leading)
@@ -167,8 +200,8 @@ private struct SettingsAppSection: View {
             SettingsGroup(title: "电源") {
                 SettingsToggleRow(title: "保持屏幕常亮", subtitle: "会话运行时防止屏幕关闭。", isOn: $viewModel.keepScreenAwake)
             }
-            SettingsGroup(title: "工具") {
-                SettingsToggleRow(title: "内置浏览器", subtitle: "如果使用外部浏览器工具，则禁用。", isOn: $viewModel.internalBrowserEnabled)
+            SettingsGroup(title: "页面显示主题") {
+                SettingsAppearanceModeRow(selection: $viewModel.appearanceMode)
             }
             SettingsGroup(title: "网络") {
                 SettingsToggleRow(title: "HTTP 代理", subtitle: "通过代理服务器路由网络流量。", isOn: $viewModel.httpProxyEnabled)
@@ -185,9 +218,8 @@ private struct SettingsAppSection: View {
                     Spacer()
                     Button("立即检查") { viewModel.appSettingsMessage = "当前为本地开发版本。" }
                 }
-                .font(.subheadline)
+                .font(SettingsListTypography.rowTitle)
             }
-            SettingsSaveBar(viewModel: viewModel)
         }
     }
 }
@@ -222,12 +254,12 @@ private struct SettingsAISection: View {
     }
 
     private var connectionList: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceXL) {
+            VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
                 Text("连接")
-                    .font(.largeTitle.weight(.semibold))
+                    .font(SettingsListTypography.header)
                 Text("管理 AI 提供商连接。")
-                    .font(.title3)
+                    .font(SettingsListTypography.rowSubtitle)
                     .foregroundStyle(.secondary)
             }
 
@@ -250,21 +282,21 @@ private struct SettingsAISection: View {
                     }
                 }
             }
-            .padding(.horizontal, 30)
-            .padding(.vertical, 14)
-            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .padding(.horizontal, SettingsListLayout.spaceL)
+            .padding(.vertical, SettingsListLayout.spaceS)
+            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(Color.secondary.opacity(0.14), lineWidth: 1)
+                RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous)
+                    .stroke(Color.secondary.opacity(SettingsListLayout.hairlineOpacity), lineWidth: 1)
             )
             .shadow(color: Color.black.opacity(0.04), radius: 2, x: 0, y: 1)
 
             Button(action: { isShowingAddConnectionGuide = true }) {
                 Label("添加连接", systemImage: "plus")
-                    .font(.title3)
+                    .font(SettingsListTypography.actionTitle)
                     .labelStyle(.titleAndIcon)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
+                    .padding(.horizontal, SettingsListLayout.spaceM)
+                    .padding(.vertical, SettingsListLayout.spaceXS)
             }
             .buttonStyle(.bordered)
             .controlSize(.large)
@@ -305,10 +337,25 @@ private struct AIConnectionProviderPreset: Identifiable, Equatable {
     var title: String
     var endpoint: String
     var defaultModel: String
+    var supportedModels: [String] = []
     var keyPlaceholder: String
     var protocolKind: AIConnectionCustomProtocol
     var authHeaderKind: AnthropicCompatibleAuthHeaderKind = .xAPIKey
+    var openAIAPIKeyHeaderKind: OpenAICompatibleAPIKeyHeaderKind = .bearer
     var hidesEndpoint: Bool = false
+
+    var availableModels: [String] {
+        if !supportedModels.isEmpty { return supportedModels }
+        return defaultModel.isEmpty ? [] : [defaultModel]
+    }
+
+    static let chinaProviderPresetIDs: Set<String> = [
+        "qwen", "doubao", "moonshot", "zhipu", "minimax", "stepfun"
+    ]
+
+    static var chinaProviderPresets: [AIConnectionProviderPreset] {
+        otherProviderPresets.filter { chinaProviderPresetIDs.contains($0.id) }
+    }
 
     static let otherProviderPresets: [AIConnectionProviderPreset] = [
         AIConnectionProviderPreset(id: "openai", title: "OpenAI", endpoint: "https://api.openai.com/v1", defaultModel: "gpt-4o-mini", keyPlaceholder: "sk-...", protocolKind: .openAICompatible, hidesEndpoint: true),
@@ -318,7 +365,14 @@ private struct AIConnectionProviderPreset: Identifiable, Equatable {
         AIConnectionProviderPreset(id: "openrouter", title: "OpenRouter", endpoint: "https://openrouter.ai/api/v1", defaultModel: "openai/gpt-4o-mini", keyPlaceholder: "sk-or-...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "groq", title: "Groq", endpoint: "https://api.groq.com/openai/v1", defaultModel: "llama-3.3-70b-versatile", keyPlaceholder: "gsk_...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "mistral", title: "Mistral", endpoint: "https://api.mistral.ai/v1", defaultModel: "mistral-large-latest", keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
-        AIConnectionProviderPreset(id: "deepseek", title: "DeepSeek", endpoint: "https://api.deepseek.com", defaultModel: "deepseek-chat", keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "deepseek", title: "DeepSeek", endpoint: "https://api.deepseek.com", defaultModel: "deepseek-v4-flash", supportedModels: ["deepseek-v4-flash", "deepseek-v4-pro"], keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "xiaomi-mimo", title: "Xiaomi MiMo", endpoint: "https://api.xiaomimimo.com/v1", defaultModel: "mimo-v2.5-pro", supportedModels: ["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-omni", "mimo-v2-flash"], keyPlaceholder: "MIMO_API_KEY", protocolKind: .openAICompatible, openAIAPIKeyHeaderKind: .apiKey),
+        AIConnectionProviderPreset(id: "qwen", title: "阿里百炼 · Qwen", endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1", defaultModel: "qwen-plus", supportedModels: ["qwen-plus", "qwen-max", "qwen-turbo", "qwen-long", "qwen3-coder-plus"], keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "doubao", title: "火山方舟 · 豆包", endpoint: "https://ark.cn-beijing.volces.com/api/v3", defaultModel: "doubao-seed-1-6", supportedModels: ["doubao-seed-1-6", "doubao-seed-1-6-thinking", "doubao-seed-1-6-flash", "doubao-1-5-pro-32k"], keyPlaceholder: "Paste your ARK_API_KEY...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "moonshot", title: "Moonshot · Kimi", endpoint: "https://api.moonshot.cn/v1", defaultModel: "kimi-k2-0711-preview", supportedModels: ["kimi-k2-0711-preview", "kimi-latest", "moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"], keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "zhipu", title: "智谱 GLM", endpoint: "https://open.bigmodel.cn/api/paas/v4", defaultModel: "glm-4.5", supportedModels: ["glm-4.5", "glm-4.5-air", "glm-4-plus", "glm-4-flash"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "minimax", title: "MiniMax", endpoint: "https://api.minimax.chat/v1", defaultModel: "MiniMax-M1", supportedModels: ["MiniMax-M1", "abab6.5s-chat", "abab6.5g-chat", "abab6.5t-chat"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "stepfun", title: "阶跃星辰 StepFun", endpoint: "https://api.stepfun.com/v1", defaultModel: "step-2-mini", supportedModels: ["step-2-mini", "step-2-16k", "step-1-8k", "step-1-32k", "step-1-128k"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "xai", title: "xAI (Grok)", endpoint: "https://api.x.ai/v1", defaultModel: "grok-3-mini", keyPlaceholder: "xai-...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "cerebras", title: "Cerebras", endpoint: "https://api.cerebras.ai/v1", defaultModel: "llama3.1-8b", keyPlaceholder: "csk-...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "zai", title: "z.ai (GLM)", endpoint: "https://api.z.ai/api/paas/v4", defaultModel: "glm-4.5", keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
@@ -341,6 +395,7 @@ private struct AIConnectionOnboardingOption: Identifiable, Equatable {
     var baseURLString: String
     var model: String
     var selectedModel: String
+    var supportedModels: [String] = []
     var setupTitle: String
     var setupSubtitle: String
     var setupInstruction: String
@@ -349,6 +404,13 @@ private struct AIConnectionOnboardingOption: Identifiable, Equatable {
     var authenticationKind: AIConnectionAuthenticationKind
 
     var requiresWebAuthentication: Bool { authenticationKind != .direct }
+
+    var modelOptionsFallback: [String] {
+        if !supportedModels.isEmpty { return supportedModels }
+        let parsed = model.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        if !parsed.isEmpty { return parsed }
+        return selectedModel.isEmpty ? [] : [selectedModel]
+    }
 
     static let all: [AIConnectionOnboardingOption] = [
         AIConnectionOnboardingOption(
@@ -404,6 +466,62 @@ private struct AIConnectionOnboardingOption: Identifiable, Equatable {
             loginButtonTitle: "打开 GitHub 授权页",
             authURLString: "https://github.com/login/device",
             authenticationKind: .deviceCode(code: "B3D1-87D5", verificationURL: "https://github.com/login/device")
+        ),
+        AIConnectionOnboardingOption(
+            id: "deepseek",
+            title: "DeepSeek",
+            subtitle: "使用 DeepSeek API，适合国内开发、Agent 和高性价比推理。",
+            systemImage: "bolt.horizontal.circle",
+            tint: .blue,
+            providerMode: .openAICompatible,
+            connectionName: "DeepSeek",
+            baseURLString: "https://api.deepseek.com",
+            model: "deepseek-v4-flash",
+            selectedModel: "deepseek-v4-flash",
+            supportedModels: ["deepseek-v4-flash", "deepseek-v4-pro"],
+            setupTitle: "连接 DeepSeek",
+            setupSubtitle: "使用 DeepSeek OpenAI Compatible API 驱动康纳同学。",
+            setupInstruction: "选择 DeepSeek 模型并填写 API Key。Endpoint 已按官方文档预设。",
+            loginButtonTitle: "继续",
+            authURLString: "",
+            authenticationKind: .direct
+        ),
+        AIConnectionOnboardingOption(
+            id: "xiaomi-mimo",
+            title: "Xiaomi MiMo",
+            subtitle: "使用小米 MiMo API，专为 Agent 与软件工程模型场景准备。",
+            systemImage: "sparkle.magnifyingglass",
+            tint: .orange,
+            providerMode: .openAICompatible,
+            connectionName: "Xiaomi MiMo",
+            baseURLString: "https://api.xiaomimimo.com/v1",
+            model: "mimo-v2.5-pro",
+            selectedModel: "mimo-v2.5-pro",
+            supportedModels: ["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-omni", "mimo-v2-flash"],
+            setupTitle: "连接 Xiaomi MiMo",
+            setupSubtitle: "使用小米 MiMo OpenAI Compatible API 驱动康纳同学。",
+            setupInstruction: "选择 MiMo 文本生成模型并填写 API Key。Endpoint 与 api-key 请求头已按官方文档预设。",
+            loginButtonTitle: "继续",
+            authURLString: "",
+            authenticationKind: .direct
+        ),
+        AIConnectionOnboardingOption(
+            id: "china-provider",
+            title: "中国常用模型",
+            subtitle: "接入 Qwen、豆包、Kimi、GLM、MiniMax、阶跃等国内常用 API。",
+            systemImage: "globe.asia.australia",
+            tint: .red,
+            providerMode: .openAICompatible,
+            connectionName: "阿里百炼 · Qwen",
+            baseURLString: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            model: "qwen-plus",
+            selectedModel: "qwen-plus",
+            setupTitle: "连接中国常用模型",
+            setupSubtitle: "从国内常用模型 API 中选择一个兼容服务。",
+            setupInstruction: "选择服务商和模型并填写 API Key。Endpoint 已按常用 OpenAI Compatible 地址预设。",
+            loginButtonTitle: "继续",
+            authURLString: "",
+            authenticationKind: .direct
         ),
         AIConnectionOnboardingOption(
             id: "other-provider",
@@ -462,6 +580,7 @@ private struct AIConnectionSetupView: View {
     @State private var baseURLString = ""
     @State private var model = ""
     @State private var selectedModel = ""
+    @State private var selectedModelIDs: Set<String> = []
     @State private var apiKey = ""
     @State private var showAPIKey = false
     @State private var selectedProviderPresetID = "openai"
@@ -473,41 +592,41 @@ private struct AIConnectionSetupView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Spacer(minLength: 180)
+            Spacer(minLength: 72)
 
-            VStack(spacing: 32) {
-                VStack(spacing: 14) {
+            VStack(spacing: SettingsListLayout.spaceXL) {
+                VStack(spacing: SettingsListLayout.spaceS) {
                     Text(option.setupTitle)
-                        .font(.largeTitle.weight(.semibold))
+                        .font(SettingsListTypography.header)
                     Text(option.setupSubtitle)
-                        .font(.title2)
+                        .font(SettingsListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                 }
 
                 setupContent
-                    .frame(maxWidth: 560)
+                    .frame(maxWidth: SettingsListLayout.formMaxWidth)
 
                 if let statusMessage {
                     Text(statusMessage)
-                        .font(.title3)
+                        .font(SettingsListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
-                        .frame(maxWidth: 560)
+                        .frame(maxWidth: SettingsListLayout.formMaxWidth)
                 }
 
                 if let errorMessage {
                     Text(errorMessage)
-                        .font(.title3)
+                        .font(SettingsListTypography.rowSubtitle)
                         .foregroundStyle(.red)
                         .multilineTextAlignment(.center)
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 14)
-                        .frame(maxWidth: 560)
-                        .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .padding(.horizontal, SettingsListLayout.spaceL)
+                        .padding(.vertical, SettingsListLayout.spaceM)
+                        .frame(maxWidth: SettingsListLayout.formMaxWidth)
+                        .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous))
                 }
 
-                HStack(spacing: 14) {
+                HStack(spacing: SettingsListLayout.spaceL) {
                     Button(action: back) {
                         Text("返回")
                             .frame(maxWidth: .infinity)
@@ -523,10 +642,10 @@ private struct AIConnectionSetupView: View {
                     .controlSize(.large)
                     .disabled(isPrimaryButtonDisabled || isAuthenticating)
                 }
-                .frame(maxWidth: 560)
+                .frame(maxWidth: SettingsListLayout.formMaxWidth)
             }
 
-            Spacer(minLength: 220)
+            Spacer(minLength: 96)
         }
         .frame(maxWidth: .infinity)
         .frame(minHeight: 760)
@@ -543,7 +662,7 @@ private struct AIConnectionSetupView: View {
                         .font(.system(size: 34, weight: .semibold))
                         .foregroundStyle(option.tint)
                     Text(option.setupInstruction)
-                        .font(.title3)
+                        .font(SettingsListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
@@ -562,13 +681,13 @@ private struct AIConnectionSetupView: View {
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("授权码")
-                        .font(.headline)
+                        .font(SettingsListTypography.header)
                     TextField("粘贴 Claude 页面显示的授权码", text: $authorizationCode)
                         .textFieldStyle(.roundedBorder)
-                        .font(.title3)
+                        .font(SettingsListTypography.rowTitle)
                         .textContentType(.oneTimeCode)
                     Text("授权码只用于完成本次连接。康纳同学会先验证，再保存连接。")
-                        .font(.subheadline)
+                        .font(SettingsListTypography.rowTitle)
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -580,7 +699,7 @@ private struct AIConnectionSetupView: View {
                         .font(.system(size: 34, weight: .semibold))
                         .foregroundStyle(option.tint)
                     Text(option.setupInstruction)
-                        .font(.title3)
+                        .font(SettingsListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
@@ -592,7 +711,7 @@ private struct AIConnectionSetupView: View {
 
                 if didOpenBrowser {
                     Text("浏览器已打开。完成网页认证后，康纳同学会自动验证并保存连接。")
-                        .font(.headline)
+                        .font(SettingsListTypography.header)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 18)
                         .padding(.vertical, 14)
@@ -603,10 +722,14 @@ private struct AIConnectionSetupView: View {
         case .deviceCode:
             VStack(spacing: 24) {
                 Text(option.setupInstruction)
-                    .font(.title3)
+                    .font(SettingsListTypography.rowSubtitle)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                openAICompatibleFields(includeAPIKey: false)
+                if option.id == "github-copilot" {
+                    githubCopilotAutomaticConfigurationSummary
+                } else {
+                    openAICompatibleFields(includeAPIKey: false)
+                }
                 if let githubDeviceCode {
                     Text(githubDeviceCode.userCode)
                         .font(.system(size: 38, weight: .bold, design: .monospaced))
@@ -620,21 +743,25 @@ private struct AIConnectionSetupView: View {
                         )
                         .textSelection(.enabled)
                     Text(didOpenBrowser ? "浏览器已打开 \(displayURL(githubDeviceCode.verificationURI))" : "点击下方按钮打开 \(displayURL(githubDeviceCode.verificationURI))")
-                        .font(.title3)
+                        .font(SettingsListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
                 } else {
                     Text("点击下方按钮获取 GitHub 授权码。")
-                        .font(.title3)
+                        .font(SettingsListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
                 }
             }
         case .direct:
-            if option.id == "other-provider" {
+            if option.id == "china-provider" {
+                curatedChinaProviderAPIFields
+            } else if option.id == "deepseek" || option.id == "xiaomi-mimo" {
+                curatedSingleProviderAPIFields
+            } else if option.id == "other-provider" {
                 otherProviderAPIFields
             } else {
                 VStack(spacing: 16) {
                     Text(option.setupInstruction)
-                        .font(.title3)
+                        .font(SettingsListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                     openAICompatibleFields(includeAPIKey: true)
@@ -643,75 +770,123 @@ private struct AIConnectionSetupView: View {
         }
     }
 
-    private var otherProviderAPIFields: some View {
+    private var githubCopilotAutomaticConfigurationSummary: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark.seal")
+                    .foregroundStyle(option.tint)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("自动配置 GitHub Copilot")
+                        .font(SettingsListTypography.header)
+                    Text("授权成功后，康纳同学会使用 Copilot token 中的 proxy endpoint 自动选择正确 API 地址，不需要手动填写 Base URL 或 API Key。")
+                        .font(SettingsListTypography.rowTitle)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Divider()
+            HStack {
+                Text("连接名称")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(connectionName)
+            }
+            HStack {
+                Text("Endpoint")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("由 Copilot 授权自动派生")
+                    .foregroundStyle(.secondary)
+            }
+            HStack {
+                Text("默认模型")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(selectedModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? model : selectedModel)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+        )
+    }
+
+    private var curatedSingleProviderAPIFields: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text(option.setupInstruction)
-                .font(.title3)
+                .font(SettingsListTypography.rowSubtitle)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+
+            modelMultiSelect(title: "启用模型", models: option.supportedModels.isEmpty ? [option.selectedModel] : option.supportedModels)
+            apiKeyField(placeholder: option.id == "xiaomi-mimo" ? "MIMO_API_KEY" : "sk-...")
+        }
+    }
+
+    private var curatedChinaProviderAPIFields: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text(option.setupInstruction)
+                .font(SettingsListTypography.rowSubtitle)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("API Key")
-                    .font(.headline)
-                HStack(spacing: 8) {
-                    Group {
-                        if showAPIKey {
-                            TextField(activeProviderPreset.keyPlaceholder, text: $apiKey)
-                        } else {
-                            SecureField(activeProviderPreset.keyPlaceholder, text: $apiKey)
-                        }
+                Text("服务商")
+                    .font(SettingsListTypography.header)
+                Picker("服务商", selection: $selectedProviderPresetID) {
+                    ForEach(chinaProviderPresets) { preset in
+                        Text(preset.title).tag(preset.id)
                     }
-                    .textFieldStyle(.plain)
-                    .font(.title3)
-                    Button(action: { showAPIKey.toggle() }) {
-                        Image(systemName: showAPIKey ? "eye.slash" : "eye")
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .help(showAPIKey ? "隐藏 API Key" : "显示 API Key")
                 }
-                .padding(.horizontal, 14)
-                .frame(height: 48)
-                .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
-                )
+                .pickerStyle(.menu)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .onChange(of: selectedProviderPresetID) { _, _ in applySelectedProviderPreset() }
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Endpoint")
-                        .font(.headline)
-                    Spacer()
-                    Picker("服务商", selection: $selectedProviderPresetID) {
-                        ForEach(AIConnectionProviderPreset.otherProviderPresets) { preset in
-                            Text(preset.title).tag(preset.id)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(maxWidth: 220)
-                    .onChange(of: selectedProviderPresetID) { _, _ in applySelectedProviderPreset() }
-                }
+            modelMultiSelect(title: "启用模型", models: activeProviderPreset.availableModels)
+            apiKeyField(placeholder: activeProviderPreset.keyPlaceholder)
+        }
+    }
 
-                if !activeProviderPreset.hidesEndpoint {
-                    TextField("https://your-api-endpoint.com", text: $baseURLString)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.title3)
-                } else {
-                    Text(activeProviderPreset.endpoint)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+    private var otherProviderAPIFields: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text(option.setupInstruction)
+                .font(SettingsListTypography.rowSubtitle)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+
+            apiKeyField(placeholder: activeProviderPreset.keyPlaceholder)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("服务商")
+                    .font(SettingsListTypography.header)
+                Picker("服务商", selection: $selectedProviderPresetID) {
+                    ForEach(AIConnectionProviderPreset.otherProviderPresets) { preset in
+                        Text(preset.title).tag(preset.id)
+                    }
                 }
+                .pickerStyle(.menu)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .onChange(of: selectedProviderPresetID) { _, _ in applySelectedProviderPreset() }
             }
 
             if selectedProviderPresetID == "custom" {
                 VStack(alignment: .leading, spacing: 8) {
+                    Text("Endpoint")
+                        .font(SettingsListTypography.header)
+                    TextField("https://your-api-endpoint.com", text: $baseURLString)
+                        .textFieldStyle(.roundedBorder)
+                        .font(SettingsListTypography.rowTitle)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
                     Text("Protocol")
-                        .font(.headline)
+                        .font(SettingsListTypography.header)
                     Picker("Protocol", selection: $customProtocol) {
                         ForEach(AIConnectionCustomProtocol.allCases, id: \.self) { protocolKind in
                             Text(protocolKind.title).tag(protocolKind)
@@ -719,27 +894,118 @@ private struct AIConnectionSetupView: View {
                     }
                     .pickerStyle(.segmented)
                     Text(customProtocol == .anthropicCompatible ? "Anthropic Compatible 使用 /v1/messages 协议，适合 Anthropic API、OpenRouter Anthropic Skin、Vercel AI Gateway 等兼容服务。" : "大多数第三方接口（Ollama、vLLM、DashScope 等）使用 OpenAI Compatible。")
-                        .font(.subheadline)
+                        .font(SettingsListTypography.rowTitle)
                         .foregroundStyle(.secondary)
                 }
             }
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("Default Model · required")
-                    .font(.headline)
-                TextField("例如 gpt-4o-mini、deepseek-chat、google/gemini-2.5-flash", text: $model)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.title3)
+                    .font(SettingsListTypography.header)
+                if selectedProviderPresetID != "custom" && !activeProviderPreset.supportedModels.isEmpty {
+                    modelMultiSelect(title: "", models: activeProviderPreset.availableModels)
+                } else {
+                    TextField("例如 gpt-4o-mini、deepseek-v4-flash、google/gemini-2.5-flash", text: $model)
+                        .textFieldStyle(.roundedBorder)
+                        .font(SettingsListTypography.rowTitle)
+                }
                 Text("使用服务商自己的模型 ID。当前 Connor 会用该模型执行一次真实连接校验。")
-                    .font(.subheadline)
+                    .font(SettingsListTypography.rowTitle)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    private func apiKeyField(placeholder: String) -> some View {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceS) {
+            Text("API Key")
+                .font(SettingsListTypography.header)
+            HStack(spacing: SettingsListLayout.spaceS) {
+                Group {
+                    if showAPIKey {
+                        TextField(placeholder, text: $apiKey)
+                    } else {
+                        SecureField(placeholder, text: $apiKey)
+                    }
+                }
+                .textFieldStyle(.plain)
+                .font(SettingsListTypography.rowTitle)
+                Button(action: { showAPIKey.toggle() }) {
+                    Image(systemName: showAPIKey ? "eye.slash" : "eye")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help(showAPIKey ? "隐藏 API Key" : "显示 API Key")
+            }
+            .padding(.horizontal, SettingsListLayout.spaceL)
+            .frame(height: SettingsListLayout.fieldHeight)
+            .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+            )
+        }
+    }
+
+    private func modelMultiSelect(title: String, models: [String]) -> some View {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceM) {
+            if !title.isEmpty {
+                Text(title)
+                    .font(SettingsListTypography.header)
+            }
+            VStack(alignment: .leading, spacing: SettingsListLayout.spaceS) {
+                ForEach(models, id: \.self) { modelID in
+                    Toggle(isOn: Binding(
+                        get: { selectedModelIDs.contains(modelID) },
+                        set: { isOn in updateSelectedModels(modelID: modelID, isSelected: isOn, availableModels: models) }
+                    )) {
+                        HStack {
+                            Text(modelID)
+                            Spacer()
+                            if selectedModel == modelID {
+                                Text("默认")
+                                    .font(SettingsListTypography.rowCaptionEmphasized)
+                                    .foregroundStyle(option.tint)
+                            }
+                        }
+                    }
+                    .toggleStyle(.checkbox)
+                }
+            }
+            .padding(.horizontal, SettingsListLayout.spaceL)
+            .padding(.vertical, SettingsListLayout.spaceM)
+            .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous))
+
+            HStack {
+                Text("默认模型")
+                    .font(SettingsListTypography.rowTitle)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Picker("默认模型", selection: $selectedModel) {
+                    ForEach(enabledModels(in: models), id: \.self) { modelID in
+                        Text(modelID).tag(modelID)
+                    }
+                }
+                .labelsHidden()
+                .frame(maxWidth: 260)
+                .onChange(of: selectedModel) { _, newValue in
+                    if !selectedModelIDs.contains(newValue) { selectedModelIDs.insert(newValue) }
+                    syncModelListFromSelection(fallbackModels: models)
+                }
+            }
+            Text("可启用多个模型；默认模型用于首次 health check 和新会话默认选择。")
+                .font(SettingsListTypography.rowTitle)
+                .foregroundStyle(.secondary)
         }
     }
 
     private var activeProviderPreset: AIConnectionProviderPreset {
         AIConnectionProviderPreset.otherProviderPresets.first { $0.id == selectedProviderPresetID }
             ?? AIConnectionProviderPreset.otherProviderPresets[0]
+    }
+
+    private var chinaProviderPresets: [AIConnectionProviderPreset] {
+        AIConnectionProviderPreset.chinaProviderPresets
     }
 
     private func openAICompatibleFields(includeAPIKey: Bool) -> some View {
@@ -792,15 +1058,10 @@ private struct AIConnectionSetupView: View {
         case .authorizationCode:
             return authorizationCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .direct:
-            if option.id == "other-provider" {
-                return connectionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    || baseURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    || model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    || (apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isLoopbackEndpoint(baseURLString))
-            }
             return connectionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || baseURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || effectiveModelListForSubmit().isEmpty
+                || (apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isLoopbackEndpoint(baseURLString))
         default:
             return false
         }
@@ -921,7 +1182,7 @@ private struct AIConnectionSetupView: View {
                     id: stableConnectionID,
                     kind: .githubCopilot,
                     name: connectionName,
-                    baseURLString: baseURLString,
+                    baseURLString: "",
                     model: model,
                     selectedModel: selectedModel,
                     apiKey: tokens.accessToken,
@@ -948,16 +1209,20 @@ private struct AIConnectionSetupView: View {
         errorMessage = nil
         Task {
             do {
-                let connectionKind: AppLLMConnectionKind = option.id == "other-provider" && customProtocol == .anthropicCompatible ? .anthropicCompatible : .openAICompatible
+                let usesProviderPreset = option.id == "other-provider" || option.id == "china-provider"
+                let connectionKind: AppLLMConnectionKind = usesProviderPreset && customProtocol == .anthropicCompatible ? .anthropicCompatible : .openAICompatible
+                let submittedModelList = effectiveModelListForSubmit()
+                let submittedSelectedModel = selectedModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? submittedModelList : selectedModel
                 let input = AppLLMConnectionSetupInput(
                     id: nil,
                     kind: connectionKind,
                     name: connectionName,
                     baseURLString: baseURLString,
-                    model: model,
-                    selectedModel: selectedModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? model : selectedModel,
+                    model: submittedModelList,
+                    selectedModel: submittedSelectedModel,
                     apiKey: apiKey,
-                    anthropicAuthHeaderKind: activeProviderPreset.authHeaderKind
+                    anthropicAuthHeaderKind: activeProviderPreset.authHeaderKind,
+                    openAIAPIKeyHeaderKind: openAIAPIKeyHeaderKindForCurrentDraft()
                 )
                 _ = try await viewModel.setupLLMConnection(input)
                 await MainActor.run {
@@ -977,11 +1242,17 @@ private struct AIConnectionSetupView: View {
     private func initializeDrafts() {
         guard connectionName.isEmpty else { return }
         connectionName = option.connectionName
-        baseURLString = option.baseURLString.isEmpty && option.id == "github-copilot" ? "https://api.githubcopilot.com" : option.baseURLString
+        baseURLString = option.baseURLString
         model = option.model
         selectedModel = option.selectedModel
+        selectedModelIDs = Set(option.modelOptionsFallback)
+        if selectedModelIDs.isEmpty, !selectedModel.isEmpty { selectedModelIDs = [selectedModel] }
         if option.id == "other-provider" {
             selectedProviderPresetID = "openai"
+            applySelectedProviderPreset()
+        }
+        if option.id == "china-provider" {
+            selectedProviderPresetID = "qwen"
             applySelectedProviderPreset()
         }
         if option.id == "claude-pro-max" {
@@ -996,16 +1267,72 @@ private struct AIConnectionSetupView: View {
         if preset.id != "custom" {
             connectionName = preset.title
             baseURLString = preset.endpoint
-            model = preset.defaultModel
+            model = preset.availableModels.joined(separator: ",")
             selectedModel = preset.defaultModel
+            selectedModelIDs = Set(preset.availableModels)
             customProtocol = preset.protocolKind
         } else {
             connectionName = option.connectionName
             baseURLString = ""
             model = ""
             selectedModel = ""
+            selectedModelIDs = []
             customProtocol = .openAICompatible
         }
+    }
+
+    private func updateSelectedModels(modelID: String, isSelected: Bool, availableModels: [String]) {
+        if isSelected {
+            selectedModelIDs.insert(modelID)
+            if selectedModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { selectedModel = modelID }
+        } else {
+            selectedModelIDs.remove(modelID)
+            if selectedModelIDs.isEmpty, let fallback = availableModels.first {
+                selectedModelIDs.insert(fallback)
+            }
+            if selectedModel == modelID || !selectedModelIDs.contains(selectedModel) {
+                selectedModel = enabledModels(in: availableModels).first ?? ""
+            }
+        }
+        syncModelListFromSelection(fallbackModels: availableModels)
+    }
+
+    private func enabledModels(in availableModels: [String]) -> [String] {
+        let selected = availableModels.filter { selectedModelIDs.contains($0) }
+        return selected.isEmpty ? Array(availableModels.prefix(1)) : selected
+    }
+
+    private func syncModelListFromSelection(fallbackModels: [String]) {
+        let models = enabledModels(in: fallbackModels)
+        model = models.joined(separator: ",")
+        if selectedModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !models.contains(selectedModel) {
+            selectedModel = models.first ?? ""
+        }
+    }
+
+    private func effectiveModelListForSubmit() -> String {
+        if !selectedModelIDs.isEmpty {
+            let sourceModels = currentPresetModelOptions()
+            let enabled = sourceModels.filter { selectedModelIDs.contains($0) }
+            if !enabled.isEmpty { return enabled.joined(separator: ",") }
+        }
+        return model.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func currentPresetModelOptions() -> [String] {
+        if option.id == "deepseek" || option.id == "xiaomi-mimo" {
+            return option.supportedModels.isEmpty ? [option.selectedModel] : option.supportedModels
+        }
+        if option.id == "china-provider" || (option.id == "other-provider" && selectedProviderPresetID != "custom") {
+            return activeProviderPreset.availableModels
+        }
+        return model.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+    }
+
+    private func openAIAPIKeyHeaderKindForCurrentDraft() -> OpenAICompatibleAPIKeyHeaderKind {
+        if option.id == "xiaomi-mimo" { return .apiKey }
+        if option.id == "other-provider" || option.id == "china-provider" { return activeProviderPreset.openAIAPIKeyHeaderKind }
+        return .bearer
     }
 
     private func isLoopbackEndpoint(_ rawValue: String) -> Bool {
@@ -1069,16 +1396,16 @@ private struct AIConnectionOnboardingView: View {
             }
             .padding(.top, 6)
 
-            Spacer(minLength: 70)
+            Spacer(minLength: 42)
 
-            VStack(spacing: 28) {
-                VStack(spacing: 22) {
+            VStack(spacing: 18) {
+                VStack(spacing: 12) {
                     ConnorConnectionMark()
                     VStack(spacing: 14) {
                         Text("欢迎使用康纳同学")
-                            .font(.largeTitle.weight(.semibold))
+                            .font(SettingsListTypography.header)
                         Text("先选择一种连接方式，康纳同学会在下一步帮你完成配置。")
-                            .font(.title2)
+                            .font(SettingsListTypography.rowSubtitle)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                             .lineLimit(2)
@@ -1095,7 +1422,7 @@ private struct AIConnectionOnboardingView: View {
                 .frame(maxWidth: 760)
             }
 
-            Spacer(minLength: 80)
+            Spacer(minLength: 56)
         }
         .frame(maxWidth: .infinity)
         .frame(minHeight: 760)
@@ -1120,38 +1447,37 @@ private struct AIConnectionOnboardingOptionRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 22) {
+            HStack(spacing: 10) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .fill(Color.secondary.opacity(0.09))
                     Image(systemName: option.systemImage)
-                        .font(.system(size: 28, weight: .semibold))
+                        .font(SettingsListTypography.icon)
                         .foregroundStyle(option.tint)
                 }
-                .frame(width: 70, height: 70)
+                .frame(width: 34, height: 34)
 
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(option.title)
-                        .font(.title2.weight(.semibold))
+                        .font(SettingsListTypography.rowTitleSelected)
                         .foregroundStyle(.primary)
                     Text(option.subtitle)
-                        .font(.title3)
+                        .font(SettingsListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Spacer(minLength: 16)
             }
-            .padding(.horizontal, 30)
-            .padding(.vertical, 20)
+            .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .stroke(Color.secondary.opacity(0.14), lineWidth: 1)
             )
             .shadow(color: Color.black.opacity(0.04), radius: 2, x: 0, y: 1)
-            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -1169,27 +1495,27 @@ private struct AIConnectionEntryRow: View {
         Button(action: select) {
             HStack(alignment: .center, spacing: 12) {
                 Image(systemName: providerSystemImage)
-                    .font(.title3.weight(.semibold))
+                    .font(SettingsListTypography.icon)
                     .foregroundStyle(providerTint)
-                    .frame(width: 24, alignment: .center)
+                    .frame(width: 18, alignment: .center)
 
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
                         Text(connection.name)
-                            .font(.title3.weight(.semibold))
+                            .font(isDefault ? SettingsListTypography.rowTitleSelected : SettingsListTypography.rowTitle)
                             .foregroundStyle(.primary)
                             .lineLimit(1)
                         if isDefault {
                             Text("默认")
-                                .font(.subheadline.weight(.medium))
+                                .font(SettingsListTypography.rowCaptionEmphasized)
                                 .foregroundStyle(.secondary)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.secondary.opacity(0.10), in: Capsule())
                         }
                     }
                     Text(subtitle)
-                        .font(.title3)
+                        .font(SettingsListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -1207,16 +1533,16 @@ private struct AIConnectionEntryRow: View {
                     .disabled(!canDelete)
                 } label: {
                     Image(systemName: "ellipsis")
-                        .font(.title2.weight(.semibold))
+                        .font(SettingsListTypography.icon)
                         .foregroundStyle(.secondary)
-                        .frame(width: 32, height: 32)
+                        .frame(width: 28, height: 28)
                 }
                 .menuStyle(.borderlessButton)
                 .buttonStyle(.plain)
                 .help("更多")
             }
             .contentShape(Rectangle())
-            .frame(minHeight: 84)
+            .frame(minHeight: 58)
         }
         .buttonStyle(.plain)
     }
@@ -1278,81 +1604,193 @@ private struct AIConnectionEntryRow: View {
     }
 }
 
-private struct SettingsAppearanceSection: View {
-    @ObservedObject var viewModel: AppViewModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            SettingsGroup(title: "默认主题") {
-                HStack {
-                    Text("模式")
-                        .font(.subheadline.weight(.medium))
-                    Spacer()
-                    Picker("模式", selection: $viewModel.appearanceMode) {
-                        ForEach(ConnorAppearanceMode.allCases) { mode in
-                            Label(mode.displayName, systemImage: mode.systemImage).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 260)
-                }
-                Divider()
-                SettingsValueRow(title: "颜色主题", value: "使用默认")
-                Divider()
-                SettingsValueRow(title: "字体", value: "系统")
-                Divider()
-                SettingsValueRow(title: "语言", value: "简体中文")
-            }
-            SettingsGroup(title: "界面") {
-                SettingsToggleRow(title: "连接图标", subtitle: "在会话列表和模型选择器中显示提供商图标。", isOn: $viewModel.showProviderIcons)
-                Divider()
-                SettingsToggleRow(title: "丰富的工具描述", subtitle: "为工具调用添加操作名称和意图描述。", isOn: $viewModel.richToolDescriptionsEnabled)
-            }
-            SettingsSaveBar(viewModel: viewModel)
-        }
-    }
-}
-
-private struct SettingsInputSection: View {
-    @ObservedObject var viewModel: AppViewModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            SettingsGroup(title: "发送") {
-                SettingsPickerRow(title: "发送消息", subtitle: "选择默认发送快捷键", selection: $viewModel.composerSendShortcut) {
-                    Text("Return").tag("return")
-                    Text("⌘ Return").tag("cmd-return")
-                }
-                Divider()
-                SettingsToggleRow(title: "自动保存草稿", subtitle: "切换会话时保留未发送输入。", isOn: $viewModel.autoSaveDraftsEnabled)
-                Divider()
-                SettingsToggleRow(title: "拼写检查", subtitle: "使用系统拼写检查。", isOn: $viewModel.spellCheckEnabled)
-            }
-            SettingsSaveBar(viewModel: viewModel)
-        }
-    }
-}
-
 private struct SettingsPermissionsSection: View {
     @ObservedObject var viewModel: AppViewModel
+    @State private var isShowingPolicyDetails = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
-            SettingsGroup(title: "默认权限") {
-                SettingsPickerRow(title: "新会话权限", subtitle: "控制工具调用和写入操作", selection: $viewModel.defaultPermissionMode) {
+            SettingsHeroHeader(
+                title: "权限",
+                subtitle: "控制新会话默认能做什么。运行中的会话仍可在输入框下方临时切换权限；项目目录在每个会话顶部的“当前会话 Workspace”中配置。",
+                systemImage: "checkmark.shield"
+            ) {
+                EmptyView()
+            }
+
+            SettingsGroup(title: "新会话默认权限") {
+                SettingsPickerRow(title: "权限模式", subtitle: "作为新会话和重建会话的默认 Policy Engine 模式。", selection: $viewModel.defaultPermissionMode) {
                     ForEach(AgentPermissionMode.allCases.filter { $0 != .allowAll }, id: \.self) { mode in
                         Text(mode.displayName).tag(mode)
                     }
                 }
                 Divider()
-                SettingsToggleRow(title: "网络访问需要审批", subtitle: "外部网络请求默认进入审批流程。", isOn: $viewModel.requireApprovalForNetwork)
-                Divider()
-                SettingsToggleRow(title: "Shell 写入需要审批", subtitle: "本地命令涉及写入时默认要求确认。", isOn: $viewModel.requireApprovalForShell)
+                PermissionModeSummaryRow(mode: viewModel.defaultPermissionMode)
             }
-            Text("项目工作目录已改为每个会话内设置：打开任意会话，在会话顶部的 ‘当前会话 Workspace’ 中配置。")
-                .font(.caption)
+
+            SettingsGroup(title: "当前真实生效") {
+                PermissionBoundaryRow(systemImage: "checkmark.shield", title: "权限模式会影响新会话", message: "这里选择的模式会写入 runtime-settings.json → loop.permissionMode，并用于创建或重建 NativeSessionManager。")
+                Divider()
+                PermissionBoundaryRow(systemImage: "network", title: "网络访问默认不单独审批", message: "在“询问”和“执行”模式下，externalNetwork 当前由 Policy Engine 默认通过；只读模式仍会拒绝外部网络。")
+                Divider()
+                PermissionBoundaryRow(systemImage: "terminal", title: "Shell 由风险分类决定", message: "只读 shell、workspace shell、network shell 和 destructive shell 由 LocalShellCommandPolicy 分类后交给 Policy Engine 决策。")
+            }
+
+            SettingsGroup(title: "安全边界") {
+                PermissionBoundaryRow(systemImage: "lock.shield", title: "不提供全部允许", message: "allowAll 不在界面中开放。Claude Sidecar 的 bypassPermissions 只表示 Connor 接管审批，不代表无限制授权。")
+                Divider()
+                PermissionBoundaryRow(systemImage: "folder", title: "Workspace 属于会话", message: "Primary root 和 additional roots 在会话顶部设置，不在全局权限页管理。")
+                Divider()
+                PermissionBoundaryRow(systemImage: "person.crop.circle.badge.xmark", title: "本地单用户边界", message: "Connor 当前是单一 Home / Runtime Root，不做团队成员、组织角色或多用户权限。")
+            }
+
+            DisclosureGroup(isExpanded: $isShowingPolicyDetails) {
+                VStack(alignment: .leading, spacing: 10) {
+                    PermissionPolicyDetailRow(title: "只读", message: "允许读取图谱、会话、workspace 文件、搜索文件、只读 shell、模型调用和本地科学计算；拒绝写入、删除、外部网络和危险 shell。")
+                    PermissionPolicyDetailRow(title: "询问", message: "读取、普通模型调用、graph write proposal、外部网络默认允许；文件写入/编辑/删除、graph commit/删除、昂贵模型调用、workspace/network/destructive shell 进入审批。")
+                    PermissionPolicyDetailRow(title: "执行", message: "文件写入/编辑、graph commit、workspace shell 可自动通过；图谱删除、文件删除、network shell、destructive shell 和昂贵模型调用仍需审批。")
+                }
+                .padding(.top, SettingsListLayout.spaceS)
+            } label: {
+                Label("查看当前策略说明", systemImage: "list.bullet.rectangle")
+                    .font(SettingsListTypography.rowTitleSelected)
+            }
+            .padding(.horizontal, SettingsListLayout.spaceL)
+            .padding(.vertical, SettingsListLayout.spaceM)
+            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous)
+                    .stroke(Color.secondary.opacity(SettingsListLayout.hairlineOpacity), lineWidth: 1)
+            )
+        }
+    }
+}
+
+private struct PermissionModeSummaryRow: View {
+    var mode: AgentPermissionMode
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 28, height: 28)
+                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(mode.displayName)
+                    .font(SettingsListTypography.rowTitleSelected)
+                Text(summary)
+                    .font(SettingsListTypography.rowCaption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(minHeight: 52, alignment: .leading)
+    }
+
+    private var systemImage: String {
+        switch mode {
+        case .readOnly:
+            return "eye"
+        case .askToWrite:
+            return "questionmark.circle"
+        case .trustedWrite:
+            return "bolt.circle"
+        case .allowAll:
+            return "exclamationmark.triangle"
+        }
+    }
+
+    private var tint: Color {
+        switch mode {
+        case .readOnly:
+            return .blue
+        case .askToWrite:
+            return .orange
+        case .trustedWrite:
+            return .green
+        case .allowAll:
+            return .red
+        }
+    }
+
+    private var summary: String {
+        switch mode {
+        case .readOnly:
+            return "适合探索、阅读和分析。写入、删除、网络和高风险 shell 会被拒绝。"
+        case .askToWrite:
+            return "适合日常协作。读取和普通工具可直接运行，写入、删除和高风险操作会先询问。"
+        case .trustedWrite:
+            return "适合你明确要让 Connor 连续执行修改时使用。普通写入和 workspace shell 可自动通过，删除和危险操作仍需审批。"
+        case .allowAll:
+            return "内部保留模式，不在产品界面中开放。"
+        }
+    }
+}
+
+private struct PermissionNoteRow: View {
+    var systemImage: String
+    var title: String
+    var message: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: systemImage)
                 .foregroundStyle(.secondary)
-            SettingsSaveBar(viewModel: viewModel)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(SettingsListTypography.rowCaptionEmphasized)
+                    .foregroundStyle(.secondary)
+                Text(message)
+                    .font(SettingsListTypography.rowCaption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct PermissionBoundaryRow: View {
+    var systemImage: String
+    var title: String
+    var message: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 24, height: 24)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(SettingsListTypography.rowTitleSelected)
+                Text(message)
+                    .font(SettingsListTypography.rowCaption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(minHeight: 46, alignment: .leading)
+    }
+}
+
+private struct PermissionPolicyDetailRow: View {
+    var title: String
+    var message: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(SettingsListTypography.rowCaptionEmphasized)
+            Text(message)
+                .font(SettingsListTypography.rowCaption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -1369,9 +1807,9 @@ struct WorkspaceRootsSettingsContent: View {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("当前会话 Workspace")
-                        .font(.subheadline.weight(.medium))
+                        .font(SettingsListTypography.rowTitleSelected)
                     Text(summaryText)
-                        .font(.caption)
+                        .font(SettingsListTypography.rowCaption)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
@@ -1379,7 +1817,7 @@ struct WorkspaceRootsSettingsContent: View {
                 Button("选择目录…") { chooseDirectories() }
                     .buttonStyle(.bordered)
             }
-            .frame(minHeight: 42)
+            .frame(minHeight: SettingsListLayout.rowMinHeight)
 
             if !viewModel.workspaceRoots.isEmpty {
                 Divider()
@@ -1406,7 +1844,7 @@ struct WorkspaceRootsSettingsContent: View {
                 .disabled(viewModel.workspaceRootPathInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             Text("保存到当前 Session Capsule。Native local tools 可访问所有 roots；Claude Sidecar cwd 使用主目录。为空时兼容旧 Sidecar 目录，再回退到进程 cwd。")
-                .font(.caption)
+                .font(SettingsListTypography.rowCaption)
                 .foregroundStyle(.secondary)
         }
         .padding(.vertical, 4)
@@ -1444,7 +1882,7 @@ private struct WorkspaceRootRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
                     Text(root.displayName.isEmpty ? URL(fileURLWithPath: root.path).lastPathComponent : root.displayName)
-                        .font(.subheadline.weight(.medium))
+                        .font(SettingsListTypography.rowTitleSelected)
                     Text(root.role)
                         .font(.caption2.weight(.medium))
                         .foregroundStyle(.secondary)
@@ -1461,7 +1899,7 @@ private struct WorkspaceRootRow: View {
                     }
                 }
                 Text(root.path)
-                    .font(.caption)
+                    .font(SettingsListTypography.rowCaption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -1515,7 +1953,7 @@ private struct SettingsLabelsSection: View {
 
             SettingsGroup(title: "删除行为") {
                 Text("删除标签会自动从所有会话中移除该标签，然后删除标签定义。")
-                    .font(.subheadline)
+                    .font(SettingsListTypography.rowTitle)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -1582,7 +2020,7 @@ private struct SettingsStatusesSection: View {
 
             SettingsGroup(title: "删除限制") {
                 Text("至少保留一个状态；如果已有会话正在使用某个状态，该状态不能删除。当前底层会话状态仍受 AgentSessionStatus 枚举约束，自定义状态定义会保存到治理配置，完整自定义状态切换需要后续迁移到 string-backed status ID。")
-                    .font(.subheadline)
+                    .font(SettingsListTypography.rowTitle)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -1643,20 +2081,20 @@ private struct SettingsHeroHeader<Accessory: View>: View {
     @ViewBuilder var accessory: Accessory
 
     var body: some View {
-        HStack(alignment: .center, spacing: 16) {
+        HStack(alignment: .center, spacing: SettingsListLayout.spaceL) {
             Image(systemName: systemImage)
-                .font(.system(size: 22, weight: .semibold))
+                .font(SettingsListTypography.largeIcon)
                 .foregroundStyle(Color.accentColor)
                 .frame(width: 44, height: 44)
-                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            VStack(alignment: .leading, spacing: 5) {
-                Text(title).font(.largeTitle.weight(.semibold))
+                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous))
+            VStack(alignment: .leading, spacing: SettingsListLayout.spaceS) {
+                Text(title).font(SettingsListTypography.header)
                 Text(subtitle)
-                    .font(.callout)
+                    .font(SettingsListTypography.rowSubtitle)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer(minLength: 16)
+            Spacer(minLength: SettingsListLayout.spaceL)
             accessory
         }
         .frame(minHeight: 72)
@@ -1671,12 +2109,12 @@ private struct SettingsEmptyStateRow: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: systemImage)
-                .font(.title3)
+                .font(SettingsListTypography.rowSubtitle)
                 .foregroundStyle(.secondary)
                 .frame(width: 44, height: 44)
             VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.subheadline.weight(.medium))
-                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                Text(title).font(SettingsListTypography.rowTitleSelected)
+                Text(subtitle).font(SettingsListTypography.rowCaption).foregroundStyle(.secondary)
             }
             Spacer()
         }
@@ -1701,9 +2139,9 @@ private struct SettingsLabelDefinitionRow: View {
             .frame(width: 44, height: 44)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(definition.name).font(.subheadline.weight(.medium))
+                Text(definition.name).font(SettingsListTypography.rowTitleSelected)
                 Text("用于 \(usageCount) 个会话")
-                    .font(.caption)
+                    .font(SettingsListTypography.rowCaption)
                     .foregroundStyle(.secondary)
             }
             Spacer()
@@ -1739,9 +2177,9 @@ private struct SettingsStatusDefinitionRow: View {
                 .frame(width: 44, height: 44)
                 .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
             VStack(alignment: .leading, spacing: 3) {
-                Text(definition.name).font(.subheadline.weight(.medium))
+                Text(definition.name).font(SettingsListTypography.rowTitleSelected)
                 Text("用于 \(usageCount) 个会话")
-                    .font(.caption)
+                    .font(SettingsListTypography.rowCaption)
                     .foregroundStyle(.secondary)
             }
             Spacer()
@@ -1786,7 +2224,7 @@ private struct SettingsLabelEditorSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text(title).font(.headline)
+            Text(title).font(SettingsListTypography.header)
             TextField("标签名称", text: $name)
                 .textFieldStyle(.roundedBorder)
             Picker("图标", selection: $systemImage) {
@@ -1832,7 +2270,7 @@ private struct SettingsStatusEditorSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text(title).font(.headline)
+            Text(title).font(SettingsListTypography.header)
             TextField("状态名称", text: $name)
                 .textFieldStyle(.roundedBorder)
             Picker("图标", selection: $systemImage) {
@@ -1954,20 +2392,104 @@ private func settingsColorStorageName(from color: Color) -> String {
 }
 
 private struct SettingsShortcutsSection: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    private let generalActions: [AgentRuntimeShortcutAction] = [
+        .newSession,
+        .toggleBrowser,
+        .focusTopSearch,
+        .openSettings
+    ]
+
+    private let browserActions: [AgentRuntimeShortcutAction] = [
+        .focusBrowserAddress,
+        .newBrowserTab,
+        .closeBrowserTab,
+        .browserBack,
+        .browserForward,
+        .toggleBrowserBookmarks,
+        .toggleBrowserHistory
+    ]
+
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
-            SettingsGroup(title: "通用") {
-                ShortcutRow(title: "新建聊天", keys: ["⌘", "N"])
-                ShortcutRow(title: "设置", keys: ["⌘", ","])
-                ShortcutRow(title: "搜索", keys: ["⌘", "F"])
-                ShortcutRow(title: "命令面板", keys: ["⌘", "/"])
+            SettingsHeroHeader(
+                title: "快捷键",
+                subtitle: "管理应用和 Browser Workspace 的常用键盘操作。修改后会写入 runtime-settings.json 并立即用于菜单命令或局部 key monitor。",
+                systemImage: "keyboard"
+            ) {
+                EmptyView()
             }
-            SettingsGroup(title: "导航") {
-                ShortcutRow(title: "聚焦侧栏", keys: ["⌘", "1"])
-                ShortcutRow(title: "聚焦会话列表", keys: ["⌘", "2"])
-                ShortcutRow(title: "聚焦聊天", keys: ["⌘", "3"])
-                ShortcutRow(title: "聚焦下一块区域", keys: ["Tab"])
+
+            SettingsGroup(title: "全局") {
+                ForEach(generalActions.indices, id: \.self) { index in
+                    if index > 0 { Divider() }
+                    EditableShortcutRow(
+                        title: title(for: generalActions[index]),
+                        subtitle: subtitle(for: generalActions[index]),
+                        shortcut: viewModel.shortcut(for: generalActions[index]),
+                        onRecord: { viewModel.beginRecordingShortcut(for: generalActions[index]) },
+                        onReset: { viewModel.resetShortcut(generalActions[index]) }
+                    )
+                }
             }
+
+            SettingsGroup(title: "Browser Workspace") {
+                ForEach(browserActions.indices, id: \.self) { index in
+                    if index > 0 { Divider() }
+                    EditableShortcutRow(
+                        title: title(for: browserActions[index]),
+                        subtitle: subtitle(for: browserActions[index]),
+                        shortcut: viewModel.shortcut(for: browserActions[index]),
+                        onRecord: { viewModel.beginRecordingShortcut(for: browserActions[index]) },
+                        onReset: { viewModel.resetShortcut(browserActions[index]) }
+                    )
+                }
+            }
+
+            Text("修改后会写入 runtime-settings.json,并由菜单命令或 Browser Workspace 局部 key monitor 真实生效。Governance / Source / Skill 等低频入口不在此页暴露快捷键,避免占用过多 ⌘ 数字键。")
+                .font(SettingsListTypography.rowCaption)
+                .foregroundStyle(.secondary)
+        }
+        .sheet(item: $viewModel.recordingShortcutAction) { action in
+            ShortcutRecorderSheet(
+                title: title(for: action),
+                currentShortcut: viewModel.shortcut(for: action),
+                onCancel: { viewModel.recordingShortcutAction = nil },
+                onSave: { shortcut in viewModel.updateShortcut(action, shortcut: shortcut) }
+            )
+        }
+    }
+
+    private func title(for action: AgentRuntimeShortcutAction) -> String {
+        switch action {
+        case .newSession: "新建聊天"
+        case .toggleBrowser: "显示 / 隐藏浏览器"
+        case .focusTopSearch: "聚焦顶部搜索"
+        case .openSettings: "打开设置"
+        case .focusBrowserAddress: "聚焦地址栏"
+        case .newBrowserTab: "新建浏览器标签"
+        case .closeBrowserTab: "关闭当前标签"
+        case .browserBack: "后退"
+        case .browserForward: "前进"
+        case .toggleBrowserBookmarks: "打开 / 关闭书签"
+        case .toggleBrowserHistory: "打开 / 关闭历史"
+        }
+    }
+
+    private func subtitle(for action: AgentRuntimeShortcutAction) -> String {
+        switch action {
+        case .newSession: "创建新会话并进入聊天。"
+        case .toggleBrowser: "在当前会话中切换内置浏览器工作区。"
+        case .focusTopSearch: "聚焦应用顶部的会话搜索框。"
+        case .openSettings: "打开设置中心。"
+        case .focusBrowserAddress: "Browser Workspace 可见时聚焦地址栏。"
+        case .newBrowserTab: "Browser Workspace 可见时创建新标签。"
+        case .closeBrowserTab: "Browser Workspace 可见时关闭当前标签,不关闭 macOS 窗口。"
+        case .browserBack: "Browser Workspace 当前标签后退。"
+        case .browserForward: "Browser Workspace 当前标签前进。"
+        case .toggleBrowserBookmarks: "切换浏览器书签面板。"
+        case .toggleBrowserHistory: "切换浏览器历史面板。"
         }
     }
 }
@@ -1977,25 +2499,68 @@ private struct SettingsPreferencesSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
+            SettingsHeroHeader(
+                title: "偏好",
+                subtitle: "管理康纳同学用于称呼、语言、时区、位置和个性化上下文的用户信息。",
+                systemImage: "person.crop.circle"
+            ) {
+                EmptyView()
+            }
+
             SettingsGroup(title: "基本信息") {
-                SettingsTextFieldRow(title: "名称", subtitle: "康纳同学如何称呼你。", text: $viewModel.userDisplayName)
+                SettingsTextFieldRow(title: "称呼", subtitle: "康纳同学如何称呼你。首次启动且未设置时会读取 macOS 账户名称，可手动更改。", text: $viewModel.userDisplayName)
                 Divider()
-                SettingsTextFieldRow(title: "时区", subtitle: "用于相对日期和日程上下文。", text: $viewModel.userTimezone)
+                SettingsTextFieldRow(title: "时区", subtitle: "未设置时自动读取系统时区，用于相对日期和日程上下文。", text: $viewModel.userTimezone)
+                Divider()
+                SettingsTextFieldRow(title: "语言偏好", subtitle: "未设置时自动读取系统语言；康纳同学会优先按此语言回复。", text: $viewModel.userPreferredLanguage)
+                Divider()
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("系统默认")
+                            .font(SettingsListTypography.rowTitleSelected)
+                        Text("只补全仍为空的项目，不覆盖你已经手动填写的偏好。")
+                            .font(SettingsListTypography.rowCaption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("重新读取空白项") { viewModel.refreshSystemPreferenceDefaults() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.regular)
+                }
             }
             SettingsGroup(title: "位置") {
-                SettingsTextFieldRow(title: "城市", subtitle: "用于本地信息和上下文。", text: $viewModel.userCity)
+                SettingsTextFieldRow(title: "城市", subtitle: "用于本地信息和上下文。不会在启动时自动请求定位权限，可手动填写或主动授权读取。", text: $viewModel.userCity)
                 Divider()
-                SettingsTextFieldRow(title: "国家", subtitle: "用于区域格式和上下文。", text: $viewModel.userCountry)
+                SettingsTextFieldRow(title: "国家/地区", subtitle: "未设置时会优先从系统地区推断，也可手动更改。", text: $viewModel.userCountry)
+                Divider()
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("当前位置")
+                            .font(SettingsListTypography.rowTitleSelected)
+                        if let message = viewModel.userLocationStatusMessage {
+                            Text(message)
+                                .font(SettingsListTypography.rowCaption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("申请位置权限后自动填写城市和国家/地区。")
+                                .font(SettingsListTypography.rowCaption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    Button("使用当前位置") { viewModel.requestUserLocation() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.regular)
+                }
             }
             SettingsGroup(title: "备注") {
                 TextEditor(text: $viewModel.userPreferenceNotes)
-                    .font(.subheadline)
+                    .font(SettingsListTypography.rowTitle)
                     .frame(minHeight: 150)
                     .scrollContentBackground(.hidden)
                     .padding(8)
                     .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
-            SettingsSaveBar(viewModel: viewModel)
         }
     }
 }
@@ -2005,20 +2570,48 @@ private struct SettingsGroup<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceM) {
             Text(title)
-                .font(.headline)
+                .font(SettingsListTypography.header)
             VStack(spacing: 0) {
                 content
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
+                    .padding(.horizontal, SettingsListLayout.spaceL)
+                    .padding(.vertical, SettingsListLayout.spaceM)
             }
-            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.secondary.opacity(0.14), lineWidth: 1)
+                RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous)
+                    .stroke(Color.secondary.opacity(SettingsListLayout.hairlineOpacity), lineWidth: 1)
             )
         }
+    }
+}
+
+private struct SettingsAppearanceModeRow: View {
+    @Binding var selection: ConnorAppearanceMode
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceM) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
+                    Text("外观")
+                        .font(SettingsListTypography.rowTitleSelected)
+                    Text("选择应用页面的显示主题。")
+                        .font(SettingsListTypography.rowCaption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+
+            Picker("页面显示主题", selection: $selection) {
+                ForEach(ConnorAppearanceMode.allCases) { mode in
+                    Label(mode.displayName, systemImage: mode.systemImage).tag(mode)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+        }
+        .frame(minHeight: SettingsListLayout.prominentRowMinHeight, alignment: .leading)
     }
 }
 
@@ -2030,15 +2623,15 @@ private struct SettingsToggleRow: View {
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.subheadline.weight(.medium))
-                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                Text(title).font(SettingsListTypography.rowTitleSelected)
+                Text(subtitle).font(SettingsListTypography.rowCaption).foregroundStyle(.secondary)
             }
             Spacer()
             Toggle("", isOn: $isOn)
                 .labelsHidden()
                 .toggleStyle(.switch)
         }
-        .frame(minHeight: 42)
+        .frame(minHeight: SettingsListLayout.rowMinHeight)
     }
 }
 
@@ -2048,11 +2641,11 @@ private struct SettingsValueRow: View {
 
     var body: some View {
         HStack {
-            Text(title).font(.subheadline.weight(.medium))
+            Text(title).font(SettingsListTypography.rowTitleSelected)
             Spacer()
-            Text(value).font(.subheadline).foregroundStyle(.secondary)
+            Text(value).font(SettingsListTypography.rowTitle).foregroundStyle(.secondary)
         }
-        .frame(minHeight: 42)
+        .frame(minHeight: SettingsListLayout.rowMinHeight)
     }
 }
 
@@ -2063,9 +2656,10 @@ private struct SettingsTextFieldRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.subheadline.weight(.medium))
-            Text(subtitle).font(.caption).foregroundStyle(.secondary)
+            Text(title).font(SettingsListTypography.rowTitleSelected)
+            Text(subtitle).font(SettingsListTypography.rowCaption).foregroundStyle(.secondary)
             TextField(title, text: $text)
+                .font(SettingsListTypography.rowTitle)
                 .textFieldStyle(.roundedBorder)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -2082,8 +2676,8 @@ private struct SettingsPickerRow<Selection: Hashable, Content: View>: View {
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.subheadline.weight(.medium))
-                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                Text(title).font(SettingsListTypography.rowTitleSelected)
+                Text(subtitle).font(SettingsListTypography.rowCaption).foregroundStyle(.secondary)
             }
             Spacer()
             Picker(title, selection: $selection) { content }
@@ -2091,23 +2685,10 @@ private struct SettingsPickerRow<Selection: Hashable, Content: View>: View {
                 .pickerStyle(.menu)
                 .frame(maxWidth: 220)
         }
-        .frame(minHeight: 46)
+        .frame(minHeight: SettingsListLayout.rowMinHeight)
     }
 }
 
-private struct SettingsSaveBar: View {
-    @ObservedObject var viewModel: AppViewModel
-
-    var body: some View {
-        HStack {
-            Spacer()
-            Button("重新加载") { viewModel.loadRuntimeSettings() }
-            Button("保存设置") { viewModel.saveRuntimeSettings() }
-                .buttonStyle(.borderedProminent)
-        }
-        .controlSize(.regular)
-    }
-}
 
 private struct ShortcutRow: View {
     var title: String
@@ -2115,18 +2696,179 @@ private struct ShortcutRow: View {
 
     var body: some View {
         HStack {
-            Text(title).font(.subheadline.weight(.medium))
+            Text(title).font(SettingsListTypography.rowTitleSelected)
             Spacer()
             HStack(spacing: 4) {
                 ForEach(keys, id: \.self) { key in
                     Text(key)
-                        .font(.caption.weight(.semibold))
+                        .font(SettingsListTypography.rowCaptionEmphasized)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
                         .background(.quaternary.opacity(0.30), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
                 }
             }
         }
-        .frame(minHeight: 38)
+        .frame(minHeight: SettingsListLayout.compactRowMinHeight)
+    }
+}
+
+// MARK: - Shortcut editing support
+
+extension AgentRuntimeShortcutAction {
+    var supportsGlobalCommandMenu: Bool {
+        switch self {
+        case .newSession, .toggleBrowser, .focusTopSearch, .openSettings:
+            true
+        default:
+            false
+        }
+    }
+}
+
+extension AgentRuntimeKeyboardShortcut {
+    var keyEquivalent: KeyEquivalent {
+        switch key.lowercased() {
+        case ",": return ","
+        case ".": return "."
+        case "/": return "/"
+        case "[": return "["
+        case "]": return "]"
+        default:
+            return KeyEquivalent(Character(String(key.lowercased().prefix(1))))
+        }
+    }
+
+    var eventModifierFlags: EventModifiers {
+        var flags: EventModifiers = []
+        if command { flags.insert(.command) }
+        if shift { flags.insert(.shift) }
+        if option { flags.insert(.option) }
+        if control { flags.insert(.control) }
+        return flags
+    }
+
+    static func from(event: NSEvent) -> AgentRuntimeKeyboardShortcut? {
+        let flags = event.modifierFlags
+        let character = event.charactersIgnoringModifiers?.lowercased()
+        guard let rawKey = character, !rawKey.isEmpty else { return nil }
+        let supported = [",", ".", "/", "[", "]"]
+        let key: String
+        if let scalar = rawKey.unicodeScalars.first, CharacterSet.alphanumerics.contains(scalar) {
+            key = String(rawKey.prefix(1))
+        } else if supported.contains(String(rawKey.prefix(1))) {
+            key = String(rawKey.prefix(1))
+        } else {
+            return nil
+        }
+        return AgentRuntimeKeyboardShortcut(
+            key: key,
+            command: flags.contains(.command),
+            shift: flags.contains(.shift),
+            option: flags.contains(.option),
+            control: flags.contains(.control)
+        )
+    }
+}
+
+struct ShortcutRecorderSheet: View {
+    var title: String
+    var currentShortcut: AgentRuntimeKeyboardShortcut
+    var onCancel: () -> Void
+    var onSave: (AgentRuntimeKeyboardShortcut) -> Void
+
+    @State private var capturedShortcut: AgentRuntimeKeyboardShortcut?
+    @State private var message: String = "按下新的快捷键。建议至少包含 ⌘。"
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("修改快捷键")
+                .font(SettingsListTypography.header)
+            Text(title)
+                .font(SettingsListTypography.rowTitleSelected)
+            ZStack {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+                Text((capturedShortcut ?? currentShortcut).displayText)
+                    .font(.system(size: 28, weight: .semibold, design: .rounded))
+                    .monospaced()
+            }
+            .frame(height: 86)
+            .background(ShortcutCaptureView { shortcut in
+                capturedShortcut = shortcut
+                message = shortcut.command ? "已捕捉: \(shortcut.displayText)" : "已捕捉: \(shortcut.displayText)。建议包含 ⌘。"
+            })
+            Text(message)
+                .font(SettingsListTypography.rowCaption)
+                .foregroundStyle(.secondary)
+            HStack {
+                Button("恢复当前") { capturedShortcut = currentShortcut }
+                Spacer()
+                Button("取消", action: onCancel)
+                Button("保存") { onSave(capturedShortcut ?? currentShortcut) }
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(22)
+        .frame(width: 420)
+    }
+}
+
+private struct ShortcutCaptureView: NSViewRepresentable {
+    var onCapture: (AgentRuntimeKeyboardShortcut) -> Void
+
+    func makeNSView(context: Context) -> CaptureView {
+        let view = CaptureView()
+        view.onCapture = onCapture
+        DispatchQueue.main.async { view.window?.makeFirstResponder(view) }
+        return view
+    }
+
+    func updateNSView(_ nsView: CaptureView, context: Context) {
+        nsView.onCapture = onCapture
+        DispatchQueue.main.async { nsView.window?.makeFirstResponder(nsView) }
+    }
+
+    final class CaptureView: NSView {
+        var onCapture: ((AgentRuntimeKeyboardShortcut) -> Void)?
+        override var acceptsFirstResponder: Bool { true }
+
+        override func keyDown(with event: NSEvent) {
+            if let shortcut = AgentRuntimeKeyboardShortcut.from(event: event) {
+                onCapture?(shortcut)
+            } else {
+                super.keyDown(with: event)
+            }
+        }
+    }
+}
+
+struct EditableShortcutRow: View {
+    var title: String
+    var subtitle: String
+    var shortcut: AgentRuntimeKeyboardShortcut
+    var onRecord: () -> Void
+    var onReset: () -> Void
+
+    var body: some View {
+        HStack(spacing: SettingsListLayout.spaceM) {
+            VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
+                Text(title).font(SettingsListTypography.rowTitleSelected)
+                Text(subtitle).font(SettingsListTypography.rowCaption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: SettingsListLayout.spaceL)
+            Text(shortcut.displayText)
+                .font(SettingsListTypography.rowCaptionEmphasized.monospaced())
+                .padding(.horizontal, SettingsListLayout.spaceM)
+                .padding(.vertical, SettingsListLayout.spaceS)
+                .background(.quaternary.opacity(0.30), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusS, style: .continuous))
+            Button("修改", action: onRecord)
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
+            Button("默认", action: onReset)
+                .buttonStyle(.borderless)
+                .controlSize(.regular)
+        }
+        .frame(minHeight: 56)
     }
 }

@@ -16,7 +16,7 @@ import ConnorGraphAgent
     #expect(snapshot.includesSummary)
     #expect(snapshot.recentMessageCount == 3)
     #expect(snapshot.currentRequest == "What next?")
-    #expect(snapshot.renderedPrompt == "Rendered prompt")
+    #expect(snapshot.renderedPrompt == nil)
 }
 
 @Test func promptInspectionSnapshotPolicyCanOmitRenderedPrompt() {
@@ -40,7 +40,7 @@ import ConnorGraphAgent
         currentRequest: "What next?",
         renderedPrompt: "abcdefghijklmnopqrstuvwxyz"
     )
-    let policy = AgentPromptInspectionSnapshotPolicy(maxRenderedPromptCharacters: 10)
+    let policy = AgentPromptInspectionSnapshotPolicy(includeRenderedPrompt: true, maxRenderedPromptCharacters: 10)
 
     let snapshot = policy.snapshot(for: inspection)
 
@@ -54,7 +54,7 @@ import ConnorGraphAgent
         currentRequest: "Email me at user@example.com",
         renderedPrompt: "Authorization: Bearer sk-secret123\napi_key=abc123\nContact user@example.com"
     )
-    let policy = AgentPromptInspectionSnapshotPolicy()
+    let policy = AgentPromptInspectionSnapshotPolicy(includeRenderedPrompt: true)
 
     let snapshot = policy.snapshot(for: inspection)
 
