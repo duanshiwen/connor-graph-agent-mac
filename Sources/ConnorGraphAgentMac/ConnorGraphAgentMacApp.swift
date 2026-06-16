@@ -1200,16 +1200,27 @@ final class AppViewModel: ObservableObject {
         persistLLMSettings(rebuildRuntime: true)
     }
 
-    func addLLMConnection(providerMode: AppLLMProviderMode) {
+    func addLLMConnection(
+        providerMode: AppLLMProviderMode,
+        name: String? = nil,
+        baseURLString: String? = nil,
+        model: String? = nil,
+        selectedModel: String? = nil
+    ) {
         let idBase = providerMode == .openAICompatible ? "openai-compatible" : "claude"
         let id = "\(idBase)-\(UUID().uuidString.prefix(8).lowercased())"
+        let defaultName = providerMode == .openAICompatible ? "新 OpenAI Compatible 连接" : "新 Claude 连接"
+        let defaultBaseURL = providerMode == .openAICompatible ? AppLLMSettings.default.baseURLString : ""
+        let defaultModel = providerMode == .openAICompatible ? AppLLMSettings.default.model : "claude-sdk-default"
+        let normalizedModel = model?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? model! : defaultModel
+        let normalizedSelectedModel = selectedModel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? selectedModel! : AppLLMConnectionConfig.firstModel(in: normalizedModel)
         let connection = AppLLMConnectionConfig(
             id: id,
-            name: providerMode == .openAICompatible ? "新 OpenAI Compatible 连接" : "新 Claude 连接",
+            name: name?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? name! : defaultName,
             providerMode: providerMode,
-            baseURLString: providerMode == .openAICompatible ? AppLLMSettings.default.baseURLString : "",
-            model: providerMode == .openAICompatible ? AppLLMSettings.default.model : "claude-sdk-default",
-            selectedModel: providerMode == .openAICompatible ? AppLLMSettings.default.effectiveModel : "claude-sdk-default"
+            baseURLString: baseURLString ?? defaultBaseURL,
+            model: normalizedModel,
+            selectedModel: normalizedSelectedModel
         )
         llmConnectionConfigs.append(connection)
         llmDefaultConnectionID = id

@@ -192,8 +192,22 @@ private struct SettingsAppSection: View {
 
 private struct SettingsAISection: View {
     @ObservedObject var viewModel: AppViewModel
+    @State private var isShowingAddConnectionGuide = false
 
     var body: some View {
+        Group {
+            if isShowingAddConnectionGuide {
+                AIConnectionOnboardingView(
+                    choose: addConnection(from:),
+                    cancel: { isShowingAddConnectionGuide = false }
+                )
+            } else {
+                connectionList
+            }
+        }
+    }
+
+    private var connectionList: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("连接")
@@ -231,7 +245,7 @@ private struct SettingsAISection: View {
             )
             .shadow(color: Color.black.opacity(0.04), radius: 2, x: 0, y: 1)
 
-            Button(action: { viewModel.addLLMConnection(providerMode: .openAICompatible) }) {
+            Button(action: { isShowingAddConnectionGuide = true }) {
                 Label("添加连接", systemImage: "plus")
                     .font(.title3)
                     .labelStyle(.titleAndIcon)
@@ -241,6 +255,198 @@ private struct SettingsAISection: View {
             .buttonStyle(.bordered)
             .controlSize(.large)
         }
+    }
+
+    private func addConnection(from option: AIConnectionOnboardingOption) {
+        viewModel.addLLMConnection(
+            providerMode: option.providerMode,
+            name: option.connectionName,
+            baseURLString: option.baseURLString,
+            model: option.model,
+            selectedModel: option.selectedModel
+        )
+        isShowingAddConnectionGuide = false
+    }
+}
+
+private struct AIConnectionOnboardingOption: Identifiable, Equatable {
+    var id: String
+    var title: String
+    var subtitle: String
+    var systemImage: String
+    var tint: Color
+    var providerMode: AppLLMProviderMode
+    var connectionName: String
+    var baseURLString: String
+    var model: String
+    var selectedModel: String
+
+    static let all: [AIConnectionOnboardingOption] = [
+        AIConnectionOnboardingOption(
+            id: "claude-pro-max",
+            title: "Claude Pro / Max",
+            subtitle: "已经有 Claude Pro / Max？用它来驱动康纳同学。",
+            systemImage: "asterisk",
+            tint: .orange,
+            providerMode: .governedClaudeSidecar,
+            connectionName: "Claude Pro / Max",
+            baseURLString: "",
+            model: "claude-sdk-default",
+            selectedModel: "claude-sdk-default"
+        ),
+        AIConnectionOnboardingOption(
+            id: "codex-chatgpt-plus",
+            title: "Codex · ChatGPT Plus",
+            subtitle: "已经有 ChatGPT Plus？用 Codex 模式连接康纳同学。",
+            systemImage: "sparkles",
+            tint: .primary,
+            providerMode: .openAICompatible,
+            connectionName: "Codex · ChatGPT Plus",
+            baseURLString: AppLLMSettings.default.baseURLString,
+            model: AppLLMSettings.default.model,
+            selectedModel: AppLLMSettings.default.effectiveModel
+        ),
+        AIConnectionOnboardingOption(
+            id: "github-copilot",
+            title: "GitHub Copilot",
+            subtitle: "已经有 GitHub Copilot？用它作为康纳同学的模型入口。",
+            systemImage: "face.smiling.inverse",
+            tint: .primary,
+            providerMode: .openAICompatible,
+            connectionName: "GitHub Copilot",
+            baseURLString: "",
+            model: "gpt-4.1",
+            selectedModel: "gpt-4.1"
+        ),
+        AIConnectionOnboardingOption(
+            id: "other-provider",
+            title: "使用其他提供商",
+            subtitle: "接入 Anthropic、AWS Bedrock、OpenRouter、Google 或其他兼容服务。",
+            systemImage: "key",
+            tint: .secondary,
+            providerMode: .openAICompatible,
+            connectionName: "其他提供商",
+            baseURLString: AppLLMSettings.default.baseURLString,
+            model: AppLLMSettings.default.model,
+            selectedModel: AppLLMSettings.default.effectiveModel
+        ),
+        AIConnectionOnboardingOption(
+            id: "local-model",
+            title: "本地模型",
+            subtitle: "通过 Ollama 等本地服务，让康纳同学在你的电脑上运行模型。",
+            systemImage: "desktopcomputer",
+            tint: .secondary,
+            providerMode: .openAICompatible,
+            connectionName: "本地模型",
+            baseURLString: "http://localhost:11434/v1",
+            model: "llama3.2",
+            selectedModel: "llama3.2"
+        )
+    ]
+}
+
+private struct AIConnectionOnboardingView: View {
+    var choose: (AIConnectionOnboardingOption) -> Void
+    var cancel: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button(action: cancel) {
+                    Label("返回", systemImage: "chevron.left")
+                        .labelStyle(.titleAndIcon)
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(.top, 6)
+
+            Spacer(minLength: 70)
+
+            VStack(spacing: 28) {
+                VStack(spacing: 22) {
+                    ConnorConnectionMark()
+                    VStack(spacing: 14) {
+                        Text("欢迎使用康纳同学")
+                            .font(.largeTitle.weight(.semibold))
+                        Text("先选择一种连接方式，康纳同学会在下一步帮你完成配置。")
+                            .font(.title2)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                    }
+                }
+
+                VStack(spacing: 14) {
+                    ForEach(AIConnectionOnboardingOption.all) { option in
+                        AIConnectionOnboardingOptionRow(option: option) {
+                            choose(option)
+                        }
+                    }
+                }
+                .frame(maxWidth: 760)
+            }
+
+            Spacer(minLength: 80)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(minHeight: 760)
+    }
+}
+
+private struct ConnorConnectionMark: View {
+    var body: some View {
+        Image(nsImage: NSApp.applicationIconImage)
+            .resizable()
+            .interpolation(.high)
+            .scaledToFit()
+            .frame(width: 82, height: 82)
+            .shadow(color: Color.black.opacity(0.08), radius: 8, x: 0, y: 4)
+            .accessibilityLabel("康纳同学应用图标")
+    }
+}
+
+private struct AIConnectionOnboardingOptionRow: View {
+    var option: AIConnectionOnboardingOption
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 22) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.secondary.opacity(0.09))
+                    Image(systemName: option.systemImage)
+                        .font(.system(size: 28, weight: .semibold))
+                        .foregroundStyle(option.tint)
+                }
+                .frame(width: 70, height: 70)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(option.title)
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text(option.subtitle)
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 16)
+            }
+            .padding(.horizontal, 30)
+            .padding(.vertical, 20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.14), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.04), radius: 2, x: 0, y: 1)
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 }
 
