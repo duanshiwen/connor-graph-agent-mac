@@ -52,16 +52,9 @@ struct ConnorSettingsDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                HStack(alignment: .center) {
-                    Text(viewModel.selectedSettingsSection.title)
-                        .font(SettingsListTypography.header)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                    Button(action: { viewModel.resetRuntimeSettings() }) {
-                        Image(systemName: "ellipsis")
-                    }
-                    .buttonStyle(.borderless)
-                    .help("更多")
-                }
+                Text(viewModel.selectedSettingsSection.title)
+                    .font(SettingsListTypography.header)
+                    .frame(maxWidth: .infinity, alignment: .center)
 
                 Group {
                     switch viewModel.selectedSettingsSection {
