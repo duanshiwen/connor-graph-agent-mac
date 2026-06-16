@@ -76,6 +76,9 @@ struct AppShellView: View {
                 sidebarSelection = newSelection
             }
         }
+        .onChange(of: viewModel.runtimeSettingsAutosaveSignature) { _, _ in
+            viewModel.scheduleRuntimeSettingsAutosave()
+        }
         .sheet(isPresented: $viewModel.isCommandPalettePresented) {
             ConnorCommandPaletteView(viewModel: viewModel)
         }

@@ -132,4 +132,12 @@ enum ConnorAppearanceMode: String, CaseIterable, Identifiable {
         case .dark: "moon"
         }
     }
+
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: nil
+        case .light: .light
+        case .dark: .dark
+        }
+    }
 }
