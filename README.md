@@ -1,6 +1,6 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-16 02:11 GMT+8  
+文档更新时间：2026-06-16 16:11 GMT+8  
 当前代码基线:`feature/apple-iwork-attachment-support`,在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface / session-scoped multi-root project workspace / Connor-owned Scientific Compute Runtime skeleton / 商用级 Document Attachment OS 基础上,继续收紧 Apple 原生 UI 边界:PDF/Word/Excel/PowerPoint 与 Apple iWork（Pages/Numbers/Keynote）一等附件仍由 Connor Session Capsule 和 Attachment Store 管理;PDF selectable text 抽取和多页原文预览继续使用 PDFKit;Office/iWork/Presentation/Spreadsheet 抽取继续通过 MarkItDown/Docling sidecar best-effort 编排与 hardening;Office/iWork/Presentation/Spreadsheet 原文件预览优先交给 macOS Quick Look / QuickLookUI,Connor 自有 UI 只负责 manifest、extraction status、retry、omitted attachment summary 和治理证据。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package,目标是把 Connor 建成 **graph-memory-native Agent OS**:它不是"图谱编辑器",也不是"Claude SDK 外壳",而是以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI 和 Local Automation Surface 共同构成的本地 Agent 操作系统。
@@ -191,6 +191,29 @@ statuses/statuses.json
 graph/evaluations/retrieval-evaluation-cases.json
 graph/evaluations/reports/*.json
 ```
+
+预制会话治理项使用稳定英文 ID + 中文显示名,避免破坏自动化、CLI、存储和已有引用:
+
+```text
+Statuses:
+- todo → 待办
+- in_progress → 进行中
+- waiting → 等待中
+- needs_review → 待审阅
+- blocked → 受阻
+- done → 已完成
+- archived → 已归档
+
+Labels:
+- important → 重要
+- research → 研究
+- graph-review → 图谱审阅
+- priority → 优先级, number value
+- due → 截止日期, date value yyyy-MM-dd
+- project → 项目, graph_entity_ref value, graphBindingKind=project
+```
+
+`config/session-governance.json` 首次创建时写入上述中文默认显示名;若本地已有旧版英文内置项,启动读取配置时会按内置 ID 将这些预制项迁移为中文显示名,自定义状态/标签不被覆盖。
 
 `runtime-settings.json` 保存应用、外观、输入、权限、UI、用户偏好和轻量 MRU 历史类设置。项目工作目录不再作为设置页里的全局主状态;每个会话在自己的 Session Capsule 中保存 `workspace` 引用和 roots。会话页 composer 底部的 folder badge 是当前工作目录的高频入口,可快速切换 primary root、通过"历史打开列表"二级菜单恢复最近打开目录、选择新目录或重置为默认;顶部 Workspace 详情用于 multi-root 管理。`runtime-settings.workspace.defaultWorkingDirectoryPath` / `runtime-settings.workspace.roots` / `llm.sidecar.workingDirectoryPath` 仅保留为 legacy fallback / 新会话初始模板兼容层;`runtime-settings.workspace.recentWorkspacePaths` 保存跨会话最近打开目录列表。Native local tools 使用当前 session 的 multi-root allowed roots;Claude Sidecar 使用当前 session primary root 作为单一 cwd。`llm-settings.json` 保存模型提供方、Base URL、模型名和 Claude Sidecar 配置。API Key 不写入 JSON,由本地 Keychain 凭据仓库管理。
 

@@ -38,6 +38,34 @@ struct ProductOSPhase1Tests {
         }
     }
 
+    @Test func governanceDefaultsUseChineseDisplayNames() throws {
+        let config = AppSessionGovernanceConfig.default
+        #expect(AgentSessionStatus.allCases.map(\.displayName) == ["待办", "进行中", "等待中", "待审阅", "已完成", "受阻", "已归档"])
+        #expect(config.statuses.map(\.name) == ["待办", "进行中", "等待中", "待审阅", "受阻", "已完成", "已归档"])
+        #expect(config.labels.map(\.name) == ["重要", "研究", "图谱审阅", "优先级", "截止日期", "项目"])
+    }
+
+    @Test func governanceRepositoryNormalizesLegacyEnglishBuiltInDisplayNames() throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let repository = AppSessionGovernanceConfigRepository(configDirectory: root)
+        let legacyConfig = AppSessionGovernanceConfig(
+            statuses: [
+                .init(id: AgentSessionStatus.todo.rawValue, name: "Todo", systemImage: "circle", sortOrder: 10),
+                .init(id: AgentSessionStatus.inProgress.rawValue, name: "In Progress", systemImage: "play.circle", sortOrder: 20)
+            ],
+            labels: [
+                .init(id: "important", name: "Important", colorName: "orange"),
+                .init(id: "custom", name: "Custom", colorName: "blue")
+            ]
+        )
+        try repository.save(legacyConfig)
+
+        let loaded = try repository.loadOrCreateDefault()
+
+        #expect(loaded.statuses.map(\.name) == ["待办", "进行中"])
+        #expect(loaded.labels.map(\.name) == ["重要", "Custom"])
+    }
+
     @Test func chatRepositoryPersistsStatusLabelsLegacyArchiveCompatibilityAndArtifacts() throws {
         let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString, isDirectory: true)
         let paths = AppStoragePaths(applicationSupportDirectory: root)
