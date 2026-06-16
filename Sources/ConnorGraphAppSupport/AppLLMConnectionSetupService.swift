@@ -19,6 +19,7 @@ public struct AppLLMConnectionSetupInput: Sendable, Equatable {
     public var sidecarWorkingDirectoryPath: String
     public var sidecarPermissionMode: AgentPermissionMode
     public var anthropicAuthHeaderKind: AnthropicCompatibleAuthHeaderKind
+    public var openAIAPIKeyHeaderKind: OpenAICompatibleAPIKeyHeaderKind
     public var makeDefault: Bool
 
     public init(
@@ -35,6 +36,7 @@ public struct AppLLMConnectionSetupInput: Sendable, Equatable {
         sidecarWorkingDirectoryPath: String = "",
         sidecarPermissionMode: AgentPermissionMode = .readOnly,
         anthropicAuthHeaderKind: AnthropicCompatibleAuthHeaderKind = .xAPIKey,
+        openAIAPIKeyHeaderKind: OpenAICompatibleAPIKeyHeaderKind = .bearer,
         makeDefault: Bool = true
     ) {
         self.id = id
@@ -50,6 +52,7 @@ public struct AppLLMConnectionSetupInput: Sendable, Equatable {
         self.sidecarWorkingDirectoryPath = sidecarWorkingDirectoryPath
         self.sidecarPermissionMode = sidecarPermissionMode
         self.anthropicAuthHeaderKind = anthropicAuthHeaderKind
+        self.openAIAPIKeyHeaderKind = openAIAPIKeyHeaderKind
         self.makeDefault = makeDefault
     }
 }
@@ -158,7 +161,7 @@ public struct AppLLMConnectionSetupService: Sendable {
         let apiKey = suppliedAPIKey.isEmpty && Self.isLocalBaseURL(baseURL) ? "connor-local-model" : suppliedAPIKey
         guard !apiKey.isEmpty else { throw AppLLMConnectionSetupError.missingAPIKey }
 
-        let config = OpenAICompatibleConfig(baseURL: baseURL, apiKey: apiKey, model: model)
+        let config = OpenAICompatibleConfig(baseURL: baseURL, apiKey: apiKey, model: model, apiKeyHeaderKind: input.openAIAPIKeyHeaderKind)
         let health = try await openAICompatibleHealthCheck(config)
         guard health.ok else { throw AppLLMConnectionSetupError.healthCheckFailed(health.message) }
 
@@ -170,7 +173,8 @@ public struct AppLLMConnectionSetupService: Sendable {
             baseURLString: baseURLString,
             model: model,
             selectedModel: normalizedSelectedModel(input.selectedModel, model: model),
-            hasAPIKey: true
+            hasAPIKey: true,
+            extraHTTPHeaders: openAICompatibleMetadataHeaders(for: input.openAIAPIKeyHeaderKind)
         )
         try settingsRepository.saveConnection(connection, apiKey: apiKey, oauthTokens: input.oauthTokens, makeDefault: input.makeDefault)
         return AppLLMConnectionSetupResult(connection: connection, message: "OpenAI Compatible 连接验证成功：\(health.model)")
@@ -251,9 +255,10 @@ public struct AppLLMConnectionSetupService: Sendable {
         guard let baseURL = URL(string: baseURLString) else { throw AppLLMConnectionSetupError.invalidBaseURL(baseURLString) }
         let model = normalizedModel(input.model).isEmpty ? "gpt-4.1" : normalizedModel(input.model)
         let extraHeaders = [
+            "User-Agent": "GitHubCopilotChat/0.35.0",
+            "Editor-Version": "vscode/1.107.0",
             "Editor-Plugin-Version": "copilot-chat/0.35.0",
-            "Copilot-Integration-Id": "vscode-chat",
-            "OpenAI-Organization": "github-copilot"
+            "Copilot-Integration-Id": "vscode-chat"
         ]
         let config = OpenAICompatibleConfig(baseURL: baseURL, apiKey: runtimeToken, model: model, extraHeaders: extraHeaders)
         let health = try await openAICompatibleHealthCheck(config)
@@ -299,6 +304,11 @@ public struct AppLLMConnectionSetupService: Sendable {
         )
         try settingsRepository.saveConnection(connection, apiKey: apiKey, oauthTokens: input.oauthTokens, makeDefault: input.makeDefault)
         return AppLLMConnectionSetupResult(connection: connection, message: "Anthropic Compatible 连接验证成功：\(health.model)")
+    }
+
+    private func openAICompatibleMetadataHeaders(for headerKind: OpenAICompatibleAPIKeyHeaderKind) -> [String: String] {
+        guard headerKind != .bearer else { return [:] }
+        return [AppLLMSettingsRepository.openAIAPIKeyHeaderKindMetadataKey: headerKind.rawValue]
     }
 
     private static func isLocalBaseURL(_ url: URL) -> Bool {

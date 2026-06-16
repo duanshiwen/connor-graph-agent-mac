@@ -87,6 +87,37 @@ struct LLMConnectionSetupTests {
         #expect(try repository.apiKey(for: "provider-1") == "secret")
     }
 
+    @Test func xiaomiMiMoOpenAICompatiblePersistsAPIKeyHeaderKind() async throws {
+        let store = MemoryLLMSettingsStore()
+        let credentials = MemoryCredentialStore()
+        let repository = AppLLMSettingsRepository(settingsStore: store, credentialStore: credentials)
+        let service = AppLLMConnectionSetupService(
+            settingsRepository: repository,
+            openAICompatibleHealthCheck: { config in
+                #expect(config.baseURL.absoluteString == "https://api.xiaomimimo.com/v1")
+                #expect(config.model == "mimo-v2.5-pro")
+                #expect(config.apiKeyHeaderKind == .apiKey)
+                return LLMProviderHealthCheckResult(ok: true, model: config.model, message: "OK")
+            }
+        )
+
+        let result = try await service.setupConnection(AppLLMConnectionSetupInput(
+            id: "xiaomi-mimo-test",
+            kind: .openAICompatible,
+            name: "Xiaomi MiMo",
+            baseURLString: "https://api.xiaomimimo.com/v1",
+            model: "mimo-v2.5-pro",
+            apiKey: "mimo-secret",
+            openAIAPIKeyHeaderKind: .apiKey
+        ))
+
+        #expect(result.connection.extraHTTPHeaders[AppLLMSettingsRepository.openAIAPIKeyHeaderKindMetadataKey] == OpenAICompatibleAPIKeyHeaderKind.apiKey.rawValue)
+        let config = try #require(try repository.openAICompatibleConfig(connectionID: "xiaomi-mimo-test"))
+        #expect(config.apiKeyHeaderKind == .apiKey)
+        #expect(try repository.apiKey(for: "xiaomi-mimo-test") == "mimo-secret")
+        #expect(!store.values.values.contains(where: { $0.contains("mimo-secret") }))
+    }
+
     @Test func claudeSidecarRejectsAllowAll() async throws {
         let repository = AppLLMSettingsRepository(settingsStore: MemoryLLMSettingsStore(), credentialStore: MemoryCredentialStore())
         let service = AppLLMConnectionSetupService(settingsRepository: repository)
@@ -159,7 +190,11 @@ struct LLMConnectionSetupTests {
         let service = AppLLMConnectionSetupService(
             settingsRepository: repository,
             openAICompatibleHealthCheck: { config in
+                #expect(config.extraHeaders["User-Agent"] == "GitHubCopilotChat/0.35.0")
+                #expect(config.extraHeaders["Editor-Version"] == "vscode/1.107.0")
+                #expect(config.extraHeaders["Editor-Plugin-Version"] == "copilot-chat/0.35.0")
                 #expect(config.extraHeaders["Copilot-Integration-Id"] == "vscode-chat")
+                #expect(config.extraHeaders["OpenAI-Organization"] == nil)
                 return LLMProviderHealthCheckResult(ok: true, model: config.model, message: "OK")
             }
         )
@@ -175,8 +210,96 @@ struct LLMConnectionSetupTests {
         ))
 
         #expect(result.connection.connectionKind == .githubCopilot)
+        #expect(result.connection.extraHTTPHeaders["User-Agent"] == "GitHubCopilotChat/0.35.0")
+        #expect(result.connection.extraHTTPHeaders["Editor-Version"] == "vscode/1.107.0")
+        #expect(result.connection.extraHTTPHeaders["Editor-Plugin-Version"] == "copilot-chat/0.35.0")
         #expect(result.connection.extraHTTPHeaders["Copilot-Integration-Id"] == "vscode-chat")
+        #expect(result.connection.extraHTTPHeaders["OpenAI-Organization"] == nil)
         #expect(try repository.apiKey(for: "github-test") == "copilot-token")
+    }
+
+    @Test func githubCopilotDerivesBaseURLFromProxyEndpointWhenInputBaseURLIsEmpty() async throws {
+        let repository = AppLLMSettingsRepository(settingsStore: MemoryLLMSettingsStore(), credentialStore: MemoryCredentialStore())
+        let token = "tid=abc;proxy-ep=proxy.individual.githubcopilot.com;exp=123"
+        let service = AppLLMConnectionSetupService(
+            settingsRepository: repository,
+            openAICompatibleHealthCheck: { config in
+                #expect(config.baseURL.absoluteString == "https://api.individual.githubcopilot.com")
+                return LLMProviderHealthCheckResult(ok: true, model: config.model, message: "OK")
+            }
+        )
+
+        let result = try await service.setupConnection(AppLLMConnectionSetupInput(
+            id: "github-derived-endpoint-test",
+            kind: .githubCopilot,
+            name: "GitHub Copilot",
+            baseURLString: "",
+            model: "gpt-4.1",
+            apiKey: token,
+            oauthTokens: AppLLMOAuthTokens(accessToken: token, refreshToken: "github-token", expiresAt: 1_800_000)
+        ))
+
+        #expect(result.connection.baseURLString == "https://api.individual.githubcopilot.com")
+        #expect(try repository.openAICompatibleConfig(connectionID: "github-derived-endpoint-test")?.baseURL.absoluteString == "https://api.individual.githubcopilot.com")
+        #expect(try repository.oauthTokens(for: "github-derived-endpoint-test")?.refreshToken == "github-token")
+    }
+
+    @Test func githubCopilotRefreshingProviderRefreshesExpiringTokenAndUpdatesEndpoint() async throws {
+        let repository = AppLLMSettingsRepository(settingsStore: MemoryLLMSettingsStore(), credentialStore: MemoryCredentialStore())
+        let oldToken = "tid=old;proxy-ep=proxy.old.githubcopilot.com;exp=100"
+        let newToken = "tid=new;proxy-ep=proxy.business.githubcopilot.com;exp=200"
+        try repository.save(settings: AppLLMSettings(
+            connections: [AppLLMConnectionConfig(
+                id: "github-refresh-test",
+                name: "GitHub Copilot",
+                providerMode: .openAICompatible,
+                connectionKind: .githubCopilot,
+                baseURLString: "https://api.old.githubcopilot.com",
+                model: "gpt-4.1",
+                selectedModel: "gpt-4.1",
+                extraHTTPHeaders: ["Copilot-Integration-Id": "vscode-chat"]
+            )],
+            defaultConnectionID: "github-refresh-test"
+        ), apiKey: oldToken)
+        try repository.saveOAuthTokens(AppLLMOAuthTokens(
+            accessToken: oldToken,
+            refreshToken: "github-access-token",
+            expiresAt: 1_000
+        ), connectionID: "github-refresh-test")
+
+        final class CapturedConfigBox: @unchecked Sendable {
+            var config: OpenAICompatibleConfig?
+        }
+        let box = CapturedConfigBox()
+        let provider = GitHubCopilotTokenRefreshingAgentModelProvider(
+            connectionID: "github-refresh-test",
+            modelID: "gpt-4.1",
+            capabilities: AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false),
+            settingsRepository: repository,
+            refreshSkew: 300,
+            now: { Date(timeIntervalSince1970: 1) },
+            refreshTokens: { githubAccessToken in
+                #expect(githubAccessToken == "github-access-token")
+                return AppLLMOAuthTokens(accessToken: newToken, refreshToken: githubAccessToken, expiresAt: 2_000_000)
+            },
+            makeProvider: { config in
+                box.config = config
+                return AnyAgentModelProvider(
+                    modelID: config.model,
+                    capabilities: AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false),
+                    complete: { _ in AgentModelResponse(text: "ok") }
+                )
+            }
+        )
+
+        let response = try await provider.complete(AgentModelRequest(messages: [AgentModelMessage(role: .user, content: "hi")]))
+
+        #expect(response.text == "ok")
+        #expect(box.config?.apiKey == newToken)
+        #expect(box.config?.baseURL.absoluteString == "https://api.business.githubcopilot.com")
+        #expect(try repository.apiKey(for: "github-refresh-test") == newToken)
+        #expect(try repository.oauthTokens(for: "github-refresh-test")?.accessToken == newToken)
+        #expect(try repository.loadSettings().connection(id: "github-refresh-test")?.baseURLString == "https://api.business.githubcopilot.com")
     }
 
     @Test func anthropicCompatibleConnectionKindRoundTrips() throws {
