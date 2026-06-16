@@ -270,21 +270,10 @@ private struct SettingsAISection: View {
     }
 
     private func beginConnectionSetup(from option: AIConnectionOnboardingOption) {
-        if option.requiresWebAuthentication {
-            setupOption = option
-        } else {
-            addConnection(from: option)
-        }
+        setupOption = option
     }
 
     private func addConnection(from option: AIConnectionOnboardingOption) {
-        viewModel.addLLMConnection(
-            providerMode: option.providerMode,
-            name: option.connectionName,
-            baseURLString: option.baseURLString,
-            model: option.model,
-            selectedModel: option.selectedModel
-        )
         setupOption = nil
         isShowingAddConnectionGuide = false
     }
@@ -425,6 +414,15 @@ private struct AIConnectionSetupView: View {
     @State private var errorMessage: String?
     @State private var claudeFlow: AppLLMOAuthService.ClaudePreparedFlow?
     @State private var githubDeviceCode: AppLLMGitHubDeviceCode?
+    @State private var connectionName = ""
+    @State private var baseURLString = ""
+    @State private var model = ""
+    @State private var selectedModel = ""
+    @State private var apiKey = ""
+    @State private var sidecarExecutablePath = Self.defaultSidecarExecutablePath()
+    @State private var sidecarArguments = Self.defaultSidecarArguments()
+    @State private var sidecarWorkingDirectoryPath = Self.defaultSidecarWorkingDirectoryPath()
+    @State private var sidecarPermissionMode: AgentPermissionMode = .readOnly
 
     var body: some View {
         VStack(spacing: 0) {
@@ -485,6 +483,7 @@ private struct AIConnectionSetupView: View {
         }
         .frame(maxWidth: .infinity)
         .frame(minHeight: 760)
+        .onAppear(perform: initializeDrafts)
     }
 
     @ViewBuilder
@@ -504,6 +503,7 @@ private struct AIConnectionSetupView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.large)
+                claudeSidecarFields
                 VStack(alignment: .leading, spacing: 6) {
                     Text("授权码")
                         .font(.headline)
@@ -519,6 +519,7 @@ private struct AIConnectionSetupView: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
+                openAICompatibleFields(includeAPIKey: false)
                 if didOpenBrowser {
                     Text("浏览器已打开。完成网页认证后，回到康纳同学继续。")
                         .font(.headline)
@@ -535,6 +536,7 @@ private struct AIConnectionSetupView: View {
                     .font(.title3)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+                openAICompatibleFields(includeAPIKey: false)
                 if let githubDeviceCode {
                     Text(githubDeviceCode.userCode)
                         .font(.system(size: 38, weight: .bold, design: .monospaced))
@@ -557,10 +559,49 @@ private struct AIConnectionSetupView: View {
                 }
             }
         case .direct:
-            Text(option.setupInstruction)
-                .font(.title3)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+            VStack(spacing: 16) {
+                Text(option.setupInstruction)
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                openAICompatibleFields(includeAPIKey: true)
+            }
+        }
+    }
+
+    private var claudeSidecarFields: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            TextField("连接名称", text: $connectionName)
+                .textFieldStyle(.roundedBorder)
+            TextField("Sidecar executable path，例如 /opt/homebrew/bin/node", text: $sidecarExecutablePath)
+                .textFieldStyle(.roundedBorder)
+            TextField("Sidecar arguments，例如 sidecars/claude-agent-engine/claude-sidecar.mjs", text: $sidecarArguments)
+                .textFieldStyle(.roundedBorder)
+            TextField("Working directory", text: $sidecarWorkingDirectoryPath)
+                .textFieldStyle(.roundedBorder)
+            Picker("权限模式", selection: $sidecarPermissionMode) {
+                Text("只读").tag(AgentPermissionMode.readOnly)
+                Text("写入需审批").tag(AgentPermissionMode.askToWrite)
+                Text("受信写入").tag(AgentPermissionMode.trustedWrite)
+            }
+            .pickerStyle(.segmented)
+        }
+    }
+
+    private func openAICompatibleFields(includeAPIKey: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            TextField("连接名称", text: $connectionName)
+                .textFieldStyle(.roundedBorder)
+            TextField("Base URL", text: $baseURLString)
+                .textFieldStyle(.roundedBorder)
+            TextField("模型", text: $model)
+                .textFieldStyle(.roundedBorder)
+            TextField("默认模型", text: $selectedModel)
+                .textFieldStyle(.roundedBorder)
+            if includeAPIKey {
+                SecureField(option.id == "local-model" ? "API Key（本地模型可留空）" : "API Key", text: $apiKey)
+                    .textFieldStyle(.roundedBorder)
+            }
         }
     }
 
@@ -574,7 +615,7 @@ private struct AIConnectionSetupView: View {
         case .deviceCode:
             return githubDeviceCode == nil ? option.loginButtonTitle : "等待授权…"
         case .direct:
-            return option.loginButtonTitle
+            return "验证并添加连接"
         }
     }
 
@@ -596,6 +637,12 @@ private struct AIConnectionSetupView: View {
         switch option.authenticationKind {
         case .authorizationCode:
             return authorizationCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || connectionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || sidecarExecutablePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .direct:
+            return connectionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || baseURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         default:
             return false
         }
@@ -610,7 +657,7 @@ private struct AIConnectionSetupView: View {
         case .deviceCode:
             authenticateGitHubCopilotAndAddConnection()
         case .direct:
-            complete()
+            setupDirectOpenAICompatibleConnection()
         }
     }
 
@@ -634,16 +681,20 @@ private struct AIConnectionSetupView: View {
         Task {
             do {
                 let tokens = try await AppLLMOAuthService.shared.exchangeClaudeCode(authorizationCode)
-                try await MainActor.run {
-                    _ = try viewModel.addAuthenticatedLLMConnection(
-                        id: stableConnectionID,
-                        providerMode: option.providerMode,
-                        name: option.connectionName,
-                        baseURLString: option.baseURLString,
-                        model: option.model,
-                        selectedModel: option.selectedModel,
-                        oauthTokens: tokens
-                    )
+                let input = AppLLMConnectionSetupInput(
+                    id: stableConnectionID,
+                    kind: .claudeSidecar,
+                    name: connectionName,
+                    model: model,
+                    selectedModel: selectedModel,
+                    oauthTokens: tokens,
+                    sidecarExecutablePath: sidecarExecutablePath,
+                    sidecarArguments: sidecarArguments,
+                    sidecarWorkingDirectoryPath: sidecarWorkingDirectoryPath,
+                    sidecarPermissionMode: sidecarPermissionMode
+                )
+                _ = try await viewModel.setupLLMConnection(input)
+                await MainActor.run {
                     isAuthenticating = false
                     complete()
                 }
@@ -667,17 +718,18 @@ private struct AIConnectionSetupView: View {
                 let result = try await AppLLMOAuthService.shared.authenticateChatGPT { url in
                     NSWorkspace.shared.open(url)
                 }
-                try await MainActor.run {
-                    _ = try viewModel.addAuthenticatedLLMConnection(
-                        id: stableConnectionID,
-                        providerMode: option.providerMode,
-                        name: option.connectionName,
-                        baseURLString: option.baseURLString,
-                        model: option.model,
-                        selectedModel: option.selectedModel,
-                        apiKey: result.apiKey,
-                        oauthTokens: result.tokens
-                    )
+                let input = AppLLMConnectionSetupInput(
+                    id: stableConnectionID,
+                    kind: .chatGPTCodex,
+                    name: connectionName,
+                    baseURLString: baseURLString,
+                    model: model,
+                    selectedModel: selectedModel,
+                    apiKey: result.apiKey,
+                    oauthTokens: result.tokens
+                )
+                _ = try await viewModel.setupLLMConnection(input)
+                await MainActor.run {
                     isAuthenticating = false
                     complete()
                 }
@@ -707,18 +759,18 @@ private struct AIConnectionSetupView: View {
                     statusMessage = "在 GitHub 页面输入授权码后，康纳同学会自动继续。"
                 }
                 let tokens = try await AppLLMOAuthService.shared.pollGitHubCopilotTokens(deviceCode: code)
-                try await MainActor.run {
-                    let baseURL = AppLLMOAuthService.copilotBaseURL(from: tokens.accessToken) ?? option.baseURLString
-                    _ = try viewModel.addAuthenticatedLLMConnection(
-                        id: stableConnectionID,
-                        providerMode: option.providerMode,
-                        name: option.connectionName,
-                        baseURLString: baseURL,
-                        model: option.model,
-                        selectedModel: option.selectedModel,
-                        apiKey: tokens.accessToken,
-                        oauthTokens: tokens
-                    )
+                let input = AppLLMConnectionSetupInput(
+                    id: stableConnectionID,
+                    kind: .githubCopilot,
+                    name: connectionName,
+                    baseURLString: baseURLString,
+                    model: model,
+                    selectedModel: selectedModel,
+                    apiKey: tokens.accessToken,
+                    oauthTokens: tokens
+                )
+                _ = try await viewModel.setupLLMConnection(input)
+                await MainActor.run {
                     isAuthenticating = false
                     complete()
                 }
@@ -730,6 +782,65 @@ private struct AIConnectionSetupView: View {
                 }
             }
         }
+    }
+
+    private func setupDirectOpenAICompatibleConnection() {
+        isAuthenticating = true
+        statusMessage = "正在验证连接…"
+        errorMessage = nil
+        Task {
+            do {
+                let input = AppLLMConnectionSetupInput(
+                    id: nil,
+                    kind: .openAICompatible,
+                    name: connectionName,
+                    baseURLString: baseURLString,
+                    model: model,
+                    selectedModel: selectedModel,
+                    apiKey: apiKey
+                )
+                _ = try await viewModel.setupLLMConnection(input)
+                await MainActor.run {
+                    isAuthenticating = false
+                    complete()
+                }
+            } catch {
+                await MainActor.run {
+                    isAuthenticating = false
+                    statusMessage = nil
+                    errorMessage = displayError(error)
+                }
+            }
+        }
+    }
+
+    private func initializeDrafts() {
+        guard connectionName.isEmpty else { return }
+        connectionName = option.connectionName
+        baseURLString = option.baseURLString.isEmpty && option.id == "github-copilot" ? "https://api.githubcopilot.com" : option.baseURLString
+        model = option.model
+        selectedModel = option.selectedModel
+        if option.id == "claude-pro-max" {
+            sidecarExecutablePath = sidecarExecutablePath.isEmpty ? Self.defaultSidecarExecutablePath() : sidecarExecutablePath
+            sidecarArguments = sidecarArguments.isEmpty ? Self.defaultSidecarArguments() : sidecarArguments
+            sidecarWorkingDirectoryPath = sidecarWorkingDirectoryPath.isEmpty ? Self.defaultSidecarWorkingDirectoryPath() : sidecarWorkingDirectoryPath
+        }
+    }
+
+    private static func defaultSidecarExecutablePath() -> String {
+        for candidate in ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"] {
+            if FileManager.default.isExecutableFile(atPath: candidate) { return candidate }
+        }
+        return "/opt/homebrew/bin/node"
+    }
+
+    private static func defaultSidecarArguments() -> String {
+        let projectRoot = "/Users/duanshiwen/code/agent-os/agents/connor-graph-agent-mac"
+        return "\(projectRoot)/sidecars/claude-agent-engine/claude-sidecar.mjs"
+    }
+
+    private static func defaultSidecarWorkingDirectoryPath() -> String {
+        "/Users/duanshiwen/code/agent-os/agents/connor-graph-agent-mac"
     }
 
     private var stableConnectionID: String {

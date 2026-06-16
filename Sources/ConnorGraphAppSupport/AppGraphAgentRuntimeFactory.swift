@@ -91,6 +91,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             session: session,
             sidecarExecutableURL: URL(fileURLWithPath: executablePath),
             sidecarArguments: Self.splitSidecarArguments(connection.sidecarArguments),
+            sidecarEnvironment: claudeSidecarEnvironment(connectionID: connection.id),
             workingDirectory: resolvedProjectWorkingDirectory(llmSettings: settings, sessionWorkspace: sessionWorkspace).url,
             permissionMode: connection.sidecarPermissionMode
         )
@@ -109,6 +110,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         let transport = ClaudeSDKSidecarPersistentProcessTransport(
             executableURL: URL(fileURLWithPath: executablePath),
             arguments: Self.splitSidecarArguments(connection.sidecarArguments),
+            environment: claudeSidecarEnvironment(connectionID: connection.id),
             currentDirectoryURL: workingDirectory
         )
         return try GovernedClaudeSDKSidecarRuntime(
@@ -173,6 +175,16 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     private func makeClaudeSDKSidecarRuntimeStore() -> AppClaudeSDKSidecarRuntimeStore? {
         guard let storagePaths else { return nil }
         return AppClaudeSDKSidecarRuntimeStore(configDirectory: storagePaths.configDirectory)
+    }
+
+    private func claudeSidecarEnvironment(connectionID: String) -> [String: String] {
+        guard let tokens = try? settingsRepository.oauthTokens(for: connectionID) else { return [:] }
+        var environment: [String: String] = [:]
+        environment["CLAUDE_CODE_OAUTH_TOKEN"] = tokens.accessToken
+        if let refreshToken = tokens.refreshToken, !refreshToken.isEmpty {
+            environment["CLAUDE_CODE_OAUTH_REFRESH_TOKEN"] = refreshToken
+        }
+        return environment
     }
 
     private func makeClaudeSDKSidecarNativeSessionManager<Backend: AgentBackend>(

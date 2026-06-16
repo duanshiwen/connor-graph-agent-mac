@@ -167,17 +167,6 @@ public struct ProductOSAutomationTriggerRecord: Codable, Sendable, Equatable, Id
 public extension ProductOSAutomationRule {
     static let defaults: [ProductOSAutomationRule] = [
         ProductOSAutomationRule(
-            id: "needs-review-flags-graph-review",
-            name: "Needs Review → Graph Review marker",
-            trigger: ProductOSAutomationTrigger(kind: .sessionStatusChanged, status: .needsReview),
-            actions: [
-                ProductOSAutomationAction(kind: .appendTimelineEvent, message: "Session entered Needs Review; reviewer should inspect graph memory and approvals."),
-                ProductOSAutomationAction(kind: .addSessionLabel, label: AgentSessionLabel(id: "graph-review"), message: "Suggest adding graph-review label.")
-            ],
-            requiresReview: true,
-            tags: ["built-in", "review"]
-        ),
-        ProductOSAutomationRule(
             id: "important-label-adds-review-note",
             name: "Important label → Review note",
             trigger: ProductOSAutomationTrigger(kind: .sessionLabelAdded, labelID: "important"),
