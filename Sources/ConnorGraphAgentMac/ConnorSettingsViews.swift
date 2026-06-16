@@ -40,6 +40,8 @@ enum SettingsListLayout {
     static let compactRowMinHeight: CGFloat = 38
     static let prominentRowMinHeight: CGFloat = 58
     static let fieldHeight = AgentChatLayout.hitTargetSize
+    static let pickerControlWidth: CGFloat = 260
+    static let compactPickerControlWidth: CGFloat = 220
     static let iconButtonSize = AgentChatLayout.iconButtonSize
     static let optionIconSize = AgentChatLayout.primaryButtonSize
 }
@@ -753,18 +755,22 @@ struct AIConnectionSetupView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
 
-            VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: SettingsListLayout.spaceL) {
                 Text("服务商")
                     .font(SettingsListTypography.header)
+                Spacer(minLength: SettingsListLayout.spaceL)
                 Picker("服务商", selection: $selectedProviderPresetID) {
                     ForEach(chinaProviderPresets) { preset in
                         Text(preset.title).tag(preset.id)
                     }
                 }
+                .labelsHidden()
                 .pickerStyle(.menu)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .controlSize(.large)
+                .frame(width: SettingsListLayout.pickerControlWidth, alignment: .trailing)
                 .onChange(of: selectedProviderPresetID) { _, _ in applySelectedProviderPreset() }
             }
+            .frame(maxWidth: .infinity, minHeight: SettingsListLayout.rowMinHeight)
 
             modelMultiSelect(title: "启用模型", models: activeProviderPreset.availableModels)
             apiKeyField(placeholder: activeProviderPreset.keyPlaceholder)
@@ -781,18 +787,22 @@ struct AIConnectionSetupView: View {
 
             apiKeyField(placeholder: activeProviderPreset.keyPlaceholder)
 
-            VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: SettingsListLayout.spaceL) {
                 Text("服务商")
                     .font(SettingsListTypography.header)
+                Spacer(minLength: SettingsListLayout.spaceL)
                 Picker("服务商", selection: $selectedProviderPresetID) {
                     ForEach(AIConnectionProviderPreset.otherProviderPresets) { preset in
                         Text(preset.title).tag(preset.id)
                     }
                 }
+                .labelsHidden()
                 .pickerStyle(.menu)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .controlSize(.large)
+                .frame(width: SettingsListLayout.pickerControlWidth, alignment: .trailing)
                 .onChange(of: selectedProviderPresetID) { _, _ in applySelectedProviderPreset() }
             }
+            .frame(maxWidth: .infinity, minHeight: SettingsListLayout.rowMinHeight)
 
             if selectedProviderPresetID == "custom" {
                 VStack(alignment: .leading, spacing: 8) {
@@ -812,6 +822,8 @@ struct AIConnectionSetupView: View {
                         }
                     }
                     .pickerStyle(.segmented)
+                    .controlSize(.large)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
                     Text(customProtocol == .anthropicCompatible ? "Anthropic Compatible 使用 /v1/messages 协议，适合 Anthropic API、OpenRouter Anthropic Skin、Vercel AI Gateway 等兼容服务。" : "大多数第三方接口（Ollama、vLLM、DashScope 等）使用 OpenAI Compatible。")
                         .font(SettingsListTypography.rowTitle)
                         .foregroundStyle(.secondary)
@@ -906,7 +918,9 @@ struct AIConnectionSetupView: View {
                     }
                 }
                 .labelsHidden()
-                .frame(maxWidth: 260)
+                .pickerStyle(.menu)
+                .controlSize(.large)
+                .frame(width: SettingsListLayout.pickerControlWidth, alignment: .trailing)
                 .onChange(of: selectedModel) { _, newValue in
                     if !selectedModelIDs.contains(newValue) { selectedModelIDs.insert(newValue) }
                     syncModelListFromSelection(fallbackModels: models)
@@ -1631,7 +1645,7 @@ struct PermissionModePickerRow: View {
                 .font(SettingsListTypography.rowTitleSelected)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
-                .frame(width: 188, alignment: .leading)
+                .frame(width: SettingsListLayout.compactPickerControlWidth - 32, alignment: .leading)
                 .background(.quaternary.opacity(0.32), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -1640,7 +1654,7 @@ struct PermissionModePickerRow: View {
                 .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
             .buttonStyle(.plain)
-            .frame(width: 220, alignment: .trailing)
+            .frame(width: SettingsListLayout.compactPickerControlWidth, alignment: .trailing)
             .help("选择新会话默认权限模式")
         }
         .frame(minHeight: SettingsListLayout.rowMinHeight)
