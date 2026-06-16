@@ -75,7 +75,6 @@ public struct AgentSessionLabelDefinition: Codable, Sendable, Equatable, Identif
     public static let defaults: [AgentSessionLabelDefinition] = [
         .init(id: "important", name: "重要", colorName: "orange"),
         .init(id: "research", name: "研究", colorName: "purple"),
-        .init(id: "graph-review", name: "图谱审阅", colorName: "teal"),
         .init(id: "priority", name: "优先级", valueType: .number, colorName: "red"),
         .init(id: "due", name: "截止日期", valueType: .date, colorName: "yellow"),
         .init(id: "project", name: "项目", valueType: .graphEntityRef, colorName: "green", graphBindingKind: "project")

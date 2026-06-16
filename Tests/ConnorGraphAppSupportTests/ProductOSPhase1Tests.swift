@@ -42,7 +42,7 @@ struct ProductOSPhase1Tests {
         let config = AppSessionGovernanceConfig.default
         #expect(AgentSessionStatus.allCases.map(\.displayName) == ["待办", "进行中", "等待中", "待审阅", "已完成", "受阻", "已归档"])
         #expect(config.statuses.map(\.name) == ["待办", "进行中", "等待中", "待审阅", "受阻", "已完成", "已归档"])
-        #expect(config.labels.map(\.name) == ["重要", "研究", "图谱审阅", "优先级", "截止日期", "项目"])
+        #expect(config.labels.map(\.name) == ["重要", "研究", "优先级", "截止日期", "项目"])
     }
 
     @Test func governanceRepositoryNormalizesLegacyEnglishBuiltInDisplayNames() throws {

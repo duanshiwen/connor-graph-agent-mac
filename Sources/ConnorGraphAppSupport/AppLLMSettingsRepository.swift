@@ -15,10 +15,27 @@ public enum AppLLMProviderMode: String, Sendable, Equatable, CaseIterable, Codab
     }
 }
 
+public enum AppLLMConnectionKind: String, Sendable, Equatable, CaseIterable, Codable {
+    case openAICompatible = "openai_compatible"
+    case claudeSidecar = "claude_sidecar"
+    case chatGPTCodex = "chatgpt_codex"
+    case githubCopilot = "github_copilot"
+
+    public var displayName: String {
+        switch self {
+        case .openAICompatible: return "OpenAI Compatible"
+        case .claudeSidecar: return "Claude SDK Sidecar"
+        case .chatGPTCodex: return "Codex · ChatGPT"
+        case .githubCopilot: return "GitHub Copilot"
+        }
+    }
+}
+
 public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable {
     public var id: String
     public var name: String
     public var providerMode: AppLLMProviderMode
+    public var connectionKind: AppLLMConnectionKind
     public var baseURLString: String
     public var model: String
     public var selectedModel: String
@@ -27,11 +44,18 @@ public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable
     public var sidecarArguments: String
     public var sidecarWorkingDirectoryPath: String
     public var sidecarPermissionMode: AgentPermissionMode
+    public var extraHTTPHeaders: [String: String]
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, providerMode, connectionKind, baseURLString, model, selectedModel, hasAPIKey
+        case sidecarExecutablePath, sidecarArguments, sidecarWorkingDirectoryPath, sidecarPermissionMode, extraHTTPHeaders
+    }
 
     public init(
         id: String,
         name: String,
         providerMode: AppLLMProviderMode,
+        connectionKind: AppLLMConnectionKind? = nil,
         baseURLString: String = "",
         model: String = "",
         selectedModel: String = "",
@@ -39,11 +63,13 @@ public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable
         sidecarExecutablePath: String = "",
         sidecarArguments: String = "",
         sidecarWorkingDirectoryPath: String = "",
-        sidecarPermissionMode: AgentPermissionMode = .readOnly
+        sidecarPermissionMode: AgentPermissionMode = .readOnly,
+        extraHTTPHeaders: [String: String] = [:]
     ) {
         self.id = id
         self.name = name
         self.providerMode = providerMode
+        self.connectionKind = connectionKind ?? (providerMode == .governedClaudeSidecar ? .claudeSidecar : .openAICompatible)
         self.baseURLString = baseURLString
         self.model = model
         let normalizedSelectedModel = selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -53,6 +79,27 @@ public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable
         self.sidecarArguments = sidecarArguments
         self.sidecarWorkingDirectoryPath = sidecarWorkingDirectoryPath
         self.sidecarPermissionMode = sidecarPermissionMode == .allowAll ? .readOnly : sidecarPermissionMode
+        self.extraHTTPHeaders = extraHTTPHeaders
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let providerMode = try container.decode(AppLLMProviderMode.self, forKey: .providerMode)
+        self.init(
+            id: try container.decode(String.self, forKey: .id),
+            name: try container.decode(String.self, forKey: .name),
+            providerMode: providerMode,
+            connectionKind: try container.decodeIfPresent(AppLLMConnectionKind.self, forKey: .connectionKind),
+            baseURLString: try container.decodeIfPresent(String.self, forKey: .baseURLString) ?? "",
+            model: try container.decodeIfPresent(String.self, forKey: .model) ?? "",
+            selectedModel: try container.decodeIfPresent(String.self, forKey: .selectedModel) ?? "",
+            hasAPIKey: try container.decodeIfPresent(Bool.self, forKey: .hasAPIKey) ?? false,
+            sidecarExecutablePath: try container.decodeIfPresent(String.self, forKey: .sidecarExecutablePath) ?? "",
+            sidecarArguments: try container.decodeIfPresent(String.self, forKey: .sidecarArguments) ?? "",
+            sidecarWorkingDirectoryPath: try container.decodeIfPresent(String.self, forKey: .sidecarWorkingDirectoryPath) ?? "",
+            sidecarPermissionMode: try container.decodeIfPresent(AgentPermissionMode.self, forKey: .sidecarPermissionMode) ?? .readOnly,
+            extraHTTPHeaders: try container.decodeIfPresent([String: String].self, forKey: .extraHTTPHeaders) ?? [:]
+        )
     }
 
     public var modelOptions: [String] { Self.modelOptions(in: model) }
@@ -374,7 +421,7 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
         guard let baseURL = URL(string: urlString) else {
             throw OpenAICompatibleProviderError.invalidBaseURL(urlString)
         }
-        return OpenAICompatibleConfig(baseURL: baseURL, apiKey: apiKey, model: modelOverride ?? connection.effectiveModel)
+        return OpenAICompatibleConfig(baseURL: baseURL, apiKey: apiKey, model: modelOverride ?? connection.effectiveModel, extraHeaders: connection.extraHTTPHeaders)
     }
 }
 

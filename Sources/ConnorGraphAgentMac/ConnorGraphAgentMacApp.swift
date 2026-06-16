@@ -223,6 +223,7 @@ final class AppViewModel: ObservableObject {
     @Published var llmSettingsMessage: String?
     @Published var llmHealthCheckMessage: String?
     @Published var isTestingLLMConnection: Bool = false
+    @Published var isAddingLLMConnection: Bool = false
     @Published var llmModelConnections: [AppLLMModelConnection] = []
     @Published var isLoadingLLMModelConnections: Bool = false
     @Published var chatSessions: [AgentSession] = []
@@ -1200,16 +1201,17 @@ final class AppViewModel: ObservableObject {
         persistLLMSettings(rebuildRuntime: true)
     }
 
+    @discardableResult
     func addLLMConnection(
         providerMode: AppLLMProviderMode,
         name: String? = nil,
         baseURLString: String? = nil,
         model: String? = nil,
         selectedModel: String? = nil
-    ) {
+    ) -> AppLLMConnectionConfig {
         let idBase = providerMode == .openAICompatible ? "openai-compatible" : "claude"
         let id = "\(idBase)-\(UUID().uuidString.prefix(8).lowercased())"
-        addLLMConnection(
+        return addLLMConnection(
             id: id,
             providerMode: providerMode,
             name: name,
@@ -1251,6 +1253,22 @@ final class AppViewModel: ObservableObject {
         return connection
     }
 
+    @discardableResult
+    func setupLLMConnection(_ input: AppLLMConnectionSetupInput) async throws -> AppLLMConnectionConfig {
+        isAddingLLMConnection = true
+        defer { isAddingLLMConnection = false }
+        let service = AppLLMConnectionSetupService(settingsRepository: llmSettingsRepository)
+        let result = try await service.setupConnection(input)
+        loadLLMSettings()
+        rebuildNativeSessionManagerForActiveSession()
+        await reloadLLMModelConnections()
+        llmSettingsMessage = result.message
+        llmHealthCheckMessage = result.message
+        errorMessage = nil
+        return result.connection
+    }
+
+    @discardableResult
     private func addLLMConnection(
         id: String,
         providerMode: AppLLMProviderMode,

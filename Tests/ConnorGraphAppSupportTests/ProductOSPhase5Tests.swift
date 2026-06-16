@@ -15,7 +15,7 @@ struct ProductOSPhase5Tests {
         let config = try repository.loadOrCreateDefault(governanceConfig: governance)
 
         #expect(config.schemaVersion == 1)
-        #expect(config.rules.contains { $0.id == "needs-review-flags-graph-review" })
+        #expect(config.rules.contains { $0.id == "important-label-adds-review-note" })
         #expect(FileManager.default.fileExists(atPath: repository.automationConfigURL.path))
         #expect(FileManager.default.fileExists(atPath: repository.statusesMirrorURL.path))
         #expect(FileManager.default.fileExists(atPath: repository.labelsMirrorURL.path))
@@ -58,7 +58,7 @@ struct ProductOSPhase5Tests {
             sessionID: "session-1",
             status: .needsReview
         ))
-        #expect(statusRecords.map(\.ruleID).contains("needs-review-flags-graph-review"))
+        #expect(statusRecords.isEmpty)
 
         let labelRecords = try repository.evaluate(context: ProductOSAutomationEventContext(
             triggerKind: .sessionLabelAdded,
@@ -75,7 +75,7 @@ struct ProductOSPhase5Tests {
         #expect(noMatch.isEmpty)
 
         let recent = try repository.loadRecentTriggerRecords()
-        #expect(recent.count == 2)
+        #expect(recent.count == 1)
         #expect(recent.allSatisfy { $0.sessionID == "session-1" })
     }
 }
