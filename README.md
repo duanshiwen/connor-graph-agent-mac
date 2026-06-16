@@ -1,7 +1,7 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-16 19:01 GMT+8  
-当前代码基线:`feature/apple-iwork-attachment-support`,在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface / session-scoped multi-root project workspace / Connor-owned Scientific Compute Runtime skeleton / 商用级 Document Attachment OS 基础上,继续收紧 Apple 原生 UI 边界:PDF/Word/Excel/PowerPoint 与 Apple iWork（Pages/Numbers/Keynote）一等附件仍由 Connor Session Capsule 和 Attachment Store 管理;PDF selectable text 抽取和多页原文预览继续使用 PDFKit;Office/iWork/Presentation/Spreadsheet 抽取继续通过 MarkItDown/Docling sidecar best-effort 编排与 hardening;Office/iWork/Presentation/Spreadsheet 原文件预览优先交给 macOS Quick Look / QuickLookUI,Connor 自有 UI 只负责 manifest、extraction status、retry、omitted attachment summary 和治理证据。
+文档更新时间：2026-06-16 19:39 GMT+8  
+当前代码基线:`feature/apple-iwork-attachment-support`,在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface / session-scoped multi-root project workspace / Connor-owned Scientific Compute Runtime skeleton / 商用级 Document Attachment OS / WKWebView-backed `web_fetch(js)` 基础上,继续收紧 Apple 原生 UI 边界:PDF/Word/Excel/PowerPoint 与 Apple iWork（Pages/Numbers/Keynote）一等附件仍由 Connor Session Capsule 和 Attachment Store 管理;PDF selectable text 抽取和多页原文预览继续使用 PDFKit;Office/iWork/Presentation/Spreadsheet 抽取继续通过 MarkItDown/Docling sidecar best-effort 编排与 hardening;Office/iWork/Presentation/Spreadsheet 原文件预览优先交给 macOS Quick Look / QuickLookUI,Connor 自有 UI 只负责 manifest、extraction status、retry、omitted attachment summary 和治理证据。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package,目标是把 Connor 建成 **graph-memory-native Agent OS**:它不是"图谱编辑器",也不是"Claude SDK 外壳",而是以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI 和 Local Automation Surface 共同构成的本地 Agent 操作系统。
 
@@ -862,6 +862,7 @@ Agent tool invocation detail 当前支持:
 - Bash / swift build / swift test / git / python / node / package manager 等 shell-like 工具使用 terminal-style renderer,优先从 result JSON 展示 stdout、stderr、exitCode,否则回退到纯文本解析。
 - Edit/Write 等文件变更类工具使用 `AgentToolChangePresentation` 提取 result JSON / arguments JSON / outputText 中的 unified diff、patch、oldText/newText,并由 SwiftUI 原生 diff renderer 高亮新增、删除和 hunk 行。
 - MCP、Browser、Read/Grep/List 和未知工具使用原生 input/output card 与 JSON/text renderer;这是参考 Craft activity overlay 的信息架构,不是 Craft UI fork,也不引入 Electron/Web UI。
+- `web_fetch` 的 `http/auto` 模式继续通过 search-engine-mcp 获取 cleaned Markdown/text;`js` 模式在 Connor App runtime 中优先走 Connor-owned WKWebView background runner,从渲染后的 DOM 抽取 title、final URL 与正文内容返回给 Agent,以保持 Native Shell 浏览器能力和 Agent 工具调用的一致治理边界;无 App UI handler 的 CLI/测试环境继续回退到 search-engine-mcp 的 JS 渲染路径。
 - 大输出通过 `AgentToolOutputDisplayPolicy` 先做 preview/truncation 治理;当前不强制把超大 stdout/stderr 落 Session Capsule artifact,后续若需要再以独立 artifact policy 接入。
 
 Browser Workspace 当前支持:
@@ -877,6 +878,7 @@ Browser Workspace 当前支持:
 - Browser Workspace 可见时,按 ⌘W 关闭当前选中的浏览器标签页,而不是关闭整个 macOS 窗口
 - 从对话 transcript 中打开链接时,会写入当前会话的浏览器状态,追加并选中新标签页,同时更新地址栏目标
 - 内置搜索服务需要浏览器时,可先通过隐藏的 Browser Background Task Runner 使用同一应用级 WebKit 存储在后台加载搜索页;若流程未遇到验证/安全挑战,则后台完成不切换用户界面;若检测到 CAPTCHA、人机验证、Cloudflare challenge 等卡点,则标记为 awaiting user intervention,并显式切换到对应浏览器标签页请用户处理
+- `web_fetch(render_mode: "js")` 在 Connor App runtime 中优先使用内置 WKWebView background runner 加载 JavaScript 页面,并从渲染后的 DOM 抽取 title、final URL 与正文内容返回给 Agent;遇到 CAPTCHA、人机验证、Cloudflare challenge、登录或浏览器安全挑战时,会切换到对应内置浏览器标签页请求用户介入;无 App UI handler 的 CLI/测试环境继续回退到 search-engine-mcp 的 JS 渲染路径
 - 地址栏右侧提供"问一问 AI"按钮,可基于当前网页全文打开与选区浮窗一致的整页 mini-thread 提问浮窗
 - 用户在网页中选中文本后自动显示跟随选区的浮动窗口
 - 浮窗会根据 Browser Workspace 可视区域自动翻转、平移并限制最大高度,避免在窗口边缘、小窗口或长 mini-thread 场景下显示不全

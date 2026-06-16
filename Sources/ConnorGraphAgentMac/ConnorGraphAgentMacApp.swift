@@ -257,6 +257,7 @@ final class AppViewModel: ObservableObject {
     @Published var sessionRecordsBySessionID: [String: [AppSessionRecord]] = [:]
     @Published var browserWorkspaceSnapshotsBySessionID: [String: AppBrowserStateSnapshot] = [:]
     @Published var browserAssistedTasksByID: [UUID: BrowserAssistedTaskState] = [:]
+    @Published var browserAssistedWebFetchRequestsByTaskID: [UUID: BrowserAssistedWebFetchRequest] = [:]
     @Published var isBrowserBookmarksPanelVisible: Bool = false
     @Published var browserBookmarkRecords: [BrowserBookmarkRecord] = []
     @Published var filteredBrowserBookmarkRecords: [BrowserBookmarkRecord] = []
@@ -327,6 +328,7 @@ final class AppViewModel: ObservableObject {
     private var pendingChatCancellationReasonsBySessionID: [String: String] = [:]
     private var chatInputDraftsBySessionID: [String: String] = [:]
     private var pendingAttachmentRefsBySessionID: [String: [AgentMessageAttachmentRef]] = [:]
+    private var browserAssistedWebFetchContinuationsByTaskID: [UUID: CheckedContinuation<BrowserAssistedWebFetchResult, Never>] = [:]
     private var isRestoringChatInputDraft = false
     private var agentEventTimelinesBySessionID: [String: [AgentEventPresentation]] = [:]
     private var agentEventTimelinesByProcessKey: [String: [AgentEventPresentation]] = [:]
@@ -726,10 +728,124 @@ final class AppViewModel: ObservableObject {
         return plan.task
     }
 
+    func performBrowserAssistedWebFetch(_ request: BrowserAssistedWebFetchRequest) async -> BrowserAssistedWebFetchResult? {
+        let task = startBrowserAssistedWebFetch(request)
+        let timeout = max(3_000, min(request.timeoutMilliseconds, 720_000))
+        return await withCheckedContinuation { continuation in
+            browserAssistedWebFetchContinuationsByTaskID[task.id] = continuation
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(timeout) * 1_000_000)
+                await MainActor.run {
+                    guard let self, self.browserAssistedWebFetchContinuationsByTaskID[task.id] != nil else { return }
+                    let result = BrowserAssistedWebFetchResult(
+                        status: .timedOut,
+                        urlString: request.urlString,
+                        finalURLString: request.urlString,
+                        title: "",
+                        contentText: "",
+                        taskID: task.id.uuidString,
+                        sessionID: task.sessionID,
+                        tabID: task.tabID.uuidString,
+                        errorMessage: "Connor WKWebView web_fetch(js) timed out after \(timeout)ms",
+                        interventionReason: nil,
+                        truncated: false,
+                        originalCharacterCount: 0
+                    )
+                    if let current = self.browserAssistedTasksByID[task.id] {
+                        self.browserAssistedTasksByID[task.id] = BrowserAssistedTaskPlanner().fail(current, message: result.errorMessage ?? "Timed out")
+                    }
+                    self.browserAssistedWebFetchContinuationsByTaskID[task.id]?.resume(returning: result)
+                    self.browserAssistedWebFetchContinuationsByTaskID[task.id] = nil
+                    self.browserAssistedWebFetchRequestsByTaskID[task.id] = nil
+                }
+            }
+        }
+    }
+
+    @discardableResult
+    private func startBrowserAssistedWebFetch(_ request: BrowserAssistedWebFetchRequest) -> BrowserAssistedTaskState {
+        let sessionID = selectedChatSessionID ?? activeChatSession.id
+        let currentSnapshot = browserWorkspaceSnapshotsBySessionID[sessionID] ?? AppBrowserStateSnapshot()
+        let taskRequest = BrowserAssistedTaskRequest(
+            kind: .fetch,
+            sessionID: sessionID,
+            urlString: request.urlString,
+            title: "Fetch: \(request.urlString)",
+            visibility: request.revealImmediately ? .foreground : .background
+        )
+        let plan = BrowserAssistedTaskPlanner().start(taskRequest, in: currentSnapshot)
+        browserAssistedTasksByID[plan.task.id] = plan.task
+        browserAssistedWebFetchRequestsByTaskID[plan.task.id] = request
+        browserTargetURLString = request.urlString
+        saveBrowserWorkspaceSnapshot(plan.snapshot, for: sessionID)
+        if plan.shouldRevealBrowser { showBrowserWorkspace(for: sessionID) }
+        return plan.task
+    }
+
+    func completeBrowserAssistedWebFetch(_ taskID: UUID, title: String, finalURLString: String, text: String) {
+        guard let task = browserAssistedTasksByID[taskID], let request = browserAssistedWebFetchRequestsByTaskID[taskID] else { return }
+        let originalCount = text.count
+        let maxCharacters = 100_000
+        let truncated = originalCount > maxCharacters
+        let returnedText = truncated ? String(text.prefix(maxCharacters)) : text
+        let content: String
+        if request.extractMode == "text" {
+            content = returnedText + (truncated ? "\n\n[Content truncated by Connor web_fetch(js-wkwebview): original characters = \(originalCount), returned characters = \(maxCharacters)]" : "")
+        } else {
+            let heading = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Fetched Page" : title
+            content = """
+            # \(heading)
+            **Source:** \(finalURLString.isEmpty ? request.urlString : finalURLString)
+            **Render mode:** js-wkwebview
+
+            ---
+
+            \(returnedText)\(truncated ? "\n\n[Content truncated by Connor web_fetch(js-wkwebview): original characters = \(originalCount), returned characters = \(maxCharacters)]" : "")
+            """
+        }
+        let result = BrowserAssistedWebFetchResult(
+            status: .fetched,
+            urlString: request.urlString,
+            finalURLString: finalURLString.isEmpty ? request.urlString : finalURLString,
+            title: title,
+            contentText: content,
+            taskID: task.id.uuidString,
+            sessionID: task.sessionID,
+            tabID: task.tabID.uuidString,
+            errorMessage: nil,
+            interventionReason: nil,
+            truncated: truncated,
+            originalCharacterCount: originalCount
+        )
+        browserAssistedTasksByID[taskID] = BrowserAssistedTaskPlanner().complete(task, message: "Fetched rendered page content")
+        browserAssistedWebFetchContinuationsByTaskID[taskID]?.resume(returning: result)
+        browserAssistedWebFetchContinuationsByTaskID[taskID] = nil
+        browserAssistedWebFetchRequestsByTaskID[taskID] = nil
+    }
+
     func revealBrowserAssistedTask(_ taskID: UUID, reason: String) {
         guard let task = browserAssistedTasksByID[taskID] else { return }
         let updated = BrowserAssistedTaskPlanner().requireUserIntervention(task, reason: reason)
         browserAssistedTasksByID[taskID] = updated
+        if let request = browserAssistedWebFetchRequestsByTaskID[taskID], browserAssistedWebFetchContinuationsByTaskID[taskID] != nil {
+            let result = BrowserAssistedWebFetchResult(
+                status: .needsUserIntervention,
+                urlString: request.urlString,
+                finalURLString: updated.urlString,
+                title: updated.title,
+                contentText: "",
+                taskID: updated.id.uuidString,
+                sessionID: updated.sessionID,
+                tabID: updated.tabID.uuidString,
+                errorMessage: nil,
+                interventionReason: reason,
+                truncated: false,
+                originalCharacterCount: 0
+            )
+            browserAssistedWebFetchContinuationsByTaskID[taskID]?.resume(returning: result)
+            browserAssistedWebFetchContinuationsByTaskID[taskID] = nil
+            browserAssistedWebFetchRequestsByTaskID[taskID] = nil
+        }
         focusBrowserTab(updated.tabID, in: updated.sessionID, urlString: updated.urlString)
         showBrowserWorkspace(for: updated.sessionID)
     }
@@ -742,6 +858,25 @@ final class AppViewModel: ObservableObject {
     func failBrowserAssistedTask(_ taskID: UUID, message: String) {
         guard let task = browserAssistedTasksByID[taskID] else { return }
         browserAssistedTasksByID[taskID] = BrowserAssistedTaskPlanner().fail(task, message: message)
+        if let request = browserAssistedWebFetchRequestsByTaskID[taskID], browserAssistedWebFetchContinuationsByTaskID[taskID] != nil {
+            let result = BrowserAssistedWebFetchResult(
+                status: .failed,
+                urlString: request.urlString,
+                finalURLString: task.urlString,
+                title: task.title,
+                contentText: "",
+                taskID: task.id.uuidString,
+                sessionID: task.sessionID,
+                tabID: task.tabID.uuidString,
+                errorMessage: message,
+                interventionReason: nil,
+                truncated: false,
+                originalCharacterCount: 0
+            )
+            browserAssistedWebFetchContinuationsByTaskID[taskID]?.resume(returning: result)
+            browserAssistedWebFetchContinuationsByTaskID[taskID] = nil
+            browserAssistedWebFetchRequestsByTaskID[taskID] = nil
+        }
     }
 
     private func focusBrowserTab(_ tabID: UUID, in sessionID: String, urlString: String) {
@@ -928,6 +1063,10 @@ final class AppViewModel: ObservableObject {
                             status: state.status.rawValue
                         )
                     }
+                },
+                browserAssistedWebFetchHandler: { [weak self] request in
+                    guard let self else { return nil }
+                    return await self.performBrowserAssistedWebFetch(request)
                 }
             )
         }

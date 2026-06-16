@@ -26,19 +26,22 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     public var groupID: String
     public var storagePaths: AppStoragePaths?
     public var browserAssistedSearchHandler: BrowserAssistedSearchHandler?
+    public var browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler?
 
     public init(
         store: SQLiteGraphKernelStore,
         settingsRepository: AppLLMSettingsRepository,
         groupID: String = "default",
         storagePaths: AppStoragePaths? = nil,
-        browserAssistedSearchHandler: BrowserAssistedSearchHandler? = nil
+        browserAssistedSearchHandler: BrowserAssistedSearchHandler? = nil,
+        browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler? = nil
     ) {
         self.store = store
         self.settingsRepository = settingsRepository
         self.groupID = groupID
         self.storagePaths = storagePaths
         self.browserAssistedSearchHandler = browserAssistedSearchHandler
+        self.browserAssistedWebFetchHandler = browserAssistedWebFetchHandler
     }
 
     public func makeAgentLoopChatController(
@@ -247,7 +250,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         registry.register(ScienceTableComputeTool())
         registry.register(BrowserFetchTool())
         registry.register(SearchEngineMCPTool(browserAssistedSearchHandler: browserAssistedSearchHandler))
-        registry.register(SearchEngineMCPWebFetchTool(browserAssistedSearchHandler: browserAssistedSearchHandler))
+        registry.register(SearchEngineMCPWebFetchTool(browserAssistedSearchHandler: browserAssistedSearchHandler, browserAssistedWebFetchHandler: browserAssistedWebFetchHandler))
         var effectiveConfiguration = configuration
         effectiveConfiguration.permissionMode = permissionMode
         return AgentLoopController(
