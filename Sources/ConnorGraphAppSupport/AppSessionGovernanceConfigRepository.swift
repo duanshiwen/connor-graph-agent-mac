@@ -47,13 +47,30 @@ public struct AppSessionGovernanceConfig: Codable, Sendable, Equatable {
     }
 
     public func normalizingBuiltInDisplayNames() -> AppSessionGovernanceConfig {
-        let statusNames = Dictionary(uniqueKeysWithValues: AgentSessionStatusDefinition.defaults.map { ($0.id, $0.name) })
+        let statusDefaults = Dictionary(uniqueKeysWithValues: AgentSessionStatusDefinition.defaults.map { ($0.id, $0) })
         let labelDefaults = Dictionary(uniqueKeysWithValues: AgentSessionLabelDefinition.defaults.map { ($0.id, $0) })
-        let normalizedStatuses = statuses.map { definition in
-            guard let name = statusNames[definition.id], definition.name != name else { return definition }
+        var normalizedStatuses = statuses.map { definition in
             var copy = definition
-            copy.name = name
+            if copy.name == "已取消", AgentSessionStatus(rawValue: copy.id) == nil {
+                copy.id = AgentSessionStatus.cancelled.rawValue
+            }
+            if let builtIn = statusDefaults[copy.id] {
+                copy.name = builtIn.name
+                if copy.systemImage == "circle" || copy.systemImage.isEmpty {
+                    copy.systemImage = builtIn.systemImage
+                }
+                copy.sortOrder = builtIn.sortOrder
+                copy.isTerminal = builtIn.isTerminal
+            }
             return copy
+        }
+        if let cancelled = statusDefaults[AgentSessionStatus.cancelled.rawValue], !normalizedStatuses.contains(where: { $0.id == cancelled.id }) {
+            normalizedStatuses.append(cancelled)
+        }
+        normalizedStatuses = normalizedStatuses.reduce(into: []) { result, definition in
+            if !result.contains(where: { $0.id == definition.id }) {
+                result.append(definition)
+            }
         }
         let normalizedLabels = labels.map { definition in
             guard let builtIn = labelDefaults[definition.id] else { return definition }

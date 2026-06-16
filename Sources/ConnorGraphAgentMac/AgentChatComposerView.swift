@@ -541,19 +541,22 @@ struct AgentChatComposerView: View {
 
     private func sessionStatusMenu(_ session: AgentSession) -> some View {
         Menu {
-            ForEach(AgentSessionStatus.allCases.filter { $0 != .archived }, id: \.self) { status in
-                Button {
-                    viewModel.deferViewUpdate {
-                        viewModel.setSelectedSessionStatus(status)
+            ForEach(selectableStatusDefinitions, id: \.id) { definition in
+                if let status = AgentSessionStatus(rawValue: definition.id) {
+                    Button {
+                        viewModel.deferViewUpdate {
+                            viewModel.setSelectedSessionStatus(status)
+                        }
+                    } label: {
+                        Text(menuOptionTitle(definition.name, isSelected: status == session.governance.status))
                     }
-                } label: {
-                    Text(menuOptionTitle(status.displayName, isSelected: status == session.governance.status))
                 }
             }
         } label: {
+            let definition = statusDefinition(for: session.governance.status)
             AgentComposerOptionBadge(
-                title: session.governance.status.displayName,
-                systemImage: sessionStatusIcon(session.governance.status),
+                title: definition.name,
+                systemImage: definition.systemImage,
                 tint: sessionStatusColor(session.governance.status),
                 isActive: false,
                 style: .prominent
@@ -561,6 +564,22 @@ struct AgentChatComposerView: View {
         }
         .menuStyle(.borderlessButton)
         .help("更改会话状态")
+    }
+
+    private var selectableStatusDefinitions: [AgentSessionStatusDefinition] {
+        viewModel.governanceConfig.statuses
+            .filter { $0.id != AgentSessionStatus.archived.rawValue }
+            .filter { AgentSessionStatus(rawValue: $0.id) != nil }
+            .sorted { lhs, rhs in
+                if lhs.sortOrder == rhs.sortOrder { return lhs.name < rhs.name }
+                return lhs.sortOrder < rhs.sortOrder
+            }
+    }
+
+    private func statusDefinition(for status: AgentSessionStatus) -> AgentSessionStatusDefinition {
+        viewModel.governanceConfig.statuses.first(where: { $0.id == status.rawValue })
+            ?? AgentSessionStatusDefinition.defaults.first(where: { $0.id == status.rawValue })
+            ?? AgentSessionStatusDefinition(id: status.rawValue, name: status.displayName, systemImage: sessionStatusIcon(status))
     }
 
     private var modelSelectionMenu: some View {
@@ -685,13 +704,14 @@ struct AgentChatComposerView: View {
         case .needsReview: "exclamationmark.bubble"
         case .done: "checkmark.circle"
         case .blocked: "nosign"
+        case .cancelled: "xmark.circle"
         case .archived: "archivebox"
         }
     }
 
     private func sessionStatusColor(_ status: AgentSessionStatus) -> Color {
         switch status {
-        case .todo, .inProgress, .waiting, .needsReview, .done, .blocked, .archived: composerControlForeground
+        case .todo, .inProgress, .waiting, .needsReview, .done, .blocked, .cancelled, .archived: composerControlForeground
         }
     }
 }
