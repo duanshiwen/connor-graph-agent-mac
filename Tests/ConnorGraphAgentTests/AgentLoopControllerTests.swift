@@ -47,6 +47,24 @@ private actor SuspendingModelProvider: AgentModelProvider {
     }
 }
 
+private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
+    let modelID = "streaming-final"
+    let capabilities = AgentModelCapabilities(supportsStreaming: true, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false)
+
+    func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
+        AgentModelResponse(text: "Fallback")
+    }
+
+    func streamComplete(_ request: AgentModelRequest) -> AsyncThrowingStream<AgentModelStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.yield(.textDelta("Hel"))
+            continuation.yield(.textDelta("lo"))
+            continuation.yield(.completed(AgentModelResponse(text: "Hello", usage: AgentModelUsage(promptTokens: 2, completionTokens: 1))))
+            continuation.finish()
+        }
+    }
+}
+
 @Test func agentLoopConfigurationDefaultsAllowDeeperSingleRunWork() {
     let configuration = AgentLoopConfiguration()
 
@@ -74,6 +92,28 @@ private actor SuspendingModelProvider: AgentModelProvider {
     #expect(configuration.promptProjectionMode == .legacySingleUserMessage)
     #expect(configuration.promptMaxEstimatedTokens == 8_000)
     #expect(configuration.maxConsecutiveToolResultErrors == 6)
+}
+
+@Test func agentLoopEmitsTextDeltaForStreamingProvider() async throws {
+    let provider = StreamingFinalAnswerProvider()
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: AgentToolRegistry(),
+        streamComplete: { provider, request in provider.streamComplete(request) }
+    )
+
+    var textDeltas: [String] = []
+    var completeText: String?
+    for try await event in loop.run(AgentChatRequest(runID: "run-streaming", sessionID: "session-streaming", userMessage: "Hello")) {
+        switch event {
+        case .textDelta(let payload): textDeltas.append(payload.text)
+        case .textComplete(let payload): completeText = payload.text
+        default: break
+        }
+    }
+
+    #expect(textDeltas == ["Hel", "lo"])
+    #expect(completeText == "Hello")
 }
 
 @Test func agentLoopEmitsPromptAssembledDiagnosticsBeforeModelCall() async throws {

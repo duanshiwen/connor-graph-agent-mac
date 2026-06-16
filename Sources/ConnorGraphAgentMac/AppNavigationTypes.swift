@@ -50,6 +50,7 @@ enum ConnorSettingsSection: String, CaseIterable, Identifiable {
     case input
     case permissions
     case labels
+    case statuses
     case shortcuts
     case preferences
 
@@ -63,6 +64,7 @@ enum ConnorSettingsSection: String, CaseIterable, Identifiable {
         case .input: "输入"
         case .permissions: "权限"
         case .labels: "标签"
+        case .statuses: "状态"
         case .shortcuts: "快捷键"
         case .preferences: "偏好"
         }
@@ -76,6 +78,7 @@ enum ConnorSettingsSection: String, CaseIterable, Identifiable {
         case .input: "发送键、拼写检查"
         case .permissions: "默认权限和审批"
         case .labels: "管理会话标签"
+        case .statuses: "管理会话状态"
         case .shortcuts: "键盘快捷键"
         case .preferences: "用户偏好"
         }
@@ -89,6 +92,7 @@ enum ConnorSettingsSection: String, CaseIterable, Identifiable {
         case .input: "keyboard"
         case .permissions: "shield"
         case .labels: "tag"
+        case .statuses: "circle.dashed"
         case .shortcuts: "command"
         case .preferences: "person.crop.circle"
         }

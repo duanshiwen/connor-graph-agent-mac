@@ -1,6 +1,6 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-16 18:20 GMT+8  
+文档更新时间：2026-06-16 19:01 GMT+8  
 当前代码基线:`feature/apple-iwork-attachment-support`,在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface / session-scoped multi-root project workspace / Connor-owned Scientific Compute Runtime skeleton / 商用级 Document Attachment OS 基础上,继续收紧 Apple 原生 UI 边界:PDF/Word/Excel/PowerPoint 与 Apple iWork（Pages/Numbers/Keynote）一等附件仍由 Connor Session Capsule 和 Attachment Store 管理;PDF selectable text 抽取和多页原文预览继续使用 PDFKit;Office/iWork/Presentation/Spreadsheet 抽取继续通过 MarkItDown/Docling sidecar best-effort 编排与 hardening;Office/iWork/Presentation/Spreadsheet 原文件预览优先交给 macOS Quick Look / QuickLookUI,Connor 自有 UI 只负责 manifest、extraction status、retry、omitted attachment summary 和治理证据。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package,目标是把 Connor 建成 **graph-memory-native Agent OS**:它不是"图谱编辑器",也不是"Claude SDK 外壳",而是以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI 和 Local Automation Surface 共同构成的本地 Agent 操作系统。
@@ -402,6 +402,7 @@ Sources/ConnorGraphAgent/AgentTextDeltaBuffer.swift
 Sources/ConnorGraphAgent/AgentRuntimeUsageTracker.swift
 Sources/ConnorGraphAgent/OpenAICompatibleProvider.swift
 Sources/ConnorGraphAgent/AnthropicCompatibleProvider.swift
+Sources/ConnorGraphAgent/AnthropicStreaming.swift
 ```
 
 ### ConnorGraphAppSupport
@@ -1090,7 +1091,7 @@ AI 设置页支持:
 - 每个连接都有稳定 provider kind:`openAICompatible`、`claudeSidecar`、`chatGPTCodex`、`githubCopilot`、`anthropicCompatible`;旧设置若没有 provider kind,会按 `providerMode` 兼容迁移为 OpenAI Compatible 或 Claude Sidecar
 - Add Connection 现在走 Connor 原生 `AppLLMConnectionSetupService`:先校验 provider-specific input,再执行真实 health check / sidecar validation,成功后才保存 metadata 和 credential;失败不会追加假连接,也不会污染 credential store
 - OpenAI Compatible / 本地模型走 Connor 原生 `OpenAICompatibleProvider`;用户填写 Base URL、模型和 API Key,本地 localhost 模型可使用本地占位 token,但仍会发起真实 health check
-- Anthropic Compatible 走 Connor 原生 `AnthropicCompatibleProvider`:使用 Anthropic Messages API `/v1/messages`,支持官方 `x-api-key` 认证和 OpenRouter / Vercel 等代理常见的 Bearer 认证,非流式文本回复、tool_use / tool_result 映射和 health check 均在 Swift HTTP provider 内完成;它面向 API Key / Endpoint 服务商,不复用 Claude SDK sidecar 的账号登录 runtime
+- Anthropic Compatible 走 Connor 原生 `AnthropicCompatibleProvider`:使用 Anthropic Messages API `/v1/messages`,支持官方 `x-api-key` 认证和 OpenRouter / Vercel 等代理常见的 Bearer 认证;文本回复、`tool_use` / `tool_result` 映射、health check、SSE streaming、extended thinking request options、prompt cache request options、server tool request schema、fine-grained tool streaming 的 partial JSON 累积与容错均在 Swift HTTP/SSE provider 内完成;它面向 API Key / Endpoint 服务商,不复用 Claude SDK sidecar 的账号登录 runtime
 - Claude 连接走 Claude SDK sidecar:验证 sidecar executable 存在且可执行,禁止 `allowAll`;OAuth token 保存到 credential store,运行 sidecar 时通过 `CLAUDE_CODE_OAUTH_TOKEN` / refresh token 环境变量注入,不让 Claude SDK 拥有 Connor session / permission / audit / graph state
 - Codex · ChatGPT Plus 连接走 ChatGPT/Codex OAuth:浏览器回调拿到 OAuth tokens,再用 `id_token` token-exchange 派生 OpenAI API key,随后复用 Connor 原生 OpenAI-Compatible runtime 做真实 health check;OAuth tokens 和派生 API key 都只进 credential store
 - GitHub Copilot 连接走 GitHub device flow:拿到 Copilot token 后构造 Connor 原生 HTTP runtime config,补充 Copilot integration headers,并用 chat/completions health check 验证后才保存
@@ -1258,6 +1259,22 @@ P1/P2 combined optimization final targeted regression status (2026-06-14 14:10 G
 - swift test --filter PhaseGCraftGradeNativeUITests: passed, 3 tests.
 - swift test --filter CommercialReadinessReleaseGateTests: passed, 4 tests.
 - SwiftPM `Assets.xcassets` unhandled-file warning is resolved by declaring `.process("Assets.xcassets")` on the mac app executable target.
+
+Settings labels/statuses redesign regression (2026-06-16 19:01 GMT+8):
+- 设置导航新增“状态”页面;“标签”和“状态”现在分别作为低频全局治理配置入口,符合 Apple HIG settings guidance:减少设置数量、按相关项分组、只暴露用户需要调整的选项。
+- 设置 → 标签已重写为纯标签管理:列表行显示颜色、图标、显示名和使用数量;新建/编辑 sheet 只允许修改显示名、图标和颜色;不暴露 ID、value type、value、graph binding 或校验字段。
+- 设置 → 状态新增完整管理页:列表行显示图标、显示名和使用数量;新建/编辑 sheet 只允许修改显示名和图标;不暴露 ID、sort order 或 terminal-state。
+- 页面采用 Apple HIG layout/buttons 要点:相关项分组、顶部主操作、44×44 pt 图标/删除按钮命中区域、主要操作 prominent、破坏性操作 destructive、打开编辑视图的按钮使用省略号。
+- 删除行为复用治理层规则:删除标签会从所有会话移除;删除状态会在最后一个状态或仍有会话使用时被阻止。
+- swift build: passed.
+- swift test --filter ProductOSPhase1Tests: passed, 5 tests.
+
+Session title / deletion guard regression (2026-06-16 18:49 GMT+8):
+- 首轮发送后的自动标题生成从 `onRunStarted` 调整为 submit 成功、首条用户消息已持久化后触发,避免标题任务读取到空会话或旧会话导致不稳定。
+- `renameChatSession` 在 repository rename 后立即同步 `chatSessions`、`allChatSessions`、`fallbackChatSession` 和 `nativeSessionManager`,再 reload,保证会话列表和详情页标题同步。
+- 会话存在 queued/running 后台任务时不允许删除;列表 swipe/context menu 删除入口禁用,`deleteChatSession` 删除前也重新读取持久化后台任务做强制兜底。
+- swift build: passed.
+- swift test --filter NativeSessionManagerSessionOSTests / ProductOSPhase1Tests: app target compiled, but package test linking failed with pre-existing undefined symbols for `AgentModelUsage.init` / `AgentModelResponse.init` in broader test bundle.
 
 Status / label context menu targeted regression (2026-06-16 17:33 GMT+8):
 - 状态创建/编辑不再要求用户提供英文 ID;侧栏创建入口自动生成不重复 `status_<uuid>`,保存层对空/重复新状态 ID 也有 UID 兜底。
