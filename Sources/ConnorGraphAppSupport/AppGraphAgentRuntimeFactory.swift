@@ -120,6 +120,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             transport: transport,
             workingDirectory: workingDirectory,
             permissionMode: connection.sidecarPermissionMode,
+            instructionAppendix: userBasicInfoPromptSection(),
             runtimeStore: makeClaudeSDKSidecarRuntimeStore()
         )
     }
@@ -166,6 +167,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             transport: transport,
             workingDirectory: workingDirectory,
             permissionMode: permissionMode,
+            instructionAppendix: userBasicInfoPromptSection(),
             runtimeStore: makeClaudeSDKSidecarRuntimeStore()
         )
         return makeClaudeSDKSidecarNativeSessionManager(
@@ -253,7 +255,12 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         registry.register(SearchEngineMCPWebFetchTool(browserAssistedSearchHandler: browserAssistedSearchHandler, browserAssistedWebFetchHandler: browserAssistedWebFetchHandler))
         var effectiveConfiguration = configuration
         effectiveConfiguration.permissionMode = permissionMode
-        effectiveConfiguration.instructionAppendix = userBasicInfoPromptSection()
+        effectiveConfiguration.instructionAppendix = [
+            configuration.instructionAppendix.trimmingCharacters(in: .whitespacesAndNewlines),
+            userBasicInfoPromptSection().trimmingCharacters(in: .whitespacesAndNewlines)
+        ]
+        .filter { !$0.isEmpty }
+        .joined(separator: "\n\n")
         return AgentLoopController(
             modelProvider: makeAgentModelProvider(sessionLLMOverride: sessionLLMOverride),
             toolRegistry: registry,
