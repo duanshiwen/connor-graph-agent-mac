@@ -25,12 +25,14 @@ public final class GovernedClaudeSDKSidecarRuntime<Transport: ClaudeSDKSidecarSe
     public let transport: Transport
     public let workingDirectory: URL
     public let permissionMode: AgentPermissionMode
+    public let instructionAppendix: String
     public let runtimeStore: AppClaudeSDKSidecarRuntimeStore?
 
     public init(
         transport: Transport,
         workingDirectory: URL,
         permissionMode: AgentPermissionMode = .askToWrite,
+        instructionAppendix: String = "",
         runtimeStore: AppClaudeSDKSidecarRuntimeStore? = nil
     ) throws {
         guard permissionMode != .allowAll else {
@@ -39,6 +41,7 @@ public final class GovernedClaudeSDKSidecarRuntime<Transport: ClaudeSDKSidecarSe
         self.transport = transport
         self.workingDirectory = workingDirectory
         self.permissionMode = permissionMode
+        self.instructionAppendix = instructionAppendix
         self.runtimeStore = runtimeStore
     }
 
@@ -57,7 +60,8 @@ public final class GovernedClaudeSDKSidecarRuntime<Transport: ClaudeSDKSidecarSe
         let sidecarRequest = ClaudeSDKSidecarRequest(
             request: safeRequest,
             workingDirectory: workingDirectory,
-            sdkSessionID: resumeSDKSessionID
+            sdkSessionID: resumeSDKSessionID,
+            instructionAppendix: instructionAppendix
         )
         try? updateRuntimeRecord(
             sessionID: safeRequest.sessionID,

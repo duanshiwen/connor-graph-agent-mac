@@ -43,6 +43,30 @@ private actor Train4CapturingProvider: AgentModelProvider {
     #expect(contract.agentContext.renderedText.contains("memory role preference"))
 }
 
+@Test func agentLoopAppendsUserBasicInfoToProviderSystemMessage() async throws {
+    let provider = Train4CapturingProvider()
+    let loop = AgentLoopController(
+        modelProvider: provider,
+        toolRegistry: AgentToolRegistry(),
+        configuration: AgentLoopConfiguration(
+            instructionAppendix: "## 用户基本信息\n- 称呼：段诗闻\n- 备注：我喜欢橙色"
+        )
+    )
+
+    var events: [AgentEvent] = []
+    for try await event in loop.run(AgentChatRequest(sessionID: "session-user-info", userMessage: "我叫什么？我喜欢什么颜色？")) {
+        events.append(event)
+    }
+
+    let request = try #require(await provider.lastRequest)
+    let systemMessage = try #require(request.messages.first(where: { $0.role == .system }))
+    #expect(events.map(\.kind).contains(.textComplete))
+    #expect(systemMessage.content.contains("You are Connor, a general-purpose local AI assistant."))
+    #expect(systemMessage.content.contains("## 用户基本信息"))
+    #expect(systemMessage.content.contains("- 称呼：段诗闻"))
+    #expect(systemMessage.content.contains("- 备注：我喜欢橙色"))
+}
+
 @Test func commercialTrain4AgentLoopGracefullyDegradesWhenMemoryContextFails() async throws {
     let provider = Train4CapturingProvider()
     let loop = AgentLoopController(

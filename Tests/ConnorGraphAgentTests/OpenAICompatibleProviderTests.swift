@@ -115,6 +115,45 @@ private struct CapturingHTTPClient: AgentHTTPClient {
     #expect(requestObject?["model"] as? String == "mimo-v2.5-pro")
 }
 
+@Test func openAICompatibleProviderPreservesUnifiedAgentPromptAndTools() async throws {
+    let body = """
+    {
+      "choices": [
+        { "message": { "role": "assistant", "content": "OK" }, "finish_reason": "stop" }
+      ]
+    }
+    """.data(using: .utf8)!
+    let client = CapturingHTTPClient(responseBody: body)
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(baseURL: URL(string: "https://llm.example.com/v1")!, apiKey: "test-key", model: "gpt-test"),
+        httpClient: client
+    )
+    let tool = AgentToolDefinition(
+        name: "graph_search",
+        description: "Search graph memory",
+        inputSchema: .object(properties: ["query": .string(description: "Query")], required: ["query"])
+    )
+
+    _ = try await provider.complete(AgentModelRequest(
+        messages: [
+            AgentModelMessage(role: .system, content: "Connor core\n\n## 用户基本信息\n- 称呼：段诗闻"),
+            AgentModelMessage(role: .user, content: "我叫什么？")
+        ],
+        tools: [tool]
+    ))
+
+    let requestBody = try #require(client.captured?.body)
+    let object = try #require(try JSONSerialization.jsonObject(with: requestBody) as? [String: Any])
+    let messages = try #require(object["messages"] as? [[String: Any]])
+    #expect(messages.first?["role"] as? String == "system")
+    #expect((messages.first?["content"] as? String)?.contains("## 用户基本信息") == true)
+    #expect((messages.first?["content"] as? String)?.contains("段诗闻") == true)
+    let tools = try #require(object["tools"] as? [[String: Any]])
+    let function = try #require(tools.first?["function"] as? [String: Any])
+    #expect(function["name"] as? String == "graph_search")
+    #expect(function["description"] as? String == "Search graph memory")
+}
+
 @Test func openAICompatibleProviderReportsHTTPError() async throws {
     let body = #"{"error":{"message":"bad key"}}"#.data(using: .utf8)!
     let client = CapturingHTTPClient(responseBody: body, statusCode: 401)
