@@ -30,7 +30,7 @@ struct SettingsAppearanceModeRow: View {
     @Binding var selection: ConnorAppearanceMode
 
     var body: some View {
-        VStack(alignment: .leading, spacing: SettingsListLayout.spaceM) {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceL) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
                     Text("外观")
@@ -42,15 +42,103 @@ struct SettingsAppearanceModeRow: View {
                 Spacer()
             }
 
-            Picker("页面显示主题", selection: $selection) {
+            HStack(alignment: .top, spacing: 24) {
                 ForEach(ConnorAppearanceMode.allCases) { mode in
-                    Label(mode.displayName, systemImage: mode.systemImage).tag(mode)
+                    SettingsAppearanceOptionCard(
+                        mode: mode,
+                        isSelected: selection == mode
+                    ) {
+                        selection = mode
+                    }
                 }
             }
-            .labelsHidden()
-            .pickerStyle(.segmented)
+            .frame(maxWidth: .infinity, alignment: .center)
         }
-        .frame(minHeight: SettingsListLayout.prominentRowMinHeight, alignment: .leading)
+        .frame(minHeight: 154, alignment: .leading)
+    }
+}
+
+private struct SettingsAppearanceOptionCard: View {
+    var mode: ConnorAppearanceMode
+    var isSelected: Bool
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                preview
+                    .frame(width: 124, height: 78)
+                    .background(previewBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(isSelected ? Color.accentColor : Color.secondary.opacity(0.16), lineWidth: isSelected ? 4 : 1)
+                    )
+                    .shadow(color: .black.opacity(isSelected ? 0.16 : 0.08), radius: isSelected ? 8 : 4, x: 0, y: 2)
+
+                Text(mode.displayName)
+                    .font(SettingsListTypography.rowCaptionEmphasized)
+                    .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("页面显示主题：\(mode.displayName)")
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+    }
+
+    @ViewBuilder
+    private var preview: some View {
+        switch mode {
+        case .system:
+            HStack(spacing: 0) {
+                previewPane(isDark: false)
+                previewPane(isDark: true)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        case .light:
+            previewPane(isDark: false)
+        case .dark:
+            previewPane(isDark: true)
+        }
+    }
+
+    private var previewBackground: Color {
+        switch mode {
+        case .system, .light: Color(nsColor: .windowBackgroundColor)
+        case .dark: Color(red: 0.10, green: 0.11, blue: 0.13)
+        }
+    }
+
+    private func previewPane(isDark: Bool) -> some View {
+        ZStack(alignment: .topLeading) {
+            LinearGradient(
+                colors: isDark
+                    ? [Color(red: 0.12, green: 0.14, blue: 0.18), Color(red: 0.02, green: 0.03, blue: 0.05)]
+                    : [Color(red: 0.96, green: 0.98, blue: 1.0), Color(red: 0.78, green: 0.88, blue: 1.0)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 4) {
+                    Circle().fill(Color(red: 1.0, green: 0.37, blue: 0.33)).frame(width: 6, height: 6)
+                    Circle().fill(Color(red: 1.0, green: 0.77, blue: 0.08)).frame(width: 6, height: 6)
+                    Circle().fill(Color(red: 0.21, green: 0.78, blue: 0.35)).frame(width: 6, height: 6)
+                }
+                .padding(.top, 7)
+                .padding(.leading, 8)
+
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(Color.orange)
+                    .frame(width: 44, height: 8)
+                    .padding(.leading, 8)
+
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(isDark ? Color.white.opacity(0.12) : Color.white.opacity(0.72))
+                    .frame(width: 72, height: 30)
+                    .padding(.leading, 8)
+            }
+        }
     }
 }
 
