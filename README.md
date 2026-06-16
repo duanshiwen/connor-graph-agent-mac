@@ -166,7 +166,7 @@ sessions/{sessionID}/
 └── logs/
 ```
 
-Connor 的会话持久化边界是完整 Session Capsule:SQLite 仍承担 session / run / event / graph 查询存储,但 session-local 的 UI/workspace 状态、记录流、附件、plans、data、logs 与 browser 子状态都归属于 `sessions/{sessionID}/`。`session-state.json` 可保存 `workspace` 引用和 `llmOverride`(per-session 模型覆盖),用于记录当前会话绑定的 project working directory 来源与路径以及独立的模型选择;`records.jsonl` 使用单行 JSONL 追加保存,读取时可跳过坏行,避免 10+ 条记录因一次异常写入或重启退化成 1 条。
+Connor 的会话持久化边界是完整 Session Capsule:SQLite 仍承担 session / run / event / graph 查询存储,但 session-local 的 UI/workspace 状态、记录流、附件、plans、data、logs 与 browser 子状态都归属于 `sessions/{sessionID}/`。`session-state.json` 可保存 `workspace` 引用和 `llmOverride`(per-session 模型覆盖),用于记录当前会话绑定的 project working directory 来源与路径以及独立的模型选择;`records.jsonl` 使用单行 JSONL 追加保存,读取时可跳过坏行,避免 10+ 条记录因一次异常写入或重启退化成 1 条。会话删除采用 soft delete:SQLite `agent_sessions.deleted_at` 标记会话已从普通列表/界面移除,但不删除 session row、run/event/background task 记录,也不删除 `sessions/{sessionID}/` 下的 Session Capsule 文件、附件、records、browser、plans、data、logs。
 
 Attachment OS 当前遵循本地优先:被允许的附件会复制到 `attachments/{attachmentID}/original/`,写入 `manifest.json` 和 `attachment-manifest.jsonl`;文本/代码/Markdown/JSON/CSV/XML/YAML/日志会立即生成 `derivatives/current/extracted.md`,并在 `derivatives/runs/{runID}/extracted.md` 保留本次抽取产物以避免文件名冲突。PDF、Word、Excel、PowerPoint 和 Apple iWork（Pages/Numbers/Keynote）会先以 `extractionStatus = pending` 保存原件和 manifest,再写入 `extraction-jobs.jsonl` 等待文档抽取 worker/processor 处理;成功后同样写入 current/runs extracted markdown,失败或 unsupported 时保留原件、report、warnings/errors 和可重试的 job 记录。iWork package 目录按 regular files 递归计算大小与稳定 digest,并整体复制进 Session Capsule。
 
