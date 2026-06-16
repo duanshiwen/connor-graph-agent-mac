@@ -438,3 +438,32 @@ public struct BrowserHistoryRecord: Codable, Equatable, Identifiable, Sendable {
         self.visitedAt = visitedAt
     }
 }
+
+// MARK: - Browser Bookmarks
+
+public struct BrowserBookmarkRecord: Codable, Equatable, Identifiable, Sendable {
+    public static let defaultGroupName = "默认"
+
+    public var id: UUID
+    public var url: String
+    public var title: String
+    public var groupName: String
+    public var createdAt: Date
+    public var updatedAt: Date
+
+    public init(
+        id: UUID = UUID(),
+        url: String,
+        title: String,
+        groupName: String = BrowserBookmarkRecord.defaultGroupName,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date()
+    ) {
+        self.id = id
+        self.url = url
+        self.title = title
+        self.groupName = groupName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? Self.defaultGroupName : groupName
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}

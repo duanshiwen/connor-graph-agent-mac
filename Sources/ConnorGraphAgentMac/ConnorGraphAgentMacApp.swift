@@ -253,6 +253,10 @@ final class AppViewModel: ObservableObject {
     @Published var sessionRecordsBySessionID: [String: [AppSessionRecord]] = [:]
     @Published var browserWorkspaceSnapshotsBySessionID: [String: AppBrowserStateSnapshot] = [:]
     @Published var browserAssistedTasksByID: [UUID: BrowserAssistedTaskState] = [:]
+    @Published var isBrowserBookmarksPanelVisible: Bool = false
+    @Published var browserBookmarkRecords: [BrowserBookmarkRecord] = []
+    @Published var filteredBrowserBookmarkRecords: [BrowserBookmarkRecord] = []
+    @Published var selectedBrowserBookmarkGroupName: String?
     @Published var isBrowserHistoryPanelVisible: Bool = false
     @Published var browserHistoryRecords: [BrowserHistoryRecord] = []
     @Published var filteredBrowserHistoryRecords: [BrowserHistoryRecord] = []
@@ -299,6 +303,7 @@ final class AppViewModel: ObservableObject {
     private var skillRuntimeRepository: AppSkillRuntimeRepository?
     private var storagePaths: AppStoragePaths?
     private var browserHistoryStore: BrowserHistoryStore?
+    private var browserBookmarkStore: BrowserBookmarkStore?
     private var runtimeSettingsRepository: AppRuntimeSettingsRepository?
     private var llmSettingsRepository: AppLLMSettingsRepository
     private var llmProviderHealthChecker: AppLLMProviderHealthChecker
@@ -878,6 +883,7 @@ final class AppViewModel: ObservableObject {
             self.sourceRuntimeRepository = AppMCPSourceRuntimeRepository(storagePaths: storagePaths)
             self.skillRuntimeRepository = AppSkillRuntimeRepository(storagePaths: storagePaths)
             self.browserHistoryStore = BrowserHistoryStore(historyURL: storagePaths.browserHistoryURL)
+            self.browserBookmarkStore = BrowserBookmarkStore(bookmarksURL: storagePaths.browserBookmarksURL)
         }
         if let repository {
             self.promotionRepository = AppPromotionQueueRepository(store: repository.store)
@@ -1793,6 +1799,97 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Browser Bookmarks
+
+    func loadBrowserBookmarks() {
+        guard let store = browserBookmarkStore else { return }
+        browserBookmarkRecords = store.loadBookmarks()
+        applyBrowserBookmarkFilter()
+    }
+
+    var browserBookmarkGroupNames: [String] {
+        let names = Set(browserBookmarkRecords.map { $0.groupName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? BrowserBookmarkRecord.defaultGroupName : $0.groupName })
+        return names.sorted { lhs, rhs in
+            if lhs == BrowserBookmarkRecord.defaultGroupName { return true }
+            if rhs == BrowserBookmarkRecord.defaultGroupName { return false }
+            return lhs.localizedStandardCompare(rhs) == .orderedAscending
+        }
+    }
+
+    func toggleBrowserBookmarksPanel() {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            isBrowserBookmarksPanelVisible.toggle()
+            if isBrowserBookmarksPanelVisible { isBrowserHistoryPanelVisible = false }
+        }
+        if isBrowserBookmarksPanelVisible { loadBrowserBookmarks() }
+    }
+
+    func addBrowserBookmark(url: String, title: String, groupName: String? = nil) {
+        guard let store = browserBookmarkStore else { return }
+        let trimmedURL = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedURL.isEmpty,
+              !trimmedURL.hasPrefix("connor://"),
+              !trimmedURL.hasPrefix("about:"),
+              !trimmedURL.hasPrefix("data:")
+        else { return }
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedGroup = groupName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let bookmark = BrowserBookmarkRecord(
+            url: trimmedURL,
+            title: trimmedTitle.isEmpty ? (URL(string: trimmedURL)?.host ?? trimmedURL) : trimmedTitle,
+            groupName: resolvedGroup?.isEmpty == false ? resolvedGroup! : BrowserBookmarkRecord.defaultGroupName,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        store.upsertBookmark(bookmark)
+        loadBrowserBookmarks()
+    }
+
+    func toggleBrowserBookmark(url: String, title: String, groupName: String? = nil) {
+        let trimmedURL = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedURL.isEmpty else { return }
+        if isBrowserBookmarked(url: trimmedURL) {
+            browserBookmarkStore?.deleteBookmark(url: trimmedURL)
+            loadBrowserBookmarks()
+        } else {
+            addBrowserBookmark(url: trimmedURL, title: title, groupName: groupName)
+        }
+    }
+
+    func isBrowserBookmarked(url: String) -> Bool {
+        let trimmedURL = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedURL.isEmpty else { return false }
+        return browserBookmarkRecords.contains { $0.url == trimmedURL }
+    }
+
+    func filterBrowserBookmarks(query: String, groupName: String? = nil) {
+        selectedBrowserBookmarkGroupName = groupName
+        applyBrowserBookmarkFilter(query: query)
+    }
+
+    func deleteBrowserBookmark(_ id: UUID) {
+        browserBookmarkStore?.deleteBookmark(id: id)
+        loadBrowserBookmarks()
+    }
+
+    func navigateToBookmark(_ bookmark: BrowserBookmarkRecord) {
+        browserTargetURLString = bookmark.url
+        showBrowserWorkspace()
+    }
+
+    private func applyBrowserBookmarkFilter(query: String = "") {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let selectedGroup = selectedBrowserBookmarkGroupName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        filteredBrowserBookmarkRecords = browserBookmarkRecords.filter { bookmark in
+            let matchesGroup = selectedGroup?.isEmpty != false || bookmark.groupName == selectedGroup
+            let matchesQuery = trimmedQuery.isEmpty
+                || bookmark.url.lowercased().contains(trimmedQuery)
+                || bookmark.title.lowercased().contains(trimmedQuery)
+                || bookmark.groupName.lowercased().contains(trimmedQuery)
+            return matchesGroup && matchesQuery
+        }
+    }
+
     // MARK: - Browser History
 
     func loadBrowserHistory() {
@@ -1824,6 +1921,7 @@ final class AppViewModel: ObservableObject {
     func toggleBrowserHistoryPanel() {
         withAnimation(.easeInOut(duration: 0.2)) {
             isBrowserHistoryPanelVisible.toggle()
+            if isBrowserHistoryPanelVisible { isBrowserBookmarksPanelVisible = false }
         }
         if isBrowserHistoryPanelVisible {
             loadBrowserHistory()

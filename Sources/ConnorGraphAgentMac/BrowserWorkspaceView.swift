@@ -101,7 +101,15 @@ struct BrowserWorkspaceView: View {
                     }
                 }
 
-                // History panel overlay on the right side
+                // Floating panels overlay on the right side
+                if viewModel.isBrowserBookmarksPanelVisible {
+                    HStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        BrowserBookmarksPanelView(viewModel: viewModel)
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                    }
+                }
+
                 if viewModel.isBrowserHistoryPanelVisible {
                     HStack(spacing: 0) {
                         Spacer(minLength: 0)
@@ -113,6 +121,7 @@ struct BrowserWorkspaceView: View {
         }
         .onAppear {
             ensureInitialTab()
+            viewModel.loadBrowserBookmarks()
             navigate(to: viewModel.browserTargetURLString)
             installBrowserKeyMonitorIfNeeded()
         }
@@ -162,6 +171,16 @@ struct BrowserWorkspaceView: View {
 
     private var defaultURLString: String {
         viewModel.browserTargetURLString.isEmpty ? BrowserBuiltInPage.blankURLString : viewModel.browserTargetURLString
+    }
+
+    private var activeTabCanBeBookmarked: Bool {
+        guard let url = activeTab?.displayURL.trimmingCharacters(in: .whitespacesAndNewlines), !url.isEmpty else { return false }
+        return !url.hasPrefix("connor://") && !url.hasPrefix("about:") && !url.hasPrefix("data:")
+    }
+
+    private var activeURLIsBookmarked: Bool {
+        guard activeTabCanBeBookmarked, let url = activeTab?.displayURL else { return false }
+        return viewModel.isBrowserBookmarked(url: url)
     }
 
     private var tabBar: some View {
@@ -239,6 +258,22 @@ struct BrowserWorkspaceView: View {
                 onSubmit: navigateFromAddressBar
             )
             .frame(height: 28)
+
+            Button(action: openBookmarksPanelAndBookmarkCurrentPageIfNeeded) {
+                BrowserToolbarIconButtonLabel(
+                    systemImage: activeURLIsBookmarked ? "star.fill" : "star",
+                    isActive: viewModel.isBrowserBookmarksPanelVisible || activeURLIsBookmarked
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(activeTab == nil || !activeTabCanBeBookmarked)
+            .opacity(activeTab == nil || !activeTabCanBeBookmarked ? 0.48 : 1)
+            .help("收藏夹")
+            .contextMenu {
+                Button(activeURLIsBookmarked ? "取消收藏当前页" : "收藏当前页") {
+                    toggleActivePageBookmark()
+                }
+            }
 
             Button(action: { viewModel.toggleBrowserHistoryPanel() }) {
                 BrowserToolbarIconButtonLabel(
@@ -361,6 +396,28 @@ struct BrowserWorkspaceView: View {
     private func syncAddressTextWithActiveTab() {
         guard let activeTab else { return }
         addressText = activeTab.navigationState.url.isEmpty ? activeTab.initialURLString : activeTab.navigationState.url
+    }
+
+    private func openBookmarksPanelAndBookmarkCurrentPageIfNeeded() {
+        if activeTabCanBeBookmarked, !activeURLIsBookmarked, let tab = activeTab {
+            viewModel.addBrowserBookmark(
+                url: tab.displayURL,
+                title: tab.displayTitle,
+                groupName: viewModel.selectedBrowserBookmarkGroupName
+            )
+        }
+        if !viewModel.isBrowserBookmarksPanelVisible {
+            viewModel.toggleBrowserBookmarksPanel()
+        }
+    }
+
+    private func toggleActivePageBookmark() {
+        guard activeTabCanBeBookmarked, let tab = activeTab else { return }
+        viewModel.toggleBrowserBookmark(
+            url: tab.displayURL,
+            title: tab.displayTitle,
+            groupName: viewModel.selectedBrowserBookmarkGroupName
+        )
     }
 
     private func reloadOrStopActiveWebView() {
