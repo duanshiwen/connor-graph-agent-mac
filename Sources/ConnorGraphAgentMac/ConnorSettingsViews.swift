@@ -187,7 +187,6 @@ private struct SettingsAppSection: View {
                 }
                 .font(.subheadline)
             }
-            SettingsSaveBar(viewModel: viewModel)
         }
     }
 }
@@ -1308,7 +1307,6 @@ private struct SettingsAppearanceSection: View {
                 Divider()
                 SettingsToggleRow(title: "丰富的工具描述", subtitle: "为工具调用添加操作名称和意图描述。", isOn: $viewModel.richToolDescriptionsEnabled)
             }
-            SettingsSaveBar(viewModel: viewModel)
         }
     }
 }
@@ -1328,7 +1326,6 @@ private struct SettingsInputSection: View {
                 Divider()
                 SettingsToggleRow(title: "拼写检查", subtitle: "使用系统拼写检查。", isOn: $viewModel.spellCheckEnabled)
             }
-            SettingsSaveBar(viewModel: viewModel)
         }
     }
 }
@@ -1352,7 +1349,6 @@ private struct SettingsPermissionsSection: View {
             Text("项目工作目录已改为每个会话内设置：打开任意会话，在会话顶部的 ‘当前会话 Workspace’ 中配置。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            SettingsSaveBar(viewModel: viewModel)
         }
     }
 }
@@ -1995,7 +1991,6 @@ private struct SettingsPreferencesSection: View {
                     .padding(8)
                     .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
-            SettingsSaveBar(viewModel: viewModel)
         }
     }
 }
@@ -2095,19 +2090,6 @@ private struct SettingsPickerRow<Selection: Hashable, Content: View>: View {
     }
 }
 
-private struct SettingsSaveBar: View {
-    @ObservedObject var viewModel: AppViewModel
-
-    var body: some View {
-        HStack {
-            Spacer()
-            Button("重新加载") { viewModel.loadRuntimeSettings() }
-            Button("保存设置") { viewModel.saveRuntimeSettings() }
-                .buttonStyle(.borderedProminent)
-        }
-        .controlSize(.regular)
-    }
-}
 
 private struct ShortcutRow: View {
     var title: String
