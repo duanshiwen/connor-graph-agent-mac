@@ -11,6 +11,7 @@ struct AppShellView: View {
     @StateObject var viewModel: AppViewModel
     @State private var sidebarSelection: SidebarItem? = .agentChat
     @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
+    @FocusState private var isTopSearchFocused: Bool
 
     var body: some View {
         NavigationSplitView(columnVisibility: $splitViewVisibility) {
@@ -36,6 +37,7 @@ struct AppShellView: View {
                         .foregroundStyle(.secondary)
                     TextField("搜索会话标题和内容", text: $viewModel.sessionSearchQuery)
                         .textFieldStyle(.plain)
+                        .focused($isTopSearchFocused)
                         .frame(minWidth: 220, idealWidth: 320, maxWidth: 420)
                     if !viewModel.sessionSearchQuery.isEmpty {
                         Button(action: { viewModel.sessionSearchQuery = "" }) {
@@ -75,6 +77,10 @@ struct AppShellView: View {
             if sidebarSelection != newSelection {
                 sidebarSelection = newSelection
             }
+        }
+        .onChange(of: viewModel.focusTopSearchRequestID) { _, requestID in
+            guard requestID != nil else { return }
+            isTopSearchFocused = true
         }
         .onChange(of: viewModel.runtimeSettingsAutosaveSignature) { _, _ in
             viewModel.scheduleRuntimeSettingsAutosave()

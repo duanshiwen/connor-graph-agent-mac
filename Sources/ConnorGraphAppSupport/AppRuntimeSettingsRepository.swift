@@ -74,11 +74,115 @@ public struct AgentRuntimePermissionSettings: Codable, Sendable, Equatable {
     public var requireApprovalForShell: Bool
 
     public init(
-        requireApprovalForNetwork: Bool = true,
+        requireApprovalForNetwork: Bool = false,
         requireApprovalForShell: Bool = true
     ) {
         self.requireApprovalForNetwork = requireApprovalForNetwork
         self.requireApprovalForShell = requireApprovalForShell
+    }
+}
+
+public enum AgentRuntimeShortcutAction: String, Codable, Sendable, Equatable, Hashable, CaseIterable, Identifiable {
+    case openCommandPalette
+    case newSession
+    case toggleBrowser
+    case focusTopSearch
+    case openSettings
+    case focusBrowserAddress
+    case newBrowserTab
+    case closeBrowserTab
+    case browserBack
+    case browserForward
+    case toggleBrowserBookmarks
+    case toggleBrowserHistory
+
+    public var id: String { rawValue }
+}
+
+public struct AgentRuntimeKeyboardShortcut: Codable, Sendable, Equatable, Hashable {
+    public var key: String
+    public var command: Bool
+    public var shift: Bool
+    public var option: Bool
+    public var control: Bool
+
+    public init(
+        key: String,
+        command: Bool = true,
+        shift: Bool = false,
+        option: Bool = false,
+        control: Bool = false
+    ) {
+        self.key = key
+        self.command = command
+        self.shift = shift
+        self.option = option
+        self.control = control
+    }
+
+    public var displayText: String {
+        [
+            command ? "⌘" : "",
+            shift ? "⇧" : "",
+            option ? "⌥" : "",
+            control ? "⌃" : "",
+            key.uppercased()
+        ].filter { !$0.isEmpty }.joined()
+    }
+
+    public func matches(
+        character: String?,
+        isCommandDown: Bool,
+        isShiftDown: Bool,
+        isControlDown: Bool,
+        isOptionDown: Bool
+    ) -> Bool {
+        guard command == isCommandDown,
+              shift == isShiftDown,
+              control == isControlDown,
+              option == isOptionDown else { return false }
+        return character?.lowercased() == key.lowercased()
+    }
+}
+
+public struct AgentRuntimeShortcutSettings: Codable, Sendable, Equatable {
+    public var bindings: [AgentRuntimeShortcutAction: AgentRuntimeKeyboardShortcut]
+
+    public init(bindings: [AgentRuntimeShortcutAction: AgentRuntimeKeyboardShortcut] = AgentRuntimeShortcutSettings.defaultBindings) {
+        self.bindings = AgentRuntimeShortcutSettings.mergedWithDefaults(bindings)
+    }
+
+    public static let defaultBindings: [AgentRuntimeShortcutAction: AgentRuntimeKeyboardShortcut] = [
+        .openCommandPalette: AgentRuntimeKeyboardShortcut(key: "k"),
+        .newSession: AgentRuntimeKeyboardShortcut(key: "n"),
+        .toggleBrowser: AgentRuntimeKeyboardShortcut(key: "b"),
+        .focusTopSearch: AgentRuntimeKeyboardShortcut(key: "f"),
+        .openSettings: AgentRuntimeKeyboardShortcut(key: ","),
+        .focusBrowserAddress: AgentRuntimeKeyboardShortcut(key: "l"),
+        .newBrowserTab: AgentRuntimeKeyboardShortcut(key: "t"),
+        .closeBrowserTab: AgentRuntimeKeyboardShortcut(key: "w"),
+        .browserBack: AgentRuntimeKeyboardShortcut(key: "["),
+        .browserForward: AgentRuntimeKeyboardShortcut(key: "]"),
+        .toggleBrowserBookmarks: AgentRuntimeKeyboardShortcut(key: "b", shift: true),
+        .toggleBrowserHistory: AgentRuntimeKeyboardShortcut(key: "y")
+    ]
+
+    public static func mergedWithDefaults(_ bindings: [AgentRuntimeShortcutAction: AgentRuntimeKeyboardShortcut]) -> [AgentRuntimeShortcutAction: AgentRuntimeKeyboardShortcut] {
+        var merged = defaultBindings
+        for (action, shortcut) in bindings { merged[action] = shortcut }
+        return merged
+    }
+
+    public func shortcut(for action: AgentRuntimeShortcutAction) -> AgentRuntimeKeyboardShortcut {
+        bindings[action] ?? Self.defaultBindings[action] ?? AgentRuntimeKeyboardShortcut(key: "")
+    }
+
+    private enum CodingKeys: String, CodingKey { case bindings }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let decoded = try container.decodeIfPresent([AgentRuntimeShortcutAction: AgentRuntimeKeyboardShortcut].self, forKey: .bindings) ?? Self.defaultBindings
+        self.bindings = Self.mergedWithDefaults(decoded)
     }
 }
 
@@ -233,6 +337,7 @@ public struct AgentRuntimeSettings: Codable, Sendable, Equatable {
     public var appearance: AgentRuntimeAppearanceSettings
     public var input: AgentRuntimeInputSettings
     public var permissions: AgentRuntimePermissionSettings
+    public var shortcuts: AgentRuntimeShortcutSettings
     public var workspace: AgentRuntimeWorkspaceSettings
     public var preferences: AgentRuntimePreferenceSettings
     public var updatedAt: Date
@@ -245,6 +350,7 @@ public struct AgentRuntimeSettings: Codable, Sendable, Equatable {
         appearance: AgentRuntimeAppearanceSettings = AgentRuntimeAppearanceSettings(),
         input: AgentRuntimeInputSettings = AgentRuntimeInputSettings(),
         permissions: AgentRuntimePermissionSettings = AgentRuntimePermissionSettings(),
+        shortcuts: AgentRuntimeShortcutSettings = AgentRuntimeShortcutSettings(),
         workspace: AgentRuntimeWorkspaceSettings = AgentRuntimeWorkspaceSettings(),
         preferences: AgentRuntimePreferenceSettings = AgentRuntimePreferenceSettings(),
         updatedAt: Date = Date()
@@ -256,6 +362,7 @@ public struct AgentRuntimeSettings: Codable, Sendable, Equatable {
         self.appearance = appearance
         self.input = input
         self.permissions = permissions
+        self.shortcuts = shortcuts
         self.workspace = workspace
         self.preferences = preferences
         self.updatedAt = updatedAt
@@ -271,6 +378,7 @@ public struct AgentRuntimeSettings: Codable, Sendable, Equatable {
         case appearance
         case input
         case permissions
+        case shortcuts
         case workspace
         case preferences
         case updatedAt
@@ -285,6 +393,7 @@ public struct AgentRuntimeSettings: Codable, Sendable, Equatable {
         self.appearance = try container.decodeIfPresent(AgentRuntimeAppearanceSettings.self, forKey: .appearance) ?? AgentRuntimeAppearanceSettings()
         self.input = try container.decodeIfPresent(AgentRuntimeInputSettings.self, forKey: .input) ?? AgentRuntimeInputSettings()
         self.permissions = try container.decodeIfPresent(AgentRuntimePermissionSettings.self, forKey: .permissions) ?? AgentRuntimePermissionSettings()
+        self.shortcuts = try container.decodeIfPresent(AgentRuntimeShortcutSettings.self, forKey: .shortcuts) ?? AgentRuntimeShortcutSettings()
         self.workspace = try container.decodeIfPresent(AgentRuntimeWorkspaceSettings.self, forKey: .workspace) ?? AgentRuntimeWorkspaceSettings()
         self.preferences = try container.decodeIfPresent(AgentRuntimePreferenceSettings.self, forKey: .preferences) ?? AgentRuntimePreferenceSettings()
         self.updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()

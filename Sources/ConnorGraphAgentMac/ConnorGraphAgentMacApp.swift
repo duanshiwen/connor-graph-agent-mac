@@ -22,35 +22,31 @@ struct ConnorGraphAgentMacApp: App {
         .commands {
             CommandMenu("康纳同学") {
                 Button("打开命令面板") {
-                    viewModel.isCommandPalettePresented = true
+                    viewModel.performShortcutAction(.openCommandPalette)
                 }
-                .keyboardShortcut("k", modifiers: .command)
+                .keyboardShortcut(viewModel.shortcut(for: .openCommandPalette).keyEquivalent, modifiers: viewModel.shortcut(for: .openCommandPalette).eventModifierFlags)
 
-                Divider()
-
-                ForEach(ConnorNativeShellPresentation.default.commands) { command in
-                    Button(command.title) {
-                        viewModel.performShellCommand(command.id)
-                    }
-                    .keyboardShortcut(keyEquivalent(for: command), modifiers: .command)
+                Button("新建聊天") {
+                    viewModel.performShortcutAction(.newSession)
                 }
+                .keyboardShortcut(viewModel.shortcut(for: .newSession).keyEquivalent, modifiers: viewModel.shortcut(for: .newSession).eventModifierFlags)
+
+                Button("显示 / 隐藏浏览器") {
+                    viewModel.performShortcutAction(.toggleBrowser)
+                }
+                .keyboardShortcut(viewModel.shortcut(for: .toggleBrowser).keyEquivalent, modifiers: viewModel.shortcut(for: .toggleBrowser).eventModifierFlags)
+
+                Button("聚焦顶部搜索") {
+                    viewModel.performShortcutAction(.focusTopSearch)
+                }
+                .keyboardShortcut(viewModel.shortcut(for: .focusTopSearch).keyEquivalent, modifiers: viewModel.shortcut(for: .focusTopSearch).eventModifierFlags)
+
+                Button("打开设置") {
+                    viewModel.performShortcutAction(.openSettings)
+                }
+                .keyboardShortcut(viewModel.shortcut(for: .openSettings).keyEquivalent, modifiers: viewModel.shortcut(for: .openSettings).eventModifierFlags)
             }
         }
-    }
-}
-
-private func keyEquivalent(for command: ConnorNativeShellCommand) -> KeyEquivalent {
-    switch command.id {
-    case .newSession: "n"
-    case .toggleBrowser: "b"
-    case .openGraphMemoryReview: "2"
-    case .openApprovals: "3"
-    case .openSources: "4"
-    case .openSkills: "5"
-    case .openAutomation: "6"
-    case .openLocalAutomationSurface: "7"
-    case .checkCommercialReadiness: "r"
-    case .openSettings: ","
     }
 }
 
@@ -282,8 +278,11 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var composerSendShortcut: String = "return"
     @Published var spellCheckEnabled: Bool = true
     @Published var autoSaveDraftsEnabled: Bool = true
+    @Published var shortcutSettings: AgentRuntimeShortcutSettings = AgentRuntimeShortcutSettings()
+    @Published var recordingShortcutAction: AgentRuntimeShortcutAction?
+    @Published var focusTopSearchRequestID: UUID?
     @Published var defaultPermissionMode: AgentPermissionMode = .askToWrite
-    @Published var requireApprovalForNetwork: Bool = true
+    @Published var requireApprovalForNetwork: Bool = false
     @Published var requireApprovalForShell: Bool = true
     @Published var defaultWorkingDirectoryPath: String = ""
     @Published var workspaceRoots: [WorkspaceRootDraft] = []
@@ -365,6 +364,7 @@ final class AppViewModel: NSObject, ObservableObject {
             composerSendShortcut,
             spellCheckEnabled.description,
             autoSaveDraftsEnabled.description,
+            shortcutSettings.bindings.sorted { $0.key.rawValue < $1.key.rawValue }.map { "\($0.key.rawValue)=\($0.value.displayText)" }.joined(separator: ","),
             defaultPermissionMode.rawValue,
             requireApprovalForNetwork.description,
             requireApprovalForShell.description,
@@ -381,6 +381,44 @@ final class AppViewModel: NSObject, ObservableObject {
         let activeSessionID = activeChatSession.id
         return pendingApprovals.filter { approval in
             approval.sessionID == activeSessionID && !shouldAutoApprovePendingApproval(approval)
+        }
+    }
+
+    func shortcut(for action: AgentRuntimeShortcutAction) -> AgentRuntimeKeyboardShortcut {
+        shortcutSettings.shortcut(for: action)
+    }
+
+    func beginRecordingShortcut(for action: AgentRuntimeShortcutAction) {
+        recordingShortcutAction = action
+    }
+
+    func updateShortcut(_ action: AgentRuntimeShortcutAction, shortcut: AgentRuntimeKeyboardShortcut) {
+        shortcutSettings.bindings[action] = shortcut
+        recordingShortcutAction = nil
+        scheduleRuntimeSettingsAutosave()
+    }
+
+    func resetShortcut(_ action: AgentRuntimeShortcutAction) {
+        if let defaultShortcut = AgentRuntimeShortcutSettings.defaultBindings[action] {
+            shortcutSettings.bindings[action] = defaultShortcut
+            scheduleRuntimeSettingsAutosave()
+        }
+    }
+
+    func performShortcutAction(_ action: AgentRuntimeShortcutAction) {
+        switch action {
+        case .openCommandPalette:
+            isCommandPalettePresented = true
+        case .newSession:
+            performShellCommand(.newSession)
+        case .toggleBrowser:
+            performShellCommand(.toggleBrowser)
+        case .focusTopSearch:
+            focusTopSearchRequestID = UUID()
+        case .openSettings:
+            performShellCommand(.openSettings)
+        case .focusBrowserAddress, .newBrowserTab, .closeBrowserTab, .browserBack, .browserForward, .toggleBrowserBookmarks, .toggleBrowserHistory:
+            break
         }
     }
 
@@ -1718,6 +1756,7 @@ final class AppViewModel: NSObject, ObservableObject {
             spellCheckEnabled = settings.input.spellCheckEnabled
             autoSaveDraftsEnabled = settings.input.autoSaveDraftsEnabled
             composerSendShortcut = settings.input.composerSendShortcut
+            shortcutSettings = settings.shortcuts
             requireApprovalForNetwork = settings.permissions.requireApprovalForNetwork
             requireApprovalForShell = settings.permissions.requireApprovalForShell
             recentWorkspacePaths = settings.workspace.recentWorkspacePaths
@@ -1744,7 +1783,7 @@ final class AppViewModel: NSObject, ObservableObject {
     func saveRuntimeSettings() {
         do {
             var settings = try runtimeSettingsRepository?.loadOrCreateDefault() ?? .default
-            settings.schemaVersion = 3
+            settings.schemaVersion = 4
             settings.loop.permissionMode = defaultPermissionMode == .allowAll ? .askToWrite : defaultPermissionMode
             settings.ui.showProviderIcons = showProviderIcons
             settings.ui.richToolDescriptionsEnabled = richToolDescriptionsEnabled
@@ -1757,6 +1796,7 @@ final class AppViewModel: NSObject, ObservableObject {
             settings.input.spellCheckEnabled = spellCheckEnabled
             settings.input.autoSaveDraftsEnabled = autoSaveDraftsEnabled
             settings.input.composerSendShortcut = composerSendShortcut
+            settings.shortcuts = shortcutSettings
             settings.permissions.requireApprovalForNetwork = requireApprovalForNetwork
             settings.permissions.requireApprovalForShell = requireApprovalForShell
                 // Workspace roots are session-scoped and saved into Session Capsule.
