@@ -87,6 +87,37 @@ struct LLMConnectionSetupTests {
         #expect(try repository.apiKey(for: "provider-1") == "secret")
     }
 
+    @Test func xiaomiMiMoOpenAICompatiblePersistsAPIKeyHeaderKind() async throws {
+        let store = MemoryLLMSettingsStore()
+        let credentials = MemoryCredentialStore()
+        let repository = AppLLMSettingsRepository(settingsStore: store, credentialStore: credentials)
+        let service = AppLLMConnectionSetupService(
+            settingsRepository: repository,
+            openAICompatibleHealthCheck: { config in
+                #expect(config.baseURL.absoluteString == "https://api.xiaomimimo.com/v1")
+                #expect(config.model == "mimo-v2.5-pro")
+                #expect(config.apiKeyHeaderKind == .apiKey)
+                return LLMProviderHealthCheckResult(ok: true, model: config.model, message: "OK")
+            }
+        )
+
+        let result = try await service.setupConnection(AppLLMConnectionSetupInput(
+            id: "xiaomi-mimo-test",
+            kind: .openAICompatible,
+            name: "Xiaomi MiMo",
+            baseURLString: "https://api.xiaomimimo.com/v1",
+            model: "mimo-v2.5-pro",
+            apiKey: "mimo-secret",
+            openAIAPIKeyHeaderKind: .apiKey
+        ))
+
+        #expect(result.connection.extraHTTPHeaders[AppLLMSettingsRepository.openAIAPIKeyHeaderKindMetadataKey] == OpenAICompatibleAPIKeyHeaderKind.apiKey.rawValue)
+        let config = try #require(try repository.openAICompatibleConfig(connectionID: "xiaomi-mimo-test"))
+        #expect(config.apiKeyHeaderKind == .apiKey)
+        #expect(try repository.apiKey(for: "xiaomi-mimo-test") == "mimo-secret")
+        #expect(!store.values.values.contains(where: { $0.contains("mimo-secret") }))
+    }
+
     @Test func claudeSidecarRejectsAllowAll() async throws {
         let repository = AppLLMSettingsRepository(settingsStore: MemoryLLMSettingsStore(), credentialStore: MemoryCredentialStore())
         let service = AppLLMConnectionSetupService(settingsRepository: repository)

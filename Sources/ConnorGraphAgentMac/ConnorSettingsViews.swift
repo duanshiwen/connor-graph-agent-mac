@@ -303,6 +303,7 @@ private struct AIConnectionProviderPreset: Identifiable, Equatable {
     var keyPlaceholder: String
     var protocolKind: AIConnectionCustomProtocol
     var authHeaderKind: AnthropicCompatibleAuthHeaderKind = .xAPIKey
+    var openAIAPIKeyHeaderKind: OpenAICompatibleAPIKeyHeaderKind = .bearer
     var hidesEndpoint: Bool = false
 
     static let otherProviderPresets: [AIConnectionProviderPreset] = [
@@ -313,7 +314,14 @@ private struct AIConnectionProviderPreset: Identifiable, Equatable {
         AIConnectionProviderPreset(id: "openrouter", title: "OpenRouter", endpoint: "https://openrouter.ai/api/v1", defaultModel: "openai/gpt-4o-mini", keyPlaceholder: "sk-or-...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "groq", title: "Groq", endpoint: "https://api.groq.com/openai/v1", defaultModel: "llama-3.3-70b-versatile", keyPlaceholder: "gsk_...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "mistral", title: "Mistral", endpoint: "https://api.mistral.ai/v1", defaultModel: "mistral-large-latest", keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
-        AIConnectionProviderPreset(id: "deepseek", title: "DeepSeek", endpoint: "https://api.deepseek.com", defaultModel: "deepseek-chat", keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "deepseek", title: "DeepSeek", endpoint: "https://api.deepseek.com", defaultModel: "deepseek-v4-flash", keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "xiaomi-mimo", title: "Xiaomi MiMo", endpoint: "https://api.xiaomimimo.com/v1", defaultModel: "mimo-v2.5-pro", keyPlaceholder: "MIMO_API_KEY", protocolKind: .openAICompatible, openAIAPIKeyHeaderKind: .apiKey),
+        AIConnectionProviderPreset(id: "qwen", title: "阿里百炼 · Qwen", endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1", defaultModel: "qwen-plus", keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "doubao", title: "火山方舟 · 豆包", endpoint: "https://ark.cn-beijing.volces.com/api/v3", defaultModel: "doubao-seed-1-6", keyPlaceholder: "Paste your ARK_API_KEY...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "moonshot", title: "Moonshot · Kimi", endpoint: "https://api.moonshot.cn/v1", defaultModel: "kimi-k2-0711-preview", keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "zhipu", title: "智谱 GLM", endpoint: "https://open.bigmodel.cn/api/paas/v4", defaultModel: "glm-4.5", keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "minimax", title: "MiniMax", endpoint: "https://api.minimax.chat/v1", defaultModel: "MiniMax-M1", keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "stepfun", title: "阶跃星辰 StepFun", endpoint: "https://api.stepfun.com/v1", defaultModel: "step-2-mini", keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "xai", title: "xAI (Grok)", endpoint: "https://api.x.ai/v1", defaultModel: "grok-3-mini", keyPlaceholder: "xai-...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "cerebras", title: "Cerebras", endpoint: "https://api.cerebras.ai/v1", defaultModel: "llama3.1-8b", keyPlaceholder: "csk-...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "zai", title: "z.ai (GLM)", endpoint: "https://api.z.ai/api/paas/v4", defaultModel: "glm-4.5", keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
@@ -399,6 +407,60 @@ private struct AIConnectionOnboardingOption: Identifiable, Equatable {
             loginButtonTitle: "打开 GitHub 授权页",
             authURLString: "https://github.com/login/device",
             authenticationKind: .deviceCode(code: "B3D1-87D5", verificationURL: "https://github.com/login/device")
+        ),
+        AIConnectionOnboardingOption(
+            id: "deepseek",
+            title: "DeepSeek",
+            subtitle: "使用 DeepSeek API，适合国内开发、Agent 和高性价比推理。",
+            systemImage: "bolt.horizontal.circle",
+            tint: .blue,
+            providerMode: .openAICompatible,
+            connectionName: "DeepSeek",
+            baseURLString: "https://api.deepseek.com",
+            model: "deepseek-v4-flash",
+            selectedModel: "deepseek-v4-flash",
+            setupTitle: "连接 DeepSeek",
+            setupSubtitle: "使用 DeepSeek OpenAI Compatible API 驱动康纳同学。",
+            setupInstruction: "填写 DeepSeek API Key。默认使用 deepseek-v4-flash，你也可以改成 deepseek-v4-pro。",
+            loginButtonTitle: "继续",
+            authURLString: "",
+            authenticationKind: .direct
+        ),
+        AIConnectionOnboardingOption(
+            id: "xiaomi-mimo",
+            title: "Xiaomi MiMo",
+            subtitle: "使用小米 MiMo API，专为 Agent 与软件工程模型场景准备。",
+            systemImage: "sparkle.magnifyingglass",
+            tint: .orange,
+            providerMode: .openAICompatible,
+            connectionName: "Xiaomi MiMo",
+            baseURLString: "https://api.xiaomimimo.com/v1",
+            model: "mimo-v2.5-pro",
+            selectedModel: "mimo-v2.5-pro",
+            setupTitle: "连接 Xiaomi MiMo",
+            setupSubtitle: "使用小米 MiMo OpenAI Compatible API 驱动康纳同学。",
+            setupInstruction: "填写 MiMo API Key。康纳同学会按官方 OpenAI 示例使用 api-key 请求头。",
+            loginButtonTitle: "继续",
+            authURLString: "",
+            authenticationKind: .direct
+        ),
+        AIConnectionOnboardingOption(
+            id: "china-provider",
+            title: "中国常用模型",
+            subtitle: "接入 Qwen、豆包、Kimi、GLM、MiniMax、阶跃等国内常用 API。",
+            systemImage: "globe.asia.australia",
+            tint: .red,
+            providerMode: .openAICompatible,
+            connectionName: "阿里百炼 · Qwen",
+            baseURLString: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            model: "qwen-plus",
+            selectedModel: "qwen-plus",
+            setupTitle: "连接中国常用模型",
+            setupSubtitle: "从国内常用模型 API 中选择一个兼容服务。",
+            setupInstruction: "选择服务商并填写 API Key、Endpoint 和模型 ID。",
+            loginButtonTitle: "继续",
+            authURLString: "",
+            authenticationKind: .direct
         ),
         AIConnectionOnboardingOption(
             id: "other-provider",
@@ -628,7 +690,7 @@ private struct AIConnectionSetupView: View {
                 }
             }
         case .direct:
-            if option.id == "other-provider" {
+            if option.id == "other-provider" || option.id == "china-provider" {
                 otherProviderAPIFields
             } else {
                 VStack(spacing: 16) {
@@ -834,15 +896,10 @@ private struct AIConnectionSetupView: View {
         case .authorizationCode:
             return authorizationCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .direct:
-            if option.id == "other-provider" {
-                return connectionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    || baseURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    || model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    || (apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isLoopbackEndpoint(baseURLString))
-            }
             return connectionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || baseURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || (apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isLoopbackEndpoint(baseURLString))
         default:
             return false
         }
@@ -990,7 +1047,8 @@ private struct AIConnectionSetupView: View {
         errorMessage = nil
         Task {
             do {
-                let connectionKind: AppLLMConnectionKind = option.id == "other-provider" && customProtocol == .anthropicCompatible ? .anthropicCompatible : .openAICompatible
+                let usesProviderPreset = option.id == "other-provider" || option.id == "china-provider"
+                let connectionKind: AppLLMConnectionKind = usesProviderPreset && customProtocol == .anthropicCompatible ? .anthropicCompatible : .openAICompatible
                 let input = AppLLMConnectionSetupInput(
                     id: nil,
                     kind: connectionKind,
@@ -999,7 +1057,8 @@ private struct AIConnectionSetupView: View {
                     model: model,
                     selectedModel: selectedModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? model : selectedModel,
                     apiKey: apiKey,
-                    anthropicAuthHeaderKind: activeProviderPreset.authHeaderKind
+                    anthropicAuthHeaderKind: activeProviderPreset.authHeaderKind,
+                    openAIAPIKeyHeaderKind: openAIAPIKeyHeaderKindForCurrentDraft()
                 )
                 _ = try await viewModel.setupLLMConnection(input)
                 await MainActor.run {
@@ -1026,6 +1085,10 @@ private struct AIConnectionSetupView: View {
             selectedProviderPresetID = "openai"
             applySelectedProviderPreset()
         }
+        if option.id == "china-provider" {
+            selectedProviderPresetID = "qwen"
+            applySelectedProviderPreset()
+        }
         if option.id == "claude-pro-max" {
             sidecarExecutablePath = sidecarExecutablePath.isEmpty ? Self.defaultSidecarExecutablePath() : sidecarExecutablePath
             sidecarArguments = sidecarArguments.isEmpty ? Self.defaultSidecarArguments() : sidecarArguments
@@ -1048,6 +1111,12 @@ private struct AIConnectionSetupView: View {
             selectedModel = ""
             customProtocol = .openAICompatible
         }
+    }
+
+    private func openAIAPIKeyHeaderKindForCurrentDraft() -> OpenAICompatibleAPIKeyHeaderKind {
+        if option.id == "xiaomi-mimo" { return .apiKey }
+        if option.id == "other-provider" || option.id == "china-provider" { return activeProviderPreset.openAIAPIKeyHeaderKind }
+        return .bearer
     }
 
     private func isLoopbackEndpoint(_ rawValue: String) -> Bool {
