@@ -99,7 +99,7 @@ struct AgentChatPermissionRequestCard: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.regular)
-            .help("将当前 Sidecar 会话权限提升为受信写入，并批准这个请求")
+            .help("将当前 Sidecar 会话权限提升为执行，并批准这个请求")
 
             Button(role: .destructive) {
                 viewModel.denyPendingApproval(approval)
