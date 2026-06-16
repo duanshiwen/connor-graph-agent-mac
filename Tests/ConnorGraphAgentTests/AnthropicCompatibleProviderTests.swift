@@ -143,6 +143,38 @@ private enum AnthropicFixtures {
     #expect(content.first?["text"] as? String == "Hello")
 }
 
+@Test func anthropicCompatibleProviderPreservesUnifiedAgentPromptAndTools() async throws {
+    let client = AnthropicCapturingHTTPClient()
+    let provider = AnthropicCompatibleProvider(
+        config: AnthropicCompatibleConfig(baseURL: URL(string: "https://api.anthropic.com")!, apiKey: "sk-ant-test", model: "claude-sonnet-test"),
+        httpClient: client
+    )
+    let tool = AgentToolDefinition(
+        name: "graph_search",
+        description: "Search graph memory",
+        inputSchema: .object(properties: ["query": .string(description: "Query")], required: ["query"])
+    )
+
+    _ = try await provider.complete(AgentModelRequest(
+        messages: [
+            AgentModelMessage(role: .system, content: "Connor core\n\n## 用户基本信息\n- 称呼：段诗闻"),
+            AgentModelMessage(role: .user, content: "我叫什么？")
+        ],
+        tools: [tool]
+    ))
+
+    let body = try #require(client.storage.capturedRequest?.body)
+    let object = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+    #expect((object["system"] as? String)?.contains("## 用户基本信息") == true)
+    #expect((object["system"] as? String)?.contains("段诗闻") == true)
+    let messages = try #require(object["messages"] as? [[String: Any]])
+    #expect(messages.first?["role"] as? String == "user")
+    let tools = try #require(object["tools"] as? [[String: Any]])
+    #expect(tools.first?["name"] as? String == "graph_search")
+    #expect(tools.first?["description"] as? String == "Search graph memory")
+    #expect(tools.first?["input_schema"] != nil)
+}
+
 @Test func anthropicParsesTextResponse() async throws {
     let client = AnthropicCapturingHTTPClient(body: AnthropicFixtures.textResponse)
     let provider = AnthropicCompatibleProvider(

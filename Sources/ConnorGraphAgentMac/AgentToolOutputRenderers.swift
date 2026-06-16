@@ -4,10 +4,13 @@ import ConnorGraphAppSupport
 
 struct AgentToolInvocationRenderer: View {
     var invocation: AgentToolInvocationPresentation
+    var showsRichDescription: Bool = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
-            AgentToolInputSection(invocation: invocation)
+            if showsRichDescription {
+                AgentToolInputSection(invocation: invocation)
+            }
 
             switch invocation.semanticKind {
             case .shellCommand, .swiftBuild, .swiftTest, .swiftRun, .xcodeBuild, .git, .packageManager, .python, .node:
