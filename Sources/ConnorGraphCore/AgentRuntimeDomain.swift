@@ -183,6 +183,7 @@ public struct AgentPromptAssembledEvent: Codable, Sendable, Equatable {
     public var sections: [AgentPromptSectionSnapshot]
     public var totalEstimatedTokenCount: Int
     public var appliedTransformers: [String]
+    public var renderedPromptSnapshot: String?
 
     public init(
         runID: String,
@@ -190,7 +191,8 @@ public struct AgentPromptAssembledEvent: Codable, Sendable, Equatable {
         projectionMode: String,
         sections: [AgentPromptSectionSnapshot],
         totalEstimatedTokenCount: Int,
-        appliedTransformers: [String] = []
+        appliedTransformers: [String] = [],
+        renderedPromptSnapshot: String? = nil
     ) {
         self.runID = runID
         self.sessionID = sessionID
@@ -198,6 +200,7 @@ public struct AgentPromptAssembledEvent: Codable, Sendable, Equatable {
         self.sections = sections
         self.totalEstimatedTokenCount = totalEstimatedTokenCount
         self.appliedTransformers = appliedTransformers
+        self.renderedPromptSnapshot = renderedPromptSnapshot
     }
 }
 

@@ -32,6 +32,144 @@ private func temporaryFactoryNativeSessionDatabaseURL(_ name: String = UUID().uu
     FileManager.default.temporaryDirectory.appendingPathComponent("\(name).sqlite")
 }
 
+private func saveFactoryUserBasicInfoRuntimeSettings(storagePaths: AppStoragePaths) throws {
+    var runtimeSettings = AgentRuntimeSettings.default
+    runtimeSettings.preferences = AgentRuntimePreferenceSettings(
+        displayName: "段诗闻",
+        timezone: "Asia/Shanghai",
+        preferredLanguage: "zh-Hans-CN",
+        city: "杭州市",
+        country: "中国",
+        notes: "我喜欢橙色"
+    )
+    try AppRuntimeSettingsRepository(configDirectory: storagePaths.configDirectory).save(runtimeSettings)
+}
+
+@Test func appGraphAgentRuntimeFactoryInjectsUserBasicInfoFromRuntimeSettings() throws {
+    let appDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorFactoryUserBasicInfo-")
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: appDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: appDirectory) }
+    let storagePaths = AppStoragePaths(applicationSupportDirectory: appDirectory)
+    try storagePaths.ensureDirectoryHierarchy()
+
+    try saveFactoryUserBasicInfoRuntimeSettings(storagePaths: storagePaths)
+
+    let store = try SQLiteGraphKernelStore(path: temporaryFactoryNativeSessionDatabaseURL().path)
+    try store.migrate()
+    let settingsRepository = AppLLMSettingsRepository(
+        settingsStore: FactoryNativeSessionSettingsStore(),
+        credentialStore: FactoryNativeSessionCredentialStore()
+    )
+    let factory = AppGraphAgentRuntimeFactory(
+        store: store,
+        settingsRepository: settingsRepository,
+        storagePaths: storagePaths
+    )
+
+    let loop = factory.makeAgentLoopController()
+
+    #expect(loop.configuration.instructionAppendix.contains("## 用户基本信息"))
+    #expect(loop.configuration.instructionAppendix.contains("- 称呼：段诗闻"))
+    #expect(loop.configuration.instructionAppendix.contains("- 备注：我喜欢橙色"))
+}
+
+@Test func appGraphAgentRuntimeFactoryNonPersistentSidecarInjectsUserBasicInfoFromRuntimeSettings() async throws {
+    let appDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorFactorySidecarUserBasicInfo-")
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: appDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: appDirectory) }
+    let storagePaths = AppStoragePaths(applicationSupportDirectory: appDirectory)
+    try storagePaths.ensureDirectoryHierarchy()
+    try saveFactoryUserBasicInfoRuntimeSettings(storagePaths: storagePaths)
+
+    let store = try SQLiteGraphKernelStore(path: temporaryFactoryNativeSessionDatabaseURL().path)
+    try store.migrate()
+    let settingsRepository = AppLLMSettingsRepository(
+        settingsStore: FactoryNativeSessionSettingsStore(),
+        credentialStore: FactoryNativeSessionCredentialStore()
+    )
+    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: settingsRepository, storagePaths: storagePaths)
+    let captureURL = appDirectory.appendingPathComponent("nonpersistent-request.json")
+    let sidecarURL = appDirectory.appendingPathComponent("nonpersistent-sidecar.sh")
+    try """
+    #!/bin/sh
+    IFS= read -r request
+    printf '%s\n' "$request" > '\(captureURL.path)'
+    printf '%s\n' '{"runStarted":{"sdkSessionID":"sdk-nonpersistent-user-info"}}'
+    printf '%s\n' '{"textComplete":{"text":"ok","citations":[],"contextSnapshot":null}}'
+    printf '%s\n' '{"runCompleted":{}}'
+    """.write(to: sidecarURL, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: sidecarURL.path)
+    var manager = factory.makeClaudeSDKSidecarNativeSessionManager(
+        session: AgentSession(id: "factory-sidecar-user-info"),
+        sidecarExecutableURL: URL(fileURLWithPath: "/bin/sh"),
+        sidecarArguments: [sidecarURL.path],
+        workingDirectory: appDirectory,
+        permissionMode: .readOnly
+    )
+
+    _ = try await manager.submit("我叫什么？")
+    let requestJSON = try String(contentsOf: captureURL, encoding: .utf8)
+
+    #expect(requestJSON.contains("appendSystemPrompt"))
+    #expect(requestJSON.contains("## 用户基本信息"))
+    #expect(requestJSON.contains("- 称呼：段诗闻"))
+    #expect(requestJSON.contains("- 备注：我喜欢橙色"))
+}
+
+@Test func appGraphAgentRuntimeFactoryGovernedSidecarInjectsUserBasicInfoFromRuntimeSettings() async throws {
+    let appDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorFactoryGovernedSidecarUserBasicInfo-")
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: appDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: appDirectory) }
+    let storagePaths = AppStoragePaths(applicationSupportDirectory: appDirectory)
+    try storagePaths.ensureDirectoryHierarchy()
+    try saveFactoryUserBasicInfoRuntimeSettings(storagePaths: storagePaths)
+
+    let store = try SQLiteGraphKernelStore(path: temporaryFactoryNativeSessionDatabaseURL().path)
+    try store.migrate()
+    let settingsRepository = AppLLMSettingsRepository(
+        settingsStore: FactoryNativeSessionSettingsStore(),
+        credentialStore: FactoryNativeSessionCredentialStore()
+    )
+    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: settingsRepository, storagePaths: storagePaths)
+    let captureURL = appDirectory.appendingPathComponent("governed-request.json")
+    let sidecarURL = appDirectory.appendingPathComponent("governed-sidecar.sh")
+    try """
+    #!/bin/sh
+    while IFS= read -r command; do
+      case "$command" in
+        *'"start"'*)
+          printf '%s\n' "$command" > '\(captureURL.path)'
+          printf '%s\n' '{"runStarted":{"sdkSessionID":"sdk-governed-user-info"}}'
+          printf '%s\n' '{"textComplete":{"text":"ok","citations":[],"contextSnapshot":null}}'
+          printf '%s\n' '{"runCompleted":{}}'
+          ;;
+      esac
+    done
+    """.write(to: sidecarURL, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: sidecarURL.path)
+    var manager = try factory.makeGovernedClaudeSDKSidecarNativeSessionManager(
+        session: AgentSession(id: "factory-governed-sidecar-user-info"),
+        sidecarExecutableURL: URL(fileURLWithPath: "/bin/sh"),
+        sidecarArguments: [sidecarURL.path],
+        workingDirectory: appDirectory,
+        permissionMode: .askToWrite
+    )
+
+    _ = try await manager.submit("我叫什么？")
+    let requestJSON = try String(contentsOf: captureURL, encoding: .utf8)
+
+    #expect(requestJSON.contains("appendSystemPrompt"))
+    #expect(requestJSON.contains("## 用户基本信息"))
+    #expect(requestJSON.contains("- 称呼：段诗闻"))
+    #expect(requestJSON.contains("- 备注：我喜欢橙色"))
+}
+
 @Test func appGraphAgentRuntimeFactoryCreatesNativeSessionManagerBackedByRepository() async throws {
     let store = try SQLiteGraphKernelStore(path: temporaryFactoryNativeSessionDatabaseURL().path)
     try store.migrate()
