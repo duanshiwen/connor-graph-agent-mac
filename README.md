@@ -1,7 +1,7 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-16 02:11 GMT+8  
-当前代码基线:`feature/apple-iwork-attachment-support`,在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface / session-scoped multi-root project workspace / Connor-owned Scientific Compute Runtime skeleton / 商用级 Document Attachment OS 基础上,继续收紧 Apple 原生 UI 边界:PDF/Word/Excel/PowerPoint 与 Apple iWork（Pages/Numbers/Keynote）一等附件仍由 Connor Session Capsule 和 Attachment Store 管理;PDF selectable text 抽取和多页原文预览继续使用 PDFKit;Office/iWork/Presentation/Spreadsheet 抽取继续通过 MarkItDown/Docling sidecar best-effort 编排与 hardening;Office/iWork/Presentation/Spreadsheet 原文件预览优先交给 macOS Quick Look / QuickLookUI,Connor 自有 UI 只负责 manifest、extraction status、retry、omitted attachment summary 和治理证据。
+文档更新时间：2026-06-16 19:39 GMT+8  
+当前代码基线:`feature/apple-iwork-attachment-support`,在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface / session-scoped multi-root project workspace / Connor-owned Scientific Compute Runtime skeleton / 商用级 Document Attachment OS / WKWebView-backed `web_fetch(js)` 基础上,继续收紧 Apple 原生 UI 边界:PDF/Word/Excel/PowerPoint 与 Apple iWork（Pages/Numbers/Keynote）一等附件仍由 Connor Session Capsule 和 Attachment Store 管理;PDF selectable text 抽取和多页原文预览继续使用 PDFKit;Office/iWork/Presentation/Spreadsheet 抽取继续通过 MarkItDown/Docling sidecar best-effort 编排与 hardening;Office/iWork/Presentation/Spreadsheet 原文件预览优先交给 macOS Quick Look / QuickLookUI,Connor 自有 UI 只负责 manifest、extraction status、retry、omitted attachment summary 和治理证据。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package,目标是把 Connor 建成 **graph-memory-native Agent OS**:它不是"图谱编辑器",也不是"Claude SDK 外壳",而是以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI 和 Local Automation Surface 共同构成的本地 Agent 操作系统。
 
@@ -192,6 +192,30 @@ graph/evaluations/retrieval-evaluation-cases.json
 graph/evaluations/reports/*.json
 ```
 
+预制会话治理项使用稳定英文 ID + 中文显示名,避免破坏自动化、CLI、存储和已有引用:
+
+```text
+Statuses:
+- todo → 待办
+- in_progress → 进行中
+- waiting → 等待中
+- needs_review → 待审阅
+- blocked → 受阻
+- done → 已完成
+- archived → 已归档
+
+Labels:
+- important → 重要
+- research → 研究
+- priority → 优先级
+- due → 截止日期
+- project → 项目
+```
+
+标签就是标签:每个标签只有系统生成的稳定 UID、显示名和颜色,不再承载 value type、日期/数字/link 解析或 graph binding。创建标签时用户只输入显示名和选择颜色,不需要提供英文 ID;系统自动生成不重复的 `label_<uuid>`。
+
+`config/session-governance.json` 首次创建时写入上述中文默认显示名;若本地已有旧版英文内置项,启动读取配置时会按内置 ID 将这些预制项迁移为中文显示名,自定义状态/标签不被覆盖。
+
 `runtime-settings.json` 保存应用、外观、输入、权限、UI、用户偏好和轻量 MRU 历史类设置。项目工作目录不再作为设置页里的全局主状态;每个会话在自己的 Session Capsule 中保存 `workspace` 引用和 roots。会话页 composer 底部的 folder badge 是当前工作目录的高频入口,可快速切换 primary root、通过"历史打开列表"二级菜单恢复最近打开目录、选择新目录或重置为默认;顶部 Workspace 详情用于 multi-root 管理。`runtime-settings.workspace.defaultWorkingDirectoryPath` / `runtime-settings.workspace.roots` / `llm.sidecar.workingDirectoryPath` 仅保留为 legacy fallback / 新会话初始模板兼容层;`runtime-settings.workspace.recentWorkspacePaths` 保存跨会话最近打开目录列表。Native local tools 使用当前 session 的 multi-root allowed roots;Claude Sidecar 使用当前 session primary root 作为单一 cwd。`llm-settings.json` 保存模型提供方、Base URL、模型名和 Claude Sidecar 配置。API Key 不写入 JSON,由本地 Keychain 凭据仓库管理。
 
 ---
@@ -377,6 +401,8 @@ Sources/ConnorGraphAgent/AgentEventReplayer.swift
 Sources/ConnorGraphAgent/AgentTextDeltaBuffer.swift
 Sources/ConnorGraphAgent/AgentRuntimeUsageTracker.swift
 Sources/ConnorGraphAgent/OpenAICompatibleProvider.swift
+Sources/ConnorGraphAgent/AnthropicCompatibleProvider.swift
+Sources/ConnorGraphAgent/AnthropicStreaming.swift
 ```
 
 ### ConnorGraphAppSupport
@@ -787,15 +813,10 @@ Sessions
 ```text
 New Session
 All Sessions
-Inbox
 Labels
-Graph Memory Review
-Approvals
-Automations
-Local API / CLI
-Sources
+Data Sources
 Skills
-Browser Workspace
+Automations
 Settings
 ```
 
@@ -841,6 +862,7 @@ Agent tool invocation detail 当前支持:
 - Bash / swift build / swift test / git / python / node / package manager 等 shell-like 工具使用 terminal-style renderer,优先从 result JSON 展示 stdout、stderr、exitCode,否则回退到纯文本解析。
 - Edit/Write 等文件变更类工具使用 `AgentToolChangePresentation` 提取 result JSON / arguments JSON / outputText 中的 unified diff、patch、oldText/newText,并由 SwiftUI 原生 diff renderer 高亮新增、删除和 hunk 行。
 - MCP、Browser、Read/Grep/List 和未知工具使用原生 input/output card 与 JSON/text renderer;这是参考 Craft activity overlay 的信息架构,不是 Craft UI fork,也不引入 Electron/Web UI。
+- `web_fetch` 的 `http/auto` 模式继续通过 search-engine-mcp 获取 cleaned Markdown/text;`js` 模式在 Connor App runtime 中优先走 Connor-owned WKWebView background runner,从渲染后的 DOM 抽取 title、final URL 与正文内容返回给 Agent,以保持 Native Shell 浏览器能力和 Agent 工具调用的一致治理边界;无 App UI handler 的 CLI/测试环境继续回退到 search-engine-mcp 的 JS 渲染路径。
 - 大输出通过 `AgentToolOutputDisplayPolicy` 先做 preview/truncation 治理;当前不强制把超大 stdout/stderr 落 Session Capsule artifact,后续若需要再以独立 artifact policy 接入。
 
 Browser Workspace 当前支持:
@@ -856,6 +878,7 @@ Browser Workspace 当前支持:
 - Browser Workspace 可见时,按 ⌘W 关闭当前选中的浏览器标签页,而不是关闭整个 macOS 窗口
 - 从对话 transcript 中打开链接时,会写入当前会话的浏览器状态,追加并选中新标签页,同时更新地址栏目标
 - 内置搜索服务需要浏览器时,可先通过隐藏的 Browser Background Task Runner 使用同一应用级 WebKit 存储在后台加载搜索页;若流程未遇到验证/安全挑战,则后台完成不切换用户界面;若检测到 CAPTCHA、人机验证、Cloudflare challenge 等卡点,则标记为 awaiting user intervention,并显式切换到对应浏览器标签页请用户处理
+- `web_fetch(render_mode: "js")` 在 Connor App runtime 中优先使用内置 WKWebView background runner 加载 JavaScript 页面,并从渲染后的 DOM 抽取 title、final URL 与正文内容返回给 Agent;遇到 CAPTCHA、人机验证、Cloudflare challenge、登录或浏览器安全挑战时,会切换到对应内置浏览器标签页请求用户介入;无 App UI handler 的 CLI/测试环境继续回退到 search-engine-mcp 的 JS 渲染路径
 - 地址栏右侧提供"问一问 AI"按钮,可基于当前网页全文打开与选区浮窗一致的整页 mini-thread 提问浮窗
 - 用户在网页中选中文本后自动显示跟随选区的浮动窗口
 - 浮窗会根据 Browser Workspace 可视区域自动翻转、平移并限制最大高度,避免在窗口边缘、小窗口或长 mini-thread 场景下显示不全
@@ -880,8 +903,6 @@ Command Palette 当前支持:
 ```text
 Open Home
 New Session
-Open Graph Memory Review
-Open Approvals
 Open Automations
 Open Local API / CLI
 Open Sources
@@ -930,6 +951,8 @@ AI
 快捷键
 偏好
 ```
+
+会话侧栏的"所有会话"状态列表和"标签"列表支持 macOS 右键菜单:状态项可"编辑状态…"或"创建状态…",标签项可"编辑标签…"或"创建标签…"。状态创建/编辑只面向显示名和图标;UID 是系统主键,创建时自动生成不重复的 `status_<uuid>`,编辑时只读展示、不可修改;排序和终态不暴露在弹窗中。状态图标使用常用 SF Symbol 菜单选择器。标签创建/编辑只面向显示名和颜色;UID 是系统主键,创建时自动生成不重复的 `label_<uuid>`,编辑时只读展示、不可修改。标签色彩选择使用 SwiftUI 原生 `ColorPicker("颜色", selection:..., supportsOpacity: false)`,保存时兼容旧命名色并可写入十六进制颜色。以上操作写入 `config/session-governance.json`,并立即刷新当前 AppViewModel、会话标签菜单、侧栏筛选计数和 automation governance mirror。当前底层会话状态仍由内置 `AgentSessionStatus` 枚举约束;因此自定义状态定义先作为治理配置维护能力落地,真正把任意自定义状态用于会话状态切换需要后续将 session status storage 从 enum 升级为 string-backed status ID。
 
 核心视图:
 
@@ -1067,10 +1090,14 @@ solve_linear_system for small square systems via Gaussian elimination with pivot
 AI 设置页支持:
 
 - 多个 AI 连接,而不是把 AI 设置硬编码成两类全局源
-- 每个连接单独选择协议类型:`OpenAI Compatible` 或 `Claude`
-- 每个连接拥有独立名称、模型列表、selected model、Base URL / Sidecar 配置
-- OpenAI Compatible 连接支持 API Key 输入 / 清除 / 连接测试,API Key 按 connection ID 存储到 credential store,不会明文写入 JSON
-- Claude 连接支持 Sidecar executable / arguments / legacy working directory fallback 和 Sidecar mode guardrail
+- 每个连接都有稳定 provider kind:`openAICompatible`、`claudeSidecar`、`chatGPTCodex`、`githubCopilot`、`anthropicCompatible`;旧设置若没有 provider kind,会按 `providerMode` 兼容迁移为 OpenAI Compatible 或 Claude Sidecar
+- Add Connection 现在走 Connor 原生 `AppLLMConnectionSetupService`:先校验 provider-specific input,再执行真实 health check / sidecar validation,成功后才保存 metadata 和 credential;失败不会追加假连接,也不会污染 credential store
+- OpenAI Compatible / 本地模型走 Connor 原生 `OpenAICompatibleProvider`;用户填写 Base URL、模型和 API Key,本地 localhost 模型可使用本地占位 token,但仍会发起真实 health check
+- Anthropic Compatible 走 Connor 原生 `AnthropicCompatibleProvider`:使用 Anthropic Messages API `/v1/messages`,支持官方 `x-api-key` 认证和 OpenRouter / Vercel 等代理常见的 Bearer 认证;文本回复、`tool_use` / `tool_result` 映射、health check、SSE streaming、extended thinking request options、prompt cache request options、server tool request schema、fine-grained tool streaming 的 partial JSON 累积与容错均在 Swift HTTP/SSE provider 内完成;它面向 API Key / Endpoint 服务商,不复用 Claude SDK sidecar 的账号登录 runtime
+- Claude 连接走 Claude SDK sidecar:验证 sidecar executable 存在且可执行,禁止 `allowAll`;OAuth token 保存到 credential store,运行 sidecar 时通过 `CLAUDE_CODE_OAUTH_TOKEN` / refresh token 环境变量注入,不让 Claude SDK 拥有 Connor session / permission / audit / graph state
+- Codex · ChatGPT Plus 连接走 ChatGPT/Codex OAuth:浏览器回调拿到 OAuth tokens,再用 `id_token` token-exchange 派生 OpenAI API key,随后复用 Connor 原生 OpenAI-Compatible runtime 做真实 health check;OAuth tokens 和派生 API key 都只进 credential store
+- GitHub Copilot 连接走 GitHub device flow:拿到 Copilot token 后构造 Connor 原生 HTTP runtime config,补充 Copilot integration headers,并用 chat/completions health check 验证后才保存
+- 每个连接拥有独立名称、模型列表、selected model、Base URL / Sidecar 配置;API Key / OAuth token 不会明文写入 JSON 设置文件
 - 全局默认连接用于新聊天;composer 模型选择器可把单个会话覆盖到某个具体连接的某个模型
 - 默认权限、外观、输入和用户偏好
 - 当前会话 Workspace 在会话界面内设置,不在 Settings Center 中设置
@@ -1234,6 +1261,32 @@ P1/P2 combined optimization final targeted regression status (2026-06-14 14:10 G
 - swift test --filter PhaseGCraftGradeNativeUITests: passed, 3 tests.
 - swift test --filter CommercialReadinessReleaseGateTests: passed, 4 tests.
 - SwiftPM `Assets.xcassets` unhandled-file warning is resolved by declaring `.process("Assets.xcassets")` on the mac app executable target.
+
+Settings labels/statuses redesign regression (2026-06-16 19:01 GMT+8):
+- 设置导航新增“状态”页面;“标签”和“状态”现在分别作为低频全局治理配置入口,符合 Apple HIG settings guidance:减少设置数量、按相关项分组、只暴露用户需要调整的选项。
+- 设置 → 标签已重写为纯标签管理:列表行显示颜色、图标、显示名和使用数量;新建/编辑 sheet 只允许修改显示名、图标和颜色;不暴露 ID、value type、value、graph binding 或校验字段。
+- 设置 → 状态新增完整管理页:列表行显示图标、显示名和使用数量;新建/编辑 sheet 只允许修改显示名和图标;不暴露 ID、sort order 或 terminal-state。
+- 页面采用 Apple HIG layout/buttons 要点:相关项分组、顶部主操作、44×44 pt 图标/删除按钮命中区域、主要操作 prominent、破坏性操作 destructive、打开编辑视图的按钮使用省略号。
+- 删除行为复用治理层规则:删除标签会从所有会话移除;删除状态会在最后一个状态或仍有会话使用时被阻止。
+- swift build: passed.
+- swift test --filter ProductOSPhase1Tests: passed, 5 tests.
+
+Session title / deletion guard regression (2026-06-16 18:49 GMT+8):
+- 首轮发送后的自动标题生成从 `onRunStarted` 调整为 submit 成功、首条用户消息已持久化后触发,避免标题任务读取到空会话或旧会话导致不稳定。
+- `renameChatSession` 在 repository rename 后立即同步 `chatSessions`、`allChatSessions`、`fallbackChatSession` 和 `nativeSessionManager`,再 reload,保证会话列表和详情页标题同步。
+- 会话存在 queued/running 后台任务时不允许删除;列表 swipe/context menu 删除入口禁用,`deleteChatSession` 删除前也重新读取持久化后台任务做强制兜底。
+- swift build: passed.
+- swift test --filter NativeSessionManagerSessionOSTests / ProductOSPhase1Tests: app target compiled, but package test linking failed with pre-existing undefined symbols for `AgentModelUsage.init` / `AgentModelResponse.init` in broader test bundle.
+
+Status / label context menu targeted regression (2026-06-16 17:33 GMT+8):
+- 状态创建/编辑不再要求用户提供英文 ID;侧栏创建入口自动生成不重复 `status_<uuid>`,保存层对空/重复新状态 ID 也有 UID 兜底。
+- 状态弹窗只保留显示名和图标;排序、终态不再暴露,图标由常用 SF Symbol 菜单选择器提供。
+- 标签模型已收敛为纯标签:系统生成 UID、显示名、颜色;删除 value type、标签值校验、graph binding 以及 UI 中的值类型/图谱绑定编辑入口。
+- 创建标签不再要求用户提供英文 ID;侧栏创建入口自动生成不重复 `label_<uuid>`,保存层对空/重复新标签 ID 也有 UID 兜底。
+- 标签颜色编辑使用 SwiftUI 原生 `ColorPicker("颜色", selection: ..., supportsOpacity: false)`,兼容旧 named colors,保存新选择为十六进制颜色。
+- swift test --filter ProductOSPhase1Tests: passed, 5 tests.
+- swift test --filter NativeSessionManagerSessionOSTests: passed, 8 tests.
+- SwiftPM debug build completed while compiling `AgentSessionGovernance.swift`, `AppSessionGovernanceConfigRepository.swift`, `AppShellViews.swift`, `ConnorGraphAgentMacApp.swift`, `ConnorSettingsViews.swift`, `ProductOSRegistryViews.swift`, and `AgentChatView.swift`.
 ```
 
 ---

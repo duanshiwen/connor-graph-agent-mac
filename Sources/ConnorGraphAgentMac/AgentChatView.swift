@@ -422,7 +422,7 @@ private struct AgentChatSessionListView: View {
 
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                 HStack {
-                    Text("Inbox")
+                    Text("会话")
                         .font(AgentChatTypography.sectionTitle)
                     Spacer()
                     Button(action: { viewModel.reloadChatSessions() }) {
@@ -491,7 +491,7 @@ private struct AgentChatSessionRow: View {
                         .foregroundStyle(.secondary)
                 }
                 if !row.labels.isEmpty {
-                    FlowLikeChips(values: row.labels.prefix(3).map(\.displayText))
+                    FlowLikeChips(values: row.labels.prefix(3).map(\.id))
                 }
             }
             .padding(.horizontal, AgentChatLayout.spaceM)
@@ -968,9 +968,7 @@ private struct AgentSessionFilterBar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
             HStack(spacing: AgentChatLayout.spaceS) {
-                FilterButton(title: "Inbox", isSelected: viewModel.sessionListFilter == .inbox) { viewModel.setSessionListFilter(.inbox) }
                 FilterButton(title: "All", isSelected: viewModel.sessionListFilter == .all) { viewModel.setSessionListFilter(.all) }
-                FilterButton(title: "Archive", isSelected: viewModel.sessionListFilter == .archived) { viewModel.setSessionListFilter(.archived) }
             }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: AgentChatLayout.spaceS) {
@@ -1135,11 +1133,6 @@ private struct AgentChatInspectorView: View {
 
             HStack(spacing: AgentChatLayout.spaceS) {
                 Button(session.governance.isFlagged ? "取消标记" : "标记") { viewModel.toggleSelectedSessionFlag() }
-                if session.governance.isArchived {
-                    Button("恢复") { viewModel.restoreSelectedSession() }
-                } else {
-                    Button("归档") { viewModel.archiveSelectedSession() }
-                }
             }
             .buttonStyle(.bordered)
             .controlSize(.regular)
@@ -1204,11 +1197,7 @@ private struct AgentChatInspectorView: View {
     }
 
     private func displayText(for label: AgentSessionLabel) -> String {
-        guard let definition = viewModel.governanceConfig.definition(for: label.id) else {
-            return label.displayText
-        }
-        guard let value = label.value else { return definition.name }
-        return "\(definition.name): \(value)"
+        viewModel.governanceConfig.definition(for: label.id)?.name ?? label.id
     }
 
     private var artifacts: some View {
