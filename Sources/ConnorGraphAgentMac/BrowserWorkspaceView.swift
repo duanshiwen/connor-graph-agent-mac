@@ -101,18 +101,31 @@ struct BrowserWorkspaceView: View {
                     }
                 }
 
-                // History panel overlay on the right side
+                // Floating panels overlay on the right side
+                if viewModel.isBrowserBookmarksPanelVisible {
+                    HStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        BrowserBookmarksPanelView(
+                            viewModel: viewModel,
+                            currentPageURL: activeTabCanBeBookmarked ? activeTab?.displayURL : nil,
+                            currentPageTitle: activeTabCanBeBookmarked ? activeTab?.displayTitle : nil
+                        )
+                        .transition(AnyTransition.move(edge: Edge.trailing).combined(with: AnyTransition.opacity))
+                    }
+                }
+
                 if viewModel.isBrowserHistoryPanelVisible {
                     HStack(spacing: 0) {
                         Spacer(minLength: 0)
                         BrowserHistoryPanelView(viewModel: viewModel)
-                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                            .transition(AnyTransition.move(edge: Edge.trailing).combined(with: AnyTransition.opacity))
                     }
                 }
             }
         }
         .onAppear {
             ensureInitialTab()
+            viewModel.loadBrowserBookmarks()
             navigate(to: viewModel.browserTargetURLString)
             installBrowserKeyMonitorIfNeeded()
         }
@@ -162,6 +175,16 @@ struct BrowserWorkspaceView: View {
 
     private var defaultURLString: String {
         viewModel.browserTargetURLString.isEmpty ? BrowserBuiltInPage.blankURLString : viewModel.browserTargetURLString
+    }
+
+    private var activeTabCanBeBookmarked: Bool {
+        guard let url = activeTab?.displayURL.trimmingCharacters(in: .whitespacesAndNewlines), !url.isEmpty else { return false }
+        return !url.hasPrefix("connor://") && !url.hasPrefix("about:") && !url.hasPrefix("data:")
+    }
+
+    private var activeURLIsBookmarked: Bool {
+        guard activeTabCanBeBookmarked, let url = activeTab?.displayURL else { return false }
+        return viewModel.isBrowserBookmarked(url: url)
     }
 
     private var tabBar: some View {
@@ -240,14 +263,27 @@ struct BrowserWorkspaceView: View {
             )
             .frame(height: 28)
 
+            Button(action: { viewModel.toggleBrowserBookmarksPanel() }) {
+                BrowserToolbarIconButtonLabel(
+                    systemImage: activeURLIsBookmarked ? "star.fill" : "star",
+                    isActive: viewModel.isBrowserBookmarksPanelVisible || activeURLIsBookmarked,
+                    iconFont: .system(size: 16, weight: .semibold)
+                )
+            }
+            .buttonStyle(.plain)
+            .help(activeURLIsBookmarked ? "当前页已收藏，打开收藏夹" : "打开收藏夹")
+            .accessibilityLabel("收藏夹")
+
             Button(action: { viewModel.toggleBrowserHistoryPanel() }) {
                 BrowserToolbarIconButtonLabel(
                     systemImage: viewModel.isBrowserHistoryPanelVisible ? "clock.arrow.circlepath" : "clock",
-                    isActive: viewModel.isBrowserHistoryPanelVisible
+                    isActive: viewModel.isBrowserHistoryPanelVisible,
+                    iconFont: .system(size: 16, weight: .semibold)
                 )
             }
             .buttonStyle(.plain)
             .help("浏览历史")
+            .accessibilityLabel("历史")
 
             Button(action: showPageQuestionPopover) {
                 BrowserAskAIButtonLabel()

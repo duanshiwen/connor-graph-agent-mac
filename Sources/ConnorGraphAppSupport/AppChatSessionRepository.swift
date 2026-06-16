@@ -5,10 +5,12 @@ import ConnorGraphStore
 
 public enum AppChatSessionRepositoryError: Error, Equatable, CustomStringConvertible {
     case sessionNotFound(String)
+    case sessionHasRunningBackgroundTasks(String)
 
     public var description: String {
         switch self {
         case .sessionNotFound(let id): "sessionNotFound: \(id)"
+        case .sessionHasRunningBackgroundTasks(let id): "sessionHasRunningBackgroundTasks: \(id)"
         }
     }
 }
@@ -96,6 +98,12 @@ public struct AppChatSessionRepository: Sendable {
 
     public func deleteSession(sessionID: String) throws {
         guard try loadSession(id: sessionID) != nil else { throw AppChatSessionRepositoryError.sessionNotFound(sessionID) }
+        let activeBackgroundTaskStatuses: Set<PersistedSessionBackgroundTaskStatus> = [.queued, .running]
+        let hasActiveBackgroundTasks = try loadBackgroundTasks(sessionID: sessionID)
+            .contains { activeBackgroundTaskStatuses.contains($0.status) }
+        guard !hasActiveBackgroundTasks else {
+            throw AppChatSessionRepositoryError.sessionHasRunningBackgroundTasks(sessionID)
+        }
         try store.deleteSession(id: sessionID)
     }
 

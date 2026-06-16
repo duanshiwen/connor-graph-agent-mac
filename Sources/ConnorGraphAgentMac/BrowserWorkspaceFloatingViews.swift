@@ -16,7 +16,7 @@ enum BrowserFloatingTypography {
     static let quickAction: Font = .system(size: 12, weight: .medium)
     static let quickActionIcon: Font = .system(size: 12, weight: .semibold)
     static let loadingOverlay: Font = .system(size: 12, weight: .medium)
-    static let toolbarIcon: Font = .system(size: 13, weight: .medium)
+    static let toolbarIcon: Font = .system(size: 13, weight: .semibold)
     static let tabTitle: Font = .system(size: 12, weight: .regular)
     static let tabTitleSelected: Font = .system(size: 12, weight: .semibold)
     static let tabIcon: Font = .system(size: 12, weight: .regular)
@@ -250,10 +250,11 @@ struct BrowserTabChip: View {
 struct BrowserToolbarIconButtonLabel: View {
     var systemImage: String
     var isActive: Bool = false
+    var iconFont: Font = BrowserFloatingTypography.toolbarIcon
 
     var body: some View {
         Image(systemName: systemImage)
-            .font(BrowserFloatingTypography.toolbarIcon)
+            .font(iconFont)
             .symbolRenderingMode(.monochrome)
             .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
             .frame(width: 28, height: 28)

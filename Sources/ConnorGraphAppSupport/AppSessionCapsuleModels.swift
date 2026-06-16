@@ -414,6 +414,12 @@ public struct AppBrowserSelectionThreadMessageSnapshot: Codable, Equatable, Iden
 
 // MARK: - Browser History
 
+public enum BrowserHistoryContentFetchStatus: String, Codable, Sendable {
+    case pending
+    case fetched
+    case failed
+}
+
 public struct BrowserHistoryRecord: Codable, Equatable, Identifiable, Sendable {
     public var id: UUID
     public var url: String
@@ -421,6 +427,10 @@ public struct BrowserHistoryRecord: Codable, Equatable, Identifiable, Sendable {
     public var sessionID: String
     public var sessionTitle: String
     public var visitedAt: Date
+    public var contentMarkdown: String?
+    public var contentFetchedAt: Date?
+    public var contentFetchStatus: BrowserHistoryContentFetchStatus?
+    public var contentFetchError: String?
 
     public init(
         id: UUID = UUID(),
@@ -428,7 +438,11 @@ public struct BrowserHistoryRecord: Codable, Equatable, Identifiable, Sendable {
         title: String,
         sessionID: String,
         sessionTitle: String,
-        visitedAt: Date = Date()
+        visitedAt: Date = Date(),
+        contentMarkdown: String? = nil,
+        contentFetchedAt: Date? = nil,
+        contentFetchStatus: BrowserHistoryContentFetchStatus? = nil,
+        contentFetchError: String? = nil
     ) {
         self.id = id
         self.url = url
@@ -436,5 +450,38 @@ public struct BrowserHistoryRecord: Codable, Equatable, Identifiable, Sendable {
         self.sessionID = sessionID
         self.sessionTitle = sessionTitle
         self.visitedAt = visitedAt
+        self.contentMarkdown = contentMarkdown
+        self.contentFetchedAt = contentFetchedAt
+        self.contentFetchStatus = contentFetchStatus
+        self.contentFetchError = contentFetchError
+    }
+}
+
+// MARK: - Browser Bookmarks
+
+public struct BrowserBookmarkRecord: Codable, Equatable, Identifiable, Sendable {
+    public static let defaultGroupName = "默认"
+
+    public var id: UUID
+    public var url: String
+    public var title: String
+    public var groupName: String
+    public var createdAt: Date
+    public var updatedAt: Date
+
+    public init(
+        id: UUID = UUID(),
+        url: String,
+        title: String,
+        groupName: String = BrowserBookmarkRecord.defaultGroupName,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date()
+    ) {
+        self.id = id
+        self.url = url
+        self.title = title
+        self.groupName = groupName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? Self.defaultGroupName : groupName
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
     }
 }

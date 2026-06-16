@@ -207,6 +207,9 @@ final class AppViewModel: ObservableObject {
     @Published var lastGraphWriteCandidateResultSummary: String?
     @Published var lastPendingApprovalResultSummary: String?
     @Published var lastAdmissionHoldQueueActionSummary: String?
+    @Published var llmConnectionConfigs: [AppLLMConnectionConfig] = AppLLMSettings.default.connections
+    @Published var llmDefaultConnectionID: String = AppLLMSettings.default.defaultConnectionID
+    @Published var llmConnectionName: String = AppLLMSettings.default.defaultConnection.name
     @Published var llmProviderMode: AppLLMProviderMode = .openAICompatible
     @Published var llmBaseURLString: String = AppLLMSettings.default.baseURLString
     @Published var llmModel: String = AppLLMSettings.default.model
@@ -253,6 +256,10 @@ final class AppViewModel: ObservableObject {
     @Published var sessionRecordsBySessionID: [String: [AppSessionRecord]] = [:]
     @Published var browserWorkspaceSnapshotsBySessionID: [String: AppBrowserStateSnapshot] = [:]
     @Published var browserAssistedTasksByID: [UUID: BrowserAssistedTaskState] = [:]
+    @Published var isBrowserBookmarksPanelVisible: Bool = false
+    @Published var browserBookmarkRecords: [BrowserBookmarkRecord] = []
+    @Published var filteredBrowserBookmarkRecords: [BrowserBookmarkRecord] = []
+    @Published var selectedBrowserBookmarkGroupName: String?
     @Published var isBrowserHistoryPanelVisible: Bool = false
     @Published var browserHistoryRecords: [BrowserHistoryRecord] = []
     @Published var filteredBrowserHistoryRecords: [BrowserHistoryRecord] = []
@@ -299,6 +306,7 @@ final class AppViewModel: ObservableObject {
     private var skillRuntimeRepository: AppSkillRuntimeRepository?
     private var storagePaths: AppStoragePaths?
     private var browserHistoryStore: BrowserHistoryStore?
+    private var browserBookmarkStore: BrowserBookmarkStore?
     private var runtimeSettingsRepository: AppRuntimeSettingsRepository?
     private var llmSettingsRepository: AppLLMSettingsRepository
     private var llmProviderHealthChecker: AppLLMProviderHealthChecker
@@ -878,6 +886,7 @@ final class AppViewModel: ObservableObject {
             self.sourceRuntimeRepository = AppMCPSourceRuntimeRepository(storagePaths: storagePaths)
             self.skillRuntimeRepository = AppSkillRuntimeRepository(storagePaths: storagePaths)
             self.browserHistoryStore = BrowserHistoryStore(historyURL: storagePaths.browserHistoryURL)
+            self.browserBookmarkStore = BrowserBookmarkStore(bookmarksURL: storagePaths.browserBookmarksURL)
         }
         if let repository {
             self.promotionRepository = AppPromotionQueueRepository(store: repository.store)
@@ -1119,16 +1128,20 @@ final class AppViewModel: ObservableObject {
     func loadLLMSettings() {
         do {
             let settings = try llmSettingsRepository.loadSettings()
-            llmProviderMode = settings.providerMode
-            llmBaseURLString = settings.baseURLString
-            llmModel = settings.model
-            llmSelectedModel = settings.effectiveModel
-            llmHasAPIKey = settings.hasAPIKey
+            let connection = settings.defaultConnection
+            llmConnectionConfigs = settings.connections
+            llmDefaultConnectionID = settings.defaultConnectionID
+            llmConnectionName = connection.name
+            llmProviderMode = connection.providerMode
+            llmBaseURLString = connection.baseURLString
+            llmModel = connection.model
+            llmSelectedModel = connection.effectiveModel
+            llmHasAPIKey = connection.hasAPIKey
             llmAPIKeyInput = ""
-            sidecarExecutablePath = settings.sidecarExecutablePath
-            sidecarArguments = settings.sidecarArguments
-            sidecarWorkingDirectoryPath = settings.sidecarWorkingDirectoryPath
-            sidecarPermissionMode = settings.sidecarPermissionMode
+            sidecarExecutablePath = connection.sidecarExecutablePath
+            sidecarArguments = connection.sidecarArguments
+            sidecarWorkingDirectoryPath = connection.sidecarWorkingDirectoryPath
+            sidecarPermissionMode = connection.sidecarPermissionMode
             llmSettingsMessage = nil
             llmHealthCheckMessage = nil
         } catch {
@@ -1143,9 +1156,10 @@ final class AppViewModel: ObservableObject {
         llmModelConnections = await catalog.loadConnections()
     }
 
-    func selectLLMModel(_ modelID: String, providerMode: AppLLMProviderMode) {
+    func selectLLMModel(_ modelID: String, providerMode: AppLLMProviderMode, connectionID: String? = nil) {
         guard !modelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         llmProviderMode = providerMode
+        if let connectionID { llmDefaultConnectionID = connectionID }
         llmSelectedModel = modelID
 
         // Write session-level override (not global)
@@ -1154,7 +1168,8 @@ final class AppViewModel: ObservableObject {
             ?? AppSessionStateSnapshot(sessionID: sessionID)
         state.llmOverride = SessionLLMOverride(
             providerMode: providerMode.rawValue,
-            model: modelID
+            model: modelID,
+            connectionID: connectionID
         )
         state.updatedAt = Date()
         sessionStateSnapshotsBySessionID[sessionID] = state
@@ -1168,19 +1183,79 @@ final class AppViewModel: ObservableObject {
         persistLLMSettings(rebuildRuntime: true)
     }
 
+    func selectDefaultLLMConnection(_ connectionID: String) {
+        guard let connection = llmConnectionConfigs.first(where: { $0.id == connectionID }) else { return }
+        llmDefaultConnectionID = connection.id
+        llmConnectionName = connection.name
+        llmProviderMode = connection.providerMode
+        llmBaseURLString = connection.baseURLString
+        llmModel = connection.model
+        llmSelectedModel = connection.effectiveModel
+        llmHasAPIKey = connection.hasAPIKey
+        llmAPIKeyInput = ""
+        sidecarExecutablePath = connection.sidecarExecutablePath
+        sidecarArguments = connection.sidecarArguments
+        sidecarWorkingDirectoryPath = connection.sidecarWorkingDirectoryPath
+        sidecarPermissionMode = connection.sidecarPermissionMode
+        persistLLMSettings(rebuildRuntime: true)
+    }
+
+    func addLLMConnection(providerMode: AppLLMProviderMode) {
+        let idBase = providerMode == .openAICompatible ? "openai-compatible" : "claude"
+        let id = "\(idBase)-\(UUID().uuidString.prefix(8).lowercased())"
+        let connection = AppLLMConnectionConfig(
+            id: id,
+            name: providerMode == .openAICompatible ? "新 OpenAI Compatible 连接" : "新 Claude 连接",
+            providerMode: providerMode,
+            baseURLString: providerMode == .openAICompatible ? AppLLMSettings.default.baseURLString : "",
+            model: providerMode == .openAICompatible ? AppLLMSettings.default.model : "claude-sdk-default",
+            selectedModel: providerMode == .openAICompatible ? AppLLMSettings.default.effectiveModel : "claude-sdk-default"
+        )
+        llmConnectionConfigs.append(connection)
+        llmDefaultConnectionID = id
+        selectDefaultLLMConnection(id)
+    }
+
+    func deleteSelectedLLMConnection() {
+        guard llmConnectionConfigs.count > 1 else {
+            llmSettingsMessage = "至少需要保留一个 AI 连接。"
+            return
+        }
+        let deletingID = llmDefaultConnectionID
+        llmConnectionConfigs.removeAll { $0.id == deletingID }
+        try? llmSettingsRepository.clearAPIKey(connectionID: deletingID)
+        llmDefaultConnectionID = llmConnectionConfigs.first?.id ?? AppLLMSettings.default.defaultConnectionID
+        selectDefaultLLMConnection(llmDefaultConnectionID)
+    }
+
     private func persistLLMSettings(rebuildRuntime: Bool) {
         do {
-            let settings = AppLLMSettings(
+            let existing = (try? llmSettingsRepository.loadSettings()) ?? .default
+            var connections = llmConnectionConfigs.isEmpty ? existing.connections : llmConnectionConfigs
+            let targetID = llmDefaultConnectionID.isEmpty ? existing.defaultConnectionID : llmDefaultConnectionID
+            let updatedConnection = AppLLMConnectionConfig(
+                id: targetID,
+                name: llmConnectionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? (connections.first(where: { $0.id == targetID })?.name ?? (llmProviderMode == .openAICompatible ? "OpenAI Compatible" : "Claude"))
+                    : llmConnectionName.trimmingCharacters(in: .whitespacesAndNewlines),
+                providerMode: llmProviderMode,
                 baseURLString: llmBaseURLString.trimmingCharacters(in: .whitespacesAndNewlines),
                 model: llmModel.trimmingCharacters(in: .whitespacesAndNewlines),
                 selectedModel: llmSelectedModel.trimmingCharacters(in: .whitespacesAndNewlines),
                 hasAPIKey: llmHasAPIKey,
-                providerMode: llmProviderMode,
                 sidecarExecutablePath: sidecarExecutablePath.trimmingCharacters(in: .whitespacesAndNewlines),
                 sidecarArguments: sidecarArguments.trimmingCharacters(in: .whitespacesAndNewlines),
                 sidecarWorkingDirectoryPath: sidecarWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines),
                 sidecarPermissionMode: sidecarPermissionMode
             )
+            if let index = connections.firstIndex(where: { $0.id == targetID }) {
+                connections[index] = updatedConnection
+            } else {
+                connections.append(updatedConnection)
+            }
+            let settings = AppLLMSettings(connections: connections, defaultConnectionID: targetID)
+            llmConnectionConfigs = settings.connections
+            llmDefaultConnectionID = settings.defaultConnectionID
             let apiKey = llmAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
             try llmSettingsRepository.save(settings: settings, apiKey: apiKey.isEmpty ? nil : apiKey)
             loadLLMSettings()
@@ -1254,10 +1329,14 @@ final class AppViewModel: ObservableObject {
             if let overrideMode = AppLLMProviderMode(rawValue: override.providerMode) {
                 llmProviderMode = overrideMode
             }
+            if let connectionID = override.connectionID {
+                llmDefaultConnectionID = connectionID
+            }
         } else {
             let settings = try? llmSettingsRepository.loadSettings()
             llmSelectedModel = settings?.effectiveModel ?? llmSelectedModel
             llmProviderMode = settings?.providerMode ?? llmProviderMode
+            llmDefaultConnectionID = settings?.defaultConnectionID ?? llmDefaultConnectionID
         }
     }
 
@@ -1279,6 +1358,7 @@ final class AppViewModel: ObservableObject {
         let settings = try? llmSettingsRepository.loadSettings()
         llmSelectedModel = settings?.effectiveModel ?? llmSelectedModel
         llmProviderMode = settings?.providerMode ?? llmProviderMode
+        llmDefaultConnectionID = settings?.defaultConnectionID ?? llmDefaultConnectionID
 
         rebuildNativeSessionManagerForActiveSession()
         Task { await reloadLLMModelConnections() }
@@ -1396,7 +1476,7 @@ final class AppViewModel: ObservableObject {
             settings.input.composerSendShortcut = composerSendShortcut
             settings.permissions.requireApprovalForNetwork = requireApprovalForNetwork
             settings.permissions.requireApprovalForShell = requireApprovalForShell
-            // Workspace roots are session-scoped and saved into Session Capsule.
+                // Workspace roots are session-scoped and saved into Session Capsule.
             // Keep runtime-settings.workspace as a legacy fallback/template only.
             settings.workspace.recentWorkspacePaths = recentWorkspacePaths
             settings.preferences.displayName = userDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1793,6 +1873,97 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Browser Bookmarks
+
+    func loadBrowserBookmarks() {
+        guard let store = browserBookmarkStore else { return }
+        browserBookmarkRecords = store.loadBookmarks()
+        applyBrowserBookmarkFilter()
+    }
+
+    var browserBookmarkGroupNames: [String] {
+        let names = Set(browserBookmarkRecords.map { $0.groupName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? BrowserBookmarkRecord.defaultGroupName : $0.groupName })
+        return names.sorted { lhs, rhs in
+            if lhs == BrowserBookmarkRecord.defaultGroupName { return true }
+            if rhs == BrowserBookmarkRecord.defaultGroupName { return false }
+            return lhs.localizedStandardCompare(rhs) == .orderedAscending
+        }
+    }
+
+    func toggleBrowserBookmarksPanel() {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            isBrowserBookmarksPanelVisible.toggle()
+            if isBrowserBookmarksPanelVisible { isBrowserHistoryPanelVisible = false }
+        }
+        if isBrowserBookmarksPanelVisible { loadBrowserBookmarks() }
+    }
+
+    func addBrowserBookmark(url: String, title: String, groupName: String? = nil) {
+        guard let store = browserBookmarkStore else { return }
+        let trimmedURL = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedURL.isEmpty,
+              !trimmedURL.hasPrefix("connor://"),
+              !trimmedURL.hasPrefix("about:"),
+              !trimmedURL.hasPrefix("data:")
+        else { return }
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedGroup = groupName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let bookmark = BrowserBookmarkRecord(
+            url: trimmedURL,
+            title: trimmedTitle.isEmpty ? (URL(string: trimmedURL)?.host ?? trimmedURL) : trimmedTitle,
+            groupName: resolvedGroup?.isEmpty == false ? resolvedGroup! : BrowserBookmarkRecord.defaultGroupName,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        store.upsertBookmark(bookmark)
+        loadBrowserBookmarks()
+    }
+
+    func toggleBrowserBookmark(url: String, title: String, groupName: String? = nil) {
+        let trimmedURL = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedURL.isEmpty else { return }
+        if isBrowserBookmarked(url: trimmedURL) {
+            browserBookmarkStore?.deleteBookmark(url: trimmedURL)
+            loadBrowserBookmarks()
+        } else {
+            addBrowserBookmark(url: trimmedURL, title: title, groupName: groupName)
+        }
+    }
+
+    func isBrowserBookmarked(url: String) -> Bool {
+        let trimmedURL = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedURL.isEmpty else { return false }
+        return browserBookmarkRecords.contains { $0.url == trimmedURL }
+    }
+
+    func filterBrowserBookmarks(query: String, groupName: String? = nil) {
+        selectedBrowserBookmarkGroupName = groupName
+        applyBrowserBookmarkFilter(query: query)
+    }
+
+    func deleteBrowserBookmark(_ id: UUID) {
+        browserBookmarkStore?.deleteBookmark(id: id)
+        loadBrowserBookmarks()
+    }
+
+    func navigateToBookmark(_ bookmark: BrowserBookmarkRecord) {
+        browserTargetURLString = bookmark.url
+        showBrowserWorkspace()
+    }
+
+    private func applyBrowserBookmarkFilter(query: String = "") {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let selectedGroup = selectedBrowserBookmarkGroupName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        filteredBrowserBookmarkRecords = browserBookmarkRecords.filter { bookmark in
+            let matchesGroup = selectedGroup?.isEmpty != false || bookmark.groupName == selectedGroup
+            let matchesQuery = trimmedQuery.isEmpty
+                || bookmark.url.lowercased().contains(trimmedQuery)
+                || bookmark.title.lowercased().contains(trimmedQuery)
+                || bookmark.groupName.lowercased().contains(trimmedQuery)
+            return matchesGroup && matchesQuery
+        }
+    }
+
     // MARK: - Browser History
 
     func loadBrowserHistory() {
@@ -1814,16 +1985,52 @@ final class AppViewModel: ObservableObject {
             url: trimmedURL,
             title: title.trimmingCharacters(in: .whitespacesAndNewlines),
             sessionID: sessionID,
-            sessionTitle: sessionTitle
+            sessionTitle: sessionTitle,
+            contentFetchStatus: .pending
         )
-        store.appendRecord(record)
+        guard let appendedRecord = store.appendRecord(record) else { return }
         browserHistoryRecords = store.loadHistory()
         applyBrowserHistoryFilter()
+        fetchContentForBrowserHistoryRecord(appendedRecord)
+    }
+
+    private func fetchContentForBrowserHistoryRecord(_ record: BrowserHistoryRecord) {
+        guard let store = browserHistoryStore else { return }
+        let recordID = record.id
+        let url = record.url
+        Task.detached(priority: .utility) {
+            let tool = SearchEngineMCPWebFetchTool()
+            let arguments = AgentToolArguments(values: [
+                "url": .string(url),
+                "extract_mode": .string("markdown"),
+                "render_mode": .string("auto"),
+                "timeout_ms": .int(60_000)
+            ])
+            let context = AgentToolExecutionContext(
+                runID: "browser-history-content-fetch-\(recordID.uuidString)",
+                sessionID: record.sessionID,
+                groupID: "browser-history",
+                userPrompt: "Fetch browser history page content",
+                toolCallID: UUID().uuidString,
+                policyEngine: AgentPolicyEngine(permissionMode: .allowAll),
+                approvedCapabilities: [.externalNetwork]
+            )
+            do {
+                let result = try await tool.execute(arguments: arguments, context: context)
+                store.updateContent(id: recordID, markdown: result.contentText, status: .fetched)
+            } catch {
+                store.updateContent(id: recordID, markdown: nil, status: .failed, error: String(describing: error))
+            }
+            await MainActor.run { [weak self] in
+                self?.loadBrowserHistory()
+            }
+        }
     }
 
     func toggleBrowserHistoryPanel() {
         withAnimation(.easeInOut(duration: 0.2)) {
             isBrowserHistoryPanelVisible.toggle()
+            if isBrowserHistoryPanelVisible { isBrowserBookmarksPanelVisible = false }
         }
         if isBrowserHistoryPanelVisible {
             loadBrowserHistory()

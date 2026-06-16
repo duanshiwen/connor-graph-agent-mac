@@ -24,7 +24,7 @@ public struct AgentToolResultGate: Sendable, Equatable {
     }
 
     public func gatedContent(for result: AgentToolResult) -> String {
-        let base = result.contentJSON ?? result.contentText
+        let base = result.contentText.isEmpty ? (result.contentJSON ?? "") : result.contentText
         let limit = max(0, configuration.perToolCharacterLimits[result.toolName] ?? configuration.maxResultCharacters)
         guard base.count > limit else { return base }
 

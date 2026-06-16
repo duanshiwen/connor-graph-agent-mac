@@ -242,10 +242,14 @@ struct AgentChatComposerView: View {
     private func submitLocalChatInput() {
         let prompt = localChatInput.trimmingCharacters(in: .whitespacesAndNewlines)
         let displayPrompt = localChatInput
+        let submittedText = localChatInput
+        localChatInput = ""
+        viewModel.updateSelectedChatInputDraft("")
         Task {
             let runID = await viewModel.submitChat(prompt: prompt, clearComposer: true, displayPrompt: displayPrompt)
-            if runID != nil {
-                localChatInput = ""
+            if runID == nil, localChatInput.isEmpty {
+                localChatInput = submittedText
+                viewModel.updateSelectedChatInputDraft(submittedText)
             }
         }
     }
@@ -576,9 +580,9 @@ struct AgentChatComposerView: View {
                         } else {
                             ForEach(connection.models) { model in
                                 Button {
-                                    viewModel.selectLLMModel(model.id, providerMode: connection.providerMode)
+                                    viewModel.selectLLMModel(model.id, providerMode: connection.providerMode, connectionID: connection.id)
                                 } label: {
-                                    if model.id == viewModel.llmSelectedModel && connection.providerMode == viewModel.llmProviderMode {
+                                    if model.id == viewModel.llmSelectedModel && connection.id == viewModel.llmDefaultConnectionID {
                                         Label(model.displayName, systemImage: "checkmark")
                                     } else {
                                         Text(model.displayName)

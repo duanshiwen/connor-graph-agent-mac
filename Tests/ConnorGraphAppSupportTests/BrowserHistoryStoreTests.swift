@@ -159,4 +159,53 @@ struct BrowserHistoryStoreTests {
         #expect(results.count == 1)
         #expect(results.first?.sessionTitle == "SwiftUI 项目")
     }
+
+    @Test("Update and persist fetched page content")
+    func updateAndPersistFetchedPageContent() {
+        let (store, url) = makeStore()
+        defer { cleanup(url) }
+
+        let record = BrowserHistoryRecord(
+            url: "https://example.com/article",
+            title: "Article",
+            sessionID: "s1",
+            sessionTitle: "Research",
+            contentFetchStatus: .pending
+        )
+        let appended = store.appendRecord(record)
+        #expect(appended?.id == record.id)
+
+        store.updateContent(
+            id: record.id,
+            markdown: "# Article\n\nThis page discusses graph-memory-native Agent OS design.",
+            fetchedAt: Date(timeIntervalSince1970: 100),
+            status: .fetched
+        )
+
+        let reloadedStore = BrowserHistoryStore(historyURL: url)
+        let loaded = reloadedStore.loadHistory()
+        #expect(loaded.count == 1)
+        #expect(loaded.first?.contentFetchStatus == .fetched)
+        #expect(loaded.first?.contentFetchedAt == Date(timeIntervalSince1970: 100))
+        #expect(loaded.first?.contentMarkdown?.contains("graph-memory-native") == true)
+        #expect(loaded.first?.contentFetchError == nil)
+    }
+
+    @Test("Search filters by fetched page content")
+    func searchByFetchedPageContent() {
+        let (store, url) = makeStore()
+        defer { cleanup(url) }
+
+        let record = BrowserHistoryRecord(url: "https://example.com", title: "Unrelated", sessionID: "s1", sessionTitle: "S")
+        store.appendRecord(record)
+        store.updateContent(
+            id: record.id,
+            markdown: "Connor browser history stores cleaned Markdown page bodies for later retrieval.",
+            status: .fetched
+        )
+
+        let results = store.searchHistory(query: "cleaned markdown")
+        #expect(results.count == 1)
+        #expect(results.first?.id == record.id)
+    }
 }
