@@ -387,6 +387,24 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
         try credentialStore.saveSecret(String(decoding: data, as: UTF8.self), service: Self.keychainService, account: Self.oauthAccount(for: connectionID))
     }
 
+    public func saveAPIKey(_ apiKey: String, connectionID: String) throws {
+        guard !apiKey.isEmpty else { return }
+        try credentialStore.saveSecret(apiKey, service: Self.keychainService, account: Self.apiKeyAccount(for: connectionID))
+        if connectionID == "openai-compatible" {
+            try credentialStore.saveSecret(apiKey, service: Self.keychainService, account: Self.apiKeyAccount)
+        }
+    }
+
+    public func updateConnection(_ connection: AppLLMConnectionConfig) throws {
+        var settings = try loadSettings()
+        guard let index = settings.connections.firstIndex(where: { $0.id == connection.id }) else { return }
+        var sanitized = connection
+        sanitized.hasAPIKey = try hasAPIKey(for: connection.id)
+        sanitized.sidecarPermissionMode = sanitized.sidecarPermissionMode == .allowAll ? .readOnly : sanitized.sidecarPermissionMode
+        settings.connections[index] = sanitized
+        try save(settings: settings, apiKey: nil)
+    }
+
     public func oauthTokens(for connectionID: String) throws -> AppLLMOAuthTokens? {
         guard let raw = try credentialStore.readSecret(service: Self.keychainService, account: Self.oauthAccount(for: connectionID)),
               let data = raw.data(using: .utf8) else { return nil }

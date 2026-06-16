@@ -314,6 +314,16 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                         throw OpenAICompatibleProviderError.missingAPIKey
                     }
                 }
+                if effectiveConnectionKind == .githubCopilot {
+                    return AnyAgentModelProvider(GitHubCopilotTokenRefreshingAgentModelProvider(
+                        connectionID: effectiveConnectionID,
+                        modelID: config.model,
+                        capabilities: OpenAICompatibleProvider(config: config).capabilities,
+                        settingsRepository: settingsRepository,
+                        modelOverride: effectiveModel,
+                        baseURLOverride: effectiveBaseURL
+                    ))
+                }
                 return AnyAgentModelProvider(OpenAICompatibleProvider(config: config))
             }
         } catch {
