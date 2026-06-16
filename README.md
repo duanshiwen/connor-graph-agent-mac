@@ -1,6 +1,6 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-16 16:11 GMT+8  
+文档更新时间：2026-06-16 16:43 GMT+8  
 当前代码基线:`feature/apple-iwork-attachment-support`,在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface / session-scoped multi-root project workspace / Connor-owned Scientific Compute Runtime skeleton / 商用级 Document Attachment OS 基础上,继续收紧 Apple 原生 UI 边界:PDF/Word/Excel/PowerPoint 与 Apple iWork（Pages/Numbers/Keynote）一等附件仍由 Connor Session Capsule 和 Attachment Store 管理;PDF selectable text 抽取和多页原文预览继续使用 PDFKit;Office/iWork/Presentation/Spreadsheet 抽取继续通过 MarkItDown/Docling sidecar best-effort 编排与 hardening;Office/iWork/Presentation/Spreadsheet 原文件预览优先交给 macOS Quick Look / QuickLookUI,Connor 自有 UI 只负责 manifest、extraction status、retry、omitted attachment summary 和治理证据。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package,目标是把 Connor 建成 **graph-memory-native Agent OS**:它不是"图谱编辑器",也不是"Claude SDK 外壳",而是以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI 和 Local Automation Surface 共同构成的本地 Agent 操作系统。
@@ -207,7 +207,6 @@ Statuses:
 Labels:
 - important → 重要
 - research → 研究
-- graph-review → 图谱审阅
 - priority → 优先级, number value
 - due → 截止日期, date value yyyy-MM-dd
 - project → 项目, graph_entity_ref value, graphBindingKind=project
@@ -810,15 +809,10 @@ Sessions
 ```text
 New Session
 All Sessions
-Inbox
 Labels
-Graph Memory Review
-Approvals
-Automations
-Local API / CLI
-Sources
+Data Sources
 Skills
-Browser Workspace
+Automations
 Settings
 ```
 
@@ -903,8 +897,6 @@ Command Palette 当前支持:
 ```text
 Open Home
 New Session
-Open Graph Memory Review
-Open Approvals
 Open Automations
 Open Local API / CLI
 Open Sources
@@ -1090,10 +1082,13 @@ solve_linear_system for small square systems via Gaussian elimination with pivot
 AI 设置页支持:
 
 - 多个 AI 连接,而不是把 AI 设置硬编码成两类全局源
-- 每个连接单独选择协议类型:`OpenAI Compatible` 或 `Claude`
-- 每个连接拥有独立名称、模型列表、selected model、Base URL / Sidecar 配置
-- OpenAI Compatible 连接支持 API Key 输入 / 清除 / 连接测试,API Key 按 connection ID 存储到 credential store,不会明文写入 JSON
-- Claude 连接支持 Sidecar executable / arguments / legacy working directory fallback 和 Sidecar mode guardrail
+- 每个连接都有稳定 provider kind:`openAICompatible`、`claudeSidecar`、`chatGPTCodex`、`githubCopilot`;旧设置若没有 provider kind,会按 `providerMode` 兼容迁移为 OpenAI Compatible 或 Claude Sidecar
+- Add Connection 现在走 Connor 原生 `AppLLMConnectionSetupService`:先校验 provider-specific input,再执行真实 health check / sidecar validation,成功后才保存 metadata 和 credential;失败不会追加假连接,也不会污染 credential store
+- OpenAI Compatible / 本地模型走 Connor 原生 `OpenAICompatibleProvider`;用户填写 Base URL、模型和 API Key,本地 localhost 模型可使用本地占位 token,但仍会发起真实 health check
+- Claude 连接走 Claude SDK sidecar:验证 sidecar executable 存在且可执行,禁止 `allowAll`;OAuth token 保存到 credential store,运行 sidecar 时通过 `CLAUDE_CODE_OAUTH_TOKEN` / refresh token 环境变量注入,不让 Claude SDK 拥有 Connor session / permission / audit / graph state
+- Codex · ChatGPT Plus 连接走 ChatGPT/Codex OAuth:浏览器回调拿到 OAuth tokens,再用 `id_token` token-exchange 派生 OpenAI API key,随后复用 Connor 原生 OpenAI-Compatible runtime 做真实 health check;OAuth tokens 和派生 API key 都只进 credential store
+- GitHub Copilot 连接走 GitHub device flow:拿到 Copilot token 后构造 Connor 原生 HTTP runtime config,补充 Copilot integration headers,并用 chat/completions health check 验证后才保存
+- 每个连接拥有独立名称、模型列表、selected model、Base URL / Sidecar 配置;API Key / OAuth token 不会明文写入 JSON 设置文件
 - 全局默认连接用于新聊天;composer 模型选择器可把单个会话覆盖到某个具体连接的某个模型
 - 默认权限、外观、输入和用户偏好
 - 当前会话 Workspace 在会话界面内设置,不在 Settings Center 中设置
