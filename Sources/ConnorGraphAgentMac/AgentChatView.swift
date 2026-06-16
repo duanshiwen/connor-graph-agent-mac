@@ -925,6 +925,7 @@ private struct AgentStatusPill: View {
         case .needsReview: "exclamationmark.bubble"
         case .done: "checkmark.circle"
         case .blocked: "nosign"
+        case .cancelled: "xmark.circle"
         case .archived: "archivebox"
         }
     }
@@ -937,6 +938,7 @@ private struct AgentStatusPill: View {
         case .needsReview: .purple
         case .done: .green
         case .blocked: .red
+        case .cancelled: .gray
         case .archived: .gray
         }
     }
