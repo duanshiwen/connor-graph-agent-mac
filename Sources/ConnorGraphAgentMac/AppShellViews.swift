@@ -236,16 +236,16 @@ private struct CraftPrimarySidebarView: View {
     }
 
     private var inboxCount: Int {
-        countSourceSessions.filter { !$0.governance.isArchived }.count
+        countSourceSessions.count
     }
 
     private func count(for status: AgentSessionStatus) -> Int {
-        countSourceSessions.filter { !$0.governance.isArchived && $0.governance.status == status }.count
+        countSourceSessions.filter { $0.governance.status == status }.count
     }
 
     private func count(forLabel labelID: String) -> Int {
         countSourceSessions.filter { session in
-            !session.governance.isArchived && session.governance.labels.contains { $0.id == labelID }
+            session.governance.labels.contains { $0.id == labelID }
         }.count
     }
 
@@ -329,6 +329,7 @@ private struct CraftSessionListPane: View {
                 .scrollContentBackground(.hidden)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .task { viewModel.reloadChatSessions() }
     }
 
@@ -339,7 +340,6 @@ private struct CraftSessionListPane: View {
     private var sessionListTitle: String {
         switch viewModel.sessionListFilter {
         case .inbox: "所有会话"
-        case .archived: "已归档"
         case .all: "全部会话"
         case .status(let status): status.displayName
         case .label(let labelID): viewModel.governanceConfig.labels.first(where: { $0.id == labelID })?.name ?? labelID
