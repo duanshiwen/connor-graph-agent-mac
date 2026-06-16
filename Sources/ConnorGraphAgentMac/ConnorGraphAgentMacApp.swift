@@ -1985,11 +1985,46 @@ final class AppViewModel: ObservableObject {
             url: trimmedURL,
             title: title.trimmingCharacters(in: .whitespacesAndNewlines),
             sessionID: sessionID,
-            sessionTitle: sessionTitle
+            sessionTitle: sessionTitle,
+            contentFetchStatus: .pending
         )
-        store.appendRecord(record)
+        guard let appendedRecord = store.appendRecord(record) else { return }
         browserHistoryRecords = store.loadHistory()
         applyBrowserHistoryFilter()
+        fetchContentForBrowserHistoryRecord(appendedRecord)
+    }
+
+    private func fetchContentForBrowserHistoryRecord(_ record: BrowserHistoryRecord) {
+        guard let store = browserHistoryStore else { return }
+        let recordID = record.id
+        let url = record.url
+        Task.detached(priority: .utility) {
+            let tool = SearchEngineMCPWebFetchTool()
+            let arguments = AgentToolArguments(values: [
+                "url": .string(url),
+                "extract_mode": .string("markdown"),
+                "render_mode": .string("auto"),
+                "timeout_ms": .int(60_000)
+            ])
+            let context = AgentToolExecutionContext(
+                runID: "browser-history-content-fetch-\(recordID.uuidString)",
+                sessionID: record.sessionID,
+                groupID: "browser-history",
+                userPrompt: "Fetch browser history page content",
+                toolCallID: UUID().uuidString,
+                policyEngine: AgentPolicyEngine(permissionMode: .allowAll),
+                approvedCapabilities: [.externalNetwork]
+            )
+            do {
+                let result = try await tool.execute(arguments: arguments, context: context)
+                store.updateContent(id: recordID, markdown: result.contentText, status: .fetched)
+            } catch {
+                store.updateContent(id: recordID, markdown: nil, status: .failed, error: String(describing: error))
+            }
+            await MainActor.run { [weak self] in
+                self?.loadBrowserHistory()
+            }
+        }
     }
 
     func toggleBrowserHistoryPanel() {

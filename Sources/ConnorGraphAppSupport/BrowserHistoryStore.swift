@@ -33,7 +33,8 @@ public final class BrowserHistoryStore: @unchecked Sendable {
     ///
     /// This is intentionally optimized for the browser hot path: normal writes append one
     /// JSON line instead of reading and rewriting the full history file on every navigation.
-    public func appendRecord(_ record: BrowserHistoryRecord) {
+    @discardableResult
+    public func appendRecord(_ record: BrowserHistoryRecord) -> BrowserHistoryRecord? {
         queue.sync {
             let last = cachedLastRecord ?? loadRecordsUnsafe().last
             cachedLastRecord = last
@@ -41,7 +42,7 @@ public final class BrowserHistoryStore: @unchecked Sendable {
                last.url == record.url,
                last.sessionID == record.sessionID,
                record.visitedAt.timeIntervalSince(last.visitedAt) < Self.deduplicationWindowSeconds {
-                return
+                return nil
             }
 
             let existingCount = cachedRecordCount ?? countRecordsUnsafe()
@@ -57,6 +58,7 @@ public final class BrowserHistoryStore: @unchecked Sendable {
                 cachedRecordCount = existingCount + 1
                 cachedLastRecord = record
             }
+            return record
         }
     }
 
@@ -65,7 +67,7 @@ public final class BrowserHistoryStore: @unchecked Sendable {
         queue.sync { loadRecordsUnsafe() }
     }
 
-    /// Search records by query string (matches URL or title, case-insensitive).
+    /// Search records by query string (matches URL, title, session title, or fetched page content, case-insensitive).
     public func searchHistory(query: String) -> [BrowserHistoryRecord] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !trimmed.isEmpty else { return loadHistory() }
@@ -74,7 +76,27 @@ public final class BrowserHistoryStore: @unchecked Sendable {
                 record.url.lowercased().contains(trimmed)
                     || record.title.lowercased().contains(trimmed)
                     || record.sessionTitle.lowercased().contains(trimmed)
+                    || (record.contentMarkdown?.lowercased().contains(trimmed) ?? false)
             }
+        }
+    }
+
+    /// Update fetched content for a previously appended history record.
+    public func updateContent(
+        id: UUID,
+        markdown: String?,
+        fetchedAt: Date = Date(),
+        status: BrowserHistoryContentFetchStatus,
+        error: String? = nil
+    ) {
+        queue.sync {
+            var records = loadRecordsUnsafe()
+            guard let index = records.firstIndex(where: { $0.id == id }) else { return }
+            records[index].contentMarkdown = markdown
+            records[index].contentFetchedAt = fetchedAt
+            records[index].contentFetchStatus = status
+            records[index].contentFetchError = error
+            saveRecordsUnsafe(records)
         }
     }
 
