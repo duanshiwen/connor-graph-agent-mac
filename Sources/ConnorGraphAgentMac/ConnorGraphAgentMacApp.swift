@@ -1751,9 +1751,9 @@ final class AppViewModel: ObservableObject {
             config.statuses.removeAll { $0.id == definition.id }
             saveGovernanceConfig(config, successMessage: "状态“\(definition.name)”已删除。")
             if case .status(let selectedStatus) = sessionListFilter, selectedStatus.rawValue == definition.id {
-                setSessionListFilter(.all)
+                setSessionListFilter(.all, restoreWorkspaceMode: false)
             } else {
-                reloadChatSessions()
+                reloadChatSessions(restoreWorkspaceMode: false)
             }
         } catch {
             errorMessage = String(describing: error)
@@ -1794,9 +1794,9 @@ final class AppViewModel: ObservableObject {
             config.labels.removeAll { $0.id == definition.id }
             saveGovernanceConfig(config, successMessage: "标签“\(definition.name)”已删除，并已从 \(removedFromSessionCount) 个会话移除。")
             if case .label(let selectedLabelID) = sessionListFilter, selectedLabelID == definition.id {
-                setSessionListFilter(.all)
+                setSessionListFilter(.all, restoreWorkspaceMode: false)
             } else {
-                reloadChatSessions()
+                reloadChatSessions(restoreWorkspaceMode: false)
             }
         } catch {
             errorMessage = String(describing: error)
@@ -1931,7 +1931,7 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    func reloadChatSessions() {
+    func reloadChatSessions(restoreWorkspaceMode shouldRestoreWorkspaceMode: Bool = true) {
         guard let chatSessionRepository else {
             transcript = activeChatTranscript
             chatSessions = [activeChatSession]
@@ -1964,7 +1964,9 @@ final class AppViewModel: ObservableObject {
                 }
                 latestChatSummary = try chatSessionRepository.loadLatestSummary(sessionID: selectedID)
                 selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: selectedID)
-                restoreWorkspaceMode(for: selectedID)
+                if shouldRestoreWorkspaceMode {
+                    restoreWorkspaceMode(for: selectedID)
+                }
             } else {
                 selectedSessionArtifactDirectories = nil
                 latestChatSummary = nil
@@ -2648,9 +2650,9 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    func setSessionListFilter(_ filter: AgentSessionListFilter) {
+    func setSessionListFilter(_ filter: AgentSessionListFilter, restoreWorkspaceMode: Bool = true) {
         sessionListFilter = filter
-        reloadChatSessions()
+        reloadChatSessions(restoreWorkspaceMode: restoreWorkspaceMode)
     }
 
     func setSelectedSessionStatus(_ status: AgentSessionStatus) {
