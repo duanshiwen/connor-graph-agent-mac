@@ -20,6 +20,7 @@ public enum AppLLMConnectionKind: String, Sendable, Equatable, CaseIterable, Cod
     case claudeSidecar = "claude_sidecar"
     case chatGPTCodex = "chatgpt_codex"
     case githubCopilot = "github_copilot"
+    case anthropicCompatible = "anthropic_compatible"
 
     public var displayName: String {
         switch self {
@@ -27,6 +28,7 @@ public enum AppLLMConnectionKind: String, Sendable, Equatable, CaseIterable, Cod
         case .claudeSidecar: return "Claude SDK Sidecar"
         case .chatGPTCodex: return "Codex · ChatGPT"
         case .githubCopilot: return "GitHub Copilot"
+        case .anthropicCompatible: return "Anthropic Compatible"
         }
     }
 }
@@ -261,6 +263,7 @@ public final class UserDefaultsLLMSettingsStore: LLMSettingsStore, @unchecked Se
 public struct AppLLMSettingsRepository: @unchecked Sendable {
     public static let keychainService = "ConnorGraphAgent"
     public static let apiKeyAccount = "openai-compatible-api-key"
+    public static let anthropicAuthHeaderKindMetadataKey = "x-connor-anthropic-auth-header-kind"
 
     private enum Keys {
         static let connections = "llm.connections"
@@ -416,12 +419,33 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
     public func openAICompatibleConfig(connectionID: String? = nil, modelOverride: String? = nil, baseURLOverride: String? = nil) throws -> OpenAICompatibleConfig? {
         let settings = try loadSettings()
         guard let connection = settings.connection(id: connectionID), connection.providerMode == .openAICompatible else { return nil }
+        guard connection.connectionKind != .anthropicCompatible else { return nil }
         guard let apiKey = try apiKey(for: connection.id), !apiKey.isEmpty else { return nil }
         let urlString = baseURLOverride ?? connection.baseURLString
         guard let baseURL = URL(string: urlString) else {
             throw OpenAICompatibleProviderError.invalidBaseURL(urlString)
         }
         return OpenAICompatibleConfig(baseURL: baseURL, apiKey: apiKey, model: modelOverride ?? connection.effectiveModel, extraHeaders: connection.extraHTTPHeaders)
+    }
+
+    public func anthropicCompatibleConfig(connectionID: String? = nil, modelOverride: String? = nil, baseURLOverride: String? = nil) throws -> AnthropicCompatibleConfig? {
+        let settings = try loadSettings()
+        guard let connection = settings.connection(id: connectionID), connection.connectionKind == .anthropicCompatible else { return nil }
+        guard let apiKey = try apiKey(for: connection.id), !apiKey.isEmpty else { return nil }
+        let urlString = baseURLOverride ?? connection.baseURLString
+        guard let baseURL = URL(string: urlString) else {
+            throw OpenAICompatibleProviderError.invalidBaseURL(urlString)
+        }
+        let authHeaderKind = AnthropicCompatibleAuthHeaderKind(rawValue: connection.extraHTTPHeaders[Self.anthropicAuthHeaderKindMetadataKey] ?? "") ?? .xAPIKey
+        var extraHeaders = connection.extraHTTPHeaders
+        extraHeaders.removeValue(forKey: Self.anthropicAuthHeaderKindMetadataKey)
+        return AnthropicCompatibleConfig(
+            baseURL: baseURL,
+            apiKey: apiKey,
+            model: modelOverride ?? connection.effectiveModel,
+            authHeaderKind: authHeaderKind,
+            extraHeaders: extraHeaders
+        )
     }
 }
 
@@ -441,7 +465,11 @@ public struct AppLLMModelCatalog<Client: AgentHTTPClient>: Sendable {
             for connection in settings.connections {
                 switch connection.providerMode {
                 case .openAICompatible:
-                    result.append(await openAICompatibleConnection(connection: connection, isDefault: connection.id == settings.defaultConnectionID))
+                    if connection.connectionKind == .anthropicCompatible {
+                        result.append(anthropicCompatibleConnection(connection: connection, isDefault: connection.id == settings.defaultConnectionID))
+                    } else {
+                        result.append(await openAICompatibleConnection(connection: connection, isDefault: connection.id == settings.defaultConnectionID))
+                    }
                 case .governedClaudeSidecar:
                     result.append(sidecarConnection(connection: connection, isDefault: connection.id == settings.defaultConnectionID))
                 }
@@ -459,6 +487,19 @@ public struct AppLLMModelCatalog<Client: AgentHTTPClient>: Sendable {
             subtitle: connection.sidecarExecutablePath.isEmpty ? "Claude · Sidecar 未配置 executable" : "Claude · \(connection.sidecarExecutablePath)",
             providerMode: .governedClaudeSidecar,
             models: options(from: connection, fallback: "claude-sdk-default"),
+            isLiveCatalog: false
+        )
+    }
+
+    private func anthropicCompatibleConnection(connection: AppLLMConnectionConfig, isDefault: Bool) -> AppLLMModelConnection {
+        let selectedModel = connection.effectiveModel
+        let fallbackModel = selectedModel.isEmpty ? "claude-sonnet-4-5" : selectedModel
+        return AppLLMModelConnection(
+            id: connection.id,
+            title: connection.name + (isDefault ? " · 默认" : ""),
+            subtitle: "Anthropic Compatible · \(connection.baseURLString)",
+            providerMode: .openAICompatible,
+            models: options(from: connection, fallback: fallbackModel),
             isLiveCatalog: false
         )
     }

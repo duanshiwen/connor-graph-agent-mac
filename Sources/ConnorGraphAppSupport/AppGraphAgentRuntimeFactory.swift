@@ -267,16 +267,19 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             let settings = try settingsRepository.loadSettings()
             let connection = settings.connection(id: sessionLLMOverride?.connectionID) ?? settings.defaultConnection
             let effectiveProviderMode: AppLLMProviderMode
+            let effectiveConnectionKind: AppLLMConnectionKind
             let effectiveModel: String
             let effectiveBaseURL: String?
             let effectiveConnectionID: String
             if let override = sessionLLMOverride {
                 effectiveProviderMode = AppLLMProviderMode(rawValue: override.providerMode) ?? connection.providerMode
+                effectiveConnectionKind = connection.connectionKind
                 effectiveModel = override.model
                 effectiveBaseURL = override.baseURLString
                 effectiveConnectionID = override.connectionID ?? connection.id
             } else {
                 effectiveProviderMode = connection.providerMode
+                effectiveConnectionKind = connection.connectionKind
                 effectiveModel = connection.effectiveModel
                 effectiveBaseURL = nil
                 effectiveConnectionID = connection.id
@@ -287,6 +290,14 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                     throw AppGraphAgentRuntimeFactoryError.sidecarRequiresSessionManager
                 }
             case .openAICompatible:
+                if effectiveConnectionKind == .anthropicCompatible {
+                    guard let config = try anthropicCompatibleConfigWithOverride(connectionID: effectiveConnectionID, model: effectiveModel, baseURLOverride: effectiveBaseURL) else {
+                        return AnyAgentModelProvider(modelID: "missing-anthropic-compatible-config") { _ in
+                            throw OpenAICompatibleProviderError.missingAPIKey
+                        }
+                    }
+                    return AnyAgentModelProvider(AnthropicCompatibleProvider(config: config))
+                }
                 guard let config = try openAICompatibleConfigWithOverride(connectionID: effectiveConnectionID, model: effectiveModel, baseURLOverride: effectiveBaseURL) else {
                     return AnyAgentModelProvider(modelID: "missing-openai-compatible-config") { _ in
                         throw OpenAICompatibleProviderError.missingAPIKey
@@ -311,6 +322,18 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         )
     }
 
+    private func anthropicCompatibleConfigWithOverride(
+        connectionID: String,
+        model: String,
+        baseURLOverride: String?
+    ) throws -> AnthropicCompatibleConfig? {
+        try settingsRepository.anthropicCompatibleConfig(
+            connectionID: connectionID,
+            modelOverride: model,
+            baseURLOverride: baseURLOverride
+        )
+    }
+
     public func makeLLMProvider() -> AnyLLMProvider {
         do {
             let settings = try settingsRepository.loadSettings()
@@ -321,6 +344,14 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                     throw AppGraphAgentRuntimeFactoryError.sidecarRequiresSessionManager
                 }
             case .openAICompatible:
+                if connection.connectionKind == .anthropicCompatible {
+                    guard let config = try settingsRepository.anthropicCompatibleConfig(connectionID: connection.id) else {
+                        return AnyLLMProvider { _, _ in
+                            throw OpenAICompatibleProviderError.missingAPIKey
+                        }
+                    }
+                    return AnyLLMProvider(AnthropicCompatibleProvider(config: config))
+                }
                 guard let config = try settingsRepository.openAICompatibleConfig(connectionID: connection.id) else {
                     return AnyLLMProvider { _, _ in
                         throw OpenAICompatibleProviderError.missingAPIKey

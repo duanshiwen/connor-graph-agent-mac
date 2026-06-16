@@ -179,6 +179,107 @@ struct LLMConnectionSetupTests {
         #expect(try repository.apiKey(for: "github-test") == "copilot-token")
     }
 
+    @Test func anthropicCompatibleConnectionKindRoundTrips() throws {
+        let encoded = try JSONEncoder().encode(AppLLMConnectionKind.anthropicCompatible)
+        let decoded = try JSONDecoder().decode(AppLLMConnectionKind.self, from: encoded)
+        #expect(decoded == .anthropicCompatible)
+    }
+
+    @Test func anthropicCompatibleMissingAPIKeyDoesNotSave() async throws {
+        let store = MemoryLLMSettingsStore()
+        let credentials = MemoryCredentialStore()
+        let repository = AppLLMSettingsRepository(settingsStore: store, credentialStore: credentials)
+        let service = AppLLMConnectionSetupService(
+            settingsRepository: repository,
+            anthropicCompatibleHealthCheck: { _ in LLMProviderHealthCheckResult(ok: true, model: "claude-test", message: "OK") }
+        )
+
+        await #expect(throws: AppLLMConnectionSetupError.missingAPIKey) {
+            try await service.setupConnection(AppLLMConnectionSetupInput(
+                kind: .anthropicCompatible,
+                name: "Anthropic",
+                baseURLString: "https://api.anthropic.com",
+                model: "claude-test"
+            ))
+        }
+        #expect(credentials.values.isEmpty)
+    }
+
+    @Test func anthropicCompatibleHealthCheckFailureDoesNotSaveSecret() async throws {
+        let store = MemoryLLMSettingsStore()
+        let credentials = MemoryCredentialStore()
+        let repository = AppLLMSettingsRepository(settingsStore: store, credentialStore: credentials)
+        let service = AppLLMConnectionSetupService(
+            settingsRepository: repository,
+            anthropicCompatibleHealthCheck: { _ in LLMProviderHealthCheckResult(ok: false, model: "claude-test", message: "bad key") }
+        )
+
+        await #expect(throws: AppLLMConnectionSetupError.healthCheckFailed("bad key")) {
+            try await service.setupConnection(AppLLMConnectionSetupInput(
+                kind: .anthropicCompatible,
+                name: "Anthropic",
+                baseURLString: "https://api.anthropic.com",
+                model: "claude-test",
+                apiKey: "secret"
+            ))
+        }
+        #expect(credentials.values.isEmpty)
+    }
+
+    @Test func anthropicCompatibleSuccessSavesMetadataAndSecret() async throws {
+        let store = MemoryLLMSettingsStore()
+        let credentials = MemoryCredentialStore()
+        let repository = AppLLMSettingsRepository(settingsStore: store, credentialStore: credentials)
+        let service = AppLLMConnectionSetupService(
+            settingsRepository: repository,
+            anthropicCompatibleHealthCheck: { config in
+                #expect(config.authHeaderKind == .xAPIKey)
+                return LLMProviderHealthCheckResult(ok: true, model: config.model, message: "OK")
+            }
+        )
+
+        let result = try await service.setupConnection(AppLLMConnectionSetupInput(
+            id: "anthropic-test",
+            kind: .anthropicCompatible,
+            name: "Anthropic",
+            baseURLString: "https://api.anthropic.com",
+            model: "claude-test",
+            apiKey: "secret"
+        ))
+
+        #expect(result.connection.connectionKind == .anthropicCompatible)
+        #expect(result.connection.providerMode == .openAICompatible)
+        #expect(result.connection.baseURLString == "https://api.anthropic.com")
+        #expect(result.connection.hasAPIKey)
+        #expect(try repository.apiKey(for: "anthropic-test") == "secret")
+        #expect(!store.values.values.contains(where: { $0.contains("secret") }))
+    }
+
+    @Test func anthropicCompatibleBearerAuthKindPersistsAndLoadsIntoRuntimeConfig() async throws {
+        let repository = AppLLMSettingsRepository(settingsStore: MemoryLLMSettingsStore(), credentialStore: MemoryCredentialStore())
+        let service = AppLLMConnectionSetupService(
+            settingsRepository: repository,
+            anthropicCompatibleHealthCheck: { config in
+                #expect(config.authHeaderKind == .bearer)
+                return LLMProviderHealthCheckResult(ok: true, model: config.model, message: "OK")
+            }
+        )
+
+        _ = try await service.setupConnection(AppLLMConnectionSetupInput(
+            id: "openrouter-anthropic-test",
+            kind: .anthropicCompatible,
+            name: "OpenRouter · Anthropic",
+            baseURLString: "https://openrouter.ai/api",
+            model: "anthropic/claude-sonnet-test",
+            apiKey: "sk-or-secret",
+            anthropicAuthHeaderKind: .bearer
+        ))
+
+        let config = try #require(try repository.anthropicCompatibleConfig(connectionID: "openrouter-anthropic-test"))
+        #expect(config.authHeaderKind == .bearer)
+        #expect(config.extraHeaders[AppLLMSettingsRepository.anthropicAuthHeaderKindMetadataKey] == nil)
+    }
+
     @Test func legacyConnectionWithoutKindLoadsWithCompatibleDefault() throws {
         let store = MemoryLLMSettingsStore()
         let raw = """
