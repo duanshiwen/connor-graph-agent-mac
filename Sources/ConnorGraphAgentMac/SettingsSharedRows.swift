@@ -30,7 +30,7 @@ struct SettingsAppearanceModeRow: View {
     @Binding var selection: ConnorAppearanceMode
 
     var body: some View {
-        VStack(alignment: .leading, spacing: SettingsListLayout.spaceL) {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceM) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
                     Text("外观")
@@ -42,7 +42,7 @@ struct SettingsAppearanceModeRow: View {
                 Spacer()
             }
 
-            HStack(alignment: .top, spacing: 24) {
+            HStack(alignment: .top, spacing: 18) {
                 ForEach(ConnorAppearanceMode.allCases) { mode in
                     SettingsAppearanceOptionCard(
                         mode: mode,
@@ -54,7 +54,7 @@ struct SettingsAppearanceModeRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .center)
         }
-        .frame(minHeight: 154, alignment: .leading)
+        .frame(minHeight: 126, alignment: .leading)
     }
 }
 
@@ -65,15 +65,15 @@ private struct SettingsAppearanceOptionCard: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 8) {
+            VStack(spacing: 6) {
                 preview
-                    .frame(width: 124, height: 78)
-                    .background(previewBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .frame(width: 96, height: 60)
+                    .background(previewBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .strokeBorder(isSelected ? Color.accentColor : Color.secondary.opacity(0.16), lineWidth: isSelected ? 4 : 1)
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(isSelected ? Color.accentColor : Color.secondary.opacity(0.16), lineWidth: isSelected ? 3 : 1)
                     )
-                    .shadow(color: .black.opacity(isSelected ? 0.16 : 0.08), radius: isSelected ? 8 : 4, x: 0, y: 2)
+                    .shadow(color: .black.opacity(isSelected ? 0.14 : 0.06), radius: isSelected ? 6 : 3, x: 0, y: 2)
 
                 Text(mode.displayName)
                     .font(SettingsListTypography.rowCaptionEmphasized)
@@ -94,7 +94,7 @@ private struct SettingsAppearanceOptionCard: View {
                 previewPane(isDark: false)
                 previewPane(isDark: true)
             }
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         case .light:
             previewPane(isDark: false)
         case .dark:
@@ -119,24 +119,24 @@ private struct SettingsAppearanceOptionCard: View {
                 endPoint: .bottomTrailing
             )
 
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 4) {
-                    Circle().fill(Color(red: 1.0, green: 0.37, blue: 0.33)).frame(width: 6, height: 6)
-                    Circle().fill(Color(red: 1.0, green: 0.77, blue: 0.08)).frame(width: 6, height: 6)
-                    Circle().fill(Color(red: 0.21, green: 0.78, blue: 0.35)).frame(width: 6, height: 6)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 3) {
+                    Circle().fill(Color(red: 1.0, green: 0.37, blue: 0.33)).frame(width: 5, height: 5)
+                    Circle().fill(Color(red: 1.0, green: 0.77, blue: 0.08)).frame(width: 5, height: 5)
+                    Circle().fill(Color(red: 0.21, green: 0.78, blue: 0.35)).frame(width: 5, height: 5)
                 }
-                .padding(.top, 7)
-                .padding(.leading, 8)
+                .padding(.top, 6)
+                .padding(.leading, 7)
 
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
                     .fill(Color.orange)
-                    .frame(width: 44, height: 8)
-                    .padding(.leading, 8)
+                    .frame(width: 34, height: 7)
+                    .padding(.leading, 7)
 
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(isDark ? Color.white.opacity(0.12) : Color.white.opacity(0.72))
-                    .frame(width: 72, height: 30)
-                    .padding(.leading, 8)
+                    .frame(width: 56, height: 23)
+                    .padding(.leading, 7)
             }
         }
     }
