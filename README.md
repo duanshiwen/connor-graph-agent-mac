@@ -207,10 +207,12 @@ Statuses:
 Labels:
 - important → 重要
 - research → 研究
-- priority → 优先级, number value
-- due → 截止日期, date value yyyy-MM-dd
-- project → 项目, graph_entity_ref value, graphBindingKind=project
+- priority → 优先级
+- due → 截止日期
+- project → 项目
 ```
+
+标签就是标签:每个标签只有稳定 ID、显示名和颜色,不再承载 value type、日期/数字/link 解析或 graph binding。
 
 `config/session-governance.json` 首次创建时写入上述中文默认显示名;若本地已有旧版英文内置项,启动读取配置时会按内置 ID 将这些预制项迁移为中文显示名,自定义状态/标签不被覆盖。
 
@@ -946,7 +948,7 @@ AI
 偏好
 ```
 
-会话侧栏的"所有会话"状态列表和"标签"列表支持 macOS 右键菜单:状态项可"编辑状态…"或"创建状态…",标签项可"编辑标签…"或"创建标签…"。这些操作写入 `config/session-governance.json`,并立即刷新当前 AppViewModel、会话标签菜单、侧栏筛选计数和 automation governance mirror。当前底层会话状态仍由内置 `AgentSessionStatus` 枚举约束;因此自定义状态定义先作为治理配置维护能力落地,真正把任意自定义状态用于会话状态切换需要后续将 session status storage 从 enum 升级为 string-backed status ID。
+会话侧栏的"所有会话"状态列表和"标签"列表支持 macOS 右键菜单:状态项可"编辑状态…"或"创建状态…",标签项可"编辑标签…"或"创建标签…"。标签编辑只保留 ID、显示名和颜色,色彩选择使用 SwiftUI 原生 `ColorPicker("颜色", selection:..., supportsOpacity: false)`,保存时兼容旧命名色并可写入十六进制颜色。以上操作写入 `config/session-governance.json`,并立即刷新当前 AppViewModel、会话标签菜单、侧栏筛选计数和 automation governance mirror。当前底层会话状态仍由内置 `AgentSessionStatus` 枚举约束;因此自定义状态定义先作为治理配置维护能力落地,真正把任意自定义状态用于会话状态切换需要后续将 session status storage 从 enum 升级为 string-backed status ID。
 
 核心视图:
 
@@ -1255,9 +1257,12 @@ P1/P2 combined optimization final targeted regression status (2026-06-14 14:10 G
 - swift test --filter CommercialReadinessReleaseGateTests: passed, 4 tests.
 - SwiftPM `Assets.xcassets` unhandled-file warning is resolved by declaring `.process("Assets.xcassets")` on the mac app executable target.
 
-Status / label context menu targeted regression (2026-06-16 17:05 GMT+8):
+Status / label context menu targeted regression (2026-06-16 17:19 GMT+8):
+- 标签模型已收敛为纯标签:稳定 ID、显示名、颜色;删除 value type、标签值校验、graph binding 以及 UI 中的值类型/图谱绑定编辑入口。
+- 标签颜色编辑使用 SwiftUI 原生 `ColorPicker("颜色", selection: ..., supportsOpacity: false)`,兼容旧 named colors,保存新选择为十六进制颜色。
 - swift test --filter ProductOSPhase1Tests: passed, 5 tests.
-- SwiftPM debug build completed while compiling `AppShellViews.swift`, `ConnorGraphAgentMacApp.swift`, and `ConnorSettingsViews.swift`.
+- swift test --filter NativeSessionManagerSessionOSTests: passed, 8 tests.
+- SwiftPM debug build completed while compiling `AgentSessionGovernance.swift`, `AppSessionGovernanceConfigRepository.swift`, `AppShellViews.swift`, `ConnorGraphAgentMacApp.swift`, `ConnorSettingsViews.swift`, `ProductOSRegistryViews.swift`, and `AgentChatView.swift`.
 ```
 
 ---

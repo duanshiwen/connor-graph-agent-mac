@@ -398,9 +398,7 @@ private struct LabelDefinitionEditorSheet: View {
 
     @State private var id: String
     @State private var name: String
-    @State private var valueType: AgentSessionLabelValueType
-    @State private var colorName: String
-    @State private var graphBindingKind: String
+    @State private var color: Color
 
     init(title: String, definition: AgentSessionLabelDefinition, isCreating: Bool, onCancel: @escaping () -> Void, onSave: @escaping (AgentSessionLabelDefinition) -> Void) {
         self.title = title
@@ -410,9 +408,7 @@ private struct LabelDefinitionEditorSheet: View {
         self.onSave = onSave
         _id = State(initialValue: definition.id)
         _name = State(initialValue: definition.name)
-        _valueType = State(initialValue: definition.valueType)
-        _colorName = State(initialValue: definition.colorName)
-        _graphBindingKind = State(initialValue: definition.graphBindingKind ?? "")
+        _color = State(initialValue: labelColor(from: definition.colorName))
     }
 
     var body: some View {
@@ -423,25 +419,12 @@ private struct LabelDefinitionEditorSheet: View {
                 .disabled(!isCreating)
             TextField("显示名", text: $name)
                 .textFieldStyle(.roundedBorder)
-            Picker("值类型", selection: $valueType) {
-                ForEach(AgentSessionLabelValueType.allCases, id: \.self) { type in
-                    Text(type.rawValue).tag(type)
-                }
-            }
-            .pickerStyle(.menu)
-            Picker("颜色", selection: $colorName) {
-                ForEach(["blue", "orange", "purple", "teal", "red", "yellow", "green"], id: \.self) { color in
-                    Text(color).tag(color)
-                }
-            }
-            .pickerStyle(.menu)
-            TextField("图谱绑定类型（可选）", text: $graphBindingKind)
-                .textFieldStyle(.roundedBorder)
+            ColorPicker("颜色", selection: $color, supportsOpacity: false)
             HStack {
                 Spacer()
                 Button("取消", action: onCancel)
                 Button("保存") {
-                    onSave(AgentSessionLabelDefinition(id: normalized(id), name: trimmed(name), valueType: valueType, colorName: colorName, graphBindingKind: trimmed(graphBindingKind).isEmpty ? nil : trimmed(graphBindingKind)))
+                    onSave(AgentSessionLabelDefinition(id: normalized(id), name: trimmed(name), colorName: colorStorageName(from: color)))
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(trimmed(id).isEmpty || trimmed(name).isEmpty)
@@ -460,6 +443,35 @@ private func normalized(_ value: String) -> String {
     trimmed(value)
         .lowercased()
         .replacingOccurrences(of: " ", with: "_")
+}
+
+private func labelColor(from storageName: String) -> Color {
+    switch storageName {
+    case "orange": return .orange
+    case "purple": return .purple
+    case "teal": return .teal
+    case "red": return .red
+    case "yellow": return .yellow
+    case "green": return .green
+    case "blue": return .blue
+    default:
+        guard storageName.hasPrefix("#"), storageName.count == 7 else { return .blue }
+        let hex = String(storageName.dropFirst())
+        guard let value = Int(hex, radix: 16) else { return .blue }
+        return Color(
+            red: Double((value >> 16) & 0xFF) / 255.0,
+            green: Double((value >> 8) & 0xFF) / 255.0,
+            blue: Double(value & 0xFF) / 255.0
+        )
+    }
+}
+
+private func colorStorageName(from color: Color) -> String {
+    let nsColor = NSColor(color).usingColorSpace(.sRGB) ?? .systemBlue
+    let red = Int((nsColor.redComponent * 255).rounded())
+    let green = Int((nsColor.greenComponent * 255).rounded())
+    let blue = Int((nsColor.blueComponent * 255).rounded())
+    return String(format: "#%02X%02X%02X", red, green, blue)
 }
 
 private struct CraftListPaneView: View {
@@ -753,8 +765,8 @@ private struct CraftSessionRow: View {
                 }
                 if !row.labels.isEmpty {
                     HStack(spacing: 4) {
-                        ForEach(Array(row.labels.prefix(3)), id: \.stableID) { label in
-                            Text(label.displayText)
+                        ForEach(Array(row.labels.prefix(3)), id: \.id) { label in
+                            Text(label.id)
                                 .font(AppListTypography.rowCaption)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)

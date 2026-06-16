@@ -23,19 +23,12 @@ struct ProductOSPhase1Tests {
         #expect(artifactDirs.attachments.path.contains("/Connor/sessions/session-1/attachments"))
     }
 
-    @Test func governanceConfigValidatesTypedLabels() throws {
+    @Test func governanceConfigValidatesPlainLabels() throws {
         let config = AppSessionGovernanceConfig.default
         try config.validate()
         try config.validate(label: AgentSessionLabel(id: "important"))
-        try config.validate(label: AgentSessionLabel(id: "priority", value: "3"))
-        try config.validate(label: AgentSessionLabel(id: "due", value: "2026-06-11"))
-
-        #expect(throws: AppSessionGovernanceConfigError.self) {
-            try config.validate(label: AgentSessionLabel(id: "important", value: "yes"))
-        }
-        #expect(throws: AppSessionGovernanceConfigError.self) {
-            try config.validate(label: AgentSessionLabel(id: "priority", value: "high"))
-        }
+        try config.validate(label: AgentSessionLabel(id: "priority"))
+        try config.validate(label: AgentSessionLabel(id: "due"))
     }
 
     @Test func governanceDefaultsUseChineseDisplayNames() throws {

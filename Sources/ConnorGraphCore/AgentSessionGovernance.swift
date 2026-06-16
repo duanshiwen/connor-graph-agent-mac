@@ -22,15 +22,6 @@ public enum AgentSessionStatus: String, Codable, Sendable, Equatable, CaseIterab
     }
 }
 
-public enum AgentSessionLabelValueType: String, Codable, Sendable, Equatable, CaseIterable, Hashable {
-    case boolean
-    case string
-    case number
-    case date
-    case link
-    case graphEntityRef = "graph_entity_ref"
-}
-
 public struct AgentSessionStatusDefinition: Codable, Sendable, Equatable, Identifiable, Hashable {
     public var id: String
     public var name: String
@@ -60,38 +51,29 @@ public struct AgentSessionStatusDefinition: Codable, Sendable, Equatable, Identi
 public struct AgentSessionLabelDefinition: Codable, Sendable, Equatable, Identifiable, Hashable {
     public var id: String
     public var name: String
-    public var valueType: AgentSessionLabelValueType
     public var colorName: String
-    public var graphBindingKind: String?
 
-    public init(id: String, name: String, valueType: AgentSessionLabelValueType = .boolean, colorName: String = "blue", graphBindingKind: String? = nil) {
+    public init(id: String, name: String, colorName: String = "blue") {
         self.id = id
         self.name = name
-        self.valueType = valueType
         self.colorName = colorName
-        self.graphBindingKind = graphBindingKind
     }
 
     public static let defaults: [AgentSessionLabelDefinition] = [
         .init(id: "important", name: "重要", colorName: "orange"),
         .init(id: "research", name: "研究", colorName: "purple"),
-        .init(id: "priority", name: "优先级", valueType: .number, colorName: "red"),
-        .init(id: "due", name: "截止日期", valueType: .date, colorName: "yellow"),
-        .init(id: "project", name: "项目", valueType: .graphEntityRef, colorName: "green", graphBindingKind: "project")
+        .init(id: "priority", name: "优先级", colorName: "red"),
+        .init(id: "due", name: "截止日期", colorName: "yellow"),
+        .init(id: "project", name: "项目", colorName: "green")
     ]
 }
 
 public struct AgentSessionLabel: Codable, Sendable, Equatable, Identifiable, Hashable {
     public var id: String
-    public var value: String?
 
-    public init(id: String, value: String? = nil) {
+    public init(id: String) {
         self.id = id
-        self.value = value?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true ? nil : value
     }
-
-    public var stableID: String { value.map { "\(id)::\($0)" } ?? id }
-    public var displayText: String { value.map { "\(id): \($0)" } ?? id }
 }
 
 public struct AgentSessionGovernanceMetadata: Codable, Sendable, Equatable {
