@@ -302,6 +302,10 @@ public final class AppLLMOAuthService: @unchecked Sendable {
         return "https://\(host)"
     }
 
+    public func refreshGitHubCopilotTokens(githubAccessToken: String) async throws -> AppLLMOAuthTokens {
+        try await exchangeGitHubTokenForCopilotTokens(githubAccessToken)
+    }
+
     private func exchangeGitHubTokenForCopilotTokens(_ githubAccessToken: String) async throws -> AppLLMOAuthTokens {
         var request = URLRequest(url: URL(string: "https://api.github.com/copilot_internal/v2/token")!)
         request.httpMethod = "GET"

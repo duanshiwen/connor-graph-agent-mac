@@ -183,13 +183,52 @@ public struct AgentRuntimeShortcutSettings: Codable, Sendable, Equatable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let rawBindings = try container.decodeIfPresent([String: AgentRuntimeKeyboardShortcut].self, forKey: .bindings) ?? [:]
+        let rawBindings = try Self.decodeBindings(from: container)
         var decoded: [AgentRuntimeShortcutAction: AgentRuntimeKeyboardShortcut] = [:]
         for (rawAction, shortcut) in rawBindings {
             guard let action = AgentRuntimeShortcutAction(legacyRawValue: rawAction) else { continue }
             decoded[action] = shortcut
         }
         self.bindings = Self.mergedWithDefaults(decoded.isEmpty ? Self.defaultBindings : decoded)
+    }
+
+    private static func decodeBindings(from container: KeyedDecodingContainer<CodingKeys>) throws -> [String: AgentRuntimeKeyboardShortcut] {
+        if let dictionary = try? container.decodeIfPresent([String: AgentRuntimeKeyboardShortcut].self, forKey: .bindings) {
+            return dictionary
+        }
+        if let legacyPairs = try? container.decodeIfPresent([LegacyShortcutBindingElement].self, forKey: .bindings) {
+            return Self.decodeLegacyBindings(from: legacyPairs)
+        }
+        return [:]
+    }
+
+    private static func decodeLegacyBindings(from elements: [LegacyShortcutBindingElement]) -> [String: AgentRuntimeKeyboardShortcut] {
+        var decoded: [String: AgentRuntimeKeyboardShortcut] = [:]
+        var index = 0
+        while index + 1 < elements.count {
+            guard case let .action(rawAction) = elements[index],
+                  case let .shortcut(shortcut) = elements[index + 1] else {
+                index += 1
+                continue
+            }
+            decoded[rawAction] = shortcut
+            index += 2
+        }
+        return decoded
+    }
+
+    private enum LegacyShortcutBindingElement: Decodable {
+        case action(String)
+        case shortcut(AgentRuntimeKeyboardShortcut)
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            if let rawAction = try? container.decode(String.self) {
+                self = .action(rawAction)
+                return
+            }
+            self = .shortcut(try container.decode(AgentRuntimeKeyboardShortcut.self))
+        }
     }
 
     public func encode(to encoder: Encoder) throws {

@@ -601,7 +601,11 @@ private struct AIConnectionSetupView: View {
                     .font(.title3)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                openAICompatibleFields(includeAPIKey: false)
+                if option.id == "github-copilot" {
+                    githubCopilotAutomaticConfigurationSummary
+                } else {
+                    openAICompatibleFields(includeAPIKey: false)
+                }
                 if let githubDeviceCode {
                     Text(githubDeviceCode.userCode)
                         .font(.system(size: 38, weight: .bold, design: .monospaced))
@@ -636,6 +640,49 @@ private struct AIConnectionSetupView: View {
                 }
             }
         }
+    }
+
+    private var githubCopilotAutomaticConfigurationSummary: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark.seal")
+                    .foregroundStyle(option.tint)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("自动配置 GitHub Copilot")
+                        .font(.headline)
+                    Text("授权成功后，康纳同学会使用 Copilot token 中的 proxy endpoint 自动选择正确 API 地址，不需要手动填写 Base URL 或 API Key。")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Divider()
+            HStack {
+                Text("连接名称")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(connectionName)
+            }
+            HStack {
+                Text("Endpoint")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("由 Copilot 授权自动派生")
+                    .foregroundStyle(.secondary)
+            }
+            HStack {
+                Text("默认模型")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(selectedModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? model : selectedModel)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+        )
     }
 
     private var otherProviderAPIFields: some View {
@@ -916,7 +963,7 @@ private struct AIConnectionSetupView: View {
                     id: stableConnectionID,
                     kind: .githubCopilot,
                     name: connectionName,
-                    baseURLString: baseURLString,
+                    baseURLString: "",
                     model: model,
                     selectedModel: selectedModel,
                     apiKey: tokens.accessToken,
@@ -972,7 +1019,7 @@ private struct AIConnectionSetupView: View {
     private func initializeDrafts() {
         guard connectionName.isEmpty else { return }
         connectionName = option.connectionName
-        baseURLString = option.baseURLString.isEmpty && option.id == "github-copilot" ? "https://api.githubcopilot.com" : option.baseURLString
+        baseURLString = option.baseURLString
         model = option.model
         selectedModel = option.selectedModel
         if option.id == "other-provider" {
