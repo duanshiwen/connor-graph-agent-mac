@@ -2446,7 +2446,7 @@ final class AppViewModel: ObservableObject {
                 fallbackChatSession = updated
             }
             reloadChatSessions()
-            appendGovernanceEvent(.sessionLabelsChanged(AgentSessionGovernanceEvent(sessionID: updated.id, message: "标签已更新：\(updated.governance.labels.map(\.displayText).joined(separator: ", "))", labels: updated.governance.labels)))
+            appendGovernanceEvent(.sessionLabelsChanged(AgentSessionGovernanceEvent(sessionID: updated.id, message: "标签已更新：\(updated.governance.labels.map(\.id).joined(separator: ", "))", labels: updated.governance.labels)))
             evaluateAutomation(ProductOSAutomationEventContext(triggerKind: didRemove ? .sessionLabelRemoved : .sessionLabelAdded, sessionID: updated.id, labelID: labelID))
             errorMessage = nil
         } catch {

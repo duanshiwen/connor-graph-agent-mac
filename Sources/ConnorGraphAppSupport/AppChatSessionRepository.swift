@@ -155,7 +155,7 @@ public struct AppChatSessionRepository: Sendable {
     @discardableResult
     public func setLabels(sessionID: String, labels: [AgentSessionLabel]) throws -> AgentSession {
         let updated = try updateGovernance(sessionID: sessionID) { governance in governance.labels = labels }
-        try appendJournalEvent(runID: UUID().uuidString, sessionID: sessionID, kind: .sessionLabelsChanged, action: "session_labels_changed", message: "Session labels changed", metadata: ["labels": labels.map(\.stableID).joined(separator: ",")])
+        try appendJournalEvent(runID: UUID().uuidString, sessionID: sessionID, kind: .sessionLabelsChanged, action: "session_labels_changed", message: "Session labels changed", metadata: ["labels": labels.map(\.id).joined(separator: ",")])
         return updated
     }
 

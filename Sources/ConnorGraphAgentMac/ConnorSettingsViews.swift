@@ -1302,7 +1302,7 @@ private struct SettingsLabelsSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsGroup(title: "关于标签") {
-                Text("标签帮助你用彩色标记整理会话。布尔标签用于筛选，带值标签可表达优先级、截止日期或项目引用。")
+                Text("标签帮助你用彩色标记整理会话。每个标签只有稳定 ID、显示名和颜色。")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1317,7 +1317,7 @@ private struct SettingsLabelsSection: View {
                         HStack {
                             Circle().fill(color(named: label.colorName)).frame(width: 7, height: 7)
                             Text(label.name).frame(width: 180, alignment: .leading)
-                            Text(label.valueType.rawValue).foregroundStyle(.secondary)
+                            Text(label.id).foregroundStyle(.secondary)
                             Spacer()
                         }
                         .font(.subheadline)
