@@ -94,6 +94,7 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
     public var auditLog: any AgentAuditLog
     public var eventRecorder: AgentEventRecorder
     public var contextBuilder: AgentContextBuilder?
+    private let streamCompleteHandler: (@Sendable (Provider, AgentModelRequest) -> AsyncThrowingStream<AgentModelStreamEvent, Error>)?
     private let cancellationRegistry: AgentLoopCancellationRegistry
     private let approvalRegistry: AgentLoopApprovalRegistry
     private let logger = Logger(subsystem: "com.connor.agent", category: "tool-loop")
@@ -104,7 +105,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         configuration: AgentLoopConfiguration = AgentLoopConfiguration(),
         auditLog: any AgentAuditLog = InMemoryAgentAuditLog(),
         eventRecorder: AgentEventRecorder = AgentEventRecorder(),
-        contextBuilder: AgentContextBuilder? = nil
+        contextBuilder: AgentContextBuilder? = nil,
+        streamComplete: (@Sendable (Provider, AgentModelRequest) -> AsyncThrowingStream<AgentModelStreamEvent, Error>)? = nil
     ) {
         self.modelProvider = modelProvider
         self.toolRegistry = toolRegistry
@@ -112,8 +114,28 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
         self.auditLog = auditLog
         self.eventRecorder = eventRecorder
         self.contextBuilder = contextBuilder
+        self.streamCompleteHandler = streamComplete
         self.cancellationRegistry = AgentLoopCancellationRegistry()
         self.approvalRegistry = AgentLoopApprovalRegistry()
+    }
+
+    public init(
+        modelProvider: Provider,
+        toolRegistry: AgentToolRegistry,
+        configuration: AgentLoopConfiguration = AgentLoopConfiguration(),
+        auditLog: any AgentAuditLog = InMemoryAgentAuditLog(),
+        eventRecorder: AgentEventRecorder = AgentEventRecorder(),
+        contextBuilder: AgentContextBuilder? = nil
+    ) {
+        self.init(
+            modelProvider: modelProvider,
+            toolRegistry: toolRegistry,
+            configuration: configuration,
+            auditLog: auditLog,
+            eventRecorder: eventRecorder,
+            contextBuilder: contextBuilder,
+            streamComplete: nil
+        )
     }
 
     public func abort(runID: String) {
@@ -190,7 +212,11 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         try Task.checkCancellation()
                         modelRequest.messages = messages
                         modelRequest.tools = toolRegistry.definitions
-                        let modelResponse = try await modelProvider.complete(modelRequest)
+                        let modelResponse = try await completeModelRequest(
+                            modelRequest,
+                            run: run,
+                            continuation: continuation
+                        )
                         try Task.checkCancellation()
                         logger.info("Model response: \(modelResponse.toolCalls.count) tool calls, has text: \(modelResponse.text != nil)")
 
@@ -245,7 +271,8 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                         messages.append(AgentModelMessage(
                             role: .assistant,
                             content: modelResponse.text ?? "",
-                            toolCalls: calls
+                            toolCalls: calls,
+                            providerMetadata: modelResponse.providerMetadata
                         ))
 
                         for call in calls {
@@ -348,6 +375,34 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 cancellationRegistry.unregister(runID: request.runID)
             }
         }
+    }
+
+    private func completeModelRequest(
+        _ request: AgentModelRequest,
+        run: AgentRun,
+        continuation: AsyncThrowingStream<AgentEvent, Error>.Continuation
+    ) async throws -> AgentModelResponse {
+        guard modelProvider.capabilities.supportsStreaming,
+              let streamCompleteHandler else {
+            return try await modelProvider.complete(request)
+        }
+        var completedResponse: AgentModelResponse?
+        for try await event in streamCompleteHandler(modelProvider, request) {
+            try Task.checkCancellation()
+            switch event {
+            case .textDelta(let text):
+                guard !text.isEmpty else { continue }
+                yield(.textDelta(AgentTextDeltaEvent(runID: run.id, sessionID: run.sessionID, text: text)), to: continuation, recorder: eventRecorder)
+            case .thinkingDelta, .toolInputDelta, .rawProviderEvent:
+                continue
+            case .completed(let response):
+                completedResponse = response
+            }
+        }
+        guard let completedResponse else {
+            return try await modelProvider.complete(request)
+        }
+        return completedResponse
     }
 
     private func executeToolBatch(

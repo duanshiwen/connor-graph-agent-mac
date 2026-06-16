@@ -55,35 +55,77 @@ struct BrowserAssistedWebToolTests {
         #expect(decoded.mojibakeRepaired == true)
     }
 
-    @Test func javascriptWebFetchUsesBrowserAssistedHandler() async throws {
+    @Test func javascriptWebFetchReturnsExtractedContentFromBrowserAssistedHandler() async throws {
         final class Recorder: @unchecked Sendable {
-            var requests: [BrowserAssistedSearchRequest] = []
+            var requests: [BrowserAssistedWebFetchRequest] = []
         }
         let recorder = Recorder()
-        let tool = SearchEngineMCPWebFetchTool(browserAssistedSearchHandler: { request in
+        let tool = SearchEngineMCPWebFetchTool(browserAssistedWebFetchHandler: { request in
             recorder.requests.append(request)
-            return BrowserAssistedSearchResult(
-                taskID: "task-2",
-                sessionID: "session-2",
-                tabID: "tab-2",
+            return BrowserAssistedWebFetchResult(
+                status: .fetched,
                 urlString: request.urlString,
-                status: "running"
+                finalURLString: "https://example.com/app#ready",
+                title: "Rendered App",
+                contentText: "# Rendered App\n\nClient rendered content",
+                taskID: "task-js-fetch",
+                sessionID: "session-js-fetch",
+                tabID: "tab-js-fetch",
+                errorMessage: nil,
+                interventionReason: nil,
+                truncated: false,
+                originalCharacterCount: 23
             )
         })
 
         let result = try await tool.execute(
             arguments: AgentToolArguments(values: [
                 "url": .string("https://example.com/app"),
-                "render_mode": .string("js")
+                "render_mode": .string("js"),
+                "extract_mode": .string("markdown")
             ]),
             context: Self.context()
         )
 
         #expect(recorder.requests.count == 1)
-        #expect(recorder.requests.first?.engine == "direct-url")
         #expect(recorder.requests.first?.urlString == "https://example.com/app")
-        #expect(result.contentText.contains("built-in browser background runner"))
-        #expect(result.contentText.contains("Task ID: task-2"))
+        #expect(recorder.requests.first?.extractMode == "markdown")
+        #expect(result.contentText.contains("Client rendered content"))
+        #expect(result.contentText.contains("Rendered App"))
+        #expect(result.contentJSON?.contains("wkwebview") == true)
+        #expect(result.contentJSON?.contains("fetched") == true)
+    }
+
+    @Test func javascriptWebFetchReportsUserInterventionWhenBrowserRequiresChallenge() async throws {
+        let tool = SearchEngineMCPWebFetchTool(browserAssistedWebFetchHandler: { request in
+            BrowserAssistedWebFetchResult(
+                status: .needsUserIntervention,
+                urlString: request.urlString,
+                finalURLString: request.urlString,
+                title: "Security Check",
+                contentText: "",
+                taskID: "task-challenge",
+                sessionID: "session-challenge",
+                tabID: "tab-challenge",
+                errorMessage: nil,
+                interventionReason: "CAPTCHA requires user action",
+                truncated: false,
+                originalCharacterCount: 0
+            )
+        })
+
+        let result = try await tool.execute(
+            arguments: AgentToolArguments(values: [
+                "url": .string("https://example.com/challenge"),
+                "render_mode": .string("js")
+            ]),
+            context: Self.context()
+        )
+
+        #expect(result.contentText.contains("requires user intervention"))
+        #expect(result.contentText.contains("CAPTCHA requires user action"))
+        #expect(result.contentJSON?.contains("needsUserIntervention") == true)
+        #expect(result.citations == ["https://example.com/challenge"])
     }
 
     private func assertSearchUsesBrowserAssistedHandler(
