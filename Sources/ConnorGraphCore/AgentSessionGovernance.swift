@@ -52,19 +52,51 @@ public struct AgentSessionLabelDefinition: Codable, Sendable, Equatable, Identif
     public var id: String
     public var name: String
     public var colorName: String
+    public var systemImage: String
 
     public init(id: String, name: String, colorName: String = "blue") {
         self.id = id
         self.name = name
         self.colorName = colorName
+        self.systemImage = "tag"
+    }
+
+    public init(id: String, name: String, colorName: String, systemImage: String) {
+        self.id = id
+        self.name = name
+        self.colorName = colorName
+        self.systemImage = systemImage
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case colorName
+        case systemImage
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        colorName = try container.decodeIfPresent(String.self, forKey: .colorName) ?? "blue"
+        systemImage = try container.decodeIfPresent(String.self, forKey: .systemImage) ?? "tag"
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(colorName, forKey: .colorName)
+        try container.encode(systemImage, forKey: .systemImage)
     }
 
     public static let defaults: [AgentSessionLabelDefinition] = [
-        .init(id: "important", name: "重要", colorName: "orange"),
-        .init(id: "research", name: "研究", colorName: "purple"),
-        .init(id: "priority", name: "优先级", colorName: "red"),
-        .init(id: "due", name: "截止日期", colorName: "yellow"),
-        .init(id: "project", name: "项目", colorName: "green")
+        .init(id: "important", name: "重要", colorName: "orange", systemImage: "star.fill"),
+        .init(id: "research", name: "研究", colorName: "purple", systemImage: "doc.text.magnifyingglass"),
+        .init(id: "priority", name: "优先级", colorName: "red", systemImage: "flag.fill"),
+        .init(id: "due", name: "截止日期", colorName: "yellow", systemImage: "calendar.badge.clock"),
+        .init(id: "project", name: "项目", colorName: "green", systemImage: "folder.fill")
     ]
 }
 

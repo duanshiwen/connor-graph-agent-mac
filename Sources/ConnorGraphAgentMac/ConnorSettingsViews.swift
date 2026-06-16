@@ -286,6 +286,44 @@ private enum AIConnectionAuthenticationKind: Equatable {
     case direct
 }
 
+private enum AIConnectionCustomProtocol: String, CaseIterable, Equatable {
+    case openAICompatible
+    case anthropicCompatible
+
+    var title: String {
+        switch self {
+        case .openAICompatible: "OpenAI Compatible"
+        case .anthropicCompatible: "Anthropic Compatible"
+        }
+    }
+}
+
+private struct AIConnectionProviderPreset: Identifiable, Equatable {
+    var id: String
+    var title: String
+    var endpoint: String
+    var defaultModel: String
+    var keyPlaceholder: String
+    var protocolKind: AIConnectionCustomProtocol
+    var hidesEndpoint: Bool = false
+
+    static let otherProviderPresets: [AIConnectionProviderPreset] = [
+        AIConnectionProviderPreset(id: "openai", title: "OpenAI", endpoint: "https://api.openai.com/v1", defaultModel: "gpt-4o-mini", keyPlaceholder: "sk-...", protocolKind: .openAICompatible, hidesEndpoint: true),
+        AIConnectionProviderPreset(id: "openai-eu", title: "OpenAI EU", endpoint: "https://eu.api.openai.com/v1", defaultModel: "gpt-4o-mini", keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "openai-us", title: "OpenAI US", endpoint: "https://us.api.openai.com/v1", defaultModel: "gpt-4o-mini", keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "google", title: "Google AI Studio", endpoint: "https://generativelanguage.googleapis.com/v1beta/openai", defaultModel: "gemini-2.5-flash", keyPlaceholder: "AIza...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "openrouter", title: "OpenRouter", endpoint: "https://openrouter.ai/api/v1", defaultModel: "openai/gpt-4o-mini", keyPlaceholder: "sk-or-...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "groq", title: "Groq", endpoint: "https://api.groq.com/openai/v1", defaultModel: "llama-3.3-70b-versatile", keyPlaceholder: "gsk_...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "mistral", title: "Mistral", endpoint: "https://api.mistral.ai/v1", defaultModel: "mistral-large-latest", keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "deepseek", title: "DeepSeek", endpoint: "https://api.deepseek.com", defaultModel: "deepseek-chat", keyPlaceholder: "sk-...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "xai", title: "xAI (Grok)", endpoint: "https://api.x.ai/v1", defaultModel: "grok-3-mini", keyPlaceholder: "xai-...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "cerebras", title: "Cerebras", endpoint: "https://api.cerebras.ai/v1", defaultModel: "llama3.1-8b", keyPlaceholder: "csk-...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "zai", title: "z.ai (GLM)", endpoint: "https://api.z.ai/api/paas/v4", defaultModel: "glm-4.5", keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "huggingface", title: "Hugging Face", endpoint: "https://router.huggingface.co/v1", defaultModel: "openai/gpt-oss-120b", keyPlaceholder: "hf_...", protocolKind: .openAICompatible),
+        AIConnectionProviderPreset(id: "custom", title: "Custom", endpoint: "", defaultModel: "", keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible)
+    ]
+}
+
 private struct AIConnectionOnboardingOption: Identifiable, Equatable {
     var id: String
     var title: String
@@ -419,6 +457,9 @@ private struct AIConnectionSetupView: View {
     @State private var model = ""
     @State private var selectedModel = ""
     @State private var apiKey = ""
+    @State private var showAPIKey = false
+    @State private var selectedProviderPresetID = "openai"
+    @State private var customProtocol: AIConnectionCustomProtocol = .openAICompatible
     @State private var sidecarExecutablePath = Self.defaultSidecarExecutablePath()
     @State private var sidecarArguments = Self.defaultSidecarArguments()
     @State private var sidecarWorkingDirectoryPath = Self.defaultSidecarWorkingDirectoryPath()
@@ -582,14 +623,117 @@ private struct AIConnectionSetupView: View {
                 }
             }
         case .direct:
-            VStack(spacing: 16) {
-                Text(option.setupInstruction)
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                openAICompatibleFields(includeAPIKey: true)
+            if option.id == "other-provider" {
+                otherProviderAPIFields
+            } else {
+                VStack(spacing: 16) {
+                    Text(option.setupInstruction)
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    openAICompatibleFields(includeAPIKey: true)
+                }
             }
         }
+    }
+
+    private var otherProviderAPIFields: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text(option.setupInstruction)
+                .font(.title3)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("API Key")
+                    .font(.headline)
+                HStack(spacing: 8) {
+                    Group {
+                        if showAPIKey {
+                            TextField(activeProviderPreset.keyPlaceholder, text: $apiKey)
+                        } else {
+                            SecureField(activeProviderPreset.keyPlaceholder, text: $apiKey)
+                        }
+                    }
+                    .textFieldStyle(.plain)
+                    .font(.title3)
+                    Button(action: { showAPIKey.toggle() }) {
+                        Image(systemName: showAPIKey ? "eye.slash" : "eye")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help(showAPIKey ? "隐藏 API Key" : "显示 API Key")
+                }
+                .padding(.horizontal, 14)
+                .frame(height: 48)
+                .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+                )
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Endpoint")
+                        .font(.headline)
+                    Spacer()
+                    Picker("服务商", selection: $selectedProviderPresetID) {
+                        ForEach(AIConnectionProviderPreset.otherProviderPresets) { preset in
+                            Text(preset.title).tag(preset.id)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: 220)
+                    .onChange(of: selectedProviderPresetID) { _, _ in applySelectedProviderPreset() }
+                }
+
+                if !activeProviderPreset.hidesEndpoint {
+                    TextField("https://your-api-endpoint.com", text: $baseURLString)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.title3)
+                } else {
+                    Text(activeProviderPreset.endpoint)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+
+            if selectedProviderPresetID == "custom" {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Protocol")
+                        .font(.headline)
+                    Picker("Protocol", selection: $customProtocol) {
+                        ForEach(AIConnectionCustomProtocol.allCases, id: \.self) { protocolKind in
+                            Text(protocolKind.title).tag(protocolKind)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    Text(customProtocol == .anthropicCompatible ? "当前 Connor 原生运行时尚未启用 Anthropic-compatible 自定义适配器。请先使用 OpenAI Compatible，或通过 Claude Pro / Max 连接 Claude。" : "大多数第三方接口（Ollama、vLLM、DashScope 等）使用 OpenAI Compatible。")
+                        .font(.subheadline)
+                        .foregroundStyle(customProtocol == .anthropicCompatible ? .orange : .secondary)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Default Model · required")
+                    .font(.headline)
+                TextField("例如 gpt-4o-mini、deepseek-chat、google/gemini-2.5-flash", text: $model)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.title3)
+                Text("使用服务商自己的模型 ID。当前 Connor 会用该模型执行一次真实连接校验。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var activeProviderPreset: AIConnectionProviderPreset {
+        AIConnectionProviderPreset.otherProviderPresets.first { $0.id == selectedProviderPresetID }
+            ?? AIConnectionProviderPreset.otherProviderPresets[0]
     }
 
     private func openAICompatibleFields(includeAPIKey: Bool) -> some View {
@@ -642,6 +786,13 @@ private struct AIConnectionSetupView: View {
         case .authorizationCode:
             return authorizationCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .direct:
+            if option.id == "other-provider" {
+                return connectionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || baseURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || (apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isLoopbackEndpoint(baseURLString))
+                    || customProtocol == .anthropicCompatible
+            }
             return connectionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || baseURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -798,7 +949,7 @@ private struct AIConnectionSetupView: View {
                     name: connectionName,
                     baseURLString: baseURLString,
                     model: model,
-                    selectedModel: selectedModel,
+                    selectedModel: selectedModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? model : selectedModel,
                     apiKey: apiKey
                 )
                 _ = try await viewModel.setupLLMConnection(input)
@@ -822,11 +973,38 @@ private struct AIConnectionSetupView: View {
         baseURLString = option.baseURLString.isEmpty && option.id == "github-copilot" ? "https://api.githubcopilot.com" : option.baseURLString
         model = option.model
         selectedModel = option.selectedModel
+        if option.id == "other-provider" {
+            selectedProviderPresetID = "openai"
+            applySelectedProviderPreset()
+        }
         if option.id == "claude-pro-max" {
             sidecarExecutablePath = sidecarExecutablePath.isEmpty ? Self.defaultSidecarExecutablePath() : sidecarExecutablePath
             sidecarArguments = sidecarArguments.isEmpty ? Self.defaultSidecarArguments() : sidecarArguments
             sidecarWorkingDirectoryPath = sidecarWorkingDirectoryPath.isEmpty ? Self.defaultSidecarWorkingDirectoryPath() : sidecarWorkingDirectoryPath
         }
+    }
+
+    private func applySelectedProviderPreset() {
+        let preset = activeProviderPreset
+        if preset.id != "custom" {
+            connectionName = preset.title
+            baseURLString = preset.endpoint
+            model = preset.defaultModel
+            selectedModel = preset.defaultModel
+            customProtocol = preset.protocolKind
+        } else {
+            connectionName = option.connectionName
+            baseURLString = ""
+            model = ""
+            selectedModel = ""
+            customProtocol = .openAICompatible
+        }
+    }
+
+    private func isLoopbackEndpoint(_ rawValue: String) -> Bool {
+        guard let url = URL(string: rawValue.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let host = url.host?.lowercased() else { return false }
+        return host == "localhost" || host == "127.0.0.1" || host == "::1"
     }
 
     private static func defaultSidecarExecutablePath() -> String {

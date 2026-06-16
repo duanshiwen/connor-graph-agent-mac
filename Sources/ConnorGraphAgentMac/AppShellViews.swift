@@ -211,7 +211,7 @@ private struct CraftPrimarySidebarView: View {
                                 }
                         } else {
                             ForEach(viewModel.governanceConfig.labels) { label in
-                                SidebarRow(title: label.name, systemImage: "tag", count: count(forLabel: label.id), isSelected: selection == .agentChat && viewModel.sessionListFilter == .label(label.id)) {
+                                SidebarRow(title: label.name, systemImage: label.systemImage, count: count(forLabel: label.id), isSelected: selection == .agentChat && viewModel.sessionListFilter == .label(label.id)) {
                                     viewModel.setSessionListFilter(.label(label.id))
                                     select(.agentChat)
                                 }
@@ -302,8 +302,8 @@ private struct CraftPrimarySidebarView: View {
         let nextSortOrder = (definition?.sortOrder ?? viewModel.governanceConfig.statuses.map(\.sortOrder).max() ?? 0) + 10
         statusEditorRequest = StatusDefinitionEditorRequest(
             definition: AgentSessionStatusDefinition(
-                id: "custom_status_\(nextSortOrder)",
-                name: "新状态",
+                id: "",
+                name: "",
                 systemImage: "circle",
                 sortOrder: nextSortOrder,
                 isTerminal: false
@@ -318,10 +318,11 @@ private struct CraftPrimarySidebarView: View {
 
     private func presentNewLabelEditor() {
         labelEditorRequest = LabelDefinitionEditorRequest(
-            definition: AgentSessionLabelDefinition(id: "custom_label_\(viewModel.governanceConfig.labels.count + 1)", name: "新标签", colorName: "blue"),
+            definition: AgentSessionLabelDefinition(id: "", name: "", colorName: "blue", systemImage: "tag"),
             isCreating: true
         )
     }
+
 }
 
 private struct StatusDefinitionEditorRequest: Identifiable {
@@ -343,11 +344,8 @@ private struct StatusDefinitionEditorSheet: View {
     var onCancel: () -> Void
     var onSave: (AgentSessionStatusDefinition) -> Void
 
-    @State private var id: String
     @State private var name: String
     @State private var systemImage: String
-    @State private var sortOrder: Int
-    @State private var isTerminal: Bool
 
     init(title: String, definition: AgentSessionStatusDefinition, isCreating: Bool, onCancel: @escaping () -> Void, onSave: @escaping (AgentSessionStatusDefinition) -> Void) {
         self.title = title
@@ -355,33 +353,29 @@ private struct StatusDefinitionEditorSheet: View {
         self.isCreating = isCreating
         self.onCancel = onCancel
         self.onSave = onSave
-        _id = State(initialValue: definition.id)
         _name = State(initialValue: definition.name)
         _systemImage = State(initialValue: definition.systemImage)
-        _sortOrder = State(initialValue: definition.sortOrder)
-        _isTerminal = State(initialValue: definition.isTerminal)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(title).font(.headline)
-            TextField("ID", text: $id)
+            TextField("状态名称", text: $name)
                 .textFieldStyle(.roundedBorder)
-                .disabled(!isCreating)
-            TextField("显示名", text: $name)
-                .textFieldStyle(.roundedBorder)
-            TextField("SF Symbol", text: $systemImage)
-                .textFieldStyle(.roundedBorder)
-            Stepper("排序：\(sortOrder)", value: $sortOrder, in: 0...999, step: 10)
-            Toggle("终态", isOn: $isTerminal)
+            Picker("图标", selection: $systemImage) {
+                ForEach(statusIconOptions, id: \.self) { icon in
+                    Label(statusIconTitle(for: icon), systemImage: icon).tag(icon)
+                }
+            }
+            .pickerStyle(.menu)
             HStack {
                 Spacer()
                 Button("取消", action: onCancel)
                 Button("保存") {
-                    onSave(AgentSessionStatusDefinition(id: normalized(id), name: trimmed(name), systemImage: trimmed(systemImage).isEmpty ? "circle" : trimmed(systemImage), sortOrder: sortOrder, isTerminal: isTerminal))
+                    onSave(AgentSessionStatusDefinition(id: definition.id, name: trimmed(name), systemImage: systemImage, sortOrder: definition.sortOrder, isTerminal: definition.isTerminal))
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(trimmed(id).isEmpty || trimmed(name).isEmpty)
+                .disabled(trimmed(name).isEmpty)
             }
         }
         .padding(20)
@@ -396,9 +390,9 @@ private struct LabelDefinitionEditorSheet: View {
     var onCancel: () -> Void
     var onSave: (AgentSessionLabelDefinition) -> Void
 
-    @State private var id: String
     @State private var name: String
     @State private var color: Color
+    @State private var systemImage: String
 
     init(title: String, definition: AgentSessionLabelDefinition, isCreating: Bool, onCancel: @escaping () -> Void, onSave: @escaping (AgentSessionLabelDefinition) -> Void) {
         self.title = title
@@ -406,28 +400,31 @@ private struct LabelDefinitionEditorSheet: View {
         self.isCreating = isCreating
         self.onCancel = onCancel
         self.onSave = onSave
-        _id = State(initialValue: definition.id)
         _name = State(initialValue: definition.name)
         _color = State(initialValue: labelColor(from: definition.colorName))
+        _systemImage = State(initialValue: definition.systemImage)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(title).font(.headline)
-            TextField("ID", text: $id)
+            TextField("标签名称", text: $name)
                 .textFieldStyle(.roundedBorder)
-                .disabled(!isCreating)
-            TextField("显示名", text: $name)
-                .textFieldStyle(.roundedBorder)
+            Picker("图标", selection: $systemImage) {
+                ForEach(labelIconOptions, id: \.self) { icon in
+                    Label(labelIconTitle(for: icon), systemImage: icon).tag(icon)
+                }
+            }
+            .pickerStyle(.menu)
             ColorPicker("颜色", selection: $color, supportsOpacity: false)
             HStack {
                 Spacer()
                 Button("取消", action: onCancel)
                 Button("保存") {
-                    onSave(AgentSessionLabelDefinition(id: normalized(id), name: trimmed(name), colorName: colorStorageName(from: color)))
+                    onSave(AgentSessionLabelDefinition(id: definition.id, name: trimmed(name), colorName: colorStorageName(from: color), systemImage: systemImage))
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(trimmed(id).isEmpty || trimmed(name).isEmpty)
+                .disabled(trimmed(name).isEmpty)
             }
         }
         .padding(20)
@@ -435,14 +432,112 @@ private struct LabelDefinitionEditorSheet: View {
     }
 }
 
-private func trimmed(_ value: String) -> String {
-    value.trimmingCharacters(in: .whitespacesAndNewlines)
+private let statusIconOptions: [String] = [
+    "circle",
+    "clock",
+    "pause.circle",
+    "play.circle",
+    "checkmark.circle",
+    "checkmark.circle.fill",
+    "xmark.circle",
+    "nosign",
+    "exclamationmark.circle",
+    "exclamationmark.bubble",
+    "questionmark.circle",
+    "flag",
+    "star",
+    "bolt",
+    "flame",
+    "tray",
+    "archivebox",
+    "paperplane",
+    "hammer",
+    "wrench.and.screwdriver",
+    "lightbulb",
+    "sparkles",
+    "target"
+]
+
+private func statusIconTitle(for icon: String) -> String {
+    switch icon {
+    case "circle": return "圆点"
+    case "clock": return "时钟"
+    case "pause.circle": return "暂停"
+    case "play.circle": return "进行中"
+    case "checkmark.circle": return "完成"
+    case "checkmark.circle.fill": return "完成（填充）"
+    case "xmark.circle": return "关闭"
+    case "nosign": return "受阻"
+    case "exclamationmark.circle": return "提醒"
+    case "exclamationmark.bubble": return "待审阅"
+    case "questionmark.circle": return "询问"
+    case "flag": return "旗标"
+    case "star": return "星标"
+    case "bolt": return "闪电"
+    case "flame": return "火焰"
+    case "tray": return "收件箱"
+    case "archivebox": return "归档"
+    case "paperplane": return "发送"
+    case "hammer": return "构建"
+    case "wrench.and.screwdriver": return "工具"
+    case "lightbulb": return "想法"
+    case "sparkles": return "闪光"
+    case "target": return "目标"
+    default: return icon
+    }
 }
 
-private func normalized(_ value: String) -> String {
-    trimmed(value)
-        .lowercased()
-        .replacingOccurrences(of: " ", with: "_")
+private let labelIconOptions: [String] = [
+    "tag",
+    "tag.fill",
+    "star",
+    "star.fill",
+    "flag",
+    "flag.fill",
+    "bookmark",
+    "bookmark.fill",
+    "doc.text",
+    "doc.text.magnifyingglass",
+    "folder",
+    "folder.fill",
+    "calendar",
+    "calendar.badge.clock",
+    "person.2",
+    "link",
+    "paperclip",
+    "lightbulb",
+    "sparkles",
+    "flame"
+]
+
+private func labelIconTitle(for icon: String) -> String {
+    switch icon {
+    case "tag": return "标签"
+    case "tag.fill": return "标签（填充）"
+    case "star": return "星标"
+    case "star.fill": return "星标（填充）"
+    case "flag": return "旗标"
+    case "flag.fill": return "旗标（填充）"
+    case "bookmark": return "书签"
+    case "bookmark.fill": return "书签（填充）"
+    case "doc.text": return "文档"
+    case "doc.text.magnifyingglass": return "研究"
+    case "folder": return "文件夹"
+    case "folder.fill": return "项目"
+    case "calendar": return "日期"
+    case "calendar.badge.clock": return "截止日期"
+    case "person.2": return "协作"
+    case "link": return "链接"
+    case "paperclip": return "附件"
+    case "lightbulb": return "想法"
+    case "sparkles": return "闪光"
+    case "flame": return "火焰"
+    default: return icon
+    }
+}
+
+private func trimmed(_ value: String) -> String {
+    value.trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
 private func labelColor(from storageName: String) -> Color {

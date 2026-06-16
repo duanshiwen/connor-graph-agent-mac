@@ -1579,22 +1579,69 @@ final class AppViewModel: ObservableObject {
 
     func upsertStatusDefinition(_ definition: AgentSessionStatusDefinition) {
         var config = governanceConfig
-        if let index = config.statuses.firstIndex(where: { $0.id == definition.id }) {
-            config.statuses[index] = definition
+        let trimmedID = definition.id.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedID.isEmpty, let index = config.statuses.firstIndex(where: { $0.id == trimmedID }) {
+            var updatedDefinition = definition
+            updatedDefinition.id = trimmedID
+            config.statuses[index] = updatedDefinition
         } else {
-            config.statuses.append(definition)
+            var newDefinition = definition
+            newDefinition.id = makeUniqueGovernanceStatusID(existingIDs: Set(config.statuses.map(\.id)), preferredName: definition.name)
+            config.statuses.append(newDefinition)
         }
         saveGovernanceConfig(config, successMessage: "状态定义已保存。")
     }
 
+    private func makeUniqueGovernanceStatusID(existingIDs: Set<String>, preferredName: String = "") -> String {
+        makeUniqueGovernanceSlug(existingIDs: existingIDs, prefix: "status", preferredName: preferredName)
+    }
+
     func upsertLabelDefinition(_ definition: AgentSessionLabelDefinition) {
         var config = governanceConfig
-        if let index = config.labels.firstIndex(where: { $0.id == definition.id }) {
-            config.labels[index] = definition
+        let trimmedID = definition.id.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedID.isEmpty, let index = config.labels.firstIndex(where: { $0.id == trimmedID }) {
+            var updatedDefinition = definition
+            updatedDefinition.id = trimmedID
+            config.labels[index] = updatedDefinition
         } else {
-            config.labels.append(definition)
+            var newDefinition = definition
+            newDefinition.id = makeUniqueGovernanceLabelID(existingIDs: Set(config.labels.map(\.id)), preferredName: definition.name)
+            config.labels.append(newDefinition)
         }
         saveGovernanceConfig(config, successMessage: "标签定义已保存。")
+    }
+
+    private func makeUniqueGovernanceLabelID(existingIDs: Set<String>, preferredName: String = "") -> String {
+        makeUniqueGovernanceSlug(existingIDs: existingIDs, prefix: "label", preferredName: preferredName)
+    }
+
+    private func makeUniqueGovernanceSlug(existingIDs: Set<String>, prefix: String, preferredName: String) -> String {
+        let allowedScalars = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789")
+        let slug = preferredName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .unicodeScalars
+            .map { scalar -> Character in
+                allowedScalars.contains(scalar) ? Character(scalar) : "-"
+            }
+            .reduce(into: "") { partial, character in
+                if character == "-", partial.last == "-" { return }
+                partial.append(character)
+            }
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+            .replacingOccurrences(of: "-", with: "_")
+        let base = slug.isEmpty ? "\(prefix)_\(shortGovernanceIDFragment())" : slug
+        var candidate = base
+        var suffix = 2
+        while existingIDs.contains(candidate) {
+            candidate = "\(base)_\(suffix)"
+            suffix += 1
+        }
+        return candidate
+    }
+
+    private func shortGovernanceIDFragment() -> String {
+        String(UUID().uuidString.lowercased().prefix(8))
     }
 
     private func saveGovernanceConfig(_ config: AppSessionGovernanceConfig, successMessage: String) {

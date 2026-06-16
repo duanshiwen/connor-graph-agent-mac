@@ -48,7 +48,7 @@ public struct AppSessionGovernanceConfig: Codable, Sendable, Equatable {
 
     public func normalizingBuiltInDisplayNames() -> AppSessionGovernanceConfig {
         let statusNames = Dictionary(uniqueKeysWithValues: AgentSessionStatusDefinition.defaults.map { ($0.id, $0.name) })
-        let labelNames = Dictionary(uniqueKeysWithValues: AgentSessionLabelDefinition.defaults.map { ($0.id, $0.name) })
+        let labelDefaults = Dictionary(uniqueKeysWithValues: AgentSessionLabelDefinition.defaults.map { ($0.id, $0) })
         let normalizedStatuses = statuses.map { definition in
             guard let name = statusNames[definition.id], definition.name != name else { return definition }
             var copy = definition
@@ -56,9 +56,14 @@ public struct AppSessionGovernanceConfig: Codable, Sendable, Equatable {
             return copy
         }
         let normalizedLabels = labels.map { definition in
-            guard let name = labelNames[definition.id], definition.name != name else { return definition }
+            guard let builtIn = labelDefaults[definition.id] else { return definition }
             var copy = definition
-            copy.name = name
+            if copy.name != builtIn.name {
+                copy.name = builtIn.name
+            }
+            if copy.systemImage == "tag", builtIn.systemImage != "tag" {
+                copy.systemImage = builtIn.systemImage
+            }
             return copy
         }
         return AppSessionGovernanceConfig(statuses: normalizedStatuses, labels: normalizedLabels)
