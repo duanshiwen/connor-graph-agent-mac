@@ -184,22 +184,44 @@ public struct AgentRuntimeWorkspaceSettings: Codable, Sendable, Equatable {
 public struct AgentRuntimePreferenceSettings: Codable, Sendable, Equatable {
     public var displayName: String
     public var timezone: String
+    public var preferredLanguage: String
     public var city: String
     public var country: String
     public var notes: String
 
     public init(
-        displayName: String = "诗闻",
-        timezone: String = "Asia/Shanghai",
-        city: String = "杭州",
-        country: String = "中国",
+        displayName: String = "",
+        timezone: String = "",
+        preferredLanguage: String = "",
+        city: String = "",
+        country: String = "",
         notes: String = ""
     ) {
         self.displayName = displayName
         self.timezone = timezone
+        self.preferredLanguage = preferredLanguage
         self.city = city
         self.country = country
         self.notes = notes
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case displayName
+        case timezone
+        case preferredLanguage
+        case city
+        case country
+        case notes
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.displayName = try container.decodeIfPresent(String.self, forKey: .displayName) ?? ""
+        self.timezone = try container.decodeIfPresent(String.self, forKey: .timezone) ?? ""
+        self.preferredLanguage = try container.decodeIfPresent(String.self, forKey: .preferredLanguage) ?? ""
+        self.city = try container.decodeIfPresent(String.self, forKey: .city) ?? ""
+        self.country = try container.decodeIfPresent(String.self, forKey: .country) ?? ""
+        self.notes = try container.decodeIfPresent(String.self, forKey: .notes) ?? ""
     }
 }
 
@@ -216,7 +238,7 @@ public struct AgentRuntimeSettings: Codable, Sendable, Equatable {
     public var updatedAt: Date
 
     public init(
-        schemaVersion: Int = 2,
+        schemaVersion: Int = 3,
         loop: AgentLoopConfiguration = AgentLoopConfiguration(),
         ui: AgentRuntimeUISettings = AgentRuntimeUISettings(),
         app: AgentRuntimeAppSettings = AgentRuntimeAppSettings(),
