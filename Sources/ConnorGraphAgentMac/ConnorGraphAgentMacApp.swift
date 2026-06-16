@@ -24,27 +24,13 @@ struct ConnorGraphAgentMacApp: App {
                 .preferredColorScheme(viewModel.appearanceMode.colorScheme)
         }
         .commands {
-            CommandMenu("康纳同学") {
-                Button("新建聊天") {
-                    viewModel.performShortcutAction(.newSession)
-                }
-                .keyboardShortcut(viewModel.shortcut(for: .newSession).keyEquivalent, modifiers: viewModel.shortcut(for: .newSession).eventModifierFlags)
+            CommandGroup(replacing: .newItem) {}
+            CommandGroup(replacing: .saveItem) {}
+            CommandGroup(replacing: .importExport) {}
+            CommandGroup(replacing: .printItem) {}
+            CommandGroup(replacing: .help) {}
 
-                Button("显示 / 隐藏浏览器") {
-                    viewModel.performShortcutAction(.toggleBrowser)
-                }
-                .keyboardShortcut(viewModel.shortcut(for: .toggleBrowser).keyEquivalent, modifiers: viewModel.shortcut(for: .toggleBrowser).eventModifierFlags)
-
-                Button("聚焦顶部搜索") {
-                    viewModel.performShortcutAction(.focusTopSearch)
-                }
-                .keyboardShortcut(viewModel.shortcut(for: .focusTopSearch).keyEquivalent, modifiers: viewModel.shortcut(for: .focusTopSearch).eventModifierFlags)
-
-                Button("打开设置") {
-                    viewModel.performShortcutAction(.openSettings)
-                }
-                .keyboardShortcut(viewModel.shortcut(for: .openSettings).keyEquivalent, modifiers: viewModel.shortcut(for: .openSettings).eventModifierFlags)
-            }
+            CommandMenu("指示") {}
         }
     }
 }
