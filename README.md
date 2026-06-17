@@ -649,6 +649,7 @@ Sources/ConnorGraphAppSupport/MCPStdioClientTransport.swift
 Sources/ConnorGraphAppSupport/MCPClientPool.swift
 Sources/ConnorGraphAppSupport/MCPSourceRuntime.swift
 Sources/ConnorGraphAppSupport/MCPSourceTestService.swift
+Sources/ConnorGraphAppSupport/MCPSourceCredentialStore.swift
 Sources/ConnorGraphAppSupport/MCPToolGovernancePolicy.swift
 Sources/ConnorGraphAppSupport/MCPToolRegistryBridge.swift
 Sources/ConnorGraphAppSupport/SourceSkillAutomationUIPresentation.swift
@@ -682,7 +683,12 @@ Sources/ConnorGraphAgentMac/SourceSkillAutomationRuntimeViews.swift
 - Sensitive MCP tools require explicit per-run approval even under broad runtime policy, rather than relying on global allowAll
 - Stdio source test service for validation + discovery + health/catalog/audit/policy persistence
 - Native MCP Source Manager list/detail UI for persisted health/catalog/audit inspection
-- Native Add/Edit Source sheet for stdio + no-credential MCP source onboarding and maintenance
+- Native Add/Edit Source sheet for stdio MCP source onboarding and maintenance
+- Connor-owned MCP source credential store backed by `CredentialStore` / macOS Keychain
+- Credential requirements for bearer token、API key header and multi-header stdio sources
+- Source config stores only credential requirement + env var bindings; secret values are never persisted in `mcp-runtime.json`
+- Source-scoped runtime secret injection into stdio subprocess environment after inherited secret filtering
+- Missing credential fail-closed behavior before source test / tool runtime execution
 - UI-driven Enable/Disable source lifecycle controls
 - Archive Source workflow via `deprecated` status that preserves catalog/health/audit history
 - Confirmed Delete Source workflow for physical removal of a source runtime directory
@@ -699,7 +705,7 @@ Sources/ConnorGraphAgentMac/SourceSkillAutomationRuntimeViews.swift
 - Tool Catalog UI displays risk、execution policy、integrity status、rationale and schema fingerprint for review
 - Audit timeline displays policy block and tool definition changed events
 
-商业级 MCP Platform 下一步仍需补齐:HTTP/SSE/Streamable HTTP production transport、long-lived connection reuse/reconnect、Keychain-backed credential injection、source auth workflow、large/binary result artifact governance、App runtime 动态 source activation、manual per-tool policy override editor。根据当前产品边界,本里程碑刻意不处理 graph ingestion。
+商业级 MCP Platform 下一步仍需补齐:HTTP/SSE/Streamable HTTP production transport、long-lived connection reuse/reconnect、OAuth/source auth workflow、large/binary result artifact governance、App runtime 动态 source activation、manual per-tool policy override editor、credential rotation/status dashboard。根据当前产品边界,本里程碑刻意不处理 graph ingestion。
 
 边界:MCP servers 是能力提供者;Connor 拥有 registry、lifecycle、health、permission policy、audit 与 readiness。Graph ingestion 不属于当前 MCP Platform scope。
 

@@ -303,3 +303,91 @@ while True:
     try script.write(to: url, atomically: true, encoding: .utf8)
     return url
 }
+
+private final class CommercialMCPFakeCredentialStore: CredentialStore, @unchecked Sendable {
+    var secrets: [String: String] = [:]
+
+    func saveSecret(_ secret: String, service: String, account: String) throws {
+        secrets["\(service):\(account)"] = secret
+    }
+
+    func readSecret(service: String, account: String) throws -> String? {
+        secrets["\(service):\(account)"]
+    }
+
+    func deleteSecret(service: String, account: String) throws {
+        secrets.removeValue(forKey: "\(service):\(account)")
+    }
+}
+
+@Test func commercialMCPSourceCredentialsStayOutOfRuntimeConfigAndInjectScopedEnv() throws {
+    let storagePaths = temporaryCommercialMCPStoragePaths()
+    defer { try? FileManager.default.removeItem(at: storagePaths.applicationSupportDirectory) }
+    let repository = AppMCPSourceRuntimeRepository(storagePaths: storagePaths)
+    let fakeCredentials = CommercialMCPFakeCredentialStore()
+    let credentialStore = MCPSourceCredentialStore(credentialStore: fakeCredentials)
+    let configuration = MCPSourceRuntimeConfiguration(
+        sourceID: "github",
+        displayName: "GitHub MCP",
+        transport: .stdio(command: "/bin/echo", arguments: []),
+        status: .enabled,
+        credentialRequirement: .bearerToken,
+        credentialBindings: [MCPSourceCredentialBinding(label: "GitHub token", environmentVariable: "GITHUB_TOKEN")],
+        allowedCapabilities: [.externalNetwork],
+        toolNamePrefix: "github"
+    )
+
+    try repository.save(configuration)
+    try credentialStore.saveSecret("ghp-secret-value", sourceID: "github", environmentVariable: "GITHUB_TOKEN")
+
+    let rawConfig = try String(contentsOf: repository.configurationURL(sourceID: "github"), encoding: .utf8)
+    #expect(rawConfig.contains("GITHUB_TOKEN"))
+    #expect(!rawConfig.contains("ghp-secret-value"))
+    #expect(try credentialStore.hasRequiredCredentials(for: configuration) == true)
+    #expect(try credentialStore.environmentOverrides(for: configuration) == ["GITHUB_TOKEN": "ghp-secret-value"])
+}
+
+@Test func commercialMCPSourceCredentialsSupportMultiHeaderScopedEnvInjection() throws {
+    let fakeCredentials = CommercialMCPFakeCredentialStore()
+    let credentialStore = MCPSourceCredentialStore(credentialStore: fakeCredentials)
+    let configuration = MCPSourceRuntimeConfiguration(
+        sourceID: "datadog",
+        displayName: "Datadog MCP",
+        transport: .stdio(command: "/bin/echo", arguments: []),
+        status: .enabled,
+        credentialRequirement: .multiHeader,
+        credentialBindings: [
+            MCPSourceCredentialBinding(label: "API", environmentVariable: "DD_API_KEY"),
+            MCPSourceCredentialBinding(label: "APP", environmentVariable: "DD_APPLICATION_KEY")
+        ],
+        allowedCapabilities: [.externalNetwork],
+        toolNamePrefix: "datadog"
+    )
+
+    try credentialStore.saveSecret("api-secret", sourceID: "datadog", environmentVariable: "DD_API_KEY")
+    try credentialStore.saveSecret("app-secret", sourceID: "datadog", environmentVariable: "DD_APPLICATION_KEY")
+
+    #expect(try credentialStore.environmentOverrides(for: configuration) == [
+        "DD_API_KEY": "api-secret",
+        "DD_APPLICATION_KEY": "app-secret"
+    ])
+}
+
+@Test func commercialMCPSourceCredentialsFailClosedWhenMissing() throws {
+    let credentialStore = MCPSourceCredentialStore(credentialStore: CommercialMCPFakeCredentialStore())
+    let configuration = MCPSourceRuntimeConfiguration(
+        sourceID: "linear",
+        displayName: "Linear MCP",
+        transport: .stdio(command: "/bin/echo", arguments: []),
+        status: .enabled,
+        credentialRequirement: .apiKeyHeader,
+        credentialBindings: [MCPSourceCredentialBinding(label: "Linear API key", environmentVariable: "LINEAR_API_KEY")],
+        allowedCapabilities: [.externalNetwork],
+        toolNamePrefix: "linear"
+    )
+
+    #expect(try credentialStore.hasRequiredCredentials(for: configuration) == false)
+    #expect(throws: MCPSourceCredentialStoreError.self) {
+        try credentialStore.environmentOverrides(for: configuration)
+    }
+}
