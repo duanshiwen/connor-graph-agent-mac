@@ -205,7 +205,6 @@ private struct MCPSourceEmptyDetailView: View {
                 .frame(maxWidth: .infinity)
             }
             Spacer()
-            SourceSummaryStrip(summary: summary)
         }
         .padding(AppShellLayout.spaceXL)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
