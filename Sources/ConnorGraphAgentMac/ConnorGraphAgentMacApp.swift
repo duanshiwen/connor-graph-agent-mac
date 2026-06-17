@@ -14,6 +14,7 @@ import ConnorGraphAppSupport
 struct ConnorGraphAgentMacApp: App {
     @NSApplicationDelegateAdaptor(ConnorMenuBarDelegate.self) private var menuBarDelegate
     @StateObject private var viewModel = AppViewModel.live()
+    @StateObject private var updateController = ConnorReleaseUpdateController()
 
     init() {
         AppKitSecureCodingWarningMitigator.clearLegacyOpenPanelRootDirectoryState()
@@ -22,9 +23,13 @@ struct ConnorGraphAgentMacApp: App {
     var body: some Scene {
         WindowGroup {
             AppShellView(viewModel: viewModel)
+                .environmentObject(updateController)
                 .preferredColorScheme(viewModel.appearanceMode.colorScheme)
         }
         .commands {
+            CommandGroup(after: .appInfo) {
+                ConnorCheckForUpdatesCommandView(updateController: updateController)
+            }
             CommandGroup(replacing: .newItem) {}
             CommandGroup(replacing: .saveItem) {}
             CommandGroup(replacing: .importExport) {}

@@ -1,6 +1,6 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-17 01:20 GMT+8  
+文档更新时间：2026-06-17 11:48 GMT+8  
 当前代码基线:`feature/apple-iwork-attachment-support`,在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface / session-scoped multi-root project workspace / Connor-owned Scientific Compute Runtime skeleton / 商用级 Document Attachment OS / WKWebView-backed `web_fetch(js)` 基础上,继续收紧 Apple 原生 UI 边界:PDF/Word/Excel/PowerPoint 与 Apple iWork（Pages/Numbers/Keynote）一等附件仍由 Connor Session Capsule 和 Attachment Store 管理;PDF selectable text 抽取和多页原文预览继续使用 PDFKit;Office/iWork/Presentation/Spreadsheet 抽取继续通过 MarkItDown/Docling sidecar best-effort 编排与 hardening;Office/iWork/Presentation/Spreadsheet 原文件预览优先交给 macOS Quick Look / QuickLookUI,Connor 自有 UI 只负责 manifest、extraction status、retry、omitted attachment summary 和治理证据;AI 设置页 Add Connection 前置 DeepSeek、Xiaomi MiMo 和中国常用模型入口,在 OpenAI Compatible 统一底座上支持 MiMo 官方 `api-key` 认证头。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package,目标是把 Connor 建成 **graph-memory-native Agent OS**:它不是"图谱编辑器",也不是"Claude SDK 外壳",而是以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI 和 Local Automation Surface 共同构成的本地 Agent 操作系统。
@@ -1043,6 +1043,8 @@ AI
 界面布局已按当前 Settings Center 卡片风格落地:顶部标题"权限"居中;内容最大宽度 760;`SettingsPermissionsSection` 先展示页面说明,再用 `新会话默认权限` 卡片承载权限模式 picker 和当前模式摘要,用 `当前真实生效` 卡片说明权限模式、网络和 Shell 的实际决策来源,用 `安全边界` 卡片说明不开放 allowAll、Workspace 属于会话、本地单用户边界。能力矩阵说明放入可折叠的"查看当前策略说明" disclosure,默认不展示工程化 capability 表,以符合 Apple 设置页只暴露必要选项的原则。
 
 会话侧栏的"所有会话"状态列表和"标签"列表支持 macOS 右键菜单:状态项可"编辑状态…"或"创建状态…",标签项可"编辑标签…"或"创建标签…"。状态创建/编辑只面向显示名和图标;UID 是系统主键,创建时自动生成不重复的 `status_<uuid>`,编辑时只读展示、不可修改;排序和终态不暴露在弹窗中。状态图标使用常用 SF Symbol 菜单选择器。标签创建/编辑只面向显示名和颜色;UID 是系统主键,创建时自动生成不重复的 `label_<uuid>`。标签色彩选择使用 SwiftUI 原生 `ColorPicker("颜色", selection:..., supportsOpacity: false)`,保存时兼容旧命名色并可写入十六进制颜色。以上操作写入 `config/session-governance.json`,并立即刷新当前 AppViewModel、会话标签菜单、侧栏筛选计数和 automation governance mirror。当前底层会话状态仍由内置 `AgentSessionStatus` 枚举约束;因此自定义状态定义先作为治理配置维护能力落地,真正把任意自定义状态用于会话状态切换需要后续将 session status storage 从 enum 升级为 string-backed status ID。
+
+会话侧栏产品导航继续弱化"智能体"作为前台主菜单概念:自动化分组仅保留"定时任务"与"事件触发";"数据源"改为可展开分组,下设"邮件系统"、"飞书"、"RSS"、"API"四个入口;并新增与"数据源"同级的"MCP"入口,用于体现 MCP 作为能力协议/运行时管理面的独立性,而不是普通业务数据源的子项。
 
 核心视图:
 

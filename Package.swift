@@ -16,6 +16,9 @@ let package = Package(
         .executable(name: "connor-graph-agent-mac", targets: ["ConnorGraphAgentMac"]),
         .executable(name: "connor", targets: ["ConnorCLI"])
     ],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.9.0")
+    ],
     targets: [
         .target(name: "ConnorGraphCore"),
         .target(name: "ConnorGraphMemory", dependencies: ["ConnorGraphCore"]),
@@ -39,7 +42,12 @@ let package = Package(
         ),
         .executableTarget(
             name: "ConnorGraphAgentMac",
-            dependencies: ["ConnorGraphAgent", "ConnorGraphStore", "ConnorGraphAppSupport"],
+            dependencies: [
+                "ConnorGraphAgent",
+                "ConnorGraphStore",
+                "ConnorGraphAppSupport",
+                .product(name: "Sparkle", package: "Sparkle")
+            ],
             resources: [.process("Assets.xcassets")],
             linkerSettings: [.linkedFramework("WebKit"), .linkedFramework("CoreLocation")]
         ),

@@ -105,6 +105,7 @@ struct ConnorSettingsDetailView: View {
 
 struct SettingsAppSection: View {
     @ObservedObject var viewModel: AppViewModel
+    @EnvironmentObject private var updateController: ConnorReleaseUpdateController
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -124,15 +125,34 @@ struct SettingsAppSection: View {
                     SettingsTextFieldRow(title: "代理地址", subtitle: "例如 http://127.0.0.1:7890", text: $viewModel.httpProxyURLString)
                 }
             }
-            SettingsGroup(title: "关于") {
-                SettingsValueRow(title: "版本", value: "0.1.0")
+            SettingsGroup(title: "关于与更新") {
+                SettingsValueRow(title: "当前版本", value: updateController.currentVersion.displayText)
                 Divider()
-                HStack {
-                    Text("检查更新")
-                    Spacer()
-                    Button("立即检查") { viewModel.appSettingsMessage = "当前为本地开发版本。" }
+                SettingsValueRow(title: "Bundle ID", value: updateController.currentVersion.bundleIdentifier)
+                Divider()
+                SettingsValueRow(title: "更新源", value: updateController.feedURLString)
+                Divider()
+                VStack(alignment: .leading, spacing: SettingsListLayout.spaceM) {
+                    HStack(alignment: .center, spacing: SettingsListLayout.spaceM) {
+                        VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
+                            Text("软件更新")
+                                .font(SettingsListTypography.rowTitleSelected)
+                            Text(updateController.configurationStatus)
+                                .font(SettingsListTypography.rowCaption)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                        Spacer()
+                        Button("检查更新") {
+                            updateController.checkForUpdates()
+                        }
+                        .disabled(!updateController.canCheckForUpdates)
+                    }
+                    Text("点击后由 Sparkle 检查 appcast、展示可用版本并完成下载、验证、安装与重启流程；Connor 不自研二进制替换器。")
+                        .font(SettingsListTypography.rowCaption)
+                        .foregroundStyle(.secondary)
                 }
-                .font(SettingsListTypography.rowTitle)
+                .frame(minHeight: SettingsListLayout.prominentRowMinHeight, alignment: .leading)
             }
         }
     }
