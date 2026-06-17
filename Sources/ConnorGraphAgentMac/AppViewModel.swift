@@ -212,6 +212,12 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var addSkillRequestDraft: String = ""
     @Published var isSubmittingAddSkillRequest: Bool = false
     @Published var addSkillDialogMessage: String?
+    @Published var isEditSkillDialogPresented: Bool = false
+    @Published var editSkillRequestDraft: String = ""
+    @Published var editingSkillCard: SkillManagerCard?
+    @Published var isSubmittingEditSkillRequest: Bool = false
+    @Published var editSkillDialogMessage: String?
+    @Published var pendingSkillDeletionCard: SkillManagerCard?
     @Published var sidecarRuntimeDiagnostics: [ClaudeSDKSidecarRuntimeDiagnostics] = []
     @Published var commercialReleaseGateResult: CommercialReadinessReleaseGateResult?
     @Published var productOSRegistryMessage: String?
@@ -1271,7 +1277,102 @@ final class AppViewModel: NSObject, ObservableObject {
         isSubmittingAddSkillRequest = false
     }
 
+    func presentEditSkillDialog(card: SkillManagerCard) {
+        editingSkillCard = card
+        editSkillRequestDraft = ""
+        editSkillDialogMessage = nil
+        isSubmittingEditSkillRequest = false
+        isEditSkillDialogPresented = true
+    }
+
+    func cancelEditSkillDialog() {
+        guard !isSubmittingEditSkillRequest else { return }
+        isEditSkillDialogPresented = false
+        editSkillRequestDraft = ""
+        editSkillDialogMessage = nil
+        editingSkillCard = nil
+    }
+
+    func submitEditSkillRequest() async {
+        guard let card = editingSkillCard else { return }
+        let request = editSkillRequestDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !request.isEmpty, !isSubmittingEditSkillRequest else { return }
+        guard let chatSessionRepository else {
+            editSkillDialogMessage = "会话系统尚未初始化。"
+            return
+        }
+        isSubmittingEditSkillRequest = true
+        editSkillDialogMessage = "康纳正在根据你的需求修改技能…"
+        do {
+            let title = sanitizedSessionTitle("编辑技能：\(card.title)")
+            let session = try chatSessionRepository.createSession(title: title)
+            rememberWorkspaceMode(.conversation, for: session.id)
+            try loadBackgroundTasks(sessionID: session.id)
+            reloadChatSessions(restoreWorkspaceMode: false)
+            try await runSkillRequestInBackgroundSession(
+                session: session,
+                prompt: buildEditSkillAgentPrompt(card: card, userRequest: request),
+                displayPrompt: "编辑技能：\(card.title) — \(request)"
+            )
+            editSkillRequestDraft = ""
+            editSkillDialogMessage = "修改请求已提交。完成后技能列表会自动刷新。"
+            reloadChatSessions(restoreWorkspaceMode: false)
+            reloadSkillRuntimeDefinitions()
+            selectedSkillManagerCardID = card.id
+            errorMessage = nil
+        } catch {
+            editSkillDialogMessage = "修改失败：\(String(describing: error))"
+            errorMessage = String(describing: error)
+        }
+        isSubmittingEditSkillRequest = false
+    }
+
+    func requestDeleteSkill(card: SkillManagerCard) {
+        pendingSkillDeletionCard = card
+    }
+
+    func cancelDeleteSkill() {
+        pendingSkillDeletionCard = nil
+    }
+
+    func confirmDeletePendingSkill() {
+        guard let card = pendingSkillDeletionCard else { return }
+        do {
+            try deleteSkill(card: card)
+            pendingSkillDeletionCard = nil
+            reloadSkillRuntimeDefinitions()
+            if selectedSkillManagerCardID == card.id {
+                selectedSkillManagerCardID = commercialSkillManagerPresentation.cards.first?.id
+            }
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    private func deleteSkill(card: SkillManagerCard) throws {
+        guard card.sourceTier == SkillSourceTier.user.rawValue else {
+            throw AppSkillRuntimeRepositoryError.unsafePermissionMode("Only user skills can be deleted from the skill manager. Skill \(card.id) is \(card.sourceTier).")
+        }
+        let packagePath = card.packagePath.isEmpty ? URL(fileURLWithPath: card.path).deletingLastPathComponent().path : card.packagePath
+        guard let storagePaths else { throw AppChatRuntimeUnavailableError.nativeSessionManagerUnavailable }
+        let packageURL = URL(fileURLWithPath: packagePath, isDirectory: true).standardizedFileURL
+        let rootURL = storagePaths.skillsDirectory.standardizedFileURL
+        guard packageURL.path == rootURL.appendingPathComponent(card.id, isDirectory: true).standardizedFileURL.path else {
+            throw AppSkillRuntimeRepositoryError.unsafePermissionMode("Refusing to delete skill outside user skill directory: \(packageURL.path)")
+        }
+        try FileManager.default.removeItem(at: packageURL)
+    }
+
     private func runAddSkillRequestInBackgroundSession(session: AgentSession, userRequest: String) async throws {
+        try await runSkillRequestInBackgroundSession(
+            session: session,
+            prompt: buildAddSkillAgentPrompt(userRequest: userRequest),
+            displayPrompt: "添加技能：\(userRequest)"
+        )
+    }
+
+    private func runSkillRequestInBackgroundSession(session: AgentSession, prompt: String, displayPrompt: String) async throws {
         guard var manager = makeNativeSessionManager(for: session) else {
             throw AppChatRuntimeUnavailableError.nativeSessionManagerUnavailable
         }
@@ -1290,8 +1391,6 @@ final class AppViewModel: NSObject, ObservableObject {
             activeChatRunIDsBySessionID.removeValue(forKey: sessionID)
             refreshSelectedSubmittingState()
         }
-        let prompt = buildAddSkillAgentPrompt(userRequest: userRequest)
-        let displayPrompt = "添加技能：\(userRequest)"
         _ = try await manager.submit(
             prompt,
             sessionSummary: nil,
@@ -1321,15 +1420,47 @@ final class AppViewModel: NSObject, ObservableObject {
 
         请按成熟技能创建流程工作：
         1. 如果需求不清楚，先用简短问题澄清技能的用途、触发时机、输入、输出和约束。
-        2. 如果需求足够清楚，必须调用本地文件写入工具创建技能文件，不要只在回复中说“已添加”。
+        2. 如果需求足够清楚，必须调用 `connor_skill_create` 创建技能；不要只在回复中说“已添加”。
         3. 推荐技能名称：\(suggestion.name)
         4. 推荐 slug：\(suggestion.slug)
-        5. 目标文件：\(skillRoot)/\(suggestion.slug)/SKILL.md
-        6. SKILL.md 必须包含 YAML frontmatter：name、description、tags、globs、x-connor。
-        7. 正文应写成可执行的工作流说明，包括适用场景、步骤、输出格式和注意事项。
-        8. 创建完成后，请验证技能可以被 Connor 扫描，并告诉用户技能名称、slug 和文件路径。
+        5. 目标目录：\(skillRoot)/\(suggestion.slug)/
+        6. `connor_skill_create` 的 instructions 参数应包含完整 Markdown 工作流说明，包括适用场景、步骤、输出格式和注意事项。
+        7. 创建完成后，请验证技能可以被 Connor 扫描，并告诉用户技能名称、slug 和文件路径。
 
-        请不要只给建议；在信息足够时，直接创建文件。如果本地工具不可用，请明确说明未能写入文件。
+        首选工具：`connor_skill_create`。只有当该工具不可用时，才使用通用文件写入工具，并明确说明降级原因。
+        """
+    }
+
+    private func buildEditSkillAgentPrompt(card: SkillManagerCard, userRequest: String) -> String {
+        return """
+        你正在帮助用户修改一个已有 Connor 技能。用户在“编辑技能”弹窗中输入了以下修改需求：
+
+        \(userRequest)
+
+        当前技能信息：
+        - slug: \(card.id)
+        - name: \(card.title)
+        - description: \(card.subtitle)
+        - source tier: \(card.sourceTier)
+        - skill file: \(card.path)
+        - package: \(card.packagePath)
+        - risk: \(card.riskLabel)
+        - lifecycle: \(card.lifecycleLabel)
+        - required sources: \(card.requiredSources.joined(separator: ", "))
+        - permissions: \(card.permissionLabels.joined(separator: ", "))
+
+        当前技能正文：
+        ```markdown
+        \(card.instructions)
+        ```
+
+        请按成熟技能修改流程工作：
+        1. 如果修改需求不清楚，先简短澄清。
+        2. 如果需求足够清楚，必须调用 `connor_skill_update` 修改 slug 为 `\(card.id)` 的技能；不要只回复修改建议。
+        3. 尽量保留当前技能的有效结构，只调整用户要求改变的部分。
+        4. 修改完成后，请说明修改了什么，并确认技能仍可被 Connor 扫描。
+
+        首选工具：`connor_skill_update`。只有当该工具不可用时，才使用通用文件编辑工具，并明确说明降级原因。
         """
     }
 

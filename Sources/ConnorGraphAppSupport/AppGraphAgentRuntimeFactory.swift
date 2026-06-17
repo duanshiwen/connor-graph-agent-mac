@@ -247,6 +247,12 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         registry.register(LocalEditFileTool(policy: localWorkspacePolicy))
         registry.register(LocalMultiEditTool(policy: localWorkspacePolicy))
         registry.register(LocalBashTool(policy: localWorkspacePolicy))
+        if let storagePaths {
+            let skillMutationService = SkillManagerMutationService(storagePaths: storagePaths)
+            registry.register(ConnorSkillCreateTool(service: skillMutationService))
+            registry.register(ConnorSkillUpdateTool(service: skillMutationService))
+            registry.register(ConnorSkillDeleteTool(service: skillMutationService))
+        }
         let scientificRuntime = ScientificComputeRuntime(engines: [NativeSwiftScientificEngine()])
         registry.register(ScienceComputeTool(runtime: scientificRuntime))
         registry.register(ScienceUnitsTool(runtime: scientificRuntime))
