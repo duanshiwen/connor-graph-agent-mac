@@ -130,6 +130,8 @@ public enum MCPSourceRuntimeAuditEventKind: String, Codable, Sendable, Equatable
     case discoveryStarted
     case discoveryFinished
     case toolPermissionRequested
+    case toolPolicyBlocked
+    case toolDefinitionChanged
     case toolStarted
     case toolFinished
     case toolFailed
@@ -145,6 +147,9 @@ public struct MCPSourceRuntimeAuditRecord: Codable, Sendable, Equatable, Identif
     public var prefixedToolName: String?
     public var permissionCapability: AgentPermissionCapability?
     public var requiredCapabilities: [AgentPermissionCapability]
+    public var riskClass: MCPToolRiskClass?
+    public var executionPolicy: MCPToolExecutionPolicy?
+    public var integrityStatus: MCPToolIntegrityStatus?
     public var timestamp: Date
     public var resultSummary: String?
     public var errorSummary: String?
@@ -159,6 +164,9 @@ public struct MCPSourceRuntimeAuditRecord: Codable, Sendable, Equatable, Identif
         prefixedToolName: String? = nil,
         permissionCapability: AgentPermissionCapability? = nil,
         requiredCapabilities: [AgentPermissionCapability] = [],
+        riskClass: MCPToolRiskClass? = nil,
+        executionPolicy: MCPToolExecutionPolicy? = nil,
+        integrityStatus: MCPToolIntegrityStatus? = nil,
         timestamp: Date = Date(),
         resultSummary: String? = nil,
         errorSummary: String? = nil
@@ -172,6 +180,9 @@ public struct MCPSourceRuntimeAuditRecord: Codable, Sendable, Equatable, Identif
         self.prefixedToolName = prefixedToolName
         self.permissionCapability = permissionCapability
         self.requiredCapabilities = requiredCapabilities
+        self.riskClass = riskClass
+        self.executionPolicy = executionPolicy
+        self.integrityStatus = integrityStatus
         self.timestamp = timestamp
         self.resultSummary = resultSummary
         self.errorSummary = errorSummary
@@ -200,6 +211,9 @@ public struct MCPSourceToolDescriptor: Codable, Sendable, Equatable, Identifiabl
     public var description: String
     public var inputSchema: MCPJSONValue
     public var requiredCapabilities: [AgentPermissionCapability]
+    public var governancePolicy: MCPToolGovernancePolicy?
+    public var definitionFingerprint: MCPToolDefinitionFingerprint?
+    public var integrityStatus: MCPToolIntegrityStatus?
 
     public init(
         sourceID: String,
@@ -207,7 +221,10 @@ public struct MCPSourceToolDescriptor: Codable, Sendable, Equatable, Identifiabl
         rawName: String,
         description: String,
         inputSchema: MCPJSONValue,
-        requiredCapabilities: [AgentPermissionCapability]
+        requiredCapabilities: [AgentPermissionCapability],
+        governancePolicy: MCPToolGovernancePolicy? = nil,
+        definitionFingerprint: MCPToolDefinitionFingerprint? = nil,
+        integrityStatus: MCPToolIntegrityStatus? = nil
     ) {
         self.sourceID = sourceID
         self.name = name
@@ -215,6 +232,9 @@ public struct MCPSourceToolDescriptor: Codable, Sendable, Equatable, Identifiabl
         self.description = description
         self.inputSchema = inputSchema
         self.requiredCapabilities = requiredCapabilities
+        self.governancePolicy = governancePolicy
+        self.definitionFingerprint = definitionFingerprint
+        self.integrityStatus = integrityStatus
     }
 }
 
@@ -282,7 +302,7 @@ public actor MCPSourceRuntime<Transport: MCPClientTransport> {
         try await discoverRuntimeState().catalog
     }
 
-    public func discoverRuntimeState(now: Date = Date()) async throws -> MCPSourceRuntimeDiscoverySnapshot {
+    public func discoverRuntimeState(now: Date = Date(), previousCatalog: [MCPSourceToolDescriptor] = []) async throws -> MCPSourceRuntimeDiscoverySnapshot {
         let discoveryStarted = MCPSourceRuntimeAuditRecord(
             sourceID: configuration.sourceID,
             eventKind: .discoveryStarted,
@@ -292,7 +312,7 @@ public actor MCPSourceRuntime<Transport: MCPClientTransport> {
         do {
             let initialization = try await client.initialize()
             let tools = try await client.listTools()
-            let catalog = toolCatalog(from: tools)
+            let catalog = toolCatalog(from: tools, previousCatalog: previousCatalog)
             let capabilitySnapshot = MCPSourceRuntimeCapabilitySnapshot.build(initialization: initialization, tools: tools)
             let health = MCPSourceRuntimeHealthRecord(
                 sourceID: configuration.sourceID,
@@ -429,17 +449,8 @@ public actor MCPSourceRuntime<Transport: MCPClientTransport> {
         try await client.shutdown()
     }
 
-    private func toolCatalog(from tools: [MCPToolDefinition]) -> [MCPSourceToolDescriptor] {
-        tools.map { tool in
-            MCPSourceToolDescriptor(
-                sourceID: configuration.sourceID,
-                name: Self.exposedToolName(sourceID: configuration.sourceID, rawToolName: tool.name),
-                rawName: tool.name,
-                description: tool.description,
-                inputSchema: tool.inputSchema,
-                requiredCapabilities: configuration.allowedCapabilities
-            )
-        }
+    private func toolCatalog(from tools: [MCPToolDefinition], previousCatalog: [MCPSourceToolDescriptor] = []) -> [MCPSourceToolDescriptor] {
+        MCPToolGovernanceEnforcer.governedCatalog(source: configuration, tools: tools, previousCatalog: previousCatalog)
     }
 
     private func lifecycleStateForCurrentConfiguration() -> MCPSourceRuntimeLifecycleState {

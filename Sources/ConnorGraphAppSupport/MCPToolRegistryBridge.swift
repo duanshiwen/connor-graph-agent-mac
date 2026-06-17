@@ -60,7 +60,10 @@ public struct MCPToolRegistryBridge: Sendable {
                     rawName: descriptor.rawName,
                     description: descriptor.description,
                     inputSchema: descriptor.inputSchema,
-                    requiredCapabilities: descriptor.requiredCapabilities
+                    requiredCapabilities: descriptor.requiredCapabilities,
+                    governancePolicy: descriptor.governancePolicy,
+                    definitionFingerprint: descriptor.definitionFingerprint,
+                    integrityStatus: descriptor.integrityStatus
                 ),
                 router: router
             ))
