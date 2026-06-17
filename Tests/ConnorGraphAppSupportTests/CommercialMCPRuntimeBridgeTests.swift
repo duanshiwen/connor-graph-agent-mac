@@ -65,13 +65,79 @@ import ConnorGraphStore
             groupID: "default",
             userPrompt: "call fixture mcp",
             toolCallID: "tool-call-mcp-runtime-bridge",
-            policyEngine: AgentPolicyEngine(permissionMode: .allowAll)
+            policyEngine: AgentPolicyEngine(permissionMode: .allowAll),
+            approvedCapabilities: [.runNetworkShellCommand]
         )
     )
 
     #expect(result.contentText == "hello runtime bridge")
     let audit = try mcpRepository.loadRecentAuditRecords(sourceID: "fixture", limit: 10)
     #expect(audit.map(\.eventKind).contains(.toolFinished))
+}
+
+@Test func appGraphAgentRuntimeFactoryRequiresExplicitMCPToolConfirmation() async throws {
+    let appDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorCommercialMCPRuntimeBridgeConfirmation-", isDirectory: true)
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: appDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: appDirectory) }
+
+    let storagePaths = AppStoragePaths(applicationSupportDirectory: appDirectory)
+    try storagePaths.ensureDirectoryHierarchy()
+    let fixture = try makeRuntimeBridgeMCPFixtureServer(in: appDirectory)
+    let mcpRepository = AppMCPSourceRuntimeRepository(storagePaths: storagePaths)
+    let config = MCPSourceRuntimeConfiguration(
+        sourceID: "fixture",
+        displayName: "Fixture MCP",
+        transport: .stdio(command: "/usr/bin/python3", arguments: [fixture.path]),
+        status: .enabled,
+        credentialRequirement: .none,
+        allowedCapabilities: [.externalNetwork],
+        toolNamePrefix: "fixture"
+    )
+    try mcpRepository.save(config)
+    try mcpRepository.saveToolCatalog(sourceID: "fixture", catalog: [
+        MCPSourceToolDescriptor(
+            sourceID: "fixture",
+            name: "mcp__fixture__delete_issue",
+            rawName: "delete_issue",
+            description: "Delete an issue",
+            inputSchema: .object(["type": .string("object")]),
+            requiredCapabilities: [.externalNetwork],
+            governancePolicy: MCPToolGovernancePolicy(
+                riskClass: .destructive,
+                executionPolicy: .requireConfirmation,
+                permissionCapability: .runDestructiveShellCommand,
+                rationale: "Destructive MCP tool requires explicit confirmation."
+            ),
+            definitionFingerprint: MCPToolDefinitionFingerprint(value: "test"),
+            integrityStatus: .verified
+        )
+    ])
+
+    let storeURL = appDirectory.appendingPathComponent("store.sqlite")
+    let store = try SQLiteGraphKernelStore(path: storeURL.path)
+    try store.migrate()
+    let settings = AppLLMSettingsRepository(
+        settingsStore: LocalRuntimeBridgeSettingsStore(),
+        credentialStore: LocalRuntimeBridgeCredentialStore()
+    )
+    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: settings, storagePaths: storagePaths)
+    let controller = factory.makeAgentLoopController(permissionMode: AgentPermissionMode.allowAll)
+
+    await #expect(throws: AgentToolError.self) {
+        try await controller.toolRegistry.execute(
+            AgentToolCall(name: "mcp__fixture__delete_issue", argumentsJSON: #"{}"#),
+            context: AgentToolExecutionContext(
+                runID: "run-mcp-confirmation",
+                sessionID: "session-mcp-confirmation",
+                groupID: "default",
+                userPrompt: "call destructive fixture mcp",
+                toolCallID: "tool-call-mcp-confirmation",
+                policyEngine: AgentPolicyEngine(permissionMode: .allowAll)
+            )
+        )
+    }
 }
 
 private func makeRuntimeBridgeMCPFixtureServer(in directory: URL) throws -> URL {

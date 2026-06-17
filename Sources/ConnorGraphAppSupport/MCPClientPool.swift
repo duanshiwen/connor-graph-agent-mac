@@ -8,6 +8,8 @@ public enum MCPClientPoolError: Error, Sendable, Equatable, CustomStringConverti
     case unsupportedTransport(String)
     case unsupportedCredentialRequirement(ProductOSCredentialRequirement)
     case toolNotInPersistedCatalog(String)
+    case toolPolicyBlocked(String)
+    case toolDefinitionChanged(String)
 
     public var description: String {
         switch self {
@@ -16,19 +18,22 @@ public enum MCPClientPoolError: Error, Sendable, Equatable, CustomStringConverti
         case .unsupportedTransport(let message): "unsupportedTransport: \(message)"
         case .unsupportedCredentialRequirement(let requirement): "unsupportedCredentialRequirement: \(requirement.rawValue)"
         case .toolNotInPersistedCatalog(let toolName): "toolNotInPersistedCatalog: \(toolName)"
+        case .toolPolicyBlocked(let toolName): "toolPolicyBlocked: \(toolName)"
+        case .toolDefinitionChanged(let toolName): "toolDefinitionChanged: \(toolName)"
         }
     }
 }
 
 /// Commercial MCP runtime pool entry point.
 ///
-/// Current MVP scope:
+/// Responsibilities:
 /// - Loads Connor-owned source configurations from `AppMCPSourceRuntimeRepository`.
 /// - Exposes persisted catalogs for enabled sources to the Agent runtime.
-/// - Routes Agent tool calls to real stdio MCP servers.
-/// - Persists invocation audit records after every call.
+/// - Enforces per-tool governance policy and definition integrity before execution.
+/// - Routes governed Agent tool calls to real stdio MCP servers.
+/// - Persists invocation and governance audit records after every call.
 ///
-/// Pending later phases: long-lived connection reuse, HTTP/SSE transports, Keychain-backed
+/// Remaining product expansion: long-lived connection reuse, HTTP/SSE transports, Keychain-backed
 /// credential injection, activation hot reload, and result artifact governance.
 public actor MCPClientPool: MCPToolRouting {
     public var repository: AppMCPSourceRuntimeRepository
@@ -65,7 +70,10 @@ public actor MCPClientPool: MCPToolRouting {
                     rawName: descriptor.rawName,
                     description: descriptor.description,
                     inputSchema: descriptor.inputSchema,
-                    requiredCapabilities: descriptor.requiredCapabilities
+                    requiredCapabilities: descriptor.requiredCapabilities,
+                    governancePolicy: descriptor.governancePolicy,
+                    definitionFingerprint: descriptor.definitionFingerprint,
+                    integrityStatus: descriptor.integrityStatus
                 )
             })
         }
@@ -96,9 +104,10 @@ public actor MCPClientPool: MCPToolRouting {
     ) async throws -> AgentToolResult {
         let configuration = try sourceConfiguration(sourceID: sourceID)
         guard configuration.status == .enabled else { throw MCPClientPoolError.sourceNotEnabled(sourceID) }
-        guard try persistedCatalogContains(sourceID: sourceID, exposedToolName: exposedToolName, rawToolName: rawToolName) else {
+        guard let descriptor = try persistedCatalogDescriptor(sourceID: sourceID, exposedToolName: exposedToolName, rawToolName: rawToolName) else {
             throw MCPClientPoolError.toolNotInPersistedCatalog(exposedToolName)
         }
+        try await enforcePolicy(descriptor: descriptor, arguments: arguments, context: context)
         let runtime = try runtime(for: configuration)
         let invocation = try await runtime.callTool(
             name: exposedToolName,
@@ -131,7 +140,7 @@ public actor MCPClientPool: MCPToolRouting {
             throw MCPClientPoolError.unsupportedCredentialRequirement(configuration.credentialRequirement)
         }
         guard case .stdio(let command, let arguments) = configuration.transport else {
-            throw MCPClientPoolError.unsupportedTransport("MVP pool currently supports stdio sources only.")
+            throw MCPClientPoolError.unsupportedTransport("Runtime pool currently supports stdio sources only; HTTP/SSE transport is not enabled yet.")
         }
         let transport = MCPStdioClientTransport(
             command: command,
@@ -145,12 +154,98 @@ public actor MCPClientPool: MCPToolRouting {
         return runtime
     }
 
-    private func persistedCatalogContains(sourceID: String, exposedToolName: String, rawToolName: String) throws -> Bool {
-        try repository.loadToolCatalog(sourceID: sourceID).contains { descriptor in
+    private func persistedCatalogDescriptor(sourceID: String, exposedToolName: String, rawToolName: String) throws -> MCPSourceToolDescriptor? {
+        try repository.loadToolCatalog(sourceID: sourceID).first { descriptor in
             descriptor.rawName == rawToolName && (
                 descriptor.name == exposedToolName ||
                 MCPSourceRuntime<MockMCPClientTransport>.exposedToolName(sourceID: descriptor.sourceID, rawToolName: descriptor.rawName) == exposedToolName
             )
         }
+    }
+
+    private func enforcePolicy(
+        descriptor: MCPSourceToolDescriptor,
+        arguments: MCPJSONValue,
+        context: AgentToolExecutionContext
+    ) async throws {
+        let policy = descriptor.governancePolicy ?? MCPToolGovernancePolicy(
+            riskClass: .unknown,
+            executionPolicy: .requireConfirmation,
+            permissionCapability: .runNetworkShellCommand,
+            rationale: "Missing persisted MCP tool governance policy; fail-safe confirmation required."
+        )
+        let payloadJSON = (try? jsonString(arguments)) ?? "{}"
+        if descriptor.integrityStatus == .changed {
+            try repository.appendAuditRecord(MCPSourceRuntimeAuditRecord(
+                sourceID: descriptor.sourceID,
+                runID: context.runID,
+                sessionID: context.sessionID,
+                eventKind: .toolDefinitionChanged,
+                rawToolName: descriptor.rawName,
+                prefixedToolName: descriptor.name,
+                permissionCapability: policy.permissionCapability,
+                requiredCapabilities: descriptor.requiredCapabilities,
+                riskClass: policy.riskClass,
+                executionPolicy: policy.executionPolicy,
+                integrityStatus: descriptor.integrityStatus,
+                errorSummary: "Execution blocked because the persisted tool definition hash changed. Re-test and review this source before use."
+            ))
+            throw MCPClientPoolError.toolDefinitionChanged(descriptor.name)
+        }
+        if policy.executionPolicy == .block {
+            try repository.appendAuditRecord(MCPSourceRuntimeAuditRecord(
+                sourceID: descriptor.sourceID,
+                runID: context.runID,
+                sessionID: context.sessionID,
+                eventKind: .toolPolicyBlocked,
+                rawToolName: descriptor.rawName,
+                prefixedToolName: descriptor.name,
+                permissionCapability: policy.permissionCapability,
+                requiredCapabilities: descriptor.requiredCapabilities,
+                riskClass: policy.riskClass,
+                executionPolicy: policy.executionPolicy,
+                integrityStatus: descriptor.integrityStatus,
+                errorSummary: policy.rationale
+            ))
+            throw MCPClientPoolError.toolPolicyBlocked(descriptor.name)
+        }
+        if policy.executionPolicy == .requireConfirmation && !context.approvedCapabilities.contains(policy.permissionCapability) {
+            let decision = await context.policyEngine.evaluate(
+                capability: policy.permissionCapability,
+                runID: context.runID,
+                sessionID: context.sessionID,
+                toolName: descriptor.name,
+                payloadJSON: payloadJSON
+            )
+            switch decision.outcome {
+            case .approved:
+                // Commercial MCP governance requires explicit, per-run approval for sensitive MCP tools.
+                throw AgentToolError.permissionNeedsApproval(AgentPermissionRequest(
+                    id: decision.requestID,
+                    runID: context.runID,
+                    sessionID: context.sessionID,
+                    capability: policy.permissionCapability,
+                    toolName: descriptor.name,
+                    payloadJSON: payloadJSON
+                ))
+            case .needsApproval:
+                throw AgentToolError.permissionNeedsApproval(AgentPermissionRequest(
+                    id: decision.requestID,
+                    runID: context.runID,
+                    sessionID: context.sessionID,
+                    capability: policy.permissionCapability,
+                    toolName: descriptor.name,
+                    payloadJSON: payloadJSON
+                ))
+            case .denied:
+                throw AgentToolError.permissionDenied(decision.reason)
+            }
+        }
+    }
+
+    private func jsonString(_ value: MCPJSONValue) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return String(decoding: try encoder.encode(value), as: UTF8.self)
     }
 }
