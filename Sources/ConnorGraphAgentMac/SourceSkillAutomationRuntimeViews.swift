@@ -151,10 +151,11 @@ private struct SkillManagerEmptyDetailView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            SkillManagerTopBar(title: "Skills", subtitle: "Skill Manager", onRefresh: onRefresh)
-            SkillManagerMetricsStrip(summary: summary)
-            ContentUnavailableView("暂无技能", systemImage: "bolt", description: Text("添加 SKILL.md 后会在左侧列表出现，并在这里显示 Craft 风格详情。"))
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            SkillManagerTopBar(title: "技能", subtitle: "", onRefresh: onRefresh)
+            Spacer(minLength: 80)
+            ContentUnavailableView("暂无技能", systemImage: "sparkles", description: Text("点击左侧列表右上角的 +，添加一个新技能。"))
+                .frame(maxWidth: .infinity)
+            Spacer()
             if !warnings.isEmpty {
                 SkillInfoSection(title: "Global warnings", systemImage: "exclamationmark.triangle") {
                     ForEach(warnings, id: \.self) { warning in
@@ -179,9 +180,11 @@ private struct SkillManagerTopBar: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(.largeTitle.weight(.semibold))
-                Text(subtitle)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                if !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
             }
             Spacer()
             Button(action: onRefresh) {

@@ -494,7 +494,7 @@ struct CraftSkillListPane: View {
             .padding(.vertical, 13)
 
             if viewModel.commercialSkillManagerPresentation.cards.isEmpty {
-                ContentUnavailableView("暂无技能", systemImage: "bolt", description: Text("在 .agents/skills 或 Connor skills 目录添加 SKILL.md。"))
+                ContentUnavailableView("暂无技能", systemImage: "sparkles", description: Text("点击右上角 +，添加一个新技能。"))
                     .padding(.top, 80)
             } else {
                 List(viewModel.commercialSkillManagerPresentation.cards) { card in
