@@ -1481,59 +1481,6 @@ b011671 Phase H add skill runtime UI presentation
 
 ---
 
-## Release & Update Surface
-
-Connor 采用**无自建后端的 macOS 独立分发模型**:
-
-- Developer ID 签名与 Apple notarization 负责 macOS Gatekeeper 信任链。
-- Sparkle 2 负责 App 二进制自动更新，包括 appcast 检查、下载、EdDSA 验签、安装与重启。
-- GitHub Releases 或等价静态 artifact host 托管 release zip/dmg。
-- GitHub Pages 或等价静态托管服务托管 signed appcast feed。
-- Connor 自身只拥有 release policy、更新入口、设置页诊断、渠道策略与兼容性治理。
-
-当前稳定 feed:
-
-```text
-https://duanshiwen.github.io/connor-updates/stable/appcast.xml
-```
-
-App target 使用显式 `Sources/ConnorGraphAgentMac/Info.plist` 写入 Sparkle 配置:
-
-```text
-SUFeedURL=https://duanshiwen.github.io/connor-updates/stable/appcast.xml
-SUPublicEDKey=sWf8ogcYVvHBiWsjfWCodO263YAXcCD4EmzbNvMiMHc=
-SUEnableAutomaticChecks=YES
-```
-
-Connor 不运行远程更新后端,不自研二进制 patcher,不自研 app installer。可执行更新安装主权交给 Sparkle;Connor 只在产品层呈现"检查更新"入口、当前版本信息、feed 状态和失败诊断。
-
-发布流水线边界:
-
-```text
-push tag
-  -> GitHub Actions
-  -> swift test / xcodebuild archive
-  -> Developer ID signing
-  -> Apple notarization + staple
-  -> zip release artifact
-  -> Sparkle generate_appcast
-  -> GitHub Release artifact
-  -> GitHub Pages stable/appcast.xml
-  -> Connor checks feed via Sparkle
-```
-
-本仓库包含:
-
-- `ConnorGraphAgentMacApp` shared Xcode scheme
-- `scripts/release-macos-sparkle.sh`
-- `scripts/export-options-developer-id.plist`
-- `.github/workflows/release-macos-sparkle.yml`
-- `RELEASE_UPDATES.md`
-
-发布凭证不进入仓库。CI 需要通过 GitHub Secrets 提供 Apple notarization credentials、Developer ID certificate 和 Sparkle private key。
-
----
-
 ## Deferred Scope
 
 当前仍刻意延后:
@@ -1543,9 +1490,7 @@ push tag
 - OAuth server / team auth / multi-user permissions
 - Full REST framework or default long-running local server
 - Real macOS Shortcuts app integration
-- Mac App Store packaging / review path
-- Self-hosted release backend
-- Custom binary patcher / custom app installer
+- App Store packaging / notarization
 - Team billing / remote collaboration
 - Full onboarding walkthrough
 - Full theme editor / design system rewrite
