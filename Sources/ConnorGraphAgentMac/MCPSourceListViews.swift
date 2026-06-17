@@ -60,35 +60,37 @@ private struct SourceListHeader: View {
     var onRefresh: () -> Void
 
     var body: some View {
-        ZStack {
-            Text("MCP")
-                .font(AppListTypography.header)
-                .frame(maxWidth: .infinity, alignment: .center)
-            HStack(spacing: 8) {
-                Spacer()
-                Button(action: onAdd) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .frame(width: 24, height: 24)
-                }
-                .buttonStyle(.plain)
-                .contentShape(Circle())
-                .help("添加 MCP Source")
-                .accessibilityLabel("添加 MCP Source")
-
-                Button(action: onRefresh) {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .frame(width: 24, height: 24)
-                }
-                .buttonStyle(.plain)
-                .contentShape(Circle())
-                .help("刷新 MCP Sources")
-                .accessibilityLabel("刷新 MCP Sources")
+        HStack(alignment: .center, spacing: AppShellLayout.spaceS) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("MCP Sources")
+                    .font(AppListTypography.header)
+                Text("工具、凭据与治理")
+                    .font(AppListTypography.rowCaption)
+                    .foregroundStyle(.secondary)
             }
+            Spacer()
+            Button(action: onAdd) {
+                Image(systemName: "plus")
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .contentShape(Circle())
+            .help("添加 MCP Source")
+            .accessibilityLabel("添加 MCP Source")
+
+            Button(action: onRefresh) {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .contentShape(Circle())
+            .help("刷新 MCP Sources")
+            .accessibilityLabel("刷新 MCP Sources")
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 13)
+        .padding(.vertical, 12)
     }
 }
 
@@ -248,23 +250,27 @@ private struct MCPSourceRow: View {
 
     var body: some View {
         Button(action: onSelect) {
-            HStack(alignment: .top, spacing: 10) {
+            HStack(alignment: .top, spacing: AppShellLayout.spaceM) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(rowColor.opacity(isSelected ? 0.20 : 0.12))
+                    RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous)
+                        .fill(rowColor.opacity(isSelected ? 0.20 : 0.11))
                     Image(systemName: "server.rack")
                         .font(.system(size: 15, weight: .semibold))
+                        .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(rowColor)
                 }
-                .frame(width: 34, height: 34)
+                .frame(width: 36, height: 36)
 
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 6) {
-                        Circle().fill(rowColor).frame(width: 7, height: 7)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(card.title)
                             .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
                             .lineLimit(1)
                         Spacer(minLength: 0)
+                        Circle()
+                            .fill(rowColor)
+                            .frame(width: 7, height: 7)
+                            .accessibilityHidden(true)
                     }
                     Text(card.transportLabel)
                         .font(AppListTypography.rowSubtitle)
@@ -272,8 +278,9 @@ private struct MCPSourceRow: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                     HStack(spacing: 6) {
-                        SourceMiniPill(text: card.statusLabel, color: rowColor)
-                        SourceMiniPill(text: card.toolCountLabel, color: .secondary)
+                        AppPill(text: card.statusLabel, color: rowColor)
+                        AppPill(text: card.healthLabel, color: rowColor)
+                        AppPill(text: card.toolCountLabel, color: .secondary)
                     }
                 }
             }
@@ -281,14 +288,14 @@ private struct MCPSourceRow: View {
             .padding(.vertical, 9)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous)
                     .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(isSelected ? Color.accentColor.opacity(0.24) : Color.clear, lineWidth: 1)
+                RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous)
+                    .stroke(isSelected ? Color.accentColor.opacity(0.28) : Color.clear, lineWidth: 1)
             )
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -300,20 +307,5 @@ private struct MCPSourceRow: View {
         case .error: .red
         case .info: .blue
         }
-    }
-}
-
-private struct SourceMiniPill: View {
-    var text: String
-    var color: Color
-
-    var body: some View {
-        Text(text)
-            .font(AppListTypography.rowCaption)
-            .lineLimit(1)
-            .padding(.horizontal, 6)
-            .frame(height: 18)
-            .foregroundStyle(color)
-            .background(color.opacity(0.11), in: Capsule())
     }
 }

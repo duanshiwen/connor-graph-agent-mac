@@ -73,3 +73,97 @@ struct SidebarActionButtonStyle: ButtonStyle {
     }
 }
 
+enum AppShellLayout {
+    static let spaceXS: CGFloat = 4
+    static let spaceS: CGFloat = 8
+    static let spaceM: CGFloat = 12
+    static let spaceL: CGFloat = 16
+    static let spaceXL: CGFloat = 22
+
+    static let radiusS: CGFloat = 8
+    static let radiusM: CGFloat = 12
+    static let radiusL: CGFloat = 16
+    static let contentMaxWidth: CGFloat = 780
+    static let hairlineOpacity: Double = 0.14
+}
+
+enum AppShellColors {
+    static let detailBackground = Color(nsColor: .textBackgroundColor).opacity(0.18)
+    static let cardBackground = Color(nsColor: .windowBackgroundColor)
+    static let subtleCardBackground = Color(nsColor: .textBackgroundColor).opacity(0.42)
+    static let hairline = Color.secondary.opacity(AppShellLayout.hairlineOpacity)
+}
+
+struct AppPill: View {
+    var text: String
+    var color: Color = .secondary
+    var systemImage: String? = nil
+
+    var body: some View {
+        Label {
+            Text(text)
+                .lineLimit(1)
+        } icon: {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: 10.5, weight: .semibold))
+            }
+        }
+        .labelStyle(.titleAndIcon)
+        .font(AppListTypography.rowCaption)
+        .padding(.horizontal, AppShellLayout.spaceS)
+        .frame(height: 22)
+        .foregroundStyle(color)
+        .background(color.opacity(0.11), in: Capsule())
+    }
+}
+
+struct AppSectionCard<Content: View>: View {
+    var title: String
+    var systemImage: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
+            Label(title, systemImage: systemImage)
+                .font(AppListTypography.rowCaptionEmphasized)
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 0) {
+                content
+            }
+            .padding(AppShellLayout.spaceL)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(AppShellColors.cardBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
+                    .stroke(AppShellColors.hairline, lineWidth: 1)
+            )
+        }
+    }
+}
+
+struct AppMetricCard: View {
+    var title: String
+    var value: String
+    var color: Color = .primary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
+            Text(title)
+                .font(AppListTypography.rowCaptionEmphasized)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(color)
+                .lineLimit(1)
+        }
+        .padding(AppShellLayout.spaceM)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppShellColors.cardBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous)
+                .stroke(AppShellColors.hairline, lineWidth: 1)
+        )
+    }
+}
+

@@ -96,7 +96,7 @@ private struct MCPSourceDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
+            VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
                 MCPSourceTopBar(
                     title: card.title,
                     subtitle: "MCP Source",
@@ -171,11 +171,11 @@ private struct MCPSourceDetailView: View {
                     MCPAuditPreview(records: auditRecords)
                 }
             }
-            .padding(AgentChatLayout.spaceXL)
-            .frame(maxWidth: AgentChatLayout.chatContentMaxWidth, alignment: .leading)
+            .padding(AppShellLayout.spaceXL)
+            .frame(maxWidth: AppShellLayout.contentMaxWidth, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color(nsColor: .textBackgroundColor).opacity(0.18))
+        .background(AppShellColors.detailBackground)
         .navigationTitle(card.title)
     }
 }
@@ -188,7 +188,7 @@ private struct MCPSourceEmptyDetailView: View {
     private var hasSources: Bool { summary.totalCount > 0 }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
+        VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
             MCPSourceTopBar(title: "MCP Sources", subtitle: "Source Runtime", onAdd: onAdd, onRefresh: onRefresh, onTest: nil, isTesting: false)
             Spacer(minLength: 80)
             ContentUnavailableView(
@@ -207,9 +207,9 @@ private struct MCPSourceEmptyDetailView: View {
             Spacer()
             SourceSummaryStrip(summary: summary)
         }
-        .padding(AgentChatLayout.spaceXL)
+        .padding(AppShellLayout.spaceXL)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color(nsColor: .textBackgroundColor).opacity(0.18))
+        .background(AppShellColors.detailBackground)
     }
 }
 
@@ -227,61 +227,32 @@ private struct MCPSourceTopBar: View {
     var isTesting: Bool
 
     var body: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
-                Text(title)
-                    .font(.system(size: 24, weight: .semibold))
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+        HStack(alignment: .top, spacing: AppShellLayout.spaceM) {
+            VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
+                HStack(alignment: .firstTextBaseline, spacing: AppShellLayout.spaceS) {
+                    Text(title)
+                        .font(.largeTitle.weight(.semibold))
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let status {
+                        AppPill(text: status.rawValue, color: status == .enabled ? .green : .secondary)
+                    }
+                }
                 Text(subtitle)
-                    .font(AgentChatTypography.meta)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            HStack(spacing: AgentChatLayout.spaceS) {
+            HStack(spacing: AppShellLayout.spaceS) {
                 if let onAdd {
                     Button(action: onAdd) {
                         Label("添加 Source", systemImage: "plus")
-                            .font(AgentChatTypography.metaEmphasis)
                     }
-                    .buttonStyle(.bordered)
-                }
-                if let onEdit {
-                    Button(action: onEdit) {
-                        Label("编辑", systemImage: "pencil")
-                            .font(AgentChatTypography.metaEmphasis)
-                    }
-                    .buttonStyle(.bordered)
-                }
-                if let onToggleEnabled {
-                    Button(action: onToggleEnabled) {
-                        Label(status == .enabled ? "停用" : "启用", systemImage: status == .enabled ? "pause.circle" : "play.circle")
-                            .font(AgentChatTypography.metaEmphasis)
-                    }
-                    .buttonStyle(.bordered)
-                    .help(status == .enabled ? "停用后不会注入 Agent runtime。" : "启用后有 catalog 的 source 可注入 Agent runtime。")
-                }
-                if let onArchive {
-                    Button(action: onArchive) {
-                        Label("归档", systemImage: "archivebox")
-                            .font(AgentChatTypography.metaEmphasis)
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(status == .deprecated)
-                    .help("标记为 deprecated，保留 catalog/health/audit 历史。")
-                }
-                if let onDelete {
-                    Button(role: .destructive, action: onDelete) {
-                        Label("删除", systemImage: "trash")
-                            .font(AgentChatTypography.metaEmphasis)
-                    }
-                    .buttonStyle(.bordered)
-                    .help("永久删除 source 目录及其 catalog/health/audit 文件。")
+                    .buttonStyle(.borderedProminent)
                 }
                 if let onTest {
                     Button(action: onTest) {
                         Label(isTesting ? "测试中…" : "测试 Source", systemImage: isTesting ? "hourglass" : "checkmark.circle")
-                            .font(AgentChatTypography.metaEmphasis)
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(isTesting)
@@ -289,10 +260,41 @@ private struct MCPSourceTopBar: View {
                 }
                 Button(action: onRefresh) {
                     Label("刷新", systemImage: "arrow.clockwise")
-                        .font(AgentChatTypography.metaEmphasis)
                 }
                 .buttonStyle(.bordered)
+                if let onEdit {
+                    Button(action: onEdit) {
+                        Label("编辑", systemImage: "pencil")
+                    }
+                    .buttonStyle(.bordered)
+                }
+                if onToggleEnabled != nil || onArchive != nil || onDelete != nil {
+                    Menu {
+                        if let onToggleEnabled {
+                            Button(action: onToggleEnabled) {
+                                Label(status == .enabled ? "停用 Source" : "启用 Source", systemImage: status == .enabled ? "pause.circle" : "play.circle")
+                            }
+                        }
+                        if let onArchive {
+                            Button(action: onArchive) {
+                                Label("归档 Source", systemImage: "archivebox")
+                            }
+                            .disabled(status == .deprecated)
+                        }
+                        if let onDelete {
+                            Divider()
+                            Button(role: .destructive, action: onDelete) {
+                                Label("删除 Source", systemImage: "trash")
+                            }
+                        }
+                    } label: {
+                        Label("更多", systemImage: "ellipsis.circle")
+                    }
+                    .menuStyle(.button)
+                    .help("更多 Source 生命周期操作")
+                }
             }
+            .controlSize(.regular)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -303,9 +305,9 @@ private struct MCPSourceHeroSection: View {
     var configuration: MCPSourceRuntimeConfiguration
 
     var body: some View {
-        HStack(alignment: .top, spacing: AgentChatLayout.spaceL) {
+        HStack(alignment: .top, spacing: AppShellLayout.spaceL) {
             ZStack {
-                RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
                     .fill(heroColor.opacity(0.14))
                 Image(systemName: "server.rack")
                     .font(.system(size: 24, weight: .semibold))
@@ -314,31 +316,31 @@ private struct MCPSourceHeroSection: View {
             }
             .frame(width: 56, height: 56)
 
-            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
-                HStack(alignment: .firstTextBaseline, spacing: AgentChatLayout.spaceS) {
+            VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
+                HStack(alignment: .firstTextBaseline, spacing: AppShellLayout.spaceS) {
                     Text(card.title)
                         .font(AgentChatTypography.title)
                         .lineLimit(2)
-                    SkillPill(text: card.statusLabel, color: heroColor)
-                    SkillPill(text: card.healthLabel, color: heroColor)
+                    AppPill(text: card.statusLabel, color: heroColor)
+                    AppPill(text: card.healthLabel, color: heroColor)
                 }
                 Text(configuration.notes.isEmpty ? "Connor-governed MCP source. Tools, credentials, permissions and audit stay inside the app boundary." : configuration.notes)
                     .font(AgentChatTypography.meta)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: AgentChatLayout.spaceS) {
-                    SkillPill(text: card.transportLabel, color: .secondary)
-                    SkillPill(text: card.toolCountLabel, color: .blue)
-                    SkillPill(text: card.auditCountLabel, color: .secondary)
+                HStack(spacing: AppShellLayout.spaceS) {
+                    AppPill(text: card.transportLabel, color: .secondary)
+                    AppPill(text: card.toolCountLabel, color: .blue)
+                    AppPill(text: card.auditCountLabel, color: .secondary)
                 }
             }
             Spacer(minLength: 0)
         }
-        .padding(AgentChatLayout.spaceL)
-        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
+        .padding(AppShellLayout.spaceL)
+        .background(AppShellColors.cardBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
-                .stroke(Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1)
+            RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
+                .stroke(AppShellColors.hairline, lineWidth: 1)
         )
     }
 
@@ -405,7 +407,7 @@ private struct MCPToolCatalogPreview: View {
                     }
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(nsColor: .textBackgroundColor).opacity(0.42), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
+                    .background(AppShellColors.subtleCardBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous))
                 }
             }
         }
@@ -488,7 +490,7 @@ private struct MCPAuditPreview: View {
                     }
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(nsColor: .textBackgroundColor).opacity(0.42), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
+                    .background(AppShellColors.subtleCardBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous))
                 }
             }
         }
@@ -508,22 +510,12 @@ private struct SourceSummaryStrip: View {
     var summary: SourceRuntimeUISummary
 
     var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 10)], spacing: 10) {
-            summaryMetric("Total", summary.totalCount)
-            summaryMetric("Enabled", summary.enabledCount)
-            summaryMetric("Healthy", summary.healthyCount)
-            summaryMetric("Tools", summary.discoveredToolCount)
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: AppShellLayout.spaceS)], spacing: AppShellLayout.spaceS) {
+            AppMetricCard(title: "Total", value: "\(summary.totalCount)")
+            AppMetricCard(title: "Enabled", value: "\(summary.enabledCount)", color: .green)
+            AppMetricCard(title: "Healthy", value: "\(summary.healthyCount)", color: .green)
+            AppMetricCard(title: "Tools", value: "\(summary.discoveredToolCount)", color: .blue)
         }
-    }
-
-    private func summaryMetric(_ title: String, _ value: Int) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(AgentChatTypography.microEmphasis).foregroundStyle(.secondary)
-            Text("\(value)").font(.title2.weight(.semibold))
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
     }
 }
 
@@ -737,19 +729,8 @@ private struct SkillInfoSection<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
-            Label(title, systemImage: systemImage)
-                .font(AgentChatTypography.metaEmphasis)
-            VStack(alignment: .leading, spacing: 0) {
-                content
-            }
-            .padding(AgentChatLayout.spaceL)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
-                    .stroke(Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1)
-            )
+        AppSectionCard(title: title, systemImage: systemImage) {
+            content
         }
     }
 }
