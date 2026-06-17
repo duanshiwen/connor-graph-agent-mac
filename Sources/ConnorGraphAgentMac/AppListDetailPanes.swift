@@ -19,7 +19,7 @@ struct CraftListPaneView: View {
             case .llmSettings:
                 CraftSettingsListPane(viewModel: viewModel, selection: $selection)
             case .sources:
-                CraftSimpleListPane(title: "数据源", subtitle: "MCP Source Runtime", rows: viewModel.sourceRuntimeConfigurations.map(\.displayName))
+                CraftSourceListPane(viewModel: viewModel)
             case .skills:
                 CraftSkillListPane(viewModel: viewModel)
             case .automation:
