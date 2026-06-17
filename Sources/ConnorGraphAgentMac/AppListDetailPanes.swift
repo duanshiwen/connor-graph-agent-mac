@@ -501,7 +501,9 @@ struct CraftSkillListPane: View {
                     CraftSkillRow(
                         card: card,
                         isSelected: card.id == viewModel.selectedSkillManagerCardID,
-                        onSelect: { viewModel.selectSkillManagerCard(card.id) }
+                        onSelect: { viewModel.selectSkillManagerCard(card.id) },
+                        onEdit: { viewModel.presentEditSkillDialog(card: card) },
+                        onDelete: { viewModel.requestDeleteSkill(card: card) }
                     )
                     .listRowInsets(EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8))
                     .listRowSeparator(.hidden)
@@ -514,6 +516,36 @@ struct CraftSkillListPane: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .sheet(isPresented: $viewModel.isAddSkillDialogPresented) {
             AddSkillRequestDialog(viewModel: viewModel)
+        }
+        .sheet(isPresented: $viewModel.isEditSkillDialogPresented) {
+            EditSkillRequestDialog(viewModel: viewModel)
+        }
+        .confirmationDialog(
+            "删除这个技能？",
+            isPresented: Binding(
+                get: { viewModel.pendingSkillDeletionCard != nil },
+                set: { isPresented in
+                    if !isPresented { viewModel.cancelDeleteSkill() }
+                }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("删除", role: .destructive) {
+                viewModel.confirmDeletePendingSkill()
+            }
+            .disabled(viewModel.pendingSkillDeletionCard?.sourceTier != SkillSourceTier.user.rawValue)
+
+            Button("取消", role: .cancel) {
+                viewModel.cancelDeleteSkill()
+            }
+        } message: {
+            if let card = viewModel.pendingSkillDeletionCard {
+                if card.sourceTier == SkillSourceTier.user.rawValue {
+                    Text("删除后，\(card.title) 会从技能列表中移除。")
+                } else {
+                    Text("这个技能来自 \(card.sourceTier)，不能在这里删除。只有你添加的技能可以删除。")
+                }
+            }
         }
         .task { viewModel.reloadSkillRuntimeDefinitions() }
     }
@@ -609,14 +641,145 @@ private struct AddSkillRequestDialog: View {
     }
 }
 
+private struct EditSkillRequestDialog: View {
+    @ObservedObject var viewModel: AppViewModel
+    @Environment(\.dismiss) private var dismiss
+    @FocusState private var isFocused: Bool
+
+    private var skillTitle: String {
+        viewModel.editingSkillCard?.title ?? "这个技能"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.14))
+                    Image(systemName: "pencil.and.sparkles")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
+                .frame(width: 48, height: 48)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("编辑技能")
+                        .font(.title3.weight(.semibold))
+                    Text("告诉康纳你想怎样调整“\(skillTitle)”，它会在这里帮你修改。")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            if let card = viewModel.editingSkillCard {
+                HStack(spacing: 8) {
+                    Image(systemName: "bolt.fill")
+                        .foregroundStyle(.secondary)
+                    Text(card.id)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(card.sourceTier)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+
+            TextEditor(text: $viewModel.editSkillRequestDraft)
+                .font(.body)
+                .focused($isFocused)
+                .frame(minHeight: 150)
+                .padding(8)
+                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+                )
+                .overlay(alignment: .topLeading) {
+                    if viewModel.editSkillRequestDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text("例如：把它改成更关注性能瓶颈，并要求输出检查清单。")
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 16)
+                            .allowsHitTesting(false)
+                    }
+                }
+
+            if let message = viewModel.editSkillDialogMessage, !message.isEmpty {
+                HStack(spacing: 8) {
+                    if viewModel.isSubmittingEditSkillRequest {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: message.contains("失败") ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                            .foregroundStyle(message.contains("失败") ? .orange : .green)
+                    }
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+
+            HStack {
+                Button("关闭") {
+                    viewModel.cancelEditSkillDialog()
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+                .disabled(viewModel.isSubmittingEditSkillRequest)
+
+                Spacer()
+
+                Button(viewModel.isSubmittingEditSkillRequest ? "修改中…" : "提交修改") {
+                    Task { await viewModel.submitEditSkillRequest() }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(viewModel.isSubmittingEditSkillRequest || viewModel.editSkillRequestDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(22)
+        .frame(width: 520)
+        .onAppear { isFocused = true }
+    }
+}
+
 
 
 struct CraftSkillRow: View {
     var card: SkillManagerCard
     var isSelected: Bool
     var onSelect: () -> Void
+    var onEdit: () -> Void
+    var onDelete: () -> Void
 
     var body: some View {
+        rowContent
+            .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                Button(action: onEdit) {
+                    Label("编辑", systemImage: "pencil")
+                }
+                .tint(.blue)
+
+                Button(role: .destructive, action: onDelete) {
+                    Label("删除", systemImage: "trash")
+                }
+                .disabled(card.sourceTier != SkillSourceTier.user.rawValue)
+            }
+            .contextMenu { contextMenuItems }
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
+    }
+
+    private var rowContent: some View {
         HStack(alignment: .top, spacing: 10) {
             ZStack {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
@@ -655,8 +818,20 @@ struct CraftSkillRow: View {
         .background(rowBackgroundColor, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .onTapGesture(perform: onSelect)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isButton)
+    }
+
+    @ViewBuilder
+    private var contextMenuItems: some View {
+        Button(action: onEdit) {
+            Label("编辑", systemImage: "pencil")
+        }
+
+        Divider()
+
+        Button(role: .destructive, action: onDelete) {
+            Label("删除", systemImage: "trash")
+        }
+        .disabled(card.sourceTier != SkillSourceTier.user.rawValue)
     }
 
     private var rowBackgroundColor: Color {
