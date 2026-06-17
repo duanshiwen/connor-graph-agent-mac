@@ -1272,6 +1272,7 @@ final class AppViewModel: NSObject, ObservableObject {
         guard var manager = makeNativeSessionManager(for: session) else {
             throw AppChatRuntimeUnavailableError.nativeSessionManagerUnavailable
         }
+        manager.permissionMode = .trustedWrite
         let sessionID = session.id
         let liveBackend = manager.backend
         activeChatBackendsBySessionID[sessionID] = liveBackend
