@@ -646,6 +646,7 @@ Commercial Train 3 将 MCP Source 从 config/call helper 升级为 Connor-owned 
 Sources/ConnorGraphAppSupport/AppMCPSourceRuntimeRepository.swift
 Sources/ConnorGraphAppSupport/MCPJSONRPCClient.swift
 Sources/ConnorGraphAppSupport/MCPStdioClientTransport.swift
+Sources/ConnorGraphAppSupport/MCPHTTPClientTransport.swift
 Sources/ConnorGraphAppSupport/MCPClientPool.swift
 Sources/ConnorGraphAppSupport/MCPSourceRuntime.swift
 Sources/ConnorGraphAppSupport/MCPSourceTestService.swift
@@ -662,6 +663,9 @@ Sources/ConnorGraphAgentMac/SourceSkillAutomationRuntimeViews.swift
 - Source runtime registry persistence
 - Stdio / HTTP transport configuration shape
 - Real MCP stdio subprocess transport for `Content-Length` framed JSON-RPC
+- Real MCP HTTP JSON-RPC transport for Streamable HTTP JSON response path
+- HTTP MCP endpoint validation: HTTPS required except localhost / loopback development endpoints, and credentials are rejected in endpoint URLs
+- Request-scoped SSE responses intentionally fail closed until explicit streaming support lands
 - Sensitive inherited environment filtering for local MCP subprocesses
 - Source ID validation
 - Tool name prefix validation
@@ -672,7 +676,7 @@ Sources/ConnorGraphAgentMac/SourceSkillAutomationRuntimeViews.swift
 - Original MCP tool name preservation for routing and audit
 - Backward-compatible parsing for previous `source.tool` runtime calls
 - MCP Tool Registry Bridge for discovered catalog → `AgentToolRegistry` registration
-- MCP Client Pool for persisted enabled source catalog exposure, stdio tool routing, and per-tool governance enforcement
+- MCP Client Pool for persisted enabled source catalog exposure, stdio / HTTP tool routing, and per-tool governance enforcement
 - App runtime bridge: `AppGraphAgentRuntimeFactory` loads persisted enabled MCP catalogs and injects tools into `AgentToolRegistry`
 - Governed MCP routed AgentTool path for source/tool dispatch
 - Per-tool governance policy generated during discovery: risk class、execution policy、permission capability、rationale
@@ -681,13 +685,14 @@ Sources/ConnorGraphAgentMac/SourceSkillAutomationRuntimeViews.swift
 - Tool definition fingerprint pinning via SHA-256 over sourceID、raw tool name、description、input schema
 - Rug-pull detection: changed tool definitions are persisted with `integrityStatus == changed`, audited, and blocked before execution until reviewed/re-tested
 - Sensitive MCP tools require explicit per-run approval even under broad runtime policy, rather than relying on global allowAll
-- Stdio source test service for validation + discovery + health/catalog/audit/policy persistence
+- Source test service for stdio / HTTP validation + discovery + health/catalog/audit/policy persistence
 - Native MCP Source Manager list/detail UI for persisted health/catalog/audit inspection
-- Native Add/Edit Source sheet for stdio MCP source onboarding and maintenance
+- Native Add/Edit Source sheet for stdio / HTTP MCP source onboarding and maintenance
 - Connor-owned MCP source credential store backed by `CredentialStore` / macOS Keychain
-- Credential requirements for bearer token、API key header and multi-header stdio sources
+- Credential requirements for bearer token、API key header and multi-header stdio / HTTP sources
 - Source config stores only credential requirement + env var bindings; secret values are never persisted in `mcp-runtime.json`
 - Source-scoped runtime secret injection into stdio subprocess environment after inherited secret filtering
+- Source-scoped runtime secret injection into HTTP request headers; bearer tokens use `Authorization: Bearer`, API header sources use configured `header:ENV` bindings, and query-string secrets remain unsupported
 - Missing credential fail-closed behavior before source test / tool runtime execution
 - UI-driven Enable/Disable source lifecycle controls
 - Archive Source workflow via `deprecated` status that preserves catalog/health/audit history
@@ -705,7 +710,7 @@ Sources/ConnorGraphAgentMac/SourceSkillAutomationRuntimeViews.swift
 - Tool Catalog UI displays risk、execution policy、integrity status、rationale and schema fingerprint for review
 - Audit timeline displays policy block and tool definition changed events
 
-商业级 MCP Platform 下一步仍需补齐:HTTP/SSE/Streamable HTTP production transport、long-lived connection reuse/reconnect、OAuth/source auth workflow、large/binary result artifact governance、App runtime 动态 source activation、manual per-tool policy override editor、credential rotation/status dashboard。根据当前产品边界,本里程碑刻意不处理 graph ingestion。
+商业级 MCP Platform 下一步仍需补齐:request-scoped SSE streaming support、long-lived connection reuse/reconnect、OAuth/source auth workflow、large/binary result artifact governance、App runtime 动态 source activation、manual per-tool policy override editor、credential rotation/status dashboard。根据当前产品边界,本里程碑刻意不处理 graph ingestion。
 
 边界:MCP servers 是能力提供者;Connor 拥有 registry、lifecycle、health、permission policy、audit 与 readiness。Graph ingestion 不属于当前 MCP Platform scope。
 

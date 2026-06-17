@@ -132,7 +132,7 @@ private struct MCPSourceAddSheet: View {
                 VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
                     Text(draft.isEditing ? "编辑 MCP Source" : "添加 MCP Source")
                         .font(.system(size: 22, weight: .semibold))
-                    Text("支持 stdio source 与 Connor-owned Keychain credential injection。Secret 不写入 source 配置文件。")
+                    Text("支持 stdio 与 HTTP MCP source，以及 Connor-owned Keychain credential injection。Secret 不写入 source 配置文件。")
                         .font(AgentChatTypography.meta)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -158,12 +158,21 @@ private struct MCPSourceAddSheet: View {
                 }
 
                 Section("Transport") {
-                    TextField("Command，例如 /usr/bin/python3 或 npx", text: $draft.command)
-                    TextField("Arguments，用空格或换行分隔", text: $draft.argumentsText, axis: .vertical)
-                        .lineLimit(2...4)
-                    LabeledContent("Mode") {
-                        Text("stdio")
+                    Picker("Mode", selection: $draft.transportKind) {
+                        Text("stdio").tag("stdio")
+                        Text("HTTP").tag("http")
+                    }
+                    .pickerStyle(.segmented)
+                    if draft.transportKind == "http" {
+                        TextField("MCP Endpoint，例如 https://mcp.example.com/mcp", text: $draft.command)
+                        Text("HTTP endpoint 必须使用 HTTPS；本地开发允许 http://localhost 或 127.0.0.1。当前支持 JSON response path；request-scoped SSE 会 fail closed。")
+                            .font(AgentChatTypography.meta)
                             .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        TextField("Command，例如 /usr/bin/python3 或 npx", text: $draft.command)
+                        TextField("Arguments，用空格或换行分隔", text: $draft.argumentsText, axis: .vertical)
+                            .lineLimit(2...4)
                     }
                 }
 
@@ -175,10 +184,9 @@ private struct MCPSourceAddSheet: View {
                         Text("Multi Header").tag(ProductOSCredentialRequirement.multiHeader)
                     }
                     if draft.credentialRequirement != .none {
-                        TextField("Environment variable，例如 GITHUB_TOKEN", text: $draft.credentialEnvironmentText)
-                            .textCase(.uppercase)
+                        TextField("Binding，例如 GITHUB_TOKEN 或 x-api-key:API_KEY", text: $draft.credentialEnvironmentText)
                         SecureField(draft.isEditing ? "Secret 或 ENV=secret 多行（留空则保留现有）" : "Secret 或 ENV=secret 多行", text: $draft.credentialSecret)
-                        Text("单一 secret 会写入所有 env bindings；multi-header 可用 ENV=secret 多行。Secret 仅保存到 Connor credential store，source 配置只保存 env var binding。")
+                        Text("stdio 使用 env binding；HTTP bearer 使用 Authorization header；HTTP API header 可写 header:ENV。multi-header 可用多组 header:ENV 与 ENV=secret。Secret 仅保存到 Connor credential store。")
                             .font(AgentChatTypography.meta)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)

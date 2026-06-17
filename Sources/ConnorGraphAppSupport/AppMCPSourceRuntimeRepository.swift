@@ -163,6 +163,7 @@ public enum AppMCPSourceRuntimeRepositoryError: Error, Sendable, Equatable, Cust
     case invalidToolNamePrefix(String)
     case missingCommand(String)
     case unsafePermissionMode(String)
+    case invalidHTTPEndpoint(String)
 
     public var description: String {
         switch self {
@@ -170,6 +171,7 @@ public enum AppMCPSourceRuntimeRepositoryError: Error, Sendable, Equatable, Cust
         case .invalidToolNamePrefix(let prefix): "invalidToolNamePrefix: \(prefix)"
         case .missingCommand(let sourceID): "missingCommand: \(sourceID)"
         case .unsafePermissionMode(let message): "unsafePermissionMode: \(message)"
+        case .invalidHTTPEndpoint(let message): "invalidHTTPEndpoint: \(message)"
         }
     }
 }
@@ -386,8 +388,12 @@ public struct AppMCPSourceRuntimeRepository: Sendable {
             if command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 throw AppMCPSourceRuntimeRepositoryError.missingCommand(configuration.sourceID)
             }
-        case .http:
-            break
+        case .http(let url):
+            do {
+                try MCPHTTPClientTransport.validateEndpoint(url)
+            } catch {
+                throw AppMCPSourceRuntimeRepositoryError.invalidHTTPEndpoint(String(describing: error))
+            }
         }
     }
 

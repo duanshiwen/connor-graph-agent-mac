@@ -373,6 +373,54 @@ private final class CommercialMCPFakeCredentialStore: CredentialStore, @unchecke
     ])
 }
 
+@Test func commercialMCPHTTPTransportRejectsUnsafeEndpoints() throws {
+    #expect(throws: MCPHTTPClientTransportError.self) {
+        _ = try MCPHTTPClientTransport(endpointURL: URL(string: "http://mcp.example.com/mcp")!)
+    }
+    #expect(throws: MCPHTTPClientTransportError.self) {
+        _ = try MCPHTTPClientTransport(endpointURL: URL(string: "https://token@example.com/mcp")!)
+    }
+    _ = try MCPHTTPClientTransport(endpointURL: URL(string: "https://mcp.example.com/mcp")!)
+    _ = try MCPHTTPClientTransport(endpointURL: URL(string: "http://localhost:3999/mcp")!)
+}
+
+@Test func commercialMCPSourceCredentialsMaterializeHTTPHeadersWithoutQuerySecrets() throws {
+    let fakeCredentials = CommercialMCPFakeCredentialStore()
+    let credentialStore = MCPSourceCredentialStore(credentialStore: fakeCredentials)
+    let bearer = MCPSourceRuntimeConfiguration(
+        sourceID: "remote-github",
+        displayName: "Remote GitHub MCP",
+        transport: .http(url: URL(string: "https://mcp.example.com/mcp")!),
+        status: .enabled,
+        credentialRequirement: .bearerToken,
+        credentialBindings: [MCPSourceCredentialBinding(label: "Authorization", environmentVariable: "GITHUB_TOKEN")],
+        allowedCapabilities: [.externalNetwork],
+        toolNamePrefix: "github"
+    )
+    try credentialStore.saveSecret("ghp-secret-value", sourceID: "remote-github", environmentVariable: "GITHUB_TOKEN")
+    #expect(try credentialStore.httpHeaders(for: bearer) == ["Authorization": "Bearer ghp-secret-value"])
+
+    let multi = MCPSourceRuntimeConfiguration(
+        sourceID: "remote-datadog",
+        displayName: "Remote Datadog MCP",
+        transport: .http(url: URL(string: "https://mcp.example.com/mcp")!),
+        status: .enabled,
+        credentialRequirement: .multiHeader,
+        credentialBindings: [
+            MCPSourceCredentialBinding(label: "DD-API-KEY", environmentVariable: "DD_API_KEY"),
+            MCPSourceCredentialBinding(label: "DD-APPLICATION-KEY", environmentVariable: "DD_APPLICATION_KEY")
+        ],
+        allowedCapabilities: [.externalNetwork],
+        toolNamePrefix: "datadog"
+    )
+    try credentialStore.saveSecret("api-secret", sourceID: "remote-datadog", environmentVariable: "DD_API_KEY")
+    try credentialStore.saveSecret("app-secret", sourceID: "remote-datadog", environmentVariable: "DD_APPLICATION_KEY")
+    #expect(try credentialStore.httpHeaders(for: multi) == [
+        "DD-API-KEY": "api-secret",
+        "DD-APPLICATION-KEY": "app-secret"
+    ])
+}
+
 @Test func commercialMCPSourceCredentialsFailClosedWhenMissing() throws {
     let credentialStore = MCPSourceCredentialStore(credentialStore: CommercialMCPFakeCredentialStore())
     let configuration = MCPSourceRuntimeConfiguration(

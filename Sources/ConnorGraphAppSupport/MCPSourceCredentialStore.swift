@@ -80,12 +80,44 @@ public struct MCPSourceCredentialStore: Sendable {
         var environment: [String: String] = [:]
         for binding in bindings {
             let env = try Self.normalizedEnvironmentVariable(binding.environmentVariable)
-            guard let secret = try readSecret(sourceID: configuration.sourceID, environmentVariable: env), !secret.isEmpty else {
-                throw MCPSourceCredentialStoreError.missingCredential(sourceID: configuration.sourceID, environmentVariable: env)
-            }
-            environment[env] = secret
+            environment[env] = try requiredSecret(sourceID: configuration.sourceID, environmentVariable: env)
         }
         return environment
+    }
+
+    public func httpHeaders(for configuration: MCPSourceRuntimeConfiguration) throws -> [String: String] {
+        guard configuration.credentialRequirement != .none else { return [:] }
+        let bindings = try Self.validatedBindings(for: configuration)
+        switch configuration.credentialRequirement {
+        case .bearerToken:
+            guard let binding = bindings.first else { throw MCPSourceCredentialStoreError.missingBinding(configuration.sourceID) }
+            let secret = try requiredSecret(sourceID: configuration.sourceID, environmentVariable: binding.environmentVariable)
+            return ["Authorization": "Bearer \(secret)"]
+        case .apiKeyHeader:
+            guard let binding = bindings.first else { throw MCPSourceCredentialStoreError.missingBinding(configuration.sourceID) }
+            let headerName = binding.label.isEmpty ? binding.environmentVariable : binding.label
+            let secret = try requiredSecret(sourceID: configuration.sourceID, environmentVariable: binding.environmentVariable)
+            return [headerName: secret]
+        case .multiHeader:
+            var headers: [String: String] = [:]
+            for binding in bindings {
+                let headerName = binding.label.isEmpty ? binding.environmentVariable : binding.label
+                headers[headerName] = try requiredSecret(sourceID: configuration.sourceID, environmentVariable: binding.environmentVariable)
+            }
+            return headers
+        case .none:
+            return [:]
+        case .basic, .apiKeyQuery, .oauth:
+            throw MCPSourceCredentialStoreError.unsupportedRequirement(configuration.credentialRequirement)
+        }
+    }
+
+    private func requiredSecret(sourceID: String, environmentVariable: String) throws -> String {
+        let env = try Self.normalizedEnvironmentVariable(environmentVariable)
+        guard let secret = try readSecret(sourceID: sourceID, environmentVariable: env), !secret.isEmpty else {
+            throw MCPSourceCredentialStoreError.missingCredential(sourceID: sourceID, environmentVariable: env)
+        }
+        return secret
     }
 
     public static func validatedBindings(for configuration: MCPSourceRuntimeConfiguration) throws -> [MCPSourceCredentialBinding] {

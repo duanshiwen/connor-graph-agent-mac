@@ -55,20 +55,38 @@ public struct MCPSourceTestService: Sendable {
         self.credentialStore = credentialStore
     }
 
-    public func testStdioSource(_ configuration: MCPSourceRuntimeConfiguration, now: Date = Date()) async throws -> MCPSourceTestReport {
+    public func testSource(_ configuration: MCPSourceRuntimeConfiguration, now: Date = Date()) async throws -> MCPSourceTestReport {
         try repository.validateForEnablement(configuration)
-        guard case .stdio(let command, let arguments) = configuration.transport else {
-            throw MCPSourceTestServiceError.unsupportedTransport("Source test currently supports stdio transport only; HTTP/SSE discovery is not enabled yet.")
+        switch configuration.transport {
+        case .stdio(let command, let arguments):
+            let environment = try credentialStore.environmentOverrides(for: configuration)
+            let transport = MCPStdioClientTransport(
+                command: command,
+                arguments: arguments,
+                environment: environment,
+                currentDirectoryURL: currentDirectoryURL
+            )
+            let client = MCPJSONRPCClient(transport: transport, clientName: clientName, clientVersion: clientVersion)
+            let runtime = MCPSourceRuntime(configuration: configuration, client: client)
+            return try await discoverAndPersist(runtime: runtime, configuration: configuration, now: now)
+        case .http(let url):
+            let headers = try credentialStore.httpHeaders(for: configuration)
+            let transport = try MCPHTTPClientTransport(endpointURL: url, headers: headers)
+            let client = MCPJSONRPCClient(transport: transport, clientName: clientName, clientVersion: clientVersion)
+            let runtime = MCPSourceRuntime(configuration: configuration, client: client)
+            return try await discoverAndPersist(runtime: runtime, configuration: configuration, now: now)
         }
-        let environment = try credentialStore.environmentOverrides(for: configuration)
-        let transport = MCPStdioClientTransport(
-            command: command,
-            arguments: arguments,
-            environment: environment,
-            currentDirectoryURL: currentDirectoryURL
-        )
-        let client = MCPJSONRPCClient(transport: transport, clientName: clientName, clientVersion: clientVersion)
-        let runtime = MCPSourceRuntime(configuration: configuration, client: client)
+    }
+
+    public func testStdioSource(_ configuration: MCPSourceRuntimeConfiguration, now: Date = Date()) async throws -> MCPSourceTestReport {
+        try await testSource(configuration, now: now)
+    }
+
+    private func discoverAndPersist<Transport: MCPClientTransport>(
+        runtime: MCPSourceRuntime<Transport>,
+        configuration: MCPSourceRuntimeConfiguration,
+        now: Date
+    ) async throws -> MCPSourceTestReport {
         let previousCatalog = try repository.loadToolCatalog(sourceID: configuration.sourceID)
         let snapshot = try await runtime.discoverRuntimeState(now: now, previousCatalog: previousCatalog)
         let integrityAuditRecords = snapshot.catalog.compactMap { descriptor -> MCPSourceRuntimeAuditRecord? in
