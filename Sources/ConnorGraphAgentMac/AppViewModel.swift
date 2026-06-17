@@ -1221,8 +1221,9 @@ final class AppViewModel: NSObject, ObservableObject {
         do {
             skillRuntimeDefinitions = try skillRuntimeRepository?.list() ?? []
             commercialSkillManagerPresentation = buildCommercialSkillManagerPresentation()
-            if selectedSkillManagerCardID == nil || !commercialSkillManagerPresentation.cards.contains(where: { $0.id == selectedSkillManagerCardID }) {
-                selectedSkillManagerCardID = commercialSkillManagerPresentation.cards.first?.id
+            if let selectedSkillManagerCardID,
+               !commercialSkillManagerPresentation.cards.contains(where: { $0.id == selectedSkillManagerCardID }) {
+                self.selectedSkillManagerCardID = nil
             }
             errorMessage = nil
         } catch {
@@ -1344,7 +1345,7 @@ final class AppViewModel: NSObject, ObservableObject {
             pendingSkillDeletionCard = nil
             reloadSkillRuntimeDefinitions()
             if selectedSkillManagerCardID == card.id {
-                selectedSkillManagerCardID = commercialSkillManagerPresentation.cards.first?.id
+                selectedSkillManagerCardID = nil
             }
             errorMessage = nil
         } catch {
