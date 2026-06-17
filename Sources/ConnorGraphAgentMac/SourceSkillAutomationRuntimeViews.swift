@@ -5,28 +5,36 @@ struct SourceRuntimePanelView: View {
     @ObservedObject var viewModel: AppViewModel
 
     private var presentation: SourceRuntimeUIPresentation {
-        SourceRuntimeUIPresentation.build(sources: viewModel.sourceRuntimeConfigurations)
+        SourceRuntimeUIPresentation.build(
+            sources: viewModel.sourceRuntimeConfigurations,
+            healthRecords: viewModel.sourceRuntimeHealthRecords,
+            auditRecords: viewModel.sourceRuntimeAuditRecordsBySource.values.flatMap { $0 }
+        )
+    }
+
+    private var selectedCard: SourceRuntimeUICard? {
+        guard let id = viewModel.selectedSourceRuntimeCardID else { return nil }
+        return presentation.cards.first(where: { $0.id == id })
+    }
+
+    private var selectedConfiguration: MCPSourceRuntimeConfiguration? {
+        guard let id = viewModel.selectedSourceRuntimeCardID else { return nil }
+        return viewModel.sourceRuntimeConfigurations.first(where: { $0.sourceID == id })
     }
 
     var body: some View {
-        RuntimePanelScaffold(
-            title: "Sources",
-            subtitle: "MCP source runtime：工具、凭据、权限、审计和图谱摄取由康纳同学治理。",
-            metrics: [
-                ("Total", "\(presentation.summary.totalCount)"),
-                ("Enabled", "\(presentation.summary.enabledCount)"),
-                ("Needs credentials", "\(presentation.summary.needsCredentialCount)")
-            ],
-            onRefresh: viewModel.reloadSourceRuntimeConfigurations
-        ) {
-            ForEach(presentation.cards) { card in
-                RuntimePanelCard(
-                    title: card.title,
-                    subtitle: "\(card.statusLabel) · \(card.transportLabel)",
-                    detail: "prefix \(card.toolPrefixLabel) · \(card.graphPolicyLabel) · credentials \(card.credentialLabel)",
-                    chips: card.capabilityLabels + card.tags,
-                    severity: card.severity
+        Group {
+            if let card = selectedCard, let configuration = selectedConfiguration {
+                MCPSourceDetailView(
+                    card: card,
+                    configuration: configuration,
+                    summary: presentation.summary,
+                    tools: viewModel.sourceRuntimeToolCatalogs[card.id, default: []],
+                    auditRecords: viewModel.sourceRuntimeAuditRecordsBySource[card.id, default: []],
+                    onRefresh: viewModel.reloadSourceRuntimeConfigurations
                 )
+            } else {
+                MCPSourceEmptyDetailView(summary: presentation.summary, onRefresh: viewModel.reloadSourceRuntimeConfigurations)
             }
         }
         .task {
@@ -34,6 +42,296 @@ struct SourceRuntimePanelView: View {
                 viewModel.reloadSourceRuntimeConfigurations()
             }
         }
+    }
+}
+
+private struct MCPSourceDetailView: View {
+    var card: SourceRuntimeUICard
+    var configuration: MCPSourceRuntimeConfiguration
+    var summary: SourceRuntimeUISummary
+    var tools: [MCPSourceToolDescriptor]
+    var auditRecords: [MCPSourceRuntimeAuditRecord]
+    var onRefresh: () -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
+                MCPSourceTopBar(title: card.title, subtitle: "MCP Source", onRefresh: onRefresh)
+                MCPSourceHeroSection(card: card, configuration: configuration)
+
+                if !card.lastErrorLabel.isEmpty {
+                    SkillInfoSection(title: "Last Error", systemImage: "exclamationmark.triangle") {
+                        Text(card.lastErrorLabel)
+                            .font(AgentChatTypography.meta)
+                            .foregroundStyle(.orange)
+                            .textSelection(.enabled)
+                    }
+                }
+
+                SkillInfoSection(title: "Metadata", systemImage: "info.circle") {
+                    SkillInfoTable(rows: [
+                        ("Source ID", configuration.sourceID),
+                        ("Display Name", configuration.displayName),
+                        ("Status", card.statusLabel),
+                        ("Lifecycle", card.lifecycleLabel),
+                        ("Health", card.healthLabel),
+                        ("Transport", card.transportLabel),
+                        ("Credentials", card.credentialLabel),
+                        ("Tool Prefix", card.toolPrefixLabel),
+                        ("Created", configuration.createdAt.ISO8601Format()),
+                        ("Updated", configuration.updatedAt.ISO8601Format())
+                    ])
+                }
+
+                SkillInfoSection(title: "Governance", systemImage: "checkmark.shield") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        SkillBadgeRow(title: "Allowed Capabilities", values: card.capabilityLabels, emptyText: "No explicit runtime capability")
+                        SkillBadgeRow(title: "Server Capabilities", values: card.platformCapabilityLabels, emptyText: "No discovery snapshot yet")
+                        SkillBadgeRow(title: "Tags", values: card.tags, emptyText: "No tags")
+                        SkillInfoTable(rows: [
+                            ("Graph Policy", card.graphPolicyLabel),
+                            ("Discovered Tools", card.toolCountLabel),
+                            ("Recent Audits", card.auditCountLabel),
+                            ("Last Checked", card.lastCheckedLabel)
+                        ])
+                    }
+                }
+
+                SkillInfoSection(title: "Tool Catalog", systemImage: "wrench.and.screwdriver") {
+                    MCPToolCatalogPreview(tools: tools)
+                }
+
+                SkillInfoSection(title: "Recent Audit", systemImage: "clock.arrow.circlepath") {
+                    MCPAuditPreview(records: auditRecords)
+                }
+            }
+            .padding(AgentChatLayout.spaceXL)
+            .frame(maxWidth: AgentChatLayout.chatContentMaxWidth, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Color(nsColor: .textBackgroundColor).opacity(0.18))
+        .navigationTitle(card.title)
+    }
+}
+
+private struct MCPSourceEmptyDetailView: View {
+    var summary: SourceRuntimeUISummary
+    var onRefresh: () -> Void
+
+    private var hasSources: Bool { summary.totalCount > 0 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
+            MCPSourceTopBar(title: "MCP Sources", subtitle: "Source Runtime", onRefresh: onRefresh)
+            Spacer(minLength: 80)
+            ContentUnavailableView(
+                hasSources ? "选择一个 MCP Source" : "暂无 MCP Source",
+                systemImage: hasSources ? "server.rack" : "externaldrive.badge.plus",
+                description: Text(hasSources ? "从左侧列表中选择一个 source，查看它的运行状态、工具目录、治理策略和审计记录。" : "添加并测试 MCP source 后，它的 health、catalog 和 audit 会在这里显示。")
+            )
+            .frame(maxWidth: .infinity)
+            Spacer()
+            SourceSummaryStrip(summary: summary)
+        }
+        .padding(AgentChatLayout.spaceXL)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Color(nsColor: .textBackgroundColor).opacity(0.18))
+    }
+}
+
+private struct MCPSourceTopBar: View {
+    var title: String
+    var subtitle: String
+    var onRefresh: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
+                Text(title)
+                    .font(.system(size: 24, weight: .semibold))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(subtitle)
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button(action: onRefresh) {
+                Label("刷新", systemImage: "arrow.clockwise")
+                    .font(AgentChatTypography.metaEmphasis)
+            }
+            .buttonStyle(.bordered)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct MCPSourceHeroSection: View {
+    var card: SourceRuntimeUICard
+    var configuration: MCPSourceRuntimeConfiguration
+
+    var body: some View {
+        HStack(alignment: .top, spacing: AgentChatLayout.spaceL) {
+            ZStack {
+                RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                    .fill(heroColor.opacity(0.14))
+                Image(systemName: "server.rack")
+                    .font(.system(size: 24, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(heroColor)
+            }
+            .frame(width: 56, height: 56)
+
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+                HStack(alignment: .firstTextBaseline, spacing: AgentChatLayout.spaceS) {
+                    Text(card.title)
+                        .font(AgentChatTypography.title)
+                        .lineLimit(2)
+                    SkillPill(text: card.statusLabel, color: heroColor)
+                    SkillPill(text: card.healthLabel, color: heroColor)
+                }
+                Text(configuration.notes.isEmpty ? "Connor-governed MCP source. Tools, credentials, permissions and audit stay inside the app boundary." : configuration.notes)
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: AgentChatLayout.spaceS) {
+                    SkillPill(text: card.transportLabel, color: .secondary)
+                    SkillPill(text: card.toolCountLabel, color: .blue)
+                    SkillPill(text: card.auditCountLabel, color: .secondary)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(AgentChatLayout.spaceL)
+        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                .stroke(Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1)
+        )
+    }
+
+    private var heroColor: Color {
+        switch card.severity {
+        case .success: .green
+        case .warning: .orange
+        case .error: .red
+        case .info: .blue
+        }
+    }
+}
+
+private struct MCPToolCatalogPreview: View {
+    var tools: [MCPSourceToolDescriptor]
+
+    var body: some View {
+        if tools.isEmpty {
+            Text("No persisted tool catalog yet. Run source test/discovery to populate catalog.json.")
+                .font(AgentChatTypography.meta)
+                .foregroundStyle(.secondary)
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(tools.prefix(24)) { tool in
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(tool.name)
+                            .font(AgentChatTypography.monoMeta.weight(.semibold))
+                            .textSelection(.enabled)
+                        if !tool.description.isEmpty {
+                            Text(tool.description)
+                                .font(AgentChatTypography.meta)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        HStack(spacing: 6) {
+                            SkillPill(text: "raw: \(tool.rawName)", color: .secondary)
+                            ForEach(tool.requiredCapabilities.map(\.rawValue).prefix(4), id: \.self) { capability in
+                                SkillPill(text: capability, color: .blue)
+                            }
+                        }
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(nsColor: .textBackgroundColor).opacity(0.42), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
+                }
+            }
+        }
+    }
+}
+
+private struct MCPAuditPreview: View {
+    var records: [MCPSourceRuntimeAuditRecord]
+
+    var body: some View {
+        if records.isEmpty {
+            Text("No recent audit records.")
+                .font(AgentChatTypography.meta)
+                .foregroundStyle(.secondary)
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(records.reversed()) { record in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            SkillPill(text: record.eventKind.rawValue, color: color(for: record.eventKind))
+                            Text(record.timestamp.ISO8601Format())
+                                .font(AgentChatTypography.micro)
+                                .foregroundStyle(.secondary)
+                            Spacer(minLength: 0)
+                        }
+                        if let toolName = record.prefixedToolName ?? record.rawToolName {
+                            Text(toolName)
+                                .font(AgentChatTypography.monoMeta)
+                                .textSelection(.enabled)
+                        }
+                        if let result = record.resultSummary, !result.isEmpty {
+                            Text(result)
+                                .font(AgentChatTypography.meta)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(3)
+                        }
+                        if let error = record.errorSummary, !error.isEmpty {
+                            Text(error)
+                                .font(AgentChatTypography.meta)
+                                .foregroundStyle(.red)
+                                .lineLimit(3)
+                        }
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(nsColor: .textBackgroundColor).opacity(0.42), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
+                }
+            }
+        }
+    }
+
+    private func color(for kind: MCPSourceRuntimeAuditEventKind) -> Color {
+        switch kind {
+        case .toolFinished, .discoveryFinished: .green
+        case .toolFailed: .red
+        case .toolPermissionRequested: .orange
+        case .toolStarted, .discoveryStarted: .blue
+        }
+    }
+}
+
+private struct SourceSummaryStrip: View {
+    var summary: SourceRuntimeUISummary
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 10)], spacing: 10) {
+            summaryMetric("Total", summary.totalCount)
+            summaryMetric("Enabled", summary.enabledCount)
+            summaryMetric("Healthy", summary.healthyCount)
+            summaryMetric("Tools", summary.discoveredToolCount)
+        }
+    }
+
+    private func summaryMetric(_ title: String, _ value: Int) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(AgentChatTypography.microEmphasis).foregroundStyle(.secondary)
+            Text("\(value)").font(.title2.weight(.semibold))
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
     }
 }
 
