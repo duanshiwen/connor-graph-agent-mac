@@ -31,7 +31,10 @@ struct SourceRuntimePanelView: View {
                     summary: presentation.summary,
                     tools: viewModel.sourceRuntimeToolCatalogs[card.id, default: []],
                     auditRecords: viewModel.sourceRuntimeAuditRecordsBySource[card.id, default: []],
-                    onRefresh: viewModel.reloadSourceRuntimeConfigurations
+                    isTesting: viewModel.testingSourceRuntimeIDs.contains(card.id),
+                    testMessage: viewModel.sourceRuntimeTestMessages[card.id],
+                    onRefresh: viewModel.reloadSourceRuntimeConfigurations,
+                    onTest: { Task { await viewModel.testSourceRuntime(sourceID: card.id) } }
                 )
             } else {
                 MCPSourceEmptyDetailView(summary: presentation.summary, onRefresh: viewModel.reloadSourceRuntimeConfigurations)
@@ -51,13 +54,30 @@ private struct MCPSourceDetailView: View {
     var summary: SourceRuntimeUISummary
     var tools: [MCPSourceToolDescriptor]
     var auditRecords: [MCPSourceRuntimeAuditRecord]
+    var isTesting: Bool
+    var testMessage: String?
     var onRefresh: () -> Void
+    var onTest: () -> Void
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
-                MCPSourceTopBar(title: card.title, subtitle: "MCP Source", onRefresh: onRefresh)
+                MCPSourceTopBar(title: card.title, subtitle: "MCP Source", onRefresh: onRefresh, onTest: onTest, isTesting: isTesting)
                 MCPSourceHeroSection(card: card, configuration: configuration)
+
+                if let testMessage, !testMessage.isEmpty {
+                    SkillInfoSection(title: "Source Test", systemImage: isTesting ? "hourglass" : "checkmark.circle") {
+                        HStack(spacing: AgentChatLayout.spaceS) {
+                            if isTesting {
+                                ProgressView().controlSize(.small)
+                            }
+                            Text(testMessage)
+                                .font(AgentChatTypography.meta)
+                                .foregroundStyle(testMessage.localizedCaseInsensitiveContains("failed") ? .red : .secondary)
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
 
                 if !card.lastErrorLabel.isEmpty {
                     SkillInfoSection(title: "Last Error", systemImage: "exclamationmark.triangle") {
@@ -122,7 +142,7 @@ private struct MCPSourceEmptyDetailView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
-            MCPSourceTopBar(title: "MCP Sources", subtitle: "Source Runtime", onRefresh: onRefresh)
+            MCPSourceTopBar(title: "MCP Sources", subtitle: "Source Runtime", onRefresh: onRefresh, onTest: nil, isTesting: false)
             Spacer(minLength: 80)
             ContentUnavailableView(
                 hasSources ? "选择一个 MCP Source" : "暂无 MCP Source",
@@ -143,6 +163,8 @@ private struct MCPSourceTopBar: View {
     var title: String
     var subtitle: String
     var onRefresh: () -> Void
+    var onTest: (() -> Void)?
+    var isTesting: Bool
 
     var body: some View {
         HStack(alignment: .top) {
@@ -156,11 +178,22 @@ private struct MCPSourceTopBar: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Button(action: onRefresh) {
-                Label("刷新", systemImage: "arrow.clockwise")
-                    .font(AgentChatTypography.metaEmphasis)
+            HStack(spacing: AgentChatLayout.spaceS) {
+                if let onTest {
+                    Button(action: onTest) {
+                        Label(isTesting ? "测试中…" : "测试 Source", systemImage: isTesting ? "hourglass" : "checkmark.circle")
+                            .font(AgentChatTypography.metaEmphasis)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isTesting)
+                    .help("运行 MCP initialize + tools/list，并刷新 health/catalog/audit。")
+                }
+                Button(action: onRefresh) {
+                    Label("刷新", systemImage: "arrow.clockwise")
+                        .font(AgentChatTypography.metaEmphasis)
+                }
+                .buttonStyle(.bordered)
             }
-            .buttonStyle(.bordered)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
