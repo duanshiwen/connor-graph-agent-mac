@@ -104,7 +104,7 @@ struct CraftPrimarySidebarView: View {
 
                     SidebarRow(title: "MCP", systemImage: "server.rack", count: viewModel.sourceRuntimeConfigurations.count, isSelected: selection == .sources) { select(.sources) }
 
-                    SidebarRow(title: "技能", systemImage: "bolt", count: viewModel.skillRuntimeDefinitions.count, isSelected: selection == .skills) { select(.skills) }
+                    SidebarRow(title: "技能", systemImage: "bolt", count: viewModel.commercialSkillManagerPresentation.summary.total, isSelected: selection == .skills) { select(.skills) }
 
                     SidebarDisclosure(title: "自动化", systemImage: "wand.and.stars", isExpanded: $automationExpanded) {
                         SidebarRow(title: "定时任务", systemImage: "clock", count: viewModel.automationConfig.rules.count, isSelected: selection == .automation) { select(.automation) }
