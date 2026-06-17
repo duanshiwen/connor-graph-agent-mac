@@ -20,28 +20,86 @@ Users can trigger update checks from:
 - App menu: `Check for Updates…`
 - Settings → 应用 → 关于与更新 → `检查更新`
 
-If `SUPublicEDKey` is still a placeholder, Connor does not start Sparkle and disables the update button. This keeps local development safe until real release signing is configured.
+When the Sparkle feed URL and public EdDSA key are present, Connor starts `SPUStandardUpdaterController`. Sparkle then owns the executable update flow: appcast lookup, update presentation, download, EdDSA verification, installation, and relaunch.
 
-## Required Info.plist keys
+## Configured Info.plist keys
 
 The Xcode target uses generated Info.plist keys:
 
 ```text
 SUFeedURL = https://duanshiwen.github.io/connor-updates/stable/appcast.xml
-SUPublicEDKey = REPLACE_WITH_SPARKLE_PUBLIC_ED_KEY
+SUPublicEDKey = sWf8ogcYVvHBiWsjfWCodO263YAXcCD4EmzbNvMiMHc=
 SUEnableAutomaticChecks = YES
 ```
 
-Before publishing, replace `REPLACE_WITH_SPARKLE_PUBLIC_ED_KEY` with the value produced by Sparkle's `generate_keys` tool.
+The matching private key was generated with Sparkle `generate_keys --account com.shiwen.connor-graph-agent-mac` and is stored in the local macOS Keychain. Do not commit or print the private key.
 
-## Enable a real release channel
+## Local release command
 
-1. Generate Sparkle EdDSA keys.
-2. Put the public key into the app target's generated Info.plist setting `INFOPLIST_KEY_SUPublicEDKey`.
-3. Archive the app with Developer ID signing.
-4. Notarize and staple the app/dmg.
-5. Generate a Sparkle appcast with `generate_appcast`.
-6. Publish the appcast to the static feed URL.
-7. Publish the release artifact to GitHub Releases or another static artifact host.
+```bash
+scripts/release-macos-sparkle.sh
+```
 
-Connor does not implement its own binary patcher or app installer.
+Useful environment variables:
+
+```bash
+SCHEME=ConnorGraphAgentMacApp
+SPARKLE_ACCOUNT=com.shiwen.connor-graph-agent-mac
+DOWNLOAD_URL_PREFIX=https://github.com/duanshiwen/connor-graph-agent-mac/releases/download/v1.0.0
+NOTARY_PROFILE=connor-notary-profile
+```
+
+Alternatively provide Apple notary credentials directly:
+
+```bash
+APPLE_ID=...
+APPLE_TEAM_ID=...
+APPLE_APP_SPECIFIC_PASSWORD=...
+```
+
+## GitHub Actions release
+
+Workflow:
+
+```text
+.github/workflows/release-macos-sparkle.yml
+```
+
+Required GitHub Secrets:
+
+```text
+SPARKLE_PRIVATE_KEY
+APPLE_ID
+APPLE_TEAM_ID
+APPLE_APP_SPECIFIC_PASSWORD
+DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64
+DEVELOPER_ID_APPLICATION_CERTIFICATE_PASSWORD
+KEYCHAIN_PASSWORD
+```
+
+`SPARKLE_PRIVATE_KEY` should be the exported Sparkle private key content from:
+
+```bash
+.build/artifacts/sparkle/Sparkle/bin/generate_keys \
+  --account com.shiwen.connor-graph-agent-mac \
+  -x /tmp/connor-sparkle-private-key.txt
+```
+
+Then copy the file content into the secret and delete the exported file immediately.
+
+## Release sequence
+
+1. Update `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION`.
+2. Push a tag, for example `v1.0.0`.
+3. GitHub Actions builds the app target using the shared `ConnorGraphAgentMacApp` scheme.
+4. The workflow imports the Developer ID Application certificate.
+5. The release script archives, exports, zips, notarizes, staples, and re-zips the app.
+6. Sparkle `generate_appcast` signs the appcast using `SPARKLE_PRIVATE_KEY`.
+7. The zip and appcast are uploaded to the GitHub Release.
+8. Publish or sync `appcast.xml` to the stable feed URL:
+
+```text
+https://duanshiwen.github.io/connor-updates/stable/appcast.xml
+```
+
+Connor does not implement its own binary patcher, remote update backend, or app installer.

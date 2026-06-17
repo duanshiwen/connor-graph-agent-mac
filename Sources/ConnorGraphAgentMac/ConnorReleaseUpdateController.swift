@@ -32,34 +32,43 @@ final class ConnorReleaseUpdateController: ObservableObject {
     @Published private(set) var currentVersion: ConnorAppVersionInfo
     @Published private(set) var configurationStatus: String
 
-    private let updaterController: SPUStandardUpdaterController?
+    private var updaterController: SPUStandardUpdaterController?
+    private let bundle: Bundle
     private var cancellables: Set<AnyCancellable> = []
 
     init(bundle: Bundle = .main) {
+        self.bundle = bundle
         currentVersion = ConnorAppVersionInfo.read(from: bundle)
         if ConnorReleaseUpdateController.hasUsableSparkleConfiguration(in: bundle) {
-            configurationStatus = "Sparkle 自动更新已配置。"
-            let controller = SPUStandardUpdaterController(
-                startingUpdater: true,
-                updaterDelegate: nil,
-                userDriverDelegate: nil
-            )
-            updaterController = controller
-            canCheckForUpdates = controller.updater.canCheckForUpdates
-            controller.updater.publisher(for: \.canCheckForUpdates)
-                .receive(on: RunLoop.main)
-                .sink { [weak self] value in
-                    self?.canCheckForUpdates = value
-                }
-                .store(in: &cancellables)
+            canCheckForUpdates = true
+            configurationStatus = "Sparkle 自动更新已配置，将在点击检查更新时激活。"
         } else {
-            updaterController = nil
             canCheckForUpdates = false
             configurationStatus = "Sparkle 自动更新尚未完成发布配置：需要 SUFeedURL 与 SUPublicEDKey。"
         }
     }
 
+    func activateAfterLaunch() {
+        guard updaterController == nil else { return }
+        guard ConnorReleaseUpdateController.hasUsableSparkleConfiguration(in: bundle) else { return }
+        let controller = SPUStandardUpdaterController(
+            startingUpdater: true,
+            updaterDelegate: nil,
+            userDriverDelegate: nil
+        )
+        updaterController = controller
+        configurationStatus = "Sparkle 自动更新已配置。"
+        canCheckForUpdates = controller.updater.canCheckForUpdates
+        controller.updater.publisher(for: \.canCheckForUpdates)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] value in
+                self?.canCheckForUpdates = value
+            }
+            .store(in: &cancellables)
+    }
+
     func checkForUpdates() {
+        activateAfterLaunch()
         updaterController?.checkForUpdates(nil)
     }
 

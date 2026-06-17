@@ -70,6 +70,7 @@ struct AppShellView: View {
             sidebarSelection = viewModel.selection ?? .agentChat
             viewModel.reloadChatSessions()
             installTopSearchKeyMonitorIfNeeded()
+            viewModel.activateRuntimeSettingsSideEffectsAfterLaunch()
         }
         .onDisappear {
             removeTopSearchKeyMonitor()

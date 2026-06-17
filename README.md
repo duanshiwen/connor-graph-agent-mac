@@ -1,6 +1,6 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-17 11:48 GMT+8  
+文档更新时间：2026-06-17 11:54 GMT+8  
 当前代码基线:`feature/apple-iwork-attachment-support`,在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface / session-scoped multi-root project workspace / Connor-owned Scientific Compute Runtime skeleton / 商用级 Document Attachment OS / WKWebView-backed `web_fetch(js)` 基础上,继续收紧 Apple 原生 UI 边界:PDF/Word/Excel/PowerPoint 与 Apple iWork（Pages/Numbers/Keynote）一等附件仍由 Connor Session Capsule 和 Attachment Store 管理;PDF selectable text 抽取和多页原文预览继续使用 PDFKit;Office/iWork/Presentation/Spreadsheet 抽取继续通过 MarkItDown/Docling sidecar best-effort 编排与 hardening;Office/iWork/Presentation/Spreadsheet 原文件预览优先交给 macOS Quick Look / QuickLookUI,Connor 自有 UI 只负责 manifest、extraction status、retry、omitted attachment summary 和治理证据;AI 设置页 Add Connection 前置 DeepSeek、Xiaomi MiMo 和中国常用模型入口,在 OpenAI Compatible 统一底座上支持 MiMo 官方 `api-key` 认证头。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package,目标是把 Connor 建成 **graph-memory-native Agent OS**:它不是"图谱编辑器",也不是"Claude SDK 外壳",而是以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI 和 Local Automation Surface 共同构成的本地 Agent 操作系统。
@@ -1481,6 +1481,59 @@ b011671 Phase H add skill runtime UI presentation
 
 ---
 
+## Release & Update Surface
+
+Connor 采用**无自建后端的 macOS 独立分发模型**:
+
+- Developer ID 签名与 Apple notarization 负责 macOS Gatekeeper 信任链。
+- Sparkle 2 负责 App 二进制自动更新，包括 appcast 检查、下载、EdDSA 验签、安装与重启。
+- GitHub Releases 或等价静态 artifact host 托管 release zip/dmg。
+- GitHub Pages 或等价静态托管服务托管 signed appcast feed。
+- Connor 自身只拥有 release policy、更新入口、设置页诊断、渠道策略与兼容性治理。
+
+当前稳定 feed:
+
+```text
+https://duanshiwen.github.io/connor-updates/stable/appcast.xml
+```
+
+App target 使用显式 `Sources/ConnorGraphAgentMac/Info.plist` 写入 Sparkle 配置:
+
+```text
+SUFeedURL=https://duanshiwen.github.io/connor-updates/stable/appcast.xml
+SUPublicEDKey=sWf8ogcYVvHBiWsjfWCodO263YAXcCD4EmzbNvMiMHc=
+SUEnableAutomaticChecks=YES
+```
+
+Connor 不运行远程更新后端,不自研二进制 patcher,不自研 app installer。可执行更新安装主权交给 Sparkle;Connor 只在产品层呈现"检查更新"入口、当前版本信息、feed 状态和失败诊断。
+
+发布流水线边界:
+
+```text
+push tag
+  -> GitHub Actions
+  -> swift test / xcodebuild archive
+  -> Developer ID signing
+  -> Apple notarization + staple
+  -> zip release artifact
+  -> Sparkle generate_appcast
+  -> GitHub Release artifact
+  -> GitHub Pages stable/appcast.xml
+  -> Connor checks feed via Sparkle
+```
+
+本仓库包含:
+
+- `ConnorGraphAgentMacApp` shared Xcode scheme
+- `scripts/release-macos-sparkle.sh`
+- `scripts/export-options-developer-id.plist`
+- `.github/workflows/release-macos-sparkle.yml`
+- `RELEASE_UPDATES.md`
+
+发布凭证不进入仓库。CI 需要通过 GitHub Secrets 提供 Apple notarization credentials、Developer ID certificate 和 Sparkle private key。
+
+---
+
 ## Deferred Scope
 
 当前仍刻意延后:
@@ -1490,7 +1543,9 @@ b011671 Phase H add skill runtime UI presentation
 - OAuth server / team auth / multi-user permissions
 - Full REST framework or default long-running local server
 - Real macOS Shortcuts app integration
-- App Store packaging / notarization / Sparkle updater
+- Mac App Store packaging / review path
+- Self-hosted release backend
+- Custom binary patcher / custom app installer
 - Team billing / remote collaboration
 - Full onboarding walkthrough
 - Full theme editor / design system rewrite
