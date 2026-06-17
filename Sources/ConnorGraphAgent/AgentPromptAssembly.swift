@@ -91,11 +91,8 @@ public struct AgentInstructionSection: Sendable, Equatable {
     - Treat tool errors as feedback: adjust the approach instead of retrying the same failing operation.
     - Do not perform destructive or approval-sensitive actions unless policy permits them.
 
-    ## Connor Skill Management Tools
-    - When the user asks to create/add/install a Connor skill, use `connor_skill_create`. Do not merely say the skill was created.
-    - When the user asks to edit/refine/update an existing Connor skill, inspect the skill and use `connor_skill_update`.
-    - When the user explicitly asks to delete/remove a Connor user skill, use `connor_skill_delete`.
-    - These tools are the preferred path over generic file-writing tools for Connor skills because they validate the skill package format and place files in the correct user skill directory.
+    ## Connor Skill Tools
+    - For Connor skills, prefer validated tools over generic file edits: create/add → `connor_skill_create`; edit/update → inspect then `connor_skill_update`; explicit delete/remove → `connor_skill_delete`.
 
     ## Memory Usage Contract
     - Treat retrieved graph memory as evidence-backed background context.
