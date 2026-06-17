@@ -15,19 +15,22 @@ public struct OpenAICompatibleConfig: Sendable, Equatable {
     public var model: String
     public var extraHeaders: [String: String]
     public var apiKeyHeaderKind: OpenAICompatibleAPIKeyHeaderKind
+    public var reasoningEffort: String?
 
     public init(
         baseURL: URL,
         apiKey: String,
         model: String,
         extraHeaders: [String: String] = [:],
-        apiKeyHeaderKind: OpenAICompatibleAPIKeyHeaderKind = .bearer
+        apiKeyHeaderKind: OpenAICompatibleAPIKeyHeaderKind = .bearer,
+        reasoningEffort: String? = nil
     ) {
         self.baseURL = baseURL
         self.apiKey = apiKey
         self.model = model
         self.extraHeaders = extraHeaders
         self.apiKeyHeaderKind = apiKeyHeaderKind
+        self.reasoningEffort = reasoningEffort
     }
 
     public var requestModel: String {
@@ -186,7 +189,8 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, Ag
                 OpenAIChatMessage(role: "system", content: systemPrompt),
                 OpenAIChatMessage(role: "user", content: "Question:\n\(prompt)\n\nGraph Context:\n\(context.renderedText)")
             ],
-            temperature: 0.2
+            temperature: 0.2,
+            reasoningEffort: config.reasoningEffort
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
@@ -245,7 +249,8 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, Ag
             messages: messages,
             temperature: request.temperature,
             tools: tools.isEmpty ? nil : tools,
-            toolChoice: tools.isEmpty ? nil : "auto"
+            toolChoice: tools.isEmpty ? nil : "auto",
+            reasoningEffort: config.reasoningEffort
         )
         let data = try JSONSerialization.data(withJSONObject: try body.jsonObject(), options: [.sortedKeys])
         return AgentHTTPRequest(
@@ -305,13 +310,15 @@ private struct OpenAIChatCompletionRequest: Encodable {
     var temperature: Double
     var tools: [OpenAIToolDefinition]?
     var toolChoice: String?
+    var reasoningEffort: String?
 
-    init(model: String, messages: [OpenAIChatMessage], temperature: Double, tools: [OpenAIToolDefinition]? = nil, toolChoice: String? = nil) {
+    init(model: String, messages: [OpenAIChatMessage], temperature: Double, tools: [OpenAIToolDefinition]? = nil, toolChoice: String? = nil, reasoningEffort: String? = nil) {
         self.model = model
         self.messages = messages
         self.temperature = temperature
         self.tools = tools
         self.toolChoice = toolChoice
+        self.reasoningEffort = reasoningEffort
     }
 
     enum CodingKeys: String, CodingKey {
@@ -320,6 +327,7 @@ private struct OpenAIChatCompletionRequest: Encodable {
         case temperature
         case tools
         case toolChoice = "tool_choice"
+        case reasoningEffort = "reasoning_effort"
     }
 
     func jsonObject() throws -> [String: Any] {
