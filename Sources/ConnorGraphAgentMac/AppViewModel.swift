@@ -3324,6 +3324,28 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
+    private func buildSkillChatPromptAugmentation(prompt: String, sessionID: String) -> SkillChatPromptAugmentation {
+        guard let storagePaths else {
+            return SkillChatPromptAugmentation(originalPrompt: prompt, augmentedPrompt: prompt)
+        }
+        let roots = workspaceRoots
+            .map { $0.path.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .map { URL(fileURLWithPath: $0, isDirectory: true) }
+        let nestedRoots: [URL]
+        if let primary = primaryWorkspaceRootDraft?.path.trimmingCharacters(in: .whitespacesAndNewlines), !primary.isEmpty {
+            nestedRoots = [URL(fileURLWithPath: primary, isDirectory: true)]
+        } else {
+            nestedRoots = []
+        }
+        return SkillChatPromptAugmentor(storagePaths: storagePaths).augment(
+            prompt: prompt,
+            sessionID: sessionID,
+            projectRoots: roots,
+            nestedRoots: nestedRoots
+        )
+    }
+
     @discardableResult
     func submitChat(prompt rawPrompt: String, clearComposer: Bool = false, displayPrompt rawDisplayPrompt: String? = nil) async -> String? {
         let prompt = rawPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3387,8 +3409,9 @@ final class AppViewModel: NSObject, ObservableObject {
                 sessionID: submittingSessionID,
                 attachments: attachmentsForSubmission
             )
+            let skillAugmentation = buildSkillChatPromptAugmentation(prompt: prompt, sessionID: submittingSessionID)
             let response = try await manager.submit(
-                prompt,
+                skillAugmentation.augmentedPrompt,
                 sessionSummary: sessionSummary,
                 displayPrompt: displayPrompt?.isEmpty == false ? displayPrompt : nil,
                 attachments: attachmentsForSubmission,
