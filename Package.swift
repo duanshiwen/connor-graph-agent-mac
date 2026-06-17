@@ -48,6 +48,7 @@ let package = Package(
                 "ConnorGraphAppSupport",
                 .product(name: "Sparkle", package: "Sparkle")
             ],
+            exclude: ["Info.plist"],
             resources: [.process("Assets.xcassets")],
             linkerSettings: [.linkedFramework("WebKit"), .linkedFramework("CoreLocation")]
         ),

@@ -13,11 +13,13 @@ import ConnorGraphAppSupport
 @main
 struct ConnorGraphAgentMacApp: App {
     @NSApplicationDelegateAdaptor(ConnorMenuBarDelegate.self) private var menuBarDelegate
-    @StateObject private var viewModel = AppViewModel.live()
-    @StateObject private var updateController = ConnorReleaseUpdateController()
+    @StateObject private var viewModel: AppViewModel
+    @StateObject private var updateController: ConnorReleaseUpdateController
 
     init() {
         AppKitSecureCodingWarningMitigator.clearLegacyOpenPanelRootDirectoryState()
+        _viewModel = StateObject(wrappedValue: AppViewModel.live())
+        _updateController = StateObject(wrappedValue: ConnorReleaseUpdateController())
     }
 
     var body: some Scene {
@@ -28,7 +30,9 @@ struct ConnorGraphAgentMacApp: App {
         }
         .commands {
             CommandGroup(after: .appInfo) {
-                ConnorCheckForUpdatesCommandView(updateController: updateController)
+                Button("Check for Updates…") {
+                    updateController.checkForUpdates()
+                }
             }
             CommandGroup(replacing: .newItem) {}
             CommandGroup(replacing: .saveItem) {}
@@ -36,7 +40,29 @@ struct ConnorGraphAgentMacApp: App {
             CommandGroup(replacing: .printItem) {}
             CommandGroup(replacing: .help) {}
 
-            CommandMenu("指示") {}
+            CommandMenu("指示") {
+                Button("新建会话") {
+                    viewModel.performShortcutAction(.newSession)
+                }
+                .keyboardShortcut("n", modifiers: .command)
+
+                Button("切换浏览器") {
+                    viewModel.performShortcutAction(.toggleBrowser)
+                }
+                .keyboardShortcut("b", modifiers: .command)
+
+                Button("聚焦搜索") {
+                    viewModel.performShortcutAction(.focusTopSearch)
+                }
+                .keyboardShortcut("f", modifiers: .command)
+
+                Divider()
+
+                Button("打开设置") {
+                    viewModel.performShortcutAction(.openSettings)
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
         }
     }
 }

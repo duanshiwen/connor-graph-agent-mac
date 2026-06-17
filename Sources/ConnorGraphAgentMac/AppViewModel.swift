@@ -302,6 +302,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var isLoadingRuntimeSettings = false
     private var runtimeSettingsAutosaveTask: Task<Void, Never>?
     private var idleSleepAssertionID: IOPMAssertionID = 0
+    private var hasActivatedRuntimeSettingsSideEffects = false
     private var locationCoordinator: UserLocationCoordinator?
 
     private var activeChatSession: AgentSession {
@@ -1733,7 +1734,9 @@ final class AppViewModel: NSObject, ObservableObject {
             var shouldPersistSystemPreferenceDefaults = false
             defer {
                 isLoadingRuntimeSettings = false
-                applyRuntimeSettingsSideEffects()
+                if hasActivatedRuntimeSettingsSideEffects {
+                    applyRuntimeSettingsSideEffects()
+                }
                 if shouldPersistSystemPreferenceDefaults {
                     scheduleRuntimeSettingsAutosave()
                 }
@@ -1839,9 +1842,20 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
+    func activateRuntimeSettingsSideEffectsAfterLaunch() {
+        guard !hasActivatedRuntimeSettingsSideEffects else { return }
+        hasActivatedRuntimeSettingsSideEffects = true
+        applyRuntimeSettingsSideEffects()
+    }
+
     private func applyRuntimeSettingsSideEffects() {
         applyKeepScreenAwakeSetting()
-        if desktopNotificationsEnabled {
+        requestDesktopNotificationAuthorizationIfNeeded()
+    }
+
+    private func requestDesktopNotificationAuthorizationIfNeeded() {
+        guard hasActivatedRuntimeSettingsSideEffects, desktopNotificationsEnabled, canUseUserNotifications else { return }
+        DispatchQueue.main.async {
             UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
         }
     }
@@ -1862,13 +1876,17 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func postDesktopNotification(title: String, body: String) {
-        guard desktopNotificationsEnabled else { return }
+        guard desktopNotificationsEnabled, canUseUserNotifications else { return }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         content.sound = .default
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
+    }
+
+    private var canUseUserNotifications: Bool {
+        Bundle.main.bundleURL.pathExtension == "app"
     }
 
     func refreshSystemPreferenceDefaults() {
