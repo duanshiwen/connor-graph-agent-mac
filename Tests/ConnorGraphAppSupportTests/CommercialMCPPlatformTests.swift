@@ -161,7 +161,100 @@ private func temporaryCommercialMCPStoragePaths(_ name: String = UUID().uuidStri
     #expect(report.healthRecord.healthStatus == .healthy)
     #expect(try repository.loadHealthRecord(sourceID: "fixture")?.healthStatus == .healthy)
     #expect(try repository.loadToolCatalog(sourceID: "fixture").map(\.name) == ["mcp__fixture__echo"])
+    let persistedCatalog = try repository.loadToolCatalog(sourceID: "fixture")
+    #expect(persistedCatalog.first?.governancePolicy?.executionPolicy == .requireConfirmation)
+    #expect(persistedCatalog.first?.governancePolicy?.riskClass == .unknown)
+    #expect(persistedCatalog.first?.definitionFingerprint?.algorithm == "sha256")
+    #expect(persistedCatalog.first?.integrityStatus == .new)
     #expect(try repository.loadRecentAuditRecords(sourceID: "fixture").map(\.eventKind).contains(.discoveryFinished))
+}
+
+@Test func commercialMCPToolGovernanceClassifiesAndPinsDefinitions() async throws {
+    let config = MCPSourceRuntimeConfiguration(
+        sourceID: "github",
+        displayName: "GitHub",
+        transport: .stdio(command: "mock", arguments: []),
+        status: .enabled,
+        credentialRequirement: .none,
+        allowedCapabilities: [.externalNetwork],
+        toolNamePrefix: "github"
+    )
+    let transport = MockMCPClientTransport(responses: [
+        MCPJSONRPCMessage(id: .number(1), result: .object([
+            "protocolVersion": .string("2025-06-18"),
+            "capabilities": .object(["tools": .object([:])]),
+            "serverInfo": .object(["name": .string("github-mcp"), "version": .string("1")])
+        ])),
+        MCPJSONRPCMessage(id: .number(2), result: .object([
+            "tools": .array([
+                .object(["name": .string("list_issues"), "description": .string("List issues"), "inputSchema": .object(["type": .string("object")])]),
+                .object(["name": .string("delete_repo_secret"), "description": .string("Delete a repository secret"), "inputSchema": .object(["type": .string("object")])])
+            ])
+        ]))
+    ])
+    let runtime = MCPSourceRuntime(configuration: config, client: MCPJSONRPCClient(transport: transport, clientName: "Connor", clientVersion: "1.0"))
+
+    let catalog = try await runtime.discoverToolCatalog()
+
+    let listTool = try #require(catalog.first(where: { $0.rawName == "list_issues" }))
+    let deleteTool = try #require(catalog.first(where: { $0.rawName == "delete_repo_secret" }))
+    #expect(listTool.governancePolicy?.riskClass == .externalRead)
+    #expect(listTool.governancePolicy?.executionPolicy == .autoAllow)
+    #expect(listTool.definitionFingerprint?.value.count == 64)
+    #expect(deleteTool.governancePolicy?.riskClass == .credentialAccess)
+    #expect(deleteTool.governancePolicy?.executionPolicy == .block)
+}
+
+@Test func commercialMCPPoolBlocksChangedToolDefinitionsBeforeExecution() async throws {
+    let storagePaths = temporaryCommercialMCPStoragePaths()
+    defer { try? FileManager.default.removeItem(at: storagePaths.applicationSupportDirectory) }
+    let repository = AppMCPSourceRuntimeRepository(storagePaths: storagePaths)
+    let config = MCPSourceRuntimeConfiguration(
+        sourceID: "fixture",
+        displayName: "Fixture MCP",
+        transport: .stdio(command: "/bin/echo", arguments: []),
+        status: .enabled,
+        credentialRequirement: .none,
+        allowedCapabilities: [.externalNetwork],
+        toolNamePrefix: "fixture"
+    )
+    try repository.save(config)
+    try repository.saveToolCatalog(sourceID: "fixture", catalog: [MCPSourceToolDescriptor(
+        sourceID: "fixture",
+        name: "mcp__fixture__list_items",
+        rawName: "list_items",
+        description: "List items",
+        inputSchema: .object(["type": .string("object")]),
+        requiredCapabilities: [.externalNetwork],
+        governancePolicy: MCPToolGovernancePolicy(
+            riskClass: .externalRead,
+            executionPolicy: .autoAllow,
+            permissionCapability: .externalNetwork,
+            rationale: "Read-only MCP tool."
+        ),
+        definitionFingerprint: MCPToolDefinitionFingerprint(value: "old"),
+        integrityStatus: .changed
+    )])
+    let pool = MCPClientPool(repository: repository)
+
+    await #expect(throws: MCPClientPoolError.self) {
+        try await pool.callMCPTool(
+            exposedToolName: "mcp__fixture__list_items",
+            sourceID: "fixture",
+            rawToolName: "list_items",
+            arguments: .object([:]),
+            context: AgentToolExecutionContext(
+                runID: "run-changed",
+                sessionID: "session-changed",
+                groupID: "default",
+                userPrompt: "call changed tool",
+                toolCallID: "tool-call-changed",
+                policyEngine: AgentPolicyEngine(permissionMode: .allowAll)
+            )
+        )
+    }
+    let audit = try repository.loadRecentAuditRecords(sourceID: "fixture", limit: 5)
+    #expect(audit.map(\.eventKind).contains(.toolDefinitionChanged))
 }
 
 private func makeMCPFixtureServer() throws -> URL {

@@ -375,9 +375,32 @@ private struct MCPToolCatalogPreview: View {
                         }
                         HStack(spacing: 6) {
                             SkillPill(text: "raw: \(tool.rawName)", color: .secondary)
-                            ForEach(tool.requiredCapabilities.map(\.rawValue).prefix(4), id: \.self) { capability in
+                            if let policy = tool.governancePolicy {
+                                SkillPill(text: "risk: \(policy.riskClass.rawValue)", color: color(for: policy.riskClass))
+                                SkillPill(text: "policy: \(policy.executionPolicy.rawValue)", color: color(for: policy.executionPolicy))
+                            } else {
+                                SkillPill(text: "policy: missing", color: .orange)
+                            }
+                            if let integrity = tool.integrityStatus {
+                                SkillPill(text: "integrity: \(integrity.rawValue)", color: color(for: integrity))
+                            }
+                            ForEach(tool.requiredCapabilities.map(\.rawValue).prefix(3), id: \.self) { capability in
                                 SkillPill(text: capability, color: .blue)
                             }
+                        }
+                        if let policy = tool.governancePolicy {
+                            Text(policy.rationale)
+                                .font(AgentChatTypography.micro)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        if let fingerprint = tool.definitionFingerprint {
+                            Text("sha256: \(fingerprint.value)")
+                                .font(AgentChatTypography.micro.monospaced())
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .textSelection(.enabled)
                         }
                     }
                     .padding(10)
@@ -385,6 +408,32 @@ private struct MCPToolCatalogPreview: View {
                     .background(Color(nsColor: .textBackgroundColor).opacity(0.42), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
                 }
             }
+        }
+    }
+
+    private func color(for risk: MCPToolRiskClass) -> Color {
+        switch risk {
+        case .read: .green
+        case .externalRead: .blue
+        case .mutation: .orange
+        case .destructive, .admin, .credentialAccess: .red
+        case .unknown: .purple
+        }
+    }
+
+    private func color(for policy: MCPToolExecutionPolicy) -> Color {
+        switch policy {
+        case .autoAllow: .green
+        case .requireConfirmation: .orange
+        case .block: .red
+        }
+    }
+
+    private func color(for integrity: MCPToolIntegrityStatus) -> Color {
+        switch integrity {
+        case .new: .blue
+        case .verified: .green
+        case .changed: .red
         }
     }
 }
@@ -413,6 +462,17 @@ private struct MCPAuditPreview: View {
                                 .font(AgentChatTypography.monoMeta)
                                 .textSelection(.enabled)
                         }
+                        HStack(spacing: 6) {
+                            if let riskClass = record.riskClass {
+                                SkillPill(text: "risk: \(riskClass.rawValue)", color: .orange)
+                            }
+                            if let executionPolicy = record.executionPolicy {
+                                SkillPill(text: "policy: \(executionPolicy.rawValue)", color: .purple)
+                            }
+                            if let integrityStatus = record.integrityStatus {
+                                SkillPill(text: "integrity: \(integrityStatus.rawValue)", color: integrityStatus == .changed ? .red : .green)
+                            }
+                        }
                         if let result = record.resultSummary, !result.isEmpty {
                             Text(result)
                                 .font(AgentChatTypography.meta)
@@ -437,7 +497,7 @@ private struct MCPAuditPreview: View {
     private func color(for kind: MCPSourceRuntimeAuditEventKind) -> Color {
         switch kind {
         case .toolFinished, .discoveryFinished: .green
-        case .toolFailed: .red
+        case .toolFailed, .toolPolicyBlocked, .toolDefinitionChanged: .red
         case .toolPermissionRequested: .orange
         case .toolStarted, .discoveryStarted: .blue
         }
