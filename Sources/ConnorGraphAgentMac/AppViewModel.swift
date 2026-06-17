@@ -202,6 +202,11 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var automationExecutionHistory: [ProductOSAutomationExecutionHistoryRecord] = []
     @Published var sourceRuntimeConfigurations: [MCPSourceRuntimeConfiguration] = []
     @Published var skillRuntimeDefinitions: [SkillRuntimeDefinition] = []
+    @Published var commercialSkillManagerPresentation: SkillManagerPresentation = SkillManagerPresentation(
+        summary: SkillManagerSummary(total: 0, enabled: 0, projectScoped: 0, risky: 0, invalid: 0, sourceBlocked: 0),
+        cards: [],
+        globalWarnings: []
+    )
     @Published var sidecarRuntimeDiagnostics: [ClaudeSDKSidecarRuntimeDiagnostics] = []
     @Published var commercialReleaseGateResult: CommercialReadinessReleaseGateResult?
     @Published var productOSRegistryMessage: String?
@@ -1202,10 +1207,33 @@ final class AppViewModel: NSObject, ObservableObject {
     func reloadSkillRuntimeDefinitions() {
         do {
             skillRuntimeDefinitions = try skillRuntimeRepository?.list() ?? []
+            commercialSkillManagerPresentation = buildCommercialSkillManagerPresentation()
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
         }
+    }
+
+    private func buildCommercialSkillManagerPresentation() -> SkillManagerPresentation {
+        guard let storagePaths else {
+            return SkillManagerPresentation(
+                summary: SkillManagerSummary(total: 0, enabled: 0, projectScoped: 0, risky: 0, invalid: 0, sourceBlocked: 0),
+                cards: [],
+                globalWarnings: ["Storage paths are not initialized."]
+            )
+        }
+        let roots = workspaceRoots
+            .map { $0.path.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .map { URL(fileURLWithPath: $0, isDirectory: true) }
+        let nestedRoots: [URL]
+        if let primary = primaryWorkspaceRootDraft?.path.trimmingCharacters(in: .whitespacesAndNewlines), !primary.isEmpty {
+            nestedRoots = [URL(fileURLWithPath: primary, isDirectory: true)]
+        } else {
+            nestedRoots = []
+        }
+        let snapshot = SkillPackageScanner().scan(storagePaths: storagePaths, projectRoots: roots, nestedRoots: nestedRoots)
+        return SkillCommercialUIPresentationBuilder().build(snapshot: snapshot)
     }
 
     func reloadSidecarRuntimeDiagnostics() {
