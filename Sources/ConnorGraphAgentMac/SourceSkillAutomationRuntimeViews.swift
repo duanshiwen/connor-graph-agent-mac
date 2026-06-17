@@ -45,11 +45,8 @@ struct SkillRuntimePanelView: View {
     }
 
     private var selectedCard: SkillManagerCard? {
-        if let id = viewModel.selectedSkillManagerCardID,
-           let card = presentation.cards.first(where: { $0.id == id }) {
-            return card
-        }
-        return presentation.cards.first
+        guard let id = viewModel.selectedSkillManagerCardID else { return nil }
+        return presentation.cards.first(where: { $0.id == id })
     }
 
     var body: some View {
@@ -58,11 +55,6 @@ struct SkillRuntimePanelView: View {
                 SkillManagerDetailView(card: card, summary: presentation.summary, globalWarnings: presentation.globalWarnings, onRefresh: viewModel.reloadSkillRuntimeDefinitions)
             } else {
                 SkillManagerEmptyDetailView(summary: presentation.summary, warnings: presentation.globalWarnings, onRefresh: viewModel.reloadSkillRuntimeDefinitions)
-            }
-        }
-        .task {
-            viewModel.deferViewUpdate {
-                viewModel.reloadSkillRuntimeDefinitions()
             }
         }
     }
@@ -76,10 +68,9 @@ private struct SkillManagerDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                SkillManagerTopBar(title: card.title, subtitle: "Skill Manager", onRefresh: onRefresh)
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
+                SkillManagerTopBar(title: card.title, subtitle: "Skill Manager")
                 SkillHeroSection(card: card)
-                SkillManagerMetricsStrip(summary: summary)
 
                 if !card.warnings.isEmpty || !globalWarnings.isEmpty {
                     SkillInfoSection(title: "Warnings", systemImage: "exclamationmark.triangle") {
@@ -116,16 +107,11 @@ private struct SkillManagerDetailView: View {
                 }
 
                 SkillInfoSection(title: "Instructions", systemImage: "doc.text") {
-                    Text(card.instructions.isEmpty ? "No instructions found." : card.instructions)
-                        .font(.system(.body, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(12)
-                        .background(Color(nsColor: .textBackgroundColor).opacity(0.50), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    SkillInstructionsPreview(instructions: card.instructions)
                 }
             }
-            .padding(24)
-            .frame(maxWidth: 980, alignment: .leading)
+            .padding(AgentChatLayout.spaceXL)
+            .frame(maxWidth: AgentChatLayout.chatContentMaxWidth, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color(nsColor: .textBackgroundColor).opacity(0.18))
@@ -149,12 +135,20 @@ private struct SkillManagerEmptyDetailView: View {
     var warnings: [String]
     var onRefresh: () -> Void
 
+    private var hasSkills: Bool {
+        summary.total > 0
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            SkillManagerTopBar(title: "技能", subtitle: "", onRefresh: onRefresh)
+        VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
+            SkillManagerTopBar(title: "技能", subtitle: "Skill Manager")
             Spacer(minLength: 80)
-            ContentUnavailableView("暂无技能", systemImage: "sparkles", description: Text("点击左侧列表右上角的 +，添加一个新技能。"))
-                .frame(maxWidth: .infinity)
+            ContentUnavailableView(
+                hasSkills ? "选择一个技能" : "暂无技能",
+                systemImage: hasSkills ? "bolt" : "sparkles",
+                description: Text(hasSkills ? "从左侧技能列表中选择一个技能，查看它的元数据、治理状态和指令内容。" : "点击左侧列表右上角的 +，添加一个新技能。")
+            )
+            .frame(maxWidth: .infinity)
             Spacer()
             if !warnings.isEmpty {
                 SkillInfoSection(title: "Global warnings", systemImage: "exclamationmark.triangle") {
@@ -164,7 +158,7 @@ private struct SkillManagerEmptyDetailView: View {
                 }
             }
         }
-        .padding(24)
+        .padding(AgentChatLayout.spaceXL)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color(nsColor: .textBackgroundColor).opacity(0.18))
     }
@@ -173,25 +167,20 @@ private struct SkillManagerEmptyDetailView: View {
 private struct SkillManagerTopBar: View {
     var title: String
     var subtitle: String
-    var onRefresh: () -> Void
 
     var body: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.largeTitle.weight(.semibold))
-                if !subtitle.isEmpty {
-                    Text(subtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
+        VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
+            Text(title)
+                .font(.system(size: 24, weight: .semibold))
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            if !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
             }
-            Spacer()
-            Button(action: onRefresh) {
-                Label("刷新", systemImage: "arrow.clockwise")
-            }
-            .buttonStyle(.bordered)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -199,36 +188,42 @@ private struct SkillHeroSection: View {
     var card: SkillManagerCard
 
     var body: some View {
-        HStack(alignment: .top, spacing: 16) {
+        HStack(alignment: .top, spacing: AgentChatLayout.spaceL) {
             ZStack {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
                     .fill(heroColor.opacity(0.14))
                 Image(systemName: "bolt.fill")
-                    .font(.system(size: 30, weight: .semibold))
+                    .font(.system(size: 24, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(heroColor)
             }
-            .frame(width: 76, height: 76)
+            .frame(width: 56, height: 56)
 
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+                HStack(alignment: .firstTextBaseline, spacing: AgentChatLayout.spaceS) {
                     Text(card.title)
-                        .font(.title.weight(.semibold))
+                        .font(AgentChatTypography.title)
+                        .lineLimit(2)
                     SkillPill(text: card.sourceTier, color: .blue)
                     SkillPill(text: card.riskLabel, color: heroColor)
                 }
                 Text(card.subtitle)
-                    .font(.body)
+                    .font(AgentChatTypography.meta)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 8) {
+                HStack(spacing: AgentChatLayout.spaceS) {
                     SkillPill(text: "trust: \(card.trustState)", color: trustColor)
                     SkillPill(text: card.lifecycleLabel, color: .secondary)
                 }
             }
-            Spacer()
+            Spacer(minLength: 0)
         }
-        .padding(18)
-        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(AgentChatLayout.spaceL)
+        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                .stroke(Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1)
+        )
     }
 
     private var heroColor: Color {
@@ -246,45 +241,70 @@ private struct SkillHeroSection: View {
     }
 }
 
-private struct SkillManagerMetricsStrip: View {
-    var summary: SkillManagerSummary
-
-    var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 118), spacing: 10)], spacing: 10) {
-            metric("Total", summary.total)
-            metric("Enabled", summary.enabled)
-            metric("Project", summary.projectScoped)
-            metric("Risky", summary.risky)
-            metric("Invalid", summary.invalid)
-        }
-    }
-
-    private func metric(_ label: String, _ value: Int) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            Text("\(value)").font(.title3.weight(.semibold))
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-}
-
 private struct SkillInfoSection<Content: View>: View {
     var title: String
     var systemImage: String
     @ViewBuilder var content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
             Label(title, systemImage: systemImage)
-                .font(.headline)
+                .font(AgentChatTypography.metaEmphasis)
             VStack(alignment: .leading, spacing: 0) {
                 content
             }
-            .padding(14)
+            .padding(AgentChatLayout.spaceL)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                    .stroke(Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1)
+            )
+        }
+    }
+}
+
+private struct SkillInstructionsPreview: View {
+    var instructions: String
+    @State private var isExpanded = false
+
+    private var normalizedInstructions: String {
+        instructions.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var displayText: String {
+        guard !normalizedInstructions.isEmpty else { return "No instructions found." }
+        guard !isExpanded, normalizedInstructions.count > 1_800 else { return normalizedInstructions }
+        let prefix = normalizedInstructions.prefix(1_800)
+        return "\(prefix)\n\n…"
+    }
+
+    private var shouldShowToggle: Bool {
+        normalizedInstructions.count > 1_800
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+            Text(displayText)
+                .font(AgentChatTypography.monoMeta)
+                .textSelection(.enabled)
+                .lineLimit(isExpanded ? nil : 18)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(AgentChatLayout.spaceM)
+                .background(Color(nsColor: .textBackgroundColor).opacity(0.50), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
+
+            if shouldShowToggle {
+                Button {
+                    withAnimation(.easeOut(duration: 0.16)) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    Label(isExpanded ? "收起完整指令" : "展开完整指令", systemImage: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(AgentChatTypography.metaEmphasis)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(ConnorCraftPalette.accent)
+            }
         }
     }
 }
@@ -293,15 +313,15 @@ private struct SkillInfoTable: View {
     var rows: [(String, String)]
 
     var body: some View {
-        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 18, verticalSpacing: 10) {
+        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: AgentChatLayout.spaceL, verticalSpacing: AgentChatLayout.spaceS) {
             ForEach(rows, id: \.0) { row in
                 GridRow {
                     Text(row.0)
-                        .font(.caption.weight(.semibold))
+                        .font(AgentChatTypography.microEmphasis)
                         .foregroundStyle(.secondary)
-                        .frame(width: 110, alignment: .leading)
+                        .frame(width: 108, alignment: .leading)
                     Text(row.1)
-                        .font(.callout)
+                        .font(AgentChatTypography.meta)
                         .textSelection(.enabled)
                 }
             }
@@ -316,9 +336,9 @@ private struct SkillBadgeRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            Text(title).font(AgentChatTypography.microEmphasis).foregroundStyle(.secondary)
             if values.isEmpty {
-                Text(emptyText).font(.callout).foregroundStyle(.secondary)
+                Text(emptyText).font(AgentChatTypography.meta).foregroundStyle(.secondary)
             } else {
                 FlowLikeWrap(values: values)
             }
@@ -344,10 +364,10 @@ private struct SkillPill: View {
 
     var body: some View {
         Text(text)
-            .font(.caption)
+            .font(AgentChatTypography.micro)
             .lineLimit(1)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+            .padding(.horizontal, AgentChatLayout.spaceS)
+            .frame(height: AgentChatLayout.chipHeight - 8)
             .background(color.opacity(0.12), in: Capsule())
             .foregroundStyle(color)
     }

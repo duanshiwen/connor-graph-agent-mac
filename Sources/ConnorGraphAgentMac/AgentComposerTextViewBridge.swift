@@ -121,7 +121,7 @@ final class SubmitAwareTextView: NSTextView {
         }
     }
 
-    override func insertText(_ string: Any?, replacementRange: NSRange) {
+    override func insertText(_ string: Any, replacementRange: NSRange) {
         if let str = string as? NSString, str.length == 1, str.character(at: 0) == UInt16(47) {
             let currentString = self.string as NSString
             let cursorLocation = selectedRange().location

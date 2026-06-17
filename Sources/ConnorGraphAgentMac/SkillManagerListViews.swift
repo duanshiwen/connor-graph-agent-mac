@@ -24,7 +24,12 @@ struct CraftSkillListPane: View {
             EditSkillRequestDialog(viewModel: viewModel)
         }
         .modifier(SkillDeleteConfirmationModifier(viewModel: viewModel))
-        .task { viewModel.reloadSkillRuntimeDefinitions() }
+        .task {
+            guard viewModel.commercialSkillManagerPresentation.cards.isEmpty else { return }
+            viewModel.deferViewUpdate {
+                viewModel.reloadSkillRuntimeDefinitions()
+            }
+        }
     }
 }
 
@@ -286,25 +291,121 @@ private struct SkillRequestTextEditor: View {
     var isFocused: FocusState<Bool>.Binding
 
     var body: some View {
-        TextEditor(text: $text)
-            .font(.body)
-            .focused(isFocused)
-            .frame(minHeight: 150)
-            .padding(8)
-            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
-            )
-            .overlay(alignment: .topLeading) {
-                if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(placeholder)
-                        .foregroundStyle(.tertiary)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 16)
-                        .allowsHitTesting(false)
-                }
-            }
+        SkillRequestTextView(
+            text: $text,
+            placeholder: placeholder,
+            isFocused: isFocused
+        )
+        .frame(minHeight: 150)
+        .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+        )
+    }
+}
+
+private struct SkillRequestTextView: NSViewRepresentable {
+    @Binding var text: String
+    var placeholder: String
+    var isFocused: FocusState<Bool>.Binding
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text, isFocused: isFocused)
+    }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.borderType = .noBorder
+
+        let textView = PlaceholderTextView()
+        textView.delegate = context.coordinator
+        textView.placeholderString = placeholder
+        textView.string = text
+        textView.font = .preferredFont(forTextStyle: .body)
+        textView.textColor = .labelColor
+        textView.backgroundColor = .clear
+        textView.drawsBackground = false
+        textView.isRichText = false
+        textView.importsGraphics = false
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.allowsUndo = true
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        textView.textContainerInset = NSSize(width: 12, height: 12)
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.containerSize = NSSize(width: scrollView.contentSize.width, height: .greatestFiniteMagnitude)
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        scrollView.documentView = textView
+        context.coordinator.textView = textView
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let textView = scrollView.documentView as? PlaceholderTextView else { return }
+        textView.placeholderString = placeholder
+        if textView.string != text {
+            textView.string = text
+        }
+        if isFocused.wrappedValue, textView.window?.firstResponder !== textView {
+            textView.window?.makeFirstResponder(textView)
+        }
+    }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        @Binding var text: String
+        var isFocused: FocusState<Bool>.Binding
+        weak var textView: PlaceholderTextView?
+
+        init(text: Binding<String>, isFocused: FocusState<Bool>.Binding) {
+            _text = text
+            self.isFocused = isFocused
+        }
+
+        func textDidChange(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            text = textView.string
+            textView.needsDisplay = true
+        }
+
+        func textDidBeginEditing(_ notification: Notification) {
+            isFocused.wrappedValue = true
+        }
+
+        func textDidEndEditing(_ notification: Notification) {
+            isFocused.wrappedValue = false
+        }
+    }
+}
+
+private final class PlaceholderTextView: NSTextView {
+    var placeholderString: String = "" {
+        didSet { needsDisplay = true }
+    }
+
+    override var string: String {
+        didSet { needsDisplay = true }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard string.isEmpty, !placeholderString.isEmpty else { return }
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font ?? .preferredFont(forTextStyle: .body),
+            .foregroundColor: NSColor.placeholderTextColor
+        ]
+        placeholderString.draw(
+            at: NSPoint(x: textContainerInset.width, y: textContainerInset.height),
+            withAttributes: attributes
+        )
     }
 }
 
