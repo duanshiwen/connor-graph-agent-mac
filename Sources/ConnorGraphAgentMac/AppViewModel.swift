@@ -1250,16 +1250,19 @@ final class AppViewModel: NSObject, ObservableObject {
         isSubmittingAddSkillRequest = true
         addSkillDialogMessage = "康纳正在根据你的需求创建技能…"
         do {
+            let knownSkillSlugs = currentUserSkillSlugs()
             let title = sanitizedSessionTitle("添加技能：\(request)")
             let session = try chatSessionRepository.createSession(title: title)
             rememberWorkspaceMode(.conversation, for: session.id)
             try loadBackgroundTasks(sessionID: session.id)
             reloadChatSessions(restoreWorkspaceMode: false)
             try await runAddSkillRequestInBackgroundSession(session: session, userRequest: request)
+            let createdSlug = try ensureSkillPackageExists(for: request, excluding: knownSkillSlugs)
             addSkillRequestDraft = ""
-            addSkillDialogMessage = "技能创建请求已提交。你可以继续留在这里，完成后技能会出现在列表中。"
+            addSkillDialogMessage = "技能已创建：\(createdSlug)。"
             reloadChatSessions(restoreWorkspaceMode: false)
             reloadSkillRuntimeDefinitions()
+            selectedSkillManagerCardID = createdSlug
             errorMessage = nil
         } catch {
             addSkillDialogMessage = "创建失败：\(String(describing: error))"
@@ -1310,6 +1313,7 @@ final class AppViewModel: NSObject, ObservableObject {
 
     private func buildAddSkillAgentPrompt(userRequest: String) -> String {
         let skillRoot = storagePaths?.skillsDirectory.path ?? "~/Library/Application Support/Connor/skills"
+        let suggestion = suggestedSkillIdentity(for: userRequest, existingSlugs: currentUserSkillSlugs())
         return """
         你正在帮助用户为 Connor 创建一个新技能。用户在“添加技能”弹窗中输入了以下需求：
 
@@ -1317,12 +1321,137 @@ final class AppViewModel: NSObject, ObservableObject {
 
         请按成熟技能创建流程工作：
         1. 如果需求不清楚，先用简短问题澄清技能的用途、触发时机、输入、输出和约束。
-        2. 如果需求足够清楚，请创建一个新的技能包目录：\(skillRoot)/<kebab-case-slug>/SKILL.md。
-        3. SKILL.md 必须包含 YAML frontmatter：name、description，并可包含 tags 与 x-connor 配置。
-        4. 正文应写成可执行的工作流说明，包括适用场景、步骤、输出格式和注意事项。
-        5. 创建完成后，请验证技能可以被 Connor 扫描，并告诉用户技能名称、slug 和文件路径。
+        2. 如果需求足够清楚，必须调用本地文件写入工具创建技能文件，不要只在回复中说“已添加”。
+        3. 推荐技能名称：\(suggestion.name)
+        4. 推荐 slug：\(suggestion.slug)
+        5. 目标文件：\(skillRoot)/\(suggestion.slug)/SKILL.md
+        6. SKILL.md 必须包含 YAML frontmatter：name、description、tags、globs、x-connor。
+        7. 正文应写成可执行的工作流说明，包括适用场景、步骤、输出格式和注意事项。
+        8. 创建完成后，请验证技能可以被 Connor 扫描，并告诉用户技能名称、slug 和文件路径。
 
-        请不要只给建议；在信息足够时，直接创建文件。
+        请不要只给建议；在信息足够时，直接创建文件。如果本地工具不可用，请明确说明未能写入文件。
+        """
+    }
+
+    private func currentUserSkillSlugs() -> Set<String> {
+        guard let storagePaths else { return [] }
+        let root = storagePaths.skillsDirectory
+        guard let entries = try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey]) else { return [] }
+        return Set(entries.compactMap { entry in
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: entry.path, isDirectory: &isDirectory), isDirectory.boolValue else { return nil }
+            guard FileManager.default.fileExists(atPath: entry.appendingPathComponent("SKILL.md").path) else { return nil }
+            return entry.lastPathComponent
+        })
+    }
+
+    private func ensureSkillPackageExists(for userRequest: String, excluding previousSlugs: Set<String>) throws -> String {
+        guard let storagePaths else { throw AppChatRuntimeUnavailableError.nativeSessionManagerUnavailable }
+        let currentSlugs = currentUserSkillSlugs()
+        if let created = currentSlugs.subtracting(previousSlugs).sorted().first {
+            return created
+        }
+        let identity = suggestedSkillIdentity(for: userRequest, existingSlugs: currentSlugs)
+        let directory = storagePaths.skillsDirectory.appendingPathComponent(identity.slug, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let skillURL = directory.appendingPathComponent("SKILL.md")
+        try generatedSkillMarkdown(name: identity.name, slug: identity.slug, userRequest: userRequest).write(to: skillURL, atomically: true, encoding: .utf8)
+        return identity.slug
+    }
+
+    private func suggestedSkillIdentity(for userRequest: String, existingSlugs: Set<String>) -> (name: String, slug: String) {
+        let lowercased = userRequest.lowercased()
+        let name: String
+        let baseSlug: String
+        if lowercased.contains("golang") || lowercased.contains("go language") || lowercased.contains(" go ") || lowercased.contains(".go") || lowercased.contains("go.mod") {
+            name = "Go 语言专家"
+            baseSlug = "go-expert"
+        } else if let firstSentence = userRequest.split(whereSeparator: { ".。\n".contains($0) }).first {
+            let trimmed = String(firstSentence).trimmingCharacters(in: .whitespacesAndNewlines)
+            name = String(trimmed.prefix(28)).isEmpty ? "新技能" : String(trimmed.prefix(28))
+            baseSlug = skillSlug(from: trimmed)
+        } else {
+            name = "新技能"
+            baseSlug = "custom-skill"
+        }
+        var candidate = baseSlug.isEmpty ? "custom-skill" : baseSlug
+        var suffix = 2
+        while existingSlugs.contains(candidate) {
+            candidate = "\(baseSlug)-\(suffix)"
+            suffix += 1
+        }
+        return (name, candidate)
+    }
+
+    private func skillSlug(from text: String) -> String {
+        let lowercased = text.lowercased()
+        var result = ""
+        var lastWasDash = false
+        for scalar in lowercased.unicodeScalars {
+            if CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789").contains(scalar) {
+                result.append(Character(scalar))
+                lastWasDash = false
+            } else if !lastWasDash {
+                result.append("-")
+                lastWasDash = true
+            }
+            if result.count >= 48 { break }
+        }
+        let trimmed = result.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return trimmed.count >= 3 ? trimmed : "custom-skill"
+    }
+
+    private func generatedSkillMarkdown(name: String, slug: String, userRequest: String) -> String {
+        let escapedName = name.replacingOccurrences(of: "\"", with: "\\\"")
+        let escapedDescription = userRequest.replacingOccurrences(of: "\"", with: "\\\"")
+        let lowercased = userRequest.lowercased()
+        let globs = (lowercased.contains("go") || lowercased.contains("golang")) ? "\n  - \"**/*.go\"\n  - \"**/go.mod\"" : ""
+        return """
+        ---
+        name: "\(escapedName)"
+        description: "\(escapedDescription)"
+        tags:
+          - generated
+          - skill
+        globs:\(globs.isEmpty ? " []" : globs)
+        x-connor:
+          lifecycle: stable
+          riskLevel: low
+          requiredCapabilities:
+            - readSession
+          graphContextPolicy: readOnly
+          sourcePolicy: preenableIfReady
+        ---
+
+        # \(name)
+
+        Use this skill when the user request matches the following need:
+
+        > \(userRequest)
+
+        ## When to use
+
+        - The user asks for work in this specialty area.
+        - The current task, files, or project context match the triggers described above.
+        - The user needs structured review, debugging, planning, or implementation guidance.
+
+        ## Workflow
+
+        1. Restate the concrete task and identify the relevant context.
+        2. Inspect available files, errors, requirements, or examples before making changes.
+        3. Apply domain-specific best practices and explain important trade-offs.
+        4. Produce actionable output: code, review findings, diagnosis, plan, or next steps.
+        5. Call out assumptions, risks, validation steps, and follow-up work.
+
+        ## Output
+
+        - Be concise and practical.
+        - Prefer concrete recommendations over generic advice.
+        - Include commands, file paths, or code snippets when they help the user act.
+
+        ## Notes
+
+        Created by Connor Skill Manager as `\(slug)`.
         """
     }
 
