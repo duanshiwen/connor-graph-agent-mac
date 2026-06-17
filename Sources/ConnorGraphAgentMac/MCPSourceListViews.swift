@@ -16,12 +16,11 @@ struct CraftSourceListPane: View {
     var body: some View {
         VStack(spacing: 0) {
             SourceListHeader(
-                onAdd: viewModel.presentAddSourceSheet,
                 onRefresh: viewModel.reloadSourceRuntimeConfigurations
             )
 
             if presentation.cards.isEmpty {
-                SourceListEmptyState(onAdd: viewModel.presentAddSourceSheet)
+                SourceListEmptyState()
             } else {
                 List(presentation.cards) { card in
                     MCPSourceRow(
@@ -56,7 +55,6 @@ struct CraftSourceListPane: View {
 }
 
 private struct SourceListHeader: View {
-    var onAdd: () -> Void
     var onRefresh: () -> Void
 
     var body: some View {
@@ -64,21 +62,11 @@ private struct SourceListHeader: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("MCP Sources")
                     .font(AppListTypography.header)
-                Text("工具、凭据与治理")
+                Text("外部工具连接")
                     .font(AppListTypography.rowCaption)
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Button(action: onAdd) {
-                Image(systemName: "plus")
-                    .font(.system(size: 12.5, weight: .semibold))
-                    .frame(width: 24, height: 24)
-            }
-            .buttonStyle(.plain)
-            .contentShape(Circle())
-            .help("添加 MCP Source")
-            .accessibilityLabel("添加 MCP Source")
-
             Button(action: onRefresh) {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 12.5, weight: .semibold))
@@ -95,20 +83,12 @@ private struct SourceListHeader: View {
 }
 
 private struct SourceListEmptyState: View {
-    var onAdd: () -> Void
-
     var body: some View {
-        VStack(spacing: 12) {
-            ContentUnavailableView(
-                "暂无 MCP Source",
-                systemImage: "server.rack",
-                description: Text("添加并测试 MCP source 后，它会显示在这里。")
-            )
-            Button(action: onAdd) {
-                Label("添加 Source", systemImage: "plus")
-            }
-            .buttonStyle(.borderedProminent)
-        }
+        ContentUnavailableView(
+            "暂无 MCP Source",
+            systemImage: "server.rack",
+            description: Text("使用右上角「添加 Source」创建第一个外部工具连接。")
+        )
         .padding(.top, 80)
     }
 }
