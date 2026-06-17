@@ -107,7 +107,7 @@ struct CraftPrimarySidebarView: View {
 
                     SidebarDisclosure(title: "自动化", systemImage: "wand.and.stars", isExpanded: $automationExpanded) {
                         SidebarRow(title: "定时任务", systemImage: "clock", count: viewModel.automationConfig.rules.count, isSelected: selection == .automation) { select(.automation) }
-                        SidebarRow(title: "事件触发", systemImage: "dot.radiowaves.left.and.right", count: viewModel.automationTriggerRecords.count, isSelected: selection == .automation) { select(.automation) }
+                        SidebarRow(title: "事件触发", systemImage: "dot.radiowaves.left.and.right", count: viewModel.automationTriggerRecords.count, isSelected: false, isEnabled: false) {}
                     }
                 }
                 .padding(.horizontal, 10)
