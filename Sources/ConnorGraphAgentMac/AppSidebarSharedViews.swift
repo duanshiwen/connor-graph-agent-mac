@@ -33,6 +33,7 @@ struct SidebarRow: View {
     var systemImage: String
     var count: Int?
     var isSelected: Bool
+    var isEnabled: Bool = true
     var action: () -> Void
 
     @State private var isHovering = false
@@ -42,25 +43,40 @@ struct SidebarRow: View {
             HStack(spacing: 9) {
                 Image(systemName: systemImage)
                     .frame(width: 16)
-                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                    .foregroundStyle(iconColor)
                 Text(title)
                     .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
                     .lineLimit(1)
+                    .foregroundStyle(textColor)
                 Spacer(minLength: 4)
                 if let count {
-                    SidebarRowCountText(count: count, isVisible: isHovering)
+                    SidebarRowCountText(count: count, isVisible: isHovering || isSelected)
                 }
             }
             .padding(.horizontal, 9)
             .padding(.vertical, 6)
-            .background(isSelected ? Color.accentColor.opacity(0.14) : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(selectionBackground, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
+        .disabled(!isEnabled)
         .accessibilityLabel(title)
         .accessibilityValue(accessibilityCountValue)
         .onHover { isHovering = $0 }
         .animation(.easeOut(duration: 0.12), value: isHovering)
+    }
+
+    private var iconColor: Color {
+        if !isEnabled { return .secondary.opacity(0.62) }
+        return isSelected ? .accentColor : .secondary
+    }
+
+    private var textColor: Color {
+        isEnabled ? .primary : .secondary
+    }
+
+    private var selectionBackground: Color {
+        isSelected ? Color.accentColor.opacity(0.14) : .clear
     }
 
     private var accessibilityCountValue: String {
