@@ -218,6 +218,8 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var isSubmittingEditSkillRequest: Bool = false
     @Published var editSkillDialogMessage: String?
     @Published var pendingSkillDeletionCard: SkillManagerCard?
+    @Published var activeSkillSlug: String?
+    @Published var activeSkillDisplayName: String?
     @Published var sidecarRuntimeDiagnostics: [ClaudeSDKSidecarRuntimeDiagnostics] = []
     @Published var commercialReleaseGateResult: CommercialReadinessReleaseGateResult?
     @Published var productOSRegistryMessage: String?
@@ -3587,6 +3589,43 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
+    func setActiveSkill(slug: String) {
+        activeSkillSlug = slug
+        activeSkillDisplayName = skillRuntimeDefinitions.first(where: { $0.slug == slug })?.manifest.name
+    }
+
+    func clearActiveSkill() {
+        activeSkillSlug = nil
+        activeSkillDisplayName = nil
+    }
+
+    private func resolveActiveSkillInstructions(sessionID: String) -> String? {
+        guard let slug = activeSkillSlug, let storagePaths else { return nil }
+        let scanner = SkillPackageScanner()
+        let roots = workspaceRoots
+            .map { $0.path.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .map { URL(fileURLWithPath: $0, isDirectory: true) }
+        let nestedRoots: [URL]
+        if let primary = primaryWorkspaceRootDraft?.path.trimmingCharacters(in: .whitespacesAndNewlines), !primary.isEmpty {
+            nestedRoots = [URL(fileURLWithPath: primary, isDirectory: true)]
+        } else {
+            nestedRoots = []
+        }
+        let snapshot = scanner.scan(storagePaths: storagePaths, projectRoots: roots, nestedRoots: nestedRoots)
+        guard let resolution = snapshot.resolution(slug: slug) else { return nil }
+        let runtime = SkillInvocationRuntime()
+        let request = SkillInvocationRequest(
+            slug: SkillSlug(slug),
+            rawInvocation: "[skill:\(slug)]",
+            arguments: "",
+            mode: .manual,
+            sessionID: sessionID
+        )
+        guard let plan = try? runtime.buildPlan(request: request, resolution: resolution) else { return nil }
+        return plan.renderedInstructions
+    }
+
     private func buildSkillChatPromptAugmentation(prompt: String, sessionID: String) -> SkillChatPromptAugmentation {
         guard let storagePaths else {
             return SkillChatPromptAugmentation(originalPrompt: prompt, augmentedPrompt: prompt)
@@ -3673,12 +3712,15 @@ final class AppViewModel: NSObject, ObservableObject {
                 attachments: attachmentsForSubmission
             )
             let skillAugmentation = buildSkillChatPromptAugmentation(prompt: prompt, sessionID: submittingSessionID)
+            let resolvedSkillInstructions = resolveActiveSkillInstructions(sessionID: submittingSessionID)
+            defer { if resolvedSkillInstructions != nil { clearActiveSkill() } }
             let response = try await manager.submit(
                 skillAugmentation.augmentedPrompt,
                 sessionSummary: sessionSummary,
                 displayPrompt: displayPrompt?.isEmpty == false ? displayPrompt : nil,
                 attachments: attachmentsForSubmission,
                 attachmentContextPlan: attachmentContextPlan,
+                skillInstructions: resolvedSkillInstructions,
                 onRunStarted: { [weak self] runID in
                     guard let self else { return }
                     if self.submittingChatSessionIDs.contains(submittingSessionID) {

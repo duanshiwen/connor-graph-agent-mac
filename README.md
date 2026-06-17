@@ -1,6 +1,6 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-17 11:54 GMT+8  
+文档更新时间：2026-06-17 16:47 GMT+8  
 当前代码基线:`feature/apple-iwork-attachment-support`,在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface / session-scoped multi-root project workspace / Connor-owned Scientific Compute Runtime skeleton / 商用级 Document Attachment OS / WKWebView-backed `web_fetch(js)` 基础上,继续收紧 Apple 原生 UI 边界:PDF/Word/Excel/PowerPoint 与 Apple iWork（Pages/Numbers/Keynote）一等附件仍由 Connor Session Capsule 和 Attachment Store 管理;PDF selectable text 抽取和多页原文预览继续使用 PDFKit;Office/iWork/Presentation/Spreadsheet 抽取继续通过 MarkItDown/Docling sidecar best-effort 编排与 hardening;Office/iWork/Presentation/Spreadsheet 原文件预览优先交给 macOS Quick Look / QuickLookUI,Connor 自有 UI 只负责 manifest、extraction status、retry、omitted attachment summary 和治理证据;AI 设置页 Add Connection 前置 DeepSeek、Xiaomi MiMo 和中国常用模型入口,在 OpenAI Compatible 统一底座上支持 MiMo 官方 `api-key` 认证头。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package,目标是把 Connor 建成 **graph-memory-native Agent OS**:它不是"图谱编辑器",也不是"Claude SDK 外壳",而是以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI 和 Local Automation Surface 共同构成的本地 Agent 操作系统。
@@ -920,6 +920,16 @@ Session Workspace 当前支持:
 - composer paperclip 现在导入 Session Capsule 附件;附件 chips 展示在现有 composer 文本框内部上半部分,文本框整体尺寸不变,composer 的尺寸、位置和外部布局不变。附件多时在文本框内部横向滚动,不在 composer 上方新增 shelf,也不推动底部按钮栏。点击附件 chip 主体会打开现有纯阅读预览弹窗;弹窗外层布局保持不变,内部对 PDF 使用 PDFKit 多页连续滚动原文件预览,对 Office/iWork/Presentation/Spreadsheet 和图片使用 macOS Quick Look / QuickLookUI 原生预览原文件,同时保留 Connor 的解析状态、manifest 路径和 retry 入口;点击 `xmark.circle.fill` 只移除附件。
 - 多工作目录能力只作用于 project workspace / allowed roots;Connor 仍保持单一 Home / Runtime Root,不引入 Craft-style multi-workspace。
 
+Composer 技能激活当前支持:
+
+- Composer 底部工具栏新增 `/技能` 按钮,点击弹出技能选择 popover;popover 列出所有已加载的技能定义,显示名称和描述,可一键选中
+- 在 composer 输入框行首输入 `/` 字符也会自动唤出技能选择 popover
+- 选中的技能以 accent 色 badge 形式显示在底部工具栏,点击 badge 上的 × 可清除
+- 选中技能后发送消息时,技能的 SKILL.md 指令通过 `AgentChatRequest.skillInstructions` 注入到系统 prompt（而非用户消息）,追加在 `instructionAppendix` 之后
+- 注入路径:AppViewModel.resolveActiveSkillInstructions() → SkillInvocationRuntime.buildPlan() → SkillInvocationPlan.renderedInstructions → NativeSessionManager.submit(skillInstructions:) → AgentChatRequest.skillInstructions → AgentLoopController.buildPromptAssembly() → assembly.instruction.text
+- 每次发送后自动清除 active skill,避免后续轮次意外注入;用户可随时手动清除或切换技能
+- 现有的 `[skill:slug]` 文本语法仍然独立工作,走 SkillChatPromptAugmentor 路径注入到用户消息中的 `<connor-active-skills>` XML block;两条路径互不干扰
+
 Agent tool invocation detail 当前支持:
 
 - 对同一个 `callID` 下的 `toolRequested` / `toolApproved` / `toolStarted` / `toolFinished` / `toolFailed` 事件进行 Connor-owned 聚合,形成 `AgentToolInvocationPresentation`,避免点击工具活动时只打开最早的 `Tool requested` 事件。
@@ -1364,6 +1374,20 @@ Settings labels/statuses redesign regression (2026-06-16 19:01 GMT+8):
 - 删除行为复用治理层规则:删除标签会从所有会话移除;删除状态会在最后一个状态或仍有会话使用时被阻止。
 - swift build: passed.
 - swift test --filter ProductOSPhase1Tests: passed, 5 tests.
+
+Composer skill activation + runtime injection (2026-06-17 16:47 GMT+8):
+- Composer 底部工具栏新增 `/技能` 按钮和行首 `/` 斜杠命令,可唤出技能选择 popover 选中技能。
+- 选中技能的 SKILL.md 指令通过 `AgentChatRequest.skillInstructions` 注入到系统 prompt（instructionAppendix 之后）,而非用户消息。
+- `AgentChatRequest` 新增 `skillInstructions: String?` 字段。
+- `AgentLoopController.buildPromptAssembly()` 在 instructionAppendix 之后追加 skillInstructions。
+- `NativeSessionManager.submit()` 新增 `skillInstructions` 参数并传递给 `AgentChatRequest`。
+- `AppViewModel` 新增 `activeSkillSlug` / `activeSkillDisplayName` 状态、`setActiveSkill(slug:)` / `clearActiveSkill()` / `resolveActiveSkillInstructions(sessionID:)` 方法。
+- `SubmitAwareTextView` 新增 `onSlashCommand` 回调,通过 `insertText` 检测行首 `/` 字符。
+- 现有 `[skill:slug]` 文本语法（走 `SkillChatPromptAugmentor` → 用户消息 `<connor-active-skills>` XML）保持不变,两条路径互不干扰。
+- swift build: passed.
+- swift test --filter NativeSessionManagerTests: passed, 14 tests.
+- swift test --filter AgentLoopControllerTests: passed, 23 tests.
+- swift test --filter PhaseGCraftGradeNativeUITests / CommercialReadinessReleaseGateTests / ProductOSPhase1Tests: passed, 12 tests.
 
 Session title / deletion guard regression (2026-06-16 18:49 GMT+8):
 - 首轮发送后的自动标题生成从 `onRunStarted` 调整为 submit 成功、首条用户消息已持久化后触发,避免标题任务读取到空会话或旧会话导致不稳定。
