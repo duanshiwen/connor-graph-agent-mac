@@ -479,7 +479,7 @@ struct CraftSkillListPane: View {
                     .frame(maxWidth: .infinity, alignment: .center)
                 HStack {
                     Spacer()
-                    Button(action: viewModel.addWorkspaceSkill) {
+                    Button(action: viewModel.presentAddSkillDialog) {
                         Image(systemName: "plus")
                             .font(.system(size: 12.5, weight: .semibold))
                             .frame(width: 24, height: 24)
@@ -512,9 +512,84 @@ struct CraftSkillListPane: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .sheet(isPresented: $viewModel.isAddSkillDialogPresented) {
+            AddSkillRequestDialog(viewModel: viewModel)
+        }
         .task { viewModel.reloadSkillRuntimeDefinitions() }
     }
 }
+
+private struct AddSkillRequestDialog: View {
+    @ObservedObject var viewModel: AppViewModel
+    @Environment(\.dismiss) private var dismiss
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.14))
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
+                .frame(width: 48, height: 48)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("添加技能")
+                        .font(.title3.weight(.semibold))
+                    Text("告诉康纳你希望新技能帮你完成什么。康纳会在新会话里和你一起创建它。")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            TextEditor(text: $viewModel.addSkillRequestDraft)
+                .font(.body)
+                .focused($isFocused)
+                .frame(minHeight: 150)
+                .padding(8)
+                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+                )
+                .overlay(alignment: .topLeading) {
+                    if viewModel.addSkillRequestDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text("例如：帮我审查 PR，重点检查安全、测试和架构一致性。")
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 16)
+                            .allowsHitTesting(false)
+                    }
+                }
+
+            HStack {
+                Button("取消") {
+                    viewModel.cancelAddSkillDialog()
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Spacer()
+
+                Button("开始创建") {
+                    Task { await viewModel.submitAddSkillRequest() }
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(viewModel.addSkillRequestDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(22)
+        .frame(width: 520)
+        .onAppear { isFocused = true }
+    }
+}
+
+
 
 struct CraftSkillRow: View {
     var card: SkillManagerCard
