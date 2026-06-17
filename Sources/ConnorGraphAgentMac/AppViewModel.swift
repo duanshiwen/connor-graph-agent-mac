@@ -134,6 +134,53 @@ private extension AppSessionBackgroundTaskStatus {
     }
 }
 
+struct MCPSourceDraft: Equatable {
+    var sourceID: String = ""
+    var displayName: String = ""
+    var command: String = ""
+    var argumentsText: String = ""
+    var enableImmediately: Bool = false
+    var allowExternalNetwork: Bool = true
+    var allowReadSession: Bool = true
+    var allowWorkspaceRead: Bool = false
+    var tagsText: String = "mcp"
+    var notes: String = ""
+
+    var parsedArguments: [String] {
+        argumentsText
+            .split(whereSeparator: { $0 == "\n" || $0 == " " || $0 == "\t" })
+            .map(String.init)
+    }
+
+    var parsedTags: [String] {
+        Array(Set(tagsText
+            .split(whereSeparator: { $0 == "," || $0 == "\n" || $0 == " " || $0 == "\t" })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }))
+        .sorted()
+    }
+
+    var allowedCapabilities: [AgentPermissionCapability] {
+        var capabilities: [AgentPermissionCapability] = []
+        if allowExternalNetwork { capabilities.append(.externalNetwork) }
+        if allowReadSession { capabilities.append(.readSession) }
+        if allowWorkspaceRead {
+            capabilities.append(.readWorkspaceFile)
+            capabilities.append(.listWorkspaceFiles)
+        }
+        return capabilities.isEmpty ? [.readSession] : capabilities
+    }
+
+    var normalizedSourceID: String {
+        sourceID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    var normalizedDisplayName: String {
+        let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? normalizedSourceID : trimmed
+    }
+}
+
 @MainActor
 final class AppViewModel: NSObject, ObservableObject {
     @Published var selection: SidebarItem? = .agentChat
@@ -207,6 +254,9 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var selectedSourceRuntimeCardID: String?
     @Published var testingSourceRuntimeIDs: Set<String> = []
     @Published var sourceRuntimeTestMessages: [String: String] = [:]
+    @Published var isPresentingAddSourceSheet: Bool = false
+    @Published var addSourceDraft = MCPSourceDraft()
+    @Published var addSourceMessage: String?
     @Published var skillRuntimeDefinitions: [SkillRuntimeDefinition] = []
     @Published var commercialSkillManagerPresentation: SkillManagerPresentation = SkillManagerPresentation(
         summary: SkillManagerSummary(total: 0, enabled: 0, projectScoped: 0, risky: 0, invalid: 0, sourceBlocked: 0),
@@ -1239,6 +1289,52 @@ final class AppViewModel: NSObject, ObservableObject {
 
     func selectSourceRuntimeCard(_ id: String) {
         selectedSourceRuntimeCardID = id
+    }
+
+    func presentAddSourceSheet() {
+        addSourceDraft = MCPSourceDraft()
+        addSourceMessage = nil
+        isPresentingAddSourceSheet = true
+    }
+
+    func dismissAddSourceSheet() {
+        isPresentingAddSourceSheet = false
+        addSourceMessage = nil
+    }
+
+    func saveSourceRuntimeDraft() {
+        guard let repository = sourceRuntimeRepository else {
+            addSourceMessage = "Source runtime repository is not available."
+            return
+        }
+        let draft = addSourceDraft
+        let configuration = MCPSourceRuntimeConfiguration(
+            sourceID: draft.normalizedSourceID,
+            displayName: draft.normalizedDisplayName,
+            transport: .stdio(
+                command: draft.command.trimmingCharacters(in: .whitespacesAndNewlines),
+                arguments: draft.parsedArguments
+            ),
+            status: draft.enableImmediately ? .enabled : .draft,
+            credentialRequirement: .none,
+            allowedCapabilities: draft.allowedCapabilities,
+            toolNamePrefix: draft.normalizedSourceID,
+            graphIngestionEnabled: false,
+            graphWritePolicy: .readOnly,
+            tags: draft.parsedTags,
+            notes: draft.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+        do {
+            try repository.save(configuration)
+            reloadSourceRuntimeConfigurations()
+            selectedSourceRuntimeCardID = configuration.sourceID
+            sourceRuntimeTestMessages[configuration.sourceID] = "Source saved. Run Test Source to discover tools."
+            isPresentingAddSourceSheet = false
+            addSourceMessage = nil
+            errorMessage = nil
+        } catch {
+            addSourceMessage = "Unable to save source: \(String(describing: error))"
+        }
     }
 
     func testSourceRuntime(sourceID: String) async {

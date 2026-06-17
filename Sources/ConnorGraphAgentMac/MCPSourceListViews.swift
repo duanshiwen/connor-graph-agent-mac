@@ -14,10 +14,13 @@ struct CraftSourceListPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SourceListHeader(onRefresh: viewModel.reloadSourceRuntimeConfigurations)
+            SourceListHeader(
+                onAdd: viewModel.presentAddSourceSheet,
+                onRefresh: viewModel.reloadSourceRuntimeConfigurations
+            )
 
             if presentation.cards.isEmpty {
-                SourceListEmptyState()
+                SourceListEmptyState(onAdd: viewModel.presentAddSourceSheet)
             } else {
                 List(presentation.cards) { card in
                     MCPSourceRow(
@@ -34,6 +37,14 @@ struct CraftSourceListPane: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .sheet(isPresented: $viewModel.isPresentingAddSourceSheet) {
+            MCPSourceAddSheet(
+                draft: $viewModel.addSourceDraft,
+                message: viewModel.addSourceMessage,
+                onCancel: viewModel.dismissAddSourceSheet,
+                onSave: viewModel.saveSourceRuntimeDraft
+            )
+        }
         .task {
             guard viewModel.sourceRuntimeConfigurations.isEmpty else { return }
             viewModel.deferViewUpdate {
@@ -44,6 +55,7 @@ struct CraftSourceListPane: View {
 }
 
 private struct SourceListHeader: View {
+    var onAdd: () -> Void
     var onRefresh: () -> Void
 
     var body: some View {
@@ -51,8 +63,18 @@ private struct SourceListHeader: View {
             Text("MCP")
                 .font(AppListTypography.header)
                 .frame(maxWidth: .infinity, alignment: .center)
-            HStack {
+            HStack(spacing: 8) {
                 Spacer()
+                Button(action: onAdd) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .contentShape(Circle())
+                .help("添加 MCP Source")
+                .accessibilityLabel("添加 MCP Source")
+
                 Button(action: onRefresh) {
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 12.5, weight: .semibold))
@@ -70,13 +92,110 @@ private struct SourceListHeader: View {
 }
 
 private struct SourceListEmptyState: View {
+    var onAdd: () -> Void
+
     var body: some View {
-        ContentUnavailableView(
-            "暂无 MCP Source",
-            systemImage: "server.rack",
-            description: Text("添加并测试 MCP source 后，它会显示在这里。")
-        )
+        VStack(spacing: 12) {
+            ContentUnavailableView(
+                "暂无 MCP Source",
+                systemImage: "server.rack",
+                description: Text("添加并测试 MCP source 后，它会显示在这里。")
+            )
+            Button(action: onAdd) {
+                Label("添加 Source", systemImage: "plus")
+            }
+            .buttonStyle(.borderedProminent)
+        }
         .padding(.top, 80)
+    }
+}
+
+private struct MCPSourceAddSheet: View {
+    @Binding var draft: MCPSourceDraft
+    var message: String?
+    var onCancel: () -> Void
+    var onSave: () -> Void
+
+    private var canSave: Bool {
+        !draft.normalizedSourceID.isEmpty &&
+        !draft.command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
+                    Text("添加 MCP Source")
+                        .font(.system(size: 22, weight: .semibold))
+                    Text("当前最小闭环支持 stdio + no credential。保存后可立即运行 Test Source 发现工具目录。")
+                        .font(AgentChatTypography.meta)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Button(action: onCancel) {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.cancelAction)
+            }
+
+            Form {
+                Section("Identity") {
+                    TextField("Source ID，例如 local-files", text: $draft.sourceID)
+                    TextField("Display Name，例如 Local Files MCP", text: $draft.displayName)
+                }
+
+                Section("Transport") {
+                    TextField("Command，例如 /usr/bin/python3 或 npx", text: $draft.command)
+                    TextField("Arguments，用空格或换行分隔", text: $draft.argumentsText, axis: .vertical)
+                        .lineLimit(2...4)
+                    LabeledContent("Mode") {
+                        Text("stdio · no credential")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("Governance") {
+                    Toggle("Enable immediately", isOn: $draft.enableImmediately)
+                    Toggle("Allow external network", isOn: $draft.allowExternalNetwork)
+                    Toggle("Allow read session", isOn: $draft.allowReadSession)
+                    Toggle("Allow workspace read", isOn: $draft.allowWorkspaceRead)
+                    LabeledContent("Graph ingestion") {
+                        Text("off")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("Metadata") {
+                    TextField("Tags，用逗号、空格或换行分隔", text: $draft.tagsText)
+                    TextField("Notes", text: $draft.notes, axis: .vertical)
+                        .lineLimit(2...4)
+                }
+            }
+            .formStyle(.grouped)
+
+            if let message, !message.isEmpty {
+                Text(message)
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+            }
+
+            HStack {
+                Text("Source ID 需匹配 lowercase kebab-case；command 不能为空。")
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("取消", action: onCancel)
+                Button("保存 Source", action: onSave)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!canSave)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(AgentChatLayout.spaceXL)
+        .frame(width: 560, height: 680)
     }
 }
 
