@@ -210,6 +210,8 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var selectedSkillManagerCardID: String?
     @Published var isAddSkillDialogPresented: Bool = false
     @Published var addSkillRequestDraft: String = ""
+    @Published var isSubmittingAddSkillRequest: Bool = false
+    @Published var addSkillDialogMessage: String?
     @Published var sidecarRuntimeDiagnostics: [ClaudeSDKSidecarRuntimeDiagnostics] = []
     @Published var commercialReleaseGateResult: CommercialReadinessReleaseGateResult?
     @Published var productOSRegistryMessage: String?
@@ -1226,23 +1228,83 @@ final class AppViewModel: NSObject, ObservableObject {
 
     func presentAddSkillDialog() {
         addSkillRequestDraft = ""
+        addSkillDialogMessage = nil
+        isSubmittingAddSkillRequest = false
         isAddSkillDialogPresented = true
     }
 
     func cancelAddSkillDialog() {
+        guard !isSubmittingAddSkillRequest else { return }
         isAddSkillDialogPresented = false
         addSkillRequestDraft = ""
+        addSkillDialogMessage = nil
     }
 
     func submitAddSkillRequest() async {
         let request = addSkillRequestDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !request.isEmpty else { return }
-        isAddSkillDialogPresented = false
-        addSkillRequestDraft = ""
-        newChatSession()
-        guard selectedChatSessionID != nil else { return }
-        let prompt = buildAddSkillAgentPrompt(userRequest: request)
-        await submitChat(prompt: prompt, displayPrompt: "添加技能：\(request)")
+        guard !request.isEmpty, !isSubmittingAddSkillRequest else { return }
+        guard let chatSessionRepository else {
+            addSkillDialogMessage = "会话系统尚未初始化。"
+            return
+        }
+        isSubmittingAddSkillRequest = true
+        addSkillDialogMessage = "正在创建一个新的技能创建会话…"
+        do {
+            let title = sanitizedSessionTitle("添加技能：\(request)")
+            let session = try chatSessionRepository.createSession(title: title)
+            rememberWorkspaceMode(.conversation, for: session.id)
+            try loadBackgroundTasks(sessionID: session.id)
+            reloadChatSessions(restoreWorkspaceMode: false)
+            addSkillDialogMessage = "已创建会话，康纳正在根据你的需求准备技能…"
+            try await runAddSkillRequestInBackgroundSession(session: session, userRequest: request)
+            addSkillRequestDraft = ""
+            addSkillDialogMessage = "已发送给康纳。你可以继续留在这里，或稍后在会话列表中查看结果。"
+            reloadChatSessions(restoreWorkspaceMode: false)
+            errorMessage = nil
+        } catch {
+            addSkillDialogMessage = "创建失败：\(String(describing: error))"
+            errorMessage = String(describing: error)
+        }
+        isSubmittingAddSkillRequest = false
+    }
+
+    private func runAddSkillRequestInBackgroundSession(session: AgentSession, userRequest: String) async throws {
+        guard var manager = makeNativeSessionManager(for: session) else {
+            throw AppChatRuntimeUnavailableError.nativeSessionManagerUnavailable
+        }
+        let sessionID = session.id
+        let liveBackend = manager.backend
+        activeChatBackendsBySessionID[sessionID] = liveBackend
+        submittingChatSessionIDs.insert(sessionID)
+        refreshSelectedSubmittingState()
+        defer {
+            activeChatBackendsBySessionID.removeValue(forKey: sessionID)
+            if let runID = activeChatRunIDsBySessionID[sessionID] {
+                activeChatBackendsByRunID.removeValue(forKey: runID)
+            }
+            submittingChatSessionIDs.remove(sessionID)
+            activeChatRunIDsBySessionID.removeValue(forKey: sessionID)
+            refreshSelectedSubmittingState()
+        }
+        let prompt = buildAddSkillAgentPrompt(userRequest: userRequest)
+        let displayPrompt = "添加技能：\(userRequest)"
+        _ = try await manager.submit(
+            prompt,
+            sessionSummary: nil,
+            displayPrompt: displayPrompt,
+            onRunStarted: { [weak self] runID in
+                guard let self else { return }
+                self.activeChatRunIDsBySessionID[sessionID] = runID
+                self.activeChatBackendsByRunID[runID] = liveBackend
+            },
+            onEventPresentation: { [weak self] presentation in
+                guard let self else { return }
+                self.agentEventTimelinesBySessionID[sessionID, default: []].append(presentation)
+            }
+        )
+        if let timeline = agentEventTimelinesBySessionID[sessionID] {
+            try chatSessionRepository?.saveActivityTimelineCache(sessionID: sessionID, timeline: timeline)
+        }
     }
 
     private func buildAddSkillAgentPrompt(userRequest: String) -> String {
