@@ -44,33 +44,20 @@ struct SkillRuntimePanelView: View {
         viewModel.commercialSkillManagerPresentation
     }
 
+    private var selectedCard: SkillManagerCard? {
+        if let id = viewModel.selectedSkillManagerCardID,
+           let card = presentation.cards.first(where: { $0.id == id }) {
+            return card
+        }
+        return presentation.cards.first
+    }
+
     var body: some View {
-        RuntimePanelScaffold(
-            title: "Skills",
-            subtitle: "商业级 Skill Manager：发现、覆盖链、风险、信任、权限、来源依赖和审计由康纳同学统一治理。",
-            metrics: [
-                ("Total", "\(presentation.summary.total)"),
-                ("Enabled", "\(presentation.summary.enabled)"),
-                ("Project", "\(presentation.summary.projectScoped)"),
-                ("Risky", "\(presentation.summary.risky)"),
-                ("Invalid", "\(presentation.summary.invalid)")
-            ],
-            onRefresh: viewModel.reloadSkillRuntimeDefinitions
-        ) {
-            if !presentation.globalWarnings.isEmpty {
-                SectionHeader(title: "Global warnings")
-                ForEach(presentation.globalWarnings, id: \.self) { warning in
-                    RuntimePanelCard(title: "Invalid skill", subtitle: "Scan warning", detail: warning, chips: ["warning"], severity: .warning)
-                }
-            }
-            ForEach(presentation.cards) { card in
-                RuntimePanelCard(
-                    title: card.title,
-                    subtitle: "\(card.sourceTier) · trust \(card.trustState) · risk \(card.riskLabel) · \(card.lifecycleLabel)",
-                    detail: card.subtitle,
-                    chips: card.requiredSources + card.permissionLabels + card.overrideChain + card.warnings,
-                    severity: commercialSkillSeverity(card)
-                )
+        Group {
+            if let card = selectedCard {
+                SkillManagerDetailView(card: card, summary: presentation.summary, globalWarnings: presentation.globalWarnings, onRefresh: viewModel.reloadSkillRuntimeDefinitions)
+            } else {
+                SkillManagerEmptyDetailView(summary: presentation.summary, warnings: presentation.globalWarnings, onRefresh: viewModel.reloadSkillRuntimeDefinitions)
             }
         }
         .task {
@@ -79,12 +66,287 @@ struct SkillRuntimePanelView: View {
             }
         }
     }
+}
 
-    private func commercialSkillSeverity(_ card: SkillManagerCard) -> AgentEventPresentationSeverity {
-        if !card.warnings.isEmpty { return .warning }
-        if card.riskLabel == "high" || card.riskLabel == "critical" { return .warning }
-        if card.trustState == "projectRequiresTrust" || card.trustState == "unknown" { return .info }
-        return .success
+private struct SkillManagerDetailView: View {
+    var card: SkillManagerCard
+    var summary: SkillManagerSummary
+    var globalWarnings: [String]
+    var onRefresh: () -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                SkillManagerTopBar(title: card.title, subtitle: "Skill Manager", onRefresh: onRefresh)
+                SkillHeroSection(card: card)
+                SkillManagerMetricsStrip(summary: summary)
+
+                if !card.warnings.isEmpty || !globalWarnings.isEmpty {
+                    SkillInfoSection(title: "Warnings", systemImage: "exclamationmark.triangle") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(card.warnings + globalWarnings, id: \.self) { warning in
+                                Label(warning, systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                            }
+                        }
+                    }
+                }
+
+                SkillInfoSection(title: "Metadata", systemImage: "info.circle") {
+                    SkillInfoTable(rows: [
+                        ("Slug", card.id),
+                        ("Name", card.title),
+                        ("Description", card.subtitle),
+                        ("Source", card.sourceTier),
+                        ("Lifecycle", card.lifecycleLabel),
+                        ("Trust", card.trustState),
+                        ("Risk", card.riskLabel),
+                        ("Package", displayPath(card.packagePath)),
+                        ("SKILL.md", displayPath(card.path))
+                    ])
+                }
+
+                SkillInfoSection(title: "Governance", systemImage: "checkmark.shield") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        SkillBadgeRow(title: "Required Sources", values: card.requiredSources, emptyText: "No source dependency")
+                        SkillBadgeRow(title: "Permissions", values: card.permissionLabels, emptyText: "No explicit skill-scoped permission")
+                        SkillBadgeRow(title: "Override Chain", values: card.overrideChain.map(displayPath), emptyText: "No override")
+                    }
+                }
+
+                SkillInfoSection(title: "Instructions", systemImage: "doc.text") {
+                    Text(card.instructions.isEmpty ? "No instructions found." : card.instructions)
+                        .font(.system(.body, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(Color(nsColor: .textBackgroundColor).opacity(0.50), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+            }
+            .padding(24)
+            .frame(maxWidth: 980, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Color(nsColor: .textBackgroundColor).opacity(0.18))
+        .navigationTitle(card.title)
+    }
+
+    private func displayPath(_ path: String) -> String {
+        guard !path.isEmpty else { return "—" }
+        if let range = path.range(of: "/skills/") {
+            return String(path[range.upperBound...]).isEmpty ? path : "skills/" + String(path[range.upperBound...])
+        }
+        if let range = path.range(of: "/.agents/skills/") {
+            return ".agents/skills/" + String(path[range.upperBound...])
+        }
+        return path
+    }
+}
+
+private struct SkillManagerEmptyDetailView: View {
+    var summary: SkillManagerSummary
+    var warnings: [String]
+    var onRefresh: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            SkillManagerTopBar(title: "Skills", subtitle: "Skill Manager", onRefresh: onRefresh)
+            SkillManagerMetricsStrip(summary: summary)
+            ContentUnavailableView("暂无技能", systemImage: "bolt", description: Text("添加 SKILL.md 后会在左侧列表出现，并在这里显示 Craft 风格详情。"))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if !warnings.isEmpty {
+                SkillInfoSection(title: "Global warnings", systemImage: "exclamationmark.triangle") {
+                    ForEach(warnings, id: \.self) { warning in
+                        Text(warning).font(.caption).foregroundStyle(.orange)
+                    }
+                }
+            }
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Color(nsColor: .textBackgroundColor).opacity(0.18))
+    }
+}
+
+private struct SkillManagerTopBar: View {
+    var title: String
+    var subtitle: String
+    var onRefresh: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.largeTitle.weight(.semibold))
+                Text(subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button(action: onRefresh) {
+                Label("刷新", systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+}
+
+private struct SkillHeroSection: View {
+    var card: SkillManagerCard
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 16) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(heroColor.opacity(0.14))
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: 30, weight: .semibold))
+                    .foregroundStyle(heroColor)
+            }
+            .frame(width: 76, height: 76)
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Text(card.title)
+                        .font(.title.weight(.semibold))
+                    SkillPill(text: card.sourceTier, color: .blue)
+                    SkillPill(text: card.riskLabel, color: heroColor)
+                }
+                Text(card.subtitle)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    SkillPill(text: "trust: \(card.trustState)", color: trustColor)
+                    SkillPill(text: card.lifecycleLabel, color: .secondary)
+                }
+            }
+            Spacer()
+        }
+        .padding(18)
+        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var heroColor: Color {
+        if !card.warnings.isEmpty { return .orange }
+        if card.riskLabel == "high" || card.riskLabel == "critical" { return .orange }
+        return .accentColor
+    }
+
+    private var trustColor: Color {
+        switch card.trustState {
+        case "projectRequiresTrust", "unknown": .orange
+        case "bundledTrusted", "trusted", "userTrusted": .green
+        default: .secondary
+        }
+    }
+}
+
+private struct SkillManagerMetricsStrip: View {
+    var summary: SkillManagerSummary
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 118), spacing: 10)], spacing: 10) {
+            metric("Total", summary.total)
+            metric("Enabled", summary.enabled)
+            metric("Project", summary.projectScoped)
+            metric("Risky", summary.risky)
+            metric("Invalid", summary.invalid)
+        }
+    }
+
+    private func metric(_ label: String, _ value: Int) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            Text("\(value)").font(.title3.weight(.semibold))
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+private struct SkillInfoSection<Content: View>: View {
+    var title: String
+    var systemImage: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(title, systemImage: systemImage)
+                .font(.headline)
+            VStack(alignment: .leading, spacing: 0) {
+                content
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+    }
+}
+
+private struct SkillInfoTable: View {
+    var rows: [(String, String)]
+
+    var body: some View {
+        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 18, verticalSpacing: 10) {
+            ForEach(rows, id: \.0) { row in
+                GridRow {
+                    Text(row.0)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 110, alignment: .leading)
+                    Text(row.1)
+                        .font(.callout)
+                        .textSelection(.enabled)
+                }
+            }
+        }
+    }
+}
+
+private struct SkillBadgeRow: View {
+    var title: String
+    var values: [String]
+    var emptyText: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            if values.isEmpty {
+                Text(emptyText).font(.callout).foregroundStyle(.secondary)
+            } else {
+                FlowLikeWrap(values: values)
+            }
+        }
+    }
+}
+
+private struct FlowLikeWrap: View {
+    var values: [String]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(values.prefix(12)), id: \.self) { value in
+                SkillPill(text: value, color: .secondary)
+            }
+        }
+    }
+}
+
+private struct SkillPill: View {
+    var text: String
+    var color: Color
+
+    var body: some View {
+        Text(text)
+            .font(.caption)
+            .lineLimit(1)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(color.opacity(0.12), in: Capsule())
+            .foregroundStyle(color)
     }
 }
 

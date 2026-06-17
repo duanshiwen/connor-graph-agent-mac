@@ -207,6 +207,7 @@ final class AppViewModel: NSObject, ObservableObject {
         cards: [],
         globalWarnings: []
     )
+    @Published var selectedSkillManagerCardID: String?
     @Published var sidecarRuntimeDiagnostics: [ClaudeSDKSidecarRuntimeDiagnostics] = []
     @Published var commercialReleaseGateResult: CommercialReadinessReleaseGateResult?
     @Published var productOSRegistryMessage: String?
@@ -1208,10 +1209,17 @@ final class AppViewModel: NSObject, ObservableObject {
         do {
             skillRuntimeDefinitions = try skillRuntimeRepository?.list() ?? []
             commercialSkillManagerPresentation = buildCommercialSkillManagerPresentation()
+            if selectedSkillManagerCardID == nil || !commercialSkillManagerPresentation.cards.contains(where: { $0.id == selectedSkillManagerCardID }) {
+                selectedSkillManagerCardID = commercialSkillManagerPresentation.cards.first?.id
+            }
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
         }
+    }
+
+    func selectSkillManagerCard(_ id: String) {
+        selectedSkillManagerCardID = id
     }
 
     private func buildCommercialSkillManagerPresentation() -> SkillManagerPresentation {
