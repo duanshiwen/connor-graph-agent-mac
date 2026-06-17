@@ -611,6 +611,11 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 .filter { !$0.isEmpty }
                 .joined(separator: "\n\n")
         }
+        if let skillInstructions = request.skillInstructions?.trimmingCharacters(in: .whitespacesAndNewlines), !skillInstructions.isEmpty {
+            assembly.instruction.text = [assembly.instruction.text.trimmingCharacters(in: .whitespacesAndNewlines), skillInstructions]
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n\n")
+        }
         let transformers: [any AgentContextTransformer] = [
             AgentPromptBudgetTransformer(maxEstimatedTokens: configuration.promptMaxEstimatedTokens),
             AgentPromptDedupeTransformer(),

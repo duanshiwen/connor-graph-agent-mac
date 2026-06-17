@@ -48,6 +48,7 @@ struct AgentChatComposerView: View {
     @State private var localChatInput: String = ""
     @State private var isWorkspacePopoverPresented: Bool = false
     @State private var isFileImporterPresented: Bool = false
+    @State private var isSkillPickerPresented: Bool = false
 
     private let workspaceMenuItemMaxWidth: CGFloat = 320
     private let supportedAttachmentContentTypes: [UTType] = [
@@ -118,7 +119,8 @@ struct AgentChatComposerView: View {
                         isSpellCheckEnabled: viewModel.spellCheckEnabled,
                         sendShortcut: viewModel.composerSendShortcut,
                         onSubmit: submitLocalChatInput,
-                        onImportFiles: { urls in Task { await viewModel.importAttachments(urls: urls) } }
+                        onImportFiles: { urls in Task { await viewModel.importAttachments(urls: urls) } },
+                        onSlashCommand: { isSkillPickerPresented = true }
                     )
                     .padding(.horizontal, AgentChatLayout.spaceL)
                     .padding(.top, viewModel.pendingAttachmentRefs.isEmpty ? AgentChatLayout.spaceM : AgentChatLayout.spaceXS)
@@ -154,6 +156,8 @@ struct AgentChatComposerView: View {
                         )
                     }
                     .buttonStyle(.plain)
+
+                    skillPickerButton
 
                     if let inspection = viewModel.lastPromptInspection {
                         Label("约 \(inspection.estimatedPromptTokenCount) tokens", systemImage: "text.alignleft")
@@ -694,6 +698,136 @@ struct AgentChatComposerView: View {
         .menuStyle(.borderlessButton)
         .controlSize(.regular)
         .help("选择真实配置的连接和模型；切换后下一轮请求立即使用该模型")
+    }
+
+    private var skillPickerButton: some View {
+        Button {
+            isSkillPickerPresented.toggle()
+        } label: {
+            if let displayName = viewModel.activeSkillDisplayName {
+                HStack(spacing: 4) {
+                    Image(systemName: "bolt.fill")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text(displayName)
+                        .lineLimit(1)
+                    Button {
+                        viewModel.clearActiveSkill()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .font(AgentChatTypography.micro.weight(.medium))
+                .foregroundStyle(Color.accentColor)
+                .padding(.horizontal, AgentChatLayout.spaceS)
+                .frame(height: AgentChatLayout.chipHeight)
+                .background(
+                    RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.12))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
+                        .stroke(Color.accentColor.opacity(0.28), lineWidth: 1)
+                )
+            } else {
+                AgentComposerOptionBadge(
+                    title: "/技能",
+                    systemImage: "bolt",
+                    tint: isSkillPickerPresented ? composerControlActiveForeground : composerControlForeground,
+                    showsChevron: false,
+                    isActive: isSkillPickerPresented,
+                    style: .compact,
+                    showsBorder: false
+                )
+            }
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $isSkillPickerPresented, arrowEdge: .bottom) {
+            skillPickerPopoverContent
+                .padding(10)
+                .frame(width: 320)
+        }
+        .help(viewModel.activeSkillSlug != nil ? "当前技能：\(viewModel.activeSkillDisplayName ?? "") — 点击 × 清除" : "输入 / 或点击选择技能")
+    }
+
+    private var skillPickerPopoverContent: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("选择技能")
+                .font(AgentChatTypography.micro.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+
+            Divider()
+
+            let allSkills = viewModel.skillRuntimeDefinitions
+            if allSkills.isEmpty {
+                Text("暂无可用技能")
+                    .font(AgentChatTypography.micro)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+            } else {
+                ForEach(allSkills) { definition in
+                    Button {
+                        viewModel.setActiveSkill(slug: definition.slug)
+                        isSkillPickerPresented = false
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "bolt.fill")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Color.accentColor)
+                                .frame(width: 16)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(definition.manifest.name)
+                                    .font(AgentChatTypography.meta.weight(.medium))
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(1)
+                                Text(definition.manifest.description)
+                                    .font(AgentChatTypography.micro)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                            Spacer()
+                            if definition.slug == viewModel.activeSkillSlug {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(Color.accentColor)
+                            }
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if viewModel.activeSkillSlug != nil {
+                Divider()
+                Button {
+                    viewModel.clearActiveSkill()
+                    isSkillPickerPresented = false
+                } label: {
+                    Label("清除当前技能", systemImage: "xmark.circle")
+                        .font(AgentChatTypography.micro)
+                }
+                .buttonStyle(.borderless)
+                .padding(.horizontal, 8)
+            }
+
+            Divider()
+
+            HStack(spacing: 4) {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 10))
+                Text("在输入框中输入 / 也可唤出此列表")
+                    .font(.system(size: 10))
+            }
+            .foregroundStyle(.tertiary)
+            .padding(.horizontal, 8)
+        }
     }
 
     private var composerControlForeground: Color { .secondary }

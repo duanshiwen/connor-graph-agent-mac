@@ -13,6 +13,8 @@ public struct AgentChatRequest: Sendable, Equatable {
     public var attachmentContextPlan: AttachmentContextPlan
     /// Compression anchor state from prior rounds.
     public var anchorState: SessionAnchorState?
+    /// Skill instructions to inject into the system prompt for this turn.
+    public var skillInstructions: String?
 
     public init(
         runID: String = UUID().uuidString,
@@ -24,7 +26,8 @@ public struct AgentChatRequest: Sendable, Equatable {
         permissionMode: AgentPermissionMode = .askToWrite,
         attachmentRefs: [AgentMessageAttachmentRef] = [],
         attachmentContextPlan: AttachmentContextPlan = AttachmentContextPlan(),
-        anchorState: SessionAnchorState? = nil
+        anchorState: SessionAnchorState? = nil,
+        skillInstructions: String? = nil
     ) {
         self.runID = runID
         self.sessionID = sessionID
@@ -36,6 +39,7 @@ public struct AgentChatRequest: Sendable, Equatable {
         self.attachmentRefs = attachmentRefs
         self.attachmentContextPlan = attachmentContextPlan
         self.anchorState = anchorState
+        self.skillInstructions = skillInstructions
     }
 
     public var normalizedPrompt: String {

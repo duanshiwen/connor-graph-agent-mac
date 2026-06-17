@@ -13,6 +13,7 @@ struct SafeChatComposerTextView: NSViewRepresentable {
     var sendShortcut: String
     var onSubmit: () -> Void
     var onImportFiles: ([URL]) -> Void
+    var onSlashCommand: (() -> Void)? = nil
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
@@ -26,6 +27,7 @@ struct SafeChatComposerTextView: NSViewRepresentable {
         textView.delegate = context.coordinator
         textView.onSubmit = onSubmit
         textView.onImportFiles = onImportFiles
+        textView.onSlashCommand = onSlashCommand
         textView.sendShortcut = sendShortcut
         textView.placeholderString = placeholder
         textView.isRichText = false
@@ -63,6 +65,7 @@ struct SafeChatComposerTextView: NSViewRepresentable {
         guard let textView = scrollView.documentView as? SubmitAwareTextView else { return }
         textView.onSubmit = onSubmit
         textView.onImportFiles = onImportFiles
+        textView.onSlashCommand = onSlashCommand
         textView.sendShortcut = sendShortcut
         textView.placeholderString = placeholder
         textView.font = AgentChatTypography.composerNSFont
@@ -94,6 +97,7 @@ struct SafeChatComposerTextView: NSViewRepresentable {
 final class SubmitAwareTextView: NSTextView {
     var onSubmit: (() -> Void)?
     var onImportFiles: (([URL]) -> Void)?
+    var onSlashCommand: (() -> Void)?
     var sendShortcut: String = "return"
     var placeholderString: String = "" {
         didSet { needsDisplay = true }
@@ -115,6 +119,20 @@ final class SubmitAwareTextView: NSTextView {
         default:
             onSubmit?()
         }
+    }
+
+    override func insertText(_ string: Any, replacementRange: NSRange) {
+        if let str = string as? NSString, str.length == 1, str.character(at: 0) == UInt16(47) {
+            let currentString = self.string as NSString
+            let cursorLocation = selectedRange().location
+            let isStartOfLine = cursorLocation == 0 || (cursorLocation > 0 && currentString.character(at: cursorLocation - 1) == UInt16(10))
+            if isStartOfLine {
+                super.insertText(string, replacementRange: replacementRange)
+                onSlashCommand?()
+                return
+            }
+        }
+        super.insertText(string, replacementRange: replacementRange)
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {

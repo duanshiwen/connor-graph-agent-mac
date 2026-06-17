@@ -202,6 +202,24 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var automationExecutionHistory: [ProductOSAutomationExecutionHistoryRecord] = []
     @Published var sourceRuntimeConfigurations: [MCPSourceRuntimeConfiguration] = []
     @Published var skillRuntimeDefinitions: [SkillRuntimeDefinition] = []
+    @Published var commercialSkillManagerPresentation: SkillManagerPresentation = SkillManagerPresentation(
+        summary: SkillManagerSummary(total: 0, enabled: 0, projectScoped: 0, risky: 0, invalid: 0, sourceBlocked: 0),
+        cards: [],
+        globalWarnings: []
+    )
+    @Published var selectedSkillManagerCardID: String?
+    @Published var isAddSkillDialogPresented: Bool = false
+    @Published var addSkillRequestDraft: String = ""
+    @Published var isSubmittingAddSkillRequest: Bool = false
+    @Published var addSkillDialogMessage: String?
+    @Published var isEditSkillDialogPresented: Bool = false
+    @Published var editSkillRequestDraft: String = ""
+    @Published var editingSkillCard: SkillManagerCard?
+    @Published var isSubmittingEditSkillRequest: Bool = false
+    @Published var editSkillDialogMessage: String?
+    @Published var pendingSkillDeletionCard: SkillManagerCard?
+    @Published var activeSkillSlug: String?
+    @Published var activeSkillDisplayName: String?
     @Published var sidecarRuntimeDiagnostics: [ClaudeSDKSidecarRuntimeDiagnostics] = []
     @Published var commercialReleaseGateResult: CommercialReadinessReleaseGateResult?
     @Published var productOSRegistryMessage: String?
@@ -1202,10 +1220,258 @@ final class AppViewModel: NSObject, ObservableObject {
     func reloadSkillRuntimeDefinitions() {
         do {
             skillRuntimeDefinitions = try skillRuntimeRepository?.list() ?? []
+            commercialSkillManagerPresentation = buildCommercialSkillManagerPresentation()
+            if let selectedSkillManagerCardID,
+               !commercialSkillManagerPresentation.cards.contains(where: { $0.id == selectedSkillManagerCardID }) {
+                self.selectedSkillManagerCardID = nil
+            }
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
         }
+    }
+
+    func selectSkillManagerCard(_ id: String) {
+        selectedSkillManagerCardID = id
+    }
+
+    func presentAddSkillDialog() {
+        addSkillRequestDraft = ""
+        addSkillDialogMessage = nil
+        isSubmittingAddSkillRequest = false
+        isAddSkillDialogPresented = true
+    }
+
+    func cancelAddSkillDialog() {
+        guard !isSubmittingAddSkillRequest else { return }
+        isAddSkillDialogPresented = false
+        addSkillRequestDraft = ""
+        addSkillDialogMessage = nil
+    }
+
+    func submitAddSkillRequest() async {
+        let request = addSkillRequestDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !request.isEmpty, !isSubmittingAddSkillRequest else { return }
+        guard let chatSessionRepository else {
+            addSkillDialogMessage = "会话系统尚未初始化。"
+            return
+        }
+        isSubmittingAddSkillRequest = true
+        addSkillDialogMessage = "康纳正在根据你的需求创建技能…"
+        do {
+            let knownSkillSlugs = currentUserSkillSlugs()
+            let title = sanitizedSessionTitle("添加技能：\(request)")
+            let session = try chatSessionRepository.createSession(title: title)
+            rememberWorkspaceMode(.conversation, for: session.id)
+            try loadBackgroundTasks(sessionID: session.id)
+            reloadChatSessions(restoreWorkspaceMode: false)
+            try await runAddSkillRequestInBackgroundSession(session: session, userRequest: request)
+            let createdSlug = try ensureSkillPackageExists(for: request, excluding: knownSkillSlugs)
+            addSkillRequestDraft = ""
+            addSkillDialogMessage = "技能已创建：\(createdSlug)。"
+            reloadChatSessions(restoreWorkspaceMode: false)
+            reloadSkillRuntimeDefinitions()
+            selectedSkillManagerCardID = createdSlug
+            errorMessage = nil
+        } catch {
+            addSkillDialogMessage = "创建失败：\(String(describing: error))"
+            errorMessage = String(describing: error)
+        }
+        isSubmittingAddSkillRequest = false
+    }
+
+    func presentEditSkillDialog(card: SkillManagerCard) {
+        editingSkillCard = card
+        editSkillRequestDraft = ""
+        editSkillDialogMessage = nil
+        isSubmittingEditSkillRequest = false
+        isEditSkillDialogPresented = true
+    }
+
+    func cancelEditSkillDialog() {
+        guard !isSubmittingEditSkillRequest else { return }
+        isEditSkillDialogPresented = false
+        editSkillRequestDraft = ""
+        editSkillDialogMessage = nil
+        editingSkillCard = nil
+    }
+
+    func submitEditSkillRequest() async {
+        guard let card = editingSkillCard else { return }
+        let request = editSkillRequestDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !request.isEmpty, !isSubmittingEditSkillRequest else { return }
+        guard let chatSessionRepository else {
+            editSkillDialogMessage = "会话系统尚未初始化。"
+            return
+        }
+        isSubmittingEditSkillRequest = true
+        editSkillDialogMessage = "康纳正在根据你的需求修改技能…"
+        do {
+            let title = sanitizedSessionTitle("编辑技能：\(card.title)")
+            let session = try chatSessionRepository.createSession(title: title)
+            rememberWorkspaceMode(.conversation, for: session.id)
+            try loadBackgroundTasks(sessionID: session.id)
+            reloadChatSessions(restoreWorkspaceMode: false)
+            try await runSkillRequestInBackgroundSession(
+                session: session,
+                prompt: buildEditSkillAgentPrompt(card: card, userRequest: request),
+                displayPrompt: "编辑技能：\(card.title) — \(request)"
+            )
+            editSkillRequestDraft = ""
+            editSkillDialogMessage = "修改请求已提交。完成后技能列表会自动刷新。"
+            reloadChatSessions(restoreWorkspaceMode: false)
+            reloadSkillRuntimeDefinitions()
+            selectedSkillManagerCardID = card.id
+            errorMessage = nil
+        } catch {
+            editSkillDialogMessage = "修改失败：\(String(describing: error))"
+            errorMessage = String(describing: error)
+        }
+        isSubmittingEditSkillRequest = false
+    }
+
+    func requestDeleteSkill(card: SkillManagerCard) {
+        pendingSkillDeletionCard = card
+    }
+
+    func cancelDeleteSkill() {
+        pendingSkillDeletionCard = nil
+    }
+
+    func confirmDeletePendingSkill() {
+        guard let card = pendingSkillDeletionCard else { return }
+        do {
+            try deleteSkill(card: card)
+            pendingSkillDeletionCard = nil
+            reloadSkillRuntimeDefinitions()
+            if selectedSkillManagerCardID == card.id {
+                selectedSkillManagerCardID = nil
+            }
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    private func deleteSkill(card: SkillManagerCard) throws {
+        guard card.sourceTier == SkillSourceTier.user.rawValue else {
+            throw AppSkillRuntimeRepositoryError.unsafePermissionMode("Only user skills can be deleted from the skill manager. Skill \(card.id) is \(card.sourceTier).")
+        }
+        let packagePath = card.packagePath.isEmpty ? URL(fileURLWithPath: card.path).deletingLastPathComponent().path : card.packagePath
+        guard let storagePaths else { throw AppChatRuntimeUnavailableError.nativeSessionManagerUnavailable }
+        let packageURL = URL(fileURLWithPath: packagePath, isDirectory: true).standardizedFileURL
+        let rootURL = storagePaths.skillsDirectory.standardizedFileURL
+        guard packageURL.path == rootURL.appendingPathComponent(card.id, isDirectory: true).standardizedFileURL.path else {
+            throw AppSkillRuntimeRepositoryError.unsafePermissionMode("Refusing to delete skill outside user skill directory: \(packageURL.path)")
+        }
+        try FileManager.default.removeItem(at: packageURL)
+    }
+
+    private func runAddSkillRequestInBackgroundSession(session: AgentSession, userRequest: String) async throws {
+        try await runSkillRequestInBackgroundSession(
+            session: session,
+            prompt: buildAddSkillAgentPrompt(userRequest: userRequest),
+            displayPrompt: "添加技能：\(userRequest)"
+        )
+    }
+
+    private func runSkillRequestInBackgroundSession(session: AgentSession, prompt: String, displayPrompt: String) async throws {
+        guard var manager = makeNativeSessionManager(for: session) else {
+            throw AppChatRuntimeUnavailableError.nativeSessionManagerUnavailable
+        }
+        manager.permissionMode = .trustedWrite
+        let sessionID = session.id
+        let liveBackend = manager.backend
+        activeChatBackendsBySessionID[sessionID] = liveBackend
+        submittingChatSessionIDs.insert(sessionID)
+        refreshSelectedSubmittingState()
+        defer {
+            activeChatBackendsBySessionID.removeValue(forKey: sessionID)
+            if let runID = activeChatRunIDsBySessionID[sessionID] {
+                activeChatBackendsByRunID.removeValue(forKey: runID)
+            }
+            submittingChatSessionIDs.remove(sessionID)
+            activeChatRunIDsBySessionID.removeValue(forKey: sessionID)
+            refreshSelectedSubmittingState()
+        }
+        _ = try await manager.submit(
+            prompt,
+            sessionSummary: nil,
+            displayPrompt: displayPrompt,
+            onRunStarted: { [weak self] runID in
+                guard let self else { return }
+                self.activeChatRunIDsBySessionID[sessionID] = runID
+                self.activeChatBackendsByRunID[runID] = liveBackend
+            },
+            onEventPresentation: { [weak self] presentation in
+                guard let self else { return }
+                self.agentEventTimelinesBySessionID[sessionID, default: []].append(presentation)
+            }
+        )
+        if let timeline = agentEventTimelinesBySessionID[sessionID] {
+            try chatSessionRepository?.saveActivityTimelineCache(sessionID: sessionID, timeline: timeline)
+        }
+    }
+
+    private func buildAddSkillAgentPrompt(userRequest: String) -> String {
+        SkillAgentPromptBuilder().addSkillPrompt(
+            userRequest: userRequest,
+            skillRootPath: storagePaths?.skillsDirectory.path ?? "~/Library/Application Support/Connor/skills",
+            existingSlugs: currentUserSkillSlugs()
+        )
+    }
+
+    private func buildEditSkillAgentPrompt(card: SkillManagerCard, userRequest: String) -> String {
+        SkillAgentPromptBuilder().editSkillPrompt(card: card, userRequest: userRequest)
+    }
+
+    private func currentUserSkillSlugs() -> Set<String> {
+        guard let storagePaths else { return [] }
+        let root = storagePaths.skillsDirectory
+        guard let entries = try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey]) else { return [] }
+        return Set(entries.compactMap { entry in
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: entry.path, isDirectory: &isDirectory), isDirectory.boolValue else { return nil }
+            guard FileManager.default.fileExists(atPath: entry.appendingPathComponent("SKILL.md").path) else { return nil }
+            return entry.lastPathComponent
+        })
+    }
+
+    private func ensureSkillPackageExists(for userRequest: String, excluding previousSlugs: Set<String>) throws -> String {
+        guard let storagePaths else { throw AppChatRuntimeUnavailableError.nativeSessionManagerUnavailable }
+        let currentSlugs = currentUserSkillSlugs()
+        if let created = currentSlugs.subtracting(previousSlugs).sorted().first {
+            return created
+        }
+        let planner = SkillCreationFallbackPlanner()
+        let identity = planner.suggestedIdentity(for: userRequest, existingSlugs: currentSlugs)
+        let directory = storagePaths.skillsDirectory.appendingPathComponent(identity.slug, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let skillURL = directory.appendingPathComponent("SKILL.md")
+        try planner.generatedSkillMarkdown(name: identity.name, slug: identity.slug, userRequest: userRequest).write(to: skillURL, atomically: true, encoding: .utf8)
+        return identity.slug
+    }
+
+    private func buildCommercialSkillManagerPresentation() -> SkillManagerPresentation {
+        guard let storagePaths else {
+            return SkillManagerPresentation(
+                summary: SkillManagerSummary(total: 0, enabled: 0, projectScoped: 0, risky: 0, invalid: 0, sourceBlocked: 0),
+                cards: [],
+                globalWarnings: ["Storage paths are not initialized."]
+            )
+        }
+        let roots = workspaceRoots
+            .map { $0.path.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .map { URL(fileURLWithPath: $0, isDirectory: true) }
+        let nestedRoots: [URL]
+        if let primary = primaryWorkspaceRootDraft?.path.trimmingCharacters(in: .whitespacesAndNewlines), !primary.isEmpty {
+            nestedRoots = [URL(fileURLWithPath: primary, isDirectory: true)]
+        } else {
+            nestedRoots = []
+        }
+        let snapshot = SkillPackageScanner().scan(storagePaths: storagePaths, projectRoots: roots, nestedRoots: nestedRoots)
+        return SkillCommercialUIPresentationBuilder().build(snapshot: snapshot)
     }
 
     func reloadSidecarRuntimeDiagnostics() {
@@ -3324,6 +3590,65 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
+    func setActiveSkill(slug: String) {
+        activeSkillSlug = slug
+        activeSkillDisplayName = skillRuntimeDefinitions.first(where: { $0.slug == slug })?.manifest.name
+    }
+
+    func clearActiveSkill() {
+        activeSkillSlug = nil
+        activeSkillDisplayName = nil
+    }
+
+    private func resolveActiveSkillInstructions(sessionID: String) -> String? {
+        guard let slug = activeSkillSlug, let storagePaths else { return nil }
+        let scanner = SkillPackageScanner()
+        let roots = workspaceRoots
+            .map { $0.path.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .map { URL(fileURLWithPath: $0, isDirectory: true) }
+        let nestedRoots: [URL]
+        if let primary = primaryWorkspaceRootDraft?.path.trimmingCharacters(in: .whitespacesAndNewlines), !primary.isEmpty {
+            nestedRoots = [URL(fileURLWithPath: primary, isDirectory: true)]
+        } else {
+            nestedRoots = []
+        }
+        let snapshot = scanner.scan(storagePaths: storagePaths, projectRoots: roots, nestedRoots: nestedRoots)
+        guard let resolution = snapshot.resolution(slug: slug) else { return nil }
+        let runtime = SkillInvocationRuntime()
+        let request = SkillInvocationRequest(
+            slug: SkillSlug(slug),
+            rawInvocation: "[skill:\(slug)]",
+            arguments: "",
+            mode: .manual,
+            sessionID: sessionID
+        )
+        guard let plan = try? runtime.buildPlan(request: request, resolution: resolution) else { return nil }
+        return plan.renderedInstructions
+    }
+
+    private func buildSkillChatPromptAugmentation(prompt: String, sessionID: String) -> SkillChatPromptAugmentation {
+        guard let storagePaths else {
+            return SkillChatPromptAugmentation(originalPrompt: prompt, augmentedPrompt: prompt)
+        }
+        let roots = workspaceRoots
+            .map { $0.path.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .map { URL(fileURLWithPath: $0, isDirectory: true) }
+        let nestedRoots: [URL]
+        if let primary = primaryWorkspaceRootDraft?.path.trimmingCharacters(in: .whitespacesAndNewlines), !primary.isEmpty {
+            nestedRoots = [URL(fileURLWithPath: primary, isDirectory: true)]
+        } else {
+            nestedRoots = []
+        }
+        return SkillChatPromptAugmentor(storagePaths: storagePaths).augment(
+            prompt: prompt,
+            sessionID: sessionID,
+            projectRoots: roots,
+            nestedRoots: nestedRoots
+        )
+    }
+
     @discardableResult
     func submitChat(prompt rawPrompt: String, clearComposer: Bool = false, displayPrompt rawDisplayPrompt: String? = nil) async -> String? {
         let prompt = rawPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3387,12 +3712,16 @@ final class AppViewModel: NSObject, ObservableObject {
                 sessionID: submittingSessionID,
                 attachments: attachmentsForSubmission
             )
+            let skillAugmentation = buildSkillChatPromptAugmentation(prompt: prompt, sessionID: submittingSessionID)
+            let resolvedSkillInstructions = resolveActiveSkillInstructions(sessionID: submittingSessionID)
+            defer { if resolvedSkillInstructions != nil { clearActiveSkill() } }
             let response = try await manager.submit(
-                prompt,
+                skillAugmentation.augmentedPrompt,
                 sessionSummary: sessionSummary,
                 displayPrompt: displayPrompt?.isEmpty == false ? displayPrompt : nil,
                 attachments: attachmentsForSubmission,
                 attachmentContextPlan: attachmentContextPlan,
+                skillInstructions: resolvedSkillInstructions,
                 onRunStarted: { [weak self] runID in
                     guard let self else { return }
                     if self.submittingChatSessionIDs.contains(submittingSessionID) {
