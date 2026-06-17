@@ -138,6 +138,7 @@ struct MCPSourceDraft: Equatable {
     var editingSourceID: String?
     var sourceID: String = ""
     var displayName: String = ""
+    var transportKind: String = "stdio"
     var command: String = ""
     var argumentsText: String = ""
     var status: ProductOSRegistryEntryStatus = .draft
@@ -158,7 +159,11 @@ struct MCPSourceDraft: Equatable {
         displayName = configuration.displayName
         status = configuration.status
         credentialRequirement = configuration.credentialRequirement
-        credentialEnvironmentText = configuration.credentialBindings.map(\.environmentVariable).joined(separator: ", ")
+        credentialEnvironmentText = configuration.credentialBindings.map { binding in
+            binding.label.isEmpty || binding.label == binding.environmentVariable
+                ? binding.environmentVariable
+                : "\(binding.label):\(binding.environmentVariable)"
+        }.joined(separator: ", ")
         allowExternalNetwork = configuration.allowedCapabilities.contains(.externalNetwork)
         allowReadSession = configuration.allowedCapabilities.contains(.readSession)
         allowWorkspaceRead = configuration.allowedCapabilities.contains(.readWorkspaceFile) || configuration.allowedCapabilities.contains(.listWorkspaceFiles)
@@ -166,9 +171,11 @@ struct MCPSourceDraft: Equatable {
         notes = configuration.notes
         switch configuration.transport {
         case .stdio(let command, let arguments):
+            transportKind = "stdio"
             self.command = command
             self.argumentsText = arguments.joined(separator: " ")
         case .http(let url):
+            transportKind = "http"
             self.command = url.absoluteString
             self.argumentsText = ""
         }
@@ -182,14 +189,15 @@ struct MCPSourceDraft: Equatable {
 
     var parsedCredentialBindings: [MCPSourceCredentialBinding] {
         guard credentialRequirement != .none else { return [] }
-        let envsFromBindings = credentialEnvironmentText
-            .split(whereSeparator: { $0 == "," || $0 == "\n" || $0 == " " || $0 == "\t" })
-            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
-            .filter { !$0.isEmpty }
-        let envsFromSecretLines = parsedCredentialSecretByEnvironment.keys.sorted()
-        return Array(Set(envsFromBindings + envsFromSecretLines))
-            .sorted()
-            .map { MCPSourceCredentialBinding(label: $0, environmentVariable: $0) }
+        var bindings: [String: MCPSourceCredentialBinding] = [:]
+        for token in credentialEnvironmentText.split(whereSeparator: { $0 == "," || $0 == "\n" || $0 == " " || $0 == "\t" }) {
+            let parsed = Self.parseCredentialBindingToken(String(token))
+            if let parsed { bindings[parsed.environmentVariable] = parsed }
+        }
+        for env in parsedCredentialSecretByEnvironment.keys.sorted() where bindings[env] == nil {
+            bindings[env] = MCPSourceCredentialBinding(label: env, environmentVariable: env)
+        }
+        return bindings.values.sorted { $0.environmentVariable < $1.environmentVariable }
     }
 
     var parsedCredentialSecretByEnvironment: [String: String] {
@@ -208,12 +216,34 @@ struct MCPSourceDraft: Equatable {
         credentialSecret.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    static func parseCredentialBindingToken(_ raw: String) -> MCPSourceCredentialBinding? {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+        if let separator = text.firstIndex(where: { $0 == ":" || $0 == "=" }) {
+            let label = String(text[..<separator]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let env = String(text[text.index(after: separator)...]).trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            guard !label.isEmpty, !env.isEmpty else { return nil }
+            return MCPSourceCredentialBinding(label: label, environmentVariable: env)
+        }
+        let env = text.uppercased()
+        return MCPSourceCredentialBinding(label: env, environmentVariable: env)
+    }
+
     var parsedTags: [String] {
         Array(Set(tagsText
             .split(whereSeparator: { $0 == "," || $0 == "\n" || $0 == " " || $0 == "\t" })
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }))
         .sorted()
+    }
+
+    var runtimeTransport: MCPSourceRuntimeTransport? {
+        let endpoint = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        if transportKind == "http" {
+            guard let url = URL(string: endpoint), url.scheme != nil, url.host != nil else { return nil }
+            return .http(url: url)
+        }
+        return .stdio(command: endpoint, arguments: parsedArguments)
     }
 
     var allowedCapabilities: [AgentPermissionCapability] {
@@ -1387,13 +1417,14 @@ final class AppViewModel: NSObject, ObservableObject {
             return
         }
         let sourceID = originalConfiguration?.sourceID ?? draft.normalizedSourceID
+        guard let transport = draft.runtimeTransport else {
+            addSourceMessage = "Invalid HTTP MCP endpoint URL. Use https://host/path, or http://localhost/path for local development."
+            return
+        }
         let configuration = MCPSourceRuntimeConfiguration(
             sourceID: sourceID,
             displayName: draft.normalizedDisplayName,
-            transport: .stdio(
-                command: draft.command.trimmingCharacters(in: .whitespacesAndNewlines),
-                arguments: draft.parsedArguments
-            ),
+            transport: transport,
             status: draft.status,
             credentialRequirement: draft.credentialRequirement,
             credentialBindings: draft.parsedCredentialBindings,
@@ -1528,7 +1559,7 @@ final class AppViewModel: NSObject, ObservableObject {
             credentialStore: mcpSourceCredentialStore
         )
         do {
-            let report = try await service.testStdioSource(configuration)
+            let report = try await service.testSource(configuration)
             sourceRuntimeTestMessages[sourceID] = report.success
                 ? "Source test passed · discovered \(report.catalog.count) tools."
                 : "Source test completed with unhealthy status · discovered \(report.catalog.count) tools."
