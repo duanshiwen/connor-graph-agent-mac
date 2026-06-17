@@ -646,6 +646,7 @@ Commercial Train 3 将 MCP Source 从 config/call helper 升级为 Connor-owned 
 Sources/ConnorGraphAppSupport/AppMCPSourceRuntimeRepository.swift
 Sources/ConnorGraphAppSupport/MCPJSONRPCClient.swift
 Sources/ConnorGraphAppSupport/MCPStdioClientTransport.swift
+Sources/ConnorGraphAppSupport/MCPClientPool.swift
 Sources/ConnorGraphAppSupport/MCPSourceRuntime.swift
 Sources/ConnorGraphAppSupport/MCPSourceTestService.swift
 Sources/ConnorGraphAppSupport/MCPToolRegistryBridge.swift
@@ -667,6 +668,8 @@ Sources/ConnorGraphAppSupport/SourceSkillAutomationUIPresentation.swift
 - Original MCP tool name preservation for routing and audit
 - Backward-compatible parsing for previous `source.tool` runtime calls
 - MCP Tool Registry Bridge for discovered catalog → `AgentToolRegistry` registration
+- MCP Client Pool MVP for persisted enabled source catalog exposure and stdio tool routing
+- App runtime bridge: `AppGraphAgentRuntimeFactory` loads persisted enabled MCP catalogs and injects tools into `AgentToolRegistry`
 - Minimal MCP routed AgentTool path for source/tool dispatch
 - Stdio source test service for validation + discovery + health/catalog/audit persistence
 - Disabled-source gate
@@ -679,7 +682,7 @@ Sources/ConnorGraphAppSupport/SourceSkillAutomationUIPresentation.swift
 - Discovery snapshot
 - Per-source `health.json`、`catalog.json`、`audit.jsonl`
 
-商业级 MCP Platform 下一步仍需补齐:HTTP/SSE/Streamable HTTP production transport、MCP client pool、Keychain-backed credential injection、source add/test/auth/enable UI workflow、per-tool permission policy、large/binary result artifact governance、App runtime 动态 source activation。根据当前产品边界,本里程碑刻意不处理 graph ingestion。
+商业级 MCP Platform 下一步仍需补齐:HTTP/SSE/Streamable HTTP production transport、long-lived connection reuse/reconnect、Keychain-backed credential injection、source add/test/auth/enable UI workflow、per-tool permission policy、large/binary result artifact governance、App runtime 动态 source activation。根据当前产品边界,本里程碑刻意不处理 graph ingestion。
 
 边界:MCP servers 是能力提供者;Connor 拥有 registry、lifecycle、health、permission policy、audit 与 readiness。Graph ingestion 不属于当前 MCP Platform MVP。
 
