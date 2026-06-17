@@ -1,38 +1,493 @@
 import SwiftUI
+import ConnorGraphCore
 import ConnorGraphAppSupport
 
 struct SourceRuntimePanelView: View {
     @ObservedObject var viewModel: AppViewModel
 
     private var presentation: SourceRuntimeUIPresentation {
-        SourceRuntimeUIPresentation.build(sources: viewModel.sourceRuntimeConfigurations)
+        SourceRuntimeUIPresentation.build(
+            sources: viewModel.sourceRuntimeConfigurations,
+            healthRecords: viewModel.sourceRuntimeHealthRecords,
+            auditRecords: viewModel.sourceRuntimeAuditRecordsBySource.values.flatMap { $0 }
+        )
+    }
+
+    private var selectedCard: SourceRuntimeUICard? {
+        guard let id = viewModel.selectedSourceRuntimeCardID else { return nil }
+        return presentation.cards.first(where: { $0.id == id })
+    }
+
+    private var selectedConfiguration: MCPSourceRuntimeConfiguration? {
+        guard let id = viewModel.selectedSourceRuntimeCardID else { return nil }
+        return viewModel.sourceRuntimeConfigurations.first(where: { $0.sourceID == id })
     }
 
     var body: some View {
-        RuntimePanelScaffold(
-            title: "Sources",
-            subtitle: "MCP source runtime：工具、凭据、权限、审计和图谱摄取由康纳同学治理。",
-            metrics: [
-                ("Total", "\(presentation.summary.totalCount)"),
-                ("Enabled", "\(presentation.summary.enabledCount)"),
-                ("Needs credentials", "\(presentation.summary.needsCredentialCount)")
-            ],
-            onRefresh: viewModel.reloadSourceRuntimeConfigurations
-        ) {
-            ForEach(presentation.cards) { card in
-                RuntimePanelCard(
-                    title: card.title,
-                    subtitle: "\(card.statusLabel) · \(card.transportLabel)",
-                    detail: "prefix \(card.toolPrefixLabel) · \(card.graphPolicyLabel) · credentials \(card.credentialLabel)",
-                    chips: card.capabilityLabels + card.tags,
-                    severity: card.severity
+        Group {
+            if let card = selectedCard, let configuration = selectedConfiguration {
+                MCPSourceDetailView(
+                    card: card,
+                    configuration: configuration,
+                    summary: presentation.summary,
+                    tools: viewModel.sourceRuntimeToolCatalogs[card.id, default: []],
+                    auditRecords: viewModel.sourceRuntimeAuditRecordsBySource[card.id, default: []],
+                    isTesting: viewModel.testingSourceRuntimeIDs.contains(card.id),
+                    testMessage: viewModel.sourceRuntimeTestMessages[card.id],
+                    onEdit: { viewModel.presentEditSourceSheet(sourceID: card.id) },
+                    onToggleEnabled: {
+                        viewModel.setSourceRuntimeStatus(
+                            sourceID: card.id,
+                            status: configuration.status == .enabled ? .disabled : .enabled
+                        )
+                    },
+                    onArchive: { viewModel.archiveSourceRuntime(sourceID: card.id) },
+                    onDelete: { viewModel.requestDeleteSourceRuntime(sourceID: card.id) },
+                    onTest: { Task { await viewModel.testSourceRuntime(sourceID: card.id) } }
+                )
+            } else {
+                MCPSourceEmptyDetailView(
+                    summary: presentation.summary
                 )
             }
+        }
+        .confirmationDialog(
+            "Delete MCP Source?",
+            isPresented: Binding(
+                get: { viewModel.pendingSourceRuntimeDeletionID != nil },
+                set: { if !$0 { viewModel.cancelDeleteSourceRuntime() } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete Source", role: .destructive) {
+                viewModel.confirmDeleteSourceRuntime()
+            }
+            Button("Cancel", role: .cancel) {
+                viewModel.cancelDeleteSourceRuntime()
+            }
+        } message: {
+            Text("This permanently deletes \(viewModel.pendingSourceRuntimeDeletionName ?? "this source") and its persisted health, catalog, and audit files. Archive instead if you need to preserve history.")
         }
         .task {
             viewModel.deferViewUpdate {
                 viewModel.reloadSourceRuntimeConfigurations()
             }
+        }
+    }
+}
+
+private struct MCPSourceDetailView: View {
+    var card: SourceRuntimeUICard
+    var configuration: MCPSourceRuntimeConfiguration
+    var summary: SourceRuntimeUISummary
+    var tools: [MCPSourceToolDescriptor]
+    var auditRecords: [MCPSourceRuntimeAuditRecord]
+    var isTesting: Bool
+    var testMessage: String?
+    var onEdit: () -> Void
+    var onToggleEnabled: () -> Void
+    var onArchive: () -> Void
+    var onDelete: () -> Void
+    var onTest: () -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
+                MCPSourceTopBar(
+                    title: card.title,
+                    subtitle: "MCP Source",
+                    status: configuration.status,
+                    onEdit: onEdit,
+                    onToggleEnabled: onToggleEnabled,
+                    onArchive: onArchive,
+                    onDelete: onDelete,
+                    onTest: onTest,
+                    isTesting: isTesting
+                )
+                MCPSourceHeroSection(card: card, configuration: configuration)
+
+                if let testMessage, !testMessage.isEmpty {
+                    SkillInfoSection(title: "Source Test", systemImage: isTesting ? "hourglass" : "checkmark.circle") {
+                        HStack(spacing: AgentChatLayout.spaceS) {
+                            if isTesting {
+                                ProgressView().controlSize(.small)
+                            }
+                            Text(testMessage)
+                                .font(AgentChatTypography.meta)
+                                .foregroundStyle(testMessage.localizedCaseInsensitiveContains("failed") ? .red : .secondary)
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+
+                if !card.lastErrorLabel.isEmpty {
+                    SkillInfoSection(title: "Last Error", systemImage: "exclamationmark.triangle") {
+                        Text(card.lastErrorLabel)
+                            .font(AgentChatTypography.meta)
+                            .foregroundStyle(.orange)
+                            .textSelection(.enabled)
+                    }
+                }
+
+                SkillInfoSection(title: "Metadata", systemImage: "info.circle") {
+                    SkillInfoTable(rows: [
+                        ("Source ID", configuration.sourceID),
+                        ("Display Name", configuration.displayName),
+                        ("Status", card.statusLabel),
+                        ("Lifecycle", card.lifecycleLabel),
+                        ("Health", card.healthLabel),
+                        ("Transport", card.transportLabel),
+                        ("Credentials", card.credentialLabel),
+                        ("Tool Prefix", card.toolPrefixLabel),
+                        ("Created", configuration.createdAt.ISO8601Format()),
+                        ("Updated", configuration.updatedAt.ISO8601Format())
+                    ])
+                }
+
+                SkillInfoSection(title: "Governance", systemImage: "checkmark.shield") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        SkillBadgeRow(title: "Allowed Capabilities", values: card.capabilityLabels, emptyText: "No explicit runtime capability")
+                        SkillBadgeRow(title: "Server Capabilities", values: card.platformCapabilityLabels, emptyText: "No discovery snapshot yet")
+                        SkillBadgeRow(title: "Tags", values: card.tags, emptyText: "No tags")
+                        SkillInfoTable(rows: [
+                            ("Graph Policy", card.graphPolicyLabel),
+                            ("Discovered Tools", card.toolCountLabel),
+                            ("Recent Audits", card.auditCountLabel),
+                            ("Last Checked", card.lastCheckedLabel)
+                        ])
+                    }
+                }
+
+                SkillInfoSection(title: "Tool Catalog", systemImage: "wrench.and.screwdriver") {
+                    MCPToolCatalogPreview(tools: tools)
+                }
+
+                SkillInfoSection(title: "Recent Audit", systemImage: "clock.arrow.circlepath") {
+                    MCPAuditPreview(records: auditRecords)
+                }
+            }
+            .padding(AppShellLayout.spaceXL)
+            .frame(maxWidth: AppShellLayout.contentMaxWidth, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(AppShellColors.detailBackground)
+        .navigationTitle(card.title)
+    }
+}
+
+private struct MCPSourceEmptyDetailView: View {
+    var summary: SourceRuntimeUISummary
+
+    private var hasSources: Bool { summary.totalCount > 0 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
+            MCPSourceTopBar(title: "MCP Sources", subtitle: "Source Runtime", onTest: nil, isTesting: false)
+            Spacer(minLength: 80)
+            ContentUnavailableView(
+                hasSources ? "请选择一个 MCP Source" : "暂无 MCP Source",
+                systemImage: hasSources ? "server.rack" : "externaldrive.badge.plus",
+                description: Text(hasSources ? "从左侧列表选择一个连接，即可查看健康状态、工具目录、治理策略和审计记录。" : "使用左侧列表标题栏的「+」创建外部工具连接；测试通过后，健康状态、工具目录和审计记录会显示在这里。")
+            )
+            .frame(maxWidth: .infinity)
+            Spacer()
+        }
+        .padding(AppShellLayout.spaceXL)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(AppShellColors.detailBackground)
+    }
+}
+
+private struct MCPSourceTopBar: View {
+    var title: String
+    var subtitle: String
+    var status: ProductOSRegistryEntryStatus? = nil
+    var onEdit: (() -> Void)? = nil
+    var onToggleEnabled: (() -> Void)? = nil
+    var onArchive: (() -> Void)? = nil
+    var onDelete: (() -> Void)? = nil
+    var onTest: (() -> Void)?
+    var isTesting: Bool
+
+    var body: some View {
+        HStack(alignment: .top, spacing: AppShellLayout.spaceM) {
+            VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
+                HStack(alignment: .firstTextBaseline, spacing: AppShellLayout.spaceS) {
+                    Text(title)
+                        .font(.largeTitle.weight(.semibold))
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let status {
+                        AppPill(text: status.rawValue, color: status == .enabled ? .green : .secondary)
+                    }
+                }
+                Text(subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            HStack(spacing: AppShellLayout.spaceS) {
+                if let onTest {
+                    Button(action: onTest) {
+                        Label(isTesting ? "测试中…" : "测试 Source", systemImage: isTesting ? "hourglass" : "checkmark.circle")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isTesting)
+                    .help("运行 MCP initialize + tools/list，并刷新 health/catalog/audit。")
+                }
+                if let onEdit {
+                    Button(action: onEdit) {
+                        Label("编辑", systemImage: "pencil")
+                    }
+                    .buttonStyle(.bordered)
+                }
+                if onToggleEnabled != nil || onArchive != nil || onDelete != nil {
+                    Menu {
+                        if let onToggleEnabled {
+                            Button(action: onToggleEnabled) {
+                                Label(status == .enabled ? "停用 Source" : "启用 Source", systemImage: status == .enabled ? "pause.circle" : "play.circle")
+                            }
+                        }
+                        if let onArchive {
+                            Button(action: onArchive) {
+                                Label("归档 Source", systemImage: "archivebox")
+                            }
+                            .disabled(status == .deprecated)
+                        }
+                        if let onDelete {
+                            Divider()
+                            Button(role: .destructive, action: onDelete) {
+                                Label("删除 Source", systemImage: "trash")
+                            }
+                        }
+                    } label: {
+                        Label("更多", systemImage: "ellipsis.circle")
+                    }
+                    .menuStyle(.button)
+                    .help("更多 Source 生命周期操作")
+                }
+            }
+            .controlSize(.regular)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct MCPSourceHeroSection: View {
+    var card: SourceRuntimeUICard
+    var configuration: MCPSourceRuntimeConfiguration
+
+    var body: some View {
+        HStack(alignment: .top, spacing: AppShellLayout.spaceL) {
+            ZStack {
+                RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
+                    .fill(heroColor.opacity(0.14))
+                Image(systemName: "server.rack")
+                    .font(.system(size: 24, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(heroColor)
+            }
+            .frame(width: 56, height: 56)
+
+            VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
+                HStack(alignment: .firstTextBaseline, spacing: AppShellLayout.spaceS) {
+                    Text(card.title)
+                        .font(AgentChatTypography.title)
+                        .lineLimit(2)
+                    AppPill(text: card.statusLabel, color: heroColor)
+                    AppPill(text: card.healthLabel, color: heroColor)
+                }
+                Text(configuration.notes.isEmpty ? "Connor-governed MCP source. Tools, credentials, permissions and audit stay inside the app boundary." : configuration.notes)
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: AppShellLayout.spaceS) {
+                    AppPill(text: card.transportLabel, color: .secondary)
+                    AppPill(text: card.toolCountLabel, color: .blue)
+                    AppPill(text: card.auditCountLabel, color: .secondary)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(AppShellLayout.spaceL)
+        .background(AppShellColors.cardBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
+                .stroke(AppShellColors.hairline, lineWidth: 1)
+        )
+    }
+
+    private var heroColor: Color {
+        switch card.severity {
+        case .success: .green
+        case .warning: .orange
+        case .error: .red
+        case .info: .blue
+        }
+    }
+}
+
+private struct MCPToolCatalogPreview: View {
+    var tools: [MCPSourceToolDescriptor]
+
+    var body: some View {
+        if tools.isEmpty {
+            Text("No persisted tool catalog yet. Run source test/discovery to populate catalog.json.")
+                .font(AgentChatTypography.meta)
+                .foregroundStyle(.secondary)
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(tools.prefix(24)) { tool in
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(tool.name)
+                            .font(AgentChatTypography.monoMeta.weight(.semibold))
+                            .textSelection(.enabled)
+                        if !tool.description.isEmpty {
+                            Text(tool.description)
+                                .font(AgentChatTypography.meta)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        HStack(spacing: 6) {
+                            SkillPill(text: "raw: \(tool.rawName)", color: .secondary)
+                            if let policy = tool.governancePolicy {
+                                SkillPill(text: "risk: \(policy.riskClass.rawValue)", color: color(for: policy.riskClass))
+                                SkillPill(text: "policy: \(policy.executionPolicy.rawValue)", color: color(for: policy.executionPolicy))
+                            } else {
+                                SkillPill(text: "policy: missing", color: .orange)
+                            }
+                            if let integrity = tool.integrityStatus {
+                                SkillPill(text: "integrity: \(integrity.rawValue)", color: color(for: integrity))
+                            }
+                            ForEach(tool.requiredCapabilities.map(\.rawValue).prefix(3), id: \.self) { capability in
+                                SkillPill(text: capability, color: .blue)
+                            }
+                        }
+                        if let policy = tool.governancePolicy {
+                            Text(policy.rationale)
+                                .font(AgentChatTypography.micro)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        if let fingerprint = tool.definitionFingerprint {
+                            Text("sha256: \(fingerprint.value)")
+                                .font(AgentChatTypography.micro.monospaced())
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .textSelection(.enabled)
+                        }
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(AppShellColors.subtleCardBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous))
+                }
+            }
+        }
+    }
+
+    private func color(for risk: MCPToolRiskClass) -> Color {
+        switch risk {
+        case .read: .green
+        case .externalRead: .blue
+        case .mutation: .orange
+        case .destructive, .admin, .credentialAccess: .red
+        case .unknown: .purple
+        }
+    }
+
+    private func color(for policy: MCPToolExecutionPolicy) -> Color {
+        switch policy {
+        case .autoAllow: .green
+        case .requireConfirmation: .orange
+        case .block: .red
+        }
+    }
+
+    private func color(for integrity: MCPToolIntegrityStatus) -> Color {
+        switch integrity {
+        case .new: .blue
+        case .verified: .green
+        case .changed: .red
+        }
+    }
+}
+
+private struct MCPAuditPreview: View {
+    var records: [MCPSourceRuntimeAuditRecord]
+
+    var body: some View {
+        if records.isEmpty {
+            Text("No recent audit records.")
+                .font(AgentChatTypography.meta)
+                .foregroundStyle(.secondary)
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(records.reversed()) { record in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            SkillPill(text: record.eventKind.rawValue, color: color(for: record.eventKind))
+                            Text(record.timestamp.ISO8601Format())
+                                .font(AgentChatTypography.micro)
+                                .foregroundStyle(.secondary)
+                            Spacer(minLength: 0)
+                        }
+                        if let toolName = record.prefixedToolName ?? record.rawToolName {
+                            Text(toolName)
+                                .font(AgentChatTypography.monoMeta)
+                                .textSelection(.enabled)
+                        }
+                        HStack(spacing: 6) {
+                            if let riskClass = record.riskClass {
+                                SkillPill(text: "risk: \(riskClass.rawValue)", color: .orange)
+                            }
+                            if let executionPolicy = record.executionPolicy {
+                                SkillPill(text: "policy: \(executionPolicy.rawValue)", color: .purple)
+                            }
+                            if let integrityStatus = record.integrityStatus {
+                                SkillPill(text: "integrity: \(integrityStatus.rawValue)", color: integrityStatus == .changed ? .red : .green)
+                            }
+                        }
+                        if let result = record.resultSummary, !result.isEmpty {
+                            Text(result)
+                                .font(AgentChatTypography.meta)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(3)
+                        }
+                        if let error = record.errorSummary, !error.isEmpty {
+                            Text(error)
+                                .font(AgentChatTypography.meta)
+                                .foregroundStyle(.red)
+                                .lineLimit(3)
+                        }
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(AppShellColors.subtleCardBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous))
+                }
+            }
+        }
+    }
+
+    private func color(for kind: MCPSourceRuntimeAuditEventKind) -> Color {
+        switch kind {
+        case .toolFinished, .discoveryFinished: .green
+        case .toolFailed, .toolPolicyBlocked, .toolDefinitionChanged: .red
+        case .toolPermissionRequested: .orange
+        case .toolStarted, .discoveryStarted: .blue
+        }
+    }
+}
+
+private struct SourceSummaryStrip: View {
+    var summary: SourceRuntimeUISummary
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: AppShellLayout.spaceS)], spacing: AppShellLayout.spaceS) {
+            AppMetricCard(title: "Total", value: "\(summary.totalCount)")
+            AppMetricCard(title: "Enabled", value: "\(summary.enabledCount)", color: .green)
+            AppMetricCard(title: "Healthy", value: "\(summary.healthyCount)", color: .green)
+            AppMetricCard(title: "Tools", value: "\(summary.discoveredToolCount)", color: .blue)
         }
     }
 }
@@ -247,19 +702,8 @@ private struct SkillInfoSection<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
-            Label(title, systemImage: systemImage)
-                .font(AgentChatTypography.metaEmphasis)
-            VStack(alignment: .leading, spacing: 0) {
-                content
-            }
-            .padding(AgentChatLayout.spaceL)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
-                    .stroke(Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1)
-            )
+        AppSectionCard(title: title, systemImage: systemImage) {
+            content
         }
     }
 }

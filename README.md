@@ -640,16 +640,24 @@ Sources/ConnorGraphAppSupport/AppGraphAgentRuntimeFactory.swift
 
 Commercial Train 3 将 MCP Source 从 config/call helper 升级为 Connor-owned source platform object。
 
+验收状态（2026-06-18 02:05 GMT+8）: **MCP Platform Phase 1 · Accepted**。验收范围是商业级基础闭环:Connor-owned source registry / lifecycle、stdio + HTTP JSON-RPC transport、source-scoped credentials、tool governance、runtime tool injection、native Source Manager UI、health/catalog/audit persistence 和测试证据。该验收不等于完整 MCP 平台全部完成;request-scoped SSE streaming、OAuth/source auth workflow、hot activation、long-lived reconnect、large/binary artifact governance、manual per-tool policy override 与 credential rotation dashboard 进入 Phase 2。
+
 关键文件:
 
 ```text
 Sources/ConnorGraphAppSupport/AppMCPSourceRuntimeRepository.swift
 Sources/ConnorGraphAppSupport/MCPJSONRPCClient.swift
 Sources/ConnorGraphAppSupport/MCPStdioClientTransport.swift
+Sources/ConnorGraphAppSupport/MCPHTTPClientTransport.swift
+Sources/ConnorGraphAppSupport/MCPClientPool.swift
 Sources/ConnorGraphAppSupport/MCPSourceRuntime.swift
 Sources/ConnorGraphAppSupport/MCPSourceTestService.swift
+Sources/ConnorGraphAppSupport/MCPSourceCredentialStore.swift
+Sources/ConnorGraphAppSupport/MCPToolGovernancePolicy.swift
 Sources/ConnorGraphAppSupport/MCPToolRegistryBridge.swift
 Sources/ConnorGraphAppSupport/SourceSkillAutomationUIPresentation.swift
+Sources/ConnorGraphAgentMac/MCPSourceListViews.swift
+Sources/ConnorGraphAgentMac/SourceSkillAutomationRuntimeViews.swift
 ```
 
 当前能力:
@@ -657,6 +665,9 @@ Sources/ConnorGraphAppSupport/SourceSkillAutomationUIPresentation.swift
 - Source runtime registry persistence
 - Stdio / HTTP transport configuration shape
 - Real MCP stdio subprocess transport for `Content-Length` framed JSON-RPC
+- Real MCP HTTP JSON-RPC transport for Streamable HTTP JSON response path
+- HTTP MCP endpoint validation: HTTPS required except localhost / loopback development endpoints, and credentials are rejected in endpoint URLs
+- Request-scoped SSE responses intentionally fail closed until explicit streaming support lands
 - Sensitive inherited environment filtering for local MCP subprocesses
 - Source ID validation
 - Tool name prefix validation
@@ -667,8 +678,28 @@ Sources/ConnorGraphAppSupport/SourceSkillAutomationUIPresentation.swift
 - Original MCP tool name preservation for routing and audit
 - Backward-compatible parsing for previous `source.tool` runtime calls
 - MCP Tool Registry Bridge for discovered catalog → `AgentToolRegistry` registration
-- Minimal MCP routed AgentTool path for source/tool dispatch
-- Stdio source test service for validation + discovery + health/catalog/audit persistence
+- MCP Client Pool for persisted enabled source catalog exposure, stdio / HTTP tool routing, and per-tool governance enforcement
+- App runtime bridge: `AppGraphAgentRuntimeFactory` loads persisted enabled MCP catalogs and injects tools into `AgentToolRegistry`
+- Governed MCP routed AgentTool path for source/tool dispatch
+- Per-tool governance policy generated during discovery: risk class、execution policy、permission capability、rationale
+- Risk classes: read、externalRead、mutation、destructive、admin、credentialAccess、unknown
+- Execution policies: autoAllow、requireConfirmation、block
+- Tool definition fingerprint pinning via SHA-256 over sourceID、raw tool name、description、input schema
+- Rug-pull detection: changed tool definitions are persisted with `integrityStatus == changed`, audited, and blocked before execution until reviewed/re-tested
+- Sensitive MCP tools require explicit per-run approval even under broad runtime policy, rather than relying on global allowAll
+- Source test service for stdio / HTTP validation + discovery + health/catalog/audit/policy persistence
+- Native MCP Source Manager list/detail UI for persisted health/catalog/audit inspection
+- Native Add/Edit Source sheet for stdio / HTTP MCP source onboarding and maintenance
+- Connor-owned MCP source credential store backed by `CredentialStore` / macOS Keychain
+- Credential requirements for bearer token、API key header and multi-header stdio / HTTP sources
+- Source config stores only credential requirement + env var bindings; secret values are never persisted in `mcp-runtime.json`
+- Source-scoped runtime secret injection into stdio subprocess environment after inherited secret filtering
+- Source-scoped runtime secret injection into HTTP request headers; bearer tokens use `Authorization: Bearer`, API header sources use configured `header:ENV` bindings, and query-string secrets remain unsupported
+- Missing credential fail-closed behavior before source test / tool runtime execution
+- UI-driven Enable/Disable source lifecycle controls
+- Archive Source workflow via `deprecated` status that preserves catalog/health/audit history
+- Confirmed Delete Source workflow for physical removal of a source runtime directory
+- UI-driven Test Source action that refreshes persisted health/catalog/audit after discovery
 - Disabled-source gate
 - MCP tool call event bridge
 - Product OS registry sync event
@@ -678,10 +709,22 @@ Sources/ConnorGraphAppSupport/SourceSkillAutomationUIPresentation.swift
 - Audit record
 - Discovery snapshot
 - Per-source `health.json`、`catalog.json`、`audit.jsonl`
+- Tool Catalog UI displays risk、execution policy、integrity status、rationale and schema fingerprint for review
+- Audit timeline displays policy block and tool definition changed events
 
-商业级 MCP Platform 下一步仍需补齐:HTTP/SSE/Streamable HTTP production transport、MCP client pool、Keychain-backed credential injection、source add/test/auth/enable UI workflow、per-tool permission policy、large/binary result artifact governance、App runtime 动态 source activation。根据当前产品边界,本里程碑刻意不处理 graph ingestion。
+Phase 1 验收覆盖:
 
-边界:MCP servers 是能力提供者;Connor 拥有 registry、lifecycle、health、permission policy、audit 与 readiness。Graph ingestion 不属于当前 MCP Platform MVP。
+- Source lifecycle: Add/Edit、Enable/Disable、Archive、confirmed Delete、Source Test。
+- Transport: real stdio MCP subprocess transport + HTTP JSON-RPC transport for Streamable HTTP JSON response path。
+- Runtime bridge: persisted enabled MCP catalog → `AgentToolRegistry` → governed routed tool execution。
+- Credential boundary: secrets stay out of `mcp-runtime.json`; stdio env 和 HTTP headers 只做 source-scoped injection; missing credential fail closed。
+- Governance: risk class、execution policy、permission capability、SHA-256 tool definition fingerprint、rug-pull detection、changed definition block、sensitive tool per-run approval。
+- Evidence stores: per-source `health.json`、`catalog.json`、`audit.jsonl`。
+- Native product surface: MCP Source Manager、catalog/governance inspection、audit timeline、stdio/HTTP Add/Edit Source sheet。
+
+Phase 2 非阻塞 backlog:request-scoped SSE streaming support、long-lived connection reuse/reconnect、OAuth/source auth workflow、large/binary result artifact governance、App runtime 动态 source activation、manual per-tool policy override editor、credential rotation/status dashboard。根据当前产品边界,本里程碑刻意不处理 graph ingestion。
+
+边界:MCP servers 是能力提供者;Connor 拥有 registry、lifecycle、health、permission policy、audit 与 readiness。Graph ingestion 不属于当前 MCP Platform scope。
 
 ---
 
@@ -1345,6 +1388,15 @@ swift run connor automations evaluate --trigger sessionStatusChanged --session d
 最近验证结果:
 
 ```text
+MCP Platform Phase 1 acceptance freeze (2026-06-18 02:07 GMT+8):
+- Status: MCP Platform Phase 1 · Accepted.
+- Scope: source lifecycle, stdio + HTTP JSON-RPC transport, source-scoped credential injection, tool governance, runtime bridge, native Source Manager UI, health/catalog/audit persistence.
+- Non-blocking Phase 2 backlog: request-scoped SSE streaming, OAuth/source auth workflow, hot activation, reconnect strategy, artifact governance, manual per-tool policy override, credential rotation/status dashboard.
+- swift test --filter 'CommercialMCPPlatformTests|CommercialMCPRuntimeBridgeTests|CommercialReadinessReleaseGateTests': passed, 19 tests.
+- swift test --filter 'CommercialMCPPlatformTests|CommercialMCPRuntimeBridgeTests|CommercialReadinessReleaseGateTests|agentLoopAbortCancelsActiveModelRequest': passed, 20 tests.
+- swift build: passed.
+- swift test: passed, 777 tests in 61 suites.
+
 Project Working Directory Runtime targeted tests passed (2026-06-14 01:00 GMT+8):
 - swift test --filter runtimeSettingsRepositoryPersistsWorkspaceRoots
 - swift test --filter AppProjectWorkingDirectoryResolverTests
