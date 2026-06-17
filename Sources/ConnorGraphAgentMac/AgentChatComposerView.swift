@@ -462,7 +462,6 @@ struct AgentChatComposerView: View {
     private var optionBadgeRow: some View {
         HStack(spacing: AgentChatLayout.spaceS) {
             permissionModeMenu
-            thinkingLevelMenu
 
             if let session = selectedSession {
                 sessionStatusMenu(session)
@@ -538,55 +537,6 @@ struct AgentChatComposerView: View {
         }
         .menuStyle(.borderlessButton)
         .help("调整本轮会话权限")
-    }
-
-    private var thinkingLevelMenu: some View {
-        Menu {
-            ForEach(AppLLMThinkingLevel.allCases) { level in
-                Button {
-                    viewModel.selectLLMThinkingLevel(level)
-                } label: {
-                    if level == viewModel.llmThinkingLevel {
-                        Label {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(level.displayName)
-                                Text(level.description)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                        } icon: {
-                            Image(systemName: "checkmark")
-                        }
-                    } else {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(level.displayName)
-                            Text(level.description)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                .help(level.description)
-            }
-
-            Divider()
-
-            Button {
-                viewModel.selectDefaultLLMThinkingLevel(viewModel.llmThinkingLevel)
-            } label: {
-                Label("设为全局默认", systemImage: "pin")
-            }
-        } label: {
-            AgentComposerOptionBadge(
-                title: viewModel.llmThinkingLevel.displayName,
-                systemImage: "brain.head.profile",
-                tint: viewModel.llmThinkingLevel == .off ? composerControlForeground : composerControlActiveForeground,
-                isActive: viewModel.llmThinkingLevel != .off,
-                style: .prominent
-            )
-        }
-        .menuStyle(.borderlessButton)
-        .help("调整模型思考模式和推理强度")
     }
 
     private func sessionStatusMenu(_ session: AgentSession) -> some View {
@@ -673,6 +623,33 @@ struct AgentChatComposerView: View {
                             Image(systemName: connection.isLiveCatalog ? "network" : "bolt.horizontal.circle")
                         }
                     }
+                }
+
+                Divider()
+
+                Menu {
+                    ForEach(AppLLMThinkingLevel.allCases) { level in
+                        Button {
+                            viewModel.selectLLMThinkingLevel(level)
+                        } label: {
+                            if level == viewModel.llmThinkingLevel {
+                                Label(level.displayName, systemImage: "checkmark")
+                            } else {
+                                Text(level.displayName)
+                            }
+                        }
+                        .help(level.description)
+                    }
+
+                    Divider()
+
+                    Button {
+                        viewModel.selectDefaultLLMThinkingLevel(viewModel.llmThinkingLevel)
+                    } label: {
+                        Label("设为全局默认", systemImage: "pin")
+                    }
+                } label: {
+                    Label("思考强度 · \(viewModel.llmThinkingLevel.displayName)", systemImage: "brain.head.profile")
                 }
 
                 if viewModel.sessionHasLLMOverride {
