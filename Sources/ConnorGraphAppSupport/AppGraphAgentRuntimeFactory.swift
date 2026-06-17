@@ -187,6 +187,14 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         return AppClaudeSDKSidecarRuntimeStore(configDirectory: storagePaths.configDirectory)
     }
 
+    private func registerPersistedMCPSourceTools(into registry: inout AgentToolRegistry, workingDirectory: URL) {
+        guard let storagePaths else { return }
+        let repository = AppMCPSourceRuntimeRepository(storagePaths: storagePaths)
+        guard let catalog = try? MCPClientPool.loadEnabledPersistedCatalog(repository: repository), !catalog.isEmpty else { return }
+        let pool = MCPClientPool(repository: repository, currentDirectoryURL: workingDirectory)
+        MCPToolRegistryBridge().registerTools(catalog: catalog, into: &registry, router: pool)
+    }
+
     private func claudeSidecarEnvironment(connectionID: String) -> [String: String] {
         guard let tokens = try? settingsRepository.oauthTokens(for: connectionID) else { return [:] }
         var environment: [String: String] = [:]
@@ -264,6 +272,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         registry.register(BrowserFetchTool())
         registry.register(SearchEngineMCPTool(browserAssistedSearchHandler: browserAssistedSearchHandler))
         registry.register(SearchEngineMCPWebFetchTool(browserAssistedSearchHandler: browserAssistedSearchHandler, browserAssistedWebFetchHandler: browserAssistedWebFetchHandler))
+        registerPersistedMCPSourceTools(into: &registry, workingDirectory: resolvedWorkspace.primary.url)
         var skillCatalogSummary = ""
         if let storagePaths {
             let scanner = SkillPackageScanner()
