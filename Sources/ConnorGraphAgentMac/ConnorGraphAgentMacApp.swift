@@ -13,10 +13,11 @@ import ConnorGraphAppSupport
 @main
 struct ConnorGraphAgentMacApp: App {
     @NSApplicationDelegateAdaptor(ConnorMenuBarDelegate.self) private var menuBarDelegate
-    @StateObject private var viewModel = AppViewModel.live()
+    @StateObject private var viewModel: AppViewModel
 
     init() {
         AppKitSecureCodingWarningMitigator.clearLegacyOpenPanelRootDirectoryState()
+        _viewModel = StateObject(wrappedValue: AppViewModel.live())
     }
 
     var body: some Scene {
@@ -31,7 +32,29 @@ struct ConnorGraphAgentMacApp: App {
             CommandGroup(replacing: .printItem) {}
             CommandGroup(replacing: .help) {}
 
-            CommandMenu("指示") {}
+            CommandMenu("指示") {
+                Button("新建会话") {
+                    viewModel.performShortcutAction(.newSession)
+                }
+                .keyboardShortcut("n", modifiers: .command)
+
+                Button("切换浏览器") {
+                    viewModel.performShortcutAction(.toggleBrowser)
+                }
+                .keyboardShortcut("b", modifiers: .command)
+
+                Button("聚焦搜索") {
+                    viewModel.performShortcutAction(.focusTopSearch)
+                }
+                .keyboardShortcut("f", modifiers: .command)
+
+                Divider()
+
+                Button("打开设置") {
+                    viewModel.performShortcutAction(.openSettings)
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
         }
     }
 }
@@ -39,8 +62,8 @@ struct ConnorGraphAgentMacApp: App {
 @MainActor
 private final class ConnorMenuBarDelegate: NSObject, NSApplicationDelegate {
     private let hiddenTopLevelMenuTitles: Set<String> = [
-        "Edit", "View", "Window", "Help",
-        "编辑", "显示", "窗口", "帮助"
+        "File", "Edit", "View", "Window", "Help",
+        "文件", "编辑", "显示", "窗口", "帮助"
     ]
     private var menuObservers: [NSObjectProtocol] = []
     private var pruneWorkItem: DispatchWorkItem?
@@ -109,8 +132,36 @@ private final class ConnorMenuBarDelegate: NSObject, NSApplicationDelegate {
         }
         isPruningMenus = true
         defer { isPruningMenus = false }
+        localizeApplicationMenu(in: mainMenu)
         for item in mainMenu.items.reversed() where hiddenTopLevelMenuTitles.contains(item.title) {
             mainMenu.removeItem(item)
+        }
+    }
+
+    private func localizeApplicationMenu(in mainMenu: NSMenu) {
+        guard let appMenu = mainMenu.items.first?.submenu else { return }
+        let appName = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
+            ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String
+            ?? ProcessInfo.processInfo.processName
+        for item in appMenu.items {
+            switch item.action {
+            case #selector(NSApplication.orderFrontStandardAboutPanel(_:)):
+                item.title = "关于\(appName)"
+            case Selector(("showSettingsWindow:")), Selector(("showPreferencesWindow:")):
+                item.title = "设置…"
+            case #selector(NSApplication.hide(_:)):
+                item.title = "隐藏\(appName)"
+            case #selector(NSApplication.hideOtherApplications(_:)):
+                item.title = "隐藏其它"
+            case #selector(NSApplication.unhideAllApplications(_:)):
+                item.title = "全部显示"
+            case #selector(NSApplication.terminate(_:)):
+                item.title = "退出\(appName)"
+            default:
+                if item.title == "Services" || item.title == "服务" {
+                    item.title = "服务"
+                }
+            }
         }
     }
 }
