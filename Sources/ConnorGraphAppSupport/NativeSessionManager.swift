@@ -151,6 +151,7 @@ public struct NativeSessionManager: Sendable {
         displayPrompt: String? = nil,
         attachments: [AgentMessageAttachmentRef] = [],
         attachmentContextPlan: AttachmentContextPlan = AttachmentContextPlan(),
+        skillInstructions: String? = nil,
         onRunStarted: (@MainActor @Sendable (String) -> Void)? = nil,
         onEventPresentation: (@MainActor @Sendable (AgentEventPresentation) -> Void)? = nil
     ) async throws -> AgentLoopChatResponse {
@@ -172,7 +173,8 @@ public struct NativeSessionManager: Sendable {
             permissionMode: permissionMode,
             attachmentRefs: attachments,
             attachmentContextPlan: attachmentContextPlan,
-            anchorState: anchorState
+            anchorState: anchorState,
+            skillInstructions: skillInstructions
         )
         let now = Date()
         var run = AgentRun(
