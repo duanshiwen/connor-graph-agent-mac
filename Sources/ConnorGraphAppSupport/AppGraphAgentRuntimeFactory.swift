@@ -96,7 +96,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             sidecarArguments: Self.splitSidecarArguments(connection.sidecarArguments),
             sidecarEnvironment: claudeSidecarEnvironment(connectionID: connection.id),
             workingDirectory: resolvedProjectWorkingDirectory(llmSettings: settings, sessionWorkspace: sessionWorkspace).url,
-            permissionMode: connection.sidecarPermissionMode
+            permissionMode: connection.sidecarPermissionMode,
+            thinkingLevel: resolvedThinkingLevel(settings: settings, sessionLLMOverride: sessionLLMOverride)
         )
     }
 
@@ -121,7 +122,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             workingDirectory: workingDirectory,
             permissionMode: connection.sidecarPermissionMode,
             instructionAppendix: userBasicInfoPromptSection(),
-            runtimeStore: makeClaudeSDKSidecarRuntimeStore()
+            runtimeStore: makeClaudeSDKSidecarRuntimeStore(),
+            thinkingLevel: settings.defaultThinkingLevel
         )
     }
 
@@ -131,7 +133,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         sidecarArguments: [String] = [],
         sidecarEnvironment: [String: String] = [:],
         workingDirectory: URL,
-        permissionMode: AgentPermissionMode = .askToWrite
+        permissionMode: AgentPermissionMode = .askToWrite,
+        thinkingLevel: AppLLMThinkingLevel = .defaultLevel
     ) -> NativeSessionManager {
         let transport = ClaudeSDKSidecarProcessTransport(
             executableURL: sidecarExecutableURL,
@@ -140,7 +143,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             currentDirectoryURL: workingDirectory
         )
         return makeClaudeSDKSidecarNativeSessionManager(
-            backend: ClaudeSDKSidecarBackend(transport: transport, workingDirectory: workingDirectory, instructionAppendix: userBasicInfoPromptSection()),
+            backend: ClaudeSDKSidecarBackend(transport: transport, workingDirectory: workingDirectory, instructionAppendix: userBasicInfoPromptSection(), thinkingLevel: thinkingLevel),
             session: session,
             permissionMode: permissionMode
         )
@@ -152,7 +155,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         sidecarArguments: [String] = [],
         sidecarEnvironment: [String: String] = [:],
         workingDirectory: URL,
-        permissionMode: AgentPermissionMode = .askToWrite
+        permissionMode: AgentPermissionMode = .askToWrite,
+        thinkingLevel: AppLLMThinkingLevel = .defaultLevel
     ) throws -> NativeSessionManager {
         guard permissionMode != .allowAll else {
             throw AppGraphAgentRuntimeFactoryError.unsafeSidecarPermissionMode(permissionMode)
@@ -168,7 +172,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             workingDirectory: workingDirectory,
             permissionMode: permissionMode,
             instructionAppendix: userBasicInfoPromptSection(),
-            runtimeStore: makeClaudeSDKSidecarRuntimeStore()
+            runtimeStore: makeClaudeSDKSidecarRuntimeStore(),
+            thinkingLevel: thinkingLevel
         )
         return makeClaudeSDKSidecarNativeSessionManager(
             backend: runtime,
@@ -282,6 +287,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             let effectiveModel: String
             let effectiveBaseURL: String?
             let effectiveConnectionID: String
+            let effectiveThinkingLevel = resolvedThinkingLevel(settings: settings, sessionLLMOverride: sessionLLMOverride)
             if let override = sessionLLMOverride {
                 effectiveProviderMode = AppLLMProviderMode(rawValue: override.providerMode) ?? connection.providerMode
                 effectiveConnectionKind = connection.connectionKind
@@ -302,14 +308,14 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                 }
             case .openAICompatible:
                 if effectiveConnectionKind == .anthropicCompatible {
-                    guard let config = try anthropicCompatibleConfigWithOverride(connectionID: effectiveConnectionID, model: effectiveModel, baseURLOverride: effectiveBaseURL) else {
+                    guard let config = try anthropicCompatibleConfigWithOverride(connectionID: effectiveConnectionID, model: effectiveModel, baseURLOverride: effectiveBaseURL, thinkingLevel: effectiveThinkingLevel) else {
                         return AnyAgentModelProvider(modelID: "missing-anthropic-compatible-config") { _ in
                             throw OpenAICompatibleProviderError.missingAPIKey
                         }
                     }
                     return AnyAgentModelProvider(AnthropicCompatibleProvider(config: config))
                 }
-                guard let config = try openAICompatibleConfigWithOverride(connectionID: effectiveConnectionID, model: effectiveModel, baseURLOverride: effectiveBaseURL) else {
+                guard let config = try openAICompatibleConfigWithOverride(connectionID: effectiveConnectionID, model: effectiveModel, baseURLOverride: effectiveBaseURL, thinkingLevel: effectiveThinkingLevel) else {
                     return AnyAgentModelProvider(modelID: "missing-openai-compatible-config") { _ in
                         throw OpenAICompatibleProviderError.missingAPIKey
                     }
@@ -334,25 +340,33 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     private func openAICompatibleConfigWithOverride(
         connectionID: String,
         model: String,
-        baseURLOverride: String?
+        baseURLOverride: String?,
+        thinkingLevel: AppLLMThinkingLevel
     ) throws -> OpenAICompatibleConfig? {
         try settingsRepository.openAICompatibleConfig(
             connectionID: connectionID,
             modelOverride: model,
-            baseURLOverride: baseURLOverride
+            baseURLOverride: baseURLOverride,
+            thinkingLevelOverride: thinkingLevel
         )
     }
 
     private func anthropicCompatibleConfigWithOverride(
         connectionID: String,
         model: String,
-        baseURLOverride: String?
+        baseURLOverride: String?,
+        thinkingLevel: AppLLMThinkingLevel
     ) throws -> AnthropicCompatibleConfig? {
         try settingsRepository.anthropicCompatibleConfig(
             connectionID: connectionID,
             modelOverride: model,
-            baseURLOverride: baseURLOverride
+            baseURLOverride: baseURLOverride,
+            thinkingLevelOverride: thinkingLevel
         )
+    }
+
+    private func resolvedThinkingLevel(settings: AppLLMSettings, sessionLLMOverride: SessionLLMOverride?) -> AppLLMThinkingLevel {
+        AppLLMThinkingLevel.normalized(sessionLLMOverride?.thinkingLevel) ?? settings.defaultThinkingLevel
     }
 
     public func makeLLMProvider() -> AnyLLMProvider {
