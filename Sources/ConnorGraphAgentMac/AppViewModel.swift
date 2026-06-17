@@ -3772,7 +3772,9 @@ final class AppViewModel: NSObject, ObservableObject {
             )
             let skillAugmentation = buildSkillChatPromptAugmentation(prompt: prompt, sessionID: submittingSessionID)
             let resolvedSkillInstructions = resolveActiveSkillInstructions(sessionID: submittingSessionID)
-            defer { if resolvedSkillInstructions != nil { clearActiveSkill() } }
+            if resolvedSkillInstructions != nil {
+                clearActiveSkill()
+            }
             let response = try await manager.submit(
                 skillAugmentation.augmentedPrompt,
                 sessionSummary: sessionSummary,
