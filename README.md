@@ -651,6 +651,8 @@ Sources/ConnorGraphAppSupport/MCPSourceRuntime.swift
 Sources/ConnorGraphAppSupport/MCPSourceTestService.swift
 Sources/ConnorGraphAppSupport/MCPToolRegistryBridge.swift
 Sources/ConnorGraphAppSupport/SourceSkillAutomationUIPresentation.swift
+Sources/ConnorGraphAgentMac/MCPSourceListViews.swift
+Sources/ConnorGraphAgentMac/SourceSkillAutomationRuntimeViews.swift
 ```
 
 当前能力:
@@ -672,6 +674,9 @@ Sources/ConnorGraphAppSupport/SourceSkillAutomationUIPresentation.swift
 - App runtime bridge: `AppGraphAgentRuntimeFactory` loads persisted enabled MCP catalogs and injects tools into `AgentToolRegistry`
 - Minimal MCP routed AgentTool path for source/tool dispatch
 - Stdio source test service for validation + discovery + health/catalog/audit persistence
+- Native MCP Source Manager list/detail UI for persisted health/catalog/audit inspection
+- Native Add Source sheet for stdio + no-credential MCP source onboarding
+- UI-driven Test Source action that refreshes persisted health/catalog/audit after discovery
 - Disabled-source gate
 - MCP tool call event bridge
 - Product OS registry sync event
@@ -682,7 +687,7 @@ Sources/ConnorGraphAppSupport/SourceSkillAutomationUIPresentation.swift
 - Discovery snapshot
 - Per-source `health.json`、`catalog.json`、`audit.jsonl`
 
-商业级 MCP Platform 下一步仍需补齐:HTTP/SSE/Streamable HTTP production transport、long-lived connection reuse/reconnect、Keychain-backed credential injection、source add/test/auth/enable UI workflow、per-tool permission policy、large/binary result artifact governance、App runtime 动态 source activation。根据当前产品边界,本里程碑刻意不处理 graph ingestion。
+商业级 MCP Platform 下一步仍需补齐:HTTP/SSE/Streamable HTTP production transport、long-lived connection reuse/reconnect、Keychain-backed credential injection、source edit/delete/auth workflow、enable/disable controls、per-tool permission policy、large/binary result artifact governance、App runtime 动态 source activation。根据当前产品边界,本里程碑刻意不处理 graph ingestion。
 
 边界:MCP servers 是能力提供者;Connor 拥有 registry、lifecycle、health、permission policy、audit 与 readiness。Graph ingestion 不属于当前 MCP Platform MVP。
 
