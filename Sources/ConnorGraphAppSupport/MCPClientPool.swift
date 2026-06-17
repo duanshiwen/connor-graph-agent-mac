@@ -28,10 +28,10 @@ public enum MCPClientPoolError: Error, Sendable, Equatable, CustomStringConverti
 /// - Loads Connor-owned source configurations from `AppMCPSourceRuntimeRepository`.
 /// - Exposes persisted catalogs for enabled sources to the Agent runtime.
 /// - Enforces per-tool governance policy and definition integrity before execution.
-/// - Routes governed Agent tool calls to real stdio MCP servers.
+/// - Routes governed Agent tool calls to real stdio or HTTP MCP servers.
 /// - Persists invocation and governance audit records after every call.
 ///
-/// Remaining product expansion: long-lived connection reuse, HTTP/SSE transports,
+/// Remaining product expansion: long-lived connection reuse, request-scoped SSE streaming,
 /// activation hot reload, and result artifact governance.
 public actor MCPClientPool: MCPToolRouting {
     public var repository: AppMCPSourceRuntimeRepository
@@ -41,6 +41,7 @@ public actor MCPClientPool: MCPToolRouting {
     public var credentialStore: MCPSourceCredentialStore
 
     private var stdioRuntimes: [String: MCPSourceRuntime<MCPStdioClientTransport>] = [:]
+    private var httpRuntimes: [String: MCPSourceRuntime<MCPHTTPClientTransport>] = [:]
 
     public init(
         repository: AppMCPSourceRuntimeRepository,
@@ -91,7 +92,7 @@ public actor MCPClientPool: MCPToolRouting {
         )
         var reports: [MCPSourceTestReport] = []
         for configuration in try repository.list().filter({ $0.status == .enabled }) {
-            let report = try await service.testStdioSource(configuration, now: now)
+            let report = try await service.testSource(configuration, now: now)
             reports.append(report)
         }
         return reports
@@ -110,23 +111,37 @@ public actor MCPClientPool: MCPToolRouting {
             throw MCPClientPoolError.toolNotInPersistedCatalog(exposedToolName)
         }
         try await enforcePolicy(descriptor: descriptor, arguments: arguments, context: context)
-        let runtime = try runtime(for: configuration)
-        let invocation = try await runtime.callTool(
-            name: exposedToolName,
-            arguments: arguments,
-            runID: context.runID,
-            sessionID: context.sessionID
-        )
-        try repository.appendAuditRecords(invocation.auditRecords)
-        return invocation.result
+        switch configuration.transport {
+        case .stdio:
+            let runtime = try stdioRuntime(for: configuration)
+            let invocation = try await runtime.callTool(
+                name: exposedToolName,
+                arguments: arguments,
+                runID: context.runID,
+                sessionID: context.sessionID
+            )
+            try repository.appendAuditRecords(invocation.auditRecords)
+            return invocation.result
+        case .http:
+            let runtime = try httpRuntime(for: configuration)
+            let invocation = try await runtime.callTool(
+                name: exposedToolName,
+                arguments: arguments,
+                runID: context.runID,
+                sessionID: context.sessionID
+            )
+            try repository.appendAuditRecords(invocation.auditRecords)
+            return invocation.result
+        }
     }
 
     public func closeAll() async {
-        let runtimes = stdioRuntimes
+        let stdio = stdioRuntimes
+        let http = httpRuntimes
         stdioRuntimes.removeAll()
-        for runtime in runtimes.values {
-            try? await runtime.shutdown()
-        }
+        httpRuntimes.removeAll()
+        for runtime in stdio.values { try? await runtime.shutdown() }
+        for runtime in http.values { try? await runtime.shutdown() }
     }
 
     private func sourceConfiguration(sourceID: String) throws -> MCPSourceRuntimeConfiguration {
@@ -136,10 +151,10 @@ public actor MCPClientPool: MCPToolRouting {
         return configuration
     }
 
-    private func runtime(for configuration: MCPSourceRuntimeConfiguration) throws -> MCPSourceRuntime<MCPStdioClientTransport> {
+    private func stdioRuntime(for configuration: MCPSourceRuntimeConfiguration) throws -> MCPSourceRuntime<MCPStdioClientTransport> {
         if let runtime = stdioRuntimes[configuration.sourceID] { return runtime }
         guard case .stdio(let command, let arguments) = configuration.transport else {
-            throw MCPClientPoolError.unsupportedTransport("Runtime pool currently supports stdio sources only; HTTP/SSE transport is not enabled yet.")
+            throw MCPClientPoolError.unsupportedTransport("Expected stdio MCP source transport.")
         }
         let environment = try credentialStore.environmentOverrides(for: configuration)
         let transport = MCPStdioClientTransport(
@@ -151,6 +166,19 @@ public actor MCPClientPool: MCPToolRouting {
         let client = MCPJSONRPCClient(transport: transport, clientName: clientName, clientVersion: clientVersion)
         let runtime = MCPSourceRuntime(configuration: configuration, client: client)
         stdioRuntimes[configuration.sourceID] = runtime
+        return runtime
+    }
+
+    private func httpRuntime(for configuration: MCPSourceRuntimeConfiguration) throws -> MCPSourceRuntime<MCPHTTPClientTransport> {
+        if let runtime = httpRuntimes[configuration.sourceID] { return runtime }
+        guard case .http(let url) = configuration.transport else {
+            throw MCPClientPoolError.unsupportedTransport("Expected HTTP MCP source transport.")
+        }
+        let headers = try credentialStore.httpHeaders(for: configuration)
+        let transport = try MCPHTTPClientTransport(endpointURL: url, headers: headers)
+        let client = MCPJSONRPCClient(transport: transport, clientName: clientName, clientVersion: clientVersion)
+        let runtime = MCPSourceRuntime(configuration: configuration, client: client)
+        httpRuntimes[configuration.sourceID] = runtime
         return runtime
     }
 
