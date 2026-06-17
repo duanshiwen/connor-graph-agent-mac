@@ -135,6 +135,35 @@ private func temporaryCommercialMCPStoragePaths(_ name: String = UUID().uuidStri
     #expect(result.content.first?.text == "hello")
 }
 
+@Test func commercialMCPSourceTestServicePersistsDiscoveryArtifacts() async throws {
+    let fixture = try makeMCPFixtureServer()
+    defer { try? FileManager.default.removeItem(at: fixture.deletingLastPathComponent()) }
+    let storagePaths = temporaryCommercialMCPStoragePaths()
+    defer { try? FileManager.default.removeItem(at: storagePaths.applicationSupportDirectory) }
+    let repository = AppMCPSourceRuntimeRepository(storagePaths: storagePaths)
+    let configuration = MCPSourceRuntimeConfiguration(
+        sourceID: "fixture",
+        displayName: "Fixture MCP",
+        transport: .stdio(command: "/usr/bin/python3", arguments: [fixture.path]),
+        status: .enabled,
+        credentialRequirement: .none,
+        allowedCapabilities: [.externalNetwork],
+        toolNamePrefix: "fixture"
+    )
+    try repository.save(configuration)
+    let service = MCPSourceTestService(repository: repository, clientName: "ConnorTests", clientVersion: "1.0")
+
+    let report = try await service.testStdioSource(configuration)
+
+    #expect(report.success)
+    #expect(report.catalog.map(\.name) == ["mcp__fixture__echo"])
+    #expect(report.catalog.first?.rawName == "echo")
+    #expect(report.healthRecord.healthStatus == .healthy)
+    #expect(try repository.loadHealthRecord(sourceID: "fixture")?.healthStatus == .healthy)
+    #expect(try repository.loadToolCatalog(sourceID: "fixture").map(\.name) == ["mcp__fixture__echo"])
+    #expect(try repository.loadRecentAuditRecords(sourceID: "fixture").map(\.eventKind).contains(.discoveryFinished))
+}
+
 private func makeMCPFixtureServer() throws -> URL {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ConnorMCPFixture-\(UUID().uuidString)", isDirectory: true)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
