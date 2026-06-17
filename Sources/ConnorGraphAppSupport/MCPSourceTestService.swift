@@ -60,7 +60,7 @@ public struct MCPSourceTestService: Sendable {
             throw MCPSourceTestServiceError.unsupportedCredentialRequirement(configuration.credentialRequirement)
         }
         guard case .stdio(let command, let arguments) = configuration.transport else {
-            throw MCPSourceTestServiceError.unsupportedTransport("MVP source test currently supports stdio transport only.")
+            throw MCPSourceTestServiceError.unsupportedTransport("Source test currently supports stdio transport only; HTTP/SSE discovery is not enabled yet.")
         }
         let transport = MCPStdioClientTransport(
             command: command,
@@ -70,17 +70,33 @@ public struct MCPSourceTestService: Sendable {
         )
         let client = MCPJSONRPCClient(transport: transport, clientName: clientName, clientVersion: clientVersion)
         let runtime = MCPSourceRuntime(configuration: configuration, client: client)
-        let snapshot = try await runtime.discoverRuntimeState(now: now)
+        let previousCatalog = try repository.loadToolCatalog(sourceID: configuration.sourceID)
+        let snapshot = try await runtime.discoverRuntimeState(now: now, previousCatalog: previousCatalog)
+        let integrityAuditRecords = snapshot.catalog.compactMap { descriptor -> MCPSourceRuntimeAuditRecord? in
+            guard descriptor.integrityStatus == .changed else { return nil }
+            return MCPSourceRuntimeAuditRecord(
+                sourceID: configuration.sourceID,
+                eventKind: .toolDefinitionChanged,
+                rawToolName: descriptor.rawName,
+                prefixedToolName: descriptor.name,
+                requiredCapabilities: descriptor.requiredCapabilities,
+                riskClass: descriptor.governancePolicy?.riskClass,
+                executionPolicy: descriptor.governancePolicy?.executionPolicy,
+                integrityStatus: descriptor.integrityStatus,
+                timestamp: now,
+                errorSummary: "Tool definition changed since last approved discovery. Review policy before trusting this tool."
+            )
+        }
         try repository.saveHealthRecord(snapshot.healthRecord)
         try repository.saveToolCatalog(sourceID: configuration.sourceID, catalog: snapshot.catalog)
-        try repository.appendAuditRecords(snapshot.auditRecords)
+        try repository.appendAuditRecords(snapshot.auditRecords + integrityAuditRecords)
         try await runtime.shutdown()
         return MCPSourceTestReport(
             sourceID: configuration.sourceID,
             success: snapshot.healthRecord.healthStatus == .healthy,
             healthRecord: snapshot.healthRecord,
             catalog: snapshot.catalog,
-            auditRecords: snapshot.auditRecords
+            auditRecords: snapshot.auditRecords + integrityAuditRecords
         )
     }
 }
