@@ -16,7 +16,7 @@ struct CraftSourceListPane: View {
     var body: some View {
         VStack(spacing: 0) {
             SourceListHeader(
-                onRefresh: viewModel.reloadSourceRuntimeConfigurations
+                onAdd: viewModel.presentAddSourceSheet
             )
 
             if presentation.cards.isEmpty {
@@ -55,7 +55,7 @@ struct CraftSourceListPane: View {
 }
 
 private struct SourceListHeader: View {
-    var onRefresh: () -> Void
+    var onAdd: () -> Void
 
     var body: some View {
         HStack(alignment: .center, spacing: AppShellLayout.spaceS) {
@@ -67,15 +67,15 @@ private struct SourceListHeader: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Button(action: onRefresh) {
-                Image(systemName: "arrow.clockwise")
+            Button(action: onAdd) {
+                Image(systemName: "plus")
                     .font(.system(size: 12.5, weight: .semibold))
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(.plain)
             .contentShape(Circle())
-            .help("刷新 MCP Sources")
-            .accessibilityLabel("刷新 MCP Sources")
+            .help("添加 MCP Source")
+            .accessibilityLabel("添加 MCP Source")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
