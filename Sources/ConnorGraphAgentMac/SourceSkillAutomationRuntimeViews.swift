@@ -40,28 +40,36 @@ struct SourceRuntimePanelView: View {
 struct SkillRuntimePanelView: View {
     @ObservedObject var viewModel: AppViewModel
 
-    private var presentation: SkillRuntimeUIPresentation {
-        SkillRuntimeUIPresentation.build(skills: viewModel.skillRuntimeDefinitions)
+    private var presentation: SkillManagerPresentation {
+        viewModel.commercialSkillManagerPresentation
     }
 
     var body: some View {
         RuntimePanelScaffold(
             title: "Skills",
-            subtitle: "受治理的指令配置。技能可以请求能力和数据源，但不能绕过康纳同学权限。",
+            subtitle: "商业级 Skill Manager：发现、覆盖链、风险、信任、权限、来源依赖和审计由康纳同学统一治理。",
             metrics: [
-                ("Total", "\(presentation.summary.totalCount)"),
-                ("Project", "\(presentation.summary.projectScopedCount)"),
-                ("Needs source", "\(presentation.summary.requiresSourceCount)")
+                ("Total", "\(presentation.summary.total)"),
+                ("Enabled", "\(presentation.summary.enabled)"),
+                ("Project", "\(presentation.summary.projectScoped)"),
+                ("Risky", "\(presentation.summary.risky)"),
+                ("Invalid", "\(presentation.summary.invalid)")
             ],
             onRefresh: viewModel.reloadSkillRuntimeDefinitions
         ) {
+            if !presentation.globalWarnings.isEmpty {
+                SectionHeader(title: "Global warnings")
+                ForEach(presentation.globalWarnings, id: \.self) { warning in
+                    RuntimePanelCard(title: "Invalid skill", subtitle: "Scan warning", detail: warning, chips: ["warning"], severity: .warning)
+                }
+            }
             ForEach(presentation.cards) { card in
                 RuntimePanelCard(
                     title: card.title,
-                    subtitle: "\(card.scopeLabel) · \(card.graphPolicyLabel)",
-                    detail: card.description,
-                    chips: card.triggerLabels + card.capabilityLabels + card.requiredSourceLabels + card.globLabels,
-                    severity: card.severity
+                    subtitle: "\(card.sourceTier) · trust \(card.trustState) · risk \(card.riskLabel) · \(card.lifecycleLabel)",
+                    detail: card.subtitle,
+                    chips: card.requiredSources + card.permissionLabels + card.overrideChain + card.warnings,
+                    severity: commercialSkillSeverity(card)
                 )
             }
         }
@@ -70,6 +78,13 @@ struct SkillRuntimePanelView: View {
                 viewModel.reloadSkillRuntimeDefinitions()
             }
         }
+    }
+
+    private func commercialSkillSeverity(_ card: SkillManagerCard) -> AgentEventPresentationSeverity {
+        if !card.warnings.isEmpty { return .warning }
+        if card.riskLabel == "high" || card.riskLabel == "critical" { return .warning }
+        if card.trustState == "projectRequiresTrust" || card.trustState == "unknown" { return .info }
+        return .success
     }
 }
 
