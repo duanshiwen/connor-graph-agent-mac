@@ -6,7 +6,6 @@ public enum MCPClientPoolError: Error, Sendable, Equatable, CustomStringConverti
     case sourceNotFound(String)
     case sourceNotEnabled(String)
     case unsupportedTransport(String)
-    case unsupportedCredentialRequirement(ProductOSCredentialRequirement)
     case toolNotInPersistedCatalog(String)
     case toolPolicyBlocked(String)
     case toolDefinitionChanged(String)
@@ -16,7 +15,6 @@ public enum MCPClientPoolError: Error, Sendable, Equatable, CustomStringConverti
         case .sourceNotFound(let sourceID): "sourceNotFound: \(sourceID)"
         case .sourceNotEnabled(let sourceID): "sourceNotEnabled: \(sourceID)"
         case .unsupportedTransport(let message): "unsupportedTransport: \(message)"
-        case .unsupportedCredentialRequirement(let requirement): "unsupportedCredentialRequirement: \(requirement.rawValue)"
         case .toolNotInPersistedCatalog(let toolName): "toolNotInPersistedCatalog: \(toolName)"
         case .toolPolicyBlocked(let toolName): "toolPolicyBlocked: \(toolName)"
         case .toolDefinitionChanged(let toolName): "toolDefinitionChanged: \(toolName)"
@@ -33,13 +31,14 @@ public enum MCPClientPoolError: Error, Sendable, Equatable, CustomStringConverti
 /// - Routes governed Agent tool calls to real stdio MCP servers.
 /// - Persists invocation and governance audit records after every call.
 ///
-/// Remaining product expansion: long-lived connection reuse, HTTP/SSE transports, Keychain-backed
-/// credential injection, activation hot reload, and result artifact governance.
+/// Remaining product expansion: long-lived connection reuse, HTTP/SSE transports,
+/// activation hot reload, and result artifact governance.
 public actor MCPClientPool: MCPToolRouting {
     public var repository: AppMCPSourceRuntimeRepository
     public var clientName: String
     public var clientVersion: String
     public var currentDirectoryURL: URL?
+    public var credentialStore: MCPSourceCredentialStore
 
     private var stdioRuntimes: [String: MCPSourceRuntime<MCPStdioClientTransport>] = [:]
 
@@ -47,12 +46,14 @@ public actor MCPClientPool: MCPToolRouting {
         repository: AppMCPSourceRuntimeRepository,
         clientName: String = "Connor",
         clientVersion: String = "1.0",
-        currentDirectoryURL: URL? = nil
+        currentDirectoryURL: URL? = nil,
+        credentialStore: MCPSourceCredentialStore = MCPSourceCredentialStore()
     ) {
         self.repository = repository
         self.clientName = clientName
         self.clientVersion = clientVersion
         self.currentDirectoryURL = currentDirectoryURL
+        self.credentialStore = credentialStore
     }
 
     public nonisolated static func loadEnabledPersistedCatalog(repository: AppMCPSourceRuntimeRepository) throws -> [MCPSourceToolDescriptor] {
@@ -85,7 +86,8 @@ public actor MCPClientPool: MCPToolRouting {
             repository: repository,
             clientName: clientName,
             clientVersion: clientVersion,
-            currentDirectoryURL: currentDirectoryURL
+            currentDirectoryURL: currentDirectoryURL,
+            credentialStore: credentialStore
         )
         var reports: [MCPSourceTestReport] = []
         for configuration in try repository.list().filter({ $0.status == .enabled }) {
@@ -136,16 +138,14 @@ public actor MCPClientPool: MCPToolRouting {
 
     private func runtime(for configuration: MCPSourceRuntimeConfiguration) throws -> MCPSourceRuntime<MCPStdioClientTransport> {
         if let runtime = stdioRuntimes[configuration.sourceID] { return runtime }
-        guard configuration.credentialRequirement == .none else {
-            throw MCPClientPoolError.unsupportedCredentialRequirement(configuration.credentialRequirement)
-        }
         guard case .stdio(let command, let arguments) = configuration.transport else {
             throw MCPClientPoolError.unsupportedTransport("Runtime pool currently supports stdio sources only; HTTP/SSE transport is not enabled yet.")
         }
+        let environment = try credentialStore.environmentOverrides(for: configuration)
         let transport = MCPStdioClientTransport(
             command: command,
             arguments: arguments,
-            environment: [:],
+            environment: environment,
             currentDirectoryURL: currentDirectoryURL
         )
         let client = MCPJSONRPCClient(transport: transport, clientName: clientName, clientVersion: clientVersion)

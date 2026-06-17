@@ -118,8 +118,12 @@ private struct MCPSourceAddSheet: View {
     var onSave: () -> Void
 
     private var canSave: Bool {
-        !draft.normalizedSourceID.isEmpty &&
-        !draft.command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard !draft.normalizedSourceID.isEmpty,
+              !draft.command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        guard draft.credentialRequirement != .none else { return true }
+        let hasBinding = !draft.credentialEnvironmentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !draft.parsedCredentialSecretByEnvironment.isEmpty
+        let hasSecretOrEditing = draft.isEditing || !draft.trimmedCredentialSecret.isEmpty
+        return hasBinding && hasSecretOrEditing
     }
 
     var body: some View {
@@ -128,7 +132,7 @@ private struct MCPSourceAddSheet: View {
                 VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
                     Text(draft.isEditing ? "编辑 MCP Source" : "添加 MCP Source")
                         .font(.system(size: 22, weight: .semibold))
-                    Text("当前最小闭环支持 stdio + no credential。保存后可运行 Test Source 刷新工具目录。")
+                    Text("支持 stdio source 与 Connor-owned Keychain credential injection。Secret 不写入 source 配置文件。")
                         .font(AgentChatTypography.meta)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -158,8 +162,26 @@ private struct MCPSourceAddSheet: View {
                     TextField("Arguments，用空格或换行分隔", text: $draft.argumentsText, axis: .vertical)
                         .lineLimit(2...4)
                     LabeledContent("Mode") {
-                        Text("stdio · no credential")
+                        Text("stdio")
                             .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("Credentials") {
+                    Picker("Requirement", selection: $draft.credentialRequirement) {
+                        Text("None").tag(ProductOSCredentialRequirement.none)
+                        Text("Bearer Token").tag(ProductOSCredentialRequirement.bearerToken)
+                        Text("API Key Header").tag(ProductOSCredentialRequirement.apiKeyHeader)
+                        Text("Multi Header").tag(ProductOSCredentialRequirement.multiHeader)
+                    }
+                    if draft.credentialRequirement != .none {
+                        TextField("Environment variable，例如 GITHUB_TOKEN", text: $draft.credentialEnvironmentText)
+                            .textCase(.uppercase)
+                        SecureField(draft.isEditing ? "Secret 或 ENV=secret 多行（留空则保留现有）" : "Secret 或 ENV=secret 多行", text: $draft.credentialSecret)
+                        Text("单一 secret 会写入所有 env bindings；multi-header 可用 ENV=secret 多行。Secret 仅保存到 Connor credential store，source 配置只保存 env var binding。")
+                            .font(AgentChatTypography.meta)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
 
@@ -195,7 +217,7 @@ private struct MCPSourceAddSheet: View {
             }
 
             HStack {
-                Text("Source ID 需匹配 lowercase kebab-case；command 不能为空。")
+                Text("Source ID 需匹配 lowercase kebab-case；credential env var 需为大写 ENV_NAME。")
                     .font(AgentChatTypography.meta)
                     .foregroundStyle(.secondary)
                 Spacer()
