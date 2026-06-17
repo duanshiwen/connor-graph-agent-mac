@@ -109,117 +109,246 @@ private struct MCPSourceAddSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
-                    Text(draft.isEditing ? "编辑 MCP Source" : "添加 MCP Source")
-                        .font(.system(size: 22, weight: .semibold))
-                    Text("支持 stdio 与 HTTP MCP source，以及 Connor-owned Keychain credential injection。Secret 不写入 source 配置文件。")
-                        .font(AgentChatTypography.meta)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 0) {
+            dialogHeader
+
+            Divider()
+                .padding(.top, AppShellLayout.spaceL)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
+                    MCPSourceDialogSection(title: "基础信息", systemImage: "person.text.rectangle") {
+                        MCPSourceDialogRow("Source ID") {
+                            TextField("local-files", text: $draft.sourceID)
+                                .disabled(draft.isEditing)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        MCPSourceDialogRow("显示名称") {
+                            TextField("Local Files MCP", text: $draft.displayName)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        if draft.isEditing {
+                            MCPSourceDialogHint("Source ID 已锁定，用于保持 health、catalog 和 audit 的持久化路径稳定。")
+                        }
+                    }
+
+                    MCPSourceDialogSection(title: "连接方式", systemImage: "point.3.connected.trianglepath.dotted") {
+                        MCPSourceDialogRow("模式") {
+                            Picker("", selection: $draft.transportKind) {
+                                Text("stdio").tag("stdio")
+                                Text("HTTP").tag("http")
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.segmented)
+                            .frame(maxWidth: 220, alignment: .leading)
+                        }
+
+                        if draft.transportKind == "http" {
+                            MCPSourceDialogRow("Endpoint") {
+                                TextField("https://mcp.example.com/mcp", text: $draft.command)
+                                    .textFieldStyle(.roundedBorder)
+                            }
+                            MCPSourceDialogHint("HTTP endpoint 需使用 HTTPS；本地开发允许 localhost 或 127.0.0.1。当前支持 JSON response path，SSE 会 fail closed。")
+                        } else {
+                            MCPSourceDialogRow("Command") {
+                                TextField("/usr/bin/python3 或 npx", text: $draft.command)
+                                    .textFieldStyle(.roundedBorder)
+                            }
+                            MCPSourceDialogRow("Arguments", alignment: .top) {
+                                TextField("用空格或换行分隔", text: $draft.argumentsText, axis: .vertical)
+                                    .textFieldStyle(.roundedBorder)
+                                    .lineLimit(2...4)
+                            }
+                        }
+                    }
+
+                    MCPSourceDialogSection(title: "凭据", systemImage: "key") {
+                        MCPSourceDialogRow("类型") {
+                            Picker("", selection: $draft.credentialRequirement) {
+                                Text("None").tag(ProductOSCredentialRequirement.none)
+                                Text("Bearer Token").tag(ProductOSCredentialRequirement.bearerToken)
+                                Text("API Key Header").tag(ProductOSCredentialRequirement.apiKeyHeader)
+                                Text("Multi Header").tag(ProductOSCredentialRequirement.multiHeader)
+                            }
+                            .labelsHidden()
+                            .frame(maxWidth: 240, alignment: .leading)
+                        }
+                        if draft.credentialRequirement != .none {
+                            MCPSourceDialogRow("Binding") {
+                                TextField("GITHUB_TOKEN 或 x-api-key:API_KEY", text: $draft.credentialEnvironmentText)
+                                    .textFieldStyle(.roundedBorder)
+                            }
+                            MCPSourceDialogRow("Secret") {
+                                SecureField(draft.isEditing ? "留空则保留现有 secret" : "Secret 或 ENV=secret 多行", text: $draft.credentialSecret)
+                                    .textFieldStyle(.roundedBorder)
+                            }
+                            MCPSourceDialogHint("Secret 只保存到 Connor credential store，不写入 source 配置文件。stdio 使用 env binding；HTTP bearer 使用 Authorization header。")
+                        }
+                    }
+
+                    MCPSourceDialogSection(title: "治理", systemImage: "checkmark.shield") {
+                        MCPSourceDialogRow("状态") {
+                            Picker("", selection: $draft.status) {
+                                Text("Draft").tag(ProductOSRegistryEntryStatus.draft)
+                                Text("Enabled").tag(ProductOSRegistryEntryStatus.enabled)
+                                Text("Disabled").tag(ProductOSRegistryEntryStatus.disabled)
+                                Text("Needs Review").tag(ProductOSRegistryEntryStatus.needsReview)
+                            }
+                            .labelsHidden()
+                            .frame(maxWidth: 180, alignment: .leading)
+                        }
+                        MCPSourceDialogToggleRow("允许外部网络", isOn: $draft.allowExternalNetwork)
+                        MCPSourceDialogToggleRow("允许读取会话", isOn: $draft.allowReadSession)
+                        MCPSourceDialogToggleRow("允许读取工作区", isOn: $draft.allowWorkspaceRead)
+                        MCPSourceDialogRow("图谱写入") {
+                            Text("关闭")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    MCPSourceDialogSection(title: "元数据", systemImage: "tag") {
+                        MCPSourceDialogRow("标签") {
+                            TextField("用逗号、空格或换行分隔", text: $draft.tagsText)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        MCPSourceDialogRow("备注", alignment: .top) {
+                            TextField("可选", text: $draft.notes, axis: .vertical)
+                                .textFieldStyle(.roundedBorder)
+                                .lineLimit(2...4)
+                        }
+                    }
                 }
-                Spacer()
-                Button(action: onCancel) {
-                    Image(systemName: "xmark")
-                }
-                .buttonStyle(.plain)
-                .keyboardShortcut(.cancelAction)
+                .padding(.vertical, AppShellLayout.spaceL)
             }
+            .scrollIndicators(.visible)
 
-            Form {
-                Section("Identity") {
-                    TextField("Source ID，例如 local-files", text: $draft.sourceID)
-                        .disabled(draft.isEditing)
-                    TextField("Display Name，例如 Local Files MCP", text: $draft.displayName)
-                    if draft.isEditing {
-                        Text("Source ID editing is disabled to preserve persisted catalog/audit paths.")
-                            .font(AgentChatTypography.meta)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+            Divider()
 
-                Section("Transport") {
-                    Picker("Mode", selection: $draft.transportKind) {
-                        Text("stdio").tag("stdio")
-                        Text("HTTP").tag("http")
-                    }
-                    .pickerStyle(.segmented)
-                    if draft.transportKind == "http" {
-                        TextField("MCP Endpoint，例如 https://mcp.example.com/mcp", text: $draft.command)
-                        Text("HTTP endpoint 必须使用 HTTPS；本地开发允许 http://localhost 或 127.0.0.1。当前支持 JSON response path；request-scoped SSE 会 fail closed。")
-                            .font(AgentChatTypography.meta)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    } else {
-                        TextField("Command，例如 /usr/bin/python3 或 npx", text: $draft.command)
-                        TextField("Arguments，用空格或换行分隔", text: $draft.argumentsText, axis: .vertical)
-                            .lineLimit(2...4)
-                    }
-                }
+            dialogFooter
+        }
+        .padding(AppShellLayout.spaceXL)
+        .frame(width: 680, height: 720)
+    }
 
-                Section("Credentials") {
-                    Picker("Requirement", selection: $draft.credentialRequirement) {
-                        Text("None").tag(ProductOSCredentialRequirement.none)
-                        Text("Bearer Token").tag(ProductOSCredentialRequirement.bearerToken)
-                        Text("API Key Header").tag(ProductOSCredentialRequirement.apiKeyHeader)
-                        Text("Multi Header").tag(ProductOSCredentialRequirement.multiHeader)
-                    }
-                    if draft.credentialRequirement != .none {
-                        TextField("Binding，例如 GITHUB_TOKEN 或 x-api-key:API_KEY", text: $draft.credentialEnvironmentText)
-                        SecureField(draft.isEditing ? "Secret 或 ENV=secret 多行（留空则保留现有）" : "Secret 或 ENV=secret 多行", text: $draft.credentialSecret)
-                        Text("stdio 使用 env binding；HTTP bearer 使用 Authorization header；HTTP API header 可写 header:ENV。multi-header 可用多组 header:ENV 与 ENV=secret。Secret 仅保存到 Connor credential store。")
-                            .font(AgentChatTypography.meta)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-
-                Section("Governance") {
-                    Picker("Status", selection: $draft.status) {
-                        Text("Draft").tag(ProductOSRegistryEntryStatus.draft)
-                        Text("Enabled").tag(ProductOSRegistryEntryStatus.enabled)
-                        Text("Disabled").tag(ProductOSRegistryEntryStatus.disabled)
-                        Text("Needs Review").tag(ProductOSRegistryEntryStatus.needsReview)
-                    }
-                    Toggle("Allow external network", isOn: $draft.allowExternalNetwork)
-                    Toggle("Allow read session", isOn: $draft.allowReadSession)
-                    Toggle("Allow workspace read", isOn: $draft.allowWorkspaceRead)
-                    LabeledContent("Graph ingestion") {
-                        Text("off")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Section("Metadata") {
-                    TextField("Tags，用逗号、空格或换行分隔", text: $draft.tagsText)
-                    TextField("Notes", text: $draft.notes, axis: .vertical)
-                        .lineLimit(2...4)
-                }
-            }
-            .formStyle(.grouped)
-
-            if let message, !message.isEmpty {
-                Text(message)
-                    .font(AgentChatTypography.meta)
-                    .foregroundStyle(.red)
-                    .textSelection(.enabled)
-            }
-
-            HStack {
-                Text("Source ID 需匹配 lowercase kebab-case；credential env var 需为大写 ENV_NAME。")
-                    .font(AgentChatTypography.meta)
+    private var dialogHeader: some View {
+        HStack(alignment: .top, spacing: AppShellLayout.spaceM) {
+            VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
+                Text(draft.isEditing ? "编辑 MCP Source" : "添加 MCP Source")
+                    .font(.system(size: 26, weight: .semibold))
+                Text("连接 stdio 或 HTTP MCP 服务。凭据由 Connor Keychain 托管，不写入 source 配置文件。")
+                    .font(.callout)
                     .foregroundStyle(.secondary)
-                Spacer()
-                Button("取消", action: onCancel)
-                Button(draft.isEditing ? "保存修改" : "保存 Source", action: onSave)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!canSave)
-                    .keyboardShortcut(.defaultAction)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+            Button(action: onCancel) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 13, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut(.cancelAction)
+            .help("关闭")
+        }
+    }
+
+    private var dialogFooter: some View {
+        HStack(alignment: .center, spacing: AppShellLayout.spaceM) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Source ID 使用 lowercase-kebab-case。")
+                Text("需要凭据时，环境变量名需使用大写 ENV_NAME。")
+            }
+            .font(AgentChatTypography.meta)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            Spacer()
+            Button("取消", action: onCancel)
+            Button(draft.isEditing ? "保存修改" : "保存 Source", action: onSave)
+                .buttonStyle(.borderedProminent)
+                .disabled(!canSave)
+                .keyboardShortcut(.defaultAction)
+        }
+        .padding(.top, AppShellLayout.spaceM)
+    }
+}
+
+private struct MCPSourceDialogSection<Content: View>: View {
+    var title: String
+    var systemImage: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
+            Label(title, systemImage: systemImage)
+                .font(.headline)
+                .foregroundStyle(.primary)
+            VStack(spacing: AppShellLayout.spaceS) {
+                content
+            }
+            .padding(AppShellLayout.spaceM)
+            .background(AppShellColors.subtleCardBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
+                    .stroke(AppShellColors.hairline, lineWidth: 1)
             }
         }
-        .padding(AgentChatLayout.spaceXL)
-        .frame(width: 560, height: 680)
+    }
+}
+
+private struct MCPSourceDialogRow<Content: View>: View {
+    var title: String
+    var alignment: VerticalAlignment
+    @ViewBuilder var content: Content
+
+    init(_ title: String, alignment: VerticalAlignment = .firstTextBaseline, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.alignment = alignment
+        self.content = content()
+    }
+
+    var body: some View {
+        HStack(alignment: alignment, spacing: AppShellLayout.spaceM) {
+            Text("\(title):")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .frame(width: 116, alignment: .trailing)
+            content
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+private struct MCPSourceDialogToggleRow: View {
+    var title: String
+    @Binding var isOn: Bool
+
+    init(_ title: String, isOn: Binding<Bool>) {
+        self.title = title
+        self._isOn = isOn
+    }
+
+    var body: some View {
+        MCPSourceDialogRow(title) {
+            Toggle("", isOn: $isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+        }
+    }
+}
+
+private struct MCPSourceDialogHint: View {
+    var text: String
+
+    init(_ text: String) {
+        self.text = text
+    }
+
+    var body: some View {
+        Text(text)
+            .font(AgentChatTypography.meta)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.leading, 116 + AppShellLayout.spaceM)
     }
 }
 
