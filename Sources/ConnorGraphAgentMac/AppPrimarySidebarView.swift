@@ -96,13 +96,12 @@ struct CraftPrimarySidebarView: View {
                     }
 
                     SidebarDisclosure(title: "数据源", systemImage: "externaldrive.connected.to.line.below", isExpanded: $sourcesExpanded) {
-                        SidebarRow(title: "邮件系统", systemImage: "envelope", count: nil, isSelected: selection == .sources) { select(.sources) }
-                        SidebarRow(title: "飞书", systemImage: "message", count: nil, isSelected: selection == .sources) { select(.sources) }
-                        SidebarRow(title: "RSS", systemImage: "dot.radiowaves.up.forward", count: nil, isSelected: selection == .sources) { select(.sources) }
-                        SidebarRow(title: "API", systemImage: "curlybraces", count: viewModel.sourceRuntimeConfigurations.count, isSelected: selection == .sources) { select(.sources) }
+                        SidebarRow(title: "邮件系统", systemImage: "envelope", count: nil, isSelected: false, isEnabled: false) {}
+                        SidebarRow(title: "飞书", systemImage: "message", count: nil, isSelected: false, isEnabled: false) {}
+                        SidebarRow(title: "RSS", systemImage: "dot.radiowaves.up.forward", count: nil, isSelected: false, isEnabled: false) {}
+                        SidebarRow(title: "API", systemImage: "curlybraces", count: nil, isSelected: false, isEnabled: false) {}
+                        SidebarRow(title: "MCP", systemImage: "server.rack", count: viewModel.sourceRuntimeConfigurations.count, isSelected: selection == .sources) { select(.sources) }
                     }
-
-                    SidebarRow(title: "MCP", systemImage: "server.rack", count: viewModel.sourceRuntimeConfigurations.count, isSelected: selection == .sources) { select(.sources) }
 
                     SidebarRow(title: "技能", systemImage: "bolt", count: viewModel.commercialSkillManagerPresentation.summary.total, isSelected: selection == .skills) { select(.skills) }
 
