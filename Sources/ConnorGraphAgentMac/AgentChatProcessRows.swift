@@ -49,7 +49,7 @@ struct AgentChatTurnProcessRow: View {
             statusIcon(summary.state)
                 .frame(width: AgentChatTypography.controlIconSize, height: AgentChatTypography.controlIconSize)
 
-            Text("\(summary.title) · \(summary.subtitle)")
+            Text(activityHeaderText(summary))
                 .font(AgentChatTypography.micro.weight(.medium))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -66,6 +66,11 @@ struct AgentChatTurnProcessRow: View {
         .frame(minHeight: AgentChatLayout.activityRowMinHeight)
         .background(Color.clear)
         .contentShape(Rectangle())
+    }
+
+    private func activityHeaderText(_ summary: AgentTurnActivitySummaryPresentation) -> String {
+        let skillPart = process.activeSkillLabel.map { " · 技能：\($0)" } ?? ""
+        return "\(summary.title) · \(summary.subtitle)\(skillPart)"
     }
 
     @ViewBuilder

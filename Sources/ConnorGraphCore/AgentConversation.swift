@@ -248,9 +248,10 @@ public struct AgentSession: Codable, Sendable, Equatable, Identifiable {
     @discardableResult
     public mutating func appendUserMessage(
         _ content: String,
-        attachments: [AgentMessageAttachmentRef] = []
+        attachments: [AgentMessageAttachmentRef] = [],
+        contextSnapshot: String? = nil
     ) -> AgentMessage {
-        let message = AgentMessage(role: .user, content: content, attachments: attachments)
+        let message = AgentMessage(role: .user, content: content, contextSnapshot: contextSnapshot, attachments: attachments)
         messages.append(message)
         updatedAt = message.createdAt
         if title == "New Chat" {
