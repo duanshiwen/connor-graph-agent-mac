@@ -42,6 +42,8 @@ struct SourceRuntimePanelView: View {
                             status: configuration.status == .enabled ? .disabled : .enabled
                         )
                     },
+                    onArchive: { viewModel.archiveSourceRuntime(sourceID: card.id) },
+                    onDelete: { viewModel.requestDeleteSourceRuntime(sourceID: card.id) },
                     onTest: { Task { await viewModel.testSourceRuntime(sourceID: card.id) } }
                 )
             } else {
@@ -51,6 +53,23 @@ struct SourceRuntimePanelView: View {
                     onRefresh: viewModel.reloadSourceRuntimeConfigurations
                 )
             }
+        }
+        .confirmationDialog(
+            "Delete MCP Source?",
+            isPresented: Binding(
+                get: { viewModel.pendingSourceRuntimeDeletionID != nil },
+                set: { if !$0 { viewModel.cancelDeleteSourceRuntime() } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete Source", role: .destructive) {
+                viewModel.confirmDeleteSourceRuntime()
+            }
+            Button("Cancel", role: .cancel) {
+                viewModel.cancelDeleteSourceRuntime()
+            }
+        } message: {
+            Text("This permanently deletes \(viewModel.pendingSourceRuntimeDeletionName ?? "this source") and its persisted health, catalog, and audit files. Archive instead if you need to preserve history.")
         }
         .task {
             viewModel.deferViewUpdate {
@@ -71,6 +90,8 @@ private struct MCPSourceDetailView: View {
     var onRefresh: () -> Void
     var onEdit: () -> Void
     var onToggleEnabled: () -> Void
+    var onArchive: () -> Void
+    var onDelete: () -> Void
     var onTest: () -> Void
 
     var body: some View {
@@ -83,6 +104,8 @@ private struct MCPSourceDetailView: View {
                     onRefresh: onRefresh,
                     onEdit: onEdit,
                     onToggleEnabled: onToggleEnabled,
+                    onArchive: onArchive,
+                    onDelete: onDelete,
                     onTest: onTest,
                     isTesting: isTesting
                 )
@@ -198,6 +221,8 @@ private struct MCPSourceTopBar: View {
     var onRefresh: () -> Void
     var onEdit: (() -> Void)? = nil
     var onToggleEnabled: (() -> Void)? = nil
+    var onArchive: (() -> Void)? = nil
+    var onDelete: (() -> Void)? = nil
     var onTest: (() -> Void)?
     var isTesting: Bool
 
@@ -235,6 +260,23 @@ private struct MCPSourceTopBar: View {
                     }
                     .buttonStyle(.bordered)
                     .help(status == .enabled ? "停用后不会注入 Agent runtime。" : "启用后有 catalog 的 source 可注入 Agent runtime。")
+                }
+                if let onArchive {
+                    Button(action: onArchive) {
+                        Label("归档", systemImage: "archivebox")
+                            .font(AgentChatTypography.metaEmphasis)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(status == .deprecated)
+                    .help("标记为 deprecated，保留 catalog/health/audit 历史。")
+                }
+                if let onDelete {
+                    Button(role: .destructive, action: onDelete) {
+                        Label("删除", systemImage: "trash")
+                            .font(AgentChatTypography.metaEmphasis)
+                    }
+                    .buttonStyle(.bordered)
+                    .help("永久删除 source 目录及其 catalog/health/audit 文件。")
                 }
                 if let onTest {
                     Button(action: onTest) {
