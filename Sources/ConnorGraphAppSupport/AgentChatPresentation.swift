@@ -62,6 +62,7 @@ public struct AgentChatTurnProcessPresentation: Sendable, Equatable, Identifiabl
     public var conversationHistory: [AgentChatMessagePresentation]
     public var sourceUserMessageID: String?
     public var assistantMessageID: String?
+    public var activeSkillLabel: String?
 
     public init(completedAssistant row: AgentChatMessagePresentation, conversationHistory: [AgentChatMessagePresentation]) {
         self.id = "process-\(row.id)"
@@ -69,8 +70,10 @@ public struct AgentChatTurnProcessPresentation: Sendable, Equatable, Identifiabl
         self.state = .completed
         self.fullConversationMessageCount = conversationHistory.count
         self.conversationHistory = conversationHistory
-        self.sourceUserMessageID = conversationHistory.last(where: { $0.message.role == .user })?.id
+        let sourceUserMessage = conversationHistory.last(where: { $0.message.role == .user })
+        self.sourceUserMessageID = sourceUserMessage?.id
         self.assistantMessageID = row.id
+        self.activeSkillLabel = Self.activeSkillLabel(from: sourceUserMessage?.message.contextSnapshot)
         if let inspection = row.message.promptInspection {
             self.summary = Self.completedSummary(turnNumber: row.turnNumber, inspection: inspection, fullConversationMessageCount: conversationHistory.count)
         } else {
@@ -90,8 +93,10 @@ public struct AgentChatTurnProcessPresentation: Sendable, Equatable, Identifiabl
         self.state = state
         self.fullConversationMessageCount = conversationHistory.count
         self.conversationHistory = conversationHistory
-        self.sourceUserMessageID = conversationHistory.last(where: { $0.message.role == .user })?.id
+        let sourceUserMessage = conversationHistory.last(where: { $0.message.role == .user })
+        self.sourceUserMessageID = sourceUserMessage?.id
         self.assistantMessageID = nil
+        self.activeSkillLabel = Self.activeSkillLabel(from: sourceUserMessage?.message.contextSnapshot)
         switch state {
         case .running:
             self.summary = "第 \(pending.turnNumber) 轮 · 正在处理 · 完整历史 \(conversationHistory.count) 条"
@@ -112,6 +117,20 @@ public struct AgentChatTurnProcessPresentation: Sendable, Equatable, Identifiabl
 
     private static func completedSummary(turnNumber: Int, inspection: AgentPromptInspectionSnapshot, fullConversationMessageCount: Int) -> String {
         "第 \(turnNumber) 轮 · 本轮提示词：摘要\(inspection.includesSummary ? "已包含" : "未包含") · 对话上下文 \(inspection.recentMessageCount) 条 · 完整历史 \(fullConversationMessageCount) 条 · 约 \(inspection.estimatedPromptTokenCount) tokens · \(AgentChatMessagePresentation.budgetStatusText(inspection.promptBudgetStatus))"
+    }
+
+    private static func activeSkillLabel(from contextSnapshot: String?) -> String? {
+        guard let contextSnapshot else { return nil }
+        let prefix = "Active skill:"
+        guard let line = contextSnapshot
+            .components(separatedBy: .newlines)
+            .first(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix(prefix) })
+        else { return nil }
+        let label = line
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .dropFirst(prefix.count)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return label.isEmpty ? nil : label
     }
 }
 

@@ -57,7 +57,13 @@ public final class GovernedClaudeSDKSidecarRuntime<Transport: ClaudeSDKSidecarSe
             userMessage: request.userMessage,
             sessionSummary: request.sessionSummary,
             recentMessages: request.recentMessages,
-            permissionMode: effectivePermissionMode
+            permissionMode: effectivePermissionMode,
+            attachmentRefs: request.attachmentRefs,
+            attachmentContextPlan: request.attachmentContextPlan,
+            anchorState: request.anchorState,
+            skillInstructions: request.skillInstructions,
+            activeSkillSlug: request.activeSkillSlug,
+            activeSkillDisplayName: request.activeSkillDisplayName
         )
         let resumeSDKSessionID = (try? runtimeStore?.load(connorSessionID: safeRequest.sessionID))?.sdkSessionID
         let sidecarRequest = ClaudeSDKSidecarRequest(

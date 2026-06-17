@@ -49,6 +49,9 @@ struct AgentChatComposerView: View {
     @State private var isWorkspacePopoverPresented: Bool = false
     @State private var isFileImporterPresented: Bool = false
     @State private var isSkillPickerPresented: Bool = false
+    @State private var slashSkillPickerAnchorRect: CGRect?
+    @State private var slashSkillPickerTriggerRange: NSRange?
+    @State private var skillPickerSelectionIndex: Int = 0
 
     private let workspaceMenuItemMaxWidth: CGFloat = 320
     private let supportedAttachmentContentTypes: [UTType] = [
@@ -113,15 +116,53 @@ struct AgentChatComposerView: View {
                         .frame(height: 42, alignment: .topLeading)
                     }
 
-                    SafeChatComposerTextView(
-                        text: localChatInputBinding,
-                        placeholder: viewModel.composerSendShortcut == "cmd-return" ? "按 ⌘ + Return 发送" : "按 Shift + Return 换行",
-                        isSpellCheckEnabled: viewModel.spellCheckEnabled,
-                        sendShortcut: viewModel.composerSendShortcut,
-                        onSubmit: submitLocalChatInput,
-                        onImportFiles: { urls in Task { await viewModel.importAttachments(urls: urls) } },
-                        onSlashCommand: { isSkillPickerPresented = true }
-                    )
+                    VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
+                        if viewModel.activeSkillSlug != nil {
+                            activeSkillInlineChip
+                        }
+
+                        ZStack(alignment: .topLeading) {
+                            SafeChatComposerTextView(
+                                text: localChatInputBinding,
+                                placeholder: viewModel.composerSendShortcut == "cmd-return" ? "按 ⌘ + Return 发送" : "按 Shift + Return 换行",
+                                isSpellCheckEnabled: viewModel.spellCheckEnabled,
+                                sendShortcut: viewModel.composerSendShortcut,
+                                isSkillPickerPresented: isSkillPickerPresented,
+                                onSubmit: submitLocalChatInput,
+                                onImportFiles: { urls in Task { await viewModel.importAttachments(urls: urls) } },
+                                onSlashCommand: { rect, triggerRange in
+                                    slashSkillPickerAnchorRect = rect
+                                    slashSkillPickerTriggerRange = triggerRange
+                                    skillPickerSelectionIndex = preferredSkillPickerSelectionIndex()
+                                    isSkillPickerPresented = true
+                                },
+                                onSkillPickerKeyCommand: handleSkillPickerKeyCommand
+                            )
+
+                            if let slashSkillPickerAnchorRect {
+                                Color.clear
+                                    .frame(width: 1, height: max(18, slashSkillPickerAnchorRect.height))
+                                    .offset(x: max(0, slashSkillPickerAnchorRect.minX), y: max(0, slashSkillPickerAnchorRect.maxY))
+                                    .popover(
+                                        isPresented: Binding(
+                                            get: { isSkillPickerPresented && self.slashSkillPickerAnchorRect != nil },
+                                            set: { isPresented in
+                                                isSkillPickerPresented = isPresented
+                                                if !isPresented {
+                                                    self.slashSkillPickerAnchorRect = nil
+                                                    self.slashSkillPickerTriggerRange = nil
+                                                }
+                                            }
+                                        ),
+                                        arrowEdge: .top
+                                    ) {
+                                        skillPickerPopoverContent
+                                            .padding(10)
+                                            .frame(width: 320)
+                                    }
+                            }
+                        }
+                    }
                     .padding(.horizontal, AgentChatLayout.spaceL)
                     .padding(.top, viewModel.pendingAttachmentRefs.isEmpty ? AgentChatLayout.spaceM : AgentChatLayout.spaceXS)
                     .padding(.bottom, AgentChatLayout.spaceM)
@@ -156,8 +197,6 @@ struct AgentChatComposerView: View {
                         )
                     }
                     .buttonStyle(.plain)
-
-                    skillPickerButton
 
                     if let inspection = viewModel.lastPromptInspection {
                         Label("约 \(inspection.estimatedPromptTokenCount) tokens", systemImage: "text.alignleft")
@@ -216,6 +255,12 @@ struct AgentChatComposerView: View {
             guard newValue != localChatInput else { return }
             localChatInput = newValue
         }
+        .task {
+            guard viewModel.commercialSkillManagerPresentation.cards.isEmpty else { return }
+            viewModel.deferViewUpdate {
+                viewModel.reloadSkillRuntimeDefinitions()
+            }
+        }
         .fileImporter(isPresented: $isFileImporterPresented, allowedContentTypes: supportedAttachmentContentTypes, allowsMultipleSelection: true) { result in
             switch result {
             case .success(let urls):
@@ -242,6 +287,54 @@ struct AgentChatComposerView: View {
 
     private var canSubmitLocalChat: Bool {
         !localChatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !viewModel.pendingAttachmentRefs.isEmpty
+    }
+
+    private func removeSlashSkillPickerTriggerIfNeeded() {
+        guard let triggerRange = slashSkillPickerTriggerRange,
+              let range = Range(triggerRange, in: localChatInput),
+              localChatInput[range] == "/"
+        else { return }
+        localChatInput.removeSubrange(range)
+        viewModel.updateSelectedChatInputDraft(localChatInput)
+    }
+
+    private func preferredSkillPickerSelectionIndex() -> Int {
+        let cards = viewModel.commercialSkillManagerPresentation.cards
+        guard !cards.isEmpty else { return 0 }
+        if let activeSkillSlug = viewModel.activeSkillSlug,
+           let activeIndex = cards.firstIndex(where: { $0.id == activeSkillSlug }) {
+            return activeIndex
+        }
+        return 0
+    }
+
+    private func handleSkillPickerKeyCommand(_ command: SkillPickerKeyCommand) {
+        let cards = viewModel.commercialSkillManagerPresentation.cards
+        switch command {
+        case .moveUp:
+            guard !cards.isEmpty else { return }
+            skillPickerSelectionIndex = (skillPickerSelectionIndex - 1 + cards.count) % cards.count
+        case .moveDown:
+            guard !cards.isEmpty else { return }
+            skillPickerSelectionIndex = (skillPickerSelectionIndex + 1) % cards.count
+        case .confirm:
+            guard cards.indices.contains(skillPickerSelectionIndex) else { return }
+            selectSkill(cards[skillPickerSelectionIndex])
+        case .cancel:
+            closeSkillPicker()
+        }
+    }
+
+    private func selectSkill(_ card: SkillManagerCard) {
+        viewModel.setActiveSkill(slug: card.id)
+        removeSlashSkillPickerTriggerIfNeeded()
+        closeSkillPicker()
+    }
+
+    private func closeSkillPicker() {
+        isSkillPickerPresented = false
+        slashSkillPickerAnchorRect = nil
+        slashSkillPickerTriggerRange = nil
     }
 
     private func submitLocalChatInput() {
@@ -700,50 +793,60 @@ struct AgentChatComposerView: View {
         .help("选择真实配置的连接和模型；切换后下一轮请求立即使用该模型")
     }
 
+    private var activeSkillInlineChip: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "bolt.fill")
+                .font(.system(size: 11, weight: .semibold))
+            Text(viewModel.activeSkillDisplayName ?? "当前技能")
+                .font(AgentChatTypography.meta.weight(.medium))
+                .lineLimit(1)
+            Button {
+                viewModel.clearActiveSkill()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.accentColor.opacity(0.72))
+        }
+        .foregroundStyle(Color.accentColor)
+        .padding(.horizontal, AgentChatLayout.spaceS)
+        .frame(height: AgentChatLayout.chipHeight)
+        .background(
+            RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
+                .fill(Color.accentColor.opacity(0.10))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
+                .stroke(Color.accentColor.opacity(0.26), lineWidth: 1)
+        )
+        .help("当前技能：\(viewModel.activeSkillDisplayName ?? "") — 点击 × 清除")
+    }
+
     private var skillPickerButton: some View {
         Button {
+            slashSkillPickerAnchorRect = nil
             isSkillPickerPresented.toggle()
         } label: {
-            if let displayName = viewModel.activeSkillDisplayName {
-                HStack(spacing: 4) {
-                    Image(systemName: "bolt.fill")
-                        .font(.system(size: 10, weight: .semibold))
-                    Text(displayName)
-                        .lineLimit(1)
-                    Button {
-                        viewModel.clearActiveSkill()
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 10, weight: .semibold))
-                    }
-                    .buttonStyle(.plain)
-                }
-                .font(AgentChatTypography.micro.weight(.medium))
-                .foregroundStyle(Color.accentColor)
-                .padding(.horizontal, AgentChatLayout.spaceS)
-                .frame(height: AgentChatLayout.chipHeight)
-                .background(
-                    RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
-                        .fill(Color.accentColor.opacity(0.12))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
-                        .stroke(Color.accentColor.opacity(0.28), lineWidth: 1)
-                )
-            } else {
-                AgentComposerOptionBadge(
-                    title: "/技能",
-                    systemImage: "bolt",
-                    tint: isSkillPickerPresented ? composerControlActiveForeground : composerControlForeground,
-                    showsChevron: false,
-                    isActive: isSkillPickerPresented,
-                    style: .compact,
-                    showsBorder: false
-                )
-            }
+            AgentComposerOptionBadge(
+                title: "/技能",
+                systemImage: viewModel.activeSkillSlug == nil ? "bolt" : "bolt.fill",
+                tint: isSkillPickerPresented ? composerControlActiveForeground : composerControlForeground,
+                showsChevron: false,
+                isActive: isSkillPickerPresented,
+                style: .compact,
+                showsBorder: false
+            )
         }
         .buttonStyle(.plain)
-        .popover(isPresented: $isSkillPickerPresented, arrowEdge: .bottom) {
+        .popover(
+            isPresented: Binding(
+                get: { isSkillPickerPresented && slashSkillPickerAnchorRect == nil },
+                set: { isPresented in isSkillPickerPresented = isPresented }
+            ),
+            arrowEdge: .bottom
+        ) {
             skillPickerPopoverContent
                 .padding(10)
                 .frame(width: 320)
@@ -760,7 +863,7 @@ struct AgentChatComposerView: View {
 
             Divider()
 
-            let allSkills = viewModel.skillRuntimeDefinitions
+            let allSkills = viewModel.commercialSkillManagerPresentation.cards
             if allSkills.isEmpty {
                 Text("暂无可用技能")
                     .font(AgentChatTypography.micro)
@@ -769,10 +872,11 @@ struct AgentChatComposerView: View {
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)
             } else {
-                ForEach(allSkills) { definition in
+                ForEach(Array(allSkills.enumerated()), id: \.element.id) { index, card in
+                    let isKeyboardSelected = index == skillPickerSelectionIndex
                     Button {
-                        viewModel.setActiveSkill(slug: definition.slug)
-                        isSkillPickerPresented = false
+                        skillPickerSelectionIndex = index
+                        selectSkill(card)
                     } label: {
                         HStack(spacing: 8) {
                             Image(systemName: "bolt.fill")
@@ -780,17 +884,17 @@ struct AgentChatComposerView: View {
                                 .foregroundStyle(Color.accentColor)
                                 .frame(width: 16)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(definition.manifest.name)
+                                Text(card.title)
                                     .font(AgentChatTypography.meta.weight(.medium))
                                     .foregroundStyle(.primary)
                                     .lineLimit(1)
-                                Text(definition.manifest.description)
+                                Text(card.subtitle)
                                     .font(AgentChatTypography.micro)
                                     .foregroundStyle(.secondary)
                                     .lineLimit(2)
                             }
                             Spacer()
-                            if definition.slug == viewModel.activeSkillSlug {
+                            if card.id == viewModel.activeSkillSlug {
                                 Image(systemName: "checkmark")
                                     .font(.system(size: 11, weight: .semibold))
                                     .foregroundStyle(Color.accentColor)
@@ -799,6 +903,10 @@ struct AgentChatComposerView: View {
                         .padding(.horizontal, 8)
                         .padding(.vertical, 6)
                         .contentShape(Rectangle())
+                        .background(
+                            RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
+                                .fill(isKeyboardSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+                        )
                     }
                     .buttonStyle(.plain)
                 }
@@ -809,6 +917,8 @@ struct AgentChatComposerView: View {
                 Button {
                     viewModel.clearActiveSkill()
                     isSkillPickerPresented = false
+                    slashSkillPickerAnchorRect = nil
+                    slashSkillPickerTriggerRange = nil
                 } label: {
                     Label("清除当前技能", systemImage: "xmark.circle")
                         .font(AgentChatTypography.micro)

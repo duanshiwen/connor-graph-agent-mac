@@ -1,0 +1,114 @@
+import Foundation
+import ConnorGraphAgent
+import ConnorGraphCore
+
+public struct MCPSourceTestReport: Sendable, Equatable {
+    public var sourceID: String
+    public var success: Bool
+    public var healthRecord: MCPSourceRuntimeHealthRecord
+    public var catalog: [MCPSourceToolDescriptor]
+    public var auditRecords: [MCPSourceRuntimeAuditRecord]
+
+    public init(
+        sourceID: String,
+        success: Bool,
+        healthRecord: MCPSourceRuntimeHealthRecord,
+        catalog: [MCPSourceToolDescriptor],
+        auditRecords: [MCPSourceRuntimeAuditRecord]
+    ) {
+        self.sourceID = sourceID
+        self.success = success
+        self.healthRecord = healthRecord
+        self.catalog = catalog
+        self.auditRecords = auditRecords
+    }
+}
+
+public enum MCPSourceTestServiceError: Error, Sendable, Equatable, CustomStringConvertible {
+    case unsupportedTransport(String)
+    case unsupportedCredentialRequirement(ProductOSCredentialRequirement)
+
+    public var description: String {
+        switch self {
+        case .unsupportedTransport(let message): "unsupportedTransport: \(message)"
+        case .unsupportedCredentialRequirement(let requirement): "unsupportedCredentialRequirement: \(requirement.rawValue)"
+        }
+    }
+}
+
+public struct MCPSourceTestService: Sendable {
+    public var repository: AppMCPSourceRuntimeRepository
+    public var clientName: String
+    public var clientVersion: String
+    public var currentDirectoryURL: URL?
+
+    public init(
+        repository: AppMCPSourceRuntimeRepository,
+        clientName: String = "Connor",
+        clientVersion: String = "1.0",
+        currentDirectoryURL: URL? = nil
+    ) {
+        self.repository = repository
+        self.clientName = clientName
+        self.clientVersion = clientVersion
+        self.currentDirectoryURL = currentDirectoryURL
+    }
+
+    public func testStdioSource(_ configuration: MCPSourceRuntimeConfiguration, now: Date = Date()) async throws -> MCPSourceTestReport {
+        try repository.validateForEnablement(configuration)
+        guard configuration.credentialRequirement == .none else {
+            throw MCPSourceTestServiceError.unsupportedCredentialRequirement(configuration.credentialRequirement)
+        }
+        guard case .stdio(let command, let arguments) = configuration.transport else {
+            throw MCPSourceTestServiceError.unsupportedTransport("MVP source test currently supports stdio transport only.")
+        }
+        let transport = MCPStdioClientTransport(
+            command: command,
+            arguments: arguments,
+            environment: [:],
+            currentDirectoryURL: currentDirectoryURL
+        )
+        let client = MCPJSONRPCClient(transport: transport, clientName: clientName, clientVersion: clientVersion)
+        let runtime = MCPSourceRuntime(configuration: configuration, client: client)
+        let snapshot = try await runtime.discoverRuntimeState(now: now)
+        try repository.saveHealthRecord(snapshot.healthRecord)
+        try repository.saveToolCatalog(sourceID: configuration.sourceID, catalog: snapshot.catalog)
+        try repository.appendAuditRecords(snapshot.auditRecords)
+        try await runtime.shutdown()
+        return MCPSourceTestReport(
+            sourceID: configuration.sourceID,
+            success: snapshot.healthRecord.healthStatus == .healthy,
+            healthRecord: snapshot.healthRecord,
+            catalog: snapshot.catalog,
+            auditRecords: snapshot.auditRecords
+        )
+    }
+}
+
+/// Minimal router for tests and early app integration where one concrete runtime is already available.
+public actor MCPConcreteRuntimeRouter<Transport: MCPClientTransport>: MCPToolRouting {
+    private var runtimes: [String: MCPSourceRuntime<Transport>]
+
+    public init(runtimes: [String: MCPSourceRuntime<Transport>]) {
+        self.runtimes = runtimes
+    }
+
+    public func callMCPTool(
+        exposedToolName: String,
+        sourceID: String,
+        rawToolName: String,
+        arguments: MCPJSONValue,
+        context: AgentToolExecutionContext
+    ) async throws -> AgentToolResult {
+        guard let runtime = runtimes[sourceID] else {
+            throw MCPToolRegistryBridgeError.missingSource(sourceID)
+        }
+        let invocation = try await runtime.callTool(
+            name: exposedToolName,
+            arguments: arguments,
+            runID: context.runID,
+            sessionID: context.sessionID
+        )
+        return invocation.result
+    }
+}

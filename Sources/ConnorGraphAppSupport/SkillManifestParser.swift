@@ -110,34 +110,68 @@ public struct SkillManifestParser: Sendable {
             lifecycle: SkillLifecycleState(rawValue: string(connorObject, "lifecycle") ?? "stable") ?? .stable,
             commercialTier: string(connorObject, "commercialTier")
         )
-        let knownFields: Set<String> = [
-            "name", "description", "when_to_use", "whenToUse", "argument-hint", "argumentHint", "arguments", "globs", "paths", "requiredSources", "alwaysAllow", "allowed-tools", "allowedTools", "disallowed-tools", "disallowedTools", "disable-model-invocation", "disableModelInvocation", "user-invocable", "userInvocable", "model", "effort", "context", "agent", "shell", "icon", "tags", "version", "publisher", "x-connor", "connor", "requiredCapabilities", "graphContextPolicy", "triggers"
+        let knownFieldsA: Set<String> = [
+            "name", "description", "when_to_use", "whenToUse", "argument-hint", "argumentHint",
+            "arguments", "globs", "paths", "requiredSources", "alwaysAllow",
+            "allowed-tools", "allowedTools", "disallowed-tools", "disallowedTools"
         ]
-        let unsupported = fields.keys.filter { !knownFields.contains($0) }.sorted()
+        let knownFieldsB: Set<String> = [
+            "disable-model-invocation", "disableModelInvocation", "user-invocable", "userInvocable",
+            "model", "effort", "context", "agent", "shell", "icon", "tags",
+            "version", "publisher", "x-connor", "connor", "requiredCapabilities",
+            "graphContextPolicy", "triggers", "hidden"
+        ]
+        var unsupported: [String] = []
+        for key in fields.keys {
+            if !knownFieldsA.contains(key) && !knownFieldsB.contains(key) { unsupported.append(key) }
+        }
+        unsupported.sort()
         let warnings = unsupported.map { "Unsupported skill frontmatter field preserved as warning: \($0)" }
+        let whenToUse = string(fields, "when_to_use") ?? string(fields, "whenToUse")
+        let argumentHint = string(fields, "argument-hint") ?? string(fields, "argumentHint")
+        let arguments = array(fields, "arguments") ?? []
+        let globs = array(fields, "globs") ?? []
+        let paths = array(fields, "paths") ?? []
+        let requiredSources = normalizedUnique(array(fields, "requiredSources") ?? [])
+        let alwaysAllow = normalizedUnique(array(fields, "alwaysAllow") ?? [])
+        let allowedTools = normalizedUnique(array(fields, "allowed-tools") ?? array(fields, "allowedTools") ?? [])
+        let disallowedTools = normalizedUnique(array(fields, "disallowed-tools") ?? array(fields, "disallowedTools") ?? [])
+        let disableModelInvocation = bool(fields, "disable-model-invocation") ?? bool(fields, "disableModelInvocation") ?? false
+        let userInvocable = bool(fields, "user-invocable") ?? bool(fields, "userInvocable") ?? true
+        let model = string(fields, "model")
+        let effort = string(fields, "effort")
+        let context = SkillExecutionContext(rawValue: string(fields, "context") ?? "inline") ?? .inline
+        let agent = string(fields, "agent")
+        let shell = string(fields, "shell")
+        let icon = string(fields, "icon")
+        let tags = array(fields, "tags") ?? []
+        let version = string(fields, "version")
+        let publisher = string(fields, "publisher")
+        let hidden = bool(fields, "hidden") ?? false
         let manifest = SkillManifest(
             name: resolvedName,
             description: description,
-            whenToUse: string(fields, "when_to_use") ?? string(fields, "whenToUse"),
-            argumentHint: string(fields, "argument-hint") ?? string(fields, "argumentHint"),
-            arguments: array(fields, "arguments") ?? [],
-            globs: array(fields, "globs") ?? [],
-            paths: array(fields, "paths") ?? [],
-            requiredSources: normalizedUnique(array(fields, "requiredSources") ?? []),
-            alwaysAllow: normalizedUnique(array(fields, "alwaysAllow") ?? []),
-            allowedTools: normalizedUnique(array(fields, "allowed-tools") ?? array(fields, "allowedTools") ?? []),
-            disallowedTools: normalizedUnique(array(fields, "disallowed-tools") ?? array(fields, "disallowedTools") ?? []),
-            disableModelInvocation: bool(fields, "disable-model-invocation") ?? bool(fields, "disableModelInvocation") ?? false,
-            userInvocable: bool(fields, "user-invocable") ?? bool(fields, "userInvocable") ?? true,
-            model: string(fields, "model"),
-            effort: string(fields, "effort"),
-            context: SkillExecutionContext(rawValue: string(fields, "context") ?? "inline") ?? .inline,
-            agent: string(fields, "agent"),
-            shell: string(fields, "shell"),
-            icon: string(fields, "icon"),
-            tags: array(fields, "tags") ?? [],
-            version: string(fields, "version"),
-            publisher: string(fields, "publisher"),
+            whenToUse: whenToUse,
+            argumentHint: argumentHint,
+            arguments: arguments,
+            globs: globs,
+            paths: paths,
+            requiredSources: requiredSources,
+            alwaysAllow: alwaysAllow,
+            allowedTools: allowedTools,
+            disallowedTools: disallowedTools,
+            disableModelInvocation: disableModelInvocation,
+            userInvocable: userInvocable,
+            model: model,
+            effort: effort,
+            context: context,
+            agent: agent,
+            shell: shell,
+            icon: icon,
+            tags: tags,
+            version: version,
+            publisher: publisher,
+            hidden: hidden,
             connor: connor,
             unsupportedFields: unsupported,
             warnings: warnings

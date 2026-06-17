@@ -1,6 +1,6 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-17 16:47 GMT+8  
+文档更新时间：2026-06-17 17:58 GMT+8  
 当前代码基线:`feature/apple-iwork-attachment-support`,在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface / session-scoped multi-root project workspace / Connor-owned Scientific Compute Runtime skeleton / 商用级 Document Attachment OS / WKWebView-backed `web_fetch(js)` 基础上,继续收紧 Apple 原生 UI 边界:PDF/Word/Excel/PowerPoint 与 Apple iWork（Pages/Numbers/Keynote）一等附件仍由 Connor Session Capsule 和 Attachment Store 管理;PDF selectable text 抽取和多页原文预览继续使用 PDFKit;Office/iWork/Presentation/Spreadsheet 抽取继续通过 MarkItDown/Docling sidecar best-effort 编排与 hardening;Office/iWork/Presentation/Spreadsheet 原文件预览优先交给 macOS Quick Look / QuickLookUI,Connor 自有 UI 只负责 manifest、extraction status、retry、omitted attachment summary 和治理证据;AI 设置页 Add Connection 前置 DeepSeek、Xiaomi MiMo 和中国常用模型入口,在 OpenAI Compatible 统一底座上支持 MiMo 官方 `api-key` 认证头。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package,目标是把 Connor 建成 **graph-memory-native Agent OS**:它不是"图谱编辑器",也不是"Claude SDK 外壳",而是以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI 和 Local Automation Surface 共同构成的本地 Agent 操作系统。
@@ -645,7 +645,10 @@ Commercial Train 3 将 MCP Source 从 config/call helper 升级为 Connor-owned 
 ```text
 Sources/ConnorGraphAppSupport/AppMCPSourceRuntimeRepository.swift
 Sources/ConnorGraphAppSupport/MCPJSONRPCClient.swift
+Sources/ConnorGraphAppSupport/MCPStdioClientTransport.swift
 Sources/ConnorGraphAppSupport/MCPSourceRuntime.swift
+Sources/ConnorGraphAppSupport/MCPSourceTestService.swift
+Sources/ConnorGraphAppSupport/MCPToolRegistryBridge.swift
 Sources/ConnorGraphAppSupport/SourceSkillAutomationUIPresentation.swift
 ```
 
@@ -653,12 +656,19 @@ Sources/ConnorGraphAppSupport/SourceSkillAutomationUIPresentation.swift
 
 - Source runtime registry persistence
 - Stdio / HTTP transport configuration shape
+- Real MCP stdio subprocess transport for `Content-Length` framed JSON-RPC
+- Sensitive inherited environment filtering for local MCP subprocesses
 - Source ID validation
 - Tool name prefix validation
 - Unsafe graph write policy rejection
 - MCP JSON-RPC lifecycle:initialize、notifications/initialized、tools/list、tools/call、shutdown
 - Server error mapping
-- Source-prefixed tool catalog
+- Model-safe exposed MCP tool naming: `mcp__{sourceID}__{toolName}`
+- Original MCP tool name preservation for routing and audit
+- Backward-compatible parsing for previous `source.tool` runtime calls
+- MCP Tool Registry Bridge for discovered catalog → `AgentToolRegistry` registration
+- Minimal MCP routed AgentTool path for source/tool dispatch
+- Stdio source test service for validation + discovery + health/catalog/audit persistence
 - Disabled-source gate
 - MCP tool call event bridge
 - Product OS registry sync event
@@ -669,7 +679,9 @@ Sources/ConnorGraphAppSupport/SourceSkillAutomationUIPresentation.swift
 - Discovery snapshot
 - Per-source `health.json`、`catalog.json`、`audit.jsonl`
 
-边界:MCP servers 是能力提供者;Connor 拥有 registry、lifecycle、health、permission policy、graph ingestion policy、audit 与 readiness。
+商业级 MCP Platform 下一步仍需补齐:HTTP/SSE/Streamable HTTP production transport、MCP client pool、Keychain-backed credential injection、source add/test/auth/enable UI workflow、per-tool permission policy、large/binary result artifact governance、App runtime 动态 source activation。根据当前产品边界,本里程碑刻意不处理 graph ingestion。
+
+边界:MCP servers 是能力提供者;Connor 拥有 registry、lifecycle、health、permission policy、audit 与 readiness。Graph ingestion 不属于当前 MCP Platform MVP。
 
 ---
 
@@ -929,6 +941,11 @@ Composer 技能激活当前支持:
 - 注入路径:AppViewModel.resolveActiveSkillInstructions() → SkillInvocationRuntime.buildPlan() → SkillInvocationPlan.renderedInstructions → NativeSessionManager.submit(skillInstructions:) → AgentChatRequest.skillInstructions → AgentLoopController.buildPromptAssembly() → assembly.instruction.text
 - 每次发送后自动清除 active skill,避免后续轮次意外注入;用户可随时手动清除或切换技能
 - 现有的 `[skill:slug]` 文本语法仍然独立工作,走 SkillChatPromptAugmentor 路径注入到用户消息中的 `<connor-active-skills>` XML block;两条路径互不干扰
+- 系统 prompt 自动附加所有已安装技能的摘要目录（名称 + slug + 描述）,通过 `instructionAppendix` 注入,在每次 Agent Loop 中对模型可见
+- 目录中附带 `How to Use Skills` 使用说明,引导模型根据用户请求自主判断是否需要激活某个技能
+- 新增 `connor_skill_activate` 内部工具（`SkillActivateTool`）,模型可调用并传入技能 slug 获取该技能的完整 SKILL.md 指令
+- 工具在 `AppGraphAgentRuntimeFactory.buildController()` 中通过 `SkillPackageScanner` 扫描已安装技能后注册;摘要文本通过 `buildSkillCatalogSummary(from:)` 生成并追加到 `effectiveConfiguration.instructionAppendix`
+- 三条技能注入路径并存:① `/` picker 手动选中 → 系统 prompt 注入;② `[skill:slug]` 文本语法 → 用户消息注入;③ 模型自主调用 `connor_skill_activate` → 工具返回值注入模型上下文
 
 Agent tool invocation detail 当前支持:
 
@@ -1375,7 +1392,7 @@ Settings labels/statuses redesign regression (2026-06-16 19:01 GMT+8):
 - swift build: passed.
 - swift test --filter ProductOSPhase1Tests: passed, 5 tests.
 
-Composer skill activation + runtime injection (2026-06-17 16:47 GMT+8):
+Composer skill activation + runtime injection + skill catalog (2026-06-17 16:47–17:58 GMT+8):
 - Composer 底部工具栏新增 `/技能` 按钮和行首 `/` 斜杠命令,可唤出技能选择 popover 选中技能。
 - 选中技能的 SKILL.md 指令通过 `AgentChatRequest.skillInstructions` 注入到系统 prompt（instructionAppendix 之后）,而非用户消息。
 - `AgentChatRequest` 新增 `skillInstructions: String?` 字段。
@@ -1383,7 +1400,11 @@ Composer skill activation + runtime injection (2026-06-17 16:47 GMT+8):
 - `NativeSessionManager.submit()` 新增 `skillInstructions` 参数并传递给 `AgentChatRequest`。
 - `AppViewModel` 新增 `activeSkillSlug` / `activeSkillDisplayName` 状态、`setActiveSkill(slug:)` / `clearActiveSkill()` / `resolveActiveSkillInstructions(sessionID:)` 方法。
 - `SubmitAwareTextView` 新增 `onSlashCommand` 回调,通过 `insertText` 检测行首 `/` 字符。
-- 现有 `[skill:slug]` 文本语法（走 `SkillChatPromptAugmentor` → 用户消息 `<connor-active-skills>` XML）保持不变,两条路径互不干扰。
+- 现有 `[skill:slug]` 文本语法（走 `SkillChatPromptAugmentor` → 用户消息 `<connor-active-skills>` XML）保持不变,三条路径互不干扰。
+- 系统 prompt 自动附加所有已安装技能的摘要目录（名称 + slug + 描述）,通过 `instructionAppendix` 注入。
+- 新增 `connor_skill_activate` 内部工具（`SkillActivateTool`）,模型可调用并传入 slug 获取完整 SKILL.md 指令。
+- `AppGraphAgentRuntimeFactory.buildController()` 通过 `SkillPackageScanner` 扫描已安装技能,注册 `SkillActivateTool`,生成摘要文本追加到 `instructionAppendix`。
+- 新建 `Sources/ConnorGraphAppSupport/SkillActivateTool.swift`。
 - swift build: passed.
 - swift test --filter NativeSessionManagerTests: passed, 14 tests.
 - swift test --filter AgentLoopControllerTests: passed, 23 tests.

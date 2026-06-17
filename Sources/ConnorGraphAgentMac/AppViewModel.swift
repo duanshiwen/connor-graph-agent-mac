@@ -3593,6 +3593,8 @@ final class AppViewModel: NSObject, ObservableObject {
     func setActiveSkill(slug: String) {
         activeSkillSlug = slug
         activeSkillDisplayName = skillRuntimeDefinitions.first(where: { $0.slug == slug })?.manifest.name
+            ?? commercialSkillManagerPresentation.cards.first(where: { $0.id == slug })?.title
+            ?? slug
     }
 
     func clearActiveSkill() {
@@ -3601,30 +3603,55 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func resolveActiveSkillInstructions(sessionID: String) -> String? {
-        guard let slug = activeSkillSlug, let storagePaths else { return nil }
-        let scanner = SkillPackageScanner()
-        let roots = workspaceRoots
-            .map { $0.path.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .map { URL(fileURLWithPath: $0, isDirectory: true) }
-        let nestedRoots: [URL]
-        if let primary = primaryWorkspaceRootDraft?.path.trimmingCharacters(in: .whitespacesAndNewlines), !primary.isEmpty {
-            nestedRoots = [URL(fileURLWithPath: primary, isDirectory: true)]
-        } else {
-            nestedRoots = []
+        guard let slug = activeSkillSlug else { return nil }
+        if let storagePaths {
+            let scanner = SkillPackageScanner()
+            let roots = workspaceRoots
+                .map { $0.path.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .map { URL(fileURLWithPath: $0, isDirectory: true) }
+            let nestedRoots: [URL]
+            if let primary = primaryWorkspaceRootDraft?.path.trimmingCharacters(in: .whitespacesAndNewlines), !primary.isEmpty {
+                nestedRoots = [URL(fileURLWithPath: primary, isDirectory: true)]
+            } else {
+                nestedRoots = []
+            }
+            let snapshot = scanner.scan(storagePaths: storagePaths, projectRoots: roots, nestedRoots: nestedRoots)
+            if let resolution = snapshot.resolution(slug: slug) {
+                let runtime = SkillInvocationRuntime()
+                let request = SkillInvocationRequest(
+                    slug: SkillSlug(slug),
+                    rawInvocation: "[skill:\(slug)]",
+                    arguments: "",
+                    mode: .manual,
+                    sessionID: sessionID
+                )
+                if let plan = try? runtime.buildPlan(request: request, resolution: resolution) {
+                    return plan.renderedInstructions
+                }
+            }
         }
-        let snapshot = scanner.scan(storagePaths: storagePaths, projectRoots: roots, nestedRoots: nestedRoots)
-        guard let resolution = snapshot.resolution(slug: slug) else { return nil }
-        let runtime = SkillInvocationRuntime()
-        let request = SkillInvocationRequest(
-            slug: SkillSlug(slug),
-            rawInvocation: "[skill:\(slug)]",
-            arguments: "",
-            mode: .manual,
-            sessionID: sessionID
-        )
-        guard let plan = try? runtime.buildPlan(request: request, resolution: resolution) else { return nil }
-        return plan.renderedInstructions
+        guard let card = commercialSkillManagerPresentation.cards.first(where: { $0.id == slug }) else { return nil }
+        return renderActiveSkillCardInstructions(card)
+    }
+
+    private func renderActiveSkillCardInstructions(_ card: SkillManagerCard) -> String? {
+        let body = card.instructions.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty else { return nil }
+        let requiredSources = card.requiredSources.joined(separator: ", ")
+        return """
+        <connor-skill-invocation slug=\"\(card.id)\" sourceTier=\"\(card.sourceTier)\" risk=\"\(card.riskLabel)\">
+        # \(card.title)
+
+        Description: \(card.subtitle)
+        Skill ID: \(card.id)
+        Source tier: \(card.sourceTier)
+        Trust state: \(card.trustState)
+        Required sources: \(requiredSources)
+
+        \(body)
+        </connor-skill-invocation>
+        """
     }
 
     private func buildSkillChatPromptAugmentation(prompt: String, sessionID: String) -> SkillChatPromptAugmentation {
@@ -3680,9 +3707,18 @@ final class AppViewModel: NSObject, ObservableObject {
         let baselineMessageCount = manager.session.messages.count
         let baselineUserMessageCount = manager.session.messages.filter { $0.role == .user }.count
         let shouldAutoGenerateInitialTitle = baselineUserMessageCount == 0
+        let submittedActiveSkillSlug = activeSkillSlug
+        let submittedActiveSkillDisplayName = activeSkillDisplayName
+        let submittedActiveSkillContextSnapshot: String? = {
+            let displayName = submittedActiveSkillDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let slug = submittedActiveSkillSlug?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !displayName.isEmpty || !slug.isEmpty else { return nil }
+            return "Active skill: \(displayName.isEmpty ? slug : displayName)\(slug.isEmpty ? "" : " (\(slug))")"
+        }()
         let optimisticUserMessage = AgentMessage(
             role: .user,
             content: displayPrompt?.isEmpty == false ? displayPrompt! : prompt,
+            contextSnapshot: submittedActiveSkillContextSnapshot,
             attachments: attachmentsForSubmission
         )
         if selectedChatSessionID == submittingSessionID {
@@ -3722,6 +3758,8 @@ final class AppViewModel: NSObject, ObservableObject {
                 attachments: attachmentsForSubmission,
                 attachmentContextPlan: attachmentContextPlan,
                 skillInstructions: resolvedSkillInstructions,
+                activeSkillSlug: resolvedSkillInstructions == nil ? nil : submittedActiveSkillSlug,
+                activeSkillDisplayName: resolvedSkillInstructions == nil ? nil : submittedActiveSkillDisplayName,
                 onRunStarted: { [weak self] runID in
                     guard let self else { return }
                     if self.submittingChatSessionIDs.contains(submittingSessionID) {
