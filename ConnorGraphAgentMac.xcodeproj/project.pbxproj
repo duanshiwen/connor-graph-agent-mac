@@ -19,6 +19,7 @@
 		A0000000000000000000002E /* Sources/ConnorGraphAgentMac/EmptyGraphHybridSearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000002F /* Sources/ConnorGraphAgentMac/EmptyGraphHybridSearchService.swift */; };
 		A00000000000000000000030 /* Sources/ConnorGraphAgentMac/BrowserWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000031 /* Sources/ConnorGraphAgentMac/BrowserWorkspaceView.swift */; };
 		A00000000000000000000036 /* Sources/ConnorGraphAgentMac/SourceSkillAutomationRuntimeViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000037 /* Sources/ConnorGraphAgentMac/SourceSkillAutomationRuntimeViews.swift */; };
+		A00000000000000000000040 /* Sources/ConnorGraphAgentMac/SkillManagerListViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000041 /* Sources/ConnorGraphAgentMac/SkillManagerListViews.swift */; };
 		A00000000000000000000038 /* Sources/ConnorGraphAgentMac/BrowserBackgroundTaskRunnerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000039 /* Sources/ConnorGraphAgentMac/BrowserBackgroundTaskRunnerView.swift */; };
 		A0000000000000000000003D /* Sources/ConnorGraphAgentMac/BrowserHistoryPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000003E /* Sources/ConnorGraphAgentMac/BrowserHistoryPanelView.swift */; };
 		B00000000000000000000001 /* XcodeSwiftPMBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000002 /* XcodeSwiftPMBridgeTests.swift */; };
@@ -78,6 +79,7 @@
 		A0000000000000000000002F /* Sources/ConnorGraphAgentMac/EmptyGraphHybridSearchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/EmptyGraphHybridSearchService.swift; sourceTree = "<group>"; };
 		A00000000000000000000031 /* Sources/ConnorGraphAgentMac/BrowserWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/BrowserWorkspaceView.swift; sourceTree = "<group>"; };
 		A00000000000000000000037 /* Sources/ConnorGraphAgentMac/SourceSkillAutomationRuntimeViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/SourceSkillAutomationRuntimeViews.swift; sourceTree = "<group>"; };
+		A00000000000000000000041 /* Sources/ConnorGraphAgentMac/SkillManagerListViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/SkillManagerListViews.swift; sourceTree = "<group>"; };
 		A00000000000000000000039 /* Sources/ConnorGraphAgentMac/BrowserBackgroundTaskRunnerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/BrowserBackgroundTaskRunnerView.swift; sourceTree = "<group>"; };
 		A0000000000000000000003E /* Sources/ConnorGraphAgentMac/BrowserHistoryPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/BrowserHistoryPanelView.swift; sourceTree = "<group>"; };
 		B00000000000000000000002 /* XcodeSwiftPMBridgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XcodeSwiftPMBridgeTests.swift; sourceTree = "<group>"; };
@@ -176,6 +178,7 @@
 				A0000000000000000000003E /* Sources/ConnorGraphAgentMac/BrowserHistoryPanelView.swift */,
 				A0000000000000000000003A /* Assets.xcassets */,
 				A00000000000000000000037 /* Sources/ConnorGraphAgentMac/SourceSkillAutomationRuntimeViews.swift */,
+				A00000000000000000000041 /* Sources/ConnorGraphAgentMac/SkillManagerListViews.swift */,
 				C00000000000000000000001 /* Sources/ConnorGraphAgentMac/AgentChatActivityViews.swift */,
 				E00000000000000000000011 /* Sources/ConnorGraphAgentMac/AgentAttachmentInspectorView.swift */,
 				E00000000000000000000012 /* Sources/ConnorGraphAgentMac/AgentAttachmentPreviewSheetView.swift */,
@@ -343,6 +346,7 @@
 				A00000000000000000000038 /* Sources/ConnorGraphAgentMac/BrowserBackgroundTaskRunnerView.swift in Sources */,
 				A0000000000000000000003D /* Sources/ConnorGraphAgentMac/BrowserHistoryPanelView.swift in Sources */,
 				A00000000000000000000036 /* Sources/ConnorGraphAgentMac/SourceSkillAutomationRuntimeViews.swift in Sources */,
+				A00000000000000000000040 /* Sources/ConnorGraphAgentMac/SkillManagerListViews.swift in Sources */,
 				D00000000000000000000001 /* Sources/ConnorGraphAgentMac/AgentChatActivityViews.swift in Sources */,
 				E00000000000000000000001 /* Sources/ConnorGraphAgentMac/AgentAttachmentInspectorView.swift in Sources */,
 				E00000000000000000000002 /* Sources/ConnorGraphAgentMac/AgentAttachmentPreviewSheetView.swift in Sources */,
