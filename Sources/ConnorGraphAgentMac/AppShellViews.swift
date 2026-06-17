@@ -8,7 +8,7 @@ import ConnorGraphStore
 import ConnorGraphAppSupport
 
 struct AppShellView: View {
-    @StateObject var viewModel: AppViewModel
+    @ObservedObject var viewModel: AppViewModel
     @State private var sidebarSelection: SidebarItem? = .agentChat
     @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
     @State private var topSearchKeyMonitor: Any?
