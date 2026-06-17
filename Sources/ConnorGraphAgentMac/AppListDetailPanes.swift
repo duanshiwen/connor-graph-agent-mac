@@ -473,11 +473,25 @@ struct CraftSkillListPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Text("技能")
-                .font(AppListTypography.header)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 13)
+            ZStack {
+                Text("技能")
+                    .font(AppListTypography.header)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                HStack {
+                    Spacer()
+                    Button(action: viewModel.addWorkspaceSkill) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 12.5, weight: .semibold))
+                            .frame(width: 24, height: 24)
+                    }
+                    .buttonStyle(.plain)
+                    .contentShape(Circle())
+                    .help("添加技能")
+                    .accessibilityLabel("添加技能")
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
 
             if viewModel.commercialSkillManagerPresentation.cards.isEmpty {
                 ContentUnavailableView("暂无技能", systemImage: "bolt", description: Text("在 .agents/skills 或 Connor skills 目录添加 SKILL.md。"))
