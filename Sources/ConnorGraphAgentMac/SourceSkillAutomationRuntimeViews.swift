@@ -34,7 +34,6 @@ struct SourceRuntimePanelView: View {
                     auditRecords: viewModel.sourceRuntimeAuditRecordsBySource[card.id, default: []],
                     isTesting: viewModel.testingSourceRuntimeIDs.contains(card.id),
                     testMessage: viewModel.sourceRuntimeTestMessages[card.id],
-                    onRefresh: viewModel.reloadSourceRuntimeConfigurations,
                     onEdit: { viewModel.presentEditSourceSheet(sourceID: card.id) },
                     onToggleEnabled: {
                         viewModel.setSourceRuntimeStatus(
@@ -48,9 +47,7 @@ struct SourceRuntimePanelView: View {
                 )
             } else {
                 MCPSourceEmptyDetailView(
-                    summary: presentation.summary,
-                    onAdd: viewModel.presentAddSourceSheet,
-                    onRefresh: viewModel.reloadSourceRuntimeConfigurations
+                    summary: presentation.summary
                 )
             }
         }
@@ -87,7 +84,6 @@ private struct MCPSourceDetailView: View {
     var auditRecords: [MCPSourceRuntimeAuditRecord]
     var isTesting: Bool
     var testMessage: String?
-    var onRefresh: () -> Void
     var onEdit: () -> Void
     var onToggleEnabled: () -> Void
     var onArchive: () -> Void
@@ -101,7 +97,6 @@ private struct MCPSourceDetailView: View {
                     title: card.title,
                     subtitle: "MCP Source",
                     status: configuration.status,
-                    onRefresh: onRefresh,
                     onEdit: onEdit,
                     onToggleEnabled: onToggleEnabled,
                     onArchive: onArchive,
@@ -182,19 +177,17 @@ private struct MCPSourceDetailView: View {
 
 private struct MCPSourceEmptyDetailView: View {
     var summary: SourceRuntimeUISummary
-    var onAdd: () -> Void
-    var onRefresh: () -> Void
 
     private var hasSources: Bool { summary.totalCount > 0 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
-            MCPSourceTopBar(title: "MCP Sources", subtitle: "Source Runtime", onAdd: onAdd, onRefresh: onRefresh, onTest: nil, isTesting: false)
+            MCPSourceTopBar(title: "MCP Sources", subtitle: "Source Runtime", onTest: nil, isTesting: false)
             Spacer(minLength: 80)
             ContentUnavailableView(
                 hasSources ? "请选择一个 MCP Source" : "暂无 MCP Source",
                 systemImage: hasSources ? "server.rack" : "externaldrive.badge.plus",
-                description: Text(hasSources ? "从左侧列表选择一个连接，即可查看健康状态、工具目录、治理策略和审计记录。" : "使用右上角「添加 Source」创建外部工具连接；测试通过后，健康状态、工具目录和审计记录会显示在这里。")
+                description: Text(hasSources ? "从左侧列表选择一个连接，即可查看健康状态、工具目录、治理策略和审计记录。" : "使用左侧列表标题栏的「+」创建外部工具连接；测试通过后，健康状态、工具目录和审计记录会显示在这里。")
             )
             .frame(maxWidth: .infinity)
             Spacer()
@@ -209,8 +202,6 @@ private struct MCPSourceTopBar: View {
     var title: String
     var subtitle: String
     var status: ProductOSRegistryEntryStatus? = nil
-    var onAdd: (() -> Void)? = nil
-    var onRefresh: () -> Void
     var onEdit: (() -> Void)? = nil
     var onToggleEnabled: (() -> Void)? = nil
     var onArchive: (() -> Void)? = nil
@@ -236,12 +227,6 @@ private struct MCPSourceTopBar: View {
             }
             Spacer()
             HStack(spacing: AppShellLayout.spaceS) {
-                if let onAdd {
-                    Button(action: onAdd) {
-                        Label("添加 Source", systemImage: "plus")
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
                 if let onTest {
                     Button(action: onTest) {
                         Label(isTesting ? "测试中…" : "测试 Source", systemImage: isTesting ? "hourglass" : "checkmark.circle")
@@ -250,10 +235,6 @@ private struct MCPSourceTopBar: View {
                     .disabled(isTesting)
                     .help("运行 MCP initialize + tools/list，并刷新 health/catalog/audit。")
                 }
-                Button(action: onRefresh) {
-                    Label("刷新", systemImage: "arrow.clockwise")
-                }
-                .buttonStyle(.bordered)
                 if let onEdit {
                     Button(action: onEdit) {
                         Label("编辑", systemImage: "pencil")
