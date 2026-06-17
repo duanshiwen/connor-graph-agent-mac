@@ -566,21 +566,41 @@ private struct AddSkillRequestDialog: View {
                     }
                 }
 
+            if let message = viewModel.addSkillDialogMessage, !message.isEmpty {
+                HStack(spacing: 8) {
+                    if viewModel.isSubmittingAddSkillRequest {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    }
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+
             HStack {
-                Button("取消") {
+                Button("关闭") {
                     viewModel.cancelAddSkillDialog()
                     dismiss()
                 }
                 .keyboardShortcut(.cancelAction)
+                .disabled(viewModel.isSubmittingAddSkillRequest)
 
                 Spacer()
 
-                Button("开始创建") {
+                Button(viewModel.isSubmittingAddSkillRequest ? "创建中…" : "开始创建") {
                     Task { await viewModel.submitAddSkillRequest() }
-                    dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(viewModel.addSkillRequestDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(viewModel.isSubmittingAddSkillRequest || viewModel.addSkillRequestDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(22)
