@@ -35,8 +35,20 @@ private actor SuspendingModelProvider: AgentModelProvider {
     let modelID = "suspending"
     let capabilities = AgentModelCapabilities(supportsStreaming: false, supportsToolCalling: true, supportsParallelToolCalls: false, supportsStructuredOutput: false, supportsVision: false)
     private(set) var wasCancelled = false
+    private var hasEnteredRequest = false
+    private var enteredContinuation: CheckedContinuation<Void, Never>?
+
+    func waitUntilRequestStarted() async {
+        if hasEnteredRequest { return }
+        await withCheckedContinuation { continuation in
+            enteredContinuation = continuation
+        }
+    }
 
     func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {
+        hasEnteredRequest = true
+        enteredContinuation?.resume()
+        enteredContinuation = nil
         do {
             try await Task.sleep(nanoseconds: 5_000_000_000)
             return AgentModelResponse(text: "should not complete")
@@ -159,7 +171,7 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
         return events
     }
 
-    try await Task.sleep(nanoseconds: 100_000_000)
+    await provider.waitUntilRequestStarted()
     loop.abort(runID: request.runID)
     let events = await task.value
 
