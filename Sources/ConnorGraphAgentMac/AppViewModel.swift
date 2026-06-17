@@ -1222,6 +1222,22 @@ final class AppViewModel: NSObject, ObservableObject {
         selectedSkillManagerCardID = id
     }
 
+    func addWorkspaceSkill() {
+        guard let storagePaths else {
+            errorMessage = "技能目录尚未初始化。"
+            return
+        }
+        do {
+            let skillURL = try SkillTemplateCreator(fileManager: .default).createSkill(in: storagePaths.skillsDirectory)
+            reloadSkillRuntimeDefinitions()
+            selectedSkillManagerCardID = skillURL.deletingLastPathComponent().lastPathComponent
+            NSWorkspace.shared.activateFileViewerSelecting([skillURL])
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
     private func buildCommercialSkillManagerPresentation() -> SkillManagerPresentation {
         guard let storagePaths else {
             return SkillManagerPresentation(
