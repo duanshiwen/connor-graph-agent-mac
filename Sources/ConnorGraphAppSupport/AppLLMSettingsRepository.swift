@@ -33,6 +33,78 @@ public enum AppLLMConnectionKind: String, Sendable, Equatable, CaseIterable, Cod
     }
 }
 
+public enum AppLLMThinkingLevel: String, Sendable, Equatable, CaseIterable, Codable, Identifiable {
+    case off
+    case low
+    case medium
+    case high
+    case xhigh
+    case max
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .off: return "无思考"
+        case .low: return "低"
+        case .medium: return "中等"
+        case .high: return "高"
+        case .xhigh: return "超高"
+        case .max: return "最大"
+        }
+    }
+
+    public var description: String {
+        switch self {
+        case .off: return "最快的响应，无推理"
+        case .low: return "轻量推理，更快的响应"
+        case .medium: return "平衡的速度和推理"
+        case .high: return "深度推理用于复杂任务"
+        case .xhigh: return "适用于长周期代理任务的更深入推理"
+        case .max: return "最大努力推理"
+        }
+    }
+
+    public var effortValue: String? {
+        switch self {
+        case .off: return nil
+        case .low: return "low"
+        case .medium: return "medium"
+        case .high: return "high"
+        case .xhigh: return "xhigh"
+        case .max: return "max"
+        }
+    }
+
+    public var openAIReasoningEffort: String? {
+        switch self {
+        case .off: return nil
+        case .low: return "low"
+        case .medium: return "medium"
+        case .high, .xhigh, .max: return "high"
+        }
+    }
+
+    public var anthropicThinking: AnthropicThinkingConfig? {
+        switch self {
+        case .off: return nil
+        case .low: return .enabled(budgetTokens: 4_000, display: .omitted)
+        case .medium: return .enabled(budgetTokens: 10_000, display: .omitted)
+        case .high: return .enabled(budgetTokens: 20_000, display: .omitted)
+        case .xhigh: return .enabled(budgetTokens: 26_000, display: .omitted)
+        case .max: return .enabled(budgetTokens: 32_000, display: .omitted)
+        }
+    }
+
+    public static let defaultLevel: AppLLMThinkingLevel = .medium
+
+    public static func normalized(_ rawValue: String?) -> AppLLMThinkingLevel? {
+        guard let rawValue else { return nil }
+        if rawValue == "think" { return .medium }
+        return AppLLMThinkingLevel(rawValue: rawValue)
+    }
+}
+
 public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable {
     public var id: String
     public var name: String
@@ -171,13 +243,19 @@ public struct AppLLMModelConnection: Sendable, Identifiable, Equatable {
 public struct AppLLMSettings: Sendable, Equatable {
     public var connections: [AppLLMConnectionConfig]
     public var defaultConnectionID: String
+    public var defaultThinkingLevel: AppLLMThinkingLevel
 
-    public init(connections: [AppLLMConnectionConfig], defaultConnectionID: String) {
+    public init(
+        connections: [AppLLMConnectionConfig],
+        defaultConnectionID: String,
+        defaultThinkingLevel: AppLLMThinkingLevel = .defaultLevel
+    ) {
         let normalizedConnections = connections.isEmpty ? [AppLLMConnectionConfig.defaultOpenAICompatible] : connections
         self.connections = normalizedConnections
         self.defaultConnectionID = normalizedConnections.contains(where: { $0.id == defaultConnectionID })
             ? defaultConnectionID
             : normalizedConnections[0].id
+        self.defaultThinkingLevel = defaultThinkingLevel
     }
 
     public init(
@@ -229,6 +307,7 @@ public struct AppLLMSettings: Sendable, Equatable {
     public var sidecarPermissionMode: AgentPermissionMode { defaultConnection.sidecarPermissionMode }
     public var modelOptions: [String] { defaultConnection.modelOptions }
     public var effectiveModel: String { defaultConnection.effectiveModel }
+    public var effectiveThinkingLevel: AppLLMThinkingLevel { defaultThinkingLevel }
 
     public static func modelOptions(in rawValue: String) -> [String] { AppLLMConnectionConfig.modelOptions(in: rawValue) }
     public static func firstModel(in rawValue: String) -> String { AppLLMConnectionConfig.firstModel(in: rawValue) }
@@ -277,6 +356,7 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
         static let sidecarArguments = "llm.sidecar.arguments"
         static let sidecarWorkingDirectoryPath = "llm.sidecar.workingDirectoryPath"
         static let sidecarPermissionMode = "llm.sidecar.permissionMode"
+        static let defaultThinkingLevel = "llm.defaultThinkingLevel"
     }
 
     public var settingsStore: LLMSettingsStore
@@ -308,7 +388,8 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
             }
             return AppLLMSettings(
                 connections: hydrated,
-                defaultConnectionID: settingsStore.string(forKey: Keys.defaultConnectionID) ?? hydrated.first?.id ?? AppLLMConnectionConfig.defaultOpenAICompatible.id
+                defaultConnectionID: settingsStore.string(forKey: Keys.defaultConnectionID) ?? hydrated.first?.id ?? AppLLMConnectionConfig.defaultOpenAICompatible.id,
+                defaultThinkingLevel: AppLLMThinkingLevel.normalized(settingsStore.string(forKey: Keys.defaultThinkingLevel)) ?? .defaultLevel
             )
         }
         return try loadLegacySettings()
@@ -336,7 +417,11 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
             sidecarWorkingDirectoryPath: settingsStore.string(forKey: Keys.sidecarWorkingDirectoryPath) ?? defaultConnection.sidecarWorkingDirectoryPath,
             sidecarPermissionMode: sidecarPermissionMode
         )
-        return AppLLMSettings(connections: [connection], defaultConnectionID: id)
+        return AppLLMSettings(
+            connections: [connection],
+            defaultConnectionID: id,
+            defaultThinkingLevel: AppLLMThinkingLevel.normalized(settingsStore.string(forKey: Keys.defaultThinkingLevel)) ?? .defaultLevel
+        )
     }
 
     public func save(settings: AppLLMSettings, apiKey: String?) throws {
@@ -347,8 +432,10 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
                 copy.sidecarPermissionMode = copy.sidecarPermissionMode == .allowAll ? .readOnly : copy.sidecarPermissionMode
                 return copy
             },
-            defaultConnectionID: settings.defaultConnectionID
+            defaultConnectionID: settings.defaultConnectionID,
+            defaultThinkingLevel: settings.defaultThinkingLevel
         )
+        settingsStore.set(sanitized.defaultThinkingLevel.rawValue, forKey: Keys.defaultThinkingLevel)
         let data = try JSONEncoder().encode(sanitized.connections)
         settingsStore.set(String(decoding: data, as: UTF8.self), forKey: Keys.connections)
         settingsStore.set(sanitized.defaultConnectionID, forKey: Keys.defaultConnectionID)
@@ -435,7 +522,12 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
         return nil
     }
 
-    public func openAICompatibleConfig(connectionID: String? = nil, modelOverride: String? = nil, baseURLOverride: String? = nil) throws -> OpenAICompatibleConfig? {
+    public func openAICompatibleConfig(
+        connectionID: String? = nil,
+        modelOverride: String? = nil,
+        baseURLOverride: String? = nil,
+        thinkingLevelOverride: AppLLMThinkingLevel? = nil
+    ) throws -> OpenAICompatibleConfig? {
         let settings = try loadSettings()
         guard let connection = settings.connection(id: connectionID), connection.providerMode == .openAICompatible else { return nil }
         guard connection.connectionKind != .anthropicCompatible else { return nil }
@@ -447,16 +539,23 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
         let apiKeyHeaderKind = OpenAICompatibleAPIKeyHeaderKind(rawValue: connection.extraHTTPHeaders[Self.openAIAPIKeyHeaderKindMetadataKey] ?? "") ?? .bearer
         var extraHeaders = connection.extraHTTPHeaders
         extraHeaders.removeValue(forKey: Self.openAIAPIKeyHeaderKindMetadataKey)
+        let thinkingLevel = thinkingLevelOverride ?? settings.defaultThinkingLevel
         return OpenAICompatibleConfig(
             baseURL: baseURL,
             apiKey: apiKey,
             model: modelOverride ?? connection.effectiveModel,
             extraHeaders: extraHeaders,
-            apiKeyHeaderKind: apiKeyHeaderKind
+            apiKeyHeaderKind: apiKeyHeaderKind,
+            reasoningEffort: thinkingLevel.openAIReasoningEffort
         )
     }
 
-    public func anthropicCompatibleConfig(connectionID: String? = nil, modelOverride: String? = nil, baseURLOverride: String? = nil) throws -> AnthropicCompatibleConfig? {
+    public func anthropicCompatibleConfig(
+        connectionID: String? = nil,
+        modelOverride: String? = nil,
+        baseURLOverride: String? = nil,
+        thinkingLevelOverride: AppLLMThinkingLevel? = nil
+    ) throws -> AnthropicCompatibleConfig? {
         let settings = try loadSettings()
         guard let connection = settings.connection(id: connectionID), connection.connectionKind == .anthropicCompatible else { return nil }
         guard let apiKey = try apiKey(for: connection.id), !apiKey.isEmpty else { return nil }
@@ -467,12 +566,14 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
         let authHeaderKind = AnthropicCompatibleAuthHeaderKind(rawValue: connection.extraHTTPHeaders[Self.anthropicAuthHeaderKindMetadataKey] ?? "") ?? .xAPIKey
         var extraHeaders = connection.extraHTTPHeaders
         extraHeaders.removeValue(forKey: Self.anthropicAuthHeaderKindMetadataKey)
+        let thinkingLevel = thinkingLevelOverride ?? settings.defaultThinkingLevel
         return AnthropicCompatibleConfig(
             baseURL: baseURL,
             apiKey: apiKey,
             model: modelOverride ?? connection.effectiveModel,
             authHeaderKind: authHeaderKind,
-            extraHeaders: extraHeaders
+            extraHeaders: extraHeaders,
+            featureOptions: AnthropicCompatibleFeatureOptions(thinking: thinkingLevel.anthropicThinking)
         )
     }
 }

@@ -174,6 +174,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var llmBaseURLString: String = AppLLMSettings.default.baseURLString
     @Published var llmModel: String = AppLLMSettings.default.model
     @Published var llmSelectedModel: String = AppLLMSettings.default.effectiveModel
+    @Published var llmThinkingLevel: AppLLMThinkingLevel = AppLLMSettings.default.defaultThinkingLevel
     @Published var llmAPIKeyInput: String = ""
     @Published var llmHasAPIKey: Bool = false
     @Published var sidecarExecutablePath: String = ""
@@ -1309,6 +1310,7 @@ final class AppViewModel: NSObject, ObservableObject {
             llmBaseURLString = connection.baseURLString
             llmModel = connection.model
             llmSelectedModel = connection.effectiveModel
+            llmThinkingLevel = settings.defaultThinkingLevel
             llmHasAPIKey = connection.hasAPIKey
             llmAPIKeyInput = ""
             sidecarExecutablePath = connection.sidecarExecutablePath
@@ -1342,7 +1344,8 @@ final class AppViewModel: NSObject, ObservableObject {
         state.llmOverride = SessionLLMOverride(
             providerMode: providerMode.rawValue,
             model: modelID,
-            connectionID: connectionID
+            connectionID: connectionID,
+            thinkingLevel: state.llmOverride?.thinkingLevel
         )
         state.updatedAt = Date()
         sessionStateSnapshotsBySessionID[sessionID] = state
@@ -1371,6 +1374,48 @@ final class AppViewModel: NSObject, ObservableObject {
         sidecarWorkingDirectoryPath = connection.sidecarWorkingDirectoryPath
         sidecarPermissionMode = connection.sidecarPermissionMode
         persistLLMSettings(rebuildRuntime: true)
+    }
+
+    func selectLLMThinkingLevel(_ level: AppLLMThinkingLevel) {
+        llmThinkingLevel = level
+        let sessionID = selectedChatSessionID ?? activeChatSession.id
+        var state = sessionStateSnapshotsBySessionID[sessionID]
+            ?? AppSessionStateSnapshot(sessionID: sessionID)
+        let settings = try? llmSettingsRepository.loadSettings()
+        let providerMode = state.llmOverride?.providerMode ?? llmProviderMode.rawValue
+        let model = state.llmOverride?.model ?? llmSelectedModel
+        let connectionID = state.llmOverride?.connectionID ?? llmDefaultConnectionID
+        state.llmOverride = SessionLLMOverride(
+            providerMode: providerMode,
+            model: model,
+            baseURLString: state.llmOverride?.baseURLString,
+            connectionID: connectionID,
+            thinkingLevel: level.rawValue
+        )
+        state.updatedAt = Date()
+        sessionStateSnapshotsBySessionID[sessionID] = state
+        try? chatSessionRepository?.saveSessionState(state, sessionID: sessionID)
+        if state.llmOverride?.connectionID == nil, settings?.defaultConnectionID == connectionID {
+            // Keep the session override explicit; this setting is intentionally session-scoped.
+        }
+        rebuildNativeSessionManagerForActiveSession()
+    }
+
+    func selectDefaultLLMThinkingLevel(_ level: AppLLMThinkingLevel) {
+        do {
+            let existing = (try? llmSettingsRepository.loadSettings()) ?? .default
+            let settings = AppLLMSettings(
+                connections: existing.connections,
+                defaultConnectionID: existing.defaultConnectionID,
+                defaultThinkingLevel: level
+            )
+            try llmSettingsRepository.save(settings: settings, apiKey: nil)
+            llmThinkingLevel = level
+            rebuildNativeSessionManagerForActiveSession()
+            llmSettingsMessage = "默认思考强度已保存。"
+        } catch {
+            errorMessage = String(describing: error)
+        }
     }
 
     @discardableResult
@@ -1508,7 +1553,7 @@ final class AppViewModel: NSObject, ObservableObject {
             } else {
                 connections.append(updatedConnection)
             }
-            let settings = AppLLMSettings(connections: connections, defaultConnectionID: targetID)
+            let settings = AppLLMSettings(connections: connections, defaultConnectionID: targetID, defaultThinkingLevel: llmThinkingLevel)
             llmConnectionConfigs = settings.connections
             llmDefaultConnectionID = settings.defaultConnectionID
             let apiKey = llmAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1582,6 +1627,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private func syncLLMModelDisplayFromSession(_ sessionID: String) {
         if let override = sessionStateSnapshotsBySessionID[sessionID]?.llmOverride {
             llmSelectedModel = override.model
+            llmThinkingLevel = AppLLMThinkingLevel.normalized(override.thinkingLevel) ?? ((try? llmSettingsRepository.loadSettings())?.defaultThinkingLevel ?? llmThinkingLevel)
             if let overrideMode = AppLLMProviderMode(rawValue: override.providerMode) {
                 llmProviderMode = overrideMode
             }
@@ -1591,6 +1637,7 @@ final class AppViewModel: NSObject, ObservableObject {
         } else {
             let settings = try? llmSettingsRepository.loadSettings()
             llmSelectedModel = settings?.effectiveModel ?? llmSelectedModel
+            llmThinkingLevel = settings?.defaultThinkingLevel ?? llmThinkingLevel
             llmProviderMode = settings?.providerMode ?? llmProviderMode
             llmDefaultConnectionID = settings?.defaultConnectionID ?? llmDefaultConnectionID
         }
@@ -1613,6 +1660,7 @@ final class AppViewModel: NSObject, ObservableObject {
         // Fall back to global settings for UI display
         let settings = try? llmSettingsRepository.loadSettings()
         llmSelectedModel = settings?.effectiveModel ?? llmSelectedModel
+        llmThinkingLevel = settings?.defaultThinkingLevel ?? llmThinkingLevel
         llmProviderMode = settings?.providerMode ?? llmProviderMode
         llmDefaultConnectionID = settings?.defaultConnectionID ?? llmDefaultConnectionID
 
