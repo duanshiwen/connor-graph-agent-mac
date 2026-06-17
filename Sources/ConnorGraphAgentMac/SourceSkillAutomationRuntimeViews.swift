@@ -37,7 +37,11 @@ struct SourceRuntimePanelView: View {
                     onTest: { Task { await viewModel.testSourceRuntime(sourceID: card.id) } }
                 )
             } else {
-                MCPSourceEmptyDetailView(summary: presentation.summary, onRefresh: viewModel.reloadSourceRuntimeConfigurations)
+                MCPSourceEmptyDetailView(
+                    summary: presentation.summary,
+                    onAdd: viewModel.presentAddSourceSheet,
+                    onRefresh: viewModel.reloadSourceRuntimeConfigurations
+                )
             }
         }
         .task {
@@ -136,13 +140,14 @@ private struct MCPSourceDetailView: View {
 
 private struct MCPSourceEmptyDetailView: View {
     var summary: SourceRuntimeUISummary
+    var onAdd: () -> Void
     var onRefresh: () -> Void
 
     private var hasSources: Bool { summary.totalCount > 0 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
-            MCPSourceTopBar(title: "MCP Sources", subtitle: "Source Runtime", onRefresh: onRefresh, onTest: nil, isTesting: false)
+            MCPSourceTopBar(title: "MCP Sources", subtitle: "Source Runtime", onAdd: onAdd, onRefresh: onRefresh, onTest: nil, isTesting: false)
             Spacer(minLength: 80)
             ContentUnavailableView(
                 hasSources ? "选择一个 MCP Source" : "暂无 MCP Source",
@@ -150,6 +155,13 @@ private struct MCPSourceEmptyDetailView: View {
                 description: Text(hasSources ? "从左侧列表中选择一个 source，查看它的运行状态、工具目录、治理策略和审计记录。" : "添加并测试 MCP source 后，它的 health、catalog 和 audit 会在这里显示。")
             )
             .frame(maxWidth: .infinity)
+            if !hasSources {
+                Button(action: onAdd) {
+                    Label("添加 Source", systemImage: "plus")
+                }
+                .buttonStyle(.borderedProminent)
+                .frame(maxWidth: .infinity)
+            }
             Spacer()
             SourceSummaryStrip(summary: summary)
         }
@@ -162,6 +174,7 @@ private struct MCPSourceEmptyDetailView: View {
 private struct MCPSourceTopBar: View {
     var title: String
     var subtitle: String
+    var onAdd: (() -> Void)? = nil
     var onRefresh: () -> Void
     var onTest: (() -> Void)?
     var isTesting: Bool
@@ -179,6 +192,13 @@ private struct MCPSourceTopBar: View {
             }
             Spacer()
             HStack(spacing: AgentChatLayout.spaceS) {
+                if let onAdd {
+                    Button(action: onAdd) {
+                        Label("添加 Source", systemImage: "plus")
+                            .font(AgentChatTypography.metaEmphasis)
+                    }
+                    .buttonStyle(.bordered)
+                }
                 if let onTest {
                     Button(action: onTest) {
                         Label(isTesting ? "测试中…" : "测试 Source", systemImage: isTesting ? "hourglass" : "checkmark.circle")
