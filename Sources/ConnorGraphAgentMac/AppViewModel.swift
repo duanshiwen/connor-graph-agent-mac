@@ -205,6 +205,8 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var sourceRuntimeToolCatalogs: [String: [MCPSourceToolDescriptor]] = [:]
     @Published var sourceRuntimeAuditRecordsBySource: [String: [MCPSourceRuntimeAuditRecord]] = [:]
     @Published var selectedSourceRuntimeCardID: String?
+    @Published var testingSourceRuntimeIDs: Set<String> = []
+    @Published var sourceRuntimeTestMessages: [String: String] = [:]
     @Published var skillRuntimeDefinitions: [SkillRuntimeDefinition] = []
     @Published var commercialSkillManagerPresentation: SkillManagerPresentation = SkillManagerPresentation(
         summary: SkillManagerSummary(total: 0, enabled: 0, projectScoped: 0, risky: 0, invalid: 0, sourceBlocked: 0),
@@ -1237,6 +1239,40 @@ final class AppViewModel: NSObject, ObservableObject {
 
     func selectSourceRuntimeCard(_ id: String) {
         selectedSourceRuntimeCardID = id
+    }
+
+    func testSourceRuntime(sourceID: String) async {
+        guard !testingSourceRuntimeIDs.contains(sourceID) else { return }
+        guard let repository = sourceRuntimeRepository else {
+            sourceRuntimeTestMessages[sourceID] = "Source runtime repository is not available."
+            return
+        }
+        guard let configuration = sourceRuntimeConfigurations.first(where: { $0.sourceID == sourceID }) else {
+            sourceRuntimeTestMessages[sourceID] = "Source configuration not found."
+            return
+        }
+        testingSourceRuntimeIDs.insert(sourceID)
+        sourceRuntimeTestMessages[sourceID] = "Testing source…"
+        defer { testingSourceRuntimeIDs.remove(sourceID) }
+
+        let workingDirectoryURL = primaryWorkspaceRootDraft
+            .map(\.path)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
+        let service = MCPSourceTestService(repository: repository, currentDirectoryURL: workingDirectoryURL)
+        do {
+            let report = try await service.testStdioSource(configuration)
+            sourceRuntimeTestMessages[sourceID] = report.success
+                ? "Source test passed · discovered \(report.catalog.count) tools."
+                : "Source test completed with unhealthy status · discovered \(report.catalog.count) tools."
+            reloadSourceRuntimeConfigurations()
+            selectedSourceRuntimeCardID = sourceID
+            errorMessage = nil
+        } catch {
+            sourceRuntimeTestMessages[sourceID] = "Source test failed: \(String(describing: error))"
+            reloadSourceRuntimeConfigurations()
+            selectedSourceRuntimeCardID = sourceID
+        }
     }
 
     func reloadSkillRuntimeDefinitions() {
