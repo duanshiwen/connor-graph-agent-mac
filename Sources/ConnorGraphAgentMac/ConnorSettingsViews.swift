@@ -105,7 +105,26 @@ struct ConnorSettingsDetailView: View {
 
 struct SettingsAppSection: View {
     @ObservedObject var viewModel: AppViewModel
-    @EnvironmentObject private var updateController: ConnorReleaseUpdateController
+
+    private var appVersionDisplay: String {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let shortVersion = (info["CFBundleShortVersionString"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let build = (info["CFBundleVersion"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch (shortVersion?.isEmpty == false ? shortVersion : nil, build?.isEmpty == false ? build : nil) {
+        case let (version?, build?):
+            return "\(version) (\(build))"
+        case let (version?, nil):
+            return version
+        case let (nil, build?):
+            return "Build \(build)"
+        default:
+            return "开发版本"
+        }
+    }
+
+    private var bundleIdentifierDisplay: String {
+        Bundle.main.bundleIdentifier ?? "未知"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -125,34 +144,10 @@ struct SettingsAppSection: View {
                     SettingsTextFieldRow(title: "代理地址", subtitle: "例如 http://127.0.0.1:7890", text: $viewModel.httpProxyURLString)
                 }
             }
-            SettingsGroup(title: "关于与更新") {
-                SettingsValueRow(title: "当前版本", value: updateController.currentVersion.displayText)
+            SettingsGroup(title: "关于") {
+                SettingsValueRow(title: "当前版本", value: appVersionDisplay)
                 Divider()
-                SettingsValueRow(title: "Bundle ID", value: updateController.currentVersion.bundleIdentifier)
-                Divider()
-                SettingsValueRow(title: "更新源", value: updateController.feedURLString)
-                Divider()
-                VStack(alignment: .leading, spacing: SettingsListLayout.spaceM) {
-                    HStack(alignment: .center, spacing: SettingsListLayout.spaceM) {
-                        VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
-                            Text("软件更新")
-                                .font(SettingsListTypography.rowTitleSelected)
-                            Text(updateController.configurationStatus)
-                                .font(SettingsListTypography.rowCaption)
-                                .foregroundStyle(.secondary)
-                                .textSelection(.enabled)
-                        }
-                        Spacer()
-                        Button("检查更新") {
-                            updateController.checkForUpdates()
-                        }
-                        .disabled(!updateController.canCheckForUpdates)
-                    }
-                    Text("点击后由 Sparkle 检查 appcast、展示可用版本并完成下载、验证、安装与重启流程；Connor 不自研二进制替换器。")
-                        .font(SettingsListTypography.rowCaption)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(minHeight: SettingsListLayout.prominentRowMinHeight, alignment: .leading)
+                SettingsValueRow(title: "Bundle ID", value: bundleIdentifierDisplay)
             }
         }
     }
