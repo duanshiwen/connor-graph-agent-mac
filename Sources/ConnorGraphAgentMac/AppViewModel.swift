@@ -208,6 +208,8 @@ final class AppViewModel: NSObject, ObservableObject {
         globalWarnings: []
     )
     @Published var selectedSkillManagerCardID: String?
+    @Published var isAddSkillDialogPresented: Bool = false
+    @Published var addSkillRequestDraft: String = ""
     @Published var sidecarRuntimeDiagnostics: [ClaudeSDKSidecarRuntimeDiagnostics] = []
     @Published var commercialReleaseGateResult: CommercialReadinessReleaseGateResult?
     @Published var productOSRegistryMessage: String?
@@ -1222,20 +1224,43 @@ final class AppViewModel: NSObject, ObservableObject {
         selectedSkillManagerCardID = id
     }
 
-    func addWorkspaceSkill() {
-        guard let storagePaths else {
-            errorMessage = "技能目录尚未初始化。"
-            return
-        }
-        do {
-            let skillURL = try SkillTemplateCreator(fileManager: .default).createSkill(in: storagePaths.skillsDirectory)
-            reloadSkillRuntimeDefinitions()
-            selectedSkillManagerCardID = skillURL.deletingLastPathComponent().lastPathComponent
-            NSWorkspace.shared.activateFileViewerSelecting([skillURL])
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
+    func presentAddSkillDialog() {
+        addSkillRequestDraft = ""
+        isAddSkillDialogPresented = true
+    }
+
+    func cancelAddSkillDialog() {
+        isAddSkillDialogPresented = false
+        addSkillRequestDraft = ""
+    }
+
+    func submitAddSkillRequest() async {
+        let request = addSkillRequestDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !request.isEmpty else { return }
+        isAddSkillDialogPresented = false
+        addSkillRequestDraft = ""
+        newChatSession()
+        guard selectedChatSessionID != nil else { return }
+        let prompt = buildAddSkillAgentPrompt(userRequest: request)
+        await submitChat(prompt: prompt, displayPrompt: "添加技能：\(request)")
+    }
+
+    private func buildAddSkillAgentPrompt(userRequest: String) -> String {
+        let skillRoot = storagePaths?.skillsDirectory.path ?? "~/Library/Application Support/Connor/skills"
+        return """
+        你正在帮助用户为 Connor 创建一个新技能。用户在“添加技能”弹窗中输入了以下需求：
+
+        \(userRequest)
+
+        请按成熟技能创建流程工作：
+        1. 如果需求不清楚，先用简短问题澄清技能的用途、触发时机、输入、输出和约束。
+        2. 如果需求足够清楚，请创建一个新的技能包目录：\(skillRoot)/<kebab-case-slug>/SKILL.md。
+        3. SKILL.md 必须包含 YAML frontmatter：name、description，并可包含 tags 与 x-connor 配置。
+        4. 正文应写成可执行的工作流说明，包括适用场景、步骤、输出格式和注意事项。
+        5. 创建完成后，请验证技能可以被 Connor 扫描，并告诉用户技能名称、slug 和文件路径。
+
+        请不要只给建议；在信息足够时，直接创建文件。
+        """
     }
 
     private func buildCommercialSkillManagerPresentation() -> SkillManagerPresentation {
