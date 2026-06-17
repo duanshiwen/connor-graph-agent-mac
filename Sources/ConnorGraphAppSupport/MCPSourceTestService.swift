@@ -26,12 +26,10 @@ public struct MCPSourceTestReport: Sendable, Equatable {
 
 public enum MCPSourceTestServiceError: Error, Sendable, Equatable, CustomStringConvertible {
     case unsupportedTransport(String)
-    case unsupportedCredentialRequirement(ProductOSCredentialRequirement)
 
     public var description: String {
         switch self {
         case .unsupportedTransport(let message): "unsupportedTransport: \(message)"
-        case .unsupportedCredentialRequirement(let requirement): "unsupportedCredentialRequirement: \(requirement.rawValue)"
         }
     }
 }
@@ -41,31 +39,32 @@ public struct MCPSourceTestService: Sendable {
     public var clientName: String
     public var clientVersion: String
     public var currentDirectoryURL: URL?
+    public var credentialStore: MCPSourceCredentialStore
 
     public init(
         repository: AppMCPSourceRuntimeRepository,
         clientName: String = "Connor",
         clientVersion: String = "1.0",
-        currentDirectoryURL: URL? = nil
+        currentDirectoryURL: URL? = nil,
+        credentialStore: MCPSourceCredentialStore = MCPSourceCredentialStore()
     ) {
         self.repository = repository
         self.clientName = clientName
         self.clientVersion = clientVersion
         self.currentDirectoryURL = currentDirectoryURL
+        self.credentialStore = credentialStore
     }
 
     public func testStdioSource(_ configuration: MCPSourceRuntimeConfiguration, now: Date = Date()) async throws -> MCPSourceTestReport {
         try repository.validateForEnablement(configuration)
-        guard configuration.credentialRequirement == .none else {
-            throw MCPSourceTestServiceError.unsupportedCredentialRequirement(configuration.credentialRequirement)
-        }
         guard case .stdio(let command, let arguments) = configuration.transport else {
             throw MCPSourceTestServiceError.unsupportedTransport("Source test currently supports stdio transport only; HTTP/SSE discovery is not enabled yet.")
         }
+        let environment = try credentialStore.environmentOverrides(for: configuration)
         let transport = MCPStdioClientTransport(
             command: command,
             arguments: arguments,
-            environment: [:],
+            environment: environment,
             currentDirectoryURL: currentDirectoryURL
         )
         let client = MCPJSONRPCClient(transport: transport, clientName: clientName, clientVersion: clientVersion)

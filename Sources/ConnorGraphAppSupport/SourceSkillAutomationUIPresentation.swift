@@ -144,7 +144,9 @@ private extension SourceRuntimeUICard {
             title: configuration.displayName,
             statusLabel: configuration.status.rawValue,
             transportLabel: configuration.transport.uiLabel,
-            credentialLabel: configuration.credentialRequirement.rawValue,
+            credentialLabel: configuration.credentialRequirement == .none
+                ? "none"
+                : "\(configuration.credentialRequirement.rawValue) · env: \(configuration.credentialBindings.map(\.environmentVariable).joined(separator: ", "))",
             capabilityLabels: configuration.allowedCapabilities.map(\.rawValue),
             toolPrefixLabel: configuration.toolNamePrefix,
             graphPolicyLabel: "ingest \(configuration.graphIngestionEnabled ? "on" : "off") · \(configuration.graphWritePolicy.rawValue)",

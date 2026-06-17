@@ -141,6 +141,9 @@ struct MCPSourceDraft: Equatable {
     var command: String = ""
     var argumentsText: String = ""
     var status: ProductOSRegistryEntryStatus = .draft
+    var credentialRequirement: ProductOSCredentialRequirement = .none
+    var credentialEnvironmentText: String = ""
+    var credentialSecret: String = ""
     var allowExternalNetwork: Bool = true
     var allowReadSession: Bool = true
     var allowWorkspaceRead: Bool = false
@@ -154,6 +157,8 @@ struct MCPSourceDraft: Equatable {
         sourceID = configuration.sourceID
         displayName = configuration.displayName
         status = configuration.status
+        credentialRequirement = configuration.credentialRequirement
+        credentialEnvironmentText = configuration.credentialBindings.map(\.environmentVariable).joined(separator: ", ")
         allowExternalNetwork = configuration.allowedCapabilities.contains(.externalNetwork)
         allowReadSession = configuration.allowedCapabilities.contains(.readSession)
         allowWorkspaceRead = configuration.allowedCapabilities.contains(.readWorkspaceFile) || configuration.allowedCapabilities.contains(.listWorkspaceFiles)
@@ -173,6 +178,34 @@ struct MCPSourceDraft: Equatable {
         argumentsText
             .split(whereSeparator: { $0 == "\n" || $0 == " " || $0 == "\t" })
             .map(String.init)
+    }
+
+    var parsedCredentialBindings: [MCPSourceCredentialBinding] {
+        guard credentialRequirement != .none else { return [] }
+        let envsFromBindings = credentialEnvironmentText
+            .split(whereSeparator: { $0 == "," || $0 == "\n" || $0 == " " || $0 == "\t" })
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
+            .filter { !$0.isEmpty }
+        let envsFromSecretLines = parsedCredentialSecretByEnvironment.keys.sorted()
+        return Array(Set(envsFromBindings + envsFromSecretLines))
+            .sorted()
+            .map { MCPSourceCredentialBinding(label: $0, environmentVariable: $0) }
+    }
+
+    var parsedCredentialSecretByEnvironment: [String: String] {
+        var values: [String: String] = [:]
+        for line in credentialSecret.split(whereSeparator: { $0 == "\n" || $0 == ";" }) {
+            let text = String(line).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let separatorIndex = text.firstIndex(of: "=") else { continue }
+            let key = String(text[..<separatorIndex]).trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            let value = String(text[text.index(after: separatorIndex)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !key.isEmpty, !value.isEmpty { values[key] = value }
+        }
+        return values
+    }
+
+    var trimmedCredentialSecret: String {
+        credentialSecret.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     var parsedTags: [String] {
@@ -372,6 +405,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var productOSRegistryRepository: AppProductOSRegistryRepository?
     private var automationRepository: AppProductOSAutomationRepository?
     private var sourceRuntimeRepository: AppMCPSourceRuntimeRepository?
+    private var mcpSourceCredentialStore = MCPSourceCredentialStore()
     private var skillRuntimeRepository: AppSkillRuntimeRepository?
     private var storagePaths: AppStoragePaths?
     private var browserHistoryStore: BrowserHistoryStore?
@@ -1361,7 +1395,8 @@ final class AppViewModel: NSObject, ObservableObject {
                 arguments: draft.parsedArguments
             ),
             status: draft.status,
-            credentialRequirement: .none,
+            credentialRequirement: draft.credentialRequirement,
+            credentialBindings: draft.parsedCredentialBindings,
             allowedCapabilities: draft.allowedCapabilities,
             toolNamePrefix: originalConfiguration?.toolNamePrefix ?? sourceID,
             graphIngestionEnabled: false,
@@ -1372,6 +1407,21 @@ final class AppViewModel: NSObject, ObservableObject {
         )
         do {
             try repository.save(configuration)
+            if configuration.credentialRequirement == .none {
+                if let originalConfiguration {
+                    try mcpSourceCredentialStore.deleteSecrets(sourceID: configuration.sourceID, bindings: originalConfiguration.credentialBindings)
+                }
+            } else if !draft.trimmedCredentialSecret.isEmpty {
+                let secretsByEnvironment = draft.parsedCredentialSecretByEnvironment
+                for binding in configuration.credentialBindings {
+                    let secret = secretsByEnvironment[binding.environmentVariable] ?? draft.trimmedCredentialSecret
+                    try mcpSourceCredentialStore.saveSecret(
+                        secret,
+                        sourceID: configuration.sourceID,
+                        environmentVariable: binding.environmentVariable
+                    )
+                }
+            }
             reloadSourceRuntimeConfigurations()
             selectedSourceRuntimeCardID = configuration.sourceID
             sourceRuntimeTestMessages[configuration.sourceID] = draft.isEditing
@@ -1433,6 +1483,10 @@ final class AppViewModel: NSObject, ObservableObject {
             return
         }
         do {
+            let configuration = sourceRuntimeConfigurations.first(where: { $0.sourceID == sourceID })
+            if let configuration {
+                try mcpSourceCredentialStore.deleteSecrets(sourceID: sourceID, bindings: configuration.credentialBindings)
+            }
             try repository.deleteSourceRuntime(sourceID: sourceID)
             sourceRuntimeTestMessages.removeValue(forKey: sourceID)
             sourceRuntimeToolCatalogs.removeValue(forKey: sourceID)
@@ -1468,7 +1522,11 @@ final class AppViewModel: NSObject, ObservableObject {
             .map(\.path)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
-        let service = MCPSourceTestService(repository: repository, currentDirectoryURL: workingDirectoryURL)
+        let service = MCPSourceTestService(
+            repository: repository,
+            currentDirectoryURL: workingDirectoryURL,
+            credentialStore: mcpSourceCredentialStore
+        )
         do {
             let report = try await service.testStdioSource(configuration)
             sourceRuntimeTestMessages[sourceID] = report.success
