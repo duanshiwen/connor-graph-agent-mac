@@ -282,6 +282,8 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var isPresentingAddSourceSheet: Bool = false
     @Published var addSourceDraft = MCPSourceDraft()
     @Published var addSourceMessage: String?
+    @Published var pendingSourceRuntimeDeletionID: String?
+    @Published var pendingSourceRuntimeDeletionName: String?
     @Published var skillRuntimeDefinitions: [SkillRuntimeDefinition] = []
     @Published var commercialSkillManagerPresentation: SkillManagerPresentation = SkillManagerPresentation(
         summary: SkillManagerSummary(total: 0, enabled: 0, projectScoped: 0, risky: 0, invalid: 0, sourceBlocked: 0),
@@ -1401,6 +1403,50 @@ final class AppViewModel: NSObject, ObservableObject {
             errorMessage = nil
         } catch {
             sourceRuntimeTestMessages[sourceID] = "Unable to update source status: \(String(describing: error))"
+        }
+    }
+
+    func archiveSourceRuntime(sourceID: String) {
+        setSourceRuntimeStatus(sourceID: sourceID, status: .deprecated)
+        sourceRuntimeTestMessages[sourceID] = "Source archived as deprecated. Catalog, health and audit history are preserved."
+    }
+
+    func requestDeleteSourceRuntime(sourceID: String) {
+        guard let configuration = sourceRuntimeConfigurations.first(where: { $0.sourceID == sourceID }) else {
+            sourceRuntimeTestMessages[sourceID] = "Source configuration not found."
+            return
+        }
+        pendingSourceRuntimeDeletionID = sourceID
+        pendingSourceRuntimeDeletionName = configuration.displayName
+    }
+
+    func cancelDeleteSourceRuntime() {
+        pendingSourceRuntimeDeletionID = nil
+        pendingSourceRuntimeDeletionName = nil
+    }
+
+    func confirmDeleteSourceRuntime() {
+        guard let sourceID = pendingSourceRuntimeDeletionID else { return }
+        guard let repository = sourceRuntimeRepository else {
+            sourceRuntimeTestMessages[sourceID] = "Source runtime repository is not available."
+            cancelDeleteSourceRuntime()
+            return
+        }
+        do {
+            try repository.deleteSourceRuntime(sourceID: sourceID)
+            sourceRuntimeTestMessages.removeValue(forKey: sourceID)
+            sourceRuntimeToolCatalogs.removeValue(forKey: sourceID)
+            sourceRuntimeAuditRecordsBySource.removeValue(forKey: sourceID)
+            sourceRuntimeHealthRecords.removeAll { $0.sourceID == sourceID }
+            if selectedSourceRuntimeCardID == sourceID {
+                selectedSourceRuntimeCardID = nil
+            }
+            cancelDeleteSourceRuntime()
+            reloadSourceRuntimeConfigurations()
+            errorMessage = nil
+        } catch {
+            sourceRuntimeTestMessages[sourceID] = "Unable to delete source: \(String(describing: error))"
+            cancelDeleteSourceRuntime()
         }
     }
 

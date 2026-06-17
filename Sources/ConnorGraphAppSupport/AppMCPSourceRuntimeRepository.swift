@@ -269,6 +269,13 @@ public struct AppMCPSourceRuntimeRepository: Sendable {
         return Array(records.suffix(max(0, limit)))
     }
 
+    public func deleteSourceRuntime(sourceID: String) throws {
+        try validateID(sourceID)
+        let directory = sourceDirectory(sourceID: sourceID)
+        guard FileManager.default.fileExists(atPath: directory.path) else { return }
+        try FileManager.default.removeItem(at: directory)
+    }
+
     public func validateForEnablement(_ configuration: MCPSourceRuntimeConfiguration) throws {
         try validate(configuration)
     }

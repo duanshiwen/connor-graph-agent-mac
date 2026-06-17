@@ -677,6 +677,8 @@ Sources/ConnorGraphAgentMac/SourceSkillAutomationRuntimeViews.swift
 - Native MCP Source Manager list/detail UI for persisted health/catalog/audit inspection
 - Native Add/Edit Source sheet for stdio + no-credential MCP source onboarding and maintenance
 - UI-driven Enable/Disable source lifecycle controls
+- Archive Source workflow via `deprecated` status that preserves catalog/health/audit history
+- Confirmed Delete Source workflow for physical removal of a source runtime directory
 - UI-driven Test Source action that refreshes persisted health/catalog/audit after discovery
 - Disabled-source gate
 - MCP tool call event bridge
@@ -688,7 +690,7 @@ Sources/ConnorGraphAgentMac/SourceSkillAutomationRuntimeViews.swift
 - Discovery snapshot
 - Per-source `health.json`、`catalog.json`、`audit.jsonl`
 
-商业级 MCP Platform 下一步仍需补齐:HTTP/SSE/Streamable HTTP production transport、long-lived connection reuse/reconnect、Keychain-backed credential injection、source delete/auth workflow、per-tool permission policy、large/binary result artifact governance、App runtime 动态 source activation。根据当前产品边界,本里程碑刻意不处理 graph ingestion。
+商业级 MCP Platform 下一步仍需补齐:HTTP/SSE/Streamable HTTP production transport、long-lived connection reuse/reconnect、Keychain-backed credential injection、source auth workflow、per-tool permission policy、large/binary result artifact governance、App runtime 动态 source activation。根据当前产品边界,本里程碑刻意不处理 graph ingestion。
 
 边界:MCP servers 是能力提供者;Connor 拥有 registry、lifecycle、health、permission policy、audit 与 readiness。Graph ingestion 不属于当前 MCP Platform MVP。
 
