@@ -1248,18 +1248,18 @@ final class AppViewModel: NSObject, ObservableObject {
             return
         }
         isSubmittingAddSkillRequest = true
-        addSkillDialogMessage = "正在创建一个新的技能创建会话…"
+        addSkillDialogMessage = "康纳正在根据你的需求创建技能…"
         do {
             let title = sanitizedSessionTitle("添加技能：\(request)")
             let session = try chatSessionRepository.createSession(title: title)
             rememberWorkspaceMode(.conversation, for: session.id)
             try loadBackgroundTasks(sessionID: session.id)
             reloadChatSessions(restoreWorkspaceMode: false)
-            addSkillDialogMessage = "已创建会话，康纳正在根据你的需求准备技能…"
             try await runAddSkillRequestInBackgroundSession(session: session, userRequest: request)
             addSkillRequestDraft = ""
-            addSkillDialogMessage = "已发送给康纳。你可以继续留在这里，或稍后在会话列表中查看结果。"
+            addSkillDialogMessage = "技能创建请求已提交。你可以继续留在这里，完成后技能会出现在列表中。"
             reloadChatSessions(restoreWorkspaceMode: false)
+            reloadSkillRuntimeDefinitions()
             errorMessage = nil
         } catch {
             addSkillDialogMessage = "创建失败：\(String(describing: error))"

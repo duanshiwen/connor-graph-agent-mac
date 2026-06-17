@@ -539,7 +539,7 @@ private struct AddSkillRequestDialog: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("添加技能")
                         .font(.title3.weight(.semibold))
-                    Text("告诉康纳你希望新技能帮你完成什么。康纳会在新会话里和你一起创建它。")
+                    Text("告诉康纳你希望新技能帮你完成什么，它会在这里帮你创建。")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
