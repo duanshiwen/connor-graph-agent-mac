@@ -1,4 +1,5 @@
 import SwiftUI
+import ConnorGraphCore
 import ConnorGraphAppSupport
 
 struct SourceRuntimePanelView: View {
@@ -34,6 +35,13 @@ struct SourceRuntimePanelView: View {
                     isTesting: viewModel.testingSourceRuntimeIDs.contains(card.id),
                     testMessage: viewModel.sourceRuntimeTestMessages[card.id],
                     onRefresh: viewModel.reloadSourceRuntimeConfigurations,
+                    onEdit: { viewModel.presentEditSourceSheet(sourceID: card.id) },
+                    onToggleEnabled: {
+                        viewModel.setSourceRuntimeStatus(
+                            sourceID: card.id,
+                            status: configuration.status == .enabled ? .disabled : .enabled
+                        )
+                    },
                     onTest: { Task { await viewModel.testSourceRuntime(sourceID: card.id) } }
                 )
             } else {
@@ -61,12 +69,23 @@ private struct MCPSourceDetailView: View {
     var isTesting: Bool
     var testMessage: String?
     var onRefresh: () -> Void
+    var onEdit: () -> Void
+    var onToggleEnabled: () -> Void
     var onTest: () -> Void
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
-                MCPSourceTopBar(title: card.title, subtitle: "MCP Source", onRefresh: onRefresh, onTest: onTest, isTesting: isTesting)
+                MCPSourceTopBar(
+                    title: card.title,
+                    subtitle: "MCP Source",
+                    status: configuration.status,
+                    onRefresh: onRefresh,
+                    onEdit: onEdit,
+                    onToggleEnabled: onToggleEnabled,
+                    onTest: onTest,
+                    isTesting: isTesting
+                )
                 MCPSourceHeroSection(card: card, configuration: configuration)
 
                 if let testMessage, !testMessage.isEmpty {
@@ -174,8 +193,11 @@ private struct MCPSourceEmptyDetailView: View {
 private struct MCPSourceTopBar: View {
     var title: String
     var subtitle: String
+    var status: ProductOSRegistryEntryStatus? = nil
     var onAdd: (() -> Void)? = nil
     var onRefresh: () -> Void
+    var onEdit: (() -> Void)? = nil
+    var onToggleEnabled: (() -> Void)? = nil
     var onTest: (() -> Void)?
     var isTesting: Bool
 
@@ -198,6 +220,21 @@ private struct MCPSourceTopBar: View {
                             .font(AgentChatTypography.metaEmphasis)
                     }
                     .buttonStyle(.bordered)
+                }
+                if let onEdit {
+                    Button(action: onEdit) {
+                        Label("编辑", systemImage: "pencil")
+                            .font(AgentChatTypography.metaEmphasis)
+                    }
+                    .buttonStyle(.bordered)
+                }
+                if let onToggleEnabled {
+                    Button(action: onToggleEnabled) {
+                        Label(status == .enabled ? "停用" : "启用", systemImage: status == .enabled ? "pause.circle" : "play.circle")
+                            .font(AgentChatTypography.metaEmphasis)
+                    }
+                    .buttonStyle(.bordered)
+                    .help(status == .enabled ? "停用后不会注入 Agent runtime。" : "启用后有 catalog 的 source 可注入 Agent runtime。")
                 }
                 if let onTest {
                     Button(action: onTest) {

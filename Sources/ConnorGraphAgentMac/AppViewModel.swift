@@ -135,16 +135,39 @@ private extension AppSessionBackgroundTaskStatus {
 }
 
 struct MCPSourceDraft: Equatable {
+    var editingSourceID: String?
     var sourceID: String = ""
     var displayName: String = ""
     var command: String = ""
     var argumentsText: String = ""
-    var enableImmediately: Bool = false
+    var status: ProductOSRegistryEntryStatus = .draft
     var allowExternalNetwork: Bool = true
     var allowReadSession: Bool = true
     var allowWorkspaceRead: Bool = false
     var tagsText: String = "mcp"
     var notes: String = ""
+
+    init() {}
+
+    init(configuration: MCPSourceRuntimeConfiguration) {
+        editingSourceID = configuration.sourceID
+        sourceID = configuration.sourceID
+        displayName = configuration.displayName
+        status = configuration.status
+        allowExternalNetwork = configuration.allowedCapabilities.contains(.externalNetwork)
+        allowReadSession = configuration.allowedCapabilities.contains(.readSession)
+        allowWorkspaceRead = configuration.allowedCapabilities.contains(.readWorkspaceFile) || configuration.allowedCapabilities.contains(.listWorkspaceFiles)
+        tagsText = configuration.tags.joined(separator: ", ")
+        notes = configuration.notes
+        switch configuration.transport {
+        case .stdio(let command, let arguments):
+            self.command = command
+            self.argumentsText = arguments.joined(separator: " ")
+        case .http(let url):
+            self.command = url.absoluteString
+            self.argumentsText = ""
+        }
+    }
 
     var parsedArguments: [String] {
         argumentsText
@@ -179,6 +202,8 @@ struct MCPSourceDraft: Equatable {
         let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? normalizedSourceID : trimmed
     }
+
+    var isEditing: Bool { editingSourceID != nil }
 }
 
 @MainActor
@@ -1297,6 +1322,16 @@ final class AppViewModel: NSObject, ObservableObject {
         isPresentingAddSourceSheet = true
     }
 
+    func presentEditSourceSheet(sourceID: String) {
+        guard let configuration = sourceRuntimeConfigurations.first(where: { $0.sourceID == sourceID }) else {
+            sourceRuntimeTestMessages[sourceID] = "Source configuration not found."
+            return
+        }
+        addSourceDraft = MCPSourceDraft(configuration: configuration)
+        addSourceMessage = nil
+        isPresentingAddSourceSheet = true
+    }
+
     func dismissAddSourceSheet() {
         isPresentingAddSourceSheet = false
         addSourceMessage = nil
@@ -1308,32 +1343,64 @@ final class AppViewModel: NSObject, ObservableObject {
             return
         }
         let draft = addSourceDraft
+        let originalConfiguration = draft.editingSourceID.flatMap { sourceID in
+            sourceRuntimeConfigurations.first(where: { $0.sourceID == sourceID })
+        }
+        if let originalSourceID = draft.editingSourceID, draft.normalizedSourceID != originalSourceID {
+            addSourceMessage = "Editing Source ID is not supported yet. Create a new source instead."
+            return
+        }
+        let sourceID = originalConfiguration?.sourceID ?? draft.normalizedSourceID
         let configuration = MCPSourceRuntimeConfiguration(
-            sourceID: draft.normalizedSourceID,
+            sourceID: sourceID,
             displayName: draft.normalizedDisplayName,
             transport: .stdio(
                 command: draft.command.trimmingCharacters(in: .whitespacesAndNewlines),
                 arguments: draft.parsedArguments
             ),
-            status: draft.enableImmediately ? .enabled : .draft,
+            status: draft.status,
             credentialRequirement: .none,
             allowedCapabilities: draft.allowedCapabilities,
-            toolNamePrefix: draft.normalizedSourceID,
+            toolNamePrefix: originalConfiguration?.toolNamePrefix ?? sourceID,
             graphIngestionEnabled: false,
             graphWritePolicy: .readOnly,
             tags: draft.parsedTags,
-            notes: draft.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+            notes: draft.notes.trimmingCharacters(in: .whitespacesAndNewlines),
+            createdAt: originalConfiguration?.createdAt ?? Date()
         )
         do {
             try repository.save(configuration)
             reloadSourceRuntimeConfigurations()
             selectedSourceRuntimeCardID = configuration.sourceID
-            sourceRuntimeTestMessages[configuration.sourceID] = "Source saved. Run Test Source to discover tools."
+            sourceRuntimeTestMessages[configuration.sourceID] = draft.isEditing
+                ? "Source updated. Run Test Source to refresh tools if transport changed."
+                : "Source saved. Run Test Source to discover tools."
             isPresentingAddSourceSheet = false
             addSourceMessage = nil
             errorMessage = nil
         } catch {
             addSourceMessage = "Unable to save source: \(String(describing: error))"
+        }
+    }
+
+    func setSourceRuntimeStatus(sourceID: String, status: ProductOSRegistryEntryStatus) {
+        guard let repository = sourceRuntimeRepository else {
+            sourceRuntimeTestMessages[sourceID] = "Source runtime repository is not available."
+            return
+        }
+        guard var configuration = sourceRuntimeConfigurations.first(where: { $0.sourceID == sourceID }) else {
+            sourceRuntimeTestMessages[sourceID] = "Source configuration not found."
+            return
+        }
+        configuration.status = status
+        do {
+            try repository.save(configuration)
+            reloadSourceRuntimeConfigurations()
+            selectedSourceRuntimeCardID = sourceID
+            sourceRuntimeTestMessages[sourceID] = "Source status updated to \(status.rawValue)."
+            errorMessage = nil
+        } catch {
+            sourceRuntimeTestMessages[sourceID] = "Unable to update source status: \(String(describing: error))"
         }
     }
 

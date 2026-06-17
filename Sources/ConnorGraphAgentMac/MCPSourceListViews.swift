@@ -1,4 +1,5 @@
 import SwiftUI
+import ConnorGraphCore
 import ConnorGraphAppSupport
 
 struct CraftSourceListPane: View {
@@ -125,9 +126,9 @@ private struct MCPSourceAddSheet: View {
         VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
-                    Text("添加 MCP Source")
+                    Text(draft.isEditing ? "编辑 MCP Source" : "添加 MCP Source")
                         .font(.system(size: 22, weight: .semibold))
-                    Text("当前最小闭环支持 stdio + no credential。保存后可立即运行 Test Source 发现工具目录。")
+                    Text("当前最小闭环支持 stdio + no credential。保存后可运行 Test Source 刷新工具目录。")
                         .font(AgentChatTypography.meta)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -143,7 +144,13 @@ private struct MCPSourceAddSheet: View {
             Form {
                 Section("Identity") {
                     TextField("Source ID，例如 local-files", text: $draft.sourceID)
+                        .disabled(draft.isEditing)
                     TextField("Display Name，例如 Local Files MCP", text: $draft.displayName)
+                    if draft.isEditing {
+                        Text("Source ID editing is disabled to preserve persisted catalog/audit paths.")
+                            .font(AgentChatTypography.meta)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Section("Transport") {
@@ -157,7 +164,12 @@ private struct MCPSourceAddSheet: View {
                 }
 
                 Section("Governance") {
-                    Toggle("Enable immediately", isOn: $draft.enableImmediately)
+                    Picker("Status", selection: $draft.status) {
+                        Text("Draft").tag(ProductOSRegistryEntryStatus.draft)
+                        Text("Enabled").tag(ProductOSRegistryEntryStatus.enabled)
+                        Text("Disabled").tag(ProductOSRegistryEntryStatus.disabled)
+                        Text("Needs Review").tag(ProductOSRegistryEntryStatus.needsReview)
+                    }
                     Toggle("Allow external network", isOn: $draft.allowExternalNetwork)
                     Toggle("Allow read session", isOn: $draft.allowReadSession)
                     Toggle("Allow workspace read", isOn: $draft.allowWorkspaceRead)
@@ -188,7 +200,7 @@ private struct MCPSourceAddSheet: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button("取消", action: onCancel)
-                Button("保存 Source", action: onSave)
+                Button(draft.isEditing ? "保存修改" : "保存 Source", action: onSave)
                     .buttonStyle(.borderedProminent)
                     .disabled(!canSave)
                     .keyboardShortcut(.defaultAction)
