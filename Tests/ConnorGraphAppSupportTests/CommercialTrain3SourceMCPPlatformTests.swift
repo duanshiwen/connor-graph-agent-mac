@@ -112,7 +112,7 @@ private func temporaryTrain3StoragePaths(_ name: String = UUID().uuidString) -> 
     #expect(snapshot.healthRecord.healthStatus == .healthy)
     #expect(snapshot.healthRecord.capabilitySnapshot?.protocolVersion == "2025-11-25")
     #expect(snapshot.healthRecord.capabilitySnapshot?.supportsElicitation == true)
-    #expect(snapshot.catalog.map(\.name) == ["linear.list_issues"])
+    #expect(snapshot.catalog.map(\.name) == ["mcp__linear__list_issues"])
     #expect(snapshot.auditRecords.map(\.eventKind) == [.discoveryStarted, .discoveryFinished])
 }
 

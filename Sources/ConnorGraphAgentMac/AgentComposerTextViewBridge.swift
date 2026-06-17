@@ -6,14 +6,23 @@ import ConnorGraphAgent
 import ConnorGraphSearch
 import ConnorGraphAppSupport
 
+enum SkillPickerKeyCommand {
+    case moveUp
+    case moveDown
+    case confirm
+    case cancel
+}
+
 struct SafeChatComposerTextView: NSViewRepresentable {
     @Binding var text: String
     var placeholder: String
     var isSpellCheckEnabled: Bool
     var sendShortcut: String
+    var isSkillPickerPresented: Bool = false
     var onSubmit: () -> Void
     var onImportFiles: ([URL]) -> Void
-    var onSlashCommand: (() -> Void)? = nil
+    var onSlashCommand: ((CGRect, NSRange) -> Void)? = nil
+    var onSkillPickerKeyCommand: ((SkillPickerKeyCommand) -> Void)? = nil
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
@@ -28,7 +37,9 @@ struct SafeChatComposerTextView: NSViewRepresentable {
         textView.onSubmit = onSubmit
         textView.onImportFiles = onImportFiles
         textView.onSlashCommand = onSlashCommand
+        textView.onSkillPickerKeyCommand = onSkillPickerKeyCommand
         textView.sendShortcut = sendShortcut
+        textView.isSkillPickerPresented = isSkillPickerPresented
         textView.placeholderString = placeholder
         textView.isRichText = false
         textView.importsGraphics = false
@@ -66,7 +77,9 @@ struct SafeChatComposerTextView: NSViewRepresentable {
         textView.onSubmit = onSubmit
         textView.onImportFiles = onImportFiles
         textView.onSlashCommand = onSlashCommand
+        textView.onSkillPickerKeyCommand = onSkillPickerKeyCommand
         textView.sendShortcut = sendShortcut
+        textView.isSkillPickerPresented = isSkillPickerPresented
         textView.placeholderString = placeholder
         textView.font = AgentChatTypography.composerNSFont
         if textView.string != text {
@@ -97,8 +110,10 @@ struct SafeChatComposerTextView: NSViewRepresentable {
 final class SubmitAwareTextView: NSTextView {
     var onSubmit: (() -> Void)?
     var onImportFiles: (([URL]) -> Void)?
-    var onSlashCommand: (() -> Void)?
+    var onSlashCommand: ((CGRect, NSRange) -> Void)?
+    var onSkillPickerKeyCommand: ((SkillPickerKeyCommand) -> Void)?
     var sendShortcut: String = "return"
+    var isSkillPickerPresented: Bool = false
     var placeholderString: String = "" {
         didSet { needsDisplay = true }
     }
@@ -107,7 +122,33 @@ final class SubmitAwareTextView: NSTextView {
         didSet { needsDisplay = true }
     }
 
+    override func keyDown(with event: NSEvent) {
+        if isSkillPickerPresented {
+            switch event.keyCode {
+            case 126:
+                onSkillPickerKeyCommand?(.moveUp)
+                return
+            case 125:
+                onSkillPickerKeyCommand?(.moveDown)
+                return
+            case 36, 76:
+                onSkillPickerKeyCommand?(.confirm)
+                return
+            case 53:
+                onSkillPickerKeyCommand?(.cancel)
+                return
+            default:
+                break
+            }
+        }
+        super.keyDown(with: event)
+    }
+
     override func insertNewline(_ sender: Any?) {
+        if isSkillPickerPresented {
+            onSkillPickerKeyCommand?(.confirm)
+            return
+        }
         let flags = NSApp.currentEvent?.modifierFlags ?? []
         if flags.contains(.shift) || flags.contains(.option) {
             super.insertNewline(sender)
@@ -128,11 +169,25 @@ final class SubmitAwareTextView: NSTextView {
             let isStartOfLine = cursorLocation == 0 || (cursorLocation > 0 && currentString.character(at: cursorLocation - 1) == UInt16(10))
             if isStartOfLine {
                 super.insertText(string, replacementRange: replacementRange)
-                onSlashCommand?()
+                let slashLocation = max(0, selectedRange().location - 1)
+                onSlashCommand?(slashCommandAnchorRect(), NSRange(location: slashLocation, length: 1))
                 return
             }
         }
         super.insertText(string, replacementRange: replacementRange)
+    }
+
+    private func slashCommandAnchorRect() -> CGRect {
+        let location = selectedRange().location
+        let screenRect = firstRect(forCharacterRange: NSRange(location: location, length: 0), actualRange: nil)
+        if let window {
+            let windowRect = window.convertFromScreen(screenRect)
+            let localRect = convert(windowRect, from: nil)
+            if localRect.isNull == false, localRect.isInfinite == false {
+                return localRect
+            }
+        }
+        return CGRect(x: textContainerInset.width, y: textContainerInset.height, width: 1, height: font?.pointSize ?? 16)
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {

@@ -160,6 +160,7 @@ public struct SkillManifest: Codable, Sendable, Equatable, Hashable {
     public var version: String?
     public var publisher: String?
     public var connor: ConnorSkillExtension
+    public var hidden: Bool
     public var unsupportedFields: [String]
     public var warnings: [String]
 
@@ -186,6 +187,7 @@ public struct SkillManifest: Codable, Sendable, Equatable, Hashable {
         tags: [String] = [],
         version: String? = nil,
         publisher: String? = nil,
+        hidden: Bool = false,
         connor: ConnorSkillExtension = ConnorSkillExtension(),
         unsupportedFields: [String] = [],
         warnings: [String] = []
@@ -213,6 +215,7 @@ public struct SkillManifest: Codable, Sendable, Equatable, Hashable {
         self.version = version
         self.publisher = publisher
         self.connor = connor
+        self.hidden = hidden
         self.unsupportedFields = unsupportedFields
         self.warnings = warnings
     }
