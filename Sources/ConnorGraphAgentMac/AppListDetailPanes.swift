@@ -21,7 +21,7 @@ struct CraftListPaneView: View {
             case .sources:
                 CraftSimpleListPane(title: "数据源", subtitle: "MCP Source Runtime", rows: viewModel.sourceRuntimeConfigurations.map(\.displayName))
             case .skills:
-                CraftSimpleListPane(title: "技能", subtitle: "Skill Runtime", rows: viewModel.skillRuntimeDefinitions.map { $0.manifest.name })
+                CraftSkillListPane(viewModel: viewModel)
             case .automation:
                 CraftSimpleListPane(title: "自动化", subtitle: "事件触发与执行历史", rows: viewModel.automationConfig.rules.map(\.name))
             case .productOS:
@@ -467,3 +467,136 @@ struct CraftSimpleListPane: View {
     }
 }
 
+
+struct CraftSkillListPane: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(spacing: 3) {
+                Text("技能")
+                    .font(AppListTypography.header)
+                Text("Skill Runtime")
+                    .font(AppListTypography.rowSubtitle)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            Divider()
+
+            if viewModel.commercialSkillManagerPresentation.cards.isEmpty {
+                ContentUnavailableView("暂无技能", systemImage: "bolt", description: Text("在 .agents/skills 或 Connor skills 目录添加 SKILL.md。"))
+                    .padding(.top, 80)
+            } else {
+                List(viewModel.commercialSkillManagerPresentation.cards) { card in
+                    CraftSkillRow(
+                        card: card,
+                        isSelected: card.id == viewModel.selectedSkillManagerCardID,
+                        onSelect: { viewModel.selectSkillManagerCard(card.id) }
+                    )
+                    .listRowInsets(EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .task { viewModel.reloadSkillRuntimeDefinitions() }
+    }
+}
+
+struct CraftSkillRow: View {
+    var card: SkillManagerCard
+    var isSelected: Bool
+    var onSelect: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(skillAccent.opacity(isSelected ? 0.20 : 0.12))
+                Image(systemName: iconName)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(skillAccent)
+            }
+            .frame(width: 24, height: 24)
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Text(card.title)
+                        .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    Text(card.sourceTier)
+                        .font(AppListTypography.rowCaption)
+                        .foregroundStyle(.secondary)
+                }
+                Text(card.subtitle)
+                    .font(AppListTypography.rowSubtitle)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                HStack(spacing: 5) {
+                    SkillMiniChip(text: card.riskLabel, color: riskColor)
+                    SkillMiniChip(text: card.trustState, color: trustColor)
+                    if !card.requiredSources.isEmpty {
+                        SkillMiniChip(text: "sources \(card.requiredSources.count)", color: .blue)
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(rowBackgroundColor, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .onTapGesture(perform: onSelect)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+    }
+
+    private var rowBackgroundColor: Color {
+        isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor)
+    }
+
+    private var iconName: String {
+        card.warnings.isEmpty ? "bolt.fill" : "exclamationmark.triangle.fill"
+    }
+
+    private var skillAccent: Color {
+        if !card.warnings.isEmpty { return .orange }
+        if card.riskLabel == "high" || card.riskLabel == "critical" { return .orange }
+        return .accentColor
+    }
+
+    private var riskColor: Color {
+        switch card.riskLabel {
+        case "high", "critical": .orange
+        case "medium": .blue
+        default: .secondary
+        }
+    }
+
+    private var trustColor: Color {
+        switch card.trustState {
+        case "projectRequiresTrust", "unknown": .orange
+        case "bundledTrusted", "trusted", "userTrusted": .green
+        default: .secondary
+        }
+    }
+}
+
+private struct SkillMiniChip: View {
+    var text: String
+    var color: Color
+
+    var body: some View {
+        Text(text)
+            .font(AppListTypography.rowCaption)
+            .lineLimit(1)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.12), in: Capsule())
+            .foregroundStyle(color)
+    }
+}

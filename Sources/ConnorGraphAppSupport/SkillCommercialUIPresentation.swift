@@ -24,6 +24,8 @@ public struct SkillManagerCard: Sendable, Equatable, Identifiable {
     public var title: String
     public var subtitle: String
     public var path: String
+    public var packagePath: String
+    public var instructions: String
     public var sourceTier: String
     public var trustState: String
     public var riskLabel: String
@@ -33,11 +35,13 @@ public struct SkillManagerCard: Sendable, Equatable, Identifiable {
     public var overrideChain: [String]
     public var warnings: [String]
 
-    public init(id: String, title: String, subtitle: String, path: String, sourceTier: String, trustState: String, riskLabel: String, lifecycleLabel: String, requiredSources: [String], permissionLabels: [String], overrideChain: [String], warnings: [String]) {
+    public init(id: String, title: String, subtitle: String, path: String, packagePath: String = "", instructions: String = "", sourceTier: String, trustState: String, riskLabel: String, lifecycleLabel: String, requiredSources: [String], permissionLabels: [String], overrideChain: [String], warnings: [String]) {
         self.id = id
         self.title = title
         self.subtitle = subtitle
         self.path = path
+        self.packagePath = packagePath
+        self.instructions = instructions
         self.sourceTier = sourceTier
         self.trustState = trustState
         self.riskLabel = riskLabel
@@ -74,6 +78,8 @@ public struct SkillCommercialUIPresentationBuilder: Sendable {
                 title: selected.manifest.name,
                 subtitle: selected.manifest.description,
                 path: selected.skillFilePath,
+                packagePath: selected.packagePath,
+                instructions: selected.instructions,
                 sourceTier: selected.sourceTier.rawValue,
                 trustState: selected.trustState.rawValue,
                 riskLabel: selected.riskLevel.rawValue,
