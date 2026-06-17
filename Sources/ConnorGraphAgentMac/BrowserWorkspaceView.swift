@@ -343,16 +343,17 @@ struct BrowserWorkspaceView: View {
     }
 
     private func closeTab(_ id: BrowserTabState.ID) {
+        var shouldReturnToConversation = false
         mutateActiveSession { session in
             guard let index = session.tabs.firstIndex(where: { $0.id == id }) else { return }
             let wasSelected = session.selectedTabID == id
             session.tabs.remove(at: index)
+            session.webViewsByTabID[id] = nil
             session.selectionPopover = session.selectionPopover?.tabID == id ? nil : session.selectionPopover
 
             if session.tabs.isEmpty {
-                let fallback = BrowserTabState(initialURLString: defaultURLString)
-                session.tabs = [fallback]
-                session.selectedTabID = fallback.id
+                session.selectedTabID = nil
+                shouldReturnToConversation = true
                 return
             }
 
@@ -361,7 +362,12 @@ struct BrowserWorkspaceView: View {
                 session.selectedTabID = session.tabs[nextIndex].id
             }
         }
-        syncAddressTextWithActiveTab()
+
+        if shouldReturnToConversation {
+            viewModel.returnFromBrowserWorkspace()
+        } else {
+            syncAddressTextWithActiveTab()
+        }
     }
 
     private func setWebView(_ webView: WKWebView, for tabID: BrowserTabState.ID) {
