@@ -201,6 +201,10 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var automationTriggerRecords: [ProductOSAutomationTriggerRecord] = []
     @Published var automationExecutionHistory: [ProductOSAutomationExecutionHistoryRecord] = []
     @Published var sourceRuntimeConfigurations: [MCPSourceRuntimeConfiguration] = []
+    @Published var sourceRuntimeHealthRecords: [MCPSourceRuntimeHealthRecord] = []
+    @Published var sourceRuntimeToolCatalogs: [String: [MCPSourceToolDescriptor]] = [:]
+    @Published var sourceRuntimeAuditRecordsBySource: [String: [MCPSourceRuntimeAuditRecord]] = [:]
+    @Published var selectedSourceRuntimeCardID: String?
     @Published var skillRuntimeDefinitions: [SkillRuntimeDefinition] = []
     @Published var commercialSkillManagerPresentation: SkillManagerPresentation = SkillManagerPresentation(
         summary: SkillManagerSummary(total: 0, enabled: 0, projectScoped: 0, risky: 0, invalid: 0, sourceBlocked: 0),
@@ -1210,11 +1214,29 @@ final class AppViewModel: NSObject, ObservableObject {
 
     func reloadSourceRuntimeConfigurations() {
         do {
-            sourceRuntimeConfigurations = try sourceRuntimeRepository?.list() ?? []
+            let configurations = try sourceRuntimeRepository?.list() ?? []
+            sourceRuntimeConfigurations = configurations
+            sourceRuntimeHealthRecords = try sourceRuntimeRepository?.listHealthRecords() ?? []
+            var catalogs: [String: [MCPSourceToolDescriptor]] = [:]
+            var audits: [String: [MCPSourceRuntimeAuditRecord]] = [:]
+            for configuration in configurations {
+                catalogs[configuration.sourceID] = try sourceRuntimeRepository?.loadToolCatalog(sourceID: configuration.sourceID) ?? []
+                audits[configuration.sourceID] = try sourceRuntimeRepository?.loadRecentAuditRecords(sourceID: configuration.sourceID, limit: 12) ?? []
+            }
+            sourceRuntimeToolCatalogs = catalogs
+            sourceRuntimeAuditRecordsBySource = audits
+            if let selectedSourceRuntimeCardID,
+               !configurations.contains(where: { $0.sourceID == selectedSourceRuntimeCardID }) {
+                self.selectedSourceRuntimeCardID = nil
+            }
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
         }
+    }
+
+    func selectSourceRuntimeCard(_ id: String) {
+        selectedSourceRuntimeCardID = id
     }
 
     func reloadSkillRuntimeDefinitions() {
