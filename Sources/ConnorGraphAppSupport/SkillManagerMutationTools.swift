@@ -19,6 +19,8 @@ public enum SkillManagerMutationToolError: Error, Sendable, Equatable, CustomStr
 }
 
 public struct SkillManagerMutationService: Sendable {
+    public static let skillManifestFileName = "SKILL.md"
+
     public var storagePaths: AppStoragePaths
     public var parser: SkillManifestParser
 
@@ -39,9 +41,8 @@ public struct SkillManagerMutationService: Sendable {
     ) throws -> String {
         let slug = normalizedSlug(rawSlug)
         try validateSlug(slug)
-        let directory = userSkillDirectory(slug: slug)
-        try validateUserSkillDirectory(directory, slug: slug)
-        let skillURL = directory.appendingPathComponent("SKILL.md")
+        let directory = try validatedUserSkillDirectory(slug: slug)
+        let skillURL = skillManifestURL(in: directory)
         if FileManager.default.fileExists(atPath: skillURL.path), !overwrite {
             throw SkillManagerMutationToolError.invalidSlug("Skill \(slug) already exists. Pass overwrite=true to replace it.")
         }
@@ -70,16 +71,15 @@ public struct SkillManagerMutationService: Sendable {
     ) throws -> String {
         let slug = normalizedSlug(rawSlug)
         try validateSlug(slug)
-        let directory = userSkillDirectory(slug: slug)
-        try validateUserSkillDirectory(directory, slug: slug)
-        let skillURL = directory.appendingPathComponent("SKILL.md")
+        let directory = try validatedUserSkillDirectory(slug: slug)
+        let skillURL = skillManifestURL(in: directory)
         guard FileManager.default.fileExists(atPath: skillURL.path) else { throw SkillManagerMutationToolError.missingSkill(slug) }
         let raw = try String(contentsOf: skillURL, encoding: .utf8)
         let parsed = try parser.parse(markdown: raw, slug: slug)
         let markdown = renderSkillMarkdown(
-            name: name?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? name! : parsed.manifest.name,
-            description: description?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? description! : parsed.manifest.description,
-            instructions: instructions?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? instructions! : parsed.instructions,
+            name: nonEmpty(name, fallback: parsed.manifest.name),
+            description: nonEmpty(description, fallback: parsed.manifest.description),
+            instructions: nonEmpty(instructions, fallback: parsed.instructions),
             tags: tags ?? parsed.manifest.tags,
             globs: globs ?? parsed.manifest.globs,
             slug: slug
@@ -92,19 +92,35 @@ public struct SkillManagerMutationService: Sendable {
     public func deleteSkill(slug rawSlug: String) throws {
         let slug = normalizedSlug(rawSlug)
         try validateSlug(slug)
-        let directory = userSkillDirectory(slug: slug)
-        try validateUserSkillDirectory(directory, slug: slug)
+        let directory = try validatedUserSkillDirectory(slug: slug)
         guard FileManager.default.fileExists(atPath: directory.path) else { throw SkillManagerMutationToolError.missingSkill(slug) }
         try FileManager.default.removeItem(at: directory)
+    }
+
+    public func skillManifestURL(slug rawSlug: String) throws -> URL {
+        let slug = normalizedSlug(rawSlug)
+        try validateSlug(slug)
+        return skillManifestURL(in: try validatedUserSkillDirectory(slug: slug))
     }
 
     private func userSkillDirectory(slug: String) -> URL {
         storagePaths.skillsDirectory.appendingPathComponent(slug, isDirectory: true).standardizedFileURL
     }
 
-    private func validateUserSkillDirectory(_ directory: URL, slug: String) throws {
+    private func skillManifestURL(in directory: URL) -> URL {
+        directory.appendingPathComponent(Self.skillManifestFileName)
+    }
+
+    private func validatedUserSkillDirectory(slug: String) throws -> URL {
+        let directory = userSkillDirectory(slug: slug)
         let expected = storagePaths.skillsDirectory.appendingPathComponent(slug, isDirectory: true).standardizedFileURL.path
-        guard directory.standardizedFileURL.path == expected else { throw SkillManagerMutationToolError.unsafePath(directory.path) }
+        guard directory.path == expected else { throw SkillManagerMutationToolError.unsafePath(directory.path) }
+        return directory
+    }
+
+    private func nonEmpty(_ candidate: String?, fallback: String) -> String {
+        guard let candidate, !candidate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return fallback }
+        return candidate
     }
 
     private func normalizedSlug(_ raw: String) -> String {
@@ -187,7 +203,12 @@ public struct ConnorSkillCreateTool: AgentTool {
             globs: arguments.stringArray("globs"),
             overwrite: arguments.bool("overwrite") ?? false
         )
-        return AgentToolResult(runID: context.runID, sessionID: context.sessionID, toolCallID: context.toolCallID, toolName: self.name, contentText: "Created Connor skill `\(slug)` at \(path).", contentJSON: "{\"slug\":\"\(slug)\",\"path\":\"\(path)\"}")
+        return skillMutationToolResult(
+            context: context,
+            toolName: self.name,
+            contentText: "Created Connor skill `\(slug)` at \(path).",
+            payload: ["slug": slug, "path": path]
+        )
     }
 }
 
@@ -220,7 +241,12 @@ public struct ConnorSkillUpdateTool: AgentTool {
             tags: arguments.array("tags") == nil ? nil : arguments.stringArray("tags"),
             globs: arguments.array("globs") == nil ? nil : arguments.stringArray("globs")
         )
-        return AgentToolResult(runID: context.runID, sessionID: context.sessionID, toolCallID: context.toolCallID, toolName: self.name, contentText: "Updated Connor skill `\(slug)` at \(path).", contentJSON: "{\"slug\":\"\(slug)\",\"path\":\"\(path)\"}")
+        return skillMutationToolResult(
+            context: context,
+            toolName: self.name,
+            contentText: "Updated Connor skill `\(slug)` at \(path).",
+            payload: ["slug": slug, "path": path]
+        )
     }
 }
 
@@ -241,8 +267,35 @@ public struct ConnorSkillDeleteTool: AgentTool {
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         guard let slug = arguments.string("slug") else { throw AgentToolError.invalidArguments("slug is required") }
         try service.deleteSkill(slug: slug)
-        return AgentToolResult(runID: context.runID, sessionID: context.sessionID, toolCallID: context.toolCallID, toolName: self.name, contentText: "Deleted Connor skill `\(slug)`.", contentJSON: "{\"slug\":\"\(slug)\"}")
+        return skillMutationToolResult(
+            context: context,
+            toolName: self.name,
+            contentText: "Deleted Connor skill `\(slug)`.",
+            payload: ["slug": slug]
+        )
     }
+}
+
+private func skillMutationToolResult(
+    context: AgentToolExecutionContext,
+    toolName: String,
+    contentText: String,
+    payload: [String: String]
+) -> AgentToolResult {
+    let contentJSON: String?
+    if let data = try? JSONEncoder().encode(payload), let encoded = String(data: data, encoding: .utf8) {
+        contentJSON = encoded
+    } else {
+        contentJSON = nil
+    }
+    return AgentToolResult(
+        runID: context.runID,
+        sessionID: context.sessionID,
+        toolCallID: context.toolCallID,
+        toolName: toolName,
+        contentText: contentText,
+        contentJSON: contentJSON
+    )
 }
 
 private extension AgentToolArguments {
