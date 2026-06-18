@@ -64,6 +64,8 @@ struct ConnorSettingsDetailView: View {
                         SettingsAISection(viewModel: viewModel)
                     case .mail:
                         SettingsMailSection(viewModel: viewModel)
+                    case .rss:
+                        SettingsRSSSection(viewModel: viewModel)
                     case .permissions:
                         SettingsPermissionsSection(viewModel: viewModel)
                     case .labels:
@@ -306,6 +308,122 @@ private struct MailProviderPresetSettingsRow: View {
         case .qq: "q.circle"
         case .netease: "n.circle"
         case .other: "server.rack"
+        }
+    }
+}
+
+struct SettingsRSSSection: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    private var presentation: NativeRSSBrowserPresentation { viewModel.rssBrowserPresentation }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceXL) {
+            sourceConnections
+            fetchPolicy
+            importExport
+        }
+        .sheet(isPresented: $viewModel.isPresentingAddRSSSourceSheet) {
+            AddRSSSourceSheet { feedURL, displayName in
+                try await viewModel.addRSSSourceAndSync(feedURL: feedURL, displayName: displayName)
+            }
+        }
+    }
+
+    private var sourceConnections: some View {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceXL) {
+            VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
+                Text("订阅源")
+                    .font(SettingsListTypography.header)
+                Text("管理 RSS / Atom / JSON Feed 连接。")
+                    .font(SettingsListTypography.rowSubtitle)
+                    .foregroundStyle(.secondary)
+            }
+
+            if !presentation.sources.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(presentation.sources) { source in
+                        RSSSettingsSourceRow(source: source, unreadCount: presentation.unreadCount(sourceID: source.id))
+                        if source.id != presentation.sources.last?.id { Divider().padding(.leading, 32) }
+                    }
+                }
+                .padding(.horizontal, SettingsListLayout.spaceL)
+                .padding(.vertical, SettingsListLayout.spaceS)
+                .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous).stroke(Color.secondary.opacity(SettingsListLayout.hairlineOpacity), lineWidth: 1))
+                .shadow(color: Color.black.opacity(0.04), radius: 2, x: 0, y: 1)
+            }
+
+            Button(action: { viewModel.isPresentingAddRSSSourceSheet = true }) {
+                Label("添加订阅源", systemImage: "plus")
+                    .font(SettingsListTypography.actionTitle)
+                    .padding(.horizontal, SettingsListLayout.spaceM)
+                    .padding(.vertical, SettingsListLayout.spaceXS)
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    private var fetchPolicy: some View {
+        SettingsGroup(title: "抓取策略") {
+            SettingsValueRow(title: "默认抓取间隔", value: "30 分钟")
+            Divider()
+            SettingsValueRow(title: "支持格式", value: "RSS 2.0 / Atom / JSON Feed")
+            Divider()
+            SettingsValueRow(title: "正文安全", value: "不执行脚本，不主动加载远程资源")
+        }
+    }
+
+    private var importExport: some View {
+        SettingsGroup(title: "导入导出") {
+            SettingsValueRow(title: "OPML 导入", value: "通过 Native RSS Runtime 审批后导入")
+            Divider()
+            SettingsValueRow(title: "OPML 导出", value: "生成可审计 OPML 文本")
+        }
+    }
+}
+
+private struct RSSSettingsSourceRow: View {
+    var source: RSSSource
+    var unreadCount: Int
+
+    var body: some View {
+        HStack(alignment: .top, spacing: SettingsListLayout.spaceM) {
+            Image(systemName: "dot.radiowaves.left.and.right")
+                .font(SettingsListTypography.icon)
+                .foregroundStyle(statusColor)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(source.displayName)
+                    .font(SettingsListTypography.rowTitleSelected)
+                Text(source.feedURL.absoluteString)
+                    .font(SettingsListTypography.rowCaption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Text(unreadCount > 0 ? "\(unreadCount) 未读" : statusTitle)
+                .font(SettingsListTypography.rowCaptionEmphasized)
+                .foregroundStyle(statusColor)
+        }
+        .frame(minHeight: SettingsListLayout.prominentRowMinHeight, alignment: .center)
+    }
+
+    private var statusTitle: String {
+        switch source.health.status {
+        case .ready: "正常"
+        case .degraded: "降级"
+        case .blocked: "阻止"
+        case .unknown: "未知"
+        }
+    }
+
+    private var statusColor: Color {
+        switch source.health.status {
+        case .ready: .green
+        case .degraded: .orange
+        case .blocked: .red
+        case .unknown: .secondary
         }
     }
 }
@@ -1182,9 +1300,9 @@ struct AIConnectionSetupView: View {
         do {
             let flow = try AppLLMOAuthService.shared.prepareClaudeOAuth()
             claudeFlow = flow
-            NSWorkspace.shared.open(flow.authURL)
+            viewModel.openURLInCurrentChatBrowser(flow.authURL)
             didOpenBrowser = true
-            statusMessage = "浏览器已打开。完成 Claude 登录后，复制授权码并粘贴到这里。"
+            statusMessage = "内置浏览器已打开。完成 Claude 登录后，复制授权码并粘贴到这里。"
             errorMessage = nil
         } catch {
             errorMessage = displayError(error)
@@ -1228,12 +1346,14 @@ struct AIConnectionSetupView: View {
     private func authenticateChatGPTAndAddConnection() {
         isAuthenticating = true
         didOpenBrowser = true
-        statusMessage = "正在打开 ChatGPT 登录页，并等待浏览器回调…"
+        statusMessage = "正在用内置浏览器打开 ChatGPT 登录页，并等待浏览器回调…"
         errorMessage = nil
         Task {
             do {
                 let result = try await AppLLMOAuthService.shared.authenticateChatGPT { url in
-                    NSWorkspace.shared.open(url)
+                    Task { @MainActor in
+                        viewModel.openURLInCurrentChatBrowser(url)
+                    }
                 }
                 let input = AppLLMConnectionSetupInput(
                     id: stableConnectionID,
@@ -1271,9 +1391,9 @@ struct AIConnectionSetupView: View {
                     githubDeviceCode = code
                     didOpenBrowser = true
                     if let url = URL(string: code.verificationURI) {
-                        NSWorkspace.shared.open(url)
+                        viewModel.openURLInCurrentChatBrowser(url)
                     }
-                    statusMessage = "在 GitHub 页面输入授权码后，康纳同学会自动继续。"
+                    statusMessage = "在内置浏览器的 GitHub 页面输入授权码后，康纳同学会自动继续。"
                 }
                 let tokens = try await AppLLMOAuthService.shared.pollGitHubCopilotTokens(deviceCode: code)
                 let input = AppLLMConnectionSetupInput(
