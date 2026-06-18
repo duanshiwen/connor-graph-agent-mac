@@ -96,7 +96,7 @@ struct CraftPrimarySidebarView: View {
                     }
 
                     SidebarDisclosure(title: "数据源", systemImage: "externaldrive.connected.to.line.below", isExpanded: $sourcesExpanded) {
-                        SidebarRow(title: "邮件系统", systemImage: "envelope", count: nil, isSelected: false, isEnabled: false) {}
+                        SidebarRow(title: "邮件系统", systemImage: "envelope.badge.shield.half.filled", count: nil, isSelected: selection == .mail) { select(.mail) }
                         SidebarRow(title: "飞书", systemImage: "message", count: nil, isSelected: false, isEnabled: false) {}
                         SidebarRow(title: "RSS", systemImage: "dot.radiowaves.up.forward", count: nil, isSelected: false, isEnabled: false) {}
                         SidebarRow(title: "MCP", systemImage: "server.rack", count: viewModel.sourceRuntimeConfigurations.count, isSelected: selection == .sources) { select(.sources) }
@@ -166,8 +166,12 @@ struct CraftPrimarySidebarView: View {
     }
 
     private func select(_ item: SidebarItem) {
-        selection = item
-        viewModel.selection = item
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            selection = item
+            viewModel.selection = item
+        }
     }
 
     private func presentStatusEditor(_ definition: AgentSessionStatusDefinition) {

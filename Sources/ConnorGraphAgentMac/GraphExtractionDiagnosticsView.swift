@@ -110,7 +110,6 @@ struct GraphExtractionDiagnosticsView: View {
             }
         }
         .padding()
-        .navigationTitle("记忆准入")
         .task {
             viewModel.deferViewUpdate {
                 viewModel.reloadGraphExtractionTraces()

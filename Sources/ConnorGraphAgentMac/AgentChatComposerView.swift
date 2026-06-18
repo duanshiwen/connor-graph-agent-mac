@@ -285,7 +285,7 @@ struct AgentChatComposerView: View {
     }
 
     private var canSubmitLocalChat: Bool {
-        !localChatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !composerState.pendingAttachments.isEmpty
+        !localChatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !viewModel.pendingAttachmentRefs.isEmpty
     }
 
     private func removeSlashSkillPickerTriggerIfNeeded() {

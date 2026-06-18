@@ -1,3 +1,9 @@
-// Commercial Native Mail System stage file.
-// Core implementation currently lives in the consolidated MailRuntime / MailAgentTools skeleton
-// and will be split into this file as the protocol implementation deepens.
+import Foundation
+import ConnorGraphCore
+
+public struct MailAttachmentImportService: Sendable, Equatable {
+    public init() {}
+    public func importDescriptor(_ descriptor: MailAttachmentDescriptor, sessionID: String) -> String {
+        "session://\(sessionID)/mail-attachments/\(descriptor.id.rawValue)/\(descriptor.filename)"
+    }
+}

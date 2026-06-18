@@ -14,6 +14,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case extractionDiagnostics = "记忆准入"
     case automation = "自动化"
     case productOS = "Product OS"
+    case mail = "Mail"
     case sources = "Sources"
     case skills = "Skills"
     case llmSettings = "模型设置"
@@ -46,6 +47,7 @@ struct WorkspaceRootDraft: Identifiable, Equatable {
 enum ConnorSettingsSection: String, CaseIterable, Identifiable {
     case app
     case ai
+    case mail
     case permissions
     case labels
     case statuses
@@ -58,6 +60,7 @@ enum ConnorSettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .app: "应用"
         case .ai: "AI"
+        case .mail: "邮件系统"
         case .permissions: "权限"
         case .labels: "标签"
         case .statuses: "状态"
@@ -70,6 +73,7 @@ enum ConnorSettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .app: "通知和更新"
         case .ai: "模型、思考、连接"
+        case .mail: "账户、同步、安全"
         case .permissions: "默认权限和审批"
         case .labels: "管理会话标签"
         case .statuses: "管理会话状态"
@@ -82,6 +86,7 @@ enum ConnorSettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .app: "app.badge"
         case .ai: "sparkles"
+        case .mail: "envelope.badge"
         case .permissions: "shield"
         case .labels: "tag"
         case .statuses: "circle.dashed"

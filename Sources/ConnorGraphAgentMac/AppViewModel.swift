@@ -347,6 +347,11 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var addSourceMessage: String?
     @Published var pendingSourceRuntimeDeletionID: String?
     @Published var pendingSourceRuntimeDeletionName: String?
+    @Published var mailBrowserPresentation: NativeMailBrowserPresentation = .empty
+    @Published var selectedMailAccountID: MailAccountID?
+    @Published var selectedMailMailboxID: MailMailboxID?
+    @Published var selectedMailMessageID: MailMessageID?
+    @Published var isPresentingAddMailAccountSheet: Bool = false
     @Published var skillRuntimeDefinitions: [SkillRuntimeDefinition] = []
     @Published var commercialSkillManagerPresentation: SkillManagerPresentation = SkillManagerPresentation(
         summary: SkillManagerSummary(total: 0, enabled: 0, projectScoped: 0, risky: 0, invalid: 0, sourceBlocked: 0),
@@ -865,7 +870,9 @@ final class AppViewModel: NSObject, ObservableObject {
             selection = .automation
         case .productOS:
             selection = .productOS
-        case .mail, .sources:
+        case .mail:
+            selection = .mail
+        case .sources:
             selection = .sources
         case .skills:
             selection = .skills
@@ -1828,17 +1835,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 globalWarnings: ["Storage paths are not initialized."]
             )
         }
-        let roots = workspaceRoots
-            .map { $0.path.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .map { URL(fileURLWithPath: $0, isDirectory: true) }
-        let nestedRoots: [URL]
-        if let primary = primaryWorkspaceRootDraft?.path.trimmingCharacters(in: .whitespacesAndNewlines), !primary.isEmpty {
-            nestedRoots = [URL(fileURLWithPath: primary, isDirectory: true)]
-        } else {
-            nestedRoots = []
-        }
-        let snapshot = SkillPackageScanner().scan(storagePaths: storagePaths, projectRoots: roots, nestedRoots: nestedRoots)
+        let snapshot = SkillPackageScanner().scan(storagePaths: storagePaths)
         return SkillCommercialUIPresentationBuilder().build(snapshot: snapshot)
     }
 
@@ -3974,17 +3971,7 @@ final class AppViewModel: NSObject, ObservableObject {
         guard let slug = activeSkillSlug else { return nil }
         if let storagePaths {
             let scanner = SkillPackageScanner()
-            let roots = workspaceRoots
-                .map { $0.path.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-                .map { URL(fileURLWithPath: $0, isDirectory: true) }
-            let nestedRoots: [URL]
-            if let primary = primaryWorkspaceRootDraft?.path.trimmingCharacters(in: .whitespacesAndNewlines), !primary.isEmpty {
-                nestedRoots = [URL(fileURLWithPath: primary, isDirectory: true)]
-            } else {
-                nestedRoots = []
-            }
-            let snapshot = scanner.scan(storagePaths: storagePaths, projectRoots: roots, nestedRoots: nestedRoots)
+            let snapshot = scanner.scan(storagePaths: storagePaths)
             if let resolution = snapshot.resolution(slug: slug) {
                 let runtime = SkillInvocationRuntime()
                 let request = SkillInvocationRequest(
@@ -4026,21 +4013,9 @@ final class AppViewModel: NSObject, ObservableObject {
         guard let storagePaths else {
             return SkillChatPromptAugmentation(originalPrompt: prompt, augmentedPrompt: prompt)
         }
-        let roots = workspaceRoots
-            .map { $0.path.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .map { URL(fileURLWithPath: $0, isDirectory: true) }
-        let nestedRoots: [URL]
-        if let primary = primaryWorkspaceRootDraft?.path.trimmingCharacters(in: .whitespacesAndNewlines), !primary.isEmpty {
-            nestedRoots = [URL(fileURLWithPath: primary, isDirectory: true)]
-        } else {
-            nestedRoots = []
-        }
         return SkillChatPromptAugmentor(storagePaths: storagePaths).augment(
             prompt: prompt,
-            sessionID: sessionID,
-            projectRoots: roots,
-            nestedRoots: nestedRoots
+            sessionID: sessionID
         )
     }
 

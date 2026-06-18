@@ -109,4 +109,172 @@ struct CommercialTrain7NativeMailSystemTests {
         #expect(shell.command(for: .openMailSources)?.target == .mail)
         #expect(shell.command(for: .openMailSources)?.keyboardShortcut == "⌘8")
     }
+
+    @Test func mailRuntimeSeparatesProtocolAndParserResponsibilities() async throws {
+        let imap = MailIMAPAdapter()
+        let smtp = MailSMTPAdapter()
+        let imapHealth = try await imap.testConnection(endpoint: MailServerEndpoint(host: "imap.example.com", port: 993, security: .tls, protocolKind: .imap))
+        let smtpHealth = try await smtp.testConnection(endpoint: MailServerEndpoint(host: "smtp.example.com", port: 587, security: .startTLS, protocolKind: .smtp))
+        #expect(imapHealth.status == .ready)
+        #expect(smtpHealth.status == .ready)
+
+        let account = MailAccount(id: MailAccountID(rawValue: "a"), provider: .genericIMAPSMTP, displayName: "A", identities: [], credentialBinding: MailCredentialBinding(keychainService: "svc", accountName: "a", authMode: .oauth2))
+        let syncHealth = MailSyncEngine().readiness(account: account, mailboxCount: 1, cursorCount: 1)
+        #expect(syncHealth.status == .ready)
+    }
+
+    @Test func mailBrowserDefaultPresentationIsEmpty() {
+        let presentation = NativeMailBrowserPresentation.empty
+        #expect(presentation.accounts.isEmpty)
+        #expect(presentation.mailboxes.isEmpty)
+        #expect(presentation.messages.isEmpty)
+        #expect(presentation.defaultAccountID() == nil)
+        #expect(presentation.defaultMailboxID(for: nil) == nil)
+        #expect(presentation.defaultMessageID(accountID: nil, mailboxID: nil) == nil)
+        #expect(presentation.emptyState(forQuery: "") == .noAccounts)
+    }
+
+    @Test func mailBrowserFiltersMessagesBySubjectAndSnippet() {
+        let fixture = makeMailBrowserFixture()
+        let accountID = MailAccountID(rawValue: "fixture-account")
+        let mailboxID = MailMailboxID(rawValue: "fixture-inbox")
+
+        let subjectMatches = fixture.messages(accountID: accountID, mailboxID: mailboxID, query: "OAuth")
+        #expect(subjectMatches.map(\.subject) == ["OAuth migration checklist"])
+
+        let snippetMatches = fixture.messages(accountID: accountID, mailboxID: mailboxID, query: "readiness")
+        #expect(snippetMatches.map(\.subject) == ["OAuth migration checklist"])
+
+        let all = fixture.messages(accountID: accountID, mailboxID: mailboxID, query: "")
+        #expect(all.count == 2)
+
+        let noResults = fixture.messages(accountID: accountID, mailboxID: mailboxID, query: "not-found")
+        #expect(noResults.isEmpty)
+        #expect(fixture.emptyState(forQuery: "not-found") == .searchNoResults)
+    }
+
+    @Test func mailBrowserSelectionUsesStableIDsAndDerivesFoldersFromSelectedAccount() {
+        let fixture = makeMailBrowserFixture()
+        let accountID = MailAccountID(rawValue: "fixture-account")
+        let otherAccountID = MailAccountID(rawValue: "fixture-qq")
+        let inboxID = MailMailboxID(rawValue: "fixture-inbox")
+
+        #expect(fixture.mailboxes(accountID: accountID).map(\.accountID).allSatisfy { $0 == accountID })
+        #expect(fixture.mailboxes(accountID: otherAccountID).map(\.accountID).allSatisfy { $0 == otherAccountID })
+        #expect(fixture.messages(accountID: accountID, mailboxID: inboxID, query: "").map(\.mailboxID).allSatisfy { $0 == inboxID })
+        #expect(fixture.defaultMailboxID(for: accountID) == inboxID)
+        #expect(fixture.defaultMessageID(accountID: accountID, mailboxID: inboxID) == MailMessageID(rawValue: "fixture-message-1"))
+    }
+
+    @Test func mailBrowserSingleListCanFilterAcrossAllAccountsAndFolders() {
+        let fixture = makeMailBrowserFixture()
+        let accountID = MailAccountID(rawValue: "fixture-account")
+        let inboxID = MailMailboxID(rawValue: "fixture-inbox")
+
+        let allMessages = fixture.messages(accountID: nil, mailboxID: nil, query: "")
+        #expect(allMessages.map(\.id) == [MailMessageID(rawValue: "fixture-message-1"), MailMessageID(rawValue: "fixture-message-2")])
+
+        let accountMessages = fixture.messages(accountID: accountID, mailboxID: nil, query: "")
+        #expect(accountMessages.map(\.accountID).allSatisfy { $0 == accountID })
+
+        let folderMessages = fixture.messages(accountID: nil, mailboxID: inboxID, query: "OAuth")
+        #expect(folderMessages.map(\.subject) == ["OAuth migration checklist"])
+    }
+
+    @Test func mailAccountProviderPresetsIncludeAppleMicrosoftQQNetEaseAndOther() {
+        let presets = MailAccountProviderPreset.allCases
+        #expect(presets.map(\.id) == ["apple", "microsoft", "qq", "netease", "other"])
+
+        let apple = MailAccountProviderPreset.apple
+        #expect(apple.incomingHost == "imap.mail.me.com")
+        #expect(apple.incomingPort == 993)
+        #expect(apple.outgoingHost == "smtp.mail.me.com")
+        #expect(apple.outgoingPort == 587)
+        #expect(apple.guidance.localizedCaseInsensitiveContains("App 专用密码"))
+
+        let qq = MailAccountProviderPreset.qq
+        #expect(qq.incomingHost == "imap.qq.com")
+        #expect(qq.outgoingHost == "smtp.qq.com")
+        #expect(qq.guidance.contains("16 位授权码"))
+
+        let netease = MailAccountProviderPreset.netease
+        #expect(netease.incomingHost == "imap.163.com")
+        #expect(netease.outgoingHost == "smtp.163.com")
+        #expect(netease.guidance.contains("POP/SMTP/IMAP"))
+        #expect(netease.guidance.contains("授权码"))
+
+        let microsoft = MailAccountProviderPreset.microsoft
+        #expect(microsoft.guidance.localizedCaseInsensitiveContains("Microsoft 登录"))
+        #expect(microsoft.outgoingPort == 587)
+
+        let other = MailAccountProviderPreset.other
+        #expect(other.incomingHost.isEmpty)
+        #expect(other.outgoingHost.isEmpty)
+    }
+
+    private func makeMailBrowserFixture(now: Date = Date()) -> NativeMailBrowserPresentation {
+        let accountID = MailAccountID(rawValue: "fixture-account")
+        let otherAccountID = MailAccountID(rawValue: "fixture-qq")
+        let identityID = MailIdentityID(rawValue: "fixture-identity")
+        let otherIdentityID = MailIdentityID(rawValue: "fixture-other-identity")
+        let inboxID = MailMailboxID(rawValue: "fixture-inbox")
+        let otherInboxID = MailMailboxID(rawValue: "fixture-other-inbox")
+
+        let accounts = [
+            MailAccount(
+                id: accountID,
+                provider: .genericIMAPSMTP,
+                displayName: "Test Account",
+                identities: [MailIdentity(id: identityID, displayName: "Test User", address: MailAddress(name: "Test User", email: "test@example.com"))],
+                incoming: MailServerEndpoint(host: "imap.example.com", port: 993, security: .tls, protocolKind: .imap),
+                outgoing: MailServerEndpoint(host: "smtp.example.com", port: 587, security: .startTLS, protocolKind: .smtp),
+                credentialBinding: MailCredentialBinding(keychainService: "test.mail", accountName: "test@example.com", authMode: .appPassword),
+                health: MailAccountHealth(status: .ready, summary: "test-ready")
+            ),
+            MailAccount(
+                id: otherAccountID,
+                provider: .genericIMAPSMTP,
+                displayName: "Other Test Account",
+                identities: [MailIdentity(id: otherIdentityID, displayName: "Other", address: MailAddress(name: "Other", email: "other@example.com"))],
+                credentialBinding: MailCredentialBinding(keychainService: "test.mail.other", accountName: "other@example.com", authMode: .appPassword),
+                health: MailAccountHealth(status: .unknown, summary: "test")
+            )
+        ]
+
+        let mailboxes = [
+            MailMailbox(id: inboxID, accountID: accountID, name: "Inbox", path: "INBOX", role: .inbox, status: MailMailboxStatus(messageCount: 2, unreadCount: 1, syncCursor: nil, lastSyncedAt: now)),
+            MailMailbox(id: otherInboxID, accountID: otherAccountID, name: "Inbox", path: "INBOX", role: .inbox, status: MailMailboxStatus(messageCount: 0, unreadCount: 0, syncCursor: nil, lastSyncedAt: nil))
+        ]
+
+        let messages = [
+            MailMessageSummary(
+                id: MailMessageID(rawValue: "fixture-message-1"),
+                accountID: accountID,
+                mailboxID: inboxID,
+                threadID: MailThreadID(rawValue: "fixture-thread-1"),
+                subject: "Connor Native Mail System",
+                from: MailAddress(name: "Alice", email: "alice@example.com"),
+                to: [MailAddress(email: "test@example.com")],
+                date: now.addingTimeInterval(-300),
+                snippet: "Commercial native mail system test message.",
+                flags: MailMessageFlags(isRead: false),
+                hasAttachments: true
+            ),
+            MailMessageSummary(
+                id: MailMessageID(rawValue: "fixture-message-2"),
+                accountID: accountID,
+                mailboxID: inboxID,
+                threadID: MailThreadID(rawValue: "fixture-thread-2"),
+                subject: "OAuth migration checklist",
+                from: MailAddress(name: "Security", email: "security@example.com"),
+                to: [MailAddress(email: "test@example.com")],
+                date: now.addingTimeInterval(-900),
+                snippet: "Provider auth policy, token refresh, keychain isolation, and audit readiness.",
+                flags: MailMessageFlags(isRead: true),
+                hasAttachments: false
+            )
+        ]
+
+        return NativeMailBrowserPresentation(accounts: accounts, mailboxes: mailboxes, messages: messages)
+    }
 }
