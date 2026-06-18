@@ -741,7 +741,7 @@ private struct BrowserAddressTextField: NSViewRepresentable {
                 if window.firstResponder !== field.currentEditor() && window.firstResponder !== field {
                     window.makeFirstResponder(field)
                 }
-                field.selectText(nil)
+                field.currentEditor()?.selectAll(nil)
             }
         }
 
@@ -761,7 +761,7 @@ private final class SelectAllOnFocusTextField: NSTextField {
         let didBecomeFirstResponder = super.becomeFirstResponder()
         if didBecomeFirstResponder {
             DispatchQueue.main.async { [weak self] in
-                self?.selectText(nil)
+                self?.currentEditor()?.selectAll(nil)
             }
         }
         return didBecomeFirstResponder
