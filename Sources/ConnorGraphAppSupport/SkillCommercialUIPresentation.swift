@@ -71,6 +71,7 @@ public struct SkillCommercialUIPresentationBuilder: Sendable {
     public func build(snapshot: SkillPackageScanSnapshot, sourceReadiness: [String: [SkillSourceReadiness]] = [:]) -> SkillManagerPresentation {
         let cards = snapshot.resolutions.compactMap { resolution -> SkillManagerCard? in
             guard let selected = resolution.selected else { return nil }
+            guard !selected.manifest.hidden else { return nil }
             let readiness = sourceReadiness[selected.slug.rawValue] ?? []
             let sourceWarnings = readiness.filter { $0.state != .ready }.map { "\($0.sourceSlug): \($0.message)" }
             return SkillManagerCard(
