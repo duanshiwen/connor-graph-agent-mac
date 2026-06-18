@@ -84,7 +84,6 @@ struct AgentPendingApprovalReviewView: View {
             }
         }
         .padding()
-        .navigationTitle("权限审批")
         .task {
             viewModel.deferViewUpdate {
                 viewModel.reloadPendingApprovals()

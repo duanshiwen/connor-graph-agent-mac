@@ -26,7 +26,7 @@ private func writeCommercialSkill(root: URL, slug: String, name: String, extraFr
 
 @Suite("Commercial Skill Package Scanner Tests")
 struct SkillPackageScannerTests {
-    @Test func scansGlobalUserProjectAndBuildsOverrideResolution() throws {
+    @Test func scansOnlyApplicationUserSkillsByDefault() throws {
         let root = temporarySkillScannerRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let global = root.appendingPathComponent("global", isDirectory: true)
@@ -35,18 +35,19 @@ struct SkillPackageScannerTests {
         let projectSkills = project.appendingPathComponent(".agents/skills", isDirectory: true)
         _ = try writeCommercialSkill(root: global, slug: "review", name: "Global Review")
         _ = try writeCommercialSkill(root: user, slug: "review", name: "User Review")
-        _ = try writeCommercialSkill(root: projectSkills, slug: "review", name: "Project Review")
+        _ = try writeCommercialSkill(root: projectSkills, slug: "project-only", name: "Project Only")
         _ = try writeCommercialSkill(root: user, slug: "writer", name: "Writer")
         let storagePaths = AppStoragePaths(applicationSupportDirectory: root, skillsDirectory: user)
-        let scanner = SkillPackageScanner(globalSkillsDirectory: global)
+        let scanner = SkillPackageScanner()
 
-        let snapshot = scanner.scan(storagePaths: storagePaths, projectRoots: [project])
+        let snapshot = scanner.scan(storagePaths: storagePaths)
 
-        #expect(snapshot.packages.count == 4)
+        #expect(snapshot.packages.count == 2)
+        #expect(snapshot.resolution(slug: "project-only") == nil)
         let review = try #require(snapshot.resolution(slug: "review"))
-        #expect(review.candidates.map(\.sourceTier) == [.global, .user, .project])
-        #expect(review.selected?.manifest.name == "Project Review")
-        #expect(review.warnings.first?.contains("3 candidates") == true)
+        #expect(review.candidates.map(\.sourceTier) == [.user])
+        #expect(review.selected?.manifest.name == "User Review")
+        #expect(review.warnings.isEmpty)
         let writer = try #require(snapshot.resolution(slug: "writer"))
         #expect(writer.selected?.sourceTier == .user)
     }
@@ -63,7 +64,7 @@ struct SkillPackageScannerTests {
           graphContextPolicy: askToWrite
         """)
         let storagePaths = AppStoragePaths(applicationSupportDirectory: root, skillsDirectory: user)
-        let scanner = SkillPackageScanner(globalSkillsDirectory: root.appendingPathComponent("missing", isDirectory: true))
+        let scanner = SkillPackageScanner()
 
         let definitions = scanner.productOSSkillDefinitions(from: scanner.scan(storagePaths: storagePaths))
 
@@ -87,7 +88,7 @@ struct SkillPackageScannerTests {
         try "# Missing frontmatter".write(to: invalidDir.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
         let storagePaths = AppStoragePaths(applicationSupportDirectory: root, skillsDirectory: user)
 
-        let snapshot = SkillPackageScanner(globalSkillsDirectory: root.appendingPathComponent("missing", isDirectory: true)).scan(storagePaths: storagePaths)
+        let snapshot = SkillPackageScanner().scan(storagePaths: storagePaths)
 
         #expect(snapshot.packages.map(\.slug.rawValue) == ["valid-skill"])
         #expect(snapshot.warnings.first?.contains("invalid-skill") == true)
@@ -101,10 +102,7 @@ struct SkillPackageScannerTests {
         _ = try writeCommercialSkill(root: bundled, slug: "internal-helper", name: "Internal Helper", extraFrontmatter: "hidden: true")
         _ = try writeCommercialSkill(root: user, slug: "user-helper", name: "User Helper", extraFrontmatter: "hidden: true")
         let storagePaths = AppStoragePaths(applicationSupportDirectory: root, skillsDirectory: user)
-        let scanner = SkillPackageScanner(
-            globalSkillsDirectory: root.appendingPathComponent("missing", isDirectory: true),
-            bundledSkillsDirectory: bundled
-        )
+        let scanner = SkillPackageScanner(bundledSkillsDirectory: bundled)
 
         let snapshot = scanner.scan(storagePaths: storagePaths)
 

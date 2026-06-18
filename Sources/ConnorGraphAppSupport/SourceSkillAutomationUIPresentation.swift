@@ -268,7 +268,7 @@ public struct SkillRuntimeUIPresentation: Codable, Sendable, Equatable {
         return SkillRuntimeUIPresentation(
             summary: SkillRuntimeUISummary(
                 totalCount: skills.count,
-                projectScopedCount: skills.filter { $0.scope == .project }.count,
+                projectScopedCount: 0,
                 requiresSourceCount: skills.filter { !$0.manifest.requiredSources.isEmpty }.count
             ),
             cards: cards

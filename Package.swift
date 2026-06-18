@@ -52,6 +52,7 @@ let package = Package(
         .testTarget(name: "ConnorGraphStoreTests", dependencies: ["ConnorGraphStore", "ConnorGraphCore"]),
         .testTarget(name: "ConnorGraphSearchTests", dependencies: ["ConnorGraphSearch"]),
         .testTarget(name: "ConnorGraphAgentTests", dependencies: ["ConnorGraphAgent"]),
+        .testTarget(name: "ConnorGraphAgentMacTests", dependencies: ["ConnorGraphAgentMac"]),
         .testTarget(name: "ConnorGraphAppSupportTests", dependencies: ["ConnorGraphAppSupport"])
     ]
 )

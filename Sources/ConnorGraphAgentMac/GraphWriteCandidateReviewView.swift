@@ -137,7 +137,6 @@ struct GraphWriteCandidateReviewView: View {
             }
         }
         .padding()
-        .navigationTitle("写入候选")
         .task {
             viewModel.deferViewUpdate {
                 viewModel.reloadGraphWriteCandidates()

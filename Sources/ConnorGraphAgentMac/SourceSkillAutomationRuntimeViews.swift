@@ -46,9 +46,9 @@ struct SourceRuntimePanelView: View {
                     onTest: { Task { await viewModel.testSourceRuntime(sourceID: card.id) } }
                 )
             } else {
-                MCPSourceEmptyDetailView(
-                    summary: presentation.summary
-                )
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(AppShellColors.detailBackground)
             }
         }
         .confirmationDialog(
@@ -171,7 +171,6 @@ private struct MCPSourceDetailView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(AppShellColors.detailBackground)
-        .navigationTitle(card.title)
     }
 }
 
@@ -509,7 +508,9 @@ struct SkillRuntimePanelView: View {
             if let card = selectedCard {
                 SkillManagerDetailView(card: card, summary: presentation.summary, globalWarnings: presentation.globalWarnings, onRefresh: viewModel.reloadSkillRuntimeDefinitions)
             } else {
-                SkillManagerEmptyDetailView(summary: presentation.summary, warnings: presentation.globalWarnings, onRefresh: viewModel.reloadSkillRuntimeDefinitions)
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color(nsColor: .textBackgroundColor).opacity(0.18))
             }
         }
     }
@@ -570,16 +571,12 @@ private struct SkillManagerDetailView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color(nsColor: .textBackgroundColor).opacity(0.18))
-        .navigationTitle(card.title)
     }
 
     private func displayPath(_ path: String) -> String {
         guard !path.isEmpty else { return "—" }
         if let range = path.range(of: "/skills/") {
             return String(path[range.upperBound...]).isEmpty ? path : "skills/" + String(path[range.upperBound...])
-        }
-        if let range = path.range(of: "/.agents/skills/") {
-            return ".agents/skills/" + String(path[range.upperBound...])
         }
         return path
     }
@@ -904,7 +901,6 @@ private struct RuntimePanelScaffold<Content: View>: View {
             .padding(20)
         }
         .background(Color(nsColor: .textBackgroundColor).opacity(0.18))
-        .navigationTitle(title)
     }
 }
 
