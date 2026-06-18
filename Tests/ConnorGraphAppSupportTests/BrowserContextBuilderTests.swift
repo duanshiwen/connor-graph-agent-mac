@@ -54,6 +54,32 @@ struct BrowserContextBuilderTests {
         #expect(!selection.hasSelectionContext)
     }
 
+    @Test func quickPageSummaryQuestionIncludesPageTitle() throws {
+        let selection = BrowserSelectionContext(
+            page: BrowserPageContext(url: "https://developer.apple.com/news/", title: "Updated age ratings in App Store Connect", text: "Page body"),
+            selectedText: ""
+        )
+
+        let question = BrowserLLMContextBuilder().makePageSummaryQuestion(selection: selection)
+        let prompt = BrowserLLMContextBuilder().makePrompt(selection: selection, question: question)
+
+        #expect(question.contains("Updated age ratings in App Store Connect"))
+        #expect(prompt.contains("我的问题："))
+        #expect(prompt.contains("总结网页《Updated age ratings in App Store Connect》"))
+    }
+
+    @Test func quickPageSummaryQuestionFallsBackWhenTitleIsMissing() throws {
+        let selection = BrowserSelectionContext(
+            page: BrowserPageContext(url: "https://example.com", title: "   ", text: "Page body"),
+            selectedText: ""
+        )
+
+        let question = BrowserLLMContextBuilder().makePageSummaryQuestion(selection: selection)
+
+        #expect(question.contains("总结此网页"))
+        #expect(!question.contains("《"))
+    }
+
     @Test func imageSelectionPromptIncludesImageMetadataAndVisionFallback() throws {
         let selection = BrowserSelectionContext(
             page: BrowserPageContext(url: "https://example.com", title: "Image Page", text: "Page body near the image."),

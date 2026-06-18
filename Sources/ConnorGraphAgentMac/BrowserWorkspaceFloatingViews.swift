@@ -33,7 +33,7 @@ struct BrowserSelectionPopover: View {
     var onCancel: () -> Void
     var onClose: () -> Void
 
-    static let quickPageSummaryPrompt = "总结此网页，提取概括网页主要内容、论点论据、观点或故事，信息"
+    static let quickPageSummaryPrompt = "总结当前网页，提取主要内容、核心论点、关键论据、重要观点或故事信息。"
 
     var body: some View {
         let isPageQuestion = popover.context.selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

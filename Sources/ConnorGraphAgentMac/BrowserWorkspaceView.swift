@@ -88,7 +88,8 @@ struct BrowserWorkspaceView: View {
                                 sendSelectionQuestion(popover)
                             },
                             onSummarizePage: {
-                                sendSelectionQuestion(popover, questionOverride: BrowserSelectionPopover.quickPageSummaryPrompt)
+                                let summaryQuestion = BrowserLLMContextBuilder().makePageSummaryQuestion(selection: popover.context)
+                                sendSelectionQuestion(popover, questionOverride: summaryQuestion)
                             },
                             onCancel: {
                                 viewModel.cancelActiveChatRun()
