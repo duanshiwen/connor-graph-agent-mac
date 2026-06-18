@@ -452,6 +452,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var runtimeSettingsRepository: AppRuntimeSettingsRepository?
     private var llmSettingsRepository: AppLLMSettingsRepository
     private var llmProviderHealthChecker: AppLLMProviderHealthChecker
+    private var rssRuntime = RSSRuntime(repository: InMemoryRSSSourceRepository(), cache: InMemoryRSSSourceCache())
     private var agentRuntimeFactory: AppGraphAgentRuntimeFactory?
     private var hybridSearchService: (any GraphHybridSearchService)?
     private var backgroundJobRunner: AppGraphBackgroundJobRunner?
@@ -1292,6 +1293,7 @@ final class AppViewModel: NSObject, ObservableObject {
         reloadSourceRuntimeConfigurations()
         reloadSkillRuntimeDefinitions()
         reloadSidecarRuntimeDiagnostics()
+        Task { await reloadRSSBrowserPresentation() }
         reloadChatSessions()
         loadBrowserHistory()
         reloadSchemaHealthReport()
@@ -1366,6 +1368,41 @@ final class AppViewModel: NSObject, ObservableObject {
         } catch {
             errorMessage = String(describing: error)
         }
+    }
+
+    func reloadRSSBrowserPresentation() async {
+        do {
+            let sources = try await rssRuntime.listSources(runID: nil, sessionID: selectedChatSessionID)
+            let items = try await rssRuntime.listItems(sourceID: nil, includeHidden: false, limit: 200, runID: nil, sessionID: selectedChatSessionID)
+            rssBrowserPresentation = NativeRSSBrowserPresentation(sources: sources, items: items)
+            if let selectedRSSSourceID,
+               !sources.contains(where: { $0.id == selectedRSSSourceID }) {
+                self.selectedRSSSourceID = sources.first?.id
+            } else if selectedRSSSourceID == nil {
+                selectedRSSSourceID = sources.first?.id
+            }
+            if let selectedRSSItemID,
+               !items.contains(where: { $0.id == selectedRSSItemID }) {
+                self.selectedRSSItemID = items.first?.id
+            } else if selectedRSSItemID == nil {
+                selectedRSSItemID = items.first?.id
+            }
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func addRSSSourceAndSync(feedURL: URL, displayName: String?) async throws {
+        let source = try await rssRuntime.addSource(feedURL: feedURL, displayName: displayName, runID: nil, sessionID: selectedChatSessionID)
+        selectedRSSSourceID = source.id
+        do {
+            _ = try await rssRuntime.syncSource(sourceID: source.id, runID: nil, sessionID: selectedChatSessionID)
+            errorMessage = nil
+        } catch {
+            errorMessage = "RSS 订阅源已添加，但首次抓取失败：\(error.localizedDescription)"
+        }
+        await reloadRSSBrowserPresentation()
     }
 
     func reloadSourceRuntimeConfigurations() {

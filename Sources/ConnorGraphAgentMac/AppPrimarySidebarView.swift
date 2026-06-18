@@ -98,7 +98,7 @@ struct CraftPrimarySidebarView: View {
                     SidebarDisclosure(title: "数据源", systemImage: "externaldrive.connected.to.line.below", isExpanded: $sourcesExpanded) {
                         SidebarRow(title: "邮件系统", systemImage: "envelope.badge.shield.half.filled", count: nil, isSelected: selection == .mail) { select(.mail) }
                         SidebarRow(title: "飞书", systemImage: "message", count: nil, isSelected: false, isEnabled: false) {}
-                        SidebarRow(title: "RSS", systemImage: "dot.radiowaves.up.forward", count: nil, isSelected: false, isEnabled: false) {}
+                        SidebarRow(title: "RSS", systemImage: "dot.radiowaves.up.forward", count: rssUnreadCount, isSelected: selection == .rss) { select(.rss) }
                         SidebarRow(title: "MCP", systemImage: "server.rack", count: viewModel.sourceRuntimeConfigurations.count, isSelected: selection == .sources) { select(.sources) }
                     }
 
@@ -153,6 +153,11 @@ struct CraftPrimarySidebarView: View {
 
     private var allSessionsCount: Int {
         countSourceSessions.count
+    }
+
+    private var rssUnreadCount: Int? {
+        let count = viewModel.rssBrowserPresentation.unreadCount(sourceID: nil)
+        return count > 0 ? count : nil
     }
 
     private func count(for status: AgentSessionStatus) -> Int {
