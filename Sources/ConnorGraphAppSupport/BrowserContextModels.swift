@@ -121,6 +121,25 @@ public struct BrowserKeyboardShortcutResolver: Sendable {
 public struct BrowserExternalOpenPlanner: Sendable {
     public init() {}
 
+    public func matchingTabID(urlString: String, in snapshot: AppBrowserStateSnapshot) -> UUID? {
+        let normalizedTarget = normalizedBrowserURLString(urlString)
+        return snapshot.tabs.first { tab in
+            normalizedBrowserURLString(tab.currentURLString) == normalizedTarget
+                || normalizedBrowserURLString(tab.initialURLString) == normalizedTarget
+        }?.id
+    }
+
+    public func openOrFocus(urlString: String, in snapshot: AppBrowserStateSnapshot) -> AppBrowserStateSnapshot {
+        if let tabID = matchingTabID(urlString: urlString, in: snapshot) {
+            var planned = snapshot
+            planned.updatedAt = Date()
+            planned.selectionPopover = nil
+            planned.selectedTabID = tabID
+            return planned
+        }
+        return open(urlString: urlString, in: snapshot)
+    }
+
     public func open(urlString: String, in snapshot: AppBrowserStateSnapshot) -> AppBrowserStateSnapshot {
         var planned = snapshot
         planned.updatedAt = Date()
@@ -137,6 +156,19 @@ public struct BrowserExternalOpenPlanner: Sendable {
         planned.selectedTabID = tab.id
         return planned
     }
+}
+
+private func normalizedBrowserURLString(_ rawValue: String) -> String {
+    let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return "" }
+    guard var components = URLComponents(string: trimmed) else { return trimmed }
+    components.scheme = components.scheme?.lowercased()
+    components.host = components.host?.lowercased()
+    if components.scheme == "https", components.port == 443 { components.port = nil }
+    if components.scheme == "http", components.port == 80 { components.port = nil }
+    if components.path == "/" { components.path = "" }
+    components.fragment = nil
+    return components.url?.absoluteString ?? trimmed
 }
 
 public struct BrowserTabStripLayout: Equatable, Sendable {
@@ -355,6 +387,14 @@ public struct BrowserLLMContextBuilder: Sendable {
         我的问题：
         \(question.trimmingCharacters(in: .whitespacesAndNewlines))
         """
+    }
+
+    public func makePageSummaryQuestion(selection: BrowserSelectionContext) -> String {
+        let title = selection.page.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if title.isEmpty {
+            return "总结此网页，提取并概括网页主要内容、核心论点、关键论据、重要观点或故事信息。"
+        }
+        return "总结网页《\(title)》，提取并概括网页主要内容、核心论点、关键论据、重要观点或故事信息。"
     }
 
     public func makeContextMarkdown(selection: BrowserSelectionContext) -> String {
