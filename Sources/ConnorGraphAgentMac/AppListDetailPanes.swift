@@ -930,12 +930,12 @@ struct RSSSourceSettingsView: View {
     var body: some View {
         Group {
             if let selectedItem {
-                VStack(alignment: .leading, spacing: 0) {
-                    RSSBrowserTopBar(onAdd: { viewModel.isPresentingAddRSSSourceSheet = true })
-                    Divider().opacity(0.6)
-                    RSSItemDetailPane(source: selectedSource ?? presentation.source(id: selectedItem.sourceID), item: selectedItem)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                }
+                RSSItemDetailPane(
+                    source: selectedSource ?? presentation.source(id: selectedItem.sourceID),
+                    item: selectedItem,
+                    onFollow: { viewModel.followRSSItemInNewSession(selectedItem) }
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
                 Color.clear
             }
@@ -950,34 +950,15 @@ struct RSSSourceSettingsView: View {
     }
 }
 
-private struct RSSBrowserTopBar: View {
-    var onAdd: () -> Void
-    var body: some View {
-        HStack(alignment: .center, spacing: AppShellLayout.spaceM) {
-            VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
-                Text("RSS 阅读")
-                    .font(.system(size: 24, weight: .semibold))
-                Text("订阅源、抓取游标、阅读状态和 Graph evidence 候选由 Connor 本地治理。")
-                    .font(AgentChatTypography.meta)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: AppShellLayout.spaceM)
-            Button(action: onAdd) { Label("添加订阅源", systemImage: "plus") }
-                .buttonStyle(.borderedProminent)
-        }
-        .padding(.horizontal, AppShellLayout.spaceXL)
-        .padding(.vertical, AppShellLayout.spaceL)
-    }
-}
-
 private struct RSSItemDetailPane: View {
     var source: RSSSource?
     var item: RSSItemSummary
+    var onFollow: () -> Void
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
-                RSSItemHero(source: source, item: item)
+                RSSItemHero(source: source, item: item, onFollow: onFollow)
                 RSSInfoSection(title: "文章摘要", systemImage: "doc.text.magnifyingglass") {
                     Text(item.snippet.isEmpty ? "暂无摘要。" : item.snippet)
                         .font(AgentChatTypography.meta)
@@ -988,7 +969,7 @@ private struct RSSItemDetailPane: View {
                     VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
                         RSSMetadataLine(label: "来源", value: source?.displayName ?? item.sourceID.rawValue)
                         RSSMetadataLine(label: "作者", value: item.author ?? "未知")
-                        RSSMetadataLine(label: "链接", value: item.link?.absoluteString ?? "无")
+                        RSSLinkMetadataLine(url: item.link, onOpen: onFollow)
                     }
                 }
                 RSSInfoSection(title: "治理提示", systemImage: "checkmark.shield") {
@@ -1008,6 +989,7 @@ private struct RSSItemDetailPane: View {
 private struct RSSItemHero: View {
     var source: RSSSource?
     var item: RSSItemSummary
+    var onFollow: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: AppShellLayout.spaceL) {
@@ -1035,7 +1017,13 @@ private struct RSSItemHero: View {
                     RSSStatusPill(status: item.author ?? "未知作者", color: .secondary, systemImage: "person")
                 }
             }
-            Spacer(minLength: 0)
+            Spacer(minLength: AppShellLayout.spaceM)
+            Button(action: onFollow) {
+                Label("关注并打开", systemImage: "sparkle.magnifyingglass")
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(item.link == nil)
+            .help(item.link == nil ? "这篇文章没有可打开的原文链接" : "新建关注会话，并在会话浏览器中打开原文")
         }
         .padding(AppShellLayout.spaceL)
         .background(AppShellColors.cardBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous))
@@ -1071,6 +1059,39 @@ private struct RSSMetadataLine: View {
             Text(value)
                 .font(AgentChatTypography.meta)
                 .textSelection(.enabled)
+        }
+    }
+}
+
+private struct RSSLinkMetadataLine: View {
+    var url: URL?
+    var onOpen: () -> Void
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text("链接")
+                .font(AgentChatTypography.microEmphasis)
+                .foregroundStyle(.secondary)
+                .frame(width: 72, alignment: .leading)
+            if let url {
+                Button(action: onOpen) {
+                    HStack(spacing: 5) {
+                        Text(url.absoluteString)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Image(systemName: "arrow.up.forward.app")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .font(AgentChatTypography.meta)
+                }
+                .buttonStyle(.link)
+                .textSelection(.enabled)
+                .help("新建关注会话，并在会话浏览器中打开此链接")
+            } else {
+                Text("无")
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }
