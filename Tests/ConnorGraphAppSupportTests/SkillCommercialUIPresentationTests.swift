@@ -55,4 +55,24 @@ struct SkillCommercialUIPresentationTests {
         #expect(presentation.summary.invalid == 1)
         #expect(presentation.globalWarnings == ["Invalid skill x"])
     }
+
+    @Test func excludesHiddenSkillsFromVisibleSkillManagerCards() throws {
+        var hidden = makeUISkillPackage(slug: "internal-helper")
+        hidden.sourceTier = .bundled
+        hidden.manifest.hidden = true
+        hidden.manifest.name = "Internal Helper"
+        let visible = makeUISkillPackage(slug: "user-helper")
+        let snapshot = SkillPackageScanSnapshot(
+            packages: [hidden, visible],
+            resolutions: [
+                SkillResolution(slug: hidden.slug, selected: hidden, candidates: [hidden]),
+                SkillResolution(slug: visible.slug, selected: visible, candidates: [visible])
+            ]
+        )
+
+        let presentation = SkillCommercialUIPresentationBuilder().build(snapshot: snapshot)
+
+        #expect(presentation.cards.map(\.id) == ["user-helper"])
+        #expect(presentation.summary.total == 1)
+    }
 }

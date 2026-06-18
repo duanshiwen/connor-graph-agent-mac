@@ -25,7 +25,6 @@ struct CraftSkillListPane: View {
         }
         .modifier(SkillDeleteConfirmationModifier(viewModel: viewModel))
         .task {
-            guard viewModel.commercialSkillManagerPresentation.cards.isEmpty else { return }
             viewModel.deferViewUpdate {
                 viewModel.reloadSkillRuntimeDefinitions()
             }

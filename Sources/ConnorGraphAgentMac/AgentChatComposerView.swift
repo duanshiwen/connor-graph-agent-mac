@@ -256,7 +256,6 @@ struct AgentChatComposerView: View {
             localChatInput = newValue
         }
         .task {
-            guard viewModel.commercialSkillManagerPresentation.cards.isEmpty else { return }
             viewModel.deferViewUpdate {
                 viewModel.reloadSkillRuntimeDefinitions()
             }

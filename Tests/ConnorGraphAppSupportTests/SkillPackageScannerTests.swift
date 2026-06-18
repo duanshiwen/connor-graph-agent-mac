@@ -92,4 +92,26 @@ struct SkillPackageScannerTests {
         #expect(snapshot.packages.map(\.slug.rawValue) == ["valid-skill"])
         #expect(snapshot.warnings.first?.contains("invalid-skill") == true)
     }
+
+    @Test func ignoresHiddenFlagForNonBundledSkillsButKeepsBundledHidden() throws {
+        let root = temporarySkillScannerRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let bundled = root.appendingPathComponent("bundled", isDirectory: true)
+        let user = root.appendingPathComponent("user", isDirectory: true)
+        _ = try writeCommercialSkill(root: bundled, slug: "internal-helper", name: "Internal Helper", extraFrontmatter: "hidden: true")
+        _ = try writeCommercialSkill(root: user, slug: "user-helper", name: "User Helper", extraFrontmatter: "hidden: true")
+        let storagePaths = AppStoragePaths(applicationSupportDirectory: root, skillsDirectory: user)
+        let scanner = SkillPackageScanner(
+            globalSkillsDirectory: root.appendingPathComponent("missing", isDirectory: true),
+            bundledSkillsDirectory: bundled
+        )
+
+        let snapshot = scanner.scan(storagePaths: storagePaths)
+
+        let bundledPackage = try #require(snapshot.resolution(slug: "internal-helper")?.selected)
+        #expect(bundledPackage.manifest.hidden == true)
+        let userPackage = try #require(snapshot.resolution(slug: "user-helper")?.selected)
+        #expect(userPackage.manifest.hidden == false)
+        #expect(userPackage.manifest.warnings.contains { $0.contains("only bundled Connor skills may be hidden") })
+    }
 }
