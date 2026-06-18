@@ -1,6 +1,6 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-18 19:41 GMT+8  
+文档更新时间：2026-06-19 00:30 GMT+8  
 当前代码基线:`feature/apple-iwork-attachment-support`,在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface / session-scoped multi-root project workspace / Connor-owned Scientific Compute Runtime skeleton / 商用级 Document Attachment OS / WKWebView-backed `web_fetch(js)` 基础上,继续收紧 Apple 原生 UI 边界:PDF/Word/Excel/PowerPoint 与 Apple iWork（Pages/Numbers/Keynote）一等附件仍由 Connor Session Capsule 和 Attachment Store 管理;PDF selectable text 抽取和多页原文预览继续使用 PDFKit;Office/iWork/Presentation/Spreadsheet 抽取继续通过 MarkItDown/Docling sidecar best-effort 编排与 hardening;Office/iWork/Presentation/Spreadsheet 原文件预览优先交给 macOS Quick Look / QuickLookUI,Connor 自有 UI 只负责 manifest、extraction status、retry、omitted attachment summary 和治理证据;AI 设置页 Add Connection 前置 DeepSeek、Xiaomi MiMo 和中国常用模型入口,在 OpenAI Compatible 统一底座上支持 MiMo 官方 `api-key` 认证头。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package,目标是把 Connor 建成 **graph-memory-native Agent OS**:它不是"图谱编辑器",也不是"Claude SDK 外壳",而是以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI 和 Local Automation Surface 共同构成的本地 Agent 操作系统。
@@ -21,6 +21,7 @@ Connor 当前坚持以下主权边界:
 - **Automation sovereignty belongs to Connor Local Automation Surface**:CLI/API 只能通过本地、可审计、可 dry-run、可 review 的 contract 调用 Connor runtime。
 - **Attachment sovereignty belongs to Connor Session OS / Attachment Store**:用户文件先进入本地 Session Capsule,原文件、manifest、派生抽取文本和 message refs 由 Connor 管理;OpenAI/Claude/Gemini 等 provider-native file API 未来只能作为可治理的投递/缓存策略,不能成为 source of truth。
 - **Mail sovereignty belongs to Connor Native Mail System**:邮件账号、身份、凭据绑定、OAuth token 生命周期、同步游标、source cache、读取状态变更、草稿、发信审批、联系人候选、邮件附件导入、tool audit 与 Graph Memory evidence policy 均由 Connor 拥有。AI、MCP server、LLM provider、协议 adapter 或任何外部 sidecar 都不能直接拥有邮件状态、绕过 Connor Policy Engine 发信、或把邮件事实直接写入 Graph Memory。内置邮件读取工具默认允许,不会触发权限获取操作;但读取正文仍写入隐私级 audit,且读取邮件默认不改变已读状态。
+- **RSS sovereignty belongs to Connor Native RSS System**:RSS / Atom / JSON Feed 订阅源、分组、抓取策略、同步游标、source cache、阅读状态、收藏/隐藏、OPML 导入导出、tool audit 与 Graph Memory evidence policy 均由 Connor 拥有。外部 feed parser、网络 adapter 或任何 MCP/server/provider 只能作为协议/解析 I/O 组件,不能拥有 source registry、cache、阅读状态、同步游标、Graph admission 或 UI 状态。
 
 明确不做:
 
@@ -42,6 +43,11 @@ Mail reads that implicitly mark messages as read
 Unapproved email sending
 Unapproved contact writes
 Auto-writing mail-derived facts into Graph Memory
+Copy-pasted Fluent Reader Electron/React UI or state model
+External RSS parser owning Connor feed registry / cache / read state
+Direct LLM access to RSS network fetch without Connor audit
+Auto-writing feed-derived facts into Graph Memory
+Executing feed HTML JavaScript or auto-loading remote tracking resources
 ```
 
 ---
@@ -1166,6 +1172,206 @@ Stage 10: Attachment Import
 Stage 11: OAuth Providers
 Stage 12: Graph Memory Evidence Integration
 Stage 13: Commercial Hardening
+```
+
+每个 stage 必须遵守 Superpowers / TDD:先写失败测试,再实现最小通过代码,再验证测试、audit、readiness evidence 与 README contract 一致。
+
+---
+
+## Connor Native RSS System
+
+Commercial Train 8 将 RSS / Atom / JSON Feed 能力定义为 Connor 自研的商用级 native source + governed tool surface。它不是 Fluent Reader 的复制品,也不是普通网页收藏夹;Fluent Reader 仅作为订阅源、条目、过滤、抓取频率、OPML 与阅读状态的产品逻辑参考。Connor 自己实现 domain、runtime facade、fetch/parser adapter、OPML service、tool contracts、permission model、audit pipeline、source cache、阅读状态治理和 Graph evidence pipeline。
+
+正式能力面命名为 **Native RSS Tool Surface**。AI 通过 Connor 注册的一组 native tool calls 读取订阅源、搜索文章、读取正文、显式修改阅读/收藏/隐藏状态、同步订阅源、导入导出 OPML 和创建 Graph evidence candidate。AI 不直接拥有 feed URL 抓取、source cache、阅读状态或 Graph 写入。
+
+核心运行路径:
+
+```text
+AI Agent
+→ Connor AgentToolRegistry
+→ RSSAgentTools
+→ Connor Policy Engine
+→ Connor Native RSS Runtime
+→ RSS Fetch Adapter / Feed Parsing Adapter
+→ RSS Source Cache / Audit / Graph Memory Evidence Pipeline
+```
+
+协议和解析 adapter 只负责 I/O,不拥有产品状态:
+
+```text
+RSSRuntime
+├── RSSFetchAdapter           # URLSession + timeout + User-Agent + HTTP status handling
+├── RSSFeedParsingAdapter     # RSS 2.0 / Atom / JSON Feed → unified domain
+├── RSSOPMLService            # OPML import/export
+├── RSSSourceRepository       # Connor-owned source registry
+├── RSSSourceCache            # rebuildable item/content/state cache
+├── RSSAuditLog               # read/content/mutation/network/import-export audit
+└── RSSEvidenceCandidate      # graph evidence candidate, no direct graph write
+```
+
+### Fluent Reader Reference Boundary
+
+参考 Fluent Reader 的内容:
+
+- `RSSSource`: url、iconurl、name、openTarget、unreadCount、lastFetched、fetchFrequency、textDir、hidden。
+- `RSSItem`: title、link、date、fetchedDate、thumb、content、snippet、creator、hasRead、starred、hidden、notify。
+- `FeedFilter`: 未读、收藏、隐藏、标题/全文/作者搜索、大小写敏感。
+- source + title + date 等去重思想。
+- OPML import/export。
+
+明确不复制:
+
+- Fluent Reader Electron / React UI、Redux / Lovefield 状态层或任何前端实现。
+- 外部 parser 若未来替换当前 adapter,只能处理 RSS/Atom/JSON 解析,不能拥有 source registry、cache、阅读状态、审计或 graph evidence policy。
+
+### RSS System Targets
+
+新增文件:
+
+```text
+Sources/ConnorGraphCore/RSSSourceDomain.swift
+Sources/ConnorGraphCore/RSSAuditDomain.swift
+
+Sources/ConnorGraphAppSupport/RSSRuntime.swift
+Sources/ConnorGraphAppSupport/RSSAgentRuntimeBridge.swift
+Sources/ConnorGraphAppSupport/NativeRSSBrowserPresentation.swift
+
+Sources/ConnorGraphAgent/RSSAgentTools.swift
+
+Sources/ConnorGraphAgentMac/RSSSourceSettingsViews.swift
+
+Tests/ConnorGraphAppSupportTests/NativeRSSSystemTests.swift
+```
+
+核心 domain 类型:
+
+```text
+RSSSourceID / RSSItemID / RSSGroupID / RSSFetchRunID
+RSSSource / RSSSourceHealth / RSSSourceFetchPolicy / RSSSourceOpenTarget / RSSSourceTextDirection
+RSSSyncCursor / RSSFeedMetadata / RSSParsedFeed / RSSFetchResult / RSSParseReport
+RSSItemSummary / RSSItemDetail / RSSItemContent / RSSItemMedia / RSSItemState
+OPMLDocument / OPMLSubscriptionOutline / RSSEvidenceCandidate / RSSAuditRecord
+```
+
+### Native RSS Tool Surface
+
+```text
+rss_list_sources
+rss_add_source
+rss_sync_source
+rss_list_items
+rss_search_items
+rss_get_item
+rss_set_read_state
+rss_set_star_state
+rss_set_hidden_state
+rss_import_opml
+rss_export_opml
+rss_create_evidence_candidate
+```
+
+Tool contract rules:
+
+- `rss_list_items` / `rss_search_items` 默认只返回 source、title、link、author、date、snippet、state、contentHash 等轻量 summary。
+- `rss_get_item(includeContent: true)` 才返回正文;正文经过 safe markdown/plain extraction,不执行 HTML JavaScript。
+- 读取 RSS summary 默认允许并写 audit。
+- 正文读取默认允许但归为 `readRSSContent`,写更高风险 audit。
+- 阅读、收藏、隐藏状态必须显式 mutation tool,不能由读取隐式改变。
+- `rss_add_source`、`rss_import_opml` 等 source management/import 行为默认审批。
+- `rss_create_evidence_candidate` 只创建证据候选,不直接写 Graph Memory。
+
+### RSS Permission Capabilities
+
+`AgentPermissionCapability` 已扩展:
+
+```swift
+case readRSS
+case readRSSContent
+case mutateRSSState
+case manageRSSSources
+case syncRSSSources
+case importRSSOPML
+case exportRSSOPML
+```
+
+策略:
+
+```text
+readRSS: readOnly/askToWrite/trustedWrite/allowAll 默认允许,写 audit
+readRSSContent: 默认允许,但标记 contentRead risk 并受 safe extraction/budget 约束
+mutateRSSState: readOnly 拒绝;askToWrite 审批;trustedWrite/allowAll 可允许并 audit
+manageRSSSources: 默认审批
+syncRSSSources: askToWrite/trustedWrite/allowAll 可允许;readOnly 拒绝
+importRSSOPML: 默认审批
+exportRSSOPML: 默认允许生成文本;写入文件仍走 workspace/file policy
+```
+
+### RSS Storage Layout
+
+文件状态规划:
+
+```text
+Connor/
+├── sources/
+│   └── rss/
+│       ├── rss-source.json
+│       ├── groups.json
+│       ├── opml-import-history.jsonl
+│       ├── opml-export-history.jsonl
+│       ├── cache-policy.json
+│       ├── audit.jsonl
+│       └── feeds/
+│           └── {sourceID}/
+│               ├── source.json
+│               ├── health.json
+│               ├── sync-state.json
+│               ├── fetch-policy.json
+│               ├── parse-report.json
+│               └── audit.jsonl
+```
+
+SQLite source cache 是可重建缓存,不是 source of truth:
+
+```text
+rss_sources
+rss_groups
+rss_source_group_memberships
+rss_items
+rss_item_content
+rss_item_state
+rss_sync_cursors
+rss_fetch_runs
+rss_audit_events
+rss_evidence_candidates
+```
+
+### Native RSS UI
+
+Connor 不做 Fluent Reader 替代品。Native UI 承载订阅源、文章列表、文章详情与治理提示。当前 UI 使用 SwiftUI/macOS 原生结构,与 Native Mail UI 保持一致:
+
+- 主侧边栏新增 `RSS`。
+- 左侧列表标题固定为「RSS 阅读」,右上角 + 打开添加订阅源 sheet。
+- 左侧列表采用单级文章列表,不做多级 group drill-down,避免 NavigationSplitView titlebar/safe-area 风险。
+- 筛选匹配标题、摘要、来源、作者;筛选状态是 transient UI state。
+- 无订阅源、无文章、无匹配文章使用 `ContentUnavailableView`。
+- 右侧详情未选中文章时保持空白;选中文章后展示 Hero、摘要、来源信息与治理提示。
+- 设置中心新增「RSS 阅读」设置页:订阅源、抓取策略、导入导出。
+- 添加订阅源 sheet 支持 Apple Developer News、Swift Blog、Hacker News 和自定义 URL preset;首轮保存为 UI draft,真实持久化与同步通过 Native RSS Runtime / Policy Engine。
+
+### Commercial Engineering Sequence
+
+```text
+Stage 1: Architecture Contract Landing
+Stage 2: Domain + Audit Models
+Stage 3: Runtime + Repository + Cache + Audit
+Stage 4: RSS / Atom / JSON Feed Parser + Safe HTML Extraction
+Stage 5: OPML Import / Export
+Stage 6: Native RSS Tool Surface + Permission Policy
+Stage 7: Native RSS Browser Presentation
+Stage 8: SwiftUI Main Surface + Settings Center
+Stage 9: Persistent Repository + SQLite Cache Migration
+Stage 10: Graph Memory Evidence Integration Hardening
+Stage 11: Commercial Network/Parser Hardening
 ```
 
 每个 stage 必须遵守 Superpowers / TDD:先写失败测试,再实现最小通过代码,再验证测试、audit、readiness evidence 与 README contract 一致。
