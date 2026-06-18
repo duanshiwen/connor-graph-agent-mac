@@ -3,6 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "ConnorGraphAgentMac",
+    defaultLocalization: "zh-Hans",
     platforms: [
         .macOS(.v14)
     ],
@@ -40,7 +41,10 @@ let package = Package(
         .executableTarget(
             name: "ConnorGraphAgentMac",
             dependencies: ["ConnorGraphAgent", "ConnorGraphStore", "ConnorGraphAppSupport"],
-            resources: [.process("Assets.xcassets")],
+            resources: [
+                .process("Assets.xcassets"),
+                .process("zh-Hans.lproj")
+            ],
             linkerSettings: [.linkedFramework("WebKit"), .linkedFramework("CoreLocation")]
         ),
         .executableTarget(
