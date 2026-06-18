@@ -6,48 +6,16 @@ import ConnorGraphAgent
 import ConnorGraphSearch
 import ConnorGraphAppSupport
 
-struct AgentSendControlButton: View {
-    var isSubmitting: Bool
-    var isDisabled: Bool
-    var action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: isSubmitting ? "stop.fill" : "arrow.up")
-                .font(.system(size: AgentChatTypography.sendIconSize, weight: .semibold))
-                .symbolRenderingMode(.hierarchical)
-                .frame(width: AgentChatLayout.primaryButtonSize, height: AgentChatLayout.primaryButtonSize)
-                .background(buttonBackground, in: Circle())
-                .overlay(Circle().stroke(buttonBorder, lineWidth: 1))
-                .shadow(color: buttonShadow, radius: 7, x: 0, y: 2)
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(isSubmitting ? ConnorCraftPalette.foreground : ConnorCraftPalette.sendButtonForeground)
-        .frame(width: AgentChatLayout.hitTargetSize, height: AgentChatLayout.hitTargetSize)
-        .contentShape(Circle())
-        .opacity(isDisabled ? 0.42 : 1)
-        .disabled(isDisabled)
-    }
-
-    private var buttonBackground: Color {
-        isSubmitting ? ConnorCraftPalette.stopButton : ConnorCraftPalette.sendButton
-    }
-
-    private var buttonBorder: Color {
-        isSubmitting ? ConnorCraftPalette.foreground.opacity(0.10) : ConnorCraftPalette.foreground.opacity(0.08)
-    }
-
-    private var buttonShadow: Color {
-        isDisabled || isSubmitting ? Color.clear : ConnorCraftPalette.foreground.opacity(0.12)
-    }
-}
-
 struct AgentChatComposerView: View {
     @ObservedObject var viewModel: AppViewModel
     @Binding var isSessionInfoPresented: Bool
     @State private var localChatInput: String = ""
     @State private var isWorkspacePopoverPresented: Bool = false
     @State private var isFileImporterPresented: Bool = false
+    @State private var isSkillPickerPresented: Bool = false
+    @State private var slashSkillPickerAnchorRect: CGRect?
+    @State private var slashSkillPickerTriggerRange: NSRange?
+    @State private var skillPickerSelectionIndex: Int = 0
 
     private let workspaceMenuItemMaxWidth: CGFloat = 320
     private let supportedAttachmentContentTypes: [UTType] = [
@@ -103,25 +71,24 @@ struct AgentChatComposerView: View {
 
             VStack(spacing: 0) {
                 VStack(spacing: 0) {
-                    if !viewModel.pendingAttachmentRefs.isEmpty {
+                    if !composerState.pendingAttachments.isEmpty {
                         AgentAttachmentShelfView(
-                            attachments: viewModel.pendingAttachmentRefs,
-                            onPreview: { attachment in viewModel.previewAttachment(attachment) },
-                            onRemove: { id in viewModel.removePendingAttachment(id: id) }
+                            attachments: composerState.pendingAttachments,
+                            onPreview: { attachment in sendComposerAction(.previewAttachment(attachment)) },
+                            onRemove: { id in sendComposerAction(.removeAttachment(id)) }
                         )
                         .frame(height: 42, alignment: .topLeading)
                     }
 
-                    SafeChatComposerTextView(
-                        text: localChatInputBinding,
-                        placeholder: viewModel.composerSendShortcut == "cmd-return" ? "按 ⌘ + Return 发送" : "按 Shift + Return 换行",
-                        isSpellCheckEnabled: viewModel.spellCheckEnabled,
-                        sendShortcut: viewModel.composerSendShortcut,
-                        onSubmit: submitLocalChatInput,
-                        onImportFiles: { urls in Task { await viewModel.importAttachments(urls: urls) } }
-                    )
+                    VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
+                        if composerState.activeSkillSlug != nil {
+                            activeSkillInlineChip
+                        }
+
+                        composerTextEditor
+                    }
                     .padding(.horizontal, AgentChatLayout.spaceL)
-                    .padding(.top, viewModel.pendingAttachmentRefs.isEmpty ? AgentChatLayout.spaceM : AgentChatLayout.spaceXS)
+                    .padding(.top, composerState.pendingAttachments.isEmpty ? AgentChatLayout.spaceM : AgentChatLayout.spaceXS)
                     .padding(.bottom, AgentChatLayout.spaceM)
                     .frame(maxHeight: .infinity, alignment: .topLeading)
                     .background(Color.clear)
@@ -143,7 +110,7 @@ struct AgentChatComposerView: View {
 
                     workingDirectoryMenu
 
-                    Button(action: { viewModel.toggleBrowserWorkspaceVisibility() }) {
+                    Button(action: { sendComposerAction(.toggleBrowserWorkspaceVisibility) }) {
                         AgentComposerOptionBadge(
                             title: viewModel.isBrowserVisible ? "隐藏浏览器" : "浏览器",
                             systemImage: "safari",
@@ -166,11 +133,11 @@ struct AgentChatComposerView: View {
                     modelSelectionMenu
 
                     AgentSendControlButton(
-                        isSubmitting: viewModel.isSubmittingChat,
-                        isDisabled: !viewModel.isSubmittingChat && !canSubmitLocalChat,
+                        isSubmitting: composerState.isSubmitting,
+                        isDisabled: !composerState.isSubmitting && !composerState.canSubmit,
                         action: {
-                            if viewModel.isSubmittingChat {
-                                viewModel.cancelActiveChatRun()
+                            if composerState.isSubmitting {
+                                sendComposerAction(.cancelActiveRun)
                             } else {
                                 submitLocalChatInput()
                             }
@@ -212,6 +179,11 @@ struct AgentChatComposerView: View {
             guard newValue != localChatInput else { return }
             localChatInput = newValue
         }
+        .task {
+            viewModel.deferViewUpdate {
+                viewModel.reloadSkillRuntimeDefinitions()
+            }
+        }
         .fileImporter(isPresented: $isFileImporterPresented, allowedContentTypes: supportedAttachmentContentTypes, allowsMultipleSelection: true) { result in
             switch result {
             case .success(let urls):
@@ -226,18 +198,142 @@ struct AgentChatComposerView: View {
         viewModel.chatSessions.first { $0.id == viewModel.selectedChatSessionID }
     }
 
+    private var composerStore: AgentComposerStore {
+        AgentComposerStore(viewModel: viewModel)
+    }
+
+    private var composerState: AgentComposerState {
+        composerStore.state(input: localChatInput, canSubmit: canSubmitLocalChat, selectedSession: selectedSession)
+    }
+
+    private func sendComposerAction(_ action: AgentComposerAction) {
+        composerStore.send(action)
+    }
+
     private var localChatInputBinding: Binding<String> {
         Binding(
             get: { localChatInput },
             set: { newValue in
                 localChatInput = newValue
-                viewModel.updateSelectedChatInputDraft(newValue)
+                sendComposerAction(.inputChanged(newValue))
             }
         )
     }
 
+    private var composerTextEditor: some View {
+        ZStack(alignment: .topLeading) {
+            SafeChatComposerTextView(
+                text: localChatInputBinding,
+                placeholder: composerPlaceholder,
+                isSpellCheckEnabled: viewModel.spellCheckEnabled,
+                sendShortcut: viewModel.composerSendShortcut,
+                isSkillPickerPresented: isSkillPickerPresented,
+                onSubmit: submitLocalChatInput,
+                onImportFiles: importComposerFiles,
+                onSlashCommand: handleSlashCommand,
+                onSkillPickerKeyCommand: handleSkillPickerKeyCommand,
+                onAttachmentImportError: handleAttachmentImportError
+            )
+
+            slashSkillPickerAnchor
+        }
+    }
+
+    private var composerPlaceholder: String {
+        viewModel.composerSendShortcut == "cmd-return" ? "按 ⌘ + Return 发送" : "按 Shift + Return 换行"
+    }
+
+    @ViewBuilder
+    private var slashSkillPickerAnchor: some View {
+        if let slashSkillPickerAnchorRect {
+            Color.clear
+                .frame(width: 1, height: max(18, slashSkillPickerAnchorRect.height))
+                .offset(x: max(0, slashSkillPickerAnchorRect.minX), y: max(0, slashSkillPickerAnchorRect.maxY))
+                .popover(
+                    isPresented: Binding(
+                        get: { isSkillPickerPresented && self.slashSkillPickerAnchorRect != nil },
+                        set: { isPresented in
+                            isSkillPickerPresented = isPresented
+                            if !isPresented {
+                                self.slashSkillPickerAnchorRect = nil
+                                self.slashSkillPickerTriggerRange = nil
+                            }
+                        }
+                    ),
+                    arrowEdge: .top
+                ) {
+                    skillPickerPopoverContent
+                        .padding(10)
+                        .frame(width: 320)
+                }
+        }
+    }
+
+    private func importComposerFiles(_ urls: [URL]) {
+        sendComposerAction(.importFiles(urls))
+    }
+
+    private func handleAttachmentImportError(_ message: String) {
+        sendComposerAction(.showAttachmentImportError(message))
+    }
+
+    private func handleSlashCommand(_ rect: CGRect, triggerRange: NSRange) {
+        slashSkillPickerAnchorRect = rect
+        slashSkillPickerTriggerRange = triggerRange
+        skillPickerSelectionIndex = preferredSkillPickerSelectionIndex()
+        isSkillPickerPresented = true
+    }
+
     private var canSubmitLocalChat: Bool {
-        !localChatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !viewModel.pendingAttachmentRefs.isEmpty
+        !localChatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !composerState.pendingAttachments.isEmpty
+    }
+
+    private func removeSlashSkillPickerTriggerIfNeeded() {
+        guard let triggerRange = slashSkillPickerTriggerRange,
+              let range = Range(triggerRange, in: localChatInput),
+              localChatInput[range] == "/"
+        else { return }
+        localChatInput.removeSubrange(range)
+        viewModel.updateSelectedChatInputDraft(localChatInput)
+    }
+
+    private func preferredSkillPickerSelectionIndex() -> Int {
+        let cards = viewModel.commercialSkillManagerPresentation.cards
+        guard !cards.isEmpty else { return 0 }
+        if let activeSkillSlug = composerState.activeSkillSlug,
+           let activeIndex = cards.firstIndex(where: { $0.id == activeSkillSlug }) {
+            return activeIndex
+        }
+        return 0
+    }
+
+    private func handleSkillPickerKeyCommand(_ command: SkillPickerKeyCommand) {
+        let cards = viewModel.commercialSkillManagerPresentation.cards
+        switch command {
+        case .moveUp:
+            guard !cards.isEmpty else { return }
+            skillPickerSelectionIndex = (skillPickerSelectionIndex - 1 + cards.count) % cards.count
+        case .moveDown:
+            guard !cards.isEmpty else { return }
+            skillPickerSelectionIndex = (skillPickerSelectionIndex + 1) % cards.count
+        case .confirm:
+            guard cards.indices.contains(skillPickerSelectionIndex) else { return }
+            selectSkill(cards[skillPickerSelectionIndex])
+        case .cancel:
+            closeSkillPicker()
+        }
+    }
+
+    private func selectSkill(_ card: SkillManagerCard) {
+        sendComposerAction(.selectSkill(card.id))
+        removeSlashSkillPickerTriggerIfNeeded()
+        closeSkillPicker()
+    }
+
+    private func closeSkillPicker() {
+        isSkillPickerPresented = false
+        slashSkillPickerAnchorRect = nil
+        slashSkillPickerTriggerRange = nil
     }
 
     private func submitLocalChatInput() {
@@ -460,126 +556,14 @@ struct AgentChatComposerView: View {
     }
 
     private var optionBadgeRow: some View {
-        HStack(spacing: AgentChatLayout.spaceS) {
-            permissionModeMenu
-
-            if let session = selectedSession {
-                sessionStatusMenu(session)
-            }
-
-            Spacer(minLength: AgentChatLayout.spaceS)
-
-            backgroundTasksButton
-
-            Button {
-                withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
-                    isSessionInfoPresented.toggle()
-                }
-            } label: {
-                AgentComposerOptionBadge(
-                    title: "信息",
-                    systemImage: "info.circle",
-                    tint: isSessionInfoPresented ? composerControlActiveForeground : composerControlForeground,
-                    showsChevron: false,
-                    isActive: isSessionInfoPresented,
-                    style: .compact
-                )
-            }
-            .buttonStyle(.plain)
-            .help("会话信息")
-        }
-        .padding(.horizontal, 1)
-        .padding(.bottom, 2)
-    }
-
-    private var backgroundTasksButton: some View {
-        Button {
-            viewModel.isBackgroundTasksPresented = true
-        } label: {
-            ZStack {
-                RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
-                    .fill(viewModel.hasRunningActiveSessionBackgroundTask ? Color.accentColor.opacity(0.16) : Color.clear)
-                if viewModel.hasRunningActiveSessionBackgroundTask {
-                    ProgressView()
-                        .controlSize(.small)
-                } else {
-                    Image(systemName: "tray.full")
-                        .font(.system(size: AgentChatTypography.controlIconSize, weight: .medium))
-                        .symbolRenderingMode(.hierarchical)
-                }
-            }
-            .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
-            .foregroundStyle(viewModel.hasRunningActiveSessionBackgroundTask ? composerControlActiveForeground : composerControlForeground)
-        }
-        .buttonStyle(.plain)
-        .frame(width: AgentChatLayout.hitTargetSize, height: AgentChatLayout.hitTargetSize)
-        .contentShape(Rectangle())
-        .help(viewModel.hasRunningActiveSessionBackgroundTask ? "查看后台任务（运行中）" : "查看后台任务")
-    }
-
-    private var permissionModeMenu: some View {
-        Menu {
-            ForEach(AgentPermissionMode.allCases.filter { $0 != .allowAll }, id: \.self) { mode in
-                Button {
-                    viewModel.setSidecarPermissionMode(mode)
-                } label: {
-                    Text(menuOptionTitle(mode.displayName, isSelected: mode == viewModel.sidecarPermissionMode))
-                }
-            }
-        } label: {
-            AgentComposerOptionBadge(
-                title: viewModel.sidecarPermissionMode.displayName,
-                systemImage: permissionModeIcon(viewModel.sidecarPermissionMode),
-                tint: permissionModeColor(viewModel.sidecarPermissionMode),
-                isActive: true,
-                style: .prominent
-            )
-        }
-        .menuStyle(.borderlessButton)
-        .help("调整本轮会话权限")
-    }
-
-    private func sessionStatusMenu(_ session: AgentSession) -> some View {
-        Menu {
-            ForEach(selectableStatusDefinitions, id: \.id) { definition in
-                if let status = AgentSessionStatus(rawValue: definition.id) {
-                    Button {
-                        viewModel.deferViewUpdate {
-                            viewModel.setSelectedSessionStatus(status)
-                        }
-                    } label: {
-                        Text(menuOptionTitle(definition.name, isSelected: status == session.governance.status))
-                    }
-                }
-            }
-        } label: {
-            let definition = statusDefinition(for: session.governance.status)
-            AgentComposerOptionBadge(
-                title: definition.name,
-                systemImage: definition.systemImage,
-                tint: sessionStatusColor(session.governance.status),
-                isActive: false,
-                style: .prominent
-            )
-        }
-        .menuStyle(.borderlessButton)
-        .help("更改会话状态")
-    }
-
-    private var selectableStatusDefinitions: [AgentSessionStatusDefinition] {
-        viewModel.governanceConfig.statuses
-            .filter { $0.id != AgentSessionStatus.archived.rawValue }
-            .filter { AgentSessionStatus(rawValue: $0.id) != nil }
-            .sorted { lhs, rhs in
-                if lhs.sortOrder == rhs.sortOrder { return lhs.name < rhs.name }
-                return lhs.sortOrder < rhs.sortOrder
-            }
-    }
-
-    private func statusDefinition(for status: AgentSessionStatus) -> AgentSessionStatusDefinition {
-        viewModel.governanceConfig.statuses.first(where: { $0.id == status.rawValue })
-            ?? AgentSessionStatusDefinition.defaults.first(where: { $0.id == status.rawValue })
-            ?? AgentSessionStatusDefinition(id: status.rawValue, name: status.displayName, systemImage: sessionStatusIcon(status))
+        AgentComposerOptionBar(
+            selectedSession: selectedSession,
+            composerState: composerState,
+            governanceConfig: viewModel.governanceConfig,
+            hasRunningBackgroundTask: viewModel.hasRunningActiveSessionBackgroundTask,
+            isSessionInfoPresented: $isSessionInfoPresented,
+            onAction: sendComposerAction
+        )
     }
 
     private var modelSelectionMenu: some View {
@@ -589,7 +573,7 @@ struct AgentChatComposerView: View {
             }
 
             if viewModel.llmModelConnections.isEmpty {
-                Button(viewModel.llmSelectedModel.isEmpty ? "未选择模型" : viewModel.llmSelectedModel) {}
+                Button(composerState.selectedModel.isEmpty ? "未选择模型" : composerState.selectedModel) {}
                     .disabled(true)
             } else {
                 ForEach(viewModel.llmModelConnections) { connection in
@@ -602,7 +586,7 @@ struct AgentChatComposerView: View {
                                 Button {
                                     viewModel.selectLLMModel(model.id, providerMode: connection.providerMode, connectionID: connection.id)
                                 } label: {
-                                    if model.id == viewModel.llmSelectedModel && connection.id == viewModel.llmDefaultConnectionID {
+                                    if model.id == composerState.selectedModel && connection.id == viewModel.llmDefaultConnectionID {
                                         Label(model.displayName, systemImage: "checkmark")
                                     } else {
                                         Text(model.displayName)
@@ -625,7 +609,34 @@ struct AgentChatComposerView: View {
                     }
                 }
 
-                if viewModel.sessionHasLLMOverride {
+                Divider()
+
+                Menu {
+                    ForEach(AppLLMThinkingLevel.allCases) { level in
+                        Button {
+                            viewModel.selectLLMThinkingLevel(level)
+                        } label: {
+                            if level == viewModel.llmThinkingLevel {
+                                Label(level.displayName, systemImage: "checkmark")
+                            } else {
+                                Text(level.displayName)
+                            }
+                        }
+                        .help(level.description)
+                    }
+
+                    Divider()
+
+                    Button {
+                        viewModel.selectDefaultLLMThinkingLevel(viewModel.llmThinkingLevel)
+                    } label: {
+                        Label("设为全局默认", systemImage: "pin")
+                    }
+                } label: {
+                    Label("思考强度 · \(viewModel.llmThinkingLevel.displayName)", systemImage: "brain.head.profile")
+                }
+
+                if composerState.sessionHasLLMOverride {
                     Divider()
                     Button {
                         viewModel.clearSessionLLMOverride()
@@ -645,13 +656,13 @@ struct AgentChatComposerView: View {
         } label: {
             HStack(spacing: AgentChatLayout.spaceXS) {
                 Label {
-                    Text(viewModel.llmSelectedModel.isEmpty ? "未选择模型" : viewModel.llmSelectedModel)
+                    Text(composerState.selectedModel.isEmpty ? "未选择模型" : composerState.selectedModel)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 } icon: {
                     Image(systemName: "cpu")
                 }
-                if viewModel.sessionHasLLMOverride {
+                if composerState.sessionHasLLMOverride {
                     Circle()
                         .fill(Color.accentColor)
                         .frame(width: 6, height: 6)
@@ -669,6 +680,153 @@ struct AgentChatComposerView: View {
         .help("选择真实配置的连接和模型；切换后下一轮请求立即使用该模型")
     }
 
+    private var activeSkillInlineChip: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "bolt.fill")
+                .font(.system(size: 11, weight: .semibold))
+            Text(composerState.activeSkillDisplayName ?? "当前技能")
+                .font(AgentChatTypography.meta.weight(.medium))
+                .lineLimit(1)
+            Button {
+                sendComposerAction(.clearSkill)
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.accentColor.opacity(0.72))
+        }
+        .foregroundStyle(Color.accentColor)
+        .padding(.horizontal, AgentChatLayout.spaceS)
+        .frame(height: AgentChatLayout.chipHeight)
+        .background(
+            RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
+                .fill(Color.accentColor.opacity(0.10))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
+                .stroke(Color.accentColor.opacity(0.26), lineWidth: 1)
+        )
+        .help("当前技能：\(composerState.activeSkillDisplayName ?? "") — 点击 × 清除")
+    }
+
+    private var skillPickerButton: some View {
+        Button {
+            slashSkillPickerAnchorRect = nil
+            isSkillPickerPresented.toggle()
+        } label: {
+            AgentComposerOptionBadge(
+                title: "/技能",
+                systemImage: composerState.activeSkillSlug == nil ? "bolt" : "bolt.fill",
+                tint: isSkillPickerPresented ? composerControlActiveForeground : composerControlForeground,
+                showsChevron: false,
+                isActive: isSkillPickerPresented,
+                style: .compact,
+                showsBorder: false
+            )
+        }
+        .buttonStyle(.plain)
+        .popover(
+            isPresented: Binding(
+                get: { isSkillPickerPresented && slashSkillPickerAnchorRect == nil },
+                set: { isPresented in isSkillPickerPresented = isPresented }
+            ),
+            arrowEdge: .bottom
+        ) {
+            skillPickerPopoverContent
+                .padding(10)
+                .frame(width: 320)
+        }
+        .help(composerState.activeSkillSlug != nil ? "当前技能：\(composerState.activeSkillDisplayName ?? "") — 点击 × 清除" : "输入 / 或点击选择技能")
+    }
+
+    private var skillPickerPopoverContent: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("选择技能")
+                .font(AgentChatTypography.micro.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+
+            Divider()
+
+            let allSkills = viewModel.commercialSkillManagerPresentation.cards
+            if allSkills.isEmpty {
+                Text("暂无可用技能")
+                    .font(AgentChatTypography.micro)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+            } else {
+                ForEach(Array(allSkills.enumerated()), id: \.element.id) { index, card in
+                    let isKeyboardSelected = index == skillPickerSelectionIndex
+                    Button {
+                        skillPickerSelectionIndex = index
+                        selectSkill(card)
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "bolt.fill")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Color.accentColor)
+                                .frame(width: 16)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(card.title)
+                                    .font(AgentChatTypography.meta.weight(.medium))
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(1)
+                                Text(card.subtitle)
+                                    .font(AgentChatTypography.micro)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                            Spacer()
+                            if card.id == composerState.activeSkillSlug {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(Color.accentColor)
+                            }
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .contentShape(Rectangle())
+                        .background(
+                            RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
+                                .fill(isKeyboardSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if composerState.activeSkillSlug != nil {
+                Divider()
+                Button {
+                    sendComposerAction(.clearSkill)
+                    isSkillPickerPresented = false
+                    slashSkillPickerAnchorRect = nil
+                    slashSkillPickerTriggerRange = nil
+                } label: {
+                    Label("清除当前技能", systemImage: "xmark.circle")
+                        .font(AgentChatTypography.micro)
+                }
+                .buttonStyle(.borderless)
+                .padding(.horizontal, 8)
+            }
+
+            Divider()
+
+            HStack(spacing: 4) {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 10))
+                Text("在输入框中输入 / 也可唤出此列表")
+                    .font(.system(size: 10))
+            }
+            .foregroundStyle(.tertiary)
+            .padding(.horizontal, 8)
+        }
+    }
+
     private var composerControlForeground: Color { .secondary }
 
     private var composerControlActiveForeground: Color { .accentColor }
@@ -681,37 +839,4 @@ struct AgentChatComposerView: View {
         }
     }
 
-    private func permissionModeIcon(_ mode: AgentPermissionMode) -> String {
-        switch mode {
-        case .readOnly: "eye"
-        case .askToWrite: "exclamationmark.circle"
-        case .trustedWrite: "pencil.and.outline"
-        case .allowAll: "bolt.circle"
-        }
-    }
-
-    private func permissionModeColor(_ mode: AgentPermissionMode) -> Color {
-        switch mode {
-        case .readOnly, .askToWrite, .trustedWrite, .allowAll: composerControlForeground
-        }
-    }
-
-    private func sessionStatusIcon(_ status: AgentSessionStatus) -> String {
-        switch status {
-        case .todo: "circle"
-        case .inProgress: "play.circle"
-        case .waiting: "clock"
-        case .needsReview: "exclamationmark.bubble"
-        case .done: "checkmark.circle"
-        case .blocked: "nosign"
-        case .cancelled: "xmark.circle"
-        case .archived: "archivebox"
-        }
-    }
-
-    private func sessionStatusColor(_ status: AgentSessionStatus) -> Color {
-        switch status {
-        case .todo, .inProgress, .waiting, .needsReview, .done, .blocked, .cancelled, .archived: composerControlForeground
-        }
-    }
 }

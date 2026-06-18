@@ -142,7 +142,7 @@ private func temporaryPhaseCStoragePaths(_ name: String = UUID().uuidString) -> 
 
     let catalog = try await runtime.discoverToolCatalog()
 
-    #expect(catalog.map(\.name) == ["linear.list_issues"])
+    #expect(catalog.map(\.name) == ["mcp__linear__list_issues"])
     #expect(catalog.first?.sourceID == "linear")
     #expect(catalog.first?.rawName == "list_issues")
     #expect(catalog.first?.requiredCapabilities == [.externalNetwork, .readSession])

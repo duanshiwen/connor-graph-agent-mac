@@ -357,14 +357,16 @@ extension ClaudeSDKSidecarEvent {
 public struct ClaudeSDKSidecarSessionBackend<Transport: ClaudeSDKSidecarSessionTransport>: AgentBackend {
     public var transport: Transport
     public var workingDirectory: URL
+    public var thinkingLevel: AppLLMThinkingLevel
 
-    public init(transport: Transport, workingDirectory: URL) {
+    public init(transport: Transport, workingDirectory: URL, thinkingLevel: AppLLMThinkingLevel = .defaultLevel) {
         self.transport = transport
         self.workingDirectory = workingDirectory
+        self.thinkingLevel = thinkingLevel
     }
 
     public func chat(_ request: AgentChatRequest) -> AsyncThrowingStream<AgentEvent, Error> {
-        let sidecarRequest = ClaudeSDKSidecarRequest(request: request, workingDirectory: workingDirectory)
+        let sidecarRequest = ClaudeSDKSidecarRequest(request: request, workingDirectory: workingDirectory, effort: thinkingLevel.effortValue)
         return AsyncThrowingStream { continuation in
             Task {
                 let sidecarEvents = await transport.start(sidecarRequest)
@@ -489,15 +491,17 @@ public struct ClaudeSDKSidecarBackend<Transport: ClaudeSDKSidecarTransport>: Age
     public var transport: Transport
     public var workingDirectory: URL
     public var instructionAppendix: String
+    public var thinkingLevel: AppLLMThinkingLevel
 
-    public init(transport: Transport, workingDirectory: URL, instructionAppendix: String = "") {
+    public init(transport: Transport, workingDirectory: URL, instructionAppendix: String = "", thinkingLevel: AppLLMThinkingLevel = .defaultLevel) {
         self.transport = transport
         self.workingDirectory = workingDirectory
         self.instructionAppendix = instructionAppendix
+        self.thinkingLevel = thinkingLevel
     }
 
     public func chat(_ request: AgentChatRequest) -> AsyncThrowingStream<AgentEvent, Error> {
-        let sidecarRequest = ClaudeSDKSidecarRequest(request: request, workingDirectory: workingDirectory, instructionAppendix: instructionAppendix)
+        let sidecarRequest = ClaudeSDKSidecarRequest(request: request, workingDirectory: workingDirectory, instructionAppendix: instructionAppendix, effort: thinkingLevel.effortValue)
         return AsyncThrowingStream { continuation in
             Task {
                 let sidecarEvents = await transport.stream(sidecarRequest)

@@ -1,18 +1,28 @@
 import SwiftUI
 import AppKit
-import UniformTypeIdentifiers
 import ConnorGraphCore
 import ConnorGraphAgent
 import ConnorGraphSearch
 import ConnorGraphAppSupport
+
+enum SkillPickerKeyCommand {
+    case moveUp
+    case moveDown
+    case confirm
+    case cancel
+}
 
 struct SafeChatComposerTextView: NSViewRepresentable {
     @Binding var text: String
     var placeholder: String
     var isSpellCheckEnabled: Bool
     var sendShortcut: String
+    var isSkillPickerPresented: Bool = false
     var onSubmit: () -> Void
     var onImportFiles: ([URL]) -> Void
+    var onSlashCommand: ((CGRect, NSRange) -> Void)? = nil
+    var onSkillPickerKeyCommand: ((SkillPickerKeyCommand) -> Void)? = nil
+    var onAttachmentImportError: ((String) -> Void)? = nil
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
@@ -24,10 +34,44 @@ struct SafeChatComposerTextView: NSViewRepresentable {
 
         let textView = SubmitAwareTextView()
         textView.delegate = context.coordinator
-        textView.onSubmit = onSubmit
-        textView.onImportFiles = onImportFiles
-        textView.sendShortcut = sendShortcut
+        textView.inputCommandRouter.configuration = textInputConfiguration
         textView.placeholderString = placeholder
+        configure(textView)
+        textView.string = text
+
+        scrollView.documentView = textView
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let textView = scrollView.documentView as? SubmitAwareTextView else { return }
+        textView.inputCommandRouter.configuration = textInputConfiguration
+        textView.placeholderString = placeholder
+        textView.font = AgentChatTypography.composerNSFont
+        if textView.string != text {
+            textView.string = text
+        }
+        textView.isContinuousSpellCheckingEnabled = isSpellCheckEnabled
+        textView.enabledTextCheckingTypes = isSpellCheckEnabled ? NSTextCheckingResult.CheckingType.spelling.rawValue : 0
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text)
+    }
+
+    private var textInputConfiguration: ComposerTextInputConfiguration {
+        ComposerTextInputConfiguration(
+            sendShortcut: sendShortcut,
+            isSkillPickerPresented: isSkillPickerPresented,
+            onSubmit: onSubmit,
+            onImportFiles: onImportFiles,
+            onSlashCommand: onSlashCommand,
+            onSkillPickerKeyCommand: onSkillPickerKeyCommand,
+            onAttachmentImportError: onAttachmentImportError
+        )
+    }
+
+    private func configure(_ textView: SubmitAwareTextView) {
         textView.isRichText = false
         textView.importsGraphics = false
         textView.allowsUndo = true
@@ -53,28 +97,6 @@ struct SafeChatComposerTextView: NSViewRepresentable {
         textView.autoresizingMask = [.width]
         textView.textContainer?.widthTracksTextView = true
         textView.textContainer?.heightTracksTextView = false
-        textView.string = text
-
-        scrollView.documentView = textView
-        return scrollView
-    }
-
-    func updateNSView(_ scrollView: NSScrollView, context: Context) {
-        guard let textView = scrollView.documentView as? SubmitAwareTextView else { return }
-        textView.onSubmit = onSubmit
-        textView.onImportFiles = onImportFiles
-        textView.sendShortcut = sendShortcut
-        textView.placeholderString = placeholder
-        textView.font = AgentChatTypography.composerNSFont
-        if textView.string != text {
-            textView.string = text
-        }
-        textView.isContinuousSpellCheckingEnabled = isSpellCheckEnabled
-        textView.enabledTextCheckingTypes = isSpellCheckEnabled ? NSTextCheckingResult.CheckingType.spelling.rawValue : 0
-    }
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text)
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
@@ -92,9 +114,7 @@ struct SafeChatComposerTextView: NSViewRepresentable {
 }
 
 final class SubmitAwareTextView: NSTextView {
-    var onSubmit: (() -> Void)?
-    var onImportFiles: (([URL]) -> Void)?
-    var sendShortcut: String = "return"
+    let inputCommandRouter = ComposerInputCommandRouter()
     var placeholderString: String = "" {
         didSet { needsDisplay = true }
     }
@@ -103,48 +123,49 @@ final class SubmitAwareTextView: NSTextView {
         didSet { needsDisplay = true }
     }
 
+    override func keyDown(with event: NSEvent) {
+        if inputCommandRouter.handleKeyDown(event) { return }
+        super.keyDown(with: event)
+    }
+
     override func insertNewline(_ sender: Any?) {
-        let flags = NSApp.currentEvent?.modifierFlags ?? []
-        if flags.contains(.shift) || flags.contains(.option) {
-            super.insertNewline(sender)
-            return
+        if inputCommandRouter.handleInsertNewline(currentEvent: NSApp.currentEvent) { return }
+        super.insertNewline(sender)
+    }
+
+    override func insertText(_ string: Any, replacementRange: NSRange) {
+        if inputCommandRouter.handleInsertText(string, replacementRange: replacementRange, textView: self, slashAnchorRect: slashCommandAnchorRect) { return }
+        super.insertText(string, replacementRange: replacementRange)
+    }
+
+    private func slashCommandAnchorRect() -> CGRect {
+        let location = selectedRange().location
+        let screenRect = firstRect(forCharacterRange: NSRange(location: location, length: 0), actualRange: nil)
+        if let window {
+            let windowRect = window.convertFromScreen(screenRect)
+            let localRect = convert(windowRect, from: nil)
+            if localRect.isNull == false, localRect.isInfinite == false {
+                return localRect
+            }
         }
-        switch sendShortcut {
-        case "cmd-return":
-            flags.contains(.command) ? onSubmit?() : super.insertNewline(sender)
-        default:
-            onSubmit?()
-        }
+        return CGRect(x: textContainerInset.width, y: textContainerInset.height, width: 1, height: font?.pointSize ?? 16)
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        fileURLs(from: sender.draggingPasteboard).isEmpty ? super.draggingEntered(sender) : .copy
+        inputCommandRouter.draggingEntered(sender.draggingPasteboard) ?? super.draggingEntered(sender)
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        let urls = fileURLs(from: sender.draggingPasteboard)
-        guard !urls.isEmpty else { return super.performDragOperation(sender) }
-        onImportFiles?(urls)
-        return true
+        inputCommandRouter.handleDragOperation(sender.draggingPasteboard) || super.performDragOperation(sender)
     }
 
     override func readSelection(from pboard: NSPasteboard, type: NSPasteboard.PasteboardType) -> Bool {
-        let urls = fileURLs(from: pboard)
-        guard urls.isEmpty else {
-            onImportFiles?(urls)
-            return true
-        }
-        return super.readSelection(from: pboard, type: type)
+        inputCommandRouter.handleReadSelection(from: pboard) || super.readSelection(from: pboard, type: type)
     }
 
-    private func fileURLs(from pasteboard: NSPasteboard) -> [URL] {
-        let objects = pasteboard.readObjects(forClasses: [NSURL.self], options: [
-            .urlReadingFileURLsOnly: true
-        ]) ?? []
-        return objects.compactMap { object in
-            guard let nsURL = object as? NSURL, let url = nsURL as URL? else { return nil }
-            return url.isFileURL ? url : nil
-        }
+    override func paste(_ sender: Any?) {
+        if inputCommandRouter.handlePaste(from: NSPasteboard.general) { return }
+        super.paste(sender)
     }
 
     override func draw(_ dirtyRect: NSRect) {

@@ -130,6 +130,8 @@ public enum MCPSourceRuntimeAuditEventKind: String, Codable, Sendable, Equatable
     case discoveryStarted
     case discoveryFinished
     case toolPermissionRequested
+    case toolPolicyBlocked
+    case toolDefinitionChanged
     case toolStarted
     case toolFinished
     case toolFailed
@@ -145,6 +147,9 @@ public struct MCPSourceRuntimeAuditRecord: Codable, Sendable, Equatable, Identif
     public var prefixedToolName: String?
     public var permissionCapability: AgentPermissionCapability?
     public var requiredCapabilities: [AgentPermissionCapability]
+    public var riskClass: MCPToolRiskClass?
+    public var executionPolicy: MCPToolExecutionPolicy?
+    public var integrityStatus: MCPToolIntegrityStatus?
     public var timestamp: Date
     public var resultSummary: String?
     public var errorSummary: String?
@@ -159,6 +164,9 @@ public struct MCPSourceRuntimeAuditRecord: Codable, Sendable, Equatable, Identif
         prefixedToolName: String? = nil,
         permissionCapability: AgentPermissionCapability? = nil,
         requiredCapabilities: [AgentPermissionCapability] = [],
+        riskClass: MCPToolRiskClass? = nil,
+        executionPolicy: MCPToolExecutionPolicy? = nil,
+        integrityStatus: MCPToolIntegrityStatus? = nil,
         timestamp: Date = Date(),
         resultSummary: String? = nil,
         errorSummary: String? = nil
@@ -172,6 +180,9 @@ public struct MCPSourceRuntimeAuditRecord: Codable, Sendable, Equatable, Identif
         self.prefixedToolName = prefixedToolName
         self.permissionCapability = permissionCapability
         self.requiredCapabilities = requiredCapabilities
+        self.riskClass = riskClass
+        self.executionPolicy = executionPolicy
+        self.integrityStatus = integrityStatus
         self.timestamp = timestamp
         self.resultSummary = resultSummary
         self.errorSummary = errorSummary
@@ -200,6 +211,9 @@ public struct MCPSourceToolDescriptor: Codable, Sendable, Equatable, Identifiabl
     public var description: String
     public var inputSchema: MCPJSONValue
     public var requiredCapabilities: [AgentPermissionCapability]
+    public var governancePolicy: MCPToolGovernancePolicy?
+    public var definitionFingerprint: MCPToolDefinitionFingerprint?
+    public var integrityStatus: MCPToolIntegrityStatus?
 
     public init(
         sourceID: String,
@@ -207,7 +221,10 @@ public struct MCPSourceToolDescriptor: Codable, Sendable, Equatable, Identifiabl
         rawName: String,
         description: String,
         inputSchema: MCPJSONValue,
-        requiredCapabilities: [AgentPermissionCapability]
+        requiredCapabilities: [AgentPermissionCapability],
+        governancePolicy: MCPToolGovernancePolicy? = nil,
+        definitionFingerprint: MCPToolDefinitionFingerprint? = nil,
+        integrityStatus: MCPToolIntegrityStatus? = nil
     ) {
         self.sourceID = sourceID
         self.name = name
@@ -215,6 +232,9 @@ public struct MCPSourceToolDescriptor: Codable, Sendable, Equatable, Identifiabl
         self.description = description
         self.inputSchema = inputSchema
         self.requiredCapabilities = requiredCapabilities
+        self.governancePolicy = governancePolicy
+        self.definitionFingerprint = definitionFingerprint
+        self.integrityStatus = integrityStatus
     }
 }
 
@@ -253,12 +273,14 @@ public enum MCPSourceRuntimeError: Error, Sendable, Equatable, CustomStringConve
     case sourceNotEnabled(String)
     case invalidPrefixedToolName(String)
     case sourcePrefixMismatch(expected: String, actual: String)
+    case invalidSourceToolName(String)
 
     public var description: String {
         switch self {
         case .sourceNotEnabled(let sourceID): "sourceNotEnabled: \(sourceID)"
         case .invalidPrefixedToolName(let name): "invalidPrefixedToolName: \(name)"
         case .sourcePrefixMismatch(let expected, let actual): "sourcePrefixMismatch: expected \(expected), actual \(actual)"
+        case .invalidSourceToolName(let name): "invalidSourceToolName: \(name)"
         }
     }
 }
@@ -280,7 +302,7 @@ public actor MCPSourceRuntime<Transport: MCPClientTransport> {
         try await discoverRuntimeState().catalog
     }
 
-    public func discoverRuntimeState(now: Date = Date()) async throws -> MCPSourceRuntimeDiscoverySnapshot {
+    public func discoverRuntimeState(now: Date = Date(), previousCatalog: [MCPSourceToolDescriptor] = []) async throws -> MCPSourceRuntimeDiscoverySnapshot {
         let discoveryStarted = MCPSourceRuntimeAuditRecord(
             sourceID: configuration.sourceID,
             eventKind: .discoveryStarted,
@@ -290,7 +312,7 @@ public actor MCPSourceRuntime<Transport: MCPClientTransport> {
         do {
             let initialization = try await client.initialize()
             let tools = try await client.listTools()
-            let catalog = toolCatalog(from: tools)
+            let catalog = toolCatalog(from: tools, previousCatalog: previousCatalog)
             let capabilitySnapshot = MCPSourceRuntimeCapabilitySnapshot.build(initialization: initialization, tools: tools)
             let health = MCPSourceRuntimeHealthRecord(
                 sourceID: configuration.sourceID,
@@ -427,17 +449,8 @@ public actor MCPSourceRuntime<Transport: MCPClientTransport> {
         try await client.shutdown()
     }
 
-    private func toolCatalog(from tools: [MCPToolDefinition]) -> [MCPSourceToolDescriptor] {
-        tools.map { tool in
-            MCPSourceToolDescriptor(
-                sourceID: configuration.sourceID,
-                name: "\(configuration.toolNamePrefix).\(tool.name)",
-                rawName: tool.name,
-                description: tool.description,
-                inputSchema: tool.inputSchema,
-                requiredCapabilities: configuration.allowedCapabilities
-            )
-        }
+    private func toolCatalog(from tools: [MCPToolDefinition], previousCatalog: [MCPSourceToolDescriptor] = []) -> [MCPSourceToolDescriptor] {
+        MCPToolGovernanceEnforcer.governedCatalog(source: configuration, tools: tools, previousCatalog: previousCatalog)
     }
 
     private func lifecycleStateForCurrentConfiguration() -> MCPSourceRuntimeLifecycleState {
@@ -451,12 +464,34 @@ public actor MCPSourceRuntime<Transport: MCPClientTransport> {
     }
 
     private func rawToolName(from prefixedToolName: String) throws -> String {
+        if prefixedToolName.hasPrefix("mcp__") {
+            let prefix = "mcp__\(configuration.sourceID)__"
+            guard prefixedToolName.hasPrefix(prefix) else {
+                throw MCPSourceRuntimeError.sourcePrefixMismatch(expected: prefix, actual: prefixedToolName)
+            }
+            let raw = String(prefixedToolName.dropFirst(prefix.count))
+            guard !raw.isEmpty else { throw MCPSourceRuntimeError.invalidPrefixedToolName(prefixedToolName) }
+            return raw
+        }
+
+        // Backward compatibility for existing persisted catalogs/tests that used source.tool.
         let components = prefixedToolName.split(separator: ".", maxSplits: 1).map(String.init)
         guard components.count == 2 else { throw MCPSourceRuntimeError.invalidPrefixedToolName(prefixedToolName) }
         guard components[0] == configuration.toolNamePrefix else {
             throw MCPSourceRuntimeError.sourcePrefixMismatch(expected: configuration.toolNamePrefix, actual: components[0])
         }
         return components[1]
+    }
+
+    public nonisolated static func exposedToolName(sourceID: String, rawToolName: String) -> String {
+        "mcp__\(sanitizeToolNameComponent(sourceID))__\(sanitizeToolNameComponent(rawToolName))"
+    }
+
+    public nonisolated static func sanitizeToolNameComponent(_ value: String) -> String {
+        let allowed = Set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
+        let mapped = value.map { allowed.contains($0) ? $0 : "_" }
+        let collapsed = String(mapped).replacingOccurrences(of: "__+", with: "_", options: .regularExpression)
+        return collapsed.trimmingCharacters(in: CharacterSet(charactersIn: "_"))
     }
 
     private func jsonString(_ value: MCPJSONValue) throws -> String {
