@@ -70,6 +70,15 @@
 		9A17D0B100000000000016 /* Sources/ConnorGraphAgentMac/SettingsSharedRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A17D0B000000000000016 /* Sources/ConnorGraphAgentMac/SettingsSharedRows.swift */; };
 		9A17D0B100000000000017 /* Sources/ConnorGraphAgentMac/SettingsShortcutsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A17D0B000000000000017 /* Sources/ConnorGraphAgentMac/SettingsShortcutsViews.swift */; };
 		9A17D0B100000000000018 /* Sources/ConnorGraphAgentMac/WorkspaceRootsSettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A17D0B000000000000018 /* Sources/ConnorGraphAgentMac/WorkspaceRootsSettingsViews.swift */; };
+		7C0C0DE10000000000000001 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerTextInputConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C0C0DE00000000000000001 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerTextInputConfiguration.swift */; };
+		7C0C0DE10000000000000002 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerInputCommandRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C0C0DE00000000000000002 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerInputCommandRouter.swift */; };
+		7C0C0DE10000000000000003 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerPasteboardAttachmentExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C0C0DE00000000000000003 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerPasteboardAttachmentExtractor.swift */; };
+		7C0C0DE10000000000000004 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerTemporaryAttachmentWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C0C0DE00000000000000004 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerTemporaryAttachmentWriter.swift */; };
+		7C0C0DE10000000000000005 /* Sources/ConnorGraphAgentMac/Composer/AgentComposerAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C0C0DE00000000000000005 /* Sources/ConnorGraphAgentMac/Composer/AgentComposerAction.swift */; };
+		7C0C0DE10000000000000006 /* Sources/ConnorGraphAgentMac/Composer/AgentComposerState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C0C0DE00000000000000006 /* Sources/ConnorGraphAgentMac/Composer/AgentComposerState.swift */; };
+		7C0C0DE10000000000000007 /* Sources/ConnorGraphAgentMac/Composer/AgentComposerStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C0C0DE00000000000000007 /* Sources/ConnorGraphAgentMac/Composer/AgentComposerStore.swift */; };
+		7C0C0DE10000000000000008 /* Sources/ConnorGraphAgentMac/Composer/AgentComposerOptionBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C0C0DE00000000000000008 /* Sources/ConnorGraphAgentMac/Composer/AgentComposerOptionBar.swift */; };
+		7C0C0DE10000000000000009 /* Sources/ConnorGraphAgentMac/Composer/AgentSendControlButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C0C0DE00000000000000009 /* Sources/ConnorGraphAgentMac/Composer/AgentSendControlButton.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -132,6 +141,15 @@
 		9A17D0B000000000000016 /* Sources/ConnorGraphAgentMac/SettingsSharedRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/SettingsSharedRows.swift; sourceTree = "<group>"; };
 		9A17D0B000000000000017 /* Sources/ConnorGraphAgentMac/SettingsShortcutsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/SettingsShortcutsViews.swift; sourceTree = "<group>"; };
 		9A17D0B000000000000018 /* Sources/ConnorGraphAgentMac/WorkspaceRootsSettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/WorkspaceRootsSettingsViews.swift; sourceTree = "<group>"; };
+		7C0C0DE00000000000000001 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerTextInputConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerTextInputConfiguration.swift; sourceTree = "<group>"; };
+		7C0C0DE00000000000000002 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerInputCommandRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerInputCommandRouter.swift; sourceTree = "<group>"; };
+		7C0C0DE00000000000000003 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerPasteboardAttachmentExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerPasteboardAttachmentExtractor.swift; sourceTree = "<group>"; };
+		7C0C0DE00000000000000004 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerTemporaryAttachmentWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerTemporaryAttachmentWriter.swift; sourceTree = "<group>"; };
+		7C0C0DE00000000000000005 /* Sources/ConnorGraphAgentMac/Composer/AgentComposerAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/Composer/AgentComposerAction.swift; sourceTree = "<group>"; };
+		7C0C0DE00000000000000006 /* Sources/ConnorGraphAgentMac/Composer/AgentComposerState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/Composer/AgentComposerState.swift; sourceTree = "<group>"; };
+		7C0C0DE00000000000000007 /* Sources/ConnorGraphAgentMac/Composer/AgentComposerStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/Composer/AgentComposerStore.swift; sourceTree = "<group>"; };
+		7C0C0DE00000000000000008 /* Sources/ConnorGraphAgentMac/Composer/AgentComposerOptionBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/Composer/AgentComposerOptionBar.swift; sourceTree = "<group>"; };
+		7C0C0DE00000000000000009 /* Sources/ConnorGraphAgentMac/Composer/AgentSendControlButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/Composer/AgentSendControlButton.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -209,7 +227,16 @@
 				9A17D0B000000000000003 /* Sources/ConnorGraphAgentMac/AgentChatMessageRows.swift */,
 				9A17D0B000000000000004 /* Sources/ConnorGraphAgentMac/AgentChatProcessRows.swift */,
 				9A17D0B000000000000005 /* Sources/ConnorGraphAgentMac/AgentComposerOptionBadge.swift */,
+				7C0C0DE00000000000000005 /* Sources/ConnorGraphAgentMac/Composer/AgentComposerAction.swift */,
+				7C0C0DE00000000000000006 /* Sources/ConnorGraphAgentMac/Composer/AgentComposerState.swift */,
+				7C0C0DE00000000000000007 /* Sources/ConnorGraphAgentMac/Composer/AgentComposerStore.swift */,
+				7C0C0DE00000000000000008 /* Sources/ConnorGraphAgentMac/Composer/AgentComposerOptionBar.swift */,
+				7C0C0DE00000000000000009 /* Sources/ConnorGraphAgentMac/Composer/AgentSendControlButton.swift */,
 				9A17D0B000000000000006 /* Sources/ConnorGraphAgentMac/AgentComposerTextViewBridge.swift */,
+				7C0C0DE00000000000000001 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerTextInputConfiguration.swift */,
+				7C0C0DE00000000000000002 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerInputCommandRouter.swift */,
+				7C0C0DE00000000000000003 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerPasteboardAttachmentExtractor.swift */,
+				7C0C0DE00000000000000004 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerTemporaryAttachmentWriter.swift */,
 				9A17D0B000000000000007 /* Sources/ConnorGraphAgentMac/AgentMarkdownPreviewText.swift */,
 				9A17D0B000000000000008 /* Sources/ConnorGraphAgentMac/AgentPendingApprovalReviewView.swift */,
 				9A17D0B000000000000009 /* Sources/ConnorGraphAgentMac/AppListDetailPanes.swift */,
@@ -378,7 +405,16 @@
 				9A17D0B100000000000003 /* Sources/ConnorGraphAgentMac/AgentChatMessageRows.swift in Sources */,
 				9A17D0B100000000000004 /* Sources/ConnorGraphAgentMac/AgentChatProcessRows.swift in Sources */,
 				9A17D0B100000000000005 /* Sources/ConnorGraphAgentMac/AgentComposerOptionBadge.swift in Sources */,
+				7C0C0DE10000000000000005 /* Sources/ConnorGraphAgentMac/Composer/AgentComposerAction.swift in Sources */,
+				7C0C0DE10000000000000006 /* Sources/ConnorGraphAgentMac/Composer/AgentComposerState.swift in Sources */,
+				7C0C0DE10000000000000007 /* Sources/ConnorGraphAgentMac/Composer/AgentComposerStore.swift in Sources */,
+				7C0C0DE10000000000000008 /* Sources/ConnorGraphAgentMac/Composer/AgentComposerOptionBar.swift in Sources */,
+				7C0C0DE10000000000000009 /* Sources/ConnorGraphAgentMac/Composer/AgentSendControlButton.swift in Sources */,
 				9A17D0B100000000000006 /* Sources/ConnorGraphAgentMac/AgentComposerTextViewBridge.swift in Sources */,
+				7C0C0DE10000000000000001 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerTextInputConfiguration.swift in Sources */,
+				7C0C0DE10000000000000002 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerInputCommandRouter.swift in Sources */,
+				7C0C0DE10000000000000003 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerPasteboardAttachmentExtractor.swift in Sources */,
+				7C0C0DE10000000000000004 /* Sources/ConnorGraphAgentMac/Composer/TextInput/ComposerTemporaryAttachmentWriter.swift in Sources */,
 				9A17D0B100000000000007 /* Sources/ConnorGraphAgentMac/AgentMarkdownPreviewText.swift in Sources */,
 				9A17D0B100000000000008 /* Sources/ConnorGraphAgentMac/AgentPendingApprovalReviewView.swift in Sources */,
 				9A17D0B100000000000009 /* Sources/ConnorGraphAgentMac/AppListDetailPanes.swift in Sources */,
