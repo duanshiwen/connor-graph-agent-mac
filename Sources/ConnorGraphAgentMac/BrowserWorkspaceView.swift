@@ -712,10 +712,7 @@ private struct BrowserAddressTextField: NSViewRepresentable {
         nsView.placeholderString = placeholder
         if context.coordinator.lastFocusRequestID != focusRequestID {
             context.coordinator.lastFocusRequestID = focusRequestID
-            DispatchQueue.main.async {
-                nsView.window?.makeFirstResponder(nsView)
-                nsView.selectText(nil)
-            }
+            context.coordinator.scheduleFocus(for: nsView)
         }
     }
 
@@ -736,6 +733,16 @@ private struct BrowserAddressTextField: NSViewRepresentable {
         func controlTextDidChange(_ notification: Notification) {
             guard let field = notification.object as? NSTextField else { return }
             text = field.stringValue
+        }
+
+        func scheduleFocus(for field: NSTextField) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) { [weak field] in
+                guard let field, let window = field.window else { return }
+                if window.firstResponder !== field.currentEditor() && window.firstResponder !== field {
+                    window.makeFirstResponder(field)
+                }
+                field.selectText(nil)
+            }
         }
 
         func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
