@@ -352,6 +352,10 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var selectedMailMailboxID: MailMailboxID?
     @Published var selectedMailMessageID: MailMessageID?
     @Published var isPresentingAddMailAccountSheet: Bool = false
+    @Published var rssBrowserPresentation: NativeRSSBrowserPresentation = .empty
+    @Published var selectedRSSSourceID: RSSSourceID?
+    @Published var selectedRSSItemID: RSSItemID?
+    @Published var isPresentingAddRSSSourceSheet: Bool = false
     @Published var skillRuntimeDefinitions: [SkillRuntimeDefinition] = []
     @Published var commercialSkillManagerPresentation: SkillManagerPresentation = SkillManagerPresentation(
         summary: SkillManagerSummary(total: 0, enabled: 0, projectScoped: 0, risky: 0, invalid: 0, sourceBlocked: 0),
@@ -564,9 +568,9 @@ final class AppViewModel: NSObject, ObservableObject {
         switch sidecarPermissionMode {
         case .trustedWrite:
             switch approval.capability {
-            case .readGraph, .readSession, .modelCall, .proposeGraphWrite, .commitGraphWrite, .externalNetwork, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .writeWorkspaceFile, .editWorkspaceFile, .computeScientific, .runReadOnlyShellCommand, .runWorkspaceShellCommand, .readMail, .readMailBody, .readContacts, .mutateMailState, .createMailDraft, .importMailAttachment:
+            case .readGraph, .readSession, .modelCall, .proposeGraphWrite, .commitGraphWrite, .externalNetwork, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .writeWorkspaceFile, .editWorkspaceFile, .computeScientific, .runReadOnlyShellCommand, .runWorkspaceShellCommand, .readMail, .readMailBody, .readContacts, .mutateMailState, .createMailDraft, .importMailAttachment, .readRSS, .readRSSContent, .mutateRSSState, .syncRSSSources, .exportRSSOPML:
                 return true
-            case .invalidateGraphStatement, .deleteGraphObject, .costlyModelCall, .deleteWorkspaceFile, .runNetworkShellCommand, .runDestructiveShellCommand, .manageMailboxes, .sendMail, .mutateContacts:
+            case .invalidateGraphStatement, .deleteGraphObject, .costlyModelCall, .deleteWorkspaceFile, .runNetworkShellCommand, .runDestructiveShellCommand, .manageMailboxes, .sendMail, .mutateContacts, .manageRSSSources, .importRSSOPML:
                 return false
             }
         case .allowAll:
@@ -872,6 +876,8 @@ final class AppViewModel: NSObject, ObservableObject {
             selection = .productOS
         case .mail:
             selection = .mail
+        case .rss:
+            selection = .rss
         case .sources:
             selection = .sources
         case .skills:
@@ -890,7 +896,7 @@ final class AppViewModel: NSObject, ObservableObject {
             toggleBrowserWorkspaceVisibility()
         case .checkCommercialReadiness:
             runCommercialReadinessReleaseGate()
-        case .openGraphMemoryReview, .openApprovals, .openSources, .openSkills, .openAutomation, .openLocalAutomationSurface, .openMailSources, .openSettings:
+        case .openGraphMemoryReview, .openApprovals, .openSources, .openSkills, .openAutomation, .openLocalAutomationSurface, .openMailSources, .openRSSSources, .openSettings:
             if let command = ConnorNativeShellPresentation.default.command(for: commandID) {
                 navigate(to: command.target)
             }
