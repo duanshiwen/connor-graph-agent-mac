@@ -260,19 +260,21 @@ private enum RSSSourcePreset: String, CaseIterable, Identifiable {
 struct AddRSSSourceSheet: View {
     private enum Layout {
         static let sheetWidth: CGFloat = 680
-        static let sheetHeight: CGFloat = 560
+        static let sheetHeight: CGFloat = 520
         static let labelWidth: CGFloat = 118
         static let presetControlWidth: CGFloat = 260
         static let compactControlWidth: CGFloat = 180
-        static let targetControlWidth: CGFloat = 230
     }
+
+    var onSave: (URL, String?) async throws -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var selectedPreset: RSSSourcePreset = .appleDeveloper
     @State private var feedURLString: String = RSSSourcePreset.appleDeveloper.feedURLString
     @State private var displayName: String = ""
     @State private var intervalMinutes: Int = 30
-    @State private var openTarget: RSSSourceOpenTarget = .localReader
+    @State private var isSaving = false
+    @State private var saveMessage: String?
 
     private var trimmedFeedURLString: String {
         feedURLString.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -286,7 +288,12 @@ struct AddRSSSourceSheet: View {
         return components.url
     }
 
-    private var saveDisabled: Bool { feedURL == nil }
+    private var saveDisabled: Bool { feedURL == nil || isSaving }
+
+    private var normalizedDisplayName: String? {
+        let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -329,7 +336,7 @@ struct AddRSSSourceSheet: View {
                         }
                     }
 
-                    RSSSetupSection(title: "阅读策略", systemImage: "clock.arrow.circlepath") {
+                    RSSSetupSection(title: "抓取策略", systemImage: "clock.arrow.circlepath") {
                         RSSSetupRow("抓取间隔", labelWidth: Layout.labelWidth) {
                             Picker("抓取间隔", selection: $intervalMinutes) {
                                 Text("15 分钟").tag(15)
@@ -340,20 +347,14 @@ struct AddRSSSourceSheet: View {
                             .labelsHidden()
                             .frame(width: Layout.compactControlWidth, alignment: .leading)
                         }
-
-                        RSSSetupRow("打开方式", labelWidth: Layout.labelWidth) {
-                            Picker("打开方式", selection: $openTarget) {
-                                Text("Connor 阅读器").tag(RSSSourceOpenTarget.localReader)
-                                Text("原网页").tag(RSSSourceOpenTarget.webpage)
-                                Text("外部浏览器").tag(RSSSourceOpenTarget.externalBrowser)
-                                Text("全文内容").tag(RSSSourceOpenTarget.fullContent)
-                            }
-                            .labelsHidden()
-                            .frame(width: Layout.targetControlWidth, alignment: .leading)
-                        }
+                        RSSSetupHint("首次添加后会立刻抓取一次。阅读时默认使用 Connor 阅读器；原网页/外部浏览器属于后续文章操作，不在添加订阅源时选择。")
                     }
 
                     RSSHintCard(title: selectedPreset.subtitle, guidance: selectedPreset.guidance)
+
+                    if let saveMessage {
+                        RSSSetupHint(saveMessage, color: .red)
+                    }
                 }
                 .padding(.vertical, AppShellLayout.spaceL)
             }
@@ -414,12 +415,42 @@ struct AddRSSSourceSheet: View {
             Spacer()
 
             Button("取消") { dismiss() }
-            Button("保存草稿") { dismiss() }
-                .buttonStyle(.borderedProminent)
-                .disabled(saveDisabled)
-                .keyboardShortcut(.defaultAction)
+                .disabled(isSaving)
+            Button {
+                save()
+            } label: {
+                if isSaving {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Text("添加并抓取")
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(saveDisabled)
+            .keyboardShortcut(.defaultAction)
         }
         .padding(.top, AppShellLayout.spaceM)
+    }
+
+    private func save() {
+        guard let feedURL else { return }
+        isSaving = true
+        saveMessage = nil
+        Task {
+            do {
+                try await onSave(feedURL, normalizedDisplayName)
+                await MainActor.run {
+                    isSaving = false
+                    dismiss()
+                }
+            } catch {
+                await MainActor.run {
+                    isSaving = false
+                    saveMessage = error.localizedDescription
+                }
+            }
+        }
     }
 }
 
@@ -471,6 +502,25 @@ private struct RSSSetupRow<Content: View>: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .controlSize(.regular)
+    }
+}
+
+private struct RSSSetupHint: View {
+    var text: String
+    var color: Color
+
+    init(_ text: String, color: Color = .secondary) {
+        self.text = text
+        self.color = color
+    }
+
+    var body: some View {
+        Text(text)
+            .font(SettingsListTypography.rowCaption)
+            .foregroundStyle(color)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, 118 + AppShellLayout.spaceM)
     }
 }
 
@@ -578,7 +628,11 @@ struct CraftRSSListPane: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .sheet(isPresented: $viewModel.isPresentingAddRSSSourceSheet) { AddRSSSourceSheet() }
+        .sheet(isPresented: $viewModel.isPresentingAddRSSSourceSheet) {
+            AddRSSSourceSheet { feedURL, displayName in
+                try await viewModel.addRSSSourceAndSync(feedURL: feedURL, displayName: displayName)
+            }
+        }
     }
 
     private func selectItem(_ item: RSSItemSummary) {
@@ -889,7 +943,9 @@ struct RSSSourceSettingsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppShellColors.detailBackground)
         .sheet(isPresented: $viewModel.isPresentingAddRSSSourceSheet) {
-            AddRSSSourceSheet()
+            AddRSSSourceSheet { feedURL, displayName in
+                try await viewModel.addRSSSourceAndSync(feedURL: feedURL, displayName: displayName)
+            }
         }
     }
 }
