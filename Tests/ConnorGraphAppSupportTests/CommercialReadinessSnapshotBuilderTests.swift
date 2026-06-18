@@ -97,7 +97,7 @@ struct CommercialReadinessSnapshotBuilderTests {
         ])
         #expect(dashboard.cards[4].status == .blocked)
         #expect(dashboard.cards[4].metrics["settings"] == "partial")
-        #expect(dashboard.cards.last?.phase == .localAPICLIAutomationSurface)
+        #expect(dashboard.cards.last?.phase == .nativeMailSystem)
         #expect(dashboard.cards.last?.status == .ready)
     }
 }

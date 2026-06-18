@@ -21,6 +21,15 @@ public enum AgentPermissionCapability: String, Codable, Sendable, Equatable, Has
     case runWorkspaceShellCommand
     case runNetworkShellCommand
     case runDestructiveShellCommand
+    case readMail
+    case readMailBody
+    case mutateMailState
+    case manageMailboxes
+    case createMailDraft
+    case sendMail
+    case readContacts
+    case mutateContacts
+    case importMailAttachment
 }
 
 public enum AgentPermissionMode: String, Codable, Sendable, Equatable, CaseIterable, Hashable {

@@ -682,12 +682,13 @@ private struct AgentToolBatchResult: Sendable, Equatable {
 private extension AgentPermissionCapability {
     var isSafeForParallelNativeToolExecution: Bool {
         switch self {
-        case .readGraph, .readSession, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific:
+        case .readGraph, .readSession, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific, .readMail, .readMailBody, .readContacts:
             return true
         case .proposeGraphWrite, .commitGraphWrite, .invalidateGraphStatement, .deleteGraphObject,
              .externalNetwork, .modelCall, .costlyModelCall,
              .writeWorkspaceFile, .editWorkspaceFile, .deleteWorkspaceFile,
-             .runReadOnlyShellCommand, .runWorkspaceShellCommand, .runNetworkShellCommand, .runDestructiveShellCommand:
+             .runReadOnlyShellCommand, .runWorkspaceShellCommand, .runNetworkShellCommand, .runDestructiveShellCommand,
+             .mutateMailState, .manageMailboxes, .createMailDraft, .sendMail, .mutateContacts, .importMailAttachment:
             return false
         }
     }
