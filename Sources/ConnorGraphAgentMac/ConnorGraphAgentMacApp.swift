@@ -57,7 +57,7 @@ struct ConnorGraphAgentMacApp: App {
 }
 
 @MainActor
-private final class ConnorApplicationDelegate: NSObject, NSApplicationDelegate {
+private final class ConnorApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NotificationCenter.default.addObserver(
             self,
@@ -87,12 +87,30 @@ private final class ConnorApplicationDelegate: NSObject, NSApplicationDelegate {
         localizeApplicationMenu(in: mainMenu)
         localizeTopLevelStandardMenus(in: mainMenu)
         localizeEditMenu(in: mainMenu)
-        ConnorMenuLocalizer.localizeMenuTree(mainMenu)
+        localizeAndObserveMenuTree(mainMenu)
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        localizeAndObserveMenuTree(menu)
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        localizeAndObserveMenuTree(menu)
     }
 
     @objc private func localizeMenuBeforeTracking(_ notification: Notification) {
         guard let menu = notification.object as? NSMenu else { return }
+        localizeAndObserveMenuTree(menu)
+    }
+
+    private func localizeAndObserveMenuTree(_ menu: NSMenu) {
+        menu.delegate = self
         ConnorMenuLocalizer.localizeMenuTree(menu)
+        for item in menu.items {
+            if let submenu = item.submenu {
+                localizeAndObserveMenuTree(submenu)
+            }
+        }
     }
 
     private func localizeApplicationMenu(in mainMenu: NSMenu) {
@@ -104,7 +122,8 @@ private final class ConnorApplicationDelegate: NSObject, NSApplicationDelegate {
             switch item.action {
             case #selector(NSApplication.orderFrontStandardAboutPanel(_:)):
                 item.title = "关于\(appName)"
-            case Selector(("showSettingsWindow:")), Selector(("showPreferencesWindow:")):
+            case _ where item.action.map({ NSStringFromSelector($0) }) == "showSettingsWindow:"
+                || item.action.map({ NSStringFromSelector($0) }) == "showPreferencesWindow:":
                 item.title = "设置…"
             case #selector(NSApplication.hide(_:)):
                 item.title = "隐藏\(appName)"
@@ -151,32 +170,7 @@ private final class ConnorApplicationDelegate: NSObject, NSApplicationDelegate {
         editMenuItem.title = "编辑"
         guard let editMenu = editMenuItem.submenu else { return }
         editMenu.title = "编辑"
-        for item in editMenu.items {
-            switch item.action {
-            case Selector(("undo:")):
-                item.title = "撤销"
-            case Selector(("redo:")):
-                item.title = "重做"
-            case #selector(NSText.cut(_:)):
-                item.title = "剪切"
-            case #selector(NSText.copy(_:)):
-                item.title = "复制"
-            case #selector(NSText.paste(_:)):
-                item.title = "粘贴"
-            case #selector(NSText.selectAll(_:)):
-                item.title = "全选"
-            case Selector(("delete:")):
-                item.title = "删除"
-            case Selector(("pasteAsPlainText:")):
-                item.title = "粘贴并匹配样式"
-            case Selector(("startDictation:")):
-                item.title = "开始听写…"
-            case Selector(("orderFrontCharacterPalette:")):
-                item.title = "表情与符号"
-            default:
-                break
-            }
-        }
+        ConnorMenuLocalizer.localizeMenuTree(editMenu)
     }
 
     private func localizeStandardMenuItems(in menu: NSMenu) {
