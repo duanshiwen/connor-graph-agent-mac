@@ -20,6 +20,8 @@ struct CraftListPaneView: View {
                 CraftSettingsListPane(viewModel: viewModel, selection: $selection)
             case .mail:
                 CraftMailListPane(viewModel: viewModel)
+            case .rss:
+                CraftRSSListPane(viewModel: viewModel)
             case .sources:
                 CraftSourceListPane(viewModel: viewModel)
             case .skills:
@@ -202,6 +204,141 @@ private extension View {
             .listRowInsets(EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8))
             .listRowSeparator(.hidden)
             .listRowBackground(Color.clear)
+    }
+}
+
+struct CraftRSSListPane: View {
+    @ObservedObject var viewModel: AppViewModel
+    @State private var searchQuery: String = ""
+
+    private var presentation: NativeRSSBrowserPresentation { viewModel.rssBrowserPresentation }
+    private var visibleItems: [RSSItemSummary] { presentation.items(sourceID: nil, query: searchQuery) }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Text("RSS 阅读")
+                    .font(AppListTypography.header)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                Button(action: { viewModel.isPresentingAddRSSSourceSheet = true }) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .help("添加订阅源")
+                .accessibilityLabel("添加订阅源")
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
+
+            if !presentation.items.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    TextField("筛选标题、摘要、来源或作者", text: $searchQuery)
+                        .textFieldStyle(.plain)
+                    if !searchQuery.isEmpty {
+                        Button { searchQuery = "" } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 9)
+                .frame(height: 28)
+                .background(Color(nsColor: .textBackgroundColor).opacity(0.62), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(AppShellColors.hairline, lineWidth: 1))
+                .padding(.horizontal, 14)
+                .padding(.bottom, 8)
+            }
+
+            if presentation.sources.isEmpty {
+                ContentUnavailableView("暂无 RSS 订阅源", systemImage: "dot.radiowaves.left.and.right", description: Text("点击右上角 + 添加 RSS / Atom / JSON Feed。"))
+                    .padding(.top, 80)
+            } else if presentation.items.isEmpty {
+                ContentUnavailableView("暂无文章", systemImage: "newspaper", description: Text("订阅源同步后的文章会在这里按时间显示。"))
+                    .padding(.top, 80)
+            } else if visibleItems.isEmpty {
+                ContentUnavailableView("没有匹配的文章", systemImage: "magnifyingglass", description: Text("筛选会匹配标题、摘要、来源和作者。"))
+                    .padding(.top, 80)
+            } else {
+                List(visibleItems) { item in
+                    RSSItemListRow(
+                        item: item,
+                        source: presentation.source(id: item.sourceID),
+                        isSelected: item.id == viewModel.selectedRSSItemID,
+                        onSelect: { selectItem(item) }
+                    )
+                    .mailListRowStyle()
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .contentMargins(.top, 6, for: .scrollContent)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .sheet(isPresented: $viewModel.isPresentingAddRSSSourceSheet) { AddRSSSourceSheet() }
+    }
+
+    private func selectItem(_ item: RSSItemSummary) {
+        viewModel.selectedRSSSourceID = item.sourceID
+        viewModel.selectedRSSItemID = item.id
+    }
+}
+
+private struct RSSItemListRow: View {
+    var item: RSSItemSummary
+    var source: RSSSource?
+    var isSelected: Bool
+    var onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(alignment: .top, spacing: 10) {
+                Circle()
+                    .fill(item.state.isRead ? Color.secondary.opacity(0.24) : Color.orange)
+                    .frame(width: 8, height: 8)
+                    .padding(.top, 7)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 6) {
+                        Text(item.title)
+                            .font(item.state.isRead ? AppListTypography.rowTitle : AppListTypography.rowTitleSelected)
+                            .lineLimit(1)
+                        if item.state.isStarred {
+                            Image(systemName: "star.fill")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.yellow)
+                        }
+                    }
+                    Text(source?.displayName ?? item.sourceID.rawValue)
+                        .font(AppListTypography.rowCaptionEmphasized)
+                        .lineLimit(1)
+                    Text(contextText)
+                        .font(AppListTypography.rowCaption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                    Text(item.snippet)
+                        .font(AppListTypography.rowSubtitle)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isSelected ? Color.orange.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var contextText: String {
+        [item.author, item.publishedAt.formatted(date: .abbreviated, time: .shortened)]
+            .compactMap { $0 }
+            .joined(separator: " · ")
     }
 }
 
@@ -418,6 +555,8 @@ struct CraftDetailPaneView: View {
                 ProductOSRegistryView(viewModel: viewModel)
             case .mail:
                 MailSourceSettingsView(viewModel: viewModel)
+            case .rss:
+                RSSSourceSettingsView(viewModel: viewModel)
             case .sources:
                 SourceRuntimePanelView(viewModel: viewModel)
             case .skills:
