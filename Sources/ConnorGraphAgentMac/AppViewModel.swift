@@ -1587,6 +1587,17 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
+    private func reloadSkillRuntimeDefinitionsIfNeeded(after presentation: AgentEventPresentation) {
+        guard presentation.kind == AgentEventKind.toolFinished.rawValue else { return }
+        let skillMutationToolNames: Set<String> = [
+            "connor_skill_create",
+            "connor_skill_update",
+            "connor_skill_delete"
+        ]
+        guard skillMutationToolNames.contains(where: { presentation.title.contains($0) }) else { return }
+        reloadSkillRuntimeDefinitions()
+    }
+
     func selectSkillManagerCard(_ id: String) {
         selectedSkillManagerCardID = id
     }
@@ -1762,6 +1773,7 @@ final class AppViewModel: NSObject, ObservableObject {
             onEventPresentation: { [weak self] presentation in
                 guard let self else { return }
                 self.agentEventTimelinesBySessionID[sessionID, default: []].append(presentation)
+                self.reloadSkillRuntimeDefinitionsIfNeeded(after: presentation)
             }
         )
         if let timeline = agentEventTimelinesBySessionID[sessionID] {
@@ -4141,6 +4153,7 @@ final class AppViewModel: NSObject, ObservableObject {
                     if presentation.kind == AgentEventKind.permissionRequested.rawValue {
                         self.reloadPendingApprovals()
                     }
+                    self.reloadSkillRuntimeDefinitionsIfNeeded(after: presentation)
                 }
             )
             agentEventTimelinesBySessionID[submittingSessionID] = manager.eventPresentations
