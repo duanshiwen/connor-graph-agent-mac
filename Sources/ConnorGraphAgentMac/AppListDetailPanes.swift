@@ -18,6 +18,8 @@ struct CraftListPaneView: View {
                 CraftSessionListPane(viewModel: viewModel)
             case .llmSettings:
                 CraftSettingsListPane(viewModel: viewModel, selection: $selection)
+            case .mail:
+                CraftSimpleListPane(title: "Mail", subtitle: "原生邮件、联系人与审批治理", rows: ["Accounts", "Sync", "Approvals", "Audit", "Evidence"])
             case .sources:
                 CraftSourceListPane(viewModel: viewModel)
             case .skills:
@@ -128,6 +130,8 @@ struct CraftDetailPaneView: View {
                 AutomationRuntimePanelView(viewModel: viewModel)
             case .productOS:
                 ProductOSRegistryView(viewModel: viewModel)
+            case .mail:
+                MailSourceSettingsView()
             case .sources:
                 SourceRuntimePanelView(viewModel: viewModel)
             case .skills:
