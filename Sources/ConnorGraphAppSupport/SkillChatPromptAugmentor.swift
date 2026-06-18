@@ -42,16 +42,14 @@ public struct SkillChatPromptAugmentor {
     public func augment(
         prompt rawPrompt: String,
         sessionID: String,
-        runID: String? = nil,
-        projectRoots: [URL] = [],
-        nestedRoots: [URL] = []
+        runID: String? = nil
     ) -> SkillChatPromptAugmentation {
         let prompt = rawPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else {
             return SkillChatPromptAugmentation(originalPrompt: rawPrompt, augmentedPrompt: rawPrompt)
         }
 
-        let snapshot = scanner.scan(storagePaths: storagePaths, projectRoots: projectRoots, nestedRoots: nestedRoots)
+        let snapshot = scanner.scan(storagePaths: storagePaths)
         let availableSlugs = Set(snapshot.resolutions.compactMap { $0.selected?.slug.rawValue })
         let invocations = parser.parse(prompt, availableSlugs: availableSlugs)
         guard !invocations.isEmpty else {
