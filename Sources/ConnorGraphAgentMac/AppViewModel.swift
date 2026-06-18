@@ -559,9 +559,9 @@ final class AppViewModel: NSObject, ObservableObject {
         switch sidecarPermissionMode {
         case .trustedWrite:
             switch approval.capability {
-            case .readGraph, .readSession, .modelCall, .proposeGraphWrite, .commitGraphWrite, .externalNetwork, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .writeWorkspaceFile, .editWorkspaceFile, .computeScientific, .runReadOnlyShellCommand, .runWorkspaceShellCommand:
+            case .readGraph, .readSession, .modelCall, .proposeGraphWrite, .commitGraphWrite, .externalNetwork, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .writeWorkspaceFile, .editWorkspaceFile, .computeScientific, .runReadOnlyShellCommand, .runWorkspaceShellCommand, .readMail, .readMailBody, .readContacts, .mutateMailState, .createMailDraft, .importMailAttachment:
                 return true
-            case .invalidateGraphStatement, .deleteGraphObject, .costlyModelCall, .deleteWorkspaceFile, .runNetworkShellCommand, .runDestructiveShellCommand:
+            case .invalidateGraphStatement, .deleteGraphObject, .costlyModelCall, .deleteWorkspaceFile, .runNetworkShellCommand, .runDestructiveShellCommand, .manageMailboxes, .sendMail, .mutateContacts:
                 return false
             }
         case .allowAll:
@@ -865,7 +865,7 @@ final class AppViewModel: NSObject, ObservableObject {
             selection = .automation
         case .productOS:
             selection = .productOS
-        case .sources:
+        case .mail, .sources:
             selection = .sources
         case .skills:
             selection = .skills
@@ -883,7 +883,7 @@ final class AppViewModel: NSObject, ObservableObject {
             toggleBrowserWorkspaceVisibility()
         case .checkCommercialReadiness:
             runCommercialReadinessReleaseGate()
-        case .openGraphMemoryReview, .openApprovals, .openSources, .openSkills, .openAutomation, .openLocalAutomationSurface, .openSettings:
+        case .openGraphMemoryReview, .openApprovals, .openSources, .openSkills, .openAutomation, .openLocalAutomationSurface, .openMailSources, .openSettings:
             if let command = ConnorNativeShellPresentation.default.command(for: commandID) {
                 navigate(to: command.target)
             }
