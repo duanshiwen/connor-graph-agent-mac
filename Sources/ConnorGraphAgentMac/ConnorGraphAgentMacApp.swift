@@ -24,7 +24,10 @@ struct ConnorGraphAgentMacApp: App {
         WindowGroup {
             AppShellView(viewModel: viewModel)
                 .preferredColorScheme(viewModel.appearanceMode.colorScheme)
+                .toolbarBackground(.visible, for: .windowToolbar)
         }
+        .windowToolbarStyle(.unifiedCompact)
+        .defaultSize(width: 1180, height: 760)
         .commands {
             CommandGroup(replacing: .newItem) {}
             CommandGroup(replacing: .saveItem) {}

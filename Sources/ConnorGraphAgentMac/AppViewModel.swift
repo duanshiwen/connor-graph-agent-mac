@@ -347,6 +347,11 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var addSourceMessage: String?
     @Published var pendingSourceRuntimeDeletionID: String?
     @Published var pendingSourceRuntimeDeletionName: String?
+    @Published var mailBrowserPresentation: NativeMailBrowserPresentation = .empty
+    @Published var selectedMailAccountID: MailAccountID?
+    @Published var selectedMailMailboxID: MailMailboxID?
+    @Published var selectedMailMessageID: MailMessageID?
+    @Published var isPresentingAddMailAccountSheet: Bool = false
     @Published var skillRuntimeDefinitions: [SkillRuntimeDefinition] = []
     @Published var commercialSkillManagerPresentation: SkillManagerPresentation = SkillManagerPresentation(
         summary: SkillManagerSummary(total: 0, enabled: 0, projectScoped: 0, risky: 0, invalid: 0, sourceBlocked: 0),

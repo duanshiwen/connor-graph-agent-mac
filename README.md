@@ -1118,7 +1118,22 @@ Mail Tool Result / Mail Message / Contact Candidate
 
 ### Native Mail UI
 
-Connor 不做 Thunderbird 替代品。Native UI 承载治理与 readiness:
+Connor 不做 Thunderbird 替代品。Native UI 承载邮件系统的账户、文件夹、邮件浏览与治理提示,而不是把 readiness 演示卡片作为默认体验。邮件系统界面采用 SwiftUI/macOS 原生最佳实践:选择状态提升到共同祖先 view model,账户 / 文件夹 / 邮件使用稳定 ID,筛选 query 作为 transient UI state,空态使用 `ContentUnavailableView`,添加账户使用 sheet + form preset。
+
+当前 Native Mail UI:
+
+- 左侧列表标题固定为「邮件系统」,不显示解释性副标题。
+- 默认邮件状态为空:启动界面不注入任何假账户、假文件夹或假邮件,只显示空态与添加账户入口。
+- 左侧列表采用单级邮件列表,不再使用账户 → 文件夹 → 邮件的递进式多级导航,以降低 macOS `NavigationSplitView` 切换层级时的 titlebar / safe-area 布局风险。
+- 中间列结构与会话列表保持一致:固定标题、可选轻量文本筛选、空态或单列 `List`,不使用多级 drill-down、Picker 表头或 `.searchable`。
+- 筛选仅提供标题、摘要正文、发件人的关键词匹配;筛选状态是 transient UI state,不写入邮件状态。
+- 右侧详情默认显示友好空态:引导用户添加账户或从左侧选择邮件,并说明读取不会自动改变已读状态。
+- 选中邮件后,右侧展示主题、发件人、收件人、所属账户/文件夹、已读/未读、附件标记、邮件摘要和治理提示。
+- 右侧提供「添加邮件帐户」按钮;添加账户 sheet 支持 Apple iCloud、Microsoft Outlook / 365、QQ 邮箱、网易 163 / 126 和其他 IMAP/SMTP。
+- 添加账户 preset 记录常见服务器配置和安全提示:Apple iCloud 使用 `imap.mail.me.com:993` / `smtp.mail.me.com:587` 与 App 专用密码;Microsoft 优先 OAuth / Microsoft 登录;QQ 邮箱提示开启 IMAP/SMTP 并使用 16 位授权码;网易 163/126 提示开启 POP/SMTP/IMAP 客户端协议并使用授权码。
+- 本轮添加账户仍是 UI draft,不写真实凭据、不触发 OAuth、不连接 IMAP/SMTP;真实登录、测试连接和持久化继续由 Mail Runtime / Credential Boundary 后续接入。
+
+治理能力仍包括:
 
 - Mail Source Manager。
 - Add/Edit Mail Account。
@@ -1820,6 +1835,20 @@ swift run connor automations evaluate --trigger sessionStatusChanged --session d
 最近验证结果:
 
 ```text
+Native Mail UI browser pass (2026-06-18 18:19 GMT+8):
+- Scope: replace readiness-demo Mail surface with SwiftUI-native mail browser: empty-by-default startup, drill-down navigation from accounts to selected account mailboxes to selected mailbox messages, search by subject/snippet/sender at message level, empty detail state, message detail pane, and Add Mail Account sheet presets for Apple/Microsoft/QQ/NetEase/Other.
+- TDD: first run failed because NativeMailBrowserPresentation and MailAccountProviderPreset did not exist; production code was then added in ConnorGraphAppSupport and reused by SwiftUI. A regression test now locks NativeMailBrowserPresentation.empty as the default no-account/no-mailbox/no-message state.
+- swift test --filter CommercialTrain7NativeMailSystemTests: passed, 14 tests.
+- swift build: passed.
+
+Native Mail UI simplification pass (2026-06-18 18:37 GMT+8):
+- Scope: replace the mail middle pane's multi-level drill-down navigation with a single-level all-message list across all accounts and folders. The first simplification used header filters for account/folder/keyword, then the UI was further reduced to match the session list structure exactly: fixed title, optional lightweight text filter, empty state or plain single-column `List`.
+- UI stability: AppShell now removes the duplicate local `sidebarSelection` source of truth. Sidebar highlight, content column and detail column all bind directly to `viewModel.selection`; content/detail also receive `.id(viewModel.selection ?? .agentChat)` so SwiftUI recreates the column subtree when the selected product area changes. This fixes the observed state where the sidebar highlighted “邮件系统” while the visible detail area remained on “康纳同学”. Primary sidebar also reserves explicit top space for macOS traffic lights.
+- TDD: added `mailBrowserSingleListCanFilterAcrossAllAccountsAndFolders`; first run failed because nil account/folder filters returned no messages, then NativeMailBrowserPresentation was updated so nil means all accounts/all folders.
+- swift test --filter CommercialTrain7NativeMailSystemTests: passed, 15 tests.
+- swift build: passed.
+- xcodebuild -project ConnorGraphAgentMac.xcodeproj -scheme ConnorGraphAgentMacApp -configuration Debug build CODE_SIGNING_ALLOWED=NO: passed, producing `~/Library/Developer/Xcode/DerivedData/ConnorGraphAgentMac-brqipgtfgcqggbajvlejfruuleet/Build/Products/Debug/康纳同学.app`.
+
 MCP Platform Phase 1 acceptance freeze (2026-06-18 02:07 GMT+8):
 - Status: MCP Platform Phase 1 · Accepted.
 - Scope: source lifecycle, stdio + HTTP JSON-RPC transport, source-scoped credential injection, tool governance, runtime bridge, native Source Manager UI, health/catalog/audit persistence.
