@@ -85,6 +85,42 @@ struct NativeRSSSystemTests {
         #expect(parsed.outlines.first?.xmlURL.absoluteString == "https://example.com/a.xml")
     }
 
+    @Test func fileBackedRSSStorageSurvivesRuntimeRestart() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ConnorRSSStorageTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = AppStoragePaths(applicationSupportDirectory: root)
+        try paths.ensureDirectoryHierarchy()
+        let sourceID = RSSSourceID(rawValue: "swift-blog")
+        let itemID = RSSItemID(rawValue: "swift-blog-item")
+        let source = RSSSource(id: sourceID, feedURL: URL(string: "https://www.swift.org/blog/feed.xml")!, displayName: "Swift Blog")
+        let item = RSSItemDetail(
+            summary: RSSItemSummary(
+                id: itemID,
+                sourceID: sourceID,
+                title: "Swift Persistence",
+                link: URL(string: "https://swift.org/blog/persistence"),
+                author: "Swift.org",
+                snippet: "RSS sources should survive app restart."
+            ),
+            content: RSSItemContent(safeMarkdown: "Swift Persistence", plainText: "RSS sources should survive app restart.")
+        )
+
+        let repository = FileBackedRSSSourceRepository(storagePaths: paths)
+        let cache = FileBackedRSSSourceCache(storagePaths: paths)
+        try await repository.saveSource(source)
+        let upsert = try await cache.upsertItems([item])
+        #expect(upsert.inserted == 1)
+
+        let restartedRepository = FileBackedRSSSourceRepository(storagePaths: paths)
+        let restartedCache = FileBackedRSSSourceCache(storagePaths: paths)
+        let restoredSources = try await restartedRepository.listSources()
+        let restoredItems = try await restartedCache.listItems(sourceID: sourceID, includeHidden: false)
+
+        #expect(restoredSources.map(\.id).contains(sourceID))
+        #expect(restoredItems.map(\.id).contains(itemID))
+        #expect(restoredItems.first?.title == "Swift Persistence")
+    }
+
     @Test func presentationFiltersAndDefaults() {
         let runtime = RSSRuntime.fixture()
         let sourceID = RSSSourceID(rawValue: "fixture-rss-source")
