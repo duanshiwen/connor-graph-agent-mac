@@ -328,6 +328,28 @@ struct SettingsRSSSection: View {
                 try await viewModel.addRSSSourceAndSync(feedURL: feedURL, displayName: displayName)
             }
         }
+        .sheet(item: $viewModel.editingRSSSource) { source in
+            AddRSSSourceSheet(source: source) { feedURL, displayName in
+                try await viewModel.updateRSSSource(sourceID: source.id, feedURL: feedURL, displayName: displayName)
+            }
+        }
+        .confirmationDialog(
+            "删除 RSS 订阅源？",
+            isPresented: Binding(
+                get: { viewModel.pendingRSSSourceDeletion != nil },
+                set: { if !$0 { viewModel.pendingRSSSourceDeletion = nil } }
+            ),
+            presenting: viewModel.pendingRSSSourceDeletion
+        ) { source in
+            Button("删除订阅源", role: .destructive) {
+                viewModel.deleteRSSSource(source)
+            }
+            Button("取消", role: .cancel) {
+                viewModel.pendingRSSSourceDeletion = nil
+            }
+        } message: { source in
+            Text("将删除“\(source.displayName)”及其本地文章缓存。此操作会写入 RSS source management audit。")
+        }
     }
 
     private var sourceConnections: some View {
@@ -343,7 +365,12 @@ struct SettingsRSSSection: View {
             if !presentation.sources.isEmpty {
                 VStack(spacing: 0) {
                     ForEach(presentation.sources) { source in
-                        RSSSettingsSourceRow(source: source, unreadCount: presentation.unreadCount(sourceID: source.id))
+                        RSSSettingsSourceRow(
+                            source: source,
+                            unreadCount: presentation.unreadCount(sourceID: source.id),
+                            onEdit: { viewModel.editingRSSSource = source },
+                            onDelete: { viewModel.pendingRSSSourceDeletion = source }
+                        )
                         if source.id != presentation.sources.last?.id { Divider().padding(.leading, 32) }
                     }
                 }
@@ -386,6 +413,8 @@ struct SettingsRSSSection: View {
 private struct RSSSettingsSourceRow: View {
     var source: RSSSource
     var unreadCount: Int
+    var onEdit: () -> Void
+    var onDelete: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: SettingsListLayout.spaceM) {
@@ -405,6 +434,23 @@ private struct RSSSettingsSourceRow: View {
             Text(unreadCount > 0 ? "\(unreadCount) 未读" : statusTitle)
                 .font(SettingsListTypography.rowCaptionEmphasized)
                 .foregroundStyle(statusColor)
+            HStack(spacing: SettingsListLayout.spaceXS) {
+                Button(action: onEdit) {
+                    Label("修改", systemImage: "pencil")
+                        .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.borderless)
+                .help("修改订阅源")
+                .accessibilityLabel("修改 \(source.displayName)")
+
+                Button(role: .destructive, action: onDelete) {
+                    Label("删除", systemImage: "trash")
+                        .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.borderless)
+                .help("删除订阅源")
+                .accessibilityLabel("删除 \(source.displayName)")
+            }
         }
         .frame(minHeight: SettingsListLayout.prominentRowMinHeight, alignment: .center)
     }
