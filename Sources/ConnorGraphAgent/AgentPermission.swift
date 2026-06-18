@@ -68,23 +68,23 @@ public actor AgentPolicyEngine: Sendable {
             return .approved
         case .readOnly:
             switch capability {
-            case .readGraph, .readSession, .modelCall, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific, .runReadOnlyShellCommand, .readMail, .readMailBody, .readContacts:
+            case .readGraph, .readSession, .modelCall, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific, .runReadOnlyShellCommand, .readMail, .readMailBody, .readContacts, .readRSS, .readRSSContent, .exportRSSOPML:
                 return .approved
-            case .proposeGraphWrite, .commitGraphWrite, .invalidateGraphStatement, .deleteGraphObject, .externalNetwork, .costlyModelCall, .writeWorkspaceFile, .editWorkspaceFile, .deleteWorkspaceFile, .runWorkspaceShellCommand, .runNetworkShellCommand, .runDestructiveShellCommand, .mutateMailState, .manageMailboxes, .createMailDraft, .sendMail, .mutateContacts, .importMailAttachment:
+            case .proposeGraphWrite, .commitGraphWrite, .invalidateGraphStatement, .deleteGraphObject, .externalNetwork, .costlyModelCall, .writeWorkspaceFile, .editWorkspaceFile, .deleteWorkspaceFile, .runWorkspaceShellCommand, .runNetworkShellCommand, .runDestructiveShellCommand, .mutateMailState, .manageMailboxes, .createMailDraft, .sendMail, .mutateContacts, .importMailAttachment, .mutateRSSState, .manageRSSSources, .syncRSSSources, .importRSSOPML:
                 return .denied
             }
         case .askToWrite:
             switch capability {
-            case .readGraph, .readSession, .modelCall, .proposeGraphWrite, .externalNetwork, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific, .runReadOnlyShellCommand, .readMail, .readMailBody, .readContacts, .createMailDraft:
+            case .readGraph, .readSession, .modelCall, .proposeGraphWrite, .externalNetwork, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific, .runReadOnlyShellCommand, .readMail, .readMailBody, .readContacts, .createMailDraft, .readRSS, .readRSSContent, .syncRSSSources, .exportRSSOPML:
                 return .approved
-            case .commitGraphWrite, .invalidateGraphStatement, .deleteGraphObject, .costlyModelCall, .writeWorkspaceFile, .editWorkspaceFile, .deleteWorkspaceFile, .runWorkspaceShellCommand, .runNetworkShellCommand, .runDestructiveShellCommand, .mutateMailState, .manageMailboxes, .sendMail, .mutateContacts, .importMailAttachment:
+            case .commitGraphWrite, .invalidateGraphStatement, .deleteGraphObject, .costlyModelCall, .writeWorkspaceFile, .editWorkspaceFile, .deleteWorkspaceFile, .runWorkspaceShellCommand, .runNetworkShellCommand, .runDestructiveShellCommand, .mutateMailState, .manageMailboxes, .sendMail, .mutateContacts, .importMailAttachment, .mutateRSSState, .manageRSSSources, .importRSSOPML:
                 return .needsApproval
             }
         case .trustedWrite:
             switch capability {
-            case .readGraph, .readSession, .modelCall, .proposeGraphWrite, .commitGraphWrite, .externalNetwork, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .writeWorkspaceFile, .editWorkspaceFile, .computeScientific, .runReadOnlyShellCommand, .runWorkspaceShellCommand, .readMail, .readMailBody, .readContacts, .mutateMailState, .createMailDraft, .importMailAttachment:
+            case .readGraph, .readSession, .modelCall, .proposeGraphWrite, .commitGraphWrite, .externalNetwork, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .writeWorkspaceFile, .editWorkspaceFile, .computeScientific, .runReadOnlyShellCommand, .runWorkspaceShellCommand, .readMail, .readMailBody, .readContacts, .mutateMailState, .createMailDraft, .importMailAttachment, .readRSS, .readRSSContent, .mutateRSSState, .syncRSSSources, .exportRSSOPML:
                 return .approved
-            case .invalidateGraphStatement, .deleteGraphObject, .costlyModelCall, .deleteWorkspaceFile, .runNetworkShellCommand, .runDestructiveShellCommand, .manageMailboxes, .sendMail, .mutateContacts:
+            case .invalidateGraphStatement, .deleteGraphObject, .costlyModelCall, .deleteWorkspaceFile, .runNetworkShellCommand, .runDestructiveShellCommand, .manageMailboxes, .sendMail, .mutateContacts, .manageRSSSources, .importRSSOPML:
                 return .needsApproval
             }
         }
