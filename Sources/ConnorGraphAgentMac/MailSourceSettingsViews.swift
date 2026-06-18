@@ -200,6 +200,7 @@ struct AddMailAccountSheet: View {
     @State private var displayName: String = ""
     @State private var email: String = ""
     @State private var credential: String = ""
+    @State private var lastAutofilledDisplayName: String = ""
     @State private var incomingHost: String = MailAccountProviderPreset.apple.incomingHost
     @State private var incomingPort: Int = MailAccountProviderPreset.apple.incomingPort
     @State private var outgoingHost: String = MailAccountProviderPreset.apple.outgoingHost
@@ -337,8 +338,9 @@ struct AddMailAccountSheet: View {
         incomingPort = preset.incomingPort
         outgoingHost = preset.outgoingHost
         outgoingPort = preset.outgoingPort
-        if displayName.isEmpty {
+        if displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || displayName == lastAutofilledDisplayName {
             displayName = preset.title
+            lastAutofilledDisplayName = preset.title
         }
     }
 }
