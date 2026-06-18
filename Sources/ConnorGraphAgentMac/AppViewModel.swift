@@ -1405,6 +1405,47 @@ final class AppViewModel: NSObject, ObservableObject {
         await reloadRSSBrowserPresentation()
     }
 
+    func followRSSItemInNewSession(_ item: RSSItemSummary) {
+        guard let url = item.link else {
+            errorMessage = "这篇 RSS 文章没有可打开的原文链接。"
+            return
+        }
+        guard let chatSessionRepository else { return }
+        rememberCurrentWorkspaceMode()
+        do {
+            let title = rssFollowSessionTitle(for: item)
+            let session = try chatSessionRepository.createSession(title: title)
+            selectedChatSessionID = session.id
+            agentEventTimelinesByProcessKey.removeAll(keepingCapacity: true)
+            browserWorkspaceSessionID = nil
+            selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
+            try loadSessionCapsule(sessionID: session.id)
+            try loadBackgroundTasks(sessionID: session.id)
+            fallbackChatSession = session
+            nativeSessionManager = makeNativeSessionManager(for: session)
+            transcript = []
+            restoreChatInputDraft(for: session.id)
+            refreshSelectedSubmittingState()
+            agentEventTimeline = []
+            agentEventTimelinesBySessionID[session.id] = []
+            latestChatSummary = nil
+            chatSummaryMessage = nil
+            lastPromptInspection = nil
+            reloadChatSessions(restoreWorkspaceMode: false)
+            selectedChatSessionID = session.id
+            openURLInCurrentChatBrowser(url)
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    private func rssFollowSessionTitle(for item: RSSItemSummary) -> String {
+        let rawTitle = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = rawTitle.isEmpty ? "RSS 文章" : rawTitle
+        return "关注 \(title)"
+    }
+
     func reloadSourceRuntimeConfigurations() {
         do {
             let configurations = try sourceRuntimeRepository?.list() ?? []
