@@ -160,17 +160,21 @@ private final class ConnorApplicationDelegate: NSObject, NSApplicationDelegate, 
     private func startMenuLocalizationWarmup() {
         menuLocalizationWarmupTimer?.invalidate()
         menuLocalizationWarmupTickCount = 0
-        menuLocalizationWarmupTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] timer in
-            guard let self else {
-                timer.invalidate()
-                return
-            }
-            self.normalizeMenus()
-            self.menuLocalizationWarmupTickCount += 1
-            if self.menuLocalizationWarmupTickCount >= 25 {
-                timer.invalidate()
-                self.menuLocalizationWarmupTimer = nil
-            }
+        menuLocalizationWarmupTimer = Timer.scheduledTimer(
+            timeInterval: 0.2,
+            target: self,
+            selector: #selector(handleMenuLocalizationWarmupTimer(_:)),
+            userInfo: nil,
+            repeats: true
+        )
+    }
+
+    @objc private func handleMenuLocalizationWarmupTimer(_ timer: Timer) {
+        normalizeMenus()
+        menuLocalizationWarmupTickCount += 1
+        if menuLocalizationWarmupTickCount >= 25 {
+            timer.invalidate()
+            menuLocalizationWarmupTimer = nil
         }
     }
 
