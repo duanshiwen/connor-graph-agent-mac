@@ -14,6 +14,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case extractionDiagnostics = "记忆准入"
     case automation = "自动化"
     case productOS = "Product OS"
+    case mail = "Mail"
     case sources = "Sources"
     case skills = "Skills"
     case llmSettings = "模型设置"
