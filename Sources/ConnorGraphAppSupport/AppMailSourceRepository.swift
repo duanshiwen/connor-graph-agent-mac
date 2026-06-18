@@ -1,3 +1,8 @@
-// Commercial Native Mail System stage file.
-// Core implementation currently lives in the consolidated MailRuntime / MailAgentTools skeleton
-// and will be split into this file as the protocol implementation deepens.
+import Foundation
+import ConnorGraphCore
+
+public protocol MailSourceRepository: Sendable {
+    func listAccounts() async throws -> [MailAccount]
+    func saveAccount(_ account: MailAccount) async throws
+    func account(id: MailAccountID) async throws -> MailAccount?
+}
