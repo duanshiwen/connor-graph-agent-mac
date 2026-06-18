@@ -62,4 +62,32 @@ struct BrowserExternalOpenPlannerTests {
 
         #expect(planned.selectionPopover == nil)
     }
+
+    @Test func openOrFocusSelectsExistingTabInsteadOfDuplicating() {
+        let planner = BrowserExternalOpenPlanner()
+        let firstID = UUID(uuidString: "00000000-0000-0000-0000-000000000031")!
+        let targetID = UUID(uuidString: "00000000-0000-0000-0000-000000000032")!
+        let snapshot = AppBrowserStateSnapshot(
+            tabs: [
+                AppBrowserTabSnapshot(id: firstID, initialURLString: "https://old.example", currentURLString: "https://old.example"),
+                AppBrowserTabSnapshot(id: targetID, initialURLString: "https://example.com/article", currentURLString: "https://example.com/article#comments")
+            ],
+            selectedTabID: firstID,
+            selectionPopover: AppBrowserSelectionPopoverSnapshot(
+                tabID: firstID,
+                pageURL: "https://old.example",
+                pageTitle: "Old",
+                pageText: "",
+                selectedText: "text",
+                rect: AppBrowserSelectionRect(x: 1, y: 2, width: 3, height: 4),
+                threadID: UUID(uuidString: "00000000-0000-0000-0000-000000000033")!
+            )
+        )
+
+        let planned = planner.openOrFocus(urlString: "https://EXAMPLE.com/article", in: snapshot)
+
+        #expect(planned.tabs.count == 2)
+        #expect(planned.selectedTabID == targetID)
+        #expect(planned.selectionPopover == nil)
+    }
 }
