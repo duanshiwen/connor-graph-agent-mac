@@ -151,6 +151,9 @@ public struct NativeSessionManager: Sendable {
         displayPrompt: String? = nil,
         attachments: [AgentMessageAttachmentRef] = [],
         attachmentContextPlan: AttachmentContextPlan = AttachmentContextPlan(),
+        skillInstructions: String? = nil,
+        activeSkillSlug: String? = nil,
+        activeSkillDisplayName: String? = nil,
         onRunStarted: (@MainActor @Sendable (String) -> Void)? = nil,
         onEventPresentation: (@MainActor @Sendable (AgentEventPresentation) -> Void)? = nil
     ) async throws -> AgentLoopChatResponse {
@@ -159,7 +162,13 @@ public struct NativeSessionManager: Sendable {
         try await maybeCompressContext()
 
         let recentMessages = Array(session.messages.suffix(max(0, recentMessageLimit)))
-        let userMessage = session.appendUserMessage(displayPrompt ?? prompt, attachments: attachments)
+        let activeSkillContextSnapshot: String? = {
+            let displayName = activeSkillDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let slug = activeSkillSlug?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !displayName.isEmpty || !slug.isEmpty else { return nil }
+            return "Active skill: \(displayName.isEmpty ? slug : displayName)\(slug.isEmpty ? "" : " (\(slug))")"
+        }()
+        let userMessage = session.appendUserMessage(displayPrompt ?? prompt, attachments: attachments, contextSnapshot: activeSkillContextSnapshot)
         try persistSession()
         try persistMemoryStagingAfterUserMessage(userMessage)
 
@@ -172,16 +181,26 @@ public struct NativeSessionManager: Sendable {
             permissionMode: permissionMode,
             attachmentRefs: attachments,
             attachmentContextPlan: attachmentContextPlan,
-            anchorState: anchorState
+            anchorState: anchorState,
+            skillInstructions: skillInstructions,
+            activeSkillSlug: activeSkillSlug,
+            activeSkillDisplayName: activeSkillDisplayName
         )
         let now = Date()
+        var runMetadata = ["user_message_id": userMessage.id, "queue": "single-session"]
+        if let activeSkillSlug, !activeSkillSlug.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            runMetadata["active_skill_slug"] = activeSkillSlug
+        }
+        if let activeSkillDisplayName, !activeSkillDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            runMetadata["active_skill_display_name"] = activeSkillDisplayName
+        }
         var run = AgentRun(
             id: request.runID,
             sessionID: session.id,
             groupID: groupID,
             status: .queued,
             startedAt: now,
-            metadata: ["user_message_id": userMessage.id, "queue": "single-session"]
+            metadata: runMetadata
         )
         try sessionRepository.saveRun(run)
         if eventRecorder == nil {

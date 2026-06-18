@@ -13,6 +13,11 @@ public struct AgentChatRequest: Sendable, Equatable {
     public var attachmentContextPlan: AttachmentContextPlan
     /// Compression anchor state from prior rounds.
     public var anchorState: SessionAnchorState?
+    /// Skill instructions to inject into the system prompt for this turn.
+    public var skillInstructions: String?
+    /// Active skill metadata for auditing/presentation. The actual instructions remain in `skillInstructions`.
+    public var activeSkillSlug: String?
+    public var activeSkillDisplayName: String?
 
     public init(
         runID: String = UUID().uuidString,
@@ -24,7 +29,10 @@ public struct AgentChatRequest: Sendable, Equatable {
         permissionMode: AgentPermissionMode = .askToWrite,
         attachmentRefs: [AgentMessageAttachmentRef] = [],
         attachmentContextPlan: AttachmentContextPlan = AttachmentContextPlan(),
-        anchorState: SessionAnchorState? = nil
+        anchorState: SessionAnchorState? = nil,
+        skillInstructions: String? = nil,
+        activeSkillSlug: String? = nil,
+        activeSkillDisplayName: String? = nil
     ) {
         self.runID = runID
         self.sessionID = sessionID
@@ -36,15 +44,27 @@ public struct AgentChatRequest: Sendable, Equatable {
         self.attachmentRefs = attachmentRefs
         self.attachmentContextPlan = attachmentContextPlan
         self.anchorState = anchorState
+        self.skillInstructions = skillInstructions
+        self.activeSkillSlug = activeSkillSlug
+        self.activeSkillDisplayName = activeSkillDisplayName
     }
 
     public var normalizedPrompt: String {
-        AgentChatPromptContext(
+        let basePrompt = AgentChatPromptContext(
             userPrompt: userMessage,
             sessionSummary: sessionSummary,
             recentMessages: recentMessages,
             anchorState: anchorState
         ).renderedPrompt
+        guard let skillInstructions = skillInstructions?.trimmingCharacters(in: .whitespacesAndNewlines), !skillInstructions.isEmpty else {
+            return basePrompt
+        }
+        return [
+            basePrompt.trimmingCharacters(in: .whitespacesAndNewlines),
+            "<connor-active-selected-skill>\n\(skillInstructions)\n</connor-active-selected-skill>"
+        ]
+        .filter { !$0.isEmpty }
+        .joined(separator: "\n\n")
     }
 }
 

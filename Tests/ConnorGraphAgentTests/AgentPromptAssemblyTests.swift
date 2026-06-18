@@ -94,7 +94,7 @@ import ConnorGraphAgent
     )
     let assembly = AgentPromptAssembler().assemble(request: request, memoryContract: nil)
 
-    let transformed = try await AgentPromptBudgetTransformer(maxEstimatedTokens: 550).transform(
+    let transformed = try await AgentPromptBudgetTransformer(maxEstimatedTokens: 620).transform(
         assembly,
         projectionMode: .structuredContextMessages
     )

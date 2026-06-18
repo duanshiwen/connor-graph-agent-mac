@@ -6,7 +6,7 @@ import ConnorGraphAppSupport
 
 @Suite("Commercial Readiness Gate Tests")
 struct CommercialReadinessGateTests {
-    @Test func readinessGateBuildsSixPhaseCommercialDashboard() {
+    @Test func readinessGateBuildsSevenPhaseCommercialDashboard() {
         let input = CommercialReadinessInput(
             sessionGovernance: .ready(
                 sessionCount: 3,
@@ -45,7 +45,8 @@ struct CommercialReadinessGateTests {
             .sourcesSkillsAutomations,
             .graphMemoryLoop,
             .nativeCommercialUI,
-            .localAPICLIAutomationSurface
+            .localAPICLIAutomationSurface,
+            .nativeMailSystem
         ])
         #expect(dashboard.cards.allSatisfy { $0.status == .ready })
         #expect(dashboard.cards[0].title == "Phase 1 · Session Governance")
@@ -54,7 +55,8 @@ struct CommercialReadinessGateTests {
         #expect(dashboard.cards[3].target == .graphMemory)
         #expect(dashboard.cards[4].target == .settings)
         #expect(dashboard.cards[5].target == .localAutomationSurface)
-        #expect(dashboard.summary == "6/6 commercial readiness phases ready")
+        #expect(dashboard.cards[6].target == .mail)
+        #expect(dashboard.summary == "7/7 commercial readiness phases ready")
     }
 
     @Test func readinessGateReportsBlockedWhenRequiredPhaseIsMissing() {
@@ -69,10 +71,10 @@ struct CommercialReadinessGateTests {
         let dashboard = CommercialReadinessGate().evaluate(input)
 
         #expect(dashboard.overallStatus == .blocked)
-        #expect(dashboard.readyCount == 4)
+        #expect(dashboard.readyCount == 5)
         #expect(dashboard.blockedCount == 2)
         #expect(dashboard.cards.filter { $0.status == .blocked }.map(\.phase) == [.sessionGovernance, .sourcesSkillsAutomations])
         #expect(dashboard.cards.first?.blockingReasons == ["No persisted session repository configured"])
-        #expect(dashboard.summary == "4/6 commercial readiness phases ready · 2 blocked")
+        #expect(dashboard.summary == "5/7 commercial readiness phases ready · 2 blocked")
     }
 }

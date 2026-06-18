@@ -29,6 +29,7 @@ struct PhaseGCraftGradeNativeUITests {
             .openSkills,
             .openAutomation,
             .openLocalAutomationSurface,
+            .openMailSources,
             .checkCommercialReadiness,
             .openSettings
         ])

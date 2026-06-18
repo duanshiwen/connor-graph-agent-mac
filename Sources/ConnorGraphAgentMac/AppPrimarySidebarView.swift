@@ -95,14 +95,18 @@ struct CraftPrimarySidebarView: View {
                         }
                     }
 
-                    SidebarRow(title: "数据源", systemImage: "externaldrive.connected.to.line.below", count: viewModel.sourceRuntimeConfigurations.count, isSelected: selection == .sources) { select(.sources) }
+                    SidebarDisclosure(title: "数据源", systemImage: "externaldrive.connected.to.line.below", isExpanded: $sourcesExpanded) {
+                        SidebarRow(title: "邮件系统", systemImage: "envelope", count: nil, isSelected: false, isEnabled: false) {}
+                        SidebarRow(title: "飞书", systemImage: "message", count: nil, isSelected: false, isEnabled: false) {}
+                        SidebarRow(title: "RSS", systemImage: "dot.radiowaves.up.forward", count: nil, isSelected: false, isEnabled: false) {}
+                        SidebarRow(title: "MCP", systemImage: "server.rack", count: viewModel.sourceRuntimeConfigurations.count, isSelected: selection == .sources) { select(.sources) }
+                    }
 
-                    SidebarRow(title: "技能", systemImage: "bolt", count: viewModel.skillRuntimeDefinitions.count, isSelected: selection == .skills) { select(.skills) }
+                    SidebarRow(title: "技能", systemImage: "bolt", count: viewModel.commercialSkillManagerPresentation.summary.total, isSelected: selection == .skills) { select(.skills) }
 
                     SidebarDisclosure(title: "自动化", systemImage: "wand.and.stars", isExpanded: $automationExpanded) {
                         SidebarRow(title: "定时任务", systemImage: "clock", count: viewModel.automationConfig.rules.count, isSelected: selection == .automation) { select(.automation) }
-                        SidebarRow(title: "事件触发", systemImage: "dot.radiowaves.left.and.right", count: viewModel.automationTriggerRecords.count, isSelected: selection == .automation) { select(.automation) }
-                        SidebarRow(title: "智能体", systemImage: "shippingbox", count: viewModel.productOSRegistry.skills.count, isSelected: selection == .productOS) { select(.productOS) }
+                        SidebarRow(title: "事件触发", systemImage: "dot.radiowaves.left.and.right", count: viewModel.automationTriggerRecords.count, isSelected: false, isEnabled: false) {}
                     }
                 }
                 .padding(.horizontal, 10)

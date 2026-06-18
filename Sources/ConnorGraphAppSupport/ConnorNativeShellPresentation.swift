@@ -11,6 +11,7 @@ public enum ConnorNativeShellItem: String, Codable, Sendable, Equatable, Hashabl
     case automation
     case localAutomationSurface
     case productOS
+    case mail
     case sources
     case skills
     case settings
@@ -87,6 +88,7 @@ public enum ConnorNativeShellCommandID: String, Codable, Sendable, Equatable, Ha
     case openSkills
     case openAutomation
     case openLocalAutomationSurface
+    case openMailSources
     case checkCommercialReadiness
     case openSettings
 
@@ -174,6 +176,8 @@ public struct ConnorNativeShellRouteResolver: Sendable {
             ConnorNativeShellRoute(item: item, legacySidebarID: "automation")
         case .productOS:
             ConnorNativeShellRoute(item: item, legacySidebarID: "productOS")
+        case .mail:
+            ConnorNativeShellRoute(item: item, legacySidebarID: "sources")
         case .sources:
             ConnorNativeShellRoute(item: item, legacySidebarID: "sources")
         case .skills:
@@ -230,6 +234,7 @@ public struct ConnorNativeShellPresentation: Codable, Sendable, Equatable {
                 ConnorNativeShellSidebarItem(id: .productOS, title: "Product OS", subtitle: "Registry, labels, readiness", systemImage: "square.grid.2x2", isPrimary: true)
             ]),
             ConnorNativeShellSidebarGroup(id: "extensions", title: "Extensions", items: [
+                ConnorNativeShellSidebarItem(id: .mail, title: "Mail", subtitle: "Native mail and contacts", systemImage: "envelope.badge.shield.half.filled", badgeStyle: .info, isPrimary: true, riskLevel: .high, emptyStateTitle: "No mail accounts", emptyStateActionTitle: "Add Mail Account"),
                 ConnorNativeShellSidebarItem(id: .sources, title: "Sources", subtitle: "MCP source runtime", systemImage: "externaldrive.connected.to.line.below", riskLevel: .medium),
                 ConnorNativeShellSidebarItem(id: .skills, title: "Skills", subtitle: "Governed instruction profiles", systemImage: "sparkles.rectangle.stack")
             ]),
@@ -246,6 +251,7 @@ public struct ConnorNativeShellPresentation: Codable, Sendable, Equatable {
             ConnorNativeShellCommand(id: .openSkills, title: "Open Skills", systemImage: "sparkles.rectangle.stack", keyboardShortcut: "⌘5", target: .skills, groupID: "extensions", keywords: ["skill", "instruction"]),
             ConnorNativeShellCommand(id: .openAutomation, title: "Open Automation", systemImage: "bolt.badge.clock", keyboardShortcut: "⌘6", target: .automation, groupID: "governance", riskLevel: .medium, keywords: ["automation", "rules"]),
             ConnorNativeShellCommand(id: .openLocalAutomationSurface, title: "Open Local API / CLI", systemImage: "terminal", keyboardShortcut: "⌘7", target: .localAutomationSurface, groupID: "governance", isPrimaryAction: true, riskLevel: .medium, keywords: ["local", "api", "cli", "automation", "script"]),
+            ConnorNativeShellCommand(id: .openMailSources, title: "Open Mail", systemImage: "envelope.badge.shield.half.filled", keyboardShortcut: "⌘8", target: .mail, groupID: "extensions", isPrimaryAction: true, riskLevel: .high, keywords: ["mail", "email", "contacts", "imap", "smtp"]),
             ConnorNativeShellCommand(id: .checkCommercialReadiness, title: "Check Commercial Readiness", systemImage: "checkmark.seal", keyboardShortcut: "⌘R", target: .productOS, groupID: "governance", isPrimaryAction: true, riskLevel: .medium, keywords: ["readiness", "release", "commercial"]),
             ConnorNativeShellCommand(id: .openSettings, title: "Open Settings", systemImage: "gearshape", keyboardShortcut: "⌘,", target: .settings, groupID: "system", isPrimaryAction: true, keywords: ["settings", "model", "preferences"])
         ]

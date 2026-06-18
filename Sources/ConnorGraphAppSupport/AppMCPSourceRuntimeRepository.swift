@@ -56,12 +56,30 @@ public enum MCPSourceRuntimeTransport: Codable, Sendable, Equatable {
 }
 
 public struct MCPSourceRuntimeConfiguration: Codable, Sendable, Equatable, Identifiable {
+    private enum CodingKeys: String, CodingKey {
+        case sourceID
+        case displayName
+        case transport
+        case status
+        case credentialRequirement
+        case credentialBindings
+        case allowedCapabilities
+        case toolNamePrefix
+        case graphIngestionEnabled
+        case graphWritePolicy
+        case tags
+        case notes
+        case createdAt
+        case updatedAt
+    }
+
     public var id: String { sourceID }
     public var sourceID: String
     public var displayName: String
     public var transport: MCPSourceRuntimeTransport
     public var status: ProductOSRegistryEntryStatus
     public var credentialRequirement: ProductOSCredentialRequirement
+    public var credentialBindings: [MCPSourceCredentialBinding]
     public var allowedCapabilities: [AgentPermissionCapability]
     public var toolNamePrefix: String
     public var graphIngestionEnabled: Bool
@@ -77,6 +95,7 @@ public struct MCPSourceRuntimeConfiguration: Codable, Sendable, Equatable, Ident
         transport: MCPSourceRuntimeTransport,
         status: ProductOSRegistryEntryStatus = .draft,
         credentialRequirement: ProductOSCredentialRequirement = .none,
+        credentialBindings: [MCPSourceCredentialBinding] = [],
         allowedCapabilities: [AgentPermissionCapability] = [.readSession],
         toolNamePrefix: String? = nil,
         graphIngestionEnabled: Bool = false,
@@ -91,6 +110,7 @@ public struct MCPSourceRuntimeConfiguration: Codable, Sendable, Equatable, Ident
         self.transport = transport
         self.status = status
         self.credentialRequirement = credentialRequirement
+        self.credentialBindings = credentialBindings
         self.allowedCapabilities = allowedCapabilities
         self.toolNamePrefix = toolNamePrefix ?? sourceID
         self.graphIngestionEnabled = graphIngestionEnabled
@@ -99,6 +119,24 @@ public struct MCPSourceRuntimeConfiguration: Codable, Sendable, Equatable, Ident
         self.notes = notes
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sourceID = try container.decode(String.self, forKey: .sourceID)
+        displayName = try container.decode(String.self, forKey: .displayName)
+        transport = try container.decode(MCPSourceRuntimeTransport.self, forKey: .transport)
+        status = try container.decodeIfPresent(ProductOSRegistryEntryStatus.self, forKey: .status) ?? .draft
+        credentialRequirement = try container.decodeIfPresent(ProductOSCredentialRequirement.self, forKey: .credentialRequirement) ?? .none
+        credentialBindings = try container.decodeIfPresent([MCPSourceCredentialBinding].self, forKey: .credentialBindings) ?? []
+        allowedCapabilities = try container.decodeIfPresent([AgentPermissionCapability].self, forKey: .allowedCapabilities) ?? [.readSession]
+        toolNamePrefix = try container.decodeIfPresent(String.self, forKey: .toolNamePrefix) ?? sourceID
+        graphIngestionEnabled = try container.decodeIfPresent(Bool.self, forKey: .graphIngestionEnabled) ?? false
+        graphWritePolicy = try container.decodeIfPresent(AgentPermissionMode.self, forKey: .graphWritePolicy) ?? .readOnly
+        tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
+        notes = try container.decodeIfPresent(String.self, forKey: .notes) ?? ""
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
     }
 
     public func productOSSourceDefinition() -> ProductOSSourceDefinition {
@@ -125,6 +163,7 @@ public enum AppMCPSourceRuntimeRepositoryError: Error, Sendable, Equatable, Cust
     case invalidToolNamePrefix(String)
     case missingCommand(String)
     case unsafePermissionMode(String)
+    case invalidHTTPEndpoint(String)
 
     public var description: String {
         switch self {
@@ -132,6 +171,7 @@ public enum AppMCPSourceRuntimeRepositoryError: Error, Sendable, Equatable, Cust
         case .invalidToolNamePrefix(let prefix): "invalidToolNamePrefix: \(prefix)"
         case .missingCommand(let sourceID): "missingCommand: \(sourceID)"
         case .unsafePermissionMode(let message): "unsafePermissionMode: \(message)"
+        case .invalidHTTPEndpoint(let message): "invalidHTTPEndpoint: \(message)"
         }
     }
 }
@@ -269,6 +309,13 @@ public struct AppMCPSourceRuntimeRepository: Sendable {
         return Array(records.suffix(max(0, limit)))
     }
 
+    public func deleteSourceRuntime(sourceID: String) throws {
+        try validateID(sourceID)
+        let directory = sourceDirectory(sourceID: sourceID)
+        guard FileManager.default.fileExists(atPath: directory.path) else { return }
+        try FileManager.default.removeItem(at: directory)
+    }
+
     public func validateForEnablement(_ configuration: MCPSourceRuntimeConfiguration) throws {
         try validate(configuration)
     }
@@ -333,13 +380,20 @@ public struct AppMCPSourceRuntimeRepository: Sendable {
         if configuration.graphWritePolicy == .allowAll {
             throw AppMCPSourceRuntimeRepositoryError.unsafePermissionMode("MCP source \(configuration.sourceID) cannot use allowAll graph write policy")
         }
+        for binding in configuration.credentialBindings {
+            _ = try MCPSourceCredentialStore.normalizedEnvironmentVariable(binding.environmentVariable)
+        }
         switch configuration.transport {
         case .stdio(let command, _):
             if command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 throw AppMCPSourceRuntimeRepositoryError.missingCommand(configuration.sourceID)
             }
-        case .http:
-            break
+        case .http(let url):
+            do {
+                try MCPHTTPClientTransport.validateEndpoint(url)
+            } catch {
+                throw AppMCPSourceRuntimeRepositoryError.invalidHTTPEndpoint(String(describing: error))
+            }
         }
     }
 

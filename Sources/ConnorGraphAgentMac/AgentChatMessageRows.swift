@@ -66,6 +66,20 @@ struct AgentChatMessageRow: View {
     }
 
     private var isUser: Bool { row.message.role == .user }
+    private var activeSkillLabel: String? {
+        guard let contextSnapshot = row.message.contextSnapshot else { return nil }
+        let prefix = "Active skill:"
+        guard let line = contextSnapshot
+            .components(separatedBy: .newlines)
+            .first(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix(prefix) })
+        else { return nil }
+        let label = line
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .dropFirst(prefix.count)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return label.isEmpty ? nil : label
+    }
+
     private var shouldFoldAssistantMessage: Bool {
         guard !isUser else { return false }
         let content = row.message.content.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -84,6 +98,9 @@ struct AgentChatMessageRow: View {
             if isUser { Spacer(minLength: AgentChatLayout.messageSideInset) }
 
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+                if isUser, let activeSkillLabel {
+                    userActiveSkillChip(activeSkillLabel)
+                }
                 messageContent
                 if !row.attachments.isEmpty {
                     AgentMessageAttachmentRefsView(attachments: row.attachments) { attachment in
@@ -101,6 +118,29 @@ struct AgentChatMessageRow: View {
             )
         }
         .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+    }
+
+    private func userActiveSkillChip(_ label: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "bolt.fill")
+                .font(.system(size: 10, weight: .semibold))
+            Text(label)
+                .font(AgentChatTypography.micro.weight(.medium))
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .foregroundStyle(Color.accentColor)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(
+            Capsule(style: .continuous)
+                .fill(Color.accentColor.opacity(0.10))
+        )
+        .overlay(
+            Capsule(style: .continuous)
+                .stroke(Color.accentColor.opacity(0.22), lineWidth: 1)
+        )
+        .accessibilityLabel("本轮技能：\(label)")
     }
 
     @ViewBuilder

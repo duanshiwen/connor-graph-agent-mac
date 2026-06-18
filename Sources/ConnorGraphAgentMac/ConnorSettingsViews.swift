@@ -106,6 +106,26 @@ struct ConnorSettingsDetailView: View {
 struct SettingsAppSection: View {
     @ObservedObject var viewModel: AppViewModel
 
+    private var appVersionDisplay: String {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let shortVersion = (info["CFBundleShortVersionString"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let build = (info["CFBundleVersion"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch (shortVersion?.isEmpty == false ? shortVersion : nil, build?.isEmpty == false ? build : nil) {
+        case let (version?, build?):
+            return "\(version) (\(build))"
+        case let (version?, nil):
+            return version
+        case let (nil, build?):
+            return "Build \(build)"
+        default:
+            return "开发版本"
+        }
+    }
+
+    private var bundleIdentifierDisplay: String {
+        Bundle.main.bundleIdentifier ?? "未知"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsGroup(title: "通知") {
@@ -125,14 +145,9 @@ struct SettingsAppSection: View {
                 }
             }
             SettingsGroup(title: "关于") {
-                SettingsValueRow(title: "版本", value: "0.1.0")
+                SettingsValueRow(title: "当前版本", value: appVersionDisplay)
                 Divider()
-                HStack {
-                    Text("检查更新")
-                    Spacer()
-                    Button("立即检查") { viewModel.appSettingsMessage = "当前为本地开发版本。" }
-                }
-                .font(SettingsListTypography.rowTitle)
+                SettingsValueRow(title: "Bundle ID", value: bundleIdentifierDisplay)
             }
         }
     }

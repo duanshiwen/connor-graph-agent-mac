@@ -1,6 +1,6 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-17 01:20 GMT+8  
+文档更新时间：2026-06-18 15:44 GMT+8  
 当前代码基线:`feature/apple-iwork-attachment-support`,在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface / session-scoped multi-root project workspace / Connor-owned Scientific Compute Runtime skeleton / 商用级 Document Attachment OS / WKWebView-backed `web_fetch(js)` 基础上,继续收紧 Apple 原生 UI 边界:PDF/Word/Excel/PowerPoint 与 Apple iWork（Pages/Numbers/Keynote）一等附件仍由 Connor Session Capsule 和 Attachment Store 管理;PDF selectable text 抽取和多页原文预览继续使用 PDFKit;Office/iWork/Presentation/Spreadsheet 抽取继续通过 MarkItDown/Docling sidecar best-effort 编排与 hardening;Office/iWork/Presentation/Spreadsheet 原文件预览优先交给 macOS Quick Look / QuickLookUI,Connor 自有 UI 只负责 manifest、extraction status、retry、omitted attachment summary 和治理证据;AI 设置页 Add Connection 前置 DeepSeek、Xiaomi MiMo 和中国常用模型入口,在 OpenAI Compatible 统一底座上支持 MiMo 官方 `api-key` 认证头。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package,目标是把 Connor 建成 **graph-memory-native Agent OS**:它不是"图谱编辑器",也不是"Claude SDK 外壳",而是以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI 和 Local Automation Surface 共同构成的本地 Agent 操作系统。
@@ -20,6 +20,7 @@ Connor 当前坚持以下主权边界:
 - **UI sovereignty belongs to Swift Native Shell**:不 fork Craft UI,不引入 Electron/Web UI,不引入 Craft-style multi-workspace。对于文件预览、设置窗口、inspector、文件/目录选择、菜单命令等 Apple 已有稳定语义的能力,优先使用 macOS / SwiftUI / AppKit 原生实现;Connor 自定义 UI 只承载 Agent OS 特有状态和治理工作流。
 - **Automation sovereignty belongs to Connor Local Automation Surface**:CLI/API 只能通过本地、可审计、可 dry-run、可 review 的 contract 调用 Connor runtime。
 - **Attachment sovereignty belongs to Connor Session OS / Attachment Store**:用户文件先进入本地 Session Capsule,原文件、manifest、派生抽取文本和 message refs 由 Connor 管理;OpenAI/Claude/Gemini 等 provider-native file API 未来只能作为可治理的投递/缓存策略,不能成为 source of truth。
+- **Mail sovereignty belongs to Connor Native Mail System**:邮件账号、身份、凭据绑定、OAuth token 生命周期、同步游标、source cache、读取状态变更、草稿、发信审批、联系人候选、邮件附件导入、tool audit 与 Graph Memory evidence policy 均由 Connor 拥有。AI、MCP server、LLM provider、协议 adapter 或任何外部 sidecar 都不能直接拥有邮件状态、绕过 Connor Policy Engine 发信、或把邮件事实直接写入 Graph Memory。内置邮件读取工具默认允许,不会触发权限获取操作;但读取正文仍写入隐私级 audit,且读取邮件默认不改变已读状态。
 
 明确不做:
 
@@ -34,6 +35,13 @@ CLI/API direct graph write
 MCP server owning product state
 Claude SDK owning Connor session state
 Unreviewed automation execution bypass
+Unmanaged external mail MCP server owning account / sync / draft / send state
+Direct LLM access to IMAP / SMTP / OAuth / Contacts credentials
+Copy-pasted Thunderbird Core protocol implementation
+Mail reads that implicitly mark messages as read
+Unapproved email sending
+Unapproved contact writes
+Auto-writing mail-derived facts into Graph Memory
 ```
 
 ---
@@ -640,25 +648,66 @@ Sources/ConnorGraphAppSupport/AppGraphAgentRuntimeFactory.swift
 
 Commercial Train 3 将 MCP Source 从 config/call helper 升级为 Connor-owned source platform object。
 
+验收状态（2026-06-18 02:05 GMT+8）: **MCP Platform Phase 1 · Accepted**。验收范围是商业级基础闭环:Connor-owned source registry / lifecycle、stdio + HTTP JSON-RPC transport、source-scoped credentials、tool governance、runtime tool injection、native Source Manager UI、health/catalog/audit persistence 和测试证据。该验收不等于完整 MCP 平台全部完成;request-scoped SSE streaming、OAuth/source auth workflow、hot activation、long-lived reconnect、large/binary artifact governance、manual per-tool policy override 与 credential rotation dashboard 进入 Phase 2。
+
 关键文件:
 
 ```text
 Sources/ConnorGraphAppSupport/AppMCPSourceRuntimeRepository.swift
 Sources/ConnorGraphAppSupport/MCPJSONRPCClient.swift
+Sources/ConnorGraphAppSupport/MCPStdioClientTransport.swift
+Sources/ConnorGraphAppSupport/MCPHTTPClientTransport.swift
+Sources/ConnorGraphAppSupport/MCPClientPool.swift
 Sources/ConnorGraphAppSupport/MCPSourceRuntime.swift
+Sources/ConnorGraphAppSupport/MCPSourceTestService.swift
+Sources/ConnorGraphAppSupport/MCPSourceCredentialStore.swift
+Sources/ConnorGraphAppSupport/MCPToolGovernancePolicy.swift
+Sources/ConnorGraphAppSupport/MCPToolRegistryBridge.swift
 Sources/ConnorGraphAppSupport/SourceSkillAutomationUIPresentation.swift
+Sources/ConnorGraphAgentMac/MCPSourceListViews.swift
+Sources/ConnorGraphAgentMac/SourceSkillAutomationRuntimeViews.swift
 ```
 
 当前能力:
 
 - Source runtime registry persistence
 - Stdio / HTTP transport configuration shape
+- Real MCP stdio subprocess transport for `Content-Length` framed JSON-RPC
+- Real MCP HTTP JSON-RPC transport for Streamable HTTP JSON response path
+- HTTP MCP endpoint validation: HTTPS required except localhost / loopback development endpoints, and credentials are rejected in endpoint URLs
+- Request-scoped SSE responses intentionally fail closed until explicit streaming support lands
+- Sensitive inherited environment filtering for local MCP subprocesses
 - Source ID validation
 - Tool name prefix validation
 - Unsafe graph write policy rejection
 - MCP JSON-RPC lifecycle:initialize、notifications/initialized、tools/list、tools/call、shutdown
 - Server error mapping
-- Source-prefixed tool catalog
+- Model-safe exposed MCP tool naming: `mcp__{sourceID}__{toolName}`
+- Original MCP tool name preservation for routing and audit
+- Backward-compatible parsing for previous `source.tool` runtime calls
+- MCP Tool Registry Bridge for discovered catalog → `AgentToolRegistry` registration
+- MCP Client Pool for persisted enabled source catalog exposure, stdio / HTTP tool routing, and per-tool governance enforcement
+- App runtime bridge: `AppGraphAgentRuntimeFactory` loads persisted enabled MCP catalogs and injects tools into `AgentToolRegistry`
+- Governed MCP routed AgentTool path for source/tool dispatch
+- Per-tool governance policy generated during discovery: risk class、execution policy、permission capability、rationale
+- Risk classes: read、externalRead、mutation、destructive、admin、credentialAccess、unknown
+- Execution policies: autoAllow、requireConfirmation、block
+- Tool definition fingerprint pinning via SHA-256 over sourceID、raw tool name、description、input schema
+- Rug-pull detection: changed tool definitions are persisted with `integrityStatus == changed`, audited, and blocked before execution until reviewed/re-tested
+- Sensitive MCP tools require explicit per-run approval even under broad runtime policy, rather than relying on global allowAll
+- Source test service for stdio / HTTP validation + discovery + health/catalog/audit/policy persistence
+- Native MCP Source Manager list/detail UI for persisted health/catalog/audit inspection
+- Native Add/Edit Source sheet for stdio / HTTP MCP source onboarding and maintenance
+- Connor-owned MCP source credential store backed by `CredentialStore` / macOS Keychain
+- Credential requirements for bearer token、API key header and multi-header stdio / HTTP sources
+- Source config stores only credential requirement + env var bindings; secret values are never persisted in `mcp-runtime.json`
+- Source-scoped runtime secret injection into stdio subprocess environment after inherited secret filtering
+- Source-scoped runtime secret injection into HTTP request headers; bearer tokens use `Authorization: Bearer`, API header sources use configured `header:ENV` bindings, and query-string secrets remain unsupported
+- Missing credential fail-closed behavior before source test / tool runtime execution
+- UI-driven Enable/Disable source lifecycle controls
+- Archive Source workflow via `deprecated` status that preserves catalog/health/audit history
+- Confirmed Delete Source workflow for physical removal of a source runtime directory
+- UI-driven Test Source action that refreshes persisted health/catalog/audit after discovery
 - Disabled-source gate
 - MCP tool call event bridge
 - Product OS registry sync event
@@ -668,8 +717,441 @@ Sources/ConnorGraphAppSupport/SourceSkillAutomationUIPresentation.swift
 - Audit record
 - Discovery snapshot
 - Per-source `health.json`、`catalog.json`、`audit.jsonl`
+- Tool Catalog UI displays risk、execution policy、integrity status、rationale and schema fingerprint for review
+- Audit timeline displays policy block and tool definition changed events
 
-边界:MCP servers 是能力提供者;Connor 拥有 registry、lifecycle、health、permission policy、graph ingestion policy、audit 与 readiness。
+Phase 1 验收覆盖:
+
+- Source lifecycle: Add/Edit、Enable/Disable、Archive、confirmed Delete、Source Test。
+- Transport: real stdio MCP subprocess transport + HTTP JSON-RPC transport for Streamable HTTP JSON response path。
+- Runtime bridge: persisted enabled MCP catalog → `AgentToolRegistry` → governed routed tool execution。
+- Credential boundary: secrets stay out of `mcp-runtime.json`; stdio env 和 HTTP headers 只做 source-scoped injection; missing credential fail closed。
+- Governance: risk class、execution policy、permission capability、SHA-256 tool definition fingerprint、rug-pull detection、changed definition block、sensitive tool per-run approval。
+- Evidence stores: per-source `health.json`、`catalog.json`、`audit.jsonl`。
+- Native product surface: MCP Source Manager、catalog/governance inspection、audit timeline、stdio/HTTP Add/Edit Source sheet。
+
+Phase 2 非阻塞 backlog:request-scoped SSE streaming support、long-lived connection reuse/reconnect、OAuth/source auth workflow、large/binary result artifact governance、App runtime 动态 source activation、manual per-tool policy override editor、credential rotation/status dashboard。根据当前产品边界,本里程碑刻意不处理 graph ingestion。
+
+边界:MCP servers 是能力提供者;Connor 拥有 registry、lifecycle、health、permission policy、audit 与 readiness。Graph ingestion 不属于当前 MCP Platform scope。
+
+---
+
+## Connor Native Mail System
+
+Commercial Train 7 将邮件与联系人能力定义为 Connor 自研的商用级 native source + governed tool surface。它不是前台邮件客户端、不是普通外部 MCP server、也不是 Thunderbird Core 的复制品;Thunderbird iOS 仅作为 Account / Autoconfiguration / IMAP / SMTP / MIME / Mailbox Manager 分层思想参考。Connor 自己实现 domain、runtime facade、协议 adapter、MIME parser、tool contracts、permission model、audit pipeline、source cache、发信审批和 Graph evidence pipeline。
+
+正式能力面命名为 **Native Mail Tool Surface**。AI 通过 Connor 注册的一组 native tool calls 读取邮件、管理读取状态、草稿/发信、查询/管理联系人和导入附件;AI 不直接接触 IMAP/SMTP/OAuth 凭据,不直接持久化邮件状态,也不能绕过 Connor 审批与审计。
+
+核心运行路径:
+
+```text
+AI Agent
+→ Connor AgentToolRegistry
+→ MailAgentTools / ContactAgentTools
+→ Connor Policy Engine
+→ Connor Native Mail Runtime
+→ Self-built protocol adapters
+→ Mail Source Cache / Audit / Attachment Store / Graph Memory Evidence Pipeline
+```
+
+协议 adapter 只负责连接外部系统,不拥有产品状态:
+
+```text
+MailRuntime
+├── MailIMAPAdapter          # self-built IMAP connect/capability/auth/list/select/fetch/store/move/copy/idle
+├── MailSMTPAdapter          # self-built SMTP EHLO/STARTTLS/AUTH/envelope/DATA/send receipt
+├── MailMIMEParser           # self-built header/body/multipart/charset/attachment parser
+├── MailOAuthService         # Google / Microsoft / generic OAuth token lifecycle
+├── MailJMAPAdapter          # reserved for JMAP providers
+├── MailGmailAPIAdapter      # reserved for Gmail API provider path
+├── MailMicrosoftGraphAdapter# reserved for Microsoft Graph Mail provider path
+└── ContactRuntime           # Apple Contacts CNContactStore bridge under Connor approval/audit
+```
+
+### Self-built Implementation Boundary
+
+参考 Thunderbird iOS 的内容:
+
+- Account / Server / Identity 分层。
+- Autoconfiguration 流程。
+- IMAP / SMTP / MIME / JMAP 作为协议层,而非产品状态层。
+- Mailbox Manager 的职责边界。
+- UI 与 Core 协议层分离。
+- Credentials 不写入普通配置文件。
+
+明确不复制:
+
+- Thunderbird Core 源码、IMAPClient、SMTPClient、MIME parser、Account manager、UI 代码或受许可证约束的实现。
+- 若未来引入第三方协议库,也必须通过 Connor-owned adapter 隔离;外部库只能处理协议 I/O,不能拥有账号 registry、凭据、同步游标、cache、审批、audit 或 graph evidence policy。
+
+### Mail System Targets
+
+新增文件规划:
+
+```text
+Sources/ConnorGraphCore/MailSourceDomain.swift
+Sources/ConnorGraphCore/MailToolDomain.swift
+Sources/ConnorGraphCore/MailAuditDomain.swift
+Sources/ConnorGraphCore/ContactSourceDomain.swift
+
+Sources/ConnorGraphAppSupport/AppMailSourceRepository.swift
+Sources/ConnorGraphAppSupport/AppMailCredentialStore.swift
+Sources/ConnorGraphAppSupport/MailRuntime.swift
+Sources/ConnorGraphAppSupport/MailProtocolAdapter.swift
+Sources/ConnorGraphAppSupport/MailIMAPAdapter.swift
+Sources/ConnorGraphAppSupport/MailSMTPAdapter.swift
+Sources/ConnorGraphAppSupport/MailJMAPAdapter.swift
+Sources/ConnorGraphAppSupport/MailGmailAPIAdapter.swift
+Sources/ConnorGraphAppSupport/MailMicrosoftGraphAdapter.swift
+Sources/ConnorGraphAppSupport/MailMIMEParser.swift
+Sources/ConnorGraphAppSupport/MailAutoconfigurationService.swift
+Sources/ConnorGraphAppSupport/MailOAuthService.swift
+Sources/ConnorGraphAppSupport/MailSyncEngine.swift
+Sources/ConnorGraphAppSupport/MailSourceCache.swift
+Sources/ConnorGraphAppSupport/MailDraftStore.swift
+Sources/ConnorGraphAppSupport/MailAuditLog.swift
+Sources/ConnorGraphAppSupport/MailAttachmentImportService.swift
+Sources/ConnorGraphAppSupport/ContactRuntime.swift
+Sources/ConnorGraphAppSupport/ContactSourceRepository.swift
+Sources/ConnorGraphAppSupport/ContactCandidateExtractor.swift
+
+Sources/ConnorGraphAgent/MailAgentTools.swift
+Sources/ConnorGraphAgent/ContactAgentTools.swift
+Sources/ConnorGraphAgent/MailToolResultBudgetPolicy.swift
+Sources/ConnorGraphAgent/MailPromptSafetyPolicy.swift
+
+Sources/ConnorGraphAgentMac/MailSourceSettingsViews.swift
+Sources/ConnorGraphAgentMac/MailAccountSetupViews.swift
+Sources/ConnorGraphAgentMac/MailApprovalViews.swift
+Sources/ConnorGraphAgentMac/MailAuditTimelineViews.swift
+Sources/ConnorGraphAgentMac/MailReadinessViews.swift
+Sources/ConnorGraphAgentMac/ContactSourceSettingsViews.swift
+```
+
+核心 domain 类型:
+
+```text
+MailAccountID / MailIdentityID / MailMailboxID / MailMessageID / MailThreadID / MailDraftID / MailAttachmentID / MailContactID
+MailAccount / MailIdentity / MailServerEndpoint / MailAuthMode / MailCredentialBinding / MailProviderKind / MailConnectionSecurity / MailProtocolKind / MailAccountHealth
+MailMailbox / MailMailboxRole / MailMailboxStatus / MailSyncCursor
+MailAddress / MailMessageSummary / MailMessageDetail / MailMessageHeaders / MailMessageBody / MailBodyPart / MailAttachmentDescriptor / MailMessageFlags
+MailDraft / MailDraftStatus / MailSendRequest / MailSendReceipt
+MailToolRiskClass / MailToolApprovalPayload / MailAuditRecord
+ContactRecord / ContactEmailAddress / ContactCandidate / ContactMutationDraft
+```
+
+### Native Mail Tool Surface
+
+Account / source tools:
+
+```text
+mail_list_accounts
+mail_get_account
+mail_get_account_health
+mail_test_account_connection
+mail_refresh_account
+mail_sync_account
+```
+
+Mailbox tools:
+
+```text
+mail_list_mailboxes
+mail_get_mailbox_status
+mail_create_mailbox
+mail_rename_mailbox
+mail_delete_mailbox
+mail_subscribe_mailbox
+mail_unsubscribe_mailbox
+```
+
+Read / search tools:
+
+```text
+mail_search_messages
+mail_list_messages
+mail_get_message
+mail_get_thread
+mail_get_headers
+mail_get_message_body
+```
+
+State mutation tools:
+
+```text
+mail_set_read_state
+mail_set_flag_state
+mail_archive_messages
+mail_move_messages
+mail_delete_messages
+mail_restore_messages
+```
+
+Draft / send tools:
+
+```text
+mail_create_draft
+mail_update_draft
+mail_discard_draft
+mail_preview_draft
+mail_reply_to_message
+mail_forward_message
+mail_send_draft
+```
+
+Attachment tools:
+
+```text
+mail_list_attachments
+mail_import_attachment_to_session
+```
+
+Contact tools:
+
+```text
+contact_search
+contact_get
+contact_extract_candidates_from_mail
+contact_create_draft
+contact_update_draft
+contact_commit_draft
+```
+
+Tool contract rules:
+
+- `mail_search_messages` / `mail_list_messages` 默认只返回 summary、snippet、headers、flags、hasAttachments 等轻量结构化结果。
+- `mail_get_message_body` 或 `mail_get_message(includeBody: true)` 才返回正文;正文结果必须遵守 prompt budget、redaction、omitted summary 与 audit 策略。
+- 内置邮件读取工具默认允许,不会弹出权限获取操作;但 body read 仍记录隐私级 audit。
+- 读取邮件默认 `markAsRead = false`;AI 想改变已读状态必须显式调用 `mail_set_read_state`。
+- 所有 state mutation、mailbox management、attachment import、contact write、send mail 都进入 Connor Policy Engine。
+- `mail_create_draft` 不等于发送;`mail_send_draft` 永远强制用户确认,即使当前 permission mode 是 allowAll / trustedWrite。
+
+### Mail Permission Capabilities
+
+`AgentPermissionCapability` 需要扩展:
+
+```swift
+case readMail
+case readMailBody
+case mutateMailState
+case manageMailboxes
+case createMailDraft
+case sendMail
+case readContacts
+case mutateContacts
+case importMailAttachment
+```
+
+策略:
+
+```text
+readMail: 内置读取默认允许,不触发权限获取操作,写入 audit
+readMailBody: 默认允许,不触发权限获取操作,但标记更高隐私风险并受预算/脱敏约束
+mutateMailState: readOnly 拒绝;askToWrite 审批;trustedWrite/allowAll 可按策略允许并 audit
+manageMailboxes: 默认审批
+createMailDraft: 可允许,但不能发送
+sendMail: 永远强制审批,不被 allowAll 自动放行
+readContacts: 默认允许读取已授权 Contacts/cache,系统 Contacts 授权失败时 fail closed
+mutateContacts: 强制审批
+importMailAttachment: 按 Attachment Store 策略审批、导入、抽取和审计
+```
+
+### Mail Storage Layout
+
+文件状态:
+
+```text
+Connor/
+├── sources/
+│   └── mail/
+│       ├── mail-source.json
+│       ├── accounts/
+│       │   └── {accountID}/
+│       │       ├── account.json
+│       │       ├── health.json
+│       │       ├── sync-state.json
+│       │       ├── mailbox-cache.json
+│       │       ├── cache-policy.json
+│       │       └── audit.jsonl
+│       └── contacts/
+│           ├── contacts-source.json
+│           ├── sync-state.json
+│           └── audit.jsonl
+```
+
+SQLite source cache 是可重建缓存,不是 source of truth:
+
+```text
+mail_accounts
+mail_identities
+mail_mailboxes
+mail_messages
+mail_message_bodies
+mail_attachments
+mail_drafts
+mail_sync_cursors
+mail_audit_events
+contact_records_cache
+contact_candidates
+```
+
+存储规则:
+
+- `account.json` 只保存 provider、endpoint、identity、capabilities、credential binding reference,不保存 secret。
+- 密码、app password、OAuth refresh token、access token 只进入 Keychain-backed credential store。
+- 正文缓存必须有 retention policy;用户可 purge mail cache。
+- 发信 audit 默认保存 hash、结构化 envelope、redacted preview 和 send receipt,不把完整正文永久写入普通 audit。
+- 邮件附件不直接进入 tool result;导入后归 Session Capsule / Attachment Store 管理。
+
+### Sync Engine and Protocol Hardening
+
+商用级 `MailSyncEngine` 必须支持:
+
+- Initial discovery / incremental sync。
+- UID validity handling。
+- Mailbox rename / move handling。
+- IDLE / polling fallback。
+- Reconnect / exponential backoff。
+- Timeout policy。
+- Per-account sync lock。
+- Partial failure isolation。
+- Rate limiting。
+- Provider-specific capability negotiation。
+- Cursor corruption recovery。
+- Cache rebuild。
+- Health classification / readiness evidence。
+
+Sync 结果不直接进入 AI 上下文;AI 必须通过 native mail tools 查询。
+
+### MIME, Body and Attachment Governance
+
+自研 `MailMIMEParser` 负责:
+
+- Header normalization。
+- Encoded-word decoding。
+- multipart/alternative、multipart/mixed、nested multipart。
+- text/plain 与 text/html 抽取。
+- HTML → safe markdown/plain extraction。
+- content-transfer decoding。
+- charset handling。
+- attachment descriptor。
+- inline image descriptor。
+- malformed MIME recovery。
+- oversized body handling。
+
+安全规则:
+
+- 不执行 HTML JavaScript。
+- 不自动加载远程图片。
+- 附件不直接进入 prompt。
+- 附件导入后复用 Document Attachment OS 的 manifest、extraction、preview、retry 和 audit。
+
+### Draft, Send and Approval Runtime
+
+发信是社会行为,不是普通写操作。Connor 必须把 send 设计为强审批事务:
+
+```text
+mail_create_draft
+→ mail_preview_draft
+→ user approval card
+→ mail_send_draft
+→ SMTP/API send receipt
+→ audit + optional Graph evidence candidate
+```
+
+审批卡展示:
+
+```text
+From
+To / Cc / Bcc
+Subject
+Body preview / full body
+Attachments
+In-Reply-To / References
+AI rationale
+Risk summary
+Send / Deny
+```
+
+`mail_send_draft` 永远不能被普通 tool auto-approval、allowAll 或 sidecar bypass 自动执行。
+
+### Contacts Runtime
+
+联系人来源分两类:
+
+```text
+Apple Contacts CNContactStore
+Mail-derived contact candidates
+```
+
+规则:
+
+- `contact_search` 可以读已授权系统 Contacts 和 Connor contact cache。
+- `contact_extract_candidates_from_mail` 只创建候选,不写系统通讯录。
+- `contact_commit_draft` 必须用户审批。
+- macOS Contacts 授权失败时 fail closed,不伪造成功。
+
+### Graph Memory Evidence Pipeline
+
+邮件事实进入图谱必须走 Connor 既有治理链路:
+
+```text
+Mail Tool Result / Mail Message / Contact Candidate
+→ MailEvidenceCandidate
+→ Memory Staging
+→ Distillation
+→ GraphExtractionDraft
+→ Entity Resolution
+→ Conflict Preview
+→ Constraint Validation
+→ Admission Policy
+→ SQLite Temporal Graph
+```
+
+约束:
+
+- AI 不直接写图谱。
+- 邮件正文默认只作为临时上下文。
+- 长期记忆必须有 evidence ref。
+- Evidence ref 可追溯到 accountID、mailboxID、messageID、date、header/body hash。
+- 高敏感邮件可设置 no-memory policy。
+
+### Native Mail UI
+
+Connor 不做 Thunderbird 替代品。Native UI 承载治理与 readiness:
+
+- Mail Source Manager。
+- Add/Edit Mail Account。
+- OAuth / Credential Status。
+- Account Health / Readiness。
+- Tool Permission Policy。
+- Send Approval Sheet/Card。
+- Contact Write Approval Sheet/Card。
+- Mail Audit Timeline。
+- Cache / Retention / Purge Controls。
+- Attachment Import Review。
+
+### Commercial Engineering Sequence
+
+完整系统按可验证工程切片实施,不是 MVP 叙事:
+
+```text
+Stage 1: Architecture Contract Landing
+Stage 2: Tool Contract + Mock Runtime
+Stage 3: Source Registry + Credential Boundary
+Stage 4: Self-built IMAP Adapter
+Stage 5: Self-built SMTP Adapter
+Stage 6: Self-built MIME Parser
+Stage 7: Sync Engine + Source Cache
+Stage 8: Draft / Send Runtime
+Stage 9: Contacts Runtime
+Stage 10: Attachment Import
+Stage 11: OAuth Providers
+Stage 12: Graph Memory Evidence Integration
+Stage 13: Commercial Hardening
+```
+
+每个 stage 必须遵守 Superpowers / TDD:先写失败测试,再实现最小通过代码,再验证测试、audit、readiness evidence 与 README contract 一致。
 
 ---
 
@@ -920,6 +1402,21 @@ Session Workspace 当前支持:
 - composer paperclip 现在导入 Session Capsule 附件;附件 chips 展示在现有 composer 文本框内部上半部分,文本框整体尺寸不变,composer 的尺寸、位置和外部布局不变。附件多时在文本框内部横向滚动,不在 composer 上方新增 shelf,也不推动底部按钮栏。点击附件 chip 主体会打开现有纯阅读预览弹窗;弹窗外层布局保持不变,内部对 PDF 使用 PDFKit 多页连续滚动原文件预览,对 Office/iWork/Presentation/Spreadsheet 和图片使用 macOS Quick Look / QuickLookUI 原生预览原文件,同时保留 Connor 的解析状态、manifest 路径和 retry 入口;点击 `xmark.circle.fill` 只移除附件。
 - 多工作目录能力只作用于 project workspace / allowed roots;Connor 仍保持单一 Home / Runtime Root,不引入 Craft-style multi-workspace。
 
+Composer 技能激活当前支持:
+
+- Composer 底部工具栏新增 `/技能` 按钮,点击弹出技能选择 popover;popover 列出所有已加载的技能定义,显示名称和描述,可一键选中
+- 在 composer 输入框行首输入 `/` 字符也会自动唤出技能选择 popover
+- 选中的技能以 accent 色 badge 形式显示在底部工具栏,点击 badge 上的 × 可清除
+- 选中技能后发送消息时,技能的 SKILL.md 指令通过 `AgentChatRequest.skillInstructions` 注入到系统 prompt（而非用户消息）,追加在 `instructionAppendix` 之后
+- 注入路径:AppViewModel.resolveActiveSkillInstructions() → SkillInvocationRuntime.buildPlan() → SkillInvocationPlan.renderedInstructions → NativeSessionManager.submit(skillInstructions:) → AgentChatRequest.skillInstructions → AgentLoopController.buildPromptAssembly() → assembly.instruction.text
+- 每次发送后自动清除 active skill,避免后续轮次意外注入;用户可随时手动清除或切换技能
+- 现有的 `[skill:slug]` 文本语法仍然独立工作,走 SkillChatPromptAugmentor 路径注入到用户消息中的 `<connor-active-skills>` XML block;两条路径互不干扰
+- 系统 prompt 自动附加所有已安装技能的摘要目录（名称 + slug + 描述）,通过 `instructionAppendix` 注入,在每次 Agent Loop 中对模型可见
+- 目录中附带 `How to Use Skills` 使用说明,引导模型根据用户请求自主判断是否需要激活某个技能
+- 新增 `connor_skill_activate` 内部工具（`SkillActivateTool`）,模型可调用并传入技能 slug 获取该技能的完整 SKILL.md 指令
+- 工具在 `AppGraphAgentRuntimeFactory.buildController()` 中通过 `SkillPackageScanner` 扫描已安装技能后注册;摘要文本通过 `buildSkillCatalogSummary(from:)` 生成并追加到 `effectiveConfiguration.instructionAppendix`
+- 三条技能注入路径并存:① `/` picker 手动选中 → 系统 prompt 注入;② `[skill:slug]` 文本语法 → 用户消息注入;③ 模型自主调用 `connor_skill_activate` → 工具返回值注入模型上下文
+
 Agent tool invocation detail 当前支持:
 
 - 对同一个 `callID` 下的 `toolRequested` / `toolApproved` / `toolStarted` / `toolFinished` / `toolFailed` 事件进行 Connor-owned 聚合,形成 `AgentToolInvocationPresentation`,避免点击工具活动时只打开最早的 `Tool requested` 事件。
@@ -1043,6 +1540,8 @@ AI
 界面布局已按当前 Settings Center 卡片风格落地:顶部标题"权限"居中;内容最大宽度 760;`SettingsPermissionsSection` 先展示页面说明,再用 `新会话默认权限` 卡片承载权限模式 picker 和当前模式摘要,用 `当前真实生效` 卡片说明权限模式、网络和 Shell 的实际决策来源,用 `安全边界` 卡片说明不开放 allowAll、Workspace 属于会话、本地单用户边界。能力矩阵说明放入可折叠的"查看当前策略说明" disclosure,默认不展示工程化 capability 表,以符合 Apple 设置页只暴露必要选项的原则。
 
 会话侧栏的"所有会话"状态列表和"标签"列表支持 macOS 右键菜单:状态项可"编辑状态…"或"创建状态…",标签项可"编辑标签…"或"创建标签…"。状态创建/编辑只面向显示名和图标;UID 是系统主键,创建时自动生成不重复的 `status_<uuid>`,编辑时只读展示、不可修改;排序和终态不暴露在弹窗中。状态图标使用常用 SF Symbol 菜单选择器。标签创建/编辑只面向显示名和颜色;UID 是系统主键,创建时自动生成不重复的 `label_<uuid>`。标签色彩选择使用 SwiftUI 原生 `ColorPicker("颜色", selection:..., supportsOpacity: false)`,保存时兼容旧命名色并可写入十六进制颜色。以上操作写入 `config/session-governance.json`,并立即刷新当前 AppViewModel、会话标签菜单、侧栏筛选计数和 automation governance mirror。当前底层会话状态仍由内置 `AgentSessionStatus` 枚举约束;因此自定义状态定义先作为治理配置维护能力落地,真正把任意自定义状态用于会话状态切换需要后续将 session status storage 从 enum 升级为 string-backed status ID。
+
+会话侧栏产品导航继续弱化"智能体"作为前台主菜单概念:自动化分组仅保留"定时任务"与"事件触发";"数据源"改为可展开分组,下设"邮件系统"、"飞书"、"RSS"、"API"四个入口;并新增与"数据源"同级的"MCP"入口,用于体现 MCP 作为能力协议/运行时管理面的独立性,而不是普通业务数据源的子项。
 
 核心视图:
 
@@ -1254,7 +1753,7 @@ RequiredHitRate@k
 
 ## Commercial Readiness Gate
 
-Commercial Readiness 当前覆盖 6 个 phase:
+Commercial Readiness 当前覆盖 7 个 phase:
 
 ```text
 Phase 1 · Session OS / Governance
@@ -1263,6 +1762,7 @@ Phase 3 · Source / MCP Platform
 Phase 4 · Graph Memory Core Capability
 Phase 5 · Native Commercial UI
 Phase 6 · Local API / CLI / Automation Surface
+Phase 7 · Native Mail System
 ```
 
 Readiness Gate 聚合:
@@ -1273,12 +1773,16 @@ Readiness Gate 聚合:
 - Graph Memory context / ingestion / distillation / review evidence
 - Native UI home / runtime center / command palette / settings evidence
 - Local API / CLI endpoint / command / dry-run / reviewed gate / audit / local-only evidence
+- Native Mail account health / credential boundary / sync cursor / tool audit / send approval / contact approval / attachment import / evidence policy readiness
 
 关键文件:
 
 ```text
 Sources/ConnorGraphAppSupport/CommercialReadinessGate.swift
 Sources/ConnorGraphAppSupport/ConnorNativeCommercialUIPresentation.swift
+Sources/ConnorGraphAppSupport/MailRuntime.swift
+Sources/ConnorGraphAppSupport/MailSourceCache.swift
+Sources/ConnorGraphAgent/MailAgentTools.swift
 ```
 
 ---
@@ -1316,6 +1820,15 @@ swift run connor automations evaluate --trigger sessionStatusChanged --session d
 最近验证结果:
 
 ```text
+MCP Platform Phase 1 acceptance freeze (2026-06-18 02:07 GMT+8):
+- Status: MCP Platform Phase 1 · Accepted.
+- Scope: source lifecycle, stdio + HTTP JSON-RPC transport, source-scoped credential injection, tool governance, runtime bridge, native Source Manager UI, health/catalog/audit persistence.
+- Non-blocking Phase 2 backlog: request-scoped SSE streaming, OAuth/source auth workflow, hot activation, reconnect strategy, artifact governance, manual per-tool policy override, credential rotation/status dashboard.
+- swift test --filter 'CommercialMCPPlatformTests|CommercialMCPRuntimeBridgeTests|CommercialReadinessReleaseGateTests': passed, 19 tests.
+- swift test --filter 'CommercialMCPPlatformTests|CommercialMCPRuntimeBridgeTests|CommercialReadinessReleaseGateTests|agentLoopAbortCancelsActiveModelRequest': passed, 20 tests.
+- swift build: passed.
+- swift test: passed, 777 tests in 61 suites.
+
 Project Working Directory Runtime targeted tests passed (2026-06-14 01:00 GMT+8):
 - swift test --filter runtimeSettingsRepositoryPersistsWorkspaceRoots
 - swift test --filter AppProjectWorkingDirectoryResolverTests
@@ -1362,6 +1875,24 @@ Settings labels/statuses redesign regression (2026-06-16 19:01 GMT+8):
 - 删除行为复用治理层规则:删除标签会从所有会话移除;删除状态会在最后一个状态或仍有会话使用时被阻止。
 - swift build: passed.
 - swift test --filter ProductOSPhase1Tests: passed, 5 tests.
+
+Composer skill activation + runtime injection + skill catalog (2026-06-17 16:47–17:58 GMT+8):
+- Composer 底部工具栏新增 `/技能` 按钮和行首 `/` 斜杠命令,可唤出技能选择 popover 选中技能。
+- 选中技能的 SKILL.md 指令通过 `AgentChatRequest.skillInstructions` 注入到系统 prompt（instructionAppendix 之后）,而非用户消息。
+- `AgentChatRequest` 新增 `skillInstructions: String?` 字段。
+- `AgentLoopController.buildPromptAssembly()` 在 instructionAppendix 之后追加 skillInstructions。
+- `NativeSessionManager.submit()` 新增 `skillInstructions` 参数并传递给 `AgentChatRequest`。
+- `AppViewModel` 新增 `activeSkillSlug` / `activeSkillDisplayName` 状态、`setActiveSkill(slug:)` / `clearActiveSkill()` / `resolveActiveSkillInstructions(sessionID:)` 方法。
+- `SubmitAwareTextView` 新增 `onSlashCommand` 回调,通过 `insertText` 检测行首 `/` 字符。
+- 现有 `[skill:slug]` 文本语法（走 `SkillChatPromptAugmentor` → 用户消息 `<connor-active-skills>` XML）保持不变,三条路径互不干扰。
+- 系统 prompt 自动附加所有已安装技能的摘要目录（名称 + slug + 描述）,通过 `instructionAppendix` 注入。
+- 新增 `connor_skill_activate` 内部工具（`SkillActivateTool`）,模型可调用并传入 slug 获取完整 SKILL.md 指令。
+- `AppGraphAgentRuntimeFactory.buildController()` 通过 `SkillPackageScanner` 扫描已安装技能,注册 `SkillActivateTool`,生成摘要文本追加到 `instructionAppendix`。
+- 新建 `Sources/ConnorGraphAppSupport/SkillActivateTool.swift`。
+- swift build: passed.
+- swift test --filter NativeSessionManagerTests: passed, 14 tests.
+- swift test --filter AgentLoopControllerTests: passed, 23 tests.
+- swift test --filter PhaseGCraftGradeNativeUITests / CommercialReadinessReleaseGateTests / ProductOSPhase1Tests: passed, 12 tests.
 
 Session title / deletion guard regression (2026-06-16 18:49 GMT+8):
 - 首轮发送后的自动标题生成从 `onRunStarted` 调整为 submit 成功、首条用户消息已持久化后触发,避免标题任务读取到空会话或旧会话导致不稳定。
@@ -1442,6 +1973,7 @@ Commercial Train 3: Source / MCP Platformization
 Commercial Train 4: Graph Memory as Agent Core Capability
 Commercial Train 5: Native UI Commercialization
 Commercial Train 6: Local API / CLI / Automation Surface
+Commercial Train 7: Native Mail System
 ```
 
 已知合并/阶段提交:
@@ -1488,7 +2020,7 @@ b011671 Phase H add skill runtime UI presentation
 - OAuth server / team auth / multi-user permissions
 - Full REST framework or default long-running local server
 - Real macOS Shortcuts app integration
-- App Store packaging / notarization / Sparkle updater
+- App Store packaging / notarization
 - Team billing / remote collaboration
 - Full onboarding walkthrough
 - Full theme editor / design system rewrite

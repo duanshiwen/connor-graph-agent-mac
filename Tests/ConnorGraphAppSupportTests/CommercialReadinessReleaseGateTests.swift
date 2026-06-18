@@ -21,7 +21,7 @@ struct CommercialReadinessReleaseGateTests {
         #expect(result.isCommercialReady)
         #expect(result.generatedAt == generatedAt)
         #expect(result.blockingCards.isEmpty)
-        #expect(result.summary == "READY · 6/6 commercial readiness phases ready")
+        #expect(result.summary == "READY · 7/7 commercial readiness phases ready")
     }
 
     @Test func releaseGateBlocksCommercialReleaseWhenAnyPhaseIsBlocked() {
@@ -40,7 +40,7 @@ struct CommercialReadinessReleaseGateTests {
         #expect(result.status == .blocked)
         #expect(!result.isCommercialReady)
         #expect(result.blockingCards.map(\.phase) == [.claudeSDKSidecar])
-        #expect(result.summary == "BLOCKED · 5/6 commercial readiness phases ready · 1 blocked")
+        #expect(result.summary == "BLOCKED · 6/7 commercial readiness phases ready · 1 blocked")
     }
 
     @Test func nativeLocalWorkspaceToolSurfaceHasCommercialGuardrails() throws {

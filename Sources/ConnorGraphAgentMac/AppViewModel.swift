@@ -134,6 +134,141 @@ private extension AppSessionBackgroundTaskStatus {
     }
 }
 
+struct MCPSourceDraft: Equatable {
+    var editingSourceID: String?
+    var sourceID: String = ""
+    var displayName: String = ""
+    var transportKind: String = "stdio"
+    var command: String = ""
+    var argumentsText: String = ""
+    var status: ProductOSRegistryEntryStatus = .draft
+    var credentialRequirement: ProductOSCredentialRequirement = .none
+    var credentialEnvironmentText: String = ""
+    var credentialSecret: String = ""
+    var allowExternalNetwork: Bool = true
+    var allowReadSession: Bool = true
+    var allowWorkspaceRead: Bool = false
+    var tagsText: String = "mcp"
+    var notes: String = ""
+
+    init() {}
+
+    init(configuration: MCPSourceRuntimeConfiguration) {
+        editingSourceID = configuration.sourceID
+        sourceID = configuration.sourceID
+        displayName = configuration.displayName
+        status = configuration.status
+        credentialRequirement = configuration.credentialRequirement
+        credentialEnvironmentText = configuration.credentialBindings.map { binding in
+            binding.label.isEmpty || binding.label == binding.environmentVariable
+                ? binding.environmentVariable
+                : "\(binding.label):\(binding.environmentVariable)"
+        }.joined(separator: ", ")
+        allowExternalNetwork = configuration.allowedCapabilities.contains(.externalNetwork)
+        allowReadSession = configuration.allowedCapabilities.contains(.readSession)
+        allowWorkspaceRead = configuration.allowedCapabilities.contains(.readWorkspaceFile) || configuration.allowedCapabilities.contains(.listWorkspaceFiles)
+        tagsText = configuration.tags.joined(separator: ", ")
+        notes = configuration.notes
+        switch configuration.transport {
+        case .stdio(let command, let arguments):
+            transportKind = "stdio"
+            self.command = command
+            self.argumentsText = arguments.joined(separator: " ")
+        case .http(let url):
+            transportKind = "http"
+            self.command = url.absoluteString
+            self.argumentsText = ""
+        }
+    }
+
+    var parsedArguments: [String] {
+        argumentsText
+            .split(whereSeparator: { $0 == "\n" || $0 == " " || $0 == "\t" })
+            .map(String.init)
+    }
+
+    var parsedCredentialBindings: [MCPSourceCredentialBinding] {
+        guard credentialRequirement != .none else { return [] }
+        var bindings: [String: MCPSourceCredentialBinding] = [:]
+        for token in credentialEnvironmentText.split(whereSeparator: { $0 == "," || $0 == "\n" || $0 == " " || $0 == "\t" }) {
+            let parsed = Self.parseCredentialBindingToken(String(token))
+            if let parsed { bindings[parsed.environmentVariable] = parsed }
+        }
+        for env in parsedCredentialSecretByEnvironment.keys.sorted() where bindings[env] == nil {
+            bindings[env] = MCPSourceCredentialBinding(label: env, environmentVariable: env)
+        }
+        return bindings.values.sorted { $0.environmentVariable < $1.environmentVariable }
+    }
+
+    var parsedCredentialSecretByEnvironment: [String: String] {
+        var values: [String: String] = [:]
+        for line in credentialSecret.split(whereSeparator: { $0 == "\n" || $0 == ";" }) {
+            let text = String(line).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let separatorIndex = text.firstIndex(of: "=") else { continue }
+            let key = String(text[..<separatorIndex]).trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            let value = String(text[text.index(after: separatorIndex)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !key.isEmpty, !value.isEmpty { values[key] = value }
+        }
+        return values
+    }
+
+    var trimmedCredentialSecret: String {
+        credentialSecret.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func parseCredentialBindingToken(_ raw: String) -> MCPSourceCredentialBinding? {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+        if let separator = text.firstIndex(where: { $0 == ":" || $0 == "=" }) {
+            let label = String(text[..<separator]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let env = String(text[text.index(after: separator)...]).trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            guard !label.isEmpty, !env.isEmpty else { return nil }
+            return MCPSourceCredentialBinding(label: label, environmentVariable: env)
+        }
+        let env = text.uppercased()
+        return MCPSourceCredentialBinding(label: env, environmentVariable: env)
+    }
+
+    var parsedTags: [String] {
+        Array(Set(tagsText
+            .split(whereSeparator: { $0 == "," || $0 == "\n" || $0 == " " || $0 == "\t" })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }))
+        .sorted()
+    }
+
+    var runtimeTransport: MCPSourceRuntimeTransport? {
+        let endpoint = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        if transportKind == "http" {
+            guard let url = URL(string: endpoint), url.scheme != nil, url.host != nil else { return nil }
+            return .http(url: url)
+        }
+        return .stdio(command: endpoint, arguments: parsedArguments)
+    }
+
+    var allowedCapabilities: [AgentPermissionCapability] {
+        var capabilities: [AgentPermissionCapability] = []
+        if allowExternalNetwork { capabilities.append(.externalNetwork) }
+        if allowReadSession { capabilities.append(.readSession) }
+        if allowWorkspaceRead {
+            capabilities.append(.readWorkspaceFile)
+            capabilities.append(.listWorkspaceFiles)
+        }
+        return capabilities.isEmpty ? [.readSession] : capabilities
+    }
+
+    var normalizedSourceID: String {
+        sourceID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    var normalizedDisplayName: String {
+        let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? normalizedSourceID : trimmed
+    }
+
+    var isEditing: Bool { editingSourceID != nil }
+}
+
 @MainActor
 final class AppViewModel: NSObject, ObservableObject {
     @Published var selection: SidebarItem? = .agentChat
@@ -174,6 +309,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var llmBaseURLString: String = AppLLMSettings.default.baseURLString
     @Published var llmModel: String = AppLLMSettings.default.model
     @Published var llmSelectedModel: String = AppLLMSettings.default.effectiveModel
+    @Published var llmThinkingLevel: AppLLMThinkingLevel = AppLLMSettings.default.defaultThinkingLevel
     @Published var llmAPIKeyInput: String = ""
     @Published var llmHasAPIKey: Bool = false
     @Published var sidecarExecutablePath: String = ""
@@ -200,7 +336,36 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var automationTriggerRecords: [ProductOSAutomationTriggerRecord] = []
     @Published var automationExecutionHistory: [ProductOSAutomationExecutionHistoryRecord] = []
     @Published var sourceRuntimeConfigurations: [MCPSourceRuntimeConfiguration] = []
+    @Published var sourceRuntimeHealthRecords: [MCPSourceRuntimeHealthRecord] = []
+    @Published var sourceRuntimeToolCatalogs: [String: [MCPSourceToolDescriptor]] = [:]
+    @Published var sourceRuntimeAuditRecordsBySource: [String: [MCPSourceRuntimeAuditRecord]] = [:]
+    @Published var selectedSourceRuntimeCardID: String?
+    @Published var testingSourceRuntimeIDs: Set<String> = []
+    @Published var sourceRuntimeTestMessages: [String: String] = [:]
+    @Published var isPresentingAddSourceSheet: Bool = false
+    @Published var addSourceDraft = MCPSourceDraft()
+    @Published var addSourceMessage: String?
+    @Published var pendingSourceRuntimeDeletionID: String?
+    @Published var pendingSourceRuntimeDeletionName: String?
     @Published var skillRuntimeDefinitions: [SkillRuntimeDefinition] = []
+    @Published var commercialSkillManagerPresentation: SkillManagerPresentation = SkillManagerPresentation(
+        summary: SkillManagerSummary(total: 0, enabled: 0, projectScoped: 0, risky: 0, invalid: 0, sourceBlocked: 0),
+        cards: [],
+        globalWarnings: []
+    )
+    @Published var selectedSkillManagerCardID: String?
+    @Published var isAddSkillDialogPresented: Bool = false
+    @Published var addSkillRequestDraft: String = ""
+    @Published var isSubmittingAddSkillRequest: Bool = false
+    @Published var addSkillDialogMessage: String?
+    @Published var isEditSkillDialogPresented: Bool = false
+    @Published var editSkillRequestDraft: String = ""
+    @Published var editingSkillCard: SkillManagerCard?
+    @Published var isSubmittingEditSkillRequest: Bool = false
+    @Published var editSkillDialogMessage: String?
+    @Published var pendingSkillDeletionCard: SkillManagerCard?
+    @Published var activeSkillSlug: String?
+    @Published var activeSkillDisplayName: String?
     @Published var sidecarRuntimeDiagnostics: [ClaudeSDKSidecarRuntimeDiagnostics] = []
     @Published var commercialReleaseGateResult: CommercialReadinessReleaseGateResult?
     @Published var productOSRegistryMessage: String?
@@ -270,6 +435,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var productOSRegistryRepository: AppProductOSRegistryRepository?
     private var automationRepository: AppProductOSAutomationRepository?
     private var sourceRuntimeRepository: AppMCPSourceRuntimeRepository?
+    private var mcpSourceCredentialStore = MCPSourceCredentialStore()
     private var skillRuntimeRepository: AppSkillRuntimeRepository?
     private var storagePaths: AppStoragePaths?
     private var browserHistoryStore: BrowserHistoryStore?
@@ -301,6 +467,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var isLoadingRuntimeSettings = false
     private var runtimeSettingsAutosaveTask: Task<Void, Never>?
     private var idleSleepAssertionID: IOPMAssertionID = 0
+    private var hasActivatedRuntimeSettingsSideEffects = false
     private var locationCoordinator: UserLocationCoordinator?
 
     private var activeChatSession: AgentSession {
@@ -392,9 +559,9 @@ final class AppViewModel: NSObject, ObservableObject {
         switch sidecarPermissionMode {
         case .trustedWrite:
             switch approval.capability {
-            case .readGraph, .readSession, .modelCall, .proposeGraphWrite, .commitGraphWrite, .externalNetwork, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .writeWorkspaceFile, .editWorkspaceFile, .computeScientific, .runReadOnlyShellCommand, .runWorkspaceShellCommand:
+            case .readGraph, .readSession, .modelCall, .proposeGraphWrite, .commitGraphWrite, .externalNetwork, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .writeWorkspaceFile, .editWorkspaceFile, .computeScientific, .runReadOnlyShellCommand, .runWorkspaceShellCommand, .readMail, .readMailBody, .readContacts, .mutateMailState, .createMailDraft, .importMailAttachment:
                 return true
-            case .invalidateGraphStatement, .deleteGraphObject, .costlyModelCall, .deleteWorkspaceFile, .runNetworkShellCommand, .runDestructiveShellCommand:
+            case .invalidateGraphStatement, .deleteGraphObject, .costlyModelCall, .deleteWorkspaceFile, .runNetworkShellCommand, .runDestructiveShellCommand, .manageMailboxes, .sendMail, .mutateContacts:
                 return false
             }
         case .allowAll:
@@ -698,7 +865,7 @@ final class AppViewModel: NSObject, ObservableObject {
             selection = .automation
         case .productOS:
             selection = .productOS
-        case .sources:
+        case .mail, .sources:
             selection = .sources
         case .skills:
             selection = .skills
@@ -716,7 +883,7 @@ final class AppViewModel: NSObject, ObservableObject {
             toggleBrowserWorkspaceVisibility()
         case .checkCommercialReadiness:
             runCommercialReadinessReleaseGate()
-        case .openGraphMemoryReview, .openApprovals, .openSources, .openSkills, .openAutomation, .openLocalAutomationSurface, .openSettings:
+        case .openGraphMemoryReview, .openApprovals, .openSources, .openSkills, .openAutomation, .openLocalAutomationSurface, .openMailSources, .openSettings:
             if let command = ConnorNativeShellPresentation.default.command(for: commandID) {
                 navigate(to: command.target)
             }
@@ -1190,20 +1357,489 @@ final class AppViewModel: NSObject, ObservableObject {
 
     func reloadSourceRuntimeConfigurations() {
         do {
-            sourceRuntimeConfigurations = try sourceRuntimeRepository?.list() ?? []
+            let configurations = try sourceRuntimeRepository?.list() ?? []
+            sourceRuntimeConfigurations = configurations
+            sourceRuntimeHealthRecords = try sourceRuntimeRepository?.listHealthRecords() ?? []
+            var catalogs: [String: [MCPSourceToolDescriptor]] = [:]
+            var audits: [String: [MCPSourceRuntimeAuditRecord]] = [:]
+            for configuration in configurations {
+                catalogs[configuration.sourceID] = try sourceRuntimeRepository?.loadToolCatalog(sourceID: configuration.sourceID) ?? []
+                audits[configuration.sourceID] = try sourceRuntimeRepository?.loadRecentAuditRecords(sourceID: configuration.sourceID, limit: 12) ?? []
+            }
+            sourceRuntimeToolCatalogs = catalogs
+            sourceRuntimeAuditRecordsBySource = audits
+            if let selectedSourceRuntimeCardID,
+               !configurations.contains(where: { $0.sourceID == selectedSourceRuntimeCardID }) {
+                self.selectedSourceRuntimeCardID = nil
+            }
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
         }
     }
 
+    func selectSourceRuntimeCard(_ id: String) {
+        selectedSourceRuntimeCardID = id
+    }
+
+    func presentAddSourceSheet() {
+        addSourceDraft = MCPSourceDraft()
+        addSourceMessage = nil
+        isPresentingAddSourceSheet = true
+    }
+
+    func presentEditSourceSheet(sourceID: String) {
+        guard let configuration = sourceRuntimeConfigurations.first(where: { $0.sourceID == sourceID }) else {
+            sourceRuntimeTestMessages[sourceID] = "Source configuration not found."
+            return
+        }
+        addSourceDraft = MCPSourceDraft(configuration: configuration)
+        addSourceMessage = nil
+        isPresentingAddSourceSheet = true
+    }
+
+    func dismissAddSourceSheet() {
+        isPresentingAddSourceSheet = false
+        addSourceMessage = nil
+    }
+
+    func saveSourceRuntimeDraft() {
+        guard let repository = sourceRuntimeRepository else {
+            addSourceMessage = "Source runtime repository is not available."
+            return
+        }
+        let draft = addSourceDraft
+        let originalConfiguration = draft.editingSourceID.flatMap { sourceID in
+            sourceRuntimeConfigurations.first(where: { $0.sourceID == sourceID })
+        }
+        if let originalSourceID = draft.editingSourceID, draft.normalizedSourceID != originalSourceID {
+            addSourceMessage = "Editing Source ID is not supported yet. Create a new source instead."
+            return
+        }
+        let sourceID = originalConfiguration?.sourceID ?? draft.normalizedSourceID
+        guard let transport = draft.runtimeTransport else {
+            addSourceMessage = "Invalid HTTP MCP endpoint URL. Use https://host/path, or http://localhost/path for local development."
+            return
+        }
+        let configuration = MCPSourceRuntimeConfiguration(
+            sourceID: sourceID,
+            displayName: draft.normalizedDisplayName,
+            transport: transport,
+            status: draft.status,
+            credentialRequirement: draft.credentialRequirement,
+            credentialBindings: draft.parsedCredentialBindings,
+            allowedCapabilities: draft.allowedCapabilities,
+            toolNamePrefix: originalConfiguration?.toolNamePrefix ?? sourceID,
+            graphIngestionEnabled: false,
+            graphWritePolicy: .readOnly,
+            tags: draft.parsedTags,
+            notes: draft.notes.trimmingCharacters(in: .whitespacesAndNewlines),
+            createdAt: originalConfiguration?.createdAt ?? Date()
+        )
+        do {
+            try repository.save(configuration)
+            if configuration.credentialRequirement == .none {
+                if let originalConfiguration {
+                    try mcpSourceCredentialStore.deleteSecrets(sourceID: configuration.sourceID, bindings: originalConfiguration.credentialBindings)
+                }
+            } else if !draft.trimmedCredentialSecret.isEmpty {
+                let secretsByEnvironment = draft.parsedCredentialSecretByEnvironment
+                for binding in configuration.credentialBindings {
+                    let secret = secretsByEnvironment[binding.environmentVariable] ?? draft.trimmedCredentialSecret
+                    try mcpSourceCredentialStore.saveSecret(
+                        secret,
+                        sourceID: configuration.sourceID,
+                        environmentVariable: binding.environmentVariable
+                    )
+                }
+            }
+            reloadSourceRuntimeConfigurations()
+            selectedSourceRuntimeCardID = configuration.sourceID
+            sourceRuntimeTestMessages[configuration.sourceID] = draft.isEditing
+                ? "Source updated. Run Test Source to refresh tools if transport changed."
+                : "Source saved. Run Test Source to discover tools."
+            isPresentingAddSourceSheet = false
+            addSourceMessage = nil
+            errorMessage = nil
+        } catch {
+            addSourceMessage = "Unable to save source: \(String(describing: error))"
+        }
+    }
+
+    func setSourceRuntimeStatus(sourceID: String, status: ProductOSRegistryEntryStatus) {
+        guard let repository = sourceRuntimeRepository else {
+            sourceRuntimeTestMessages[sourceID] = "Source runtime repository is not available."
+            return
+        }
+        guard var configuration = sourceRuntimeConfigurations.first(where: { $0.sourceID == sourceID }) else {
+            sourceRuntimeTestMessages[sourceID] = "Source configuration not found."
+            return
+        }
+        configuration.status = status
+        do {
+            try repository.save(configuration)
+            reloadSourceRuntimeConfigurations()
+            selectedSourceRuntimeCardID = sourceID
+            sourceRuntimeTestMessages[sourceID] = "Source status updated to \(status.rawValue)."
+            errorMessage = nil
+        } catch {
+            sourceRuntimeTestMessages[sourceID] = "Unable to update source status: \(String(describing: error))"
+        }
+    }
+
+    func archiveSourceRuntime(sourceID: String) {
+        setSourceRuntimeStatus(sourceID: sourceID, status: .deprecated)
+        sourceRuntimeTestMessages[sourceID] = "Source archived as deprecated. Catalog, health and audit history are preserved."
+    }
+
+    func requestDeleteSourceRuntime(sourceID: String) {
+        guard let configuration = sourceRuntimeConfigurations.first(where: { $0.sourceID == sourceID }) else {
+            sourceRuntimeTestMessages[sourceID] = "Source configuration not found."
+            return
+        }
+        pendingSourceRuntimeDeletionID = sourceID
+        pendingSourceRuntimeDeletionName = configuration.displayName
+    }
+
+    func cancelDeleteSourceRuntime() {
+        pendingSourceRuntimeDeletionID = nil
+        pendingSourceRuntimeDeletionName = nil
+    }
+
+    func confirmDeleteSourceRuntime() {
+        guard let sourceID = pendingSourceRuntimeDeletionID else { return }
+        guard let repository = sourceRuntimeRepository else {
+            sourceRuntimeTestMessages[sourceID] = "Source runtime repository is not available."
+            cancelDeleteSourceRuntime()
+            return
+        }
+        do {
+            let configuration = sourceRuntimeConfigurations.first(where: { $0.sourceID == sourceID })
+            if let configuration {
+                try mcpSourceCredentialStore.deleteSecrets(sourceID: sourceID, bindings: configuration.credentialBindings)
+            }
+            try repository.deleteSourceRuntime(sourceID: sourceID)
+            sourceRuntimeTestMessages.removeValue(forKey: sourceID)
+            sourceRuntimeToolCatalogs.removeValue(forKey: sourceID)
+            sourceRuntimeAuditRecordsBySource.removeValue(forKey: sourceID)
+            sourceRuntimeHealthRecords.removeAll { $0.sourceID == sourceID }
+            if selectedSourceRuntimeCardID == sourceID {
+                selectedSourceRuntimeCardID = nil
+            }
+            cancelDeleteSourceRuntime()
+            reloadSourceRuntimeConfigurations()
+            errorMessage = nil
+        } catch {
+            sourceRuntimeTestMessages[sourceID] = "Unable to delete source: \(String(describing: error))"
+            cancelDeleteSourceRuntime()
+        }
+    }
+
+    func testSourceRuntime(sourceID: String) async {
+        guard !testingSourceRuntimeIDs.contains(sourceID) else { return }
+        guard let repository = sourceRuntimeRepository else {
+            sourceRuntimeTestMessages[sourceID] = "Source runtime repository is not available."
+            return
+        }
+        guard let configuration = sourceRuntimeConfigurations.first(where: { $0.sourceID == sourceID }) else {
+            sourceRuntimeTestMessages[sourceID] = "Source configuration not found."
+            return
+        }
+        testingSourceRuntimeIDs.insert(sourceID)
+        sourceRuntimeTestMessages[sourceID] = "Testing source…"
+        defer { testingSourceRuntimeIDs.remove(sourceID) }
+
+        let workingDirectoryURL = primaryWorkspaceRootDraft
+            .map(\.path)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
+        let service = MCPSourceTestService(
+            repository: repository,
+            currentDirectoryURL: workingDirectoryURL,
+            credentialStore: mcpSourceCredentialStore
+        )
+        do {
+            let report = try await service.testSource(configuration)
+            sourceRuntimeTestMessages[sourceID] = report.success
+                ? "Source test passed · discovered \(report.catalog.count) tools."
+                : "Source test completed with unhealthy status · discovered \(report.catalog.count) tools."
+            reloadSourceRuntimeConfigurations()
+            selectedSourceRuntimeCardID = sourceID
+            errorMessage = nil
+        } catch {
+            sourceRuntimeTestMessages[sourceID] = "Source test failed: \(String(describing: error))"
+            reloadSourceRuntimeConfigurations()
+            selectedSourceRuntimeCardID = sourceID
+        }
+    }
+
     func reloadSkillRuntimeDefinitions() {
         do {
             skillRuntimeDefinitions = try skillRuntimeRepository?.list() ?? []
+            commercialSkillManagerPresentation = buildCommercialSkillManagerPresentation()
+            if let selectedSkillManagerCardID,
+               !commercialSkillManagerPresentation.cards.contains(where: { $0.id == selectedSkillManagerCardID }) {
+                self.selectedSkillManagerCardID = nil
+            }
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
         }
+    }
+
+    private func reloadSkillRuntimeDefinitionsIfNeeded(after presentation: AgentEventPresentation) {
+        guard presentation.kind == AgentEventKind.toolFinished.rawValue else { return }
+        let skillMutationToolNames: Set<String> = [
+            "connor_skill_create",
+            "connor_skill_update",
+            "connor_skill_delete"
+        ]
+        guard skillMutationToolNames.contains(where: { presentation.title.contains($0) }) else { return }
+        reloadSkillRuntimeDefinitions()
+    }
+
+    func selectSkillManagerCard(_ id: String) {
+        selectedSkillManagerCardID = id
+    }
+
+    func presentAddSkillDialog() {
+        addSkillRequestDraft = ""
+        addSkillDialogMessage = nil
+        isSubmittingAddSkillRequest = false
+        isAddSkillDialogPresented = true
+    }
+
+    func cancelAddSkillDialog() {
+        guard !isSubmittingAddSkillRequest else { return }
+        isAddSkillDialogPresented = false
+        addSkillRequestDraft = ""
+        addSkillDialogMessage = nil
+    }
+
+    func submitAddSkillRequest() async {
+        let request = addSkillRequestDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !request.isEmpty, !isSubmittingAddSkillRequest else { return }
+        guard let chatSessionRepository else {
+            addSkillDialogMessage = "会话系统尚未初始化。"
+            return
+        }
+        isSubmittingAddSkillRequest = true
+        addSkillDialogMessage = "康纳正在根据你的需求创建技能…"
+        do {
+            let knownSkillSlugs = currentUserSkillSlugs()
+            let title = sanitizedSessionTitle("添加技能：\(request)")
+            let session = try chatSessionRepository.createSession(title: title)
+            rememberWorkspaceMode(.conversation, for: session.id)
+            try loadBackgroundTasks(sessionID: session.id)
+            reloadChatSessions(restoreWorkspaceMode: false)
+            try await runAddSkillRequestInBackgroundSession(session: session, userRequest: request)
+            let createdSlug = try ensureSkillPackageExists(for: request, excluding: knownSkillSlugs)
+            addSkillRequestDraft = ""
+            addSkillDialogMessage = "技能已创建：\(createdSlug)。"
+            reloadChatSessions(restoreWorkspaceMode: false)
+            reloadSkillRuntimeDefinitions()
+            selectedSkillManagerCardID = createdSlug
+            errorMessage = nil
+        } catch {
+            addSkillDialogMessage = "创建失败：\(String(describing: error))"
+            errorMessage = String(describing: error)
+        }
+        isSubmittingAddSkillRequest = false
+    }
+
+    func presentEditSkillDialog(card: SkillManagerCard) {
+        editingSkillCard = card
+        editSkillRequestDraft = ""
+        editSkillDialogMessage = nil
+        isSubmittingEditSkillRequest = false
+        isEditSkillDialogPresented = true
+    }
+
+    func cancelEditSkillDialog() {
+        guard !isSubmittingEditSkillRequest else { return }
+        isEditSkillDialogPresented = false
+        editSkillRequestDraft = ""
+        editSkillDialogMessage = nil
+        editingSkillCard = nil
+    }
+
+    func submitEditSkillRequest() async {
+        guard let card = editingSkillCard else { return }
+        let request = editSkillRequestDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !request.isEmpty, !isSubmittingEditSkillRequest else { return }
+        guard let chatSessionRepository else {
+            editSkillDialogMessage = "会话系统尚未初始化。"
+            return
+        }
+        isSubmittingEditSkillRequest = true
+        editSkillDialogMessage = "康纳正在根据你的需求修改技能…"
+        do {
+            let title = sanitizedSessionTitle("编辑技能：\(card.title)")
+            let session = try chatSessionRepository.createSession(title: title)
+            rememberWorkspaceMode(.conversation, for: session.id)
+            try loadBackgroundTasks(sessionID: session.id)
+            reloadChatSessions(restoreWorkspaceMode: false)
+            try await runSkillRequestInBackgroundSession(
+                session: session,
+                prompt: buildEditSkillAgentPrompt(card: card, userRequest: request),
+                displayPrompt: "编辑技能：\(card.title) — \(request)"
+            )
+            editSkillRequestDraft = ""
+            editSkillDialogMessage = "修改请求已提交。完成后技能列表会自动刷新。"
+            reloadChatSessions(restoreWorkspaceMode: false)
+            reloadSkillRuntimeDefinitions()
+            selectedSkillManagerCardID = card.id
+            errorMessage = nil
+        } catch {
+            editSkillDialogMessage = "修改失败：\(String(describing: error))"
+            errorMessage = String(describing: error)
+        }
+        isSubmittingEditSkillRequest = false
+    }
+
+    func requestDeleteSkill(card: SkillManagerCard) {
+        pendingSkillDeletionCard = card
+    }
+
+    func cancelDeleteSkill() {
+        pendingSkillDeletionCard = nil
+    }
+
+    func confirmDeletePendingSkill() {
+        guard let card = pendingSkillDeletionCard else { return }
+        do {
+            try deleteSkill(card: card)
+            pendingSkillDeletionCard = nil
+            reloadSkillRuntimeDefinitions()
+            if selectedSkillManagerCardID == card.id {
+                selectedSkillManagerCardID = nil
+            }
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    private func deleteSkill(card: SkillManagerCard) throws {
+        guard card.sourceTier == SkillSourceTier.user.rawValue else {
+            throw AppSkillRuntimeRepositoryError.unsafePermissionMode("Only user skills can be deleted from the skill manager. Skill \(card.id) is \(card.sourceTier).")
+        }
+        let packagePath = card.packagePath.isEmpty ? URL(fileURLWithPath: card.path).deletingLastPathComponent().path : card.packagePath
+        guard let storagePaths else { throw AppChatRuntimeUnavailableError.nativeSessionManagerUnavailable }
+        let packageURL = URL(fileURLWithPath: packagePath, isDirectory: true).standardizedFileURL
+        let rootURL = storagePaths.skillsDirectory.standardizedFileURL
+        guard packageURL.path == rootURL.appendingPathComponent(card.id, isDirectory: true).standardizedFileURL.path else {
+            throw AppSkillRuntimeRepositoryError.unsafePermissionMode("Refusing to delete skill outside user skill directory: \(packageURL.path)")
+        }
+        try FileManager.default.removeItem(at: packageURL)
+    }
+
+    private func runAddSkillRequestInBackgroundSession(session: AgentSession, userRequest: String) async throws {
+        try await runSkillRequestInBackgroundSession(
+            session: session,
+            prompt: buildAddSkillAgentPrompt(userRequest: userRequest),
+            displayPrompt: "添加技能：\(userRequest)"
+        )
+    }
+
+    private func runSkillRequestInBackgroundSession(session: AgentSession, prompt: String, displayPrompt: String) async throws {
+        guard var manager = makeNativeSessionManager(for: session) else {
+            throw AppChatRuntimeUnavailableError.nativeSessionManagerUnavailable
+        }
+        manager.permissionMode = .trustedWrite
+        let sessionID = session.id
+        let liveBackend = manager.backend
+        activeChatBackendsBySessionID[sessionID] = liveBackend
+        submittingChatSessionIDs.insert(sessionID)
+        refreshSelectedSubmittingState()
+        defer {
+            activeChatBackendsBySessionID.removeValue(forKey: sessionID)
+            if let runID = activeChatRunIDsBySessionID[sessionID] {
+                activeChatBackendsByRunID.removeValue(forKey: runID)
+            }
+            submittingChatSessionIDs.remove(sessionID)
+            activeChatRunIDsBySessionID.removeValue(forKey: sessionID)
+            refreshSelectedSubmittingState()
+        }
+        _ = try await manager.submit(
+            prompt,
+            sessionSummary: nil,
+            displayPrompt: displayPrompt,
+            onRunStarted: { [weak self] runID in
+                guard let self else { return }
+                self.activeChatRunIDsBySessionID[sessionID] = runID
+                self.activeChatBackendsByRunID[runID] = liveBackend
+            },
+            onEventPresentation: { [weak self] presentation in
+                guard let self else { return }
+                self.agentEventTimelinesBySessionID[sessionID, default: []].append(presentation)
+                self.reloadSkillRuntimeDefinitionsIfNeeded(after: presentation)
+            }
+        )
+        if let timeline = agentEventTimelinesBySessionID[sessionID] {
+            try chatSessionRepository?.saveActivityTimelineCache(sessionID: sessionID, timeline: timeline)
+        }
+    }
+
+    private func buildAddSkillAgentPrompt(userRequest: String) -> String {
+        SkillAgentPromptBuilder().addSkillPrompt(
+            userRequest: userRequest,
+            skillRootPath: storagePaths?.skillsDirectory.path ?? "~/Library/Application Support/Connor/skills",
+            existingSlugs: currentUserSkillSlugs()
+        )
+    }
+
+    private func buildEditSkillAgentPrompt(card: SkillManagerCard, userRequest: String) -> String {
+        SkillAgentPromptBuilder().editSkillPrompt(card: card, userRequest: userRequest)
+    }
+
+    private func currentUserSkillSlugs() -> Set<String> {
+        guard let storagePaths else { return [] }
+        let root = storagePaths.skillsDirectory
+        guard let entries = try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey]) else { return [] }
+        return Set(entries.compactMap { entry in
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: entry.path, isDirectory: &isDirectory), isDirectory.boolValue else { return nil }
+            guard FileManager.default.fileExists(atPath: entry.appendingPathComponent("SKILL.md").path) else { return nil }
+            return entry.lastPathComponent
+        })
+    }
+
+    private func ensureSkillPackageExists(for userRequest: String, excluding previousSlugs: Set<String>) throws -> String {
+        guard let storagePaths else { throw AppChatRuntimeUnavailableError.nativeSessionManagerUnavailable }
+        let currentSlugs = currentUserSkillSlugs()
+        if let created = currentSlugs.subtracting(previousSlugs).sorted().first {
+            return created
+        }
+        let planner = SkillCreationFallbackPlanner()
+        let identity = planner.suggestedIdentity(for: userRequest, existingSlugs: currentSlugs)
+        let directory = storagePaths.skillsDirectory.appendingPathComponent(identity.slug, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let skillURL = directory.appendingPathComponent("SKILL.md")
+        try planner.generatedSkillMarkdown(name: identity.name, slug: identity.slug, userRequest: userRequest).write(to: skillURL, atomically: true, encoding: .utf8)
+        return identity.slug
+    }
+
+    private func buildCommercialSkillManagerPresentation() -> SkillManagerPresentation {
+        guard let storagePaths else {
+            return SkillManagerPresentation(
+                summary: SkillManagerSummary(total: 0, enabled: 0, projectScoped: 0, risky: 0, invalid: 0, sourceBlocked: 0),
+                cards: [],
+                globalWarnings: ["Storage paths are not initialized."]
+            )
+        }
+        let roots = workspaceRoots
+            .map { $0.path.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .map { URL(fileURLWithPath: $0, isDirectory: true) }
+        let nestedRoots: [URL]
+        if let primary = primaryWorkspaceRootDraft?.path.trimmingCharacters(in: .whitespacesAndNewlines), !primary.isEmpty {
+            nestedRoots = [URL(fileURLWithPath: primary, isDirectory: true)]
+        } else {
+            nestedRoots = []
+        }
+        let snapshot = SkillPackageScanner().scan(storagePaths: storagePaths, projectRoots: roots, nestedRoots: nestedRoots)
+        return SkillCommercialUIPresentationBuilder().build(snapshot: snapshot)
     }
 
     func reloadSidecarRuntimeDiagnostics() {
@@ -1309,6 +1945,7 @@ final class AppViewModel: NSObject, ObservableObject {
             llmBaseURLString = connection.baseURLString
             llmModel = connection.model
             llmSelectedModel = connection.effectiveModel
+            llmThinkingLevel = settings.defaultThinkingLevel
             llmHasAPIKey = connection.hasAPIKey
             llmAPIKeyInput = ""
             sidecarExecutablePath = connection.sidecarExecutablePath
@@ -1342,7 +1979,8 @@ final class AppViewModel: NSObject, ObservableObject {
         state.llmOverride = SessionLLMOverride(
             providerMode: providerMode.rawValue,
             model: modelID,
-            connectionID: connectionID
+            connectionID: connectionID,
+            thinkingLevel: state.llmOverride?.thinkingLevel
         )
         state.updatedAt = Date()
         sessionStateSnapshotsBySessionID[sessionID] = state
@@ -1371,6 +2009,48 @@ final class AppViewModel: NSObject, ObservableObject {
         sidecarWorkingDirectoryPath = connection.sidecarWorkingDirectoryPath
         sidecarPermissionMode = connection.sidecarPermissionMode
         persistLLMSettings(rebuildRuntime: true)
+    }
+
+    func selectLLMThinkingLevel(_ level: AppLLMThinkingLevel) {
+        llmThinkingLevel = level
+        let sessionID = selectedChatSessionID ?? activeChatSession.id
+        var state = sessionStateSnapshotsBySessionID[sessionID]
+            ?? AppSessionStateSnapshot(sessionID: sessionID)
+        let settings = try? llmSettingsRepository.loadSettings()
+        let providerMode = state.llmOverride?.providerMode ?? llmProviderMode.rawValue
+        let model = state.llmOverride?.model ?? llmSelectedModel
+        let connectionID = state.llmOverride?.connectionID ?? llmDefaultConnectionID
+        state.llmOverride = SessionLLMOverride(
+            providerMode: providerMode,
+            model: model,
+            baseURLString: state.llmOverride?.baseURLString,
+            connectionID: connectionID,
+            thinkingLevel: level.rawValue
+        )
+        state.updatedAt = Date()
+        sessionStateSnapshotsBySessionID[sessionID] = state
+        try? chatSessionRepository?.saveSessionState(state, sessionID: sessionID)
+        if state.llmOverride?.connectionID == nil, settings?.defaultConnectionID == connectionID {
+            // Keep the session override explicit; this setting is intentionally session-scoped.
+        }
+        rebuildNativeSessionManagerForActiveSession()
+    }
+
+    func selectDefaultLLMThinkingLevel(_ level: AppLLMThinkingLevel) {
+        do {
+            let existing = (try? llmSettingsRepository.loadSettings()) ?? .default
+            let settings = AppLLMSettings(
+                connections: existing.connections,
+                defaultConnectionID: existing.defaultConnectionID,
+                defaultThinkingLevel: level
+            )
+            try llmSettingsRepository.save(settings: settings, apiKey: nil)
+            llmThinkingLevel = level
+            rebuildNativeSessionManagerForActiveSession()
+            llmSettingsMessage = "默认思考强度已保存。"
+        } catch {
+            errorMessage = String(describing: error)
+        }
     }
 
     @discardableResult
@@ -1508,7 +2188,7 @@ final class AppViewModel: NSObject, ObservableObject {
             } else {
                 connections.append(updatedConnection)
             }
-            let settings = AppLLMSettings(connections: connections, defaultConnectionID: targetID)
+            let settings = AppLLMSettings(connections: connections, defaultConnectionID: targetID, defaultThinkingLevel: llmThinkingLevel)
             llmConnectionConfigs = settings.connections
             llmDefaultConnectionID = settings.defaultConnectionID
             let apiKey = llmAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1582,6 +2262,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private func syncLLMModelDisplayFromSession(_ sessionID: String) {
         if let override = sessionStateSnapshotsBySessionID[sessionID]?.llmOverride {
             llmSelectedModel = override.model
+            llmThinkingLevel = AppLLMThinkingLevel.normalized(override.thinkingLevel) ?? ((try? llmSettingsRepository.loadSettings())?.defaultThinkingLevel ?? llmThinkingLevel)
             if let overrideMode = AppLLMProviderMode(rawValue: override.providerMode) {
                 llmProviderMode = overrideMode
             }
@@ -1591,6 +2272,7 @@ final class AppViewModel: NSObject, ObservableObject {
         } else {
             let settings = try? llmSettingsRepository.loadSettings()
             llmSelectedModel = settings?.effectiveModel ?? llmSelectedModel
+            llmThinkingLevel = settings?.defaultThinkingLevel ?? llmThinkingLevel
             llmProviderMode = settings?.providerMode ?? llmProviderMode
             llmDefaultConnectionID = settings?.defaultConnectionID ?? llmDefaultConnectionID
         }
@@ -1613,6 +2295,7 @@ final class AppViewModel: NSObject, ObservableObject {
         // Fall back to global settings for UI display
         let settings = try? llmSettingsRepository.loadSettings()
         llmSelectedModel = settings?.effectiveModel ?? llmSelectedModel
+        llmThinkingLevel = settings?.defaultThinkingLevel ?? llmThinkingLevel
         llmProviderMode = settings?.providerMode ?? llmProviderMode
         llmDefaultConnectionID = settings?.defaultConnectionID ?? llmDefaultConnectionID
 
@@ -1685,7 +2368,9 @@ final class AppViewModel: NSObject, ObservableObject {
             var shouldPersistSystemPreferenceDefaults = false
             defer {
                 isLoadingRuntimeSettings = false
-                applyRuntimeSettingsSideEffects()
+                if hasActivatedRuntimeSettingsSideEffects {
+                    applyRuntimeSettingsSideEffects()
+                }
                 if shouldPersistSystemPreferenceDefaults {
                     scheduleRuntimeSettingsAutosave()
                 }
@@ -1791,9 +2476,20 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
+    func activateRuntimeSettingsSideEffectsAfterLaunch() {
+        guard !hasActivatedRuntimeSettingsSideEffects else { return }
+        hasActivatedRuntimeSettingsSideEffects = true
+        applyRuntimeSettingsSideEffects()
+    }
+
     private func applyRuntimeSettingsSideEffects() {
         applyKeepScreenAwakeSetting()
-        if desktopNotificationsEnabled {
+        requestDesktopNotificationAuthorizationIfNeeded()
+    }
+
+    private func requestDesktopNotificationAuthorizationIfNeeded() {
+        guard hasActivatedRuntimeSettingsSideEffects, desktopNotificationsEnabled, canUseUserNotifications else { return }
+        DispatchQueue.main.async {
             UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
         }
     }
@@ -1814,13 +2510,17 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func postDesktopNotification(title: String, body: String) {
-        guard desktopNotificationsEnabled else { return }
+        guard desktopNotificationsEnabled, canUseUserNotifications else { return }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         content.sound = .default
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
+    }
+
+    private var canUseUserNotifications: Bool {
+        Bundle.main.bundleURL.pathExtension == "app"
     }
 
     func refreshSystemPreferenceDefaults() {
@@ -3258,6 +3958,92 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
+    func setActiveSkill(slug: String) {
+        activeSkillSlug = slug
+        activeSkillDisplayName = skillRuntimeDefinitions.first(where: { $0.slug == slug })?.manifest.name
+            ?? commercialSkillManagerPresentation.cards.first(where: { $0.id == slug })?.title
+            ?? slug
+    }
+
+    func clearActiveSkill() {
+        activeSkillSlug = nil
+        activeSkillDisplayName = nil
+    }
+
+    private func resolveActiveSkillInstructions(sessionID: String) -> String? {
+        guard let slug = activeSkillSlug else { return nil }
+        if let storagePaths {
+            let scanner = SkillPackageScanner()
+            let roots = workspaceRoots
+                .map { $0.path.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .map { URL(fileURLWithPath: $0, isDirectory: true) }
+            let nestedRoots: [URL]
+            if let primary = primaryWorkspaceRootDraft?.path.trimmingCharacters(in: .whitespacesAndNewlines), !primary.isEmpty {
+                nestedRoots = [URL(fileURLWithPath: primary, isDirectory: true)]
+            } else {
+                nestedRoots = []
+            }
+            let snapshot = scanner.scan(storagePaths: storagePaths, projectRoots: roots, nestedRoots: nestedRoots)
+            if let resolution = snapshot.resolution(slug: slug) {
+                let runtime = SkillInvocationRuntime()
+                let request = SkillInvocationRequest(
+                    slug: SkillSlug(slug),
+                    rawInvocation: "[skill:\(slug)]",
+                    arguments: "",
+                    mode: .manual,
+                    sessionID: sessionID
+                )
+                if let plan = try? runtime.buildPlan(request: request, resolution: resolution) {
+                    return plan.renderedInstructions
+                }
+            }
+        }
+        guard let card = commercialSkillManagerPresentation.cards.first(where: { $0.id == slug }) else { return nil }
+        return renderActiveSkillCardInstructions(card)
+    }
+
+    private func renderActiveSkillCardInstructions(_ card: SkillManagerCard) -> String? {
+        let body = card.instructions.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty else { return nil }
+        let requiredSources = card.requiredSources.joined(separator: ", ")
+        return """
+        <connor-skill-invocation slug=\"\(card.id)\" sourceTier=\"\(card.sourceTier)\" risk=\"\(card.riskLabel)\">
+        # \(card.title)
+
+        Description: \(card.subtitle)
+        Skill ID: \(card.id)
+        Source tier: \(card.sourceTier)
+        Trust state: \(card.trustState)
+        Required sources: \(requiredSources)
+
+        \(body)
+        </connor-skill-invocation>
+        """
+    }
+
+    private func buildSkillChatPromptAugmentation(prompt: String, sessionID: String) -> SkillChatPromptAugmentation {
+        guard let storagePaths else {
+            return SkillChatPromptAugmentation(originalPrompt: prompt, augmentedPrompt: prompt)
+        }
+        let roots = workspaceRoots
+            .map { $0.path.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .map { URL(fileURLWithPath: $0, isDirectory: true) }
+        let nestedRoots: [URL]
+        if let primary = primaryWorkspaceRootDraft?.path.trimmingCharacters(in: .whitespacesAndNewlines), !primary.isEmpty {
+            nestedRoots = [URL(fileURLWithPath: primary, isDirectory: true)]
+        } else {
+            nestedRoots = []
+        }
+        return SkillChatPromptAugmentor(storagePaths: storagePaths).augment(
+            prompt: prompt,
+            sessionID: sessionID,
+            projectRoots: roots,
+            nestedRoots: nestedRoots
+        )
+    }
+
     @discardableResult
     func submitChat(prompt rawPrompt: String, clearComposer: Bool = false, displayPrompt rawDisplayPrompt: String? = nil) async -> String? {
         let prompt = rawPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3289,9 +4075,18 @@ final class AppViewModel: NSObject, ObservableObject {
         let baselineMessageCount = manager.session.messages.count
         let baselineUserMessageCount = manager.session.messages.filter { $0.role == .user }.count
         let shouldAutoGenerateInitialTitle = baselineUserMessageCount == 0
+        let submittedActiveSkillSlug = activeSkillSlug
+        let submittedActiveSkillDisplayName = activeSkillDisplayName
+        let submittedActiveSkillContextSnapshot: String? = {
+            let displayName = submittedActiveSkillDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let slug = submittedActiveSkillSlug?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !displayName.isEmpty || !slug.isEmpty else { return nil }
+            return "Active skill: \(displayName.isEmpty ? slug : displayName)\(slug.isEmpty ? "" : " (\(slug))")"
+        }()
         let optimisticUserMessage = AgentMessage(
             role: .user,
             content: displayPrompt?.isEmpty == false ? displayPrompt! : prompt,
+            contextSnapshot: submittedActiveSkillContextSnapshot,
             attachments: attachmentsForSubmission
         )
         if selectedChatSessionID == submittingSessionID {
@@ -3321,12 +4116,20 @@ final class AppViewModel: NSObject, ObservableObject {
                 sessionID: submittingSessionID,
                 attachments: attachmentsForSubmission
             )
+            let skillAugmentation = buildSkillChatPromptAugmentation(prompt: prompt, sessionID: submittingSessionID)
+            let resolvedSkillInstructions = resolveActiveSkillInstructions(sessionID: submittingSessionID)
+            if resolvedSkillInstructions != nil {
+                clearActiveSkill()
+            }
             let response = try await manager.submit(
-                prompt,
+                skillAugmentation.augmentedPrompt,
                 sessionSummary: sessionSummary,
                 displayPrompt: displayPrompt?.isEmpty == false ? displayPrompt : nil,
                 attachments: attachmentsForSubmission,
                 attachmentContextPlan: attachmentContextPlan,
+                skillInstructions: resolvedSkillInstructions,
+                activeSkillSlug: resolvedSkillInstructions == nil ? nil : submittedActiveSkillSlug,
+                activeSkillDisplayName: resolvedSkillInstructions == nil ? nil : submittedActiveSkillDisplayName,
                 onRunStarted: { [weak self] runID in
                     guard let self else { return }
                     if self.submittingChatSessionIDs.contains(submittingSessionID) {
@@ -3350,6 +4153,7 @@ final class AppViewModel: NSObject, ObservableObject {
                     if presentation.kind == AgentEventKind.permissionRequested.rawValue {
                         self.reloadPendingApprovals()
                     }
+                    self.reloadSkillRuntimeDefinitionsIfNeeded(after: presentation)
                 }
             )
             agentEventTimelinesBySessionID[submittingSessionID] = manager.eventPresentations

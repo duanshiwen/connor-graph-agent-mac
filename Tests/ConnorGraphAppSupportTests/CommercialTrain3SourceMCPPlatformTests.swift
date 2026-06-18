@@ -74,6 +74,41 @@ private func temporaryTrain3StoragePaths(_ name: String = UUID().uuidString) -> 
     #expect(loadedAudit.map(\.eventKind) == [.toolFinished])
 }
 
+@Test func commercialTrain3SourceRepositoryDeletesRuntimeDirectory() throws {
+    let storagePaths = temporaryTrain3StoragePaths()
+    defer { try? FileManager.default.removeItem(at: storagePaths.applicationSupportDirectory) }
+    let repository = AppMCPSourceRuntimeRepository(storagePaths: storagePaths)
+    let source = MCPSourceRuntimeConfiguration(
+        sourceID: "github",
+        displayName: "GitHub",
+        transport: .stdio(command: "mock", arguments: []),
+        status: .deprecated,
+        credentialRequirement: .none,
+        allowedCapabilities: [.externalNetwork],
+        toolNamePrefix: "github"
+    )
+    try repository.save(source)
+    try repository.saveToolCatalog(sourceID: "github", catalog: [MCPSourceToolDescriptor(
+        sourceID: "github",
+        name: "mcp__github__search_issues",
+        rawName: "search_issues",
+        description: "Search issues",
+        inputSchema: .object(["type": .string("object")]),
+        requiredCapabilities: [.externalNetwork]
+    )])
+    try repository.appendAuditRecord(MCPSourceRuntimeAuditRecord(sourceID: "github", eventKind: .discoveryFinished))
+
+    #expect(try repository.load(sourceID: "github") != nil)
+    #expect(FileManager.default.fileExists(atPath: repository.sourceDirectory(sourceID: "github").path))
+
+    try repository.deleteSourceRuntime(sourceID: "github")
+
+    #expect(try repository.load(sourceID: "github") == nil)
+    #expect(try repository.loadToolCatalog(sourceID: "github").isEmpty)
+    #expect(try repository.loadRecentAuditRecords(sourceID: "github").isEmpty)
+    #expect(!FileManager.default.fileExists(atPath: repository.sourceDirectory(sourceID: "github").path))
+}
+
 @Test func commercialTrain3RuntimeDiscoveryBuildsHealthCapabilityAndCatalogSnapshot() async throws {
     let config = MCPSourceRuntimeConfiguration(
         sourceID: "linear",
@@ -112,7 +147,7 @@ private func temporaryTrain3StoragePaths(_ name: String = UUID().uuidString) -> 
     #expect(snapshot.healthRecord.healthStatus == .healthy)
     #expect(snapshot.healthRecord.capabilitySnapshot?.protocolVersion == "2025-11-25")
     #expect(snapshot.healthRecord.capabilitySnapshot?.supportsElicitation == true)
-    #expect(snapshot.catalog.map(\.name) == ["linear.list_issues"])
+    #expect(snapshot.catalog.map(\.name) == ["mcp__linear__list_issues"])
     #expect(snapshot.auditRecords.map(\.eventKind) == [.discoveryStarted, .discoveryFinished])
 }
 
