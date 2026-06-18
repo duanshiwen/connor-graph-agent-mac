@@ -29,6 +29,62 @@ struct ConnorGraphAgentMacApp: App {
         .windowToolbarStyle(.unifiedCompact)
         .defaultSize(width: 1180, height: 760)
         .commands {
+            CommandGroup(replacing: .undoRedo) {
+                Button("撤销") {
+                    sendResponderAction(#selector(ConnorMenuActionSelectors.undo(_:)))
+                }
+                .keyboardShortcut("z", modifiers: .command)
+
+                Button("重做") {
+                    sendResponderAction(#selector(ConnorMenuActionSelectors.redo(_:)))
+                }
+                .keyboardShortcut("Z", modifiers: [.command, .shift])
+            }
+
+            CommandGroup(replacing: .pasteboard) {
+                Button("剪切") {
+                    sendResponderAction(#selector(NSText.cut(_:)))
+                }
+                .keyboardShortcut("x", modifiers: .command)
+
+                Button("复制") {
+                    sendResponderAction(#selector(NSText.copy(_:)))
+                }
+                .keyboardShortcut("c", modifiers: .command)
+
+                Button("粘贴") {
+                    sendResponderAction(#selector(NSText.paste(_:)))
+                }
+                .keyboardShortcut("v", modifiers: .command)
+
+                Button("删除") {
+                    sendResponderAction(#selector(ConnorMenuActionSelectors.delete(_:)))
+                }
+
+                Button("全选") {
+                    sendResponderAction(#selector(NSText.selectAll(_:)))
+                }
+                .keyboardShortcut("a", modifiers: .command)
+            }
+
+            CommandGroup(replacing: .textEditing) {
+                Button("粘贴并匹配样式") {
+                    sendResponderAction(#selector(ConnorMenuActionSelectors.pasteAsPlainText(_:)))
+                }
+                .keyboardShortcut("V", modifiers: [.command, .option, .shift])
+
+                Divider()
+
+                Button("开始听写…") {
+                    sendResponderAction(#selector(ConnorMenuActionSelectors.startDictation(_:)))
+                }
+
+                Button("表情与符号") {
+                    sendResponderAction(#selector(ConnorMenuActionSelectors.orderFrontCharacterPalette(_:)))
+                }
+                .keyboardShortcut("e", modifiers: [.control, .command])
+            }
+
             CommandMenu("指示") {
                 Button("新建会话") {
                     viewModel.performShortcutAction(.newSession)
@@ -57,7 +113,25 @@ struct ConnorGraphAgentMacApp: App {
 }
 
 @MainActor
+private func sendResponderAction(_ selector: Selector) {
+    NSApp.sendAction(selector, to: nil, from: nil)
+}
+
+@objc
+private final class ConnorMenuActionSelectors: NSObject {
+    @objc func undo(_ sender: Any?) {}
+    @objc func redo(_ sender: Any?) {}
+    @objc func delete(_ sender: Any?) {}
+    @objc func pasteAsPlainText(_ sender: Any?) {}
+    @objc func startDictation(_ sender: Any?) {}
+    @objc func orderFrontCharacterPalette(_ sender: Any?) {}
+}
+
+@MainActor
 private final class ConnorApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+    private var menuLocalizationWarmupTimer: Timer?
+    private var menuLocalizationWarmupTickCount = 0
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NotificationCenter.default.addObserver(
             self,
@@ -66,6 +140,7 @@ private final class ConnorApplicationDelegate: NSObject, NSApplicationDelegate, 
             object: nil
         )
         normalizeMenusSoon()
+        startMenuLocalizationWarmup()
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
@@ -79,6 +154,23 @@ private final class ConnorApplicationDelegate: NSObject, NSApplicationDelegate, 
     private func normalizeMenusSoon() {
         DispatchQueue.main.async { [weak self] in
             self?.normalizeMenus()
+        }
+    }
+
+    private func startMenuLocalizationWarmup() {
+        menuLocalizationWarmupTimer?.invalidate()
+        menuLocalizationWarmupTickCount = 0
+        menuLocalizationWarmupTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] timer in
+            guard let self else {
+                timer.invalidate()
+                return
+            }
+            self.normalizeMenus()
+            self.menuLocalizationWarmupTickCount += 1
+            if self.menuLocalizationWarmupTickCount >= 25 {
+                timer.invalidate()
+                self.menuLocalizationWarmupTimer = nil
+            }
         }
     }
 
@@ -104,12 +196,22 @@ private final class ConnorApplicationDelegate: NSObject, NSApplicationDelegate, 
     }
 
     private func localizeAndObserveMenuTree(_ menu: NSMenu) {
+        localizeAndObserveMenuTree(menu, scheduleFollowUp: true)
+    }
+
+    private func localizeAndObserveMenuTree(_ menu: NSMenu, scheduleFollowUp: Bool) {
         menu.delegate = self
         ConnorMenuLocalizer.localizeMenuTree(menu)
         for item in menu.items {
             if let submenu = item.submenu {
-                localizeAndObserveMenuTree(submenu)
+                localizeAndObserveMenuTree(submenu, scheduleFollowUp: false)
             }
+        }
+
+        guard scheduleFollowUp else { return }
+        DispatchQueue.main.async { [weak self, weak menu] in
+            guard let self, let menu else { return }
+            self.localizeAndObserveMenuTree(menu, scheduleFollowUp: false)
         }
     }
 
