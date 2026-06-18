@@ -323,7 +323,11 @@ struct SettingsRSSSection: View {
             fetchPolicy
             importExport
         }
-        .sheet(isPresented: $viewModel.isPresentingAddRSSSourceSheet) { AddRSSSourceSheet() }
+        .sheet(isPresented: $viewModel.isPresentingAddRSSSourceSheet) {
+            AddRSSSourceSheet { feedURL, displayName in
+                try await viewModel.addRSSSourceAndSync(feedURL: feedURL, displayName: displayName)
+            }
+        }
     }
 
     private var sourceConnections: some View {
