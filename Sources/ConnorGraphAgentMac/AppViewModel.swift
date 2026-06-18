@@ -907,11 +907,52 @@ final class AppViewModel: NSObject, ObservableObject {
     func openURLInCurrentChatBrowser(_ url: URL) {
         let sessionID = selectedChatSessionID ?? activeChatSession.id
         let urlString = url.absoluteString
+        let planner = BrowserExternalOpenPlanner()
+        if focusExistingBrowserTabIfPresent(urlString: urlString, preferredSessionID: sessionID, planner: planner) {
+            return
+        }
         let currentSnapshot = browserWorkspaceSnapshotsBySessionID[sessionID] ?? AppBrowserStateSnapshot()
-        let plannedSnapshot = BrowserExternalOpenPlanner().open(urlString: urlString, in: currentSnapshot)
+        let plannedSnapshot = planner.openOrFocus(urlString: urlString, in: currentSnapshot)
         browserTargetURLString = urlString
         saveBrowserWorkspaceSnapshot(plannedSnapshot, for: sessionID)
-        showBrowserWorkspace()
+        showBrowserWorkspace(for: sessionID)
+    }
+
+    @discardableResult
+    private func focusExistingBrowserTabIfPresent(urlString: String, preferredSessionID: String, planner: BrowserExternalOpenPlanner = BrowserExternalOpenPlanner()) -> Bool {
+        guard let existing = existingBrowserTab(for: urlString, preferredSessionID: preferredSessionID, planner: planner) else { return false }
+        var snapshot = existing.snapshot
+        snapshot.updatedAt = Date()
+        snapshot.selectionPopover = nil
+        snapshot.selectedTabID = existing.tabID
+        browserTargetURLString = urlString
+        saveBrowserWorkspaceSnapshot(snapshot, for: existing.sessionID)
+        showBrowserWorkspace(for: existing.sessionID)
+        return true
+    }
+
+    private func existingBrowserTab(for urlString: String, preferredSessionID: String, planner: BrowserExternalOpenPlanner) -> (sessionID: String, tabID: UUID, snapshot: AppBrowserStateSnapshot)? {
+        for sessionID in browserWorkspaceSearchOrder(preferredSessionID: preferredSessionID) {
+            guard let snapshot = browserWorkspaceSnapshotsBySessionID[sessionID],
+                  let tabID = planner.matchingTabID(urlString: urlString, in: snapshot) else { continue }
+            return (sessionID, tabID, snapshot)
+        }
+        return nil
+    }
+
+    private func browserWorkspaceSearchOrder(preferredSessionID: String) -> [String] {
+        var ordered: [String] = []
+        func appendIfNeeded(_ sessionID: String?) {
+            guard let sessionID, !sessionID.isEmpty, !ordered.contains(sessionID) else { return }
+            ordered.append(sessionID)
+        }
+        appendIfNeeded(preferredSessionID)
+        appendIfNeeded(browserWorkspaceSessionID)
+        appendIfNeeded(activeChatSession.id)
+        for sessionID in browserWorkspaceSnapshotsBySessionID.keys.sorted() {
+            appendIfNeeded(sessionID)
+        }
+        return ordered
     }
 
     func openProjectGitHubHelp() {
@@ -1235,6 +1276,10 @@ final class AppViewModel: NSObject, ObservableObject {
             self.skillRuntimeRepository = AppSkillRuntimeRepository(storagePaths: storagePaths)
             self.browserHistoryStore = BrowserHistoryStore(historyURL: storagePaths.browserHistoryURL)
             self.browserBookmarkStore = BrowserBookmarkStore(bookmarksURL: storagePaths.browserBookmarksURL)
+            self.rssRuntime = RSSRuntime(
+                repository: FileBackedRSSSourceRepository(storagePaths: storagePaths),
+                cache: FileBackedRSSSourceCache(storagePaths: storagePaths)
+            )
         }
         if let repository {
             self.promotionRepository = AppPromotionQueueRepository(store: repository.store)
@@ -1393,6 +1438,34 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
+    func selectRSSItem(_ item: RSSItemSummary) {
+        selectedRSSSourceID = item.sourceID
+        selectedRSSItemID = item.id
+        guard !item.state.isRead else { return }
+        markRSSItemsRead([item.id], isRead: true)
+    }
+
+    func markRSSItemsRead(_ itemIDs: [RSSItemID], isRead: Bool) {
+        guard !itemIDs.isEmpty else { return }
+        let targetIDs = Set(itemIDs)
+        let updatedItems = rssBrowserPresentation.items.map { item in
+            guard targetIDs.contains(item.id), item.state.isRead != isRead else { return item }
+            var copy = item
+            copy.state.isRead = isRead
+            return copy
+        }
+        rssBrowserPresentation = NativeRSSBrowserPresentation(sources: rssBrowserPresentation.sources, items: updatedItems)
+        Task { @MainActor in
+            do {
+                try await rssRuntime.setReadState(itemIDs: itemIDs, isRead: isRead, runID: nil, sessionID: selectedChatSessionID)
+                await reloadRSSBrowserPresentation()
+            } catch {
+                errorMessage = String(describing: error)
+                await reloadRSSBrowserPresentation()
+            }
+        }
+    }
+
     func addRSSSourceAndSync(feedURL: URL, displayName: String?) async throws {
         let source = try await rssRuntime.addSource(feedURL: feedURL, displayName: displayName, runID: nil, sessionID: selectedChatSessionID)
         selectedRSSSourceID = source.id
@@ -1408,6 +1481,14 @@ final class AppViewModel: NSObject, ObservableObject {
     func followRSSItemInNewSession(_ item: RSSItemSummary) {
         guard let url = item.link else {
             errorMessage = "这篇 RSS 文章没有可打开的原文链接。"
+            return
+        }
+        if !item.state.isRead {
+            markRSSItemsRead([item.id], isRead: true)
+        }
+        let currentSessionID = selectedChatSessionID ?? activeChatSession.id
+        if focusExistingBrowserTabIfPresent(urlString: url.absoluteString, preferredSessionID: currentSessionID) {
+            errorMessage = nil
             return
         }
         guard let chatSessionRepository else { return }
