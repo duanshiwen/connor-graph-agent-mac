@@ -356,6 +356,8 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var selectedRSSSourceID: RSSSourceID?
     @Published var selectedRSSItemID: RSSItemID?
     @Published var isPresentingAddRSSSourceSheet: Bool = false
+    @Published var editingRSSSource: RSSSource?
+    @Published var pendingRSSSourceDeletion: RSSSource?
     @Published var skillRuntimeDefinitions: [SkillRuntimeDefinition] = []
     @Published var commercialSkillManagerPresentation: SkillManagerPresentation = SkillManagerPresentation(
         summary: SkillManagerSummary(total: 0, enabled: 0, projectScoped: 0, risky: 0, invalid: 0, sourceBlocked: 0),
@@ -1476,6 +1478,38 @@ final class AppViewModel: NSObject, ObservableObject {
             errorMessage = "RSS 订阅源已添加，但首次抓取失败：\(error.localizedDescription)"
         }
         await reloadRSSBrowserPresentation()
+    }
+
+    func updateRSSSource(sourceID: RSSSourceID, feedURL: URL, displayName: String?) async throws {
+        let source = try await rssRuntime.updateSource(sourceID: sourceID, feedURL: feedURL, displayName: displayName, runID: nil, sessionID: selectedChatSessionID)
+        selectedRSSSourceID = source.id
+        if let selectedRSSItemID,
+           rssBrowserPresentation.item(id: selectedRSSItemID)?.sourceID == sourceID,
+           source.feedURL == feedURL {
+            self.selectedRSSItemID = selectedRSSItemID
+        }
+        errorMessage = nil
+        await reloadRSSBrowserPresentation()
+    }
+
+    func deleteRSSSource(_ source: RSSSource) {
+        Task { @MainActor in
+            do {
+                try await rssRuntime.deleteSource(sourceID: source.id, runID: nil, sessionID: selectedChatSessionID)
+                if selectedRSSSourceID == source.id { selectedRSSSourceID = nil }
+                if let selectedRSSItemID,
+                   rssBrowserPresentation.item(id: selectedRSSItemID)?.sourceID == source.id {
+                    self.selectedRSSItemID = nil
+                }
+                pendingRSSSourceDeletion = nil
+                errorMessage = nil
+                await reloadRSSBrowserPresentation()
+            } catch {
+                pendingRSSSourceDeletion = nil
+                errorMessage = String(describing: error)
+                await reloadRSSBrowserPresentation()
+            }
+        }
     }
 
     func followRSSItemInNewSession(_ item: RSSItemSummary) {

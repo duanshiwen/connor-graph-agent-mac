@@ -125,6 +125,12 @@ public actor FileBackedRSSSourceCache: RSSSourceCache {
         if didChange { try saveItems(items) }
     }
 
+    public func deleteItems(sourceID: RSSSourceID) async throws {
+        let items = try loadItems()
+        let filteredItems = items.filter { $0.summary.sourceID != sourceID }
+        if filteredItems.count != items.count { try saveItems(filteredItems) }
+    }
+
     private func filtered(sourceID: RSSSourceID?, includeHidden: Bool) throws -> [RSSItemSummary] {
         try loadItems().map(\.summary)
             .filter { sourceID == nil || $0.sourceID == sourceID }
