@@ -70,6 +70,7 @@ public func buildSkillCatalogSummary(from packages: [SkillPackage]) -> String {
     lines.append("3. **Follow the loaded instructions** — treat them as your operational guide for this task.")
     lines.append("4. **One skill per task** — if multiple skills seem relevant, pick the most specific one.")
     lines.append("5. **Skills are optional guidance** — if no skill matches, proceed with your general capabilities.")
+    lines.append("6. **Do not discover skills through the filesystem** — do not use Shell, List Directory, Find Files, or search tools to inspect skill directories. This catalog is the source of truth for user-visible skills.")
     if !hiddenSlugs.isEmpty {
         lines.append("")
         lines.append("### Built-in Hidden Skills")

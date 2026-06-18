@@ -94,7 +94,7 @@ public struct SkillCommercialUIPresentationBuilder: Sendable {
         let summary = SkillManagerSummary(
             total: cards.count,
             enabled: cards.filter { $0.lifecycleLabel != SkillLifecycleState.deprecated.rawValue }.count,
-            projectScoped: cards.filter { $0.sourceTier == SkillSourceTier.project.rawValue || $0.sourceTier == SkillSourceTier.nestedContextual.rawValue }.count,
+            projectScoped: 0,
             risky: cards.filter { [SkillRiskLevel.high.rawValue, SkillRiskLevel.critical.rawValue].contains($0.riskLabel) }.count,
             invalid: snapshot.warnings.count,
             sourceBlocked: sourceReadiness.values.flatMap { $0 }.filter { $0.state == .missing || $0.state == .unauthenticated }.count

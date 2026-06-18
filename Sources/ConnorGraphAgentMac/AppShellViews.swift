@@ -9,28 +9,58 @@ import ConnorGraphAppSupport
 
 struct AppShellView: View {
     @ObservedObject var viewModel: AppViewModel
-    @State private var sidebarSelection: SidebarItem? = .agentChat
-    @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
+    @State private var isPrimarySidebarVisible = true
+
+    private var selectionBinding: Binding<SidebarItem?> {
+        Binding(
+            get: { viewModel.selection ?? .agentChat },
+            set: { viewModel.selection = $0 ?? .agentChat }
+        )
+    }
     @State private var topSearchKeyMonitor: Any?
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $splitViewVisibility) {
-            CraftPrimarySidebarView(viewModel: viewModel, selection: $sidebarSelection)
-                .navigationSplitViewColumnWidth(min: 220, ideal: 264, max: 320)
-                .background(.bar)
-                .controlSize(.small)
-        } content: {
-            CraftListPaneView(viewModel: viewModel, selection: $sidebarSelection)
-                .navigationSplitViewColumnWidth(min: 260, ideal: 314, max: 380)
+        HSplitView {
+            if isPrimarySidebarVisible {
+                CraftPrimarySidebarView(viewModel: viewModel, selection: selectionBinding)
+                    .frame(
+                        minWidth: AppShellLayout.primarySidebarMinWidth,
+                        idealWidth: AppShellLayout.primarySidebarDefaultWidth,
+                        maxWidth: AppShellLayout.primarySidebarMaxWidth,
+                        maxHeight: .infinity
+                    )
+                    .background(.bar)
+                    .controlSize(.small)
+            }
+
+            CraftListPaneView(viewModel: viewModel, selection: selectionBinding)
+                .frame(
+                    minWidth: AppShellLayout.listColumnMinWidth,
+                    idealWidth: AppShellLayout.listColumnDefaultWidth,
+                    maxWidth: AppShellLayout.listColumnMaxWidth,
+                    maxHeight: .infinity
+                )
                 .background(Color(nsColor: .windowBackgroundColor).opacity(0.84))
                 .controlSize(.small)
-        } detail: {
-            CraftDetailPaneView(viewModel: viewModel, selection: sidebarSelection ?? .agentChat)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            CraftDetailPaneView(viewModel: viewModel, selection: viewModel.selection ?? .agentChat)
+                .id(viewModel.selection ?? .agentChat)
+                .frame(minWidth: AppShellLayout.detailColumnMinWidth, maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
                 .controlSize(.small)
         }
         .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.16)) {
+                        isPrimarySidebarVisible.toggle()
+                    }
+                } label: {
+                    Label(isPrimarySidebarVisible ? "隐藏主侧栏" : "显示主侧栏", systemImage: "sidebar.leading")
+                }
+                .help(isPrimarySidebarVisible ? "隐藏主侧栏" : "显示主侧栏")
+            }
+
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass")
@@ -65,25 +95,18 @@ struct AppShellView: View {
         .overlay(alignment: .topLeading) {
             BrowserBackgroundTaskRunnerView(viewModel: viewModel)
         }
-        .frame(minWidth: 1120, minHeight: 680)
+        .background(WindowTitlebarConfigurator())
+        .frame(minWidth: AppShellLayout.shellMinWidth, minHeight: AppShellLayout.shellMinHeight)
         .onAppear {
-            sidebarSelection = viewModel.selection ?? .agentChat
+            if viewModel.selection == nil {
+                viewModel.selection = .agentChat
+            }
             viewModel.reloadChatSessions()
             installTopSearchKeyMonitorIfNeeded()
             viewModel.activateRuntimeSettingsSideEffectsAfterLaunch()
         }
         .onDisappear {
             removeTopSearchKeyMonitor()
-        }
-        .onChange(of: sidebarSelection) { _, newSelection in
-            viewModel.deferViewUpdate {
-                viewModel.selection = newSelection
-            }
-        }
-        .onChange(of: viewModel.selection) { _, newSelection in
-            if sidebarSelection != newSelection {
-                sidebarSelection = newSelection
-            }
         }
         .onChange(of: viewModel.runtimeSettingsAutosaveSignature) { _, _ in
             viewModel.scheduleRuntimeSettingsAutosave()
@@ -115,4 +138,24 @@ struct AppShellView: View {
         }
     }
 
+}
+
+private struct WindowTitlebarConfigurator: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        DispatchQueue.main.async { configure(window: view.window) }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async { configure(window: nsView.window) }
+    }
+
+    private func configure(window: NSWindow?) {
+        guard let window else { return }
+        window.styleMask.remove(.fullSizeContentView)
+        window.titlebarAppearsTransparent = false
+        window.titleVisibility = .visible
+        window.isMovableByWindowBackground = false
+    }
 }

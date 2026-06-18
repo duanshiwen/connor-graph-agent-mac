@@ -276,7 +276,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         var skillCatalogSummary = ""
         if let storagePaths {
             let scanner = SkillPackageScanner()
-            let snapshot = scanner.scan(storagePaths: storagePaths, projectRoots: sessionWorkspace?.roots.map { URL(fileURLWithPath: $0.path) } ?? [])
+            let snapshot = scanner.scan(storagePaths: storagePaths)
             if !snapshot.packages.isEmpty {
                 registry.register(SkillActivateTool(packages: snapshot.packages))
                 skillCatalogSummary = buildSkillCatalogSummary(from: snapshot.packages)
