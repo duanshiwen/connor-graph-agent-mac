@@ -404,14 +404,6 @@ struct AddRSSSourceSheet: View {
 
     private var dialogFooter: some View {
         HStack(alignment: .center, spacing: AppShellLayout.spaceM) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("保存后将创建本地 source registry 草稿。")
-                Text("OPML 导入、同步游标和 audit trail 后续仍走 Connor RSS 治理链路。")
-            }
-            .font(AgentChatTypography.meta)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-
             Spacer()
 
             Button("取消") { dismiss() }
@@ -556,10 +548,9 @@ private struct RSSHintCard: View {
 
 struct CraftRSSListPane: View {
     @ObservedObject var viewModel: AppViewModel
-    @State private var searchQuery: String = ""
 
     private var presentation: NativeRSSBrowserPresentation { viewModel.rssBrowserPresentation }
-    private var visibleItems: [RSSItemSummary] { presentation.items(sourceID: nil, query: searchQuery) }
+    private var visibleItems: [RSSItemSummary] { presentation.items(sourceID: nil, query: "") }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -579,38 +570,12 @@ struct CraftRSSListPane: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
 
-            if !presentation.items.isEmpty {
-                HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                    TextField("筛选标题、摘要、来源或作者", text: $searchQuery)
-                        .textFieldStyle(.plain)
-                    if !searchQuery.isEmpty {
-                        Button { searchQuery = "" } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 9)
-                .frame(height: 28)
-                .background(Color(nsColor: .textBackgroundColor).opacity(0.62), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(AppShellColors.hairline, lineWidth: 1))
-                .padding(.horizontal, 14)
-                .padding(.bottom, 8)
-            }
 
             if presentation.sources.isEmpty {
                 ContentUnavailableView("暂无 RSS 订阅源", systemImage: "dot.radiowaves.left.and.right", description: Text("点击右上角 + 添加 RSS / Atom / JSON Feed。"))
                     .padding(.top, 80)
             } else if presentation.items.isEmpty {
                 ContentUnavailableView("暂无文章", systemImage: "newspaper", description: Text("订阅源同步后的文章会在这里按时间显示。"))
-                    .padding(.top, 80)
-            } else if visibleItems.isEmpty {
-                ContentUnavailableView("没有匹配的文章", systemImage: "magnifyingglass", description: Text("筛选会匹配标题、摘要、来源和作者。"))
                     .padding(.top, 80)
             } else {
                 List(visibleItems) { item in
@@ -638,6 +603,8 @@ struct CraftRSSListPane: View {
     private func selectItem(_ item: RSSItemSummary) {
         viewModel.selectedRSSSourceID = item.sourceID
         viewModel.selectedRSSItemID = item.id
+        guard !item.state.isRead else { return }
+        viewModel.markRSSItemsRead([item.id], isRead: true)
     }
 }
 
@@ -930,12 +897,12 @@ struct RSSSourceSettingsView: View {
     var body: some View {
         Group {
             if let selectedItem {
-                VStack(alignment: .leading, spacing: 0) {
-                    RSSBrowserTopBar(onAdd: { viewModel.isPresentingAddRSSSourceSheet = true })
-                    Divider().opacity(0.6)
-                    RSSItemDetailPane(source: selectedSource ?? presentation.source(id: selectedItem.sourceID), item: selectedItem)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                }
+                RSSItemDetailPane(
+                    source: selectedSource ?? presentation.source(id: selectedItem.sourceID),
+                    item: selectedItem,
+                    onFollow: { viewModel.followRSSItemInNewSession(selectedItem) }
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
                 Color.clear
             }
@@ -950,58 +917,38 @@ struct RSSSourceSettingsView: View {
     }
 }
 
-private struct RSSBrowserTopBar: View {
-    var onAdd: () -> Void
-    var body: some View {
-        HStack(alignment: .center, spacing: AppShellLayout.spaceM) {
-            VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
-                Text("RSS 阅读")
-                    .font(.system(size: 24, weight: .semibold))
-                Text("订阅源、抓取游标、阅读状态和 Graph evidence 候选由 Connor 本地治理。")
-                    .font(AgentChatTypography.meta)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: AppShellLayout.spaceM)
-            Button(action: onAdd) { Label("添加订阅源", systemImage: "plus") }
-                .buttonStyle(.borderedProminent)
-        }
-        .padding(.horizontal, AppShellLayout.spaceXL)
-        .padding(.vertical, AppShellLayout.spaceL)
-    }
-}
-
 private struct RSSItemDetailPane: View {
     var source: RSSSource?
     var item: RSSItemSummary
+    var onFollow: () -> Void
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
                 RSSItemHero(source: source, item: item)
                 RSSInfoSection(title: "文章摘要", systemImage: "doc.text.magnifyingglass") {
                     Text(item.snippet.isEmpty ? "暂无摘要。" : item.snippet)
-                        .font(AgentChatTypography.meta)
+                        .font(AgentChatTypography.body)
+                        .lineSpacing(2)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 RSSInfoSection(title: "来源信息", systemImage: "dot.radiowaves.left.and.right") {
-                    VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
+                    VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                         RSSMetadataLine(label: "来源", value: source?.displayName ?? item.sourceID.rawValue)
                         RSSMetadataLine(label: "作者", value: item.author ?? "未知")
-                        RSSMetadataLine(label: "链接", value: item.link?.absoluteString ?? "无")
+                        RSSLinkMetadataLine(url: item.link, onOpen: onFollow)
                     }
-                }
-                RSSInfoSection(title: "治理提示", systemImage: "checkmark.shield") {
-                    VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
-                        RSSChecklistRow(title: "列表读取不注入全文", isReady: true, detail: "AI 默认只读取 summary/snippet，需要正文时显式调用 content 工具。")
-                        RSSChecklistRow(title: "阅读状态显式变更", isReady: true, detail: "已读、收藏、隐藏均通过 Policy Engine 审计。")
-                        RSSChecklistRow(title: "记忆写入需 evidence", isReady: true, detail: "RSS 文章只能生成候选证据，不直接写入 Graph Memory。")
-                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            .padding(AppShellLayout.spaceXL)
-            .frame(maxWidth: AppShellLayout.contentMaxWidth, alignment: .leading)
+            .padding(.horizontal, AgentChatLayout.spaceXL)
+            .padding(.vertical, AgentChatLayout.spaceL)
+            .frame(maxWidth: AgentChatLayout.chatContentMaxWidth, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
+        .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
     }
 }
 
@@ -1010,36 +957,39 @@ private struct RSSItemHero: View {
     var item: RSSItemSummary
 
     var body: some View {
-        HStack(alignment: .top, spacing: AppShellLayout.spaceL) {
+        HStack(alignment: .top, spacing: AgentChatLayout.spaceM) {
             ZStack {
-                RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
-                    .fill(Color.orange.opacity(0.14))
+                RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                    .fill(Color.orange.opacity(0.12))
                 Image(systemName: item.state.isRead ? "newspaper" : "newspaper.fill")
-                    .font(.system(size: 24, weight: .semibold))
+                    .font(.system(size: 22, weight: .semibold))
                     .foregroundStyle(.orange)
             }
-            .frame(width: 56, height: 56)
-            VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
-                HStack(alignment: .firstTextBaseline, spacing: AppShellLayout.spaceS) {
+            .frame(width: 52, height: 52)
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+                HStack(alignment: .firstTextBaseline, spacing: AgentChatLayout.spaceS) {
                     Text(item.title)
                         .font(AgentChatTypography.title)
                         .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
                     RSSStatusPill(status: item.state.isRead ? "已读" : "未读", color: item.state.isRead ? .secondary : .blue)
                     if item.state.isStarred { RSSStatusPill(status: "收藏", color: .yellow, systemImage: "star.fill") }
                 }
                 Text(source?.displayName ?? item.sourceID.rawValue)
                     .font(AgentChatTypography.meta)
                     .foregroundStyle(.secondary)
-                HStack(spacing: AppShellLayout.spaceS) {
+                    .lineLimit(1)
+                HStack(spacing: AgentChatLayout.spaceS) {
                     RSSStatusPill(status: item.publishedAt.formatted(date: .abbreviated, time: .shortened), color: .secondary, systemImage: "clock")
                     RSSStatusPill(status: item.author ?? "未知作者", color: .secondary, systemImage: "person")
                 }
             }
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(AppShellLayout.spaceL)
-        .background(AppShellColors.cardBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous).stroke(AppShellColors.hairline, lineWidth: 1))
+        .padding(AgentChatLayout.spaceM)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.85), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous).stroke(Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1))
     }
 }
 
@@ -1048,13 +998,16 @@ private struct RSSInfoSection<Content: View>: View {
     var systemImage: String
     @ViewBuilder var content: Content
     var body: some View {
-        VStack(alignment: .leading, spacing: AppShellLayout.spaceM) {
-            Label(title, systemImage: systemImage).font(AgentChatTypography.callout)
+        VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
+            Label(title, systemImage: systemImage)
+                .font(AgentChatTypography.metaEmphasis)
+                .foregroundStyle(.primary)
             content
         }
-        .padding(AppShellLayout.spaceL)
-        .background(AppShellColors.cardBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous).stroke(AppShellColors.hairline, lineWidth: 1))
+        .padding(AgentChatLayout.spaceM)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.85), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous).stroke(Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1))
     }
 }
 
@@ -1071,6 +1024,39 @@ private struct RSSMetadataLine: View {
             Text(value)
                 .font(AgentChatTypography.meta)
                 .textSelection(.enabled)
+        }
+    }
+}
+
+private struct RSSLinkMetadataLine: View {
+    var url: URL?
+    var onOpen: () -> Void
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text("链接")
+                .font(AgentChatTypography.microEmphasis)
+                .foregroundStyle(.secondary)
+                .frame(width: 72, alignment: .leading)
+            if let url {
+                Button(action: onOpen) {
+                    HStack(spacing: 5) {
+                        Text(url.absoluteString)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Image(systemName: "arrow.up.forward.app")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .font(AgentChatTypography.meta)
+                }
+                .buttonStyle(.link)
+                .textSelection(.enabled)
+                .help("新建关注会话，并在会话浏览器中打开此链接")
+            } else {
+                Text("无")
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }
@@ -1093,22 +1079,6 @@ private struct RSSStatusPill: View {
     }
 }
 
-private struct RSSChecklistRow: View {
-    var title: String
-    var isReady: Bool
-    var detail: String
-
-    var body: some View {
-        HStack(alignment: .top, spacing: AppShellLayout.spaceS) {
-            Image(systemName: isReady ? "checkmark.circle.fill" : "circle")
-                .foregroundStyle(isReady ? .green : .secondary)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(AgentChatTypography.metaEmphasis)
-                Text(detail).font(AgentChatTypography.micro).foregroundStyle(.secondary)
-            }
-        }
-    }
-}
 
 struct CraftSessionRow: View {
     var row: AgentChatSessionPresentation
