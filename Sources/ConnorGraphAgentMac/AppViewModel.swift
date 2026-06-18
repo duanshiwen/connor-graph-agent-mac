@@ -865,7 +865,9 @@ final class AppViewModel: NSObject, ObservableObject {
             selection = .automation
         case .productOS:
             selection = .productOS
-        case .mail, .sources:
+        case .mail:
+            selection = .mail
+        case .sources:
             selection = .sources
         case .skills:
             selection = .skills
