@@ -99,7 +99,6 @@ struct CraftPrimarySidebarView: View {
                         SidebarRow(title: "邮件系统", systemImage: "envelope", count: nil, isSelected: false, isEnabled: false) {}
                         SidebarRow(title: "飞书", systemImage: "message", count: nil, isSelected: false, isEnabled: false) {}
                         SidebarRow(title: "RSS", systemImage: "dot.radiowaves.up.forward", count: nil, isSelected: false, isEnabled: false) {}
-                        SidebarRow(title: "API", systemImage: "curlybraces", count: nil, isSelected: false, isEnabled: false) {}
                         SidebarRow(title: "MCP", systemImage: "server.rack", count: viewModel.sourceRuntimeConfigurations.count, isSelected: selection == .sources) { select(.sources) }
                     }
 
