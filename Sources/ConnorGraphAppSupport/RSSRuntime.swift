@@ -33,6 +33,7 @@ public protocol RSSSourceCache: Sendable {
     func item(id: RSSItemID) async throws -> RSSItemDetail?
     func upsertItems(_ items: [RSSItemDetail]) async throws -> (inserted: Int, duplicates: Int)
     func updateState(itemIDs: [RSSItemID], transform: @Sendable (RSSItemState) -> RSSItemState) async throws
+    func deleteItems(sourceID: RSSSourceID) async throws
 }
 
 public protocol RSSAuditLogProtocol: Sendable {
@@ -100,6 +101,10 @@ public actor InMemoryRSSSourceCache: RSSSourceCache {
             detail.summary.state = transform(detail.summary.state)
             items[id] = detail
         }
+    }
+
+    public func deleteItems(sourceID: RSSSourceID) async throws {
+        items = items.filter { _, detail in detail.summary.sourceID != sourceID }
     }
 
     private func filtered(sourceID: RSSSourceID?, includeHidden: Bool) -> [RSSItemSummary] {
@@ -409,6 +414,33 @@ public struct RSSRuntime: Sendable {
         try await repository.saveSource(source)
         try await auditLog.record(RSSAuditRecord(runID: runID, sessionID: sessionID, sourceID: source.id, kind: .sourceAdded, riskClass: .sourceManagement, redactedSummary: "Added RSS source \(source.displayName)", payloadHash: RSSHash.sha256(feedURL.absoluteString)))
         return source
+    }
+
+    public func updateSource(sourceID: RSSSourceID, feedURL: URL, displayName: String?, runID: String? = nil, sessionID: String? = nil) async throws -> RSSSource {
+        guard var source = try await repository.source(id: sourceID) else { throw RSSRuntimeError.sourceNotFound(sourceID.rawValue) }
+        let trimmedName = displayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let feedURLChanged = source.feedURL != feedURL
+        source.feedURL = feedURL
+        source.displayName = trimmedName.isEmpty ? (feedURL.host ?? feedURL.absoluteString) : trimmedName
+        source.updatedAt = Date()
+        if feedURLChanged {
+            source.format = .unknown
+            source.siteURL = nil
+            source.iconURL = nil
+            source.syncCursor = nil
+            source.health = RSSSourceHealth(status: .unknown, summary: "Feed URL changed; sync required")
+            try await cache.deleteItems(sourceID: sourceID)
+        }
+        try await repository.saveSource(source)
+        try await auditLog.record(RSSAuditRecord(runID: runID, sessionID: sessionID, sourceID: sourceID, kind: .sourceUpdated, riskClass: .sourceManagement, redactedSummary: "Updated RSS source \(source.displayName)", payloadHash: RSSHash.sha256(feedURL.absoluteString)))
+        return source
+    }
+
+    public func deleteSource(sourceID: RSSSourceID, runID: String? = nil, sessionID: String? = nil) async throws {
+        guard let source = try await repository.source(id: sourceID) else { throw RSSRuntimeError.sourceNotFound(sourceID.rawValue) }
+        try await repository.deleteSource(id: sourceID)
+        try await cache.deleteItems(sourceID: sourceID)
+        try await auditLog.record(RSSAuditRecord(runID: runID, sessionID: sessionID, sourceID: sourceID, kind: .sourceDeleted, riskClass: .sourceManagement, redactedSummary: "Deleted RSS source \(source.displayName)", payloadHash: RSSHash.sha256(source.feedURL.absoluteString)))
     }
 
     public func testSource(sourceID: RSSSourceID, runID: String? = nil, sessionID: String? = nil) async throws -> RSSParseReport {
