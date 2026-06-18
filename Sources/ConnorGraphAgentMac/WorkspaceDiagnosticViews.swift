@@ -95,7 +95,6 @@ struct GraphEntitiesView: View {
                 }
             }
         }
-        .navigationTitle("图谱")
     }
 }
 
@@ -120,7 +119,6 @@ struct SearchView: View {
             }
         }
         .padding()
-        .navigationTitle("搜索")
     }
 }
 
@@ -139,7 +137,6 @@ struct ObserveLogView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .navigationTitle("观察日志")
     }
 }
 
@@ -196,7 +193,6 @@ struct PromotionQueueView: View {
             }
         }
         .padding()
-        .navigationTitle("提升队列")
         .task {
             viewModel.deferViewUpdate {
                 viewModel.reloadPromotionCandidates()

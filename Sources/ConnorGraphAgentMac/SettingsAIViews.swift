@@ -81,6 +81,5 @@ struct LLMSettingsView: View {
             }
         }
         .padding()
-        .navigationTitle("模型设置")
     }
 }

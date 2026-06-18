@@ -122,17 +122,9 @@ public struct SkillRuntimeRegistrySyncResult: Sendable, Equatable {
 
 public struct AppSkillRuntimeRepository: Sendable {
     public var storagePaths: AppStoragePaths
-    public var globalSkillsDirectory: URL
-    public var projectRoot: URL?
 
-    public init(
-        storagePaths: AppStoragePaths,
-        globalSkillsDirectory: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".agents/skills", isDirectory: true),
-        projectRoot: URL? = nil
-    ) {
+    public init(storagePaths: AppStoragePaths) {
         self.storagePaths = storagePaths
-        self.globalSkillsDirectory = globalSkillsDirectory
-        self.projectRoot = projectRoot
     }
 
     public var runtimeDirectory: URL { storagePaths.skillsDirectory }
@@ -165,22 +157,9 @@ public struct AppSkillRuntimeRepository: Sendable {
 
     public func resolveSkill(slug: String) throws -> SkillRuntimeDefinition? {
         try validateSlug(slug)
-        if let projectRoot {
-            let url = projectRoot
-                .appendingPathComponent(".agents/skills", isDirectory: true)
-                .appendingPathComponent(slug, isDirectory: true)
-                .appendingPathComponent("SKILL.md")
-            if FileManager.default.fileExists(atPath: url.path) {
-                return try loadSkill(slug: slug, scope: .project, skillURL: url)
-            }
-        }
         let homeURL = runtimeDirectory.appendingPathComponent(slug, isDirectory: true).appendingPathComponent("SKILL.md")
         if FileManager.default.fileExists(atPath: homeURL.path) {
             return try loadSkill(slug: slug, scope: .home, skillURL: homeURL)
-        }
-        let globalURL = globalSkillsDirectory.appendingPathComponent(slug, isDirectory: true).appendingPathComponent("SKILL.md")
-        if FileManager.default.fileExists(atPath: globalURL.path) {
-            return try loadSkill(slug: slug, scope: .global, skillURL: globalURL)
         }
         return nil
     }

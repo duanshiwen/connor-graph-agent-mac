@@ -19,9 +19,6 @@ struct CraftPrimarySidebarView: View {
 
     var body: some View {
         VStack(spacing: 10) {
-            Color.clear
-                .frame(height: 28)
-
             Button {
                 viewModel.newChatSession()
                 select(.agentChat)
@@ -30,6 +27,7 @@ struct CraftPrimarySidebarView: View {
             }
             .buttonStyle(SidebarActionButtonStyle())
             .padding(.horizontal, 10)
+            .padding(.top, 10)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {

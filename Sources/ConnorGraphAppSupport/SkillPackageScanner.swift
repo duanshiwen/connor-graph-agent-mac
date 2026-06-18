@@ -34,32 +34,22 @@ public struct SkillPackageScanSnapshot: Sendable, Equatable {
 public struct SkillPackageScanner {
     public var parser: SkillManifestParser
     public var fileManager: FileManager
-    public var globalSkillsDirectory: URL
     public var bundledSkillsDirectory: URL?
 
     public init(
         parser: SkillManifestParser = SkillManifestParser(),
         fileManager: FileManager = .default,
-        globalSkillsDirectory: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".agents/skills", isDirectory: true),
         bundledSkillsDirectory: URL? = nil
     ) {
         self.parser = parser
         self.fileManager = fileManager
-        self.globalSkillsDirectory = globalSkillsDirectory
         self.bundledSkillsDirectory = bundledSkillsDirectory
     }
 
-    public func defaultRoots(storagePaths: AppStoragePaths, projectRoots: [URL] = [], nestedRoots: [URL] = []) -> [SkillPackageScanRoot] {
+    public func defaultRoots(storagePaths: AppStoragePaths) -> [SkillPackageScanRoot] {
         var roots: [SkillPackageScanRoot] = []
         if let bundledSkillsDirectory { roots.append(SkillPackageScanRoot(tier: .bundled, rootURL: bundledSkillsDirectory)) }
-        roots.append(SkillPackageScanRoot(tier: .global, rootURL: globalSkillsDirectory))
         roots.append(SkillPackageScanRoot(tier: .user, rootURL: storagePaths.skillsDirectory))
-        for projectRoot in projectRoots {
-            roots.append(SkillPackageScanRoot(tier: .project, rootURL: projectRoot.appendingPathComponent(".agents/skills", isDirectory: true)))
-        }
-        for nestedRoot in nestedRoots {
-            roots.append(SkillPackageScanRoot(tier: .nestedContextual, rootURL: nestedRoot.appendingPathComponent(".agents/skills", isDirectory: true), isContextual: true))
-        }
         return roots
     }
 
@@ -75,8 +65,8 @@ public struct SkillPackageScanner {
         return SkillPackageScanSnapshot(packages: packages.sorted(by: packageSort), resolutions: resolutions, warnings: warnings)
     }
 
-    public func scan(storagePaths: AppStoragePaths, projectRoots: [URL] = [], nestedRoots: [URL] = []) -> SkillPackageScanSnapshot {
-        scan(roots: defaultRoots(storagePaths: storagePaths, projectRoots: projectRoots, nestedRoots: nestedRoots))
+    public func scan(storagePaths: AppStoragePaths) -> SkillPackageScanSnapshot {
+        scan(roots: defaultRoots(storagePaths: storagePaths))
     }
 
     public func productOSSkillDefinitions(from snapshot: SkillPackageScanSnapshot) -> [ProductOSSkillDefinition] {
