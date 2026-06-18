@@ -4,6 +4,8 @@ public enum RSSAuditKind: String, Codable, Sendable, Equatable, Hashable {
     case sourceListed
     case sourceRead
     case sourceAdded
+    case sourceUpdated
+    case sourceDeleted
     case sourceTested
     case sourceSynced
     case itemListed
