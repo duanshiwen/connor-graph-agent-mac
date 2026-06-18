@@ -258,7 +258,15 @@ private enum RSSSourcePreset: String, CaseIterable, Identifiable {
 }
 
 struct AddRSSSourceSheet: View {
-    private enum Layout { static let sheetWidth: CGFloat = 640; static let iconSize: CGFloat = 44; static let labelWidth: CGFloat = 108 }
+    private enum Layout {
+        static let sheetWidth: CGFloat = 680
+        static let sheetHeight: CGFloat = 560
+        static let labelWidth: CGFloat = 118
+        static let presetControlWidth: CGFloat = 260
+        static let compactControlWidth: CGFloat = 180
+        static let targetControlWidth: CGFloat = 230
+    }
+
     @Environment(\.dismiss) private var dismiss
     @State private var selectedPreset: RSSSourcePreset = .appleDeveloper
     @State private var feedURLString: String = RSSSourcePreset.appleDeveloper.feedURLString
@@ -266,79 +274,203 @@ struct AddRSSSourceSheet: View {
     @State private var intervalMinutes: Int = 30
     @State private var openTarget: RSSSourceOpenTarget = .localReader
 
-    private var saveDisabled: Bool { URL(string: feedURLString.trimmingCharacters(in: .whitespacesAndNewlines)) == nil }
+    private var trimmedFeedURLString: String {
+        feedURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var feedURL: URL? {
+        guard let components = URLComponents(string: trimmedFeedURLString),
+              let scheme = components.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              components.host?.isEmpty == false else { return nil }
+        return components.url
+    }
+
+    private var saveDisabled: Bool { feedURL == nil }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: SettingsListLayout.spaceXL) {
-            header
-            RSSSetupSection(title: "订阅源") {
-                RSSSetupRow("预设", labelWidth: Layout.labelWidth) {
-                    Picker("预设", selection: $selectedPreset) {
-                        ForEach(RSSSourcePreset.allCases) { preset in Text(preset.title).tag(preset) }
+        VStack(alignment: .leading, spacing: 0) {
+            dialogHeader
+
+            Divider()
+                .padding(.top, AppShellLayout.spaceL)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
+                    RSSSetupSection(title: "订阅源", systemImage: "dot.radiowaves.left.and.right") {
+                        RSSSetupRow("预设", labelWidth: Layout.labelWidth) {
+                            Picker("预设", selection: $selectedPreset) {
+                                ForEach(RSSSourcePreset.allCases) { preset in
+                                    Text(preset.title).tag(preset)
+                                }
+                            }
+                            .labelsHidden()
+                            .frame(width: Layout.presetControlWidth, alignment: .leading)
+                            .onChange(of: selectedPreset) { _, newValue in
+                                if !newValue.feedURLString.isEmpty { feedURLString = newValue.feedURLString }
+                            }
+                        }
+
+                        RSSSetupRow("Feed URL", labelWidth: Layout.labelWidth) {
+                            VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
+                                TextField("https://example.com/feed.xml", text: $feedURLString)
+                                    .textFieldStyle(.roundedBorder)
+                                if !trimmedFeedURLString.isEmpty && feedURL == nil {
+                                    Text("请输入以 http:// 或 https:// 开头的有效 feed 地址。")
+                                        .font(SettingsListTypography.rowCaption)
+                                        .foregroundStyle(.red)
+                                }
+                            }
+                        }
+
+                        RSSSetupRow("显示名称", labelWidth: Layout.labelWidth) {
+                            TextField("可选；留空时使用 feed 标题", text: $displayName)
+                                .textFieldStyle(.roundedBorder)
+                        }
                     }
-                    .onChange(of: selectedPreset) { _, newValue in
-                        if !newValue.feedURLString.isEmpty { feedURLString = newValue.feedURLString }
+
+                    RSSSetupSection(title: "阅读策略", systemImage: "clock.arrow.circlepath") {
+                        RSSSetupRow("抓取间隔", labelWidth: Layout.labelWidth) {
+                            Picker("抓取间隔", selection: $intervalMinutes) {
+                                Text("15 分钟").tag(15)
+                                Text("30 分钟").tag(30)
+                                Text("1 小时").tag(60)
+                                Text("6 小时").tag(360)
+                            }
+                            .labelsHidden()
+                            .frame(width: Layout.compactControlWidth, alignment: .leading)
+                        }
+
+                        RSSSetupRow("打开方式", labelWidth: Layout.labelWidth) {
+                            Picker("打开方式", selection: $openTarget) {
+                                Text("Connor 阅读器").tag(RSSSourceOpenTarget.localReader)
+                                Text("原网页").tag(RSSSourceOpenTarget.webpage)
+                                Text("外部浏览器").tag(RSSSourceOpenTarget.externalBrowser)
+                                Text("全文内容").tag(RSSSourceOpenTarget.fullContent)
+                            }
+                            .labelsHidden()
+                            .frame(width: Layout.targetControlWidth, alignment: .leading)
+                        }
                     }
+
+                    RSSHintCard(title: selectedPreset.subtitle, guidance: selectedPreset.guidance)
                 }
-                RSSSetupRow("Feed URL", labelWidth: Layout.labelWidth) { TextField("https://example.com/feed.xml", text: $feedURLString).textFieldStyle(.roundedBorder) }
-                RSSSetupRow("显示名称", labelWidth: Layout.labelWidth) { TextField("可选", text: $displayName).textFieldStyle(.roundedBorder) }
-                RSSSetupRow("抓取间隔", labelWidth: Layout.labelWidth) { Picker("抓取间隔", selection: $intervalMinutes) { Text("15 分钟").tag(15); Text("30 分钟").tag(30); Text("1 小时").tag(60); Text("6 小时").tag(360) }.frame(width: 180) }
-                RSSSetupRow("打开方式", labelWidth: Layout.labelWidth) { Picker("打开方式", selection: $openTarget) { Text("Connor 阅读器").tag(RSSSourceOpenTarget.localReader); Text("原网页").tag(RSSSourceOpenTarget.webpage); Text("外部浏览器").tag(RSSSourceOpenTarget.externalBrowser); Text("全文内容").tag(RSSSourceOpenTarget.fullContent) }.frame(width: 220) }
+                .padding(.vertical, AppShellLayout.spaceL)
             }
-            RSSHintCard(title: selectedPreset.subtitle, guidance: selectedPreset.guidance)
-            HStack { Spacer(); Button("取消") { dismiss() }; Button("保存草稿") { dismiss() }.buttonStyle(.borderedProminent).disabled(saveDisabled) }
+            .scrollIndicators(.visible)
+
+            Divider()
+
+            dialogFooter
         }
-        .padding(SettingsListLayout.spaceXL)
-        .frame(width: Layout.sheetWidth)
+        .padding(AppShellLayout.spaceXL)
+        .frame(width: Layout.sheetWidth, height: Layout.sheetHeight)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
-    private var header: some View {
-        HStack(alignment: .top, spacing: SettingsListLayout.spaceM) {
-            ZStack { RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous).fill(Color.orange.opacity(0.13)); Image(systemName: "dot.radiowaves.left.and.right").font(SettingsListTypography.largeIcon).foregroundStyle(.orange) }
-                .frame(width: Layout.iconSize, height: Layout.iconSize)
-            VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
-                Text("添加 RSS 订阅源").font(SettingsListTypography.header)
-                Text("支持 RSS 2.0、Atom 与 JSON Feed。真实保存与同步继续由 Native RSS Runtime / Policy Engine 接入。")
-                    .font(SettingsListTypography.rowSubtitle).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+    private var dialogHeader: some View {
+        HStack(alignment: .top, spacing: AppShellLayout.spaceM) {
+            ZStack {
+                RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous)
+                    .fill(Color.orange.opacity(0.13))
+                Image(systemName: "dot.radiowaves.left.and.right")
+                    .font(SettingsListTypography.largeIcon)
+                    .foregroundStyle(.orange)
             }
+            .frame(width: 46, height: 46)
+
+            VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
+                Text("添加 RSS 订阅源")
+                    .font(.system(size: 26, weight: .semibold))
+                Text("支持 RSS 2.0、Atom 与 JSON Feed。订阅、同步和状态变更继续由 Native RSS Runtime 与 Policy Engine 托管。")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer()
+
+            Button(action: { dismiss() }) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 13, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut(.cancelAction)
+            .help("关闭")
+            .accessibilityLabel("关闭添加 RSS 订阅源")
         }
+    }
+
+    private var dialogFooter: some View {
+        HStack(alignment: .center, spacing: AppShellLayout.spaceM) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("保存后将创建本地 source registry 草稿。")
+                Text("OPML 导入、同步游标和 audit trail 后续仍走 Connor RSS 治理链路。")
+            }
+            .font(AgentChatTypography.meta)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            Spacer()
+
+            Button("取消") { dismiss() }
+            Button("保存草稿") { dismiss() }
+                .buttonStyle(.borderedProminent)
+                .disabled(saveDisabled)
+                .keyboardShortcut(.defaultAction)
+        }
+        .padding(.top, AppShellLayout.spaceM)
     }
 }
 
 private struct RSSSetupSection<Content: View>: View {
     var title: String
+    var systemImage: String
     @ViewBuilder var content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: SettingsListLayout.spaceM) {
-            Text(title).font(SettingsListTypography.rowTitleSelected)
-            content
+        VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
+            Label(title, systemImage: systemImage)
+                .font(.headline)
+                .foregroundStyle(.primary)
+
+            VStack(spacing: AppShellLayout.spaceS) {
+                content
+            }
+            .padding(AppShellLayout.spaceM)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(AppShellColors.subtleCardBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
+                    .stroke(AppShellColors.hairline, lineWidth: 1)
+            }
         }
-        .padding(SettingsListLayout.spaceL)
-        .background(Color(nsColor: .textBackgroundColor).opacity(0.45), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous))
     }
 }
 
 private struct RSSSetupRow<Content: View>: View {
     var label: String
     var labelWidth: CGFloat
+    var alignment: VerticalAlignment
     @ViewBuilder var content: Content
 
-    init(_ label: String, labelWidth: CGFloat, @ViewBuilder content: () -> Content) {
+    init(_ label: String, labelWidth: CGFloat, alignment: VerticalAlignment = .firstTextBaseline, @ViewBuilder content: () -> Content) {
         self.label = label
         self.labelWidth = labelWidth
+        self.alignment = alignment
         self.content = content()
     }
 
     var body: some View {
-        HStack(alignment: .center, spacing: SettingsListLayout.spaceM) {
-            Text(label)
-                .font(SettingsListTypography.rowCaptionEmphasized)
+        HStack(alignment: alignment, spacing: AppShellLayout.spaceM) {
+            Text("\(label):")
+                .font(.callout)
                 .foregroundStyle(.secondary)
-                .frame(width: labelWidth, alignment: .leading)
+                .frame(width: labelWidth, alignment: .trailing)
             content
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .controlSize(.regular)
     }
 }
 
@@ -347,15 +479,28 @@ private struct RSSHintCard: View {
     var guidance: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
-            Text(title).font(SettingsListTypography.rowTitleSelected)
-            Text(guidance)
-                .font(SettingsListTypography.rowSubtitle)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+        HStack(alignment: .top, spacing: AppShellLayout.spaceM) {
+            Image(systemName: "checkmark.shield")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.orange)
+                .frame(width: 24, alignment: .center)
+
+            VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
+                Text(title)
+                    .font(SettingsListTypography.rowTitleSelected)
+                Text(guidance)
+                    .font(SettingsListTypography.rowSubtitle)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
-        .padding(SettingsListLayout.spaceL)
-        .background(Color.orange.opacity(0.09), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous))
+        .padding(AppShellLayout.spaceM)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.09), in: RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
+                .stroke(Color.orange.opacity(0.18), lineWidth: 1)
+        }
     }
 }
 
