@@ -1182,9 +1182,9 @@ struct AIConnectionSetupView: View {
         do {
             let flow = try AppLLMOAuthService.shared.prepareClaudeOAuth()
             claudeFlow = flow
-            NSWorkspace.shared.open(flow.authURL)
+            viewModel.openURLInCurrentChatBrowser(flow.authURL)
             didOpenBrowser = true
-            statusMessage = "浏览器已打开。完成 Claude 登录后，复制授权码并粘贴到这里。"
+            statusMessage = "内置浏览器已打开。完成 Claude 登录后，复制授权码并粘贴到这里。"
             errorMessage = nil
         } catch {
             errorMessage = displayError(error)
@@ -1228,12 +1228,14 @@ struct AIConnectionSetupView: View {
     private func authenticateChatGPTAndAddConnection() {
         isAuthenticating = true
         didOpenBrowser = true
-        statusMessage = "正在打开 ChatGPT 登录页，并等待浏览器回调…"
+        statusMessage = "正在用内置浏览器打开 ChatGPT 登录页，并等待浏览器回调…"
         errorMessage = nil
         Task {
             do {
                 let result = try await AppLLMOAuthService.shared.authenticateChatGPT { url in
-                    NSWorkspace.shared.open(url)
+                    Task { @MainActor in
+                        viewModel.openURLInCurrentChatBrowser(url)
+                    }
                 }
                 let input = AppLLMConnectionSetupInput(
                     id: stableConnectionID,
@@ -1271,9 +1273,9 @@ struct AIConnectionSetupView: View {
                     githubDeviceCode = code
                     didOpenBrowser = true
                     if let url = URL(string: code.verificationURI) {
-                        NSWorkspace.shared.open(url)
+                        viewModel.openURLInCurrentChatBrowser(url)
                     }
-                    statusMessage = "在 GitHub 页面输入授权码后，康纳同学会自动继续。"
+                    statusMessage = "在内置浏览器的 GitHub 页面输入授权码后，康纳同学会自动继续。"
                 }
                 let tokens = try await AppLLMOAuthService.shared.pollGitHubCopilotTokens(deviceCode: code)
                 let input = AppLLMConnectionSetupInput(
