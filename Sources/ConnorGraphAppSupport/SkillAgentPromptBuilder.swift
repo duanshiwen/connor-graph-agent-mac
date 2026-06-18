@@ -21,7 +21,8 @@ public struct SkillAgentPromptBuilder: Sendable {
         4. 推荐 slug：\(suggestion.slug)
         5. 目标目录：\(skillRootPath)/\(suggestion.slug)/
         6. `connor_skill_create` 的 instructions 参数应包含完整 Markdown 工作流说明，包括适用场景、步骤、输出格式和注意事项。
-        7. 创建完成后，请验证技能可以被 Connor 扫描，并告诉用户技能名称、slug 和文件路径。
+        7. 用户创建的技能必须是可见技能，不要写入或要求写入 `hidden: true`；隐藏技能只允许 Connor 内置 bundled skills 使用。
+        8. 创建完成后，请验证技能可以被 Connor 扫描，并告诉用户技能名称、slug 和文件路径。
 
         首选工具：`connor_skill_create`。只有当该工具不可用时，才使用通用文件写入工具，并明确说明降级原因。
         """
