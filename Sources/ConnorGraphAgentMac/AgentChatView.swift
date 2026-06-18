@@ -11,6 +11,23 @@ struct AgentChatView: View {
     @State private var isSessionInfoPresented = false
 
     var body: some View {
+        Group {
+            if viewModel.selectedChatSessionID == nil && !viewModel.isBrowserVisible {
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                activeSessionContent
+            }
+        }
+        .task {
+            viewModel.deferViewUpdate {
+                viewModel.reloadChatSessions()
+                viewModel.reloadPendingApprovals()
+            }
+        }
+    }
+
+    private var activeSessionContent: some View {
         ZStack(alignment: .topTrailing) {
             Group {
                 if viewModel.isBrowserVisible {
@@ -68,13 +85,6 @@ struct AgentChatView: View {
             viewModel.openURLInCurrentChatBrowser(url)
             return .handled
         })
-        .navigationTitle("康纳同学会话")
-        .task {
-            viewModel.deferViewUpdate {
-                viewModel.reloadChatSessions()
-                viewModel.reloadPendingApprovals()
-            }
-        }
     }
 }
 

@@ -35,7 +35,7 @@ struct SkillCommercialUIPresentationTests {
         let presentation = SkillCommercialUIPresentationBuilder().build(snapshot: snapshot, sourceReadiness: readiness)
 
         #expect(presentation.summary.total == 1)
-        #expect(presentation.summary.projectScoped == 1)
+        #expect(presentation.summary.projectScoped == 0)
         #expect(presentation.summary.risky == 1)
         #expect(presentation.summary.sourceBlocked == 1)
         let card = try #require(presentation.cards.first)

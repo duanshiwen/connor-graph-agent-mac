@@ -55,32 +55,35 @@ struct CraftSessionListPane: View {
                         .padding(.top, 80)
                 }
             } else {
-                List(filteredSessions) { session in
-                    CraftSessionRow(
-                        row: AgentChatSessionPresentation(session: session),
-                        isSelected: session.id == viewModel.selectedChatSessionID,
-                        isRunning: viewModel.isChatSessionSubmitting(session.id),
-                        isRegeneratingTitle: viewModel.regeneratingTitleSessionIDs.contains(session.id),
-                        hasRunningBackgroundTask: !viewModel.canDeleteChatSession(session.id),
-                        labelDefinitions: viewModel.governanceConfig.labels,
-                        onSelect: {
-                            var transaction = Transaction()
-                            transaction.disablesAnimations = true
-                            withTransaction(transaction) {
-                                viewModel.selectChatSession(session.id)
-                            }
-                        },
-                        onRename: { title in viewModel.renameChatSession(session.id, title: title) },
-                        onSetStatus: { status in viewModel.setChatSessionStatus(session.id, status: status) },
-                        onToggleLabel: { labelID in viewModel.toggleChatSessionLabel(session.id, labelID: labelID) },
-                        onRegenerateTitle: { viewModel.regenerateChatSessionTitle(session.id) },
-                        onDelete: { viewModel.deleteChatSession(session.id) }
-                    )
-                    .listRowInsets(EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8))
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
+                ScrollView {
+                    LazyVStack(spacing: 2) {
+                        ForEach(filteredSessions) { session in
+                            CraftSessionRow(
+                                row: AgentChatSessionPresentation(session: session),
+                                isSelected: session.id == viewModel.selectedChatSessionID,
+                                isRunning: viewModel.isChatSessionSubmitting(session.id),
+                                isRegeneratingTitle: viewModel.regeneratingTitleSessionIDs.contains(session.id),
+                                hasRunningBackgroundTask: !viewModel.canDeleteChatSession(session.id),
+                                labelDefinitions: viewModel.governanceConfig.labels,
+                                onSelect: {
+                                    var transaction = Transaction()
+                                    transaction.disablesAnimations = true
+                                    withTransaction(transaction) {
+                                        viewModel.selectChatSession(session.id)
+                                    }
+                                },
+                                onRename: { title in viewModel.renameChatSession(session.id, title: title) },
+                                onSetStatus: { status in viewModel.setChatSessionStatus(session.id, status: status) },
+                                onToggleLabel: { labelID in viewModel.toggleChatSessionLabel(session.id, labelID: labelID) },
+                                onRegenerateTitle: { viewModel.regenerateChatSessionTitle(session.id) },
+                                onDelete: { viewModel.deleteChatSession(session.id) }
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.top, 6)
+                    .padding(.bottom, 10)
                 }
-                .listStyle(.plain)
                 .scrollContentBackground(.hidden)
             }
         }
@@ -180,6 +183,7 @@ struct CraftMailListPane: View {
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
+                .contentMargins(.top, 6, for: .scrollContent)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

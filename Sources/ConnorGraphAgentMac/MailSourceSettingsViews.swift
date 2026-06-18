@@ -22,18 +22,19 @@ struct MailSourceSettingsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            MailBrowserTopBar(onAdd: { viewModel.isPresentingAddMailAccountSheet = true })
-            Divider().opacity(0.6)
-            Group {
-                if let selectedMessage {
+        Group {
+            if let selectedMessage {
+                VStack(alignment: .leading, spacing: 0) {
+                    MailBrowserTopBar(onAdd: { viewModel.isPresentingAddMailAccountSheet = true })
+                    Divider().opacity(0.6)
                     MailMessageDetailPane(account: selectedAccount, mailbox: selectedMailbox, message: selectedMessage)
-                } else {
-                    MailMessageEmptyDetailPane(hasAccounts: !presentation.accounts.isEmpty)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
+            } else {
+                Color.clear
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppShellColors.detailBackground)
         .sheet(isPresented: $viewModel.isPresentingAddMailAccountSheet) {
             AddMailAccountSheet()
@@ -62,26 +63,6 @@ private struct MailBrowserTopBar: View {
         }
         .padding(.horizontal, AppShellLayout.spaceXL)
         .padding(.vertical, AppShellLayout.spaceL)
-    }
-}
-
-private struct MailMessageEmptyDetailPane: View {
-    var hasAccounts: Bool
-
-    var body: some View {
-        VStack(spacing: AppShellLayout.spaceL) {
-            Spacer(minLength: 96)
-            ContentUnavailableView(
-                hasAccounts ? "选择一封邮件开始查看" : "先添加一个邮件帐户",
-                systemImage: hasAccounts ? "envelope.open" : "envelope.badge",
-                description: Text(hasAccounts ? "从左侧依次选择账户、文件夹和邮件。Connor 会在不改变已读状态的前提下展示邮件摘要；读取正文和附件导入仍会保留审计记录。" : "点击右上角“添加邮件帐户”，选择 Apple、Microsoft、QQ、网易 163/126 或其他 IMAP/SMTP 邮箱。")
-            )
-            .frame(maxWidth: .infinity)
-            MailGovernanceHintStrip()
-                .frame(maxWidth: 680)
-            Spacer()
-        }
-        .padding(AppShellLayout.spaceXL)
     }
 }
 

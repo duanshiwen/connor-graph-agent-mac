@@ -38,7 +38,7 @@ struct SkillManagerMutationToolsTests {
         ]), context: mutationToolContext())
 
         #expect(result.toolName == "connor_skill_create")
-        let snapshot = SkillPackageScanner(globalSkillsDirectory: root.appendingPathComponent("missing", isDirectory: true)).scan(storagePaths: storagePaths)
+        let snapshot = SkillPackageScanner().scan(storagePaths: storagePaths)
         let resolution = try #require(snapshot.resolution(slug: "go-expert"))
         #expect(resolution.selected?.manifest.name == "Go Expert")
         #expect(resolution.selected?.manifest.globs.contains("**/*.go") == true)
@@ -66,7 +66,7 @@ struct SkillManagerMutationToolsTests {
             "tags": .array([.string("go"), .string("performance")])
         ]), context: mutationToolContext())
 
-        let snapshot = SkillPackageScanner(globalSkillsDirectory: root.appendingPathComponent("missing", isDirectory: true)).scan(storagePaths: storagePaths)
+        let snapshot = SkillPackageScanner().scan(storagePaths: storagePaths)
         let package = try #require(snapshot.resolution(slug: "go-expert")?.selected)
         #expect(package.manifest.description == "Updated Go debugging and performance skill.")
         #expect(package.instructions.contains("profiling"))
@@ -90,7 +90,7 @@ struct SkillManagerMutationToolsTests {
             "slug": .string("go-expert")
         ]), context: mutationToolContext())
 
-        let snapshot = SkillPackageScanner(globalSkillsDirectory: root.appendingPathComponent("missing", isDirectory: true)).scan(storagePaths: storagePaths)
+        let snapshot = SkillPackageScanner().scan(storagePaths: storagePaths)
         #expect(snapshot.resolution(slug: "go-expert") == nil)
         #expect(!FileManager.default.fileExists(atPath: storagePaths.skillsDirectory.appendingPathComponent("go-expert", isDirectory: true).path))
     }
