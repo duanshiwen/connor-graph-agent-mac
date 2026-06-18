@@ -3,313 +3,310 @@ import ConnorGraphCore
 import ConnorGraphAppSupport
 
 struct MailSourceSettingsView: View {
-    private let accounts: [MailAccount]
-    private let mailboxes: [MailMailbox]
-    private let messages: [MailMessageSummary]
-    private let auditRecords: [MailAuditRecord]
-    private let readiness: NativeMailReadiness
+    @ObservedObject var viewModel: AppViewModel
 
-    init(
-        accounts: [MailAccount] = NativeMailUIPreviewData.accounts,
-        mailboxes: [MailMailbox] = NativeMailUIPreviewData.mailboxes,
-        messages: [MailMessageSummary] = NativeMailUIPreviewData.messages,
-        auditRecords: [MailAuditRecord] = NativeMailUIPreviewData.auditRecords,
-        readiness: NativeMailReadiness = NativeMailUIPreviewData.readiness
-    ) {
-        self.accounts = accounts
-        self.mailboxes = mailboxes
-        self.messages = messages
-        self.auditRecords = auditRecords
-        self.readiness = readiness
+    private var presentation: NativeMailBrowserPresentation {
+        viewModel.mailBrowserPresentation
+    }
+
+    private var selectedAccount: MailAccount? {
+        presentation.account(id: viewModel.selectedMailAccountID)
+    }
+
+    private var selectedMailbox: MailMailbox? {
+        presentation.mailbox(id: viewModel.selectedMailMailboxID)
+    }
+
+    private var selectedMessage: MailMessageSummary? {
+        presentation.message(id: viewModel.selectedMailMessageID)
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: AppShellLayout.spaceXL) {
-                MailHeroHeader(readiness: readiness)
-                MailReadinessGrid(readiness: readiness)
-                LazyVGrid(columns: [.init(.flexible(), spacing: AppShellLayout.spaceL), .init(.flexible(), spacing: AppShellLayout.spaceL)], spacing: AppShellLayout.spaceL) {
-                    MailAccountsCard(accounts: accounts)
-                    MailGovernanceCard(readiness: readiness)
+        VStack(alignment: .leading, spacing: 0) {
+            MailBrowserTopBar(onAdd: { viewModel.isPresentingAddMailAccountSheet = true })
+            Divider().opacity(0.6)
+            Group {
+                if let selectedMessage {
+                    MailMessageDetailPane(account: selectedAccount, mailbox: selectedMailbox, message: selectedMessage)
+                } else {
+                    MailMessageEmptyDetailPane(hasAccounts: !presentation.accounts.isEmpty)
                 }
-                MailMailboxOverviewCard(mailboxes: mailboxes)
-                MailMessagePreviewCard(messages: messages)
-                MailAuditTimelineCard(records: auditRecords)
             }
-            .padding(AppShellLayout.spaceXL)
-            .frame(maxWidth: AppShellLayout.contentMaxWidth + 180, alignment: .topLeading)
-            .frame(maxWidth: .infinity, alignment: .top)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .background(AppShellColors.detailBackground.ignoresSafeArea())
-        .navigationTitle("Mail")
+        .background(AppShellColors.detailBackground)
+        .sheet(isPresented: $viewModel.isPresentingAddMailAccountSheet) {
+            AddMailAccountSheet()
+        }
     }
 }
 
-private struct MailHeroHeader: View {
-    var readiness: NativeMailReadiness
+private struct MailBrowserTopBar: View {
+    var onAdd: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: AppShellLayout.spaceM) {
+            VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
+                Text("邮件系统")
+                    .font(.system(size: 24, weight: .semibold))
+                Text("账户、文件夹和邮件详情由 Connor 本地治理；读取不会自动改变已读状态。")
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: AppShellLayout.spaceM)
+            Button(action: onAdd) {
+                Label("添加邮件帐户", systemImage: "plus")
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.regular)
+        }
+        .padding(.horizontal, AppShellLayout.spaceXL)
+        .padding(.vertical, AppShellLayout.spaceL)
+    }
+}
+
+private struct MailMessageEmptyDetailPane: View {
+    var hasAccounts: Bool
+
+    var body: some View {
+        VStack(spacing: AppShellLayout.spaceL) {
+            Spacer(minLength: 96)
+            ContentUnavailableView(
+                hasAccounts ? "选择一封邮件开始查看" : "先添加一个邮件帐户",
+                systemImage: hasAccounts ? "envelope.open" : "envelope.badge",
+                description: Text(hasAccounts ? "从左侧依次选择账户、文件夹和邮件。Connor 会在不改变已读状态的前提下展示邮件摘要；读取正文和附件导入仍会保留审计记录。" : "点击右上角“添加邮件帐户”，选择 Apple、Microsoft、QQ、网易 163/126 或其他 IMAP/SMTP 邮箱。")
+            )
+            .frame(maxWidth: .infinity)
+            MailGovernanceHintStrip()
+                .frame(maxWidth: 680)
+            Spacer()
+        }
+        .padding(AppShellLayout.spaceXL)
+    }
+}
+
+private struct MailMessageDetailPane: View {
+    var account: MailAccount?
+    var mailbox: MailMailbox?
+    var message: MailMessageSummary
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
+                MailMessageHero(account: account, mailbox: mailbox, message: message)
+                MailInfoSection(title: "邮件摘要", systemImage: "doc.text.magnifyingglass") {
+                    Text(message.snippet)
+                        .font(AgentChatTypography.meta)
+                        .foregroundStyle(.primary)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                MailInfoSection(title: "收件人", systemImage: "person.2") {
+                    VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
+                        MailAddressLine(label: "发件人", values: [message.from])
+                        MailAddressLine(label: "收件人", values: message.to)
+                        if !message.cc.isEmpty {
+                            MailAddressLine(label: "抄送", values: message.cc)
+                        }
+                    }
+                }
+                MailInfoSection(title: "治理提示", systemImage: "checkmark.shield") {
+                    MailGovernanceHintStrip()
+                }
+            }
+            .padding(AppShellLayout.spaceXL)
+            .frame(maxWidth: AppShellLayout.contentMaxWidth, alignment: .leading)
+        }
+    }
+}
+
+private struct MailMessageHero: View {
+    var account: MailAccount?
+    var mailbox: MailMailbox?
+    var message: MailMessageSummary
 
     var body: some View {
         HStack(alignment: .top, spacing: AppShellLayout.spaceL) {
             ZStack {
-                Circle()
-                    .fill(ConnorCraftPalette.accentSoftFill)
-                    .frame(width: 56, height: 56)
-                Image(systemName: "envelope.badge.shield.half.filled")
-                    .font(.system(size: 25, weight: .semibold))
+                RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.14))
+                Image(systemName: message.flags.isRead ? "envelope.open" : "envelope.badge")
+                    .font(.system(size: 24, weight: .semibold))
                     .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(ConnorCraftPalette.accent)
+                    .foregroundStyle(Color.accentColor)
             }
+            .frame(width: 56, height: 56)
 
             VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
-                HStack(spacing: AppShellLayout.spaceS) {
-                    Text("Connor Native Mail System")
-                        .font(.system(size: 24, weight: .semibold))
-                    MailStatusPill(status: readiness.isReady ? "Ready" : "Needs setup", color: readiness.isReady ? .green : .orange, systemImage: readiness.isReady ? "checkmark.shield" : "exclamationmark.triangle")
+                HStack(alignment: .firstTextBaseline, spacing: AppShellLayout.spaceS) {
+                    Text(message.subject)
+                        .font(AgentChatTypography.title)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                    MailStatusPill(status: message.flags.isRead ? "已读" : "未读", color: message.flags.isRead ? .secondary : .blue)
+                    if message.hasAttachments {
+                        MailStatusPill(status: "附件", color: .teal, systemImage: "paperclip")
+                    }
                 }
-                Text("AI 通过受治理的原生工具读取、搜索、起草、审批发送邮件；账号、凭据、同步、联系人写入、附件导入与 Graph evidence admission 都保留在 Connor 主权边界内。")
-                    .font(AgentChatTypography.callout)
+                Text("From \(message.from.name ?? message.from.email) · \(message.from.email)")
+                    .font(AgentChatTypography.meta)
                     .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .lineSpacing(2)
+                    .textSelection(.enabled)
                 HStack(spacing: AppShellLayout.spaceS) {
-                    MailStatusPill(status: "Read tools default allowed", color: .blue, systemImage: "book")
-                    MailStatusPill(status: "Send always approval-gated", color: .red, systemImage: "paperplane")
-                    MailStatusPill(status: "No implicit read-state mutation", color: .purple, systemImage: "eye.slash")
+                    MailStatusPill(status: account?.displayName ?? "未选择账户", color: .secondary, systemImage: "person.crop.circle")
+                    MailStatusPill(status: mailbox?.name ?? "未选择文件夹", color: .secondary, systemImage: "folder")
+                    MailStatusPill(status: message.date.formatted(date: .abbreviated, time: .shortened), color: .secondary, systemImage: "clock")
                 }
             }
-            Spacer(minLength: AppShellLayout.spaceM)
+            Spacer(minLength: 0)
         }
-        .padding(AppShellLayout.spaceXL)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous))
+        .padding(AppShellLayout.spaceL)
+        .background(AppShellColors.cardBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
-                .stroke(ConnorCraftPalette.accentBorder, lineWidth: 1)
+                .stroke(AppShellColors.hairline, lineWidth: 1)
         )
     }
 }
 
-private struct MailReadinessGrid: View {
-    var readiness: NativeMailReadiness
+private struct MailAddressLine: View {
+    var label: String
+    var values: [MailAddress]
 
     var body: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: AppShellLayout.spaceM), count: 4), spacing: AppShellLayout.spaceM) {
-            AppMetricCard(title: "Accounts", value: "\(readiness.healthyAccountCount)/\(readiness.accountCount)", color: readiness.healthyAccountCount > 0 ? .green : .orange)
-            AppMetricCard(title: "Credential", value: readiness.credentialBoundaryReady ? "Bounded" : "Missing", color: readiness.credentialBoundaryReady ? .green : .orange)
-            AppMetricCard(title: "Sync Cursor", value: readiness.syncCursorReady ? "Ready" : "Pending", color: readiness.syncCursorReady ? .green : .orange)
-            AppMetricCard(title: "Evidence", value: readiness.evidencePolicyReady ? "Review" : "Blocked", color: readiness.evidencePolicyReady ? .blue : .orange)
+        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: AppShellLayout.spaceL, verticalSpacing: AppShellLayout.spaceS) {
+            GridRow {
+                Text(label)
+                    .font(AgentChatTypography.microEmphasis)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 72, alignment: .leading)
+                Text(values.map(display).joined(separator: ", "))
+                    .font(AgentChatTypography.meta)
+                    .textSelection(.enabled)
+            }
+        }
+    }
+
+    private func display(_ address: MailAddress) -> String {
+        if let name = address.name, !name.isEmpty {
+            return "\(name) <\(address.email)>"
+        }
+        return address.email
+    }
+}
+
+private struct MailGovernanceHintStrip: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
+            MailChecklistRow(title: "读取不自动标记已读", isReady: true, detail: "列表和详情预览不会隐式修改邮件 read state。")
+            MailChecklistRow(title: "发信始终需要审批", isReady: true, detail: "草稿发送必须进入 Connor approval gate。")
+            MailChecklistRow(title: "附件导入受治理", isReady: true, detail: "附件进入 Session Capsule / Attachment Store 后再供 Agent 使用。")
         }
     }
 }
 
-private struct MailAccountsCard: View {
-    var accounts: [MailAccount]
+private struct AddMailAccountSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedPreset: MailAccountProviderPreset = .apple
+    @State private var displayName: String = ""
+    @State private var email: String = ""
+    @State private var credential: String = ""
+    @State private var incomingHost: String = MailAccountProviderPreset.apple.incomingHost
+    @State private var incomingPort: Int = MailAccountProviderPreset.apple.incomingPort
+    @State private var outgoingHost: String = MailAccountProviderPreset.apple.outgoingHost
+    @State private var outgoingPort: Int = MailAccountProviderPreset.apple.outgoingPort
+
+    private var isManualPreset: Bool {
+        selectedPreset == .other
+    }
 
     var body: some View {
-        MailPanelCard(title: "Accounts", systemImage: "person.crop.circle.badge.checkmark") {
-            VStack(alignment: .leading, spacing: AppShellLayout.spaceM) {
-                ForEach(accounts) { account in
-                    HStack(alignment: .top, spacing: AppShellLayout.spaceM) {
-                        Image(systemName: icon(for: account.provider))
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(color(for: account.health.status))
-                            .frame(width: 24)
-                        VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
-                            Text(account.displayName)
-                                .font(AppListTypography.header)
-                            Text(account.identities.map { $0.address.email }.joined(separator: ", "))
-                                .font(AppListTypography.rowSubtitle)
-                                .foregroundStyle(.secondary)
-                            Text(account.health.summary)
-                                .font(AgentChatTypography.micro)
-                                .foregroundStyle(.tertiary)
-                        }
-                        Spacer()
-                        MailStatusPill(status: account.health.status.rawValue, color: color(for: account.health.status))
-                    }
-                    .padding(AppShellLayout.spaceM)
-                    .background(AppShellColors.subtleCardBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous))
+        VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
+            HStack(alignment: .top, spacing: AppShellLayout.spaceM) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.14))
+                    Image(systemName: "envelope.badge")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
+                .frame(width: 48, height: 48)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("添加邮件帐户")
+                        .font(.title3.weight(.semibold))
+                    Text("选择服务商后，Connor 会预填常见 IMAP/SMTP 配置。真实凭据接入会继续走本地凭据边界和审批治理。")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
-        }
-    }
 
-    private func icon(for provider: MailProviderKind) -> String {
-        switch provider {
-        case .gmail: "g.circle.fill"
-        case .microsoft365: "m.circle.fill"
-        case .jmap: "j.circle.fill"
-        case .genericIMAPSMTP: "tray.full"
-        case .localFixture: "shippingbox"
-        }
-    }
-
-    private func color(for status: MailAccountHealthStatus) -> Color {
-        switch status {
-        case .ready: .green
-        case .degraded: .orange
-        case .blocked, .unauthenticated: .red
-        case .unknown: .secondary
-        }
-    }
-}
-
-private struct MailGovernanceCard: View {
-    var readiness: NativeMailReadiness
-
-    var body: some View {
-        MailPanelCard(title: "Governance", systemImage: "checkmark.shield") {
-            VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
-                MailChecklistRow(title: "Tool audit log", isReady: readiness.toolAuditReady, detail: "Every read/body/mutation/send path records a redacted audit event.")
-                MailChecklistRow(title: "Send approval", isReady: readiness.sendApprovalReady, detail: "mail_send_draft never auto-sends; approval payload is explicit.")
-                MailChecklistRow(title: "Contact approval", isReady: readiness.contactApprovalReady, detail: "Mail-derived contacts become candidates/drafts first.")
-                MailChecklistRow(title: "Attachment import", isReady: readiness.attachmentImportReady, detail: "Attachments enter Session Capsule / Attachment Store by tool call.")
-            }
-        }
-    }
-}
-
-private struct MailMailboxOverviewCard: View {
-    var mailboxes: [MailMailbox]
-
-    var body: some View {
-        MailPanelCard(title: "Mailbox Sync", systemImage: "arrow.triangle.2.circlepath") {
-            VStack(spacing: 0) {
-                ForEach(mailboxes) { mailbox in
-                    HStack(spacing: AppShellLayout.spaceM) {
-                        Image(systemName: icon(for: mailbox.role))
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 24)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(mailbox.name)
-                                .font(AppListTypography.rowTitleSelected)
-                            Text(mailbox.path)
-                                .font(AgentChatTypography.monoMicro)
-                                .foregroundStyle(.tertiary)
-                        }
-                        Spacer()
-                        MailCompactMetric(label: "Messages", value: "\(mailbox.status.messageCount)")
-                        MailCompactMetric(label: "Unread", value: "\(mailbox.status.unreadCount)", color: mailbox.status.unreadCount > 0 ? .blue : .secondary)
-                        MailStatusPill(status: mailbox.status.syncCursor == nil ? "No cursor" : "Cursor", color: mailbox.status.syncCursor == nil ? .orange : .green, systemImage: mailbox.status.syncCursor == nil ? "pause.circle" : "checkmark.circle")
-                    }
-                    .padding(.vertical, AppShellLayout.spaceM)
-                    if mailbox.id != mailboxes.last?.id { Divider().opacity(0.55) }
-                }
-            }
-        }
-    }
-
-    private func icon(for role: MailMailboxRole) -> String {
-        switch role {
-        case .inbox: "tray"
-        case .sent: "paperplane"
-        case .drafts: "doc.text"
-        case .archive: "archivebox"
-        case .trash: "trash"
-        case .spam: "exclamationmark.octagon"
-        case .custom: "folder"
-        }
-    }
-}
-
-private struct MailMessagePreviewCard: View {
-    var messages: [MailMessageSummary]
-
-    var body: some View {
-        MailPanelCard(title: "Tool Result Preview", systemImage: "list.bullet.rectangle") {
-            VStack(spacing: AppShellLayout.spaceS) {
-                ForEach(messages) { message in
-                    HStack(alignment: .top, spacing: AppShellLayout.spaceM) {
-                        Circle()
-                            .fill(message.flags.isRead ? Color.secondary.opacity(0.18) : ConnorCraftPalette.accent)
-                            .frame(width: 9, height: 9)
-                            .padding(.top, 7)
-                        VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
-                            HStack(spacing: AppShellLayout.spaceS) {
-                                Text(message.subject)
-                                    .font(message.flags.isRead ? AppListTypography.rowTitle : AppListTypography.rowTitleSelected)
-                                    .lineLimit(1)
-                                if message.hasAttachments {
-                                    Image(systemName: "paperclip")
-                                        .font(.system(size: 11, weight: .semibold))
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            Text("From \(message.from.name ?? message.from.email) · \(message.from.email)")
-                                .font(AppListTypography.rowCaption)
-                                .foregroundStyle(.secondary)
-                            Text(message.snippet)
-                                .font(AgentChatTypography.micro)
-                                .foregroundStyle(.tertiary)
-                                .lineLimit(2)
-                        }
-                        Spacer()
-                        MailStatusPill(status: message.flags.isRead ? "Read" : "Unread", color: message.flags.isRead ? .secondary : .blue)
-                    }
-                    .padding(AppShellLayout.spaceM)
-                    .background(AppShellColors.subtleCardBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous))
-                }
-            }
-        }
-    }
-}
-
-private struct MailAuditTimelineCard: View {
-    var records: [MailAuditRecord]
-
-    var body: some View {
-        MailPanelCard(title: "Audit Timeline", systemImage: "clock.badge.checkmark") {
-            VStack(alignment: .leading, spacing: AppShellLayout.spaceM) {
-                ForEach(records) { record in
-                    HStack(alignment: .top, spacing: AppShellLayout.spaceM) {
-                        Image(systemName: icon(for: record.riskClass))
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(color(for: record.riskClass))
-                            .frame(width: 22)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(record.kind.rawValue)
-                                .font(AppListTypography.rowTitleSelected)
-                            Text(record.redactedSummary)
-                                .font(AppListTypography.rowSubtitle)
-                                .foregroundStyle(.secondary)
-                            if let payloadHash = record.payloadHash {
-                                Text("hash: \(payloadHash)")
-                                    .font(AgentChatTypography.monoMicro)
-                                    .foregroundStyle(.tertiary)
-                            }
-                        }
-                        Spacer()
-                        MailStatusPill(status: record.riskClass.rawValue, color: color(for: record.riskClass))
+            Form {
+                Picker("服务商", selection: $selectedPreset) {
+                    ForEach(MailAccountProviderPreset.allCases) { preset in
+                        Text(preset.title).tag(preset)
                     }
                 }
+                .onChange(of: selectedPreset) { _, preset in applyPreset(preset) }
+
+                TextField("显示名称", text: $displayName)
+                TextField("邮箱地址", text: $email)
+                SecureField(selectedPreset == .microsoft ? "OAuth / 授权凭据（稍后接入）" : "授权码 / App Password", text: $credential)
+
+                Section("服务器预设") {
+                    TextField("收件服务器", text: $incomingHost)
+                        .disabled(!isManualPreset)
+                    TextField("收件端口", value: $incomingPort, format: .number)
+                        .disabled(!isManualPreset)
+                    TextField("发件服务器", text: $outgoingHost)
+                        .disabled(!isManualPreset)
+                    TextField("发件端口", value: $outgoingPort, format: .number)
+                        .disabled(!isManualPreset)
+                }
+            }
+            .formStyle(.grouped)
+            .frame(minHeight: 300)
+
+            GroupBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label(selectedPreset.subtitle, systemImage: "lock.shield")
+                        .font(AgentChatTypography.metaEmphasis)
+                    Text(selectedPreset.guidance)
+                        .font(AgentChatTypography.meta)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("本轮界面先保存为连接草稿；真实登录、测试连接和凭据持久化会在后续 Mail Runtime 接入中完成。")
+                        .font(AgentChatTypography.micro)
+                        .foregroundStyle(.tertiary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            HStack {
+                Spacer()
+                Button("取消") { dismiss() }
+                Button("保存草稿") { dismiss() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
+        .padding(22)
+        .frame(width: 620)
+        .onAppear { applyPreset(selectedPreset) }
     }
 
-    private func icon(for risk: MailToolRiskClass) -> String {
-        switch risk {
-        case .read: "book"
-        case .bodyRead: "doc.text.magnifyingglass"
-        case .mutation: "slider.horizontal.3"
-        case .destructive: "trash"
-        case .send: "paperplane"
-        case .contactMutation: "person.crop.circle.badge.plus"
-        case .attachmentImport: "paperclip"
-        }
-    }
-
-    private func color(for risk: MailToolRiskClass) -> Color {
-        switch risk {
-        case .read: .blue
-        case .bodyRead: .purple
-        case .mutation: .orange
-        case .destructive, .send, .contactMutation: .red
-        case .attachmentImport: .teal
+    private func applyPreset(_ preset: MailAccountProviderPreset) {
+        incomingHost = preset.incomingHost
+        incomingPort = preset.incomingPort
+        outgoingHost = preset.outgoingHost
+        outgoingPort = preset.outgoingPort
+        if displayName.isEmpty {
+            displayName = preset.title
         }
     }
 }
 
-private struct MailPanelCard<Content: View>: View {
+private struct MailInfoSection<Content: View>: View {
     var title: String
     var systemImage: String
     @ViewBuilder var content: Content
@@ -354,24 +351,6 @@ private struct MailChecklistRow: View {
     }
 }
 
-private struct MailCompactMetric: View {
-    var label: String
-    var value: String
-    var color: Color = .primary
-
-    var body: some View {
-        VStack(alignment: .trailing, spacing: 2) {
-            Text(value)
-                .font(AgentChatTypography.metaEmphasis)
-                .foregroundStyle(color)
-            Text(label)
-                .font(AgentChatTypography.micro)
-                .foregroundStyle(.tertiary)
-        }
-        .frame(minWidth: 56, alignment: .trailing)
-    }
-}
-
 private struct MailStatusPill: View {
     var status: String
     var color: Color
@@ -393,42 +372,4 @@ private struct MailStatusPill: View {
         .frame(height: 23)
         .background(color.opacity(0.12), in: Capsule())
     }
-}
-
-enum NativeMailUIPreviewData {
-    static let accountID = MailAccountID(rawValue: "fixture-account")
-    static let identityID = MailIdentityID(rawValue: "fixture-identity")
-    static let mailboxID = MailMailboxID(rawValue: "fixture-inbox")
-
-    static let accounts: [MailAccount] = [
-        MailAccount(
-            id: accountID,
-            provider: .localFixture,
-            displayName: "Fixture Mail",
-            identities: [MailIdentity(id: identityID, displayName: "Connor Fixture", address: MailAddress(name: "Connor Fixture", email: "connor@example.com"))],
-            incoming: MailServerEndpoint(host: "imap.example.com", port: 993, security: .tls, protocolKind: .imap),
-            outgoing: MailServerEndpoint(host: "smtp.example.com", port: 587, security: .startTLS, protocolKind: .smtp),
-            credentialBinding: MailCredentialBinding(keychainService: "connor.mail.fixture", accountName: "connor@example.com", authMode: .oauth2),
-            health: MailAccountHealth(status: .ready, summary: "Credential boundary, sync cursor, and audit hooks ready")
-        )
-    ]
-
-    static let mailboxes: [MailMailbox] = [
-        MailMailbox(id: mailboxID, accountID: accountID, name: "Inbox", path: "INBOX", role: .inbox, status: MailMailboxStatus(messageCount: 128, unreadCount: 7, syncCursor: MailSyncCursor(value: "uid:928"), lastSyncedAt: Date())),
-        MailMailbox(id: MailMailboxID(rawValue: "fixture-sent"), accountID: accountID, name: "Sent", path: "Sent", role: .sent, status: MailMailboxStatus(messageCount: 42, unreadCount: 0, syncCursor: MailSyncCursor(value: "uid:311"), lastSyncedAt: Date())),
-        MailMailbox(id: MailMailboxID(rawValue: "fixture-archive"), accountID: accountID, name: "Archive", path: "Archive", role: .archive, status: MailMailboxStatus(messageCount: 560, unreadCount: 0, syncCursor: MailSyncCursor(value: "uid:1440"), lastSyncedAt: Date()))
-    ]
-
-    static let messages: [MailMessageSummary] = [
-        MailMessageSummary(id: MailMessageID(rawValue: "fixture-message-1"), accountID: accountID, mailboxID: mailboxID, threadID: MailThreadID(rawValue: "fixture-thread-1"), subject: "Connor Native Mail System", from: MailAddress(name: "Alice", email: "alice@example.com"), to: [MailAddress(email: "connor@example.com")], snippet: "Commercial native mail system fixture. Reading this message never marks it as read.", flags: MailMessageFlags(isRead: false), hasAttachments: true),
-        MailMessageSummary(id: MailMessageID(rawValue: "fixture-message-2"), accountID: accountID, mailboxID: mailboxID, threadID: MailThreadID(rawValue: "fixture-thread-2"), subject: "OAuth migration checklist", from: MailAddress(name: "Security", email: "security@example.com"), to: [MailAddress(email: "connor@example.com")], snippet: "Provider auth policy, token refresh, keychain isolation, and audit readiness.", flags: MailMessageFlags(isRead: true), hasAttachments: false)
-    ]
-
-    static let auditRecords: [MailAuditRecord] = [
-        MailAuditRecord(accountID: accountID, kind: .messageSearched, riskClass: .read, redactedSummary: "Searched mail messages; returned redacted summaries"),
-        MailAuditRecord(accountID: accountID, messageID: MailMessageID(rawValue: "fixture-message-1"), kind: .messageBodyRead, riskClass: .bodyRead, redactedSummary: "Read mail body without mutating read state", payloadHash: "fixture-body-hash"),
-        MailAuditRecord(accountID: accountID, kind: .sendApprovalRequested, riskClass: .send, redactedSummary: "Send approval required before mail_send_draft")
-    ]
-
-    static let readiness = NativeMailReadiness(accountCount: 1, healthyAccountCount: 1, credentialBoundaryReady: true, syncCursorReady: true, toolAuditReady: true, sendApprovalReady: true, contactApprovalReady: true, attachmentImportReady: true, evidencePolicyReady: true)
 }

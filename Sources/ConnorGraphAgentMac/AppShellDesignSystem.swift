@@ -83,6 +83,19 @@ enum AppShellLayout {
     static let radiusS: CGFloat = 8
     static let radiusM: CGFloat = 12
     static let radiusL: CGFloat = 16
+
+    static let primarySidebarMinWidth: CGFloat = 180
+    static let primarySidebarDefaultWidth: CGFloat = 210
+    static let primarySidebarMaxWidth: CGFloat = 250
+
+    static let listColumnMinWidth: CGFloat = 220
+    static let listColumnDefaultWidth: CGFloat = 250
+    static let listColumnMaxWidth: CGFloat = 300
+
+    static let detailColumnMinWidth: CGFloat = 360
+    static let shellMinWidth: CGFloat = 860
+    static let shellMinHeight: CGFloat = 680
+
     static let contentMaxWidth: CGFloat = 780
     static let hairlineOpacity: Double = 0.14
 }
