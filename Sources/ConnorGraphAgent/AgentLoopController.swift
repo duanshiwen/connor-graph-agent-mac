@@ -611,6 +611,11 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                 .filter { !$0.isEmpty }
                 .joined(separator: "\n\n")
         }
+        if let skillInstructions = request.skillInstructions?.trimmingCharacters(in: .whitespacesAndNewlines), !skillInstructions.isEmpty {
+            assembly.instruction.text = [assembly.instruction.text.trimmingCharacters(in: .whitespacesAndNewlines), skillInstructions]
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n\n")
+        }
         let transformers: [any AgentContextTransformer] = [
             AgentPromptBudgetTransformer(maxEstimatedTokens: configuration.promptMaxEstimatedTokens),
             AgentPromptDedupeTransformer(),
@@ -677,12 +682,13 @@ private struct AgentToolBatchResult: Sendable, Equatable {
 private extension AgentPermissionCapability {
     var isSafeForParallelNativeToolExecution: Bool {
         switch self {
-        case .readGraph, .readSession, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific:
+        case .readGraph, .readSession, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific, .readMail, .readMailBody, .readContacts:
             return true
         case .proposeGraphWrite, .commitGraphWrite, .invalidateGraphStatement, .deleteGraphObject,
              .externalNetwork, .modelCall, .costlyModelCall,
              .writeWorkspaceFile, .editWorkspaceFile, .deleteWorkspaceFile,
-             .runReadOnlyShellCommand, .runWorkspaceShellCommand, .runNetworkShellCommand, .runDestructiveShellCommand:
+             .runReadOnlyShellCommand, .runWorkspaceShellCommand, .runNetworkShellCommand, .runDestructiveShellCommand,
+             .mutateMailState, .manageMailboxes, .createMailDraft, .sendMail, .mutateContacts, .importMailAttachment:
             return false
         }
     }

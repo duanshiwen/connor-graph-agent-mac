@@ -27,13 +27,15 @@ public final class GovernedClaudeSDKSidecarRuntime<Transport: ClaudeSDKSidecarSe
     public let permissionMode: AgentPermissionMode
     public let instructionAppendix: String
     public let runtimeStore: AppClaudeSDKSidecarRuntimeStore?
+    public let thinkingLevel: AppLLMThinkingLevel
 
     public init(
         transport: Transport,
         workingDirectory: URL,
         permissionMode: AgentPermissionMode = .askToWrite,
         instructionAppendix: String = "",
-        runtimeStore: AppClaudeSDKSidecarRuntimeStore? = nil
+        runtimeStore: AppClaudeSDKSidecarRuntimeStore? = nil,
+        thinkingLevel: AppLLMThinkingLevel = .defaultLevel
     ) throws {
         guard permissionMode != .allowAll else {
             throw GovernedClaudeSDKSidecarRuntimeError.unsafePermissionMode(permissionMode)
@@ -43,6 +45,7 @@ public final class GovernedClaudeSDKSidecarRuntime<Transport: ClaudeSDKSidecarSe
         self.permissionMode = permissionMode
         self.instructionAppendix = instructionAppendix
         self.runtimeStore = runtimeStore
+        self.thinkingLevel = thinkingLevel
     }
 
     public func chat(_ request: AgentChatRequest) -> AsyncThrowingStream<AgentEvent, Error> {
@@ -54,14 +57,21 @@ public final class GovernedClaudeSDKSidecarRuntime<Transport: ClaudeSDKSidecarSe
             userMessage: request.userMessage,
             sessionSummary: request.sessionSummary,
             recentMessages: request.recentMessages,
-            permissionMode: effectivePermissionMode
+            permissionMode: effectivePermissionMode,
+            attachmentRefs: request.attachmentRefs,
+            attachmentContextPlan: request.attachmentContextPlan,
+            anchorState: request.anchorState,
+            skillInstructions: request.skillInstructions,
+            activeSkillSlug: request.activeSkillSlug,
+            activeSkillDisplayName: request.activeSkillDisplayName
         )
         let resumeSDKSessionID = (try? runtimeStore?.load(connorSessionID: safeRequest.sessionID))?.sdkSessionID
         let sidecarRequest = ClaudeSDKSidecarRequest(
             request: safeRequest,
             workingDirectory: workingDirectory,
             sdkSessionID: resumeSDKSessionID,
-            instructionAppendix: instructionAppendix
+            instructionAppendix: instructionAppendix,
+            effort: thinkingLevel.effortValue
         )
         try? updateRuntimeRecord(
             sessionID: safeRequest.sessionID,

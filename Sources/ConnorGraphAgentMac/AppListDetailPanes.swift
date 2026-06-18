@@ -19,9 +19,9 @@ struct CraftListPaneView: View {
             case .llmSettings:
                 CraftSettingsListPane(viewModel: viewModel, selection: $selection)
             case .sources:
-                CraftSimpleListPane(title: "数据源", subtitle: "MCP Source Runtime", rows: viewModel.sourceRuntimeConfigurations.map(\.displayName))
+                CraftSourceListPane(viewModel: viewModel)
             case .skills:
-                CraftSimpleListPane(title: "技能", subtitle: "Skill Runtime", rows: viewModel.skillRuntimeDefinitions.map { $0.manifest.name })
+                CraftSkillListPane(viewModel: viewModel)
             case .automation:
                 CraftSimpleListPane(title: "自动化", subtitle: "事件触发与执行历史", rows: viewModel.automationConfig.rules.map(\.name))
             case .productOS:
@@ -466,4 +466,3 @@ struct CraftSimpleListPane: View {
         }
     }
 }
-
