@@ -85,6 +85,26 @@ struct NativeRSSSystemTests {
         #expect(parsed.outlines.first?.xmlURL.absoluteString == "https://example.com/a.xml")
     }
 
+    @Test func runtimeUpdatesAndDeletesRSSSources() async throws {
+        let sourceID = RSSSourceID(rawValue: "example-source")
+        let itemID = RSSItemID(rawValue: "example-item")
+        let source = RSSSource(id: sourceID, feedURL: URL(string: "https://example.com/feed.xml")!, displayName: "Example")
+        let item = RSSItemDetail(summary: RSSItemSummary(id: itemID, sourceID: sourceID, title: "Example Item", snippet: "Cached feed item"))
+        let runtime = RSSRuntime(repository: InMemoryRSSSourceRepository(sources: [source]), cache: InMemoryRSSSourceCache(items: [item]))
+
+        let updated = try await runtime.updateSource(sourceID: sourceID, feedURL: URL(string: "https://example.org/rss.xml")!, displayName: "Example Updated")
+        #expect(updated.id == sourceID)
+        #expect(updated.feedURL.absoluteString == "https://example.org/rss.xml")
+        #expect(updated.displayName == "Example Updated")
+        #expect(updated.health.status == .unknown)
+
+        try await runtime.deleteSource(sourceID: sourceID)
+        let sources = try await runtime.listSources()
+        let items = try await runtime.listItems(sourceID: nil, includeHidden: true)
+        #expect(sources.isEmpty)
+        #expect(items.isEmpty)
+    }
+
     @Test func fileBackedRSSStorageSurvivesRuntimeRestart() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("ConnorRSSStorageTests-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }

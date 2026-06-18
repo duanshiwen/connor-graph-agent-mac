@@ -266,15 +266,24 @@ struct AddRSSSourceSheet: View {
         static let compactControlWidth: CGFloat = 180
     }
 
+    private let source: RSSSource?
     var onSave: (URL, String?) async throws -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var selectedPreset: RSSSourcePreset = .appleDeveloper
-    @State private var feedURLString: String = RSSSourcePreset.appleDeveloper.feedURLString
-    @State private var displayName: String = ""
+    @State private var selectedPreset: RSSSourcePreset
+    @State private var feedURLString: String
+    @State private var displayName: String
     @State private var intervalMinutes: Int = 30
     @State private var isSaving = false
     @State private var saveMessage: String?
+
+    init(source: RSSSource? = nil, onSave: @escaping (URL, String?) async throws -> Void) {
+        self.source = source
+        self.onSave = onSave
+        self._selectedPreset = State(initialValue: source == nil ? .appleDeveloper : .custom)
+        self._feedURLString = State(initialValue: source?.feedURL.absoluteString ?? RSSSourcePreset.appleDeveloper.feedURLString)
+        self._displayName = State(initialValue: source?.displayName ?? "")
+    }
 
     private var trimmedFeedURLString: String {
         feedURLString.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -289,6 +298,7 @@ struct AddRSSSourceSheet: View {
     }
 
     private var saveDisabled: Bool { feedURL == nil || isSaving }
+    private var isEditing: Bool { source != nil }
 
     private var normalizedDisplayName: String? {
         let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -347,7 +357,7 @@ struct AddRSSSourceSheet: View {
                             .labelsHidden()
                             .frame(width: Layout.compactControlWidth, alignment: .leading)
                         }
-                        RSSSetupHint("首次添加后会立刻抓取一次。阅读时默认使用 Connor 阅读器；原网页/外部浏览器属于后续文章操作，不在添加订阅源时选择。")
+                        RSSSetupHint(isEditing ? "保存后会保留源 ID 和治理记录；如果修改 Feed URL，会清理旧文章缓存并等待下次同步。" : "首次添加后会立刻抓取一次。阅读时默认使用 Connor 阅读器；原网页/外部浏览器属于后续文章操作，不在添加订阅源时选择。")
                     }
 
                     RSSHintCard(title: selectedPreset.subtitle, guidance: selectedPreset.guidance)
@@ -381,9 +391,9 @@ struct AddRSSSourceSheet: View {
             .frame(width: 46, height: 46)
 
             VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
-                Text("添加 RSS 订阅源")
+                Text(isEditing ? "修改 RSS 订阅源" : "添加 RSS 订阅源")
                     .font(.system(size: 26, weight: .semibold))
-                Text("支持 RSS 2.0、Atom 与 JSON Feed。订阅、同步和状态变更继续由 Native RSS Runtime 与 Policy Engine 托管。")
+                Text(isEditing ? "更新显示名称或 Feed URL。源注册、缓存清理和审计继续由 Native RSS Runtime 托管。" : "支持 RSS 2.0、Atom 与 JSON Feed。订阅、同步和状态变更继续由 Native RSS Runtime 与 Policy Engine 托管。")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -415,7 +425,7 @@ struct AddRSSSourceSheet: View {
                     ProgressView()
                         .controlSize(.small)
                 } else {
-                    Text("添加并抓取")
+                    Text(isEditing ? "保存修改" : "添加并抓取")
                 }
             }
             .buttonStyle(.borderedProminent)
