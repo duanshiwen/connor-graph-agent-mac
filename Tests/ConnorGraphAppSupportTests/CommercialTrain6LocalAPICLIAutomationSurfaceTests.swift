@@ -78,9 +78,9 @@ struct CommercialTrain6LocalAPICLIAutomationSurfaceTests {
         let dashboard = CommercialReadinessGate().evaluate(input)
 
         #expect(dashboard.cards.map(\.phase).contains(.localAPICLIAutomationSurface))
-        #expect(dashboard.cards.count == 6)
+        #expect(dashboard.cards.count == 7)
         #expect(dashboard.overallStatus == .ready)
-        #expect(dashboard.summary == "6/6 commercial readiness phases ready")
+        #expect(dashboard.summary == "7/7 commercial readiness phases ready")
     }
 
     @Test func localAutomationSurfaceBlocksReadinessWhenExecutionGateIsUnsafe() {
