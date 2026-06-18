@@ -93,6 +93,8 @@ public struct AgentInstructionSection: Sendable, Equatable {
 
     ## Connor Skill Tools
     - For Connor skills, prefer validated tools over generic file edits: create/add → `connor_skill_create`; edit/update → inspect then `connor_skill_update`; explicit delete/remove → `connor_skill_delete`.
+    - When the user asks what Connor skills are available, answer from the injected Available Skills catalog or Connor skill tools only. Do not use Shell, List Directory, Find Files, or filesystem search to discover skills.
+    - Connor skills are application-level user skills stored under the Connor application support skills directory. Do not probe legacy, external, workspace, or project-local skill directories.
 
     ## Memory Usage Contract
     - Treat retrieved graph memory as evidence-backed background context.

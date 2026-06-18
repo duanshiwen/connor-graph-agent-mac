@@ -92,7 +92,7 @@ struct PhaseHSourceSkillAutomationUITests {
         let presentation = SkillRuntimeUIPresentation.build(skills: definitions)
 
         #expect(presentation.summary.totalCount == 2)
-        #expect(presentation.summary.projectScopedCount == 1)
+        #expect(presentation.summary.projectScopedCount == 0)
         #expect(presentation.summary.requiresSourceCount == 1)
         #expect(presentation.cards.map(\.id) == ["superpowers", "writer"])
         #expect(presentation.cards[0].scopeLabel == "project")
