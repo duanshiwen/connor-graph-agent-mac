@@ -205,7 +205,7 @@ private struct MailGovernanceHintStrip: View {
     }
 }
 
-private struct AddMailAccountSheet: View {
+struct AddMailAccountSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var selectedPreset: MailAccountProviderPreset = .apple
     @State private var displayName: String = ""
