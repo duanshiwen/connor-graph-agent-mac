@@ -30,6 +30,13 @@ public enum AgentPermissionCapability: String, Codable, Sendable, Equatable, Has
     case readContacts
     case mutateContacts
     case importMailAttachment
+    case readRSS
+    case readRSSContent
+    case mutateRSSState
+    case manageRSSSources
+    case syncRSSSources
+    case importRSSOPML
+    case exportRSSOPML
 }
 
 public enum AgentPermissionMode: String, Codable, Sendable, Equatable, CaseIterable, Hashable {
