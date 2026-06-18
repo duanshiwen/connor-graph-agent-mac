@@ -12,7 +12,7 @@ import ConnorGraphAppSupport
 
 @main
 struct ConnorGraphAgentMacApp: App {
-    @NSApplicationDelegateAdaptor(ConnorMenuBarDelegate.self) private var menuBarDelegate
+    @NSApplicationDelegateAdaptor(ConnorApplicationDelegate.self) private var applicationDelegate
     @StateObject private var viewModel: AppViewModel
 
     init() {
@@ -21,7 +21,7 @@ struct ConnorGraphAgentMacApp: App {
     }
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup("康纳同学") {
             AppShellView(viewModel: viewModel)
                 .preferredColorScheme(viewModel.appearanceMode.colorScheme)
                 .toolbarBackground(.visible, for: .windowToolbar)
@@ -63,78 +63,32 @@ struct ConnorGraphAgentMacApp: App {
 }
 
 @MainActor
-private final class ConnorMenuBarDelegate: NSObject, NSApplicationDelegate {
+private final class ConnorApplicationDelegate: NSObject, NSApplicationDelegate {
     private let hiddenTopLevelMenuTitles: Set<String> = [
         "File", "Edit", "View", "Window", "Help",
         "文件", "编辑", "显示", "窗口", "帮助"
     ]
-    private var menuObservers: [NSObjectProtocol] = []
-    private var pruneWorkItem: DispatchWorkItem?
-    private var isPruningMenus = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        installMenuPruneObserversIfNeeded()
-        scheduleStandardMenuPrune()
-        scheduleStandardMenuPrune(after: 0.1)
-        scheduleStandardMenuPrune(after: 0.5)
+        normalizeMenusSoon()
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        scheduleStandardMenuPrune()
-    }
-
-    func applicationWillUpdate(_ notification: Notification) {
-        scheduleStandardMenuPrune()
+        normalizeMenusSoon()
     }
 
     func applicationDidUpdate(_ notification: Notification) {
-        scheduleStandardMenuPrune()
+        normalizeMenusSoon()
     }
 
-    func applicationWillTerminate(_ notification: Notification) {
-        for observer in menuObservers {
-            NotificationCenter.default.removeObserver(observer)
-        }
-        menuObservers.removeAll()
-        pruneWorkItem?.cancel()
-        pruneWorkItem = nil
-    }
-
-    private func installMenuPruneObserversIfNeeded() {
-        guard menuObservers.isEmpty else { return }
-        let center = NotificationCenter.default
-        let notifications: [Notification.Name] = [
-            NSMenu.didAddItemNotification,
-            NSMenu.didChangeItemNotification,
-            NSMenu.didRemoveItemNotification
-        ]
-        menuObservers = notifications.map { name in
-            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    self?.scheduleStandardMenuPrune()
-                }
-            }
+    private func normalizeMenusSoon() {
+        DispatchQueue.main.async { [weak self] in
+            self?.normalizeMenus()
         }
     }
 
-    private func scheduleStandardMenuPrune(after delay: TimeInterval = 0) {
-        guard !isPruningMenus else { return }
-        pruneWorkItem?.cancel()
-        let workItem = DispatchWorkItem { [weak self] in
-            self?.pruneStandardMenusNow()
-        }
-        pruneWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
-    }
-
-    private func pruneStandardMenusNow() {
-        guard !isPruningMenus else { return }
-        guard let mainMenu = NSApp.mainMenu else {
-            scheduleStandardMenuPrune(after: 0.05)
-            return
-        }
-        isPruningMenus = true
-        defer { isPruningMenus = false }
+    private func normalizeMenus() {
+        guard let mainMenu = NSApp.mainMenu else { return }
         localizeApplicationMenu(in: mainMenu)
         for item in mainMenu.items.reversed() where hiddenTopLevelMenuTitles.contains(item.title) {
             mainMenu.removeItem(item)

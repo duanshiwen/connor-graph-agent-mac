@@ -134,7 +134,6 @@ struct ProductOSRegistryView: View {
             }
             .padding()
         }
-        .navigationTitle("Product OS")
     }
 }
 

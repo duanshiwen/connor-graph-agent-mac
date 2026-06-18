@@ -22,18 +22,19 @@ struct MailSourceSettingsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            MailBrowserTopBar(onAdd: { viewModel.isPresentingAddMailAccountSheet = true })
-            Divider().opacity(0.6)
-            Group {
-                if let selectedMessage {
+        Group {
+            if let selectedMessage {
+                VStack(alignment: .leading, spacing: 0) {
+                    MailBrowserTopBar(onAdd: { viewModel.isPresentingAddMailAccountSheet = true })
+                    Divider().opacity(0.6)
                     MailMessageDetailPane(account: selectedAccount, mailbox: selectedMailbox, message: selectedMessage)
-                } else {
-                    MailMessageEmptyDetailPane(hasAccounts: !presentation.accounts.isEmpty)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
+            } else {
+                Color.clear
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppShellColors.detailBackground)
         .sheet(isPresented: $viewModel.isPresentingAddMailAccountSheet) {
             AddMailAccountSheet()
@@ -62,26 +63,6 @@ private struct MailBrowserTopBar: View {
         }
         .padding(.horizontal, AppShellLayout.spaceXL)
         .padding(.vertical, AppShellLayout.spaceL)
-    }
-}
-
-private struct MailMessageEmptyDetailPane: View {
-    var hasAccounts: Bool
-
-    var body: some View {
-        VStack(spacing: AppShellLayout.spaceL) {
-            Spacer(minLength: 96)
-            ContentUnavailableView(
-                hasAccounts ? "选择一封邮件开始查看" : "先添加一个邮件帐户",
-                systemImage: hasAccounts ? "envelope.open" : "envelope.badge",
-                description: Text(hasAccounts ? "从左侧依次选择账户、文件夹和邮件。Connor 会在不改变已读状态的前提下展示邮件摘要；读取正文和附件导入仍会保留审计记录。" : "点击右上角“添加邮件帐户”，选择 Apple、Microsoft、QQ、网易 163/126 或其他 IMAP/SMTP 邮箱。")
-            )
-            .frame(maxWidth: .infinity)
-            MailGovernanceHintStrip()
-                .frame(maxWidth: 680)
-            Spacer()
-        }
-        .padding(AppShellLayout.spaceXL)
     }
 }
 
@@ -205,7 +186,15 @@ private struct MailGovernanceHintStrip: View {
     }
 }
 
-private struct AddMailAccountSheet: View {
+struct AddMailAccountSheet: View {
+    private enum Layout {
+        static let sheetWidth: CGFloat = 640
+        static let iconSize: CGFloat = 44
+        static let labelColumnWidth: CGFloat = 108
+        static let menuWidth: CGFloat = 188
+        static let portFieldWidth: CGFloat = 92
+    }
+
     @Environment(\.dismiss) private var dismiss
     @State private var selectedPreset: MailAccountProviderPreset = .apple
     @State private var displayName: String = ""
@@ -220,79 +209,127 @@ private struct AddMailAccountSheet: View {
         selectedPreset == .other
     }
 
+    private var saveDisabled: Bool {
+        email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
-            HStack(alignment: .top, spacing: AppShellLayout.spaceM) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color.accentColor.opacity(0.14))
-                    Image(systemName: "envelope.badge")
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(Color.accentColor)
-                }
-                .frame(width: 48, height: 48)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("添加邮件帐户")
-                        .font(.title3.weight(.semibold))
-                    Text("选择服务商后，Connor 会预填常见 IMAP/SMTP 配置。真实凭据接入会继续走本地凭据边界和审批治理。")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceXL) {
+            header
+            formContent
+            MailAccountSetupHintCard(
+                title: selectedPreset.subtitle,
+                guidance: selectedPreset.guidance
+            )
+            footer
+        }
+        .padding(SettingsListLayout.spaceXL)
+        .frame(width: Layout.sheetWidth)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear { applyPreset(selectedPreset) }
+    }
+
+    private var header: some View {
+        HStack(alignment: .top, spacing: SettingsListLayout.spaceM) {
+            ZStack {
+                RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.13))
+                Image(systemName: "envelope.badge")
+                    .font(SettingsListTypography.largeIcon)
+                    .foregroundStyle(Color.accentColor)
             }
+            .frame(width: Layout.iconSize, height: Layout.iconSize)
 
-            Form {
-                Picker("服务商", selection: $selectedPreset) {
-                    ForEach(MailAccountProviderPreset.allCases) { preset in
-                        Text(preset.title).tag(preset)
-                    }
-                }
-                .onChange(of: selectedPreset) { _, preset in applyPreset(preset) }
-
-                TextField("显示名称", text: $displayName)
-                TextField("邮箱地址", text: $email)
-                SecureField(selectedPreset == .microsoft ? "OAuth / 授权凭据（稍后接入）" : "授权码 / App Password", text: $credential)
-
-                Section("服务器预设") {
-                    TextField("收件服务器", text: $incomingHost)
-                        .disabled(!isManualPreset)
-                    TextField("收件端口", value: $incomingPort, format: .number)
-                        .disabled(!isManualPreset)
-                    TextField("发件服务器", text: $outgoingHost)
-                        .disabled(!isManualPreset)
-                    TextField("发件端口", value: $outgoingPort, format: .number)
-                        .disabled(!isManualPreset)
-                }
-            }
-            .formStyle(.grouped)
-            .frame(minHeight: 300)
-
-            GroupBox {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label(selectedPreset.subtitle, systemImage: "lock.shield")
-                        .font(AgentChatTypography.metaEmphasis)
-                    Text(selectedPreset.guidance)
-                        .font(AgentChatTypography.meta)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text("本轮界面先保存为连接草稿；真实登录、测试连接和凭据持久化会在后续 Mail Runtime 接入中完成。")
-                        .font(AgentChatTypography.micro)
-                        .foregroundStyle(.tertiary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            HStack {
-                Spacer()
-                Button("取消") { dismiss() }
-                Button("保存草稿") { dismiss() }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
+                Text("添加邮件账户")
+                    .font(SettingsListTypography.header)
+                Text("选择服务商后，Connor 会预填常见 IMAP/SMTP 配置。真实凭据接入会继续走本地凭据边界和审批治理。")
+                    .font(SettingsListTypography.rowSubtitle)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(22)
-        .frame(width: 620)
-        .onAppear { applyPreset(selectedPreset) }
+    }
+
+    private var formContent: some View {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceM) {
+            MailAccountSetupSection(title: "账户信息") {
+                MailAccountSetupRow("服务商", labelWidth: Layout.labelColumnWidth) {
+                    Picker("服务商", selection: $selectedPreset) {
+                        ForEach(MailAccountProviderPreset.allCases) { preset in
+                            Text(preset.title).tag(preset)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .controlSize(.regular)
+                    .frame(width: Layout.menuWidth, alignment: .leading)
+                    .onChange(of: selectedPreset) { _, preset in applyPreset(preset) }
+                }
+
+                Divider().padding(.leading, Layout.labelColumnWidth + SettingsListLayout.spaceM)
+
+                MailAccountSetupRow("显示名称", labelWidth: Layout.labelColumnWidth) {
+                    TextField("例如 Apple iCloud", text: $displayName)
+                        .textFieldStyle(.roundedBorder)
+                }
+
+                MailAccountSetupRow("邮箱地址", labelWidth: Layout.labelColumnWidth) {
+                    TextField("name@example.com", text: $email)
+                        .textFieldStyle(.roundedBorder)
+                        .textContentType(.emailAddress)
+                }
+
+                MailAccountSetupRow("授权凭据", labelWidth: Layout.labelColumnWidth) {
+                    SecureField(selectedPreset == .microsoft ? "OAuth / 授权凭据（稍后接入）" : "授权码 / App Password", text: $credential)
+                        .textFieldStyle(.roundedBorder)
+                }
+            }
+
+            MailAccountSetupSection(title: "服务器预设") {
+                MailAccountSetupRow("收件服务器", labelWidth: Layout.labelColumnWidth) {
+                    TextField("imap.example.com", text: $incomingHost)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(!isManualPreset)
+                        .opacity(isManualPreset ? 1 : 0.68)
+                }
+
+                MailAccountSetupRow("收件端口", labelWidth: Layout.labelColumnWidth) {
+                    TextField("993", value: $incomingPort, format: .number)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: Layout.portFieldWidth, alignment: .leading)
+                        .disabled(!isManualPreset)
+                        .opacity(isManualPreset ? 1 : 0.68)
+                }
+
+                MailAccountSetupRow("发件服务器", labelWidth: Layout.labelColumnWidth) {
+                    TextField("smtp.example.com", text: $outgoingHost)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(!isManualPreset)
+                        .opacity(isManualPreset ? 1 : 0.68)
+                }
+
+                MailAccountSetupRow("发件端口", labelWidth: Layout.labelColumnWidth) {
+                    TextField("587", value: $outgoingPort, format: .number)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: Layout.portFieldWidth, alignment: .leading)
+                        .disabled(!isManualPreset)
+                        .opacity(isManualPreset ? 1 : 0.68)
+                }
+            }
+        }
+    }
+
+    private var footer: some View {
+        HStack(spacing: SettingsListLayout.spaceS) {
+            Spacer()
+            Button("取消") { dismiss() }
+                .keyboardShortcut(.cancelAction)
+            Button("保存草稿") { dismiss() }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(saveDisabled)
+        }
     }
 
     private func applyPreset(_ preset: MailAccountProviderPreset) {
@@ -303,6 +340,88 @@ private struct AddMailAccountSheet: View {
         if displayName.isEmpty {
             displayName = preset.title
         }
+    }
+}
+
+private struct MailAccountSetupSection<Content: View>: View {
+    var title: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceS) {
+            Text(title)
+                .font(SettingsListTypography.rowCaptionEmphasized)
+                .foregroundStyle(.secondary)
+            VStack(spacing: SettingsListLayout.spaceXS) {
+                content
+            }
+            .padding(.horizontal, SettingsListLayout.spaceL)
+            .padding(.vertical, SettingsListLayout.spaceM)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(AppShellColors.cardBackground, in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous)
+                    .stroke(Color.secondary.opacity(SettingsListLayout.hairlineOpacity), lineWidth: 1)
+            )
+        }
+    }
+}
+
+private struct MailAccountSetupRow<Content: View>: View {
+    var title: String
+    var labelWidth: CGFloat
+    @ViewBuilder var content: Content
+
+    init(_ title: String, labelWidth: CGFloat, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.labelWidth = labelWidth
+        self.content = content()
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: SettingsListLayout.spaceM) {
+            Text(title)
+                .font(SettingsListTypography.rowTitleSelected)
+                .foregroundStyle(.primary)
+                .frame(width: labelWidth, alignment: .trailing)
+            content
+                .font(SettingsListTypography.rowTitle)
+                .frame(maxWidth: .infinity, minHeight: SettingsListLayout.fieldHeight, alignment: .leading)
+        }
+        .frame(minHeight: SettingsListLayout.fieldHeight)
+    }
+}
+
+private struct MailAccountSetupHintCard: View {
+    var title: String
+    var guidance: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: SettingsListLayout.spaceM) {
+            Image(systemName: "lock.shield")
+                .font(SettingsListTypography.icon)
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 22, alignment: .center)
+            VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
+                Text(title)
+                    .font(SettingsListTypography.rowTitleSelected)
+                Text(guidance)
+                    .font(SettingsListTypography.rowSubtitle)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("本轮界面先保存为连接草稿；真实登录、测试连接和凭据持久化会在后续 Mail Runtime 接入中完成。")
+                    .font(SettingsListTypography.rowCaption)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(SettingsListLayout.spaceM)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppShellColors.subtleCardBackground, in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous)
+                .stroke(Color.secondary.opacity(SettingsListLayout.hairlineOpacity), lineWidth: 1)
+        )
     }
 }
 
