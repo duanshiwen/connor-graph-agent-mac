@@ -18,6 +18,8 @@ struct CraftListPaneView: View {
                 CraftSessionListPane(viewModel: viewModel)
             case .llmSettings:
                 CraftSettingsListPane(viewModel: viewModel, selection: $selection)
+            case .mail:
+                CraftMailListPane(viewModel: viewModel)
             case .sources:
                 CraftSourceListPane(viewModel: viewModel)
             case .skills:
@@ -53,32 +55,35 @@ struct CraftSessionListPane: View {
                         .padding(.top, 80)
                 }
             } else {
-                List(filteredSessions) { session in
-                    CraftSessionRow(
-                        row: AgentChatSessionPresentation(session: session),
-                        isSelected: session.id == viewModel.selectedChatSessionID,
-                        isRunning: viewModel.isChatSessionSubmitting(session.id),
-                        isRegeneratingTitle: viewModel.regeneratingTitleSessionIDs.contains(session.id),
-                        hasRunningBackgroundTask: !viewModel.canDeleteChatSession(session.id),
-                        labelDefinitions: viewModel.governanceConfig.labels,
-                        onSelect: {
-                            var transaction = Transaction()
-                            transaction.disablesAnimations = true
-                            withTransaction(transaction) {
-                                viewModel.selectChatSession(session.id)
-                            }
-                        },
-                        onRename: { title in viewModel.renameChatSession(session.id, title: title) },
-                        onSetStatus: { status in viewModel.setChatSessionStatus(session.id, status: status) },
-                        onToggleLabel: { labelID in viewModel.toggleChatSessionLabel(session.id, labelID: labelID) },
-                        onRegenerateTitle: { viewModel.regenerateChatSessionTitle(session.id) },
-                        onDelete: { viewModel.deleteChatSession(session.id) }
-                    )
-                    .listRowInsets(EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8))
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
+                ScrollView {
+                    LazyVStack(spacing: 2) {
+                        ForEach(filteredSessions) { session in
+                            CraftSessionRow(
+                                row: AgentChatSessionPresentation(session: session),
+                                isSelected: session.id == viewModel.selectedChatSessionID,
+                                isRunning: viewModel.isChatSessionSubmitting(session.id),
+                                isRegeneratingTitle: viewModel.regeneratingTitleSessionIDs.contains(session.id),
+                                hasRunningBackgroundTask: !viewModel.canDeleteChatSession(session.id),
+                                labelDefinitions: viewModel.governanceConfig.labels,
+                                onSelect: {
+                                    var transaction = Transaction()
+                                    transaction.disablesAnimations = true
+                                    withTransaction(transaction) {
+                                        viewModel.selectChatSession(session.id)
+                                    }
+                                },
+                                onRename: { title in viewModel.renameChatSession(session.id, title: title) },
+                                onSetStatus: { status in viewModel.setChatSessionStatus(session.id, status: status) },
+                                onToggleLabel: { labelID in viewModel.toggleChatSessionLabel(session.id, labelID: labelID) },
+                                onRegenerateTitle: { viewModel.regenerateChatSessionTitle(session.id) },
+                                onDelete: { viewModel.deleteChatSession(session.id) }
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.top, 6)
+                    .padding(.bottom, 10)
                 }
-                .listStyle(.plain)
                 .scrollContentBackground(.hidden)
             }
         }
@@ -96,6 +101,289 @@ struct CraftSessionListPane: View {
         case .status(let status): status.displayName
         case .label(let labelID): viewModel.governanceConfig.labels.first(where: { $0.id == labelID })?.name ?? labelID
         }
+    }
+}
+
+struct CraftMailListPane: View {
+    @ObservedObject var viewModel: AppViewModel
+    @State private var searchQuery: String = ""
+
+    private var presentation: NativeMailBrowserPresentation {
+        viewModel.mailBrowserPresentation
+    }
+
+    private var visibleMessages: [MailMessageSummary] {
+        presentation.messages(accountID: nil, mailboxID: nil, query: searchQuery)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Text("邮件系统")
+                    .font(AppListTypography.header)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                Button(action: { viewModel.isPresentingAddMailAccountSheet = true }) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .help("添加邮件帐户")
+                .accessibilityLabel("添加邮件帐户")
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
+
+            if !presentation.messages.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    TextField("筛选标题、正文或发件人", text: $searchQuery)
+                        .textFieldStyle(.plain)
+                    if !searchQuery.isEmpty {
+                        Button { searchQuery = "" } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 9)
+                .frame(height: 28)
+                .background(Color(nsColor: .textBackgroundColor).opacity(0.62), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(AppShellColors.hairline, lineWidth: 1)
+                )
+                .padding(.horizontal, 14)
+                .padding(.bottom, 8)
+            }
+
+            if presentation.accounts.isEmpty {
+                ContentUnavailableView("暂无邮件账户", systemImage: "envelope.badge", description: Text("点击右上角 + 添加邮件账户。"))
+                    .padding(.top, 80)
+            } else if presentation.messages.isEmpty {
+                ContentUnavailableView("暂无邮件", systemImage: "tray", description: Text("账户添加后，同步到的邮件会在这里按时间显示。"))
+                    .padding(.top, 80)
+            } else if visibleMessages.isEmpty {
+                ContentUnavailableView("没有匹配的邮件", systemImage: "magnifyingglass", description: Text("筛选会匹配标题、正文摘要和发件人。"))
+                    .padding(.top, 80)
+            } else {
+                List(visibleMessages) { message in
+                    MailMessageListRow(
+                        message: message,
+                        account: presentation.account(id: message.accountID),
+                        mailbox: presentation.mailbox(id: message.mailboxID),
+                        isSelected: message.id == viewModel.selectedMailMessageID,
+                        onSelect: { selectMessage(message) }
+                    )
+                    .mailListRowStyle()
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .contentMargins(.top, 6, for: .scrollContent)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private func selectMessage(_ message: MailMessageSummary) {
+        viewModel.selectedMailAccountID = message.accountID
+        viewModel.selectedMailMailboxID = message.mailboxID
+        viewModel.selectedMailMessageID = message.id
+    }
+}
+
+private extension View {
+    func mailListRowStyle() -> some View {
+        self
+            .listRowInsets(EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+    }
+}
+
+private struct MailAccountListRow: View {
+    var account: MailAccount
+    var isSelected: Bool
+    var showsDisclosure: Bool = false
+    var onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: icon(for: account.provider))
+                    .foregroundStyle(isSelected ? .accentColor : color(for: account.health.status))
+                    .frame(width: 18)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 6) {
+                        Text(account.displayName)
+                            .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                        Circle()
+                            .fill(color(for: account.health.status))
+                            .frame(width: 7, height: 7)
+                    }
+                    Text(account.identities.map { $0.address.email }.joined(separator: ", "))
+                        .font(AppListTypography.rowSubtitle)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                if showsDisclosure {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func icon(for provider: MailProviderKind) -> String {
+        switch provider {
+        case .gmail: "g.circle.fill"
+        case .microsoft365: "m.circle.fill"
+        case .jmap: "j.circle.fill"
+        case .genericIMAPSMTP: "envelope"
+        case .localFixture: "shippingbox"
+        }
+    }
+
+    private func color(for status: MailAccountHealthStatus) -> Color {
+        switch status {
+        case .ready: .green
+        case .degraded: .orange
+        case .blocked, .unauthenticated: .red
+        case .unknown: .secondary
+        }
+    }
+}
+
+private struct MailMailboxListRow: View {
+    var mailbox: MailMailbox
+    var isSelected: Bool
+    var showsDisclosure: Bool = false
+    var onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 10) {
+                Image(systemName: icon(for: mailbox.role))
+                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                    .frame(width: 18)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(mailbox.name)
+                        .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
+                        .lineLimit(1)
+                    Text("\(mailbox.status.messageCount) 封 · \(mailbox.status.unreadCount) 未读")
+                        .font(AppListTypography.rowCaption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 4)
+                if mailbox.status.unreadCount > 0 {
+                    Text("\(mailbox.status.unreadCount)")
+                        .font(AppListTypography.rowCaptionEmphasized)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .frame(height: 18)
+                        .background(Color.accentColor, in: Capsule())
+                }
+                if showsDisclosure {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func icon(for role: MailMailboxRole) -> String {
+        switch role {
+        case .inbox: "tray"
+        case .sent: "paperplane"
+        case .drafts: "doc.text"
+        case .archive: "archivebox"
+        case .trash: "trash"
+        case .spam: "exclamationmark.octagon"
+        case .custom: "folder"
+        }
+    }
+}
+
+private struct MailMessageListRow: View {
+    var message: MailMessageSummary
+    var account: MailAccount?
+    var mailbox: MailMailbox?
+    var isSelected: Bool
+    var onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(alignment: .top, spacing: 10) {
+                Circle()
+                    .fill(message.flags.isRead ? Color.secondary.opacity(0.24) : Color.accentColor)
+                    .frame(width: 8, height: 8)
+                    .padding(.top, 7)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 6) {
+                        Text(message.subject)
+                            .font(message.flags.isRead ? AppListTypography.rowTitle : AppListTypography.rowTitleSelected)
+                            .lineLimit(1)
+                        if message.hasAttachments {
+                            Image(systemName: "paperclip")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Text(message.from.name ?? message.from.email)
+                        .font(AppListTypography.rowCaptionEmphasized)
+                        .lineLimit(1)
+                    Text(contextText)
+                        .font(AppListTypography.rowCaption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                    Text(message.snippet)
+                        .font(AppListTypography.rowSubtitle)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var contextText: String {
+        [account?.displayName, mailbox?.name]
+            .compactMap { $0 }
+            .joined(separator: " · ")
+    }
+}
+
+private struct MailSmallUnavailableRow: View {
+    var text: String
+
+    var body: some View {
+        Text(text)
+            .font(AppListTypography.rowSubtitle)
+            .foregroundStyle(.secondary)
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -128,6 +416,8 @@ struct CraftDetailPaneView: View {
                 AutomationRuntimePanelView(viewModel: viewModel)
             case .productOS:
                 ProductOSRegistryView(viewModel: viewModel)
+            case .mail:
+                MailSourceSettingsView(viewModel: viewModel)
             case .sources:
                 SourceRuntimePanelView(viewModel: viewModel)
             case .skills:

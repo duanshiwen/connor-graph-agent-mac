@@ -55,7 +55,7 @@ Use concise bullets. Never bypass Connor graph admission.
     #expect(loaded.skillURL == skillURL)
 }
 
-@Test func skillsRuntimeResolverPrefersProjectThenHomeThenGlobal() throws {
+@Test func skillsRuntimeResolverUsesOnlyApplicationSkillsDirectory() throws {
     let storagePaths = temporaryPhaseDStoragePaths()
     defer { try? FileManager.default.removeItem(at: storagePaths.applicationSupportDirectory) }
     let globalRoot = storagePaths.applicationSupportDirectory.appendingPathComponent("global-skills", isDirectory: true)
@@ -63,13 +63,14 @@ Use concise bullets. Never bypass Connor graph admission.
     let projectSkills = projectRoot.appendingPathComponent(".agents/skills", isDirectory: true)
     _ = try writeSkill(root: globalRoot, slug: "same-skill", content: validSkillMarkdown.replacingOccurrences(of: "Session Summary", with: "Global Skill"))
     _ = try writeSkill(root: storagePaths.skillsDirectory, slug: "same-skill", content: validSkillMarkdown.replacingOccurrences(of: "Session Summary", with: "Home Skill"))
-    _ = try writeSkill(root: projectSkills, slug: "same-skill", content: validSkillMarkdown.replacingOccurrences(of: "Session Summary", with: "Project Skill"))
-    let repository = AppSkillRuntimeRepository(storagePaths: storagePaths, globalSkillsDirectory: globalRoot, projectRoot: projectRoot)
+    _ = try writeSkill(root: projectSkills, slug: "project-only", content: validSkillMarkdown.replacingOccurrences(of: "Session Summary", with: "Project Skill"))
+    let repository = AppSkillRuntimeRepository(storagePaths: storagePaths)
 
     let resolved = try #require(try repository.resolveSkill(slug: "same-skill"))
 
-    #expect(resolved.scope == .project)
-    #expect(resolved.manifest.name == "Project Skill")
+    #expect(resolved.scope == .home)
+    #expect(resolved.manifest.name == "Home Skill")
+    #expect(try repository.resolveSkill(slug: "project-only") == nil)
 }
 
 @Test func skillRuntimeBuildsInstructionBundleForMatchingTriggerAndGlob() throws {

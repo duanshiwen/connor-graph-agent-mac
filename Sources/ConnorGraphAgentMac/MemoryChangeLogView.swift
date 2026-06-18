@@ -55,7 +55,6 @@ struct MemoryChangeLogView: View {
             }
         }
         .padding()
-        .navigationTitle("记忆变更")
         .task {
             viewModel.deferViewUpdate {
                 viewModel.reloadMemoryChangeLog()
