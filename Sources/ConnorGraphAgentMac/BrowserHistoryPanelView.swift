@@ -48,6 +48,7 @@ struct BrowserHistoryPanelView: View {
             }
             .buttonStyle(.plain)
             .help("关闭历史面板")
+            .accessibilityLabel("关闭历史面板")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -76,6 +77,8 @@ struct BrowserHistoryPanelView: View {
                         .foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.plain)
+                .help("清空历史搜索")
+                .accessibilityLabel("清空历史搜索")
             }
         }
         .padding(.horizontal, 10)
