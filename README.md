@@ -146,7 +146,7 @@ Agent runtime layer. It provides：
 
 - Agent loop orchestration
 - Streaming model provider abstraction
-- OpenAI-compatible / Anthropic-compatible providers
+- OpenAI-compatible / Anthropic-compatible providers with streaming agent completion paths
 - Tool registration, tool execution and tool result gating
 - Local workspace tools and policy checks
 - Mail/RSS/Calendar/Contacts/scientific compute tool boundaries
@@ -291,6 +291,9 @@ API keys and provider credentials must not be stored in JSON settings files. The
 
 - OpenAI-compatible provider path
 - Anthropic-compatible provider path
+- OpenAI-compatible and Anthropic-compatible agent completions support SSE streaming through Connor's model-provider abstraction
+- OpenAI-compatible chat completion requests use an explicit 180-second default request timeout instead of relying on `URLSession.shared` defaults
+- Non-streaming completion and provider health-check paths remain available as fallbacks
 - Claude SDK sidecar boundary
 - Per-connection settings and per-session model override
 - Provider health checks and credential boundary
