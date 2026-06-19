@@ -1,17 +1,32 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import Foundation
 import Speech
+
+private final class SpeechAudioSampleBufferForwarder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
+    var onSampleBuffer: ((CMSampleBuffer) -> Void)?
+
+    func captureOutput(
+        _ output: AVCaptureOutput,
+        didOutput sampleBuffer: CMSampleBuffer,
+        from connection: AVCaptureConnection
+    ) {
+        onSampleBuffer?(sampleBuffer)
+    }
+}
 
 @MainActor
 final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
     private(set) var runningSessionID: String?
 
     private let localeIdentifier: String?
-    private var audioEngine: AVAudioEngine?
+    private let captureQueue = DispatchQueue(label: "com.shiwen.connor.speech.capture")
+
+    private var captureSession: AVCaptureSession?
+    private var audioOutput: AVCaptureAudioDataOutput?
+    private var sampleBufferForwarder: SpeechAudioSampleBufferForwarder?
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
     private var speechRecognizer: SFSpeechRecognizer?
-    private var didInstallInputTap = false
     private var isStopping = false
 
     init(localeIdentifier: String? = nil) {
@@ -40,14 +55,17 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
     }
 
     func stop(reason: SessionSpeechTranscriptionStopReason) {
-        guard runningSessionID != nil || audioEngine != nil || recognitionRequest != nil || recognitionTask != nil else { return }
+        guard runningSessionID != nil || captureSession != nil || recognitionRequest != nil || recognitionTask != nil else { return }
         isStopping = true
         runningSessionID = nil
 
-        if let audioEngine {
-            audioEngine.stop()
-            if didInstallInputTap {
-                audioEngine.inputNode.removeTap(onBus: 0)
+        audioOutput?.setSampleBufferDelegate(nil, queue: nil)
+        sampleBufferForwarder?.onSampleBuffer = nil
+
+        let sessionToStop = captureSession
+        captureQueue.async {
+            if sessionToStop?.isRunning == true {
+                sessionToStop?.stopRunning()
             }
         }
 
@@ -121,35 +139,53 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
             return
         }
 
-        guard AVCaptureDevice.default(for: .audio) != nil else {
+        guard let audioDevice = AVCaptureDevice.default(for: .audio) else {
             cleanupAfterFailure()
             onError("没有可用的麦克风输入设备，请连接或启用系统输入设备后再试。")
             return
         }
 
-        let audioEngine = AVAudioEngine()
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
-        // Do not force on-device recognition by default. Apple documents this
-        // flag as a hard network-prevention setting rather than a general
-        // quality/performance recommendation. Some macOS locale/model
-        // combinations advertise partial support but fail immediately for live
-        // audio, which makes the session appear to start and then stop. Let the
-        // recognizer choose the available path so live dictation remains stable.
 
-        let inputNode = audioEngine.inputNode
-        let recordingFormat = inputNode.outputFormat(forBus: 0)
-        guard recordingFormat.channelCount > 0, recordingFormat.sampleRate > 0 else {
+        let captureSession = AVCaptureSession()
+        captureSession.beginConfiguration()
+
+        do {
+            let audioInput = try AVCaptureDeviceInput(device: audioDevice)
+            guard captureSession.canAddInput(audioInput) else {
+                captureSession.commitConfiguration()
+                cleanupAfterFailure()
+                onError("无法添加麦克风输入，请检查系统输入设备。")
+                return
+            }
+            captureSession.addInput(audioInput)
+        } catch {
+            captureSession.commitConfiguration()
             cleanupAfterFailure()
-            onError("麦克风输入格式不可用，请检查系统麦克风权限和输入设备。")
+            onError(error.localizedDescription)
             return
         }
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak request] buffer, _ in
-            request?.append(buffer)
-        }
-        didInstallInputTap = true
 
-        self.audioEngine = audioEngine
+        let audioOutput = AVCaptureAudioDataOutput()
+        guard captureSession.canAddOutput(audioOutput) else {
+            captureSession.commitConfiguration()
+            cleanupAfterFailure()
+            onError("无法添加麦克风音频输出，请检查系统输入设备。")
+            return
+        }
+
+        let forwarder = SpeechAudioSampleBufferForwarder()
+        forwarder.onSampleBuffer = { [weak request] sampleBuffer in
+            request?.appendAudioSampleBuffer(sampleBuffer)
+        }
+        audioOutput.setSampleBufferDelegate(forwarder, queue: captureQueue)
+        captureSession.addOutput(audioOutput)
+        captureSession.commitConfiguration()
+
+        self.captureSession = captureSession
+        self.audioOutput = audioOutput
+        self.sampleBufferForwarder = forwarder
         self.recognitionRequest = request
         self.speechRecognizer = recognizer
         isStopping = false
@@ -165,20 +201,14 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
                     onError(error.localizedDescription)
                     return
                 }
-                // Keep the session-level dictation running until the user stops
-                // it, leaves the session, or an actual error occurs. For live
-                // audio, `isFinal` only means the current recognition request has
-                // produced a final hypothesis; treating it as a user stop makes
-                // short pauses look like the microphone immediately turns off.
+                // For session-level dictation, keep listening until the user
+                // stops, leaves/deletes the session, or Speech reports an error.
+                // Do not stop just because one recognition result is final.
             }
         }
 
-        do {
-            audioEngine.prepare()
-            try audioEngine.start()
-        } catch {
-            cleanupAfterFailure()
-            onError(error.localizedDescription)
+        captureQueue.async { [weak captureSession] in
+            captureSession?.startRunning()
         }
     }
 
@@ -202,12 +232,13 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
     }
 
     private func cleanup() {
-        didInstallInputTap = false
+        captureSession = nil
+        audioOutput = nil
+        sampleBufferForwarder = nil
         runningSessionID = nil
         recognitionTask = nil
         recognitionRequest = nil
         speechRecognizer = nil
-        audioEngine = nil
         isStopping = false
     }
 }
