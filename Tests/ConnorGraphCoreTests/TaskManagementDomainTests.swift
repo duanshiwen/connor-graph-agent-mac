@@ -95,6 +95,26 @@ struct TaskManagementDomainTests {
         #expect(decoded.metadata.recoveryPolicy == .restoreIfInterrupted)
     }
 
+    @Test func legacyTaskMetadataDecodesWithGlobalScopeDefaults() throws {
+        let json = """
+        {
+          "createdBySessionID": "session-legacy",
+          "createdByDisplayName": null,
+          "rationale": "legacy",
+          "tags": ["legacy"],
+          "isProtectedSystemTask": false,
+          "userEditableFields": ["name", "trigger", "target", "tags", "rationale"]
+        }
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(ConnorTaskMetadata.self, from: json)
+
+        #expect(decoded.scope == .global)
+        #expect(decoded.ownerSessionID == nil)
+        #expect(decoded.isRecoverable == false)
+        #expect(decoded.recoveryPolicy == ConnorTaskRecoveryPolicy.none)
+    }
+
     @Test func recoveryPolicyOnlyContainsExpectedValues() {
         #expect(ConnorTaskRecoveryPolicy.allCases == [.none, .restoreIfInterrupted, .restoreIfQueuedOrRunning])
         #expect(ConnorTaskScope.allCases == [.global, .session])
