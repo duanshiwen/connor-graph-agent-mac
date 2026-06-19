@@ -33,7 +33,7 @@ struct TaskManagementPresentationTests {
 
         #expect(card.originBadge == "系统")
         #expect(card.triggerLabel == "定时")
-        #expect(card.targetLabel == "source.runtime:rss.check")
+        #expect(card.targetLabel == "source.runtime:rss.refresh")
         #expect(card.canDelete == false)
         #expect(card.deleteDisabledReason == "系统任务受保护")
         #expect(card.hasReviewControls == false)

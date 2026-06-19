@@ -216,7 +216,7 @@ struct AddMailAccountSheet: View {
 
     private var saveDisabled: Bool {
         email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            || credential.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || (selectedPreset != .microsoft && credential.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             || incomingHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || outgoingHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -289,10 +289,22 @@ struct AddMailAccountSheet: View {
                         .textContentType(.emailAddress)
                 }
 
-                MailAccountSetupRow("授权凭据", labelWidth: Layout.labelColumnWidth) {
-                    SecureField(selectedPreset == .microsoft ? "OAuth / 授权凭据" : "授权码 / App Password", text: $credential)
-                        .textFieldStyle(.roundedBorder)
+                MailAccountSetupRow(selectedPreset == .microsoft ? "登录方式" : "授权凭据", labelWidth: Layout.labelColumnWidth) {
+                    if selectedPreset == .microsoft {
+                        HStack(spacing: SettingsListLayout.spaceS) {
+                            Image(systemName: "person.crop.circle.badge.checkmark")
+                                .foregroundStyle(Color.accentColor)
+                            Text("点击底部按钮后会打开系统默认浏览器进入 Microsoft 登录页，授权 IMAP/SMTP OAuth 访问。")
+                                .font(SettingsListTypography.rowSubtitle)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    } else {
+                        SecureField("授权码 / App Password", text: $credential)
+                            .textFieldStyle(.roundedBorder)
+                    }
                 }
+
             }
 
             MailAccountSetupSection(title: "服务器预设") {
@@ -356,7 +368,7 @@ struct AddMailAccountSheet: View {
                     ProgressView()
                         .controlSize(.small)
                 } else {
-                    Text("添加账户")
+                    Text(selectedPreset == .microsoft ? "使用 Microsoft 登录并添加" : "添加账户")
                 }
             }
             .buttonStyle(.borderedProminent)
@@ -370,7 +382,7 @@ struct AddMailAccountSheet: View {
         guard !isSubmitting else { return }
         isSubmitting = true
         setupError = nil
-        setupMessage = "正在添加账户并准备同步…"
+        setupMessage = selectedPreset == .microsoft ? "正在打开系统默认浏览器进行 Microsoft 登录…" : "正在添加账户并准备同步…"
         do {
             try await viewModel.addMailAccountAndPrepareSync(
                 preset: selectedPreset,
@@ -384,7 +396,7 @@ struct AddMailAccountSheet: View {
             )
             dismiss()
         } catch {
-            setupError = String(describing: error)
+            setupError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             setupMessage = nil
             isSubmitting = false
         }
@@ -468,7 +480,7 @@ private struct MailAccountSetupHintCard: View {
                     .font(SettingsListTypography.rowSubtitle)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("本轮会创建本地账户与默认邮箱结构；真实 IMAP/SMTP 登录、远端邮箱发现和邮件拉取需要 Mail Runtime 同步适配器接入后完成。")
+                Text("添加后会创建本地账户并尝试首次同步。Microsoft Outlook / 365 会通过 OAuth 获取 token，并使用 IMAP XOAUTH2 登录；其他服务商继续使用授权码 / App Password。")
                     .font(SettingsListTypography.rowCaption)
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)

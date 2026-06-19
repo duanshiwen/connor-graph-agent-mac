@@ -24,6 +24,7 @@ public enum ClaudeSDKSidecarProcessTransportError: Error, Sendable, Equatable, L
     case unsupportedCommand(String)
     case sessionAlreadyStarted
     case sessionNotStarted
+    case timedOut(seconds: TimeInterval)
 
     public var errorDescription: String? {
         switch self {
@@ -39,6 +40,8 @@ public enum ClaudeSDKSidecarProcessTransportError: Error, Sendable, Equatable, L
             return "Claude SDK sidecar persistent process transport session has already started."
         case .sessionNotStarted:
             return "Claude SDK sidecar persistent process transport session has not started."
+        case .timedOut(let seconds):
+            return "Claude SDK sidecar timed out after \(seconds) seconds."
         }
     }
 }
@@ -231,17 +234,20 @@ public struct ClaudeSDKSidecarProcessTransport: ClaudeSDKSidecarCommandTransport
     public var arguments: [String]
     public var environment: [String: String]
     public var currentDirectoryURL: URL?
+    public var processTimeout: TimeInterval
 
     public init(
         executableURL: URL,
         arguments: [String] = [],
         environment: [String: String] = [:],
-        currentDirectoryURL: URL? = nil
+        currentDirectoryURL: URL? = nil,
+        processTimeout: TimeInterval = 300
     ) {
         self.executableURL = executableURL
         self.arguments = arguments
         self.environment = environment
         self.currentDirectoryURL = currentDirectoryURL
+        self.processTimeout = processTimeout
     }
 
     public func stream(_ request: ClaudeSDKSidecarRequest) async -> AsyncThrowingStream<ClaudeSDKSidecarEvent, Error> {
@@ -253,6 +259,7 @@ public struct ClaudeSDKSidecarProcessTransport: ClaudeSDKSidecarCommandTransport
         let arguments = arguments
         let environment = environment
         let currentDirectoryURL = currentDirectoryURL
+        let processTimeout = processTimeout
 
         return AsyncThrowingStream { continuation in
             Task.detached(priority: .userInitiated) {
@@ -265,7 +272,8 @@ public struct ClaudeSDKSidecarProcessTransport: ClaudeSDKSidecarCommandTransport
                         executableURL: executableURL,
                         arguments: arguments,
                         environment: environment,
-                        currentDirectoryURL: currentDirectoryURL
+                        currentDirectoryURL: currentDirectoryURL,
+                        processTimeout: processTimeout
                     )
                     for event in events {
                         continuation.yield(event)
@@ -284,7 +292,8 @@ private func runSidecarProcess(
     executableURL: URL,
     arguments: [String],
     environment: [String: String],
-    currentDirectoryURL: URL?
+    currentDirectoryURL: URL?,
+    processTimeout: TimeInterval
 ) throws -> [ClaudeSDKSidecarEvent] {
     let encoder = JSONEncoder()
     var requestData = try encoder.encode(request)
@@ -310,10 +319,21 @@ private func runSidecarProcess(
     process.standardOutput = stdout
     process.standardError = stderr
 
+    let terminationSemaphore = DispatchSemaphore(value: 0)
+    process.terminationHandler = { _ in terminationSemaphore.signal() }
+
     try process.run()
     stdin.fileHandleForWriting.write(requestData)
     try? stdin.fileHandleForWriting.close()
-    process.waitUntilExit()
+
+    let waitResult = terminationSemaphore.wait(timeout: .now() + processTimeout)
+    if waitResult == .timedOut {
+        if process.isRunning {
+            process.terminate()
+            _ = terminationSemaphore.wait(timeout: .now() + 1)
+        }
+        throw ClaudeSDKSidecarProcessTransportError.timedOut(seconds: processTimeout)
+    }
 
     let stdoutData = stdout.fileHandleForReading.readDataToEndOfFile()
     let stderrData = stderr.fileHandleForReading.readDataToEndOfFile()

@@ -21,6 +21,7 @@ enum AppMailAccountSetupError: LocalizedError {
     case invalidEmail
     case missingCredential
     case missingServerConfiguration
+    case missingMicrosoftOAuthClientID
 
     var errorDescription: String? {
         switch self {
@@ -30,6 +31,8 @@ enum AppMailAccountSetupError: LocalizedError {
             return "请输入授权凭据或 App Password。"
         case .missingServerConfiguration:
             return "请填写完整的收件/发件服务器配置。"
+        case .missingMicrosoftOAuthClientID:
+            return "缺少 Microsoft OAuth Client ID。请在 Microsoft Entra 注册桌面应用，并配置 CONNOR_MICROSOFT_MAIL_CLIENT_ID；回调 URI 使用 http://localhost:1476/mail/microsoft/callback。"
         }
     }
 }
@@ -353,6 +356,12 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var automationConfig: ProductOSAutomationConfig = .default
     @Published var automationTriggerRecords: [ProductOSAutomationTriggerRecord] = []
     @Published var automationExecutionHistory: [ProductOSAutomationExecutionHistoryRecord] = []
+    @Published var taskManagementPresentation = TaskManagementUIPresentation(
+        summary: TaskManagementUISummary(totalTaskCount: 0, scheduledTaskCount: 0, eventTriggeredTaskCount: 0, systemTaskCount: 0, userTaskCount: 0, aiTaskCount: 0, stoppedTaskCount: 0, failedTaskCount: 0),
+        cards: []
+    )
+    @Published var selectedTaskAutomationID: String?
+    @Published var isRunningScheduledTasks: Bool = false
     @Published var sourceRuntimeConfigurations: [MCPSourceRuntimeConfiguration] = []
     @Published var sourceRuntimeHealthRecords: [MCPSourceRuntimeHealthRecord] = []
     @Published var sourceRuntimeToolCatalogs: [String: [MCPSourceToolDescriptor]] = [:]
@@ -478,6 +487,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var governanceConfigRepository: AppSessionGovernanceConfigRepository?
     private var productOSRegistryRepository: AppProductOSRegistryRepository?
     private var automationRepository: AppProductOSAutomationRepository?
+    private var taskManagementRepository: AppTaskManagementRepository?
     private var sourceRuntimeRepository: AppMCPSourceRuntimeRepository?
     private var mcpSourceCredentialStore = MCPSourceCredentialStore()
     private var skillRuntimeRepository: AppSkillRuntimeRepository?
@@ -489,6 +499,8 @@ final class AppViewModel: NSObject, ObservableObject {
     private var llmProviderHealthChecker: AppLLMProviderHealthChecker
     private var rssRuntime = RSSRuntime(repository: InMemoryRSSSourceRepository(), cache: InMemoryRSSSourceCache())
     private var mailStore: FileBackedMailSourceStore?
+    private var calendarStore: FileBackedCalendarSourceStore?
+    private var contactStore: FileBackedContactSourceStore?
     private var mailCredentialStore = AppMailCredentialStore()
     private var agentRuntimeFactory: AppGraphAgentRuntimeFactory?
     private var hybridSearchService: (any GraphHybridSearchService)?
@@ -518,6 +530,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var idleSleepAssertionID: IOPMAssertionID = 0
     private var hasActivatedRuntimeSettingsSideEffects = false
     private var locationCoordinator: UserLocationCoordinator?
+    private var taskSchedulerTimer: Timer?
 
     private var activeChatSession: AgentSession {
         nativeSessionManager?.session ?? fallbackChatSession
@@ -916,7 +929,7 @@ final class AppViewModel: NSObject, ObservableObject {
         case .approvals:
             selection = .pendingApprovals
         case .automation, .localAutomationSurface:
-            selection = .automation
+            selection = .scheduledTasks
         case .productOS:
             selection = .productOS
         case .mail:
@@ -1320,6 +1333,7 @@ final class AppViewModel: NSObject, ObservableObject {
             self.governanceConfigRepository = AppSessionGovernanceConfigRepository(configDirectory: storagePaths.configDirectory)
             self.productOSRegistryRepository = AppProductOSRegistryRepository(storagePaths: storagePaths)
             self.automationRepository = AppProductOSAutomationRepository(storagePaths: storagePaths)
+            self.taskManagementRepository = AppTaskManagementRepository(storagePaths: storagePaths)
             self.sourceRuntimeRepository = AppMCPSourceRuntimeRepository(storagePaths: storagePaths)
             self.skillRuntimeRepository = AppSkillRuntimeRepository(storagePaths: storagePaths)
             self.browserHistoryStore = BrowserHistoryStore(historyURL: storagePaths.browserHistoryURL)
@@ -1329,6 +1343,8 @@ final class AppViewModel: NSObject, ObservableObject {
                 cache: FileBackedRSSSourceCache(storagePaths: storagePaths)
             )
             self.mailStore = FileBackedMailSourceStore(storagePaths: storagePaths)
+            self.calendarStore = FileBackedCalendarSourceStore(storagePaths: storagePaths)
+            self.contactStore = FileBackedContactSourceStore(storagePaths: storagePaths)
         }
         if let repository {
             self.promotionRepository = AppPromotionQueueRepository(store: repository.store)
@@ -1384,11 +1400,13 @@ final class AppViewModel: NSObject, ObservableObject {
         reloadProductOSRegistry()
         reloadAutomationConfig()
         reloadAutomationExecutionHistory()
+        reloadTaskManagementPresentation()
         reloadSourceRuntimeConfigurations()
         reloadSkillRuntimeDefinitions()
         reloadSidecarRuntimeDiagnostics()
         Task { await reloadRSSBrowserPresentation() }
         Task { await reloadMailBrowserPresentation() }
+        Task { await reloadCalendarContactsFromStorage() }
         reloadChatSessions()
         loadBrowserHistory()
         reloadSchemaHealthReport()
@@ -1430,6 +1448,147 @@ final class AppViewModel: NSObject, ObservableObject {
         } catch {
             await MainActor.run { errorMessage = String(describing: error) }
         }
+    }
+
+    func reloadTaskManagementPresentation() {
+        do {
+            guard let taskManagementRepository else { return }
+            let tasks = try taskManagementRepository.loadOrCreateDefault()
+            let history = try taskManagementRepository.loadRunHistory(taskID: nil, limit: 100)
+            taskManagementPresentation = TaskManagementUIPresentation.build(tasks: tasks, runHistory: history)
+            if let selectedTaskAutomationID,
+               !taskManagementPresentation.cards.contains(where: { $0.id == selectedTaskAutomationID }) {
+                self.selectedTaskAutomationID = nil
+            }
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func stopTask(_ id: String) {
+        do {
+            _ = try taskManagementRepository?.stopTask(id: id, reason: "Stopped from Task Management UI")
+            reloadTaskManagementPresentation()
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func restoreTask(_ id: String) {
+        do {
+            _ = try taskManagementRepository?.restoreTask(id: id)
+            reloadTaskManagementPresentation()
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func deleteTask(_ id: String) {
+        do {
+            _ = try taskManagementRepository?.deleteTask(id: id, reason: "Deleted from Task Management UI")
+            reloadTaskManagementPresentation()
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func startTaskSchedulerTimer() {
+        guard taskSchedulerTimer == nil else { return }
+        Task { await runScheduledTasksNow() }
+        taskSchedulerTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                await self?.runScheduledTasksNow()
+            }
+        }
+    }
+
+    func stopTaskSchedulerTimer() {
+        taskSchedulerTimer?.invalidate()
+        taskSchedulerTimer = nil
+    }
+
+    func runScheduledTasksNow() async {
+        guard !isRunningScheduledTasks else { return }
+        guard let taskManagementRepository else { return }
+        isRunningScheduledTasks = true
+        defer { isRunningScheduledTasks = false }
+        let runner = TaskTargetRunner.appRuntime(
+            mailRefresh: { [weak self] runID in
+                guard let self else { throw TaskTargetRunnerError.unsupportedTarget("mail") }
+                return try await self.refreshMailForScheduledTask(runID: runID)
+            },
+            calendarRefresh: { [weak self] runID in
+                guard let self else { throw TaskTargetRunnerError.unsupportedTarget("calendar") }
+                return await self.refreshCalendarForScheduledTask(runID: runID)
+            },
+            rssRefresh: { [weak self] runID in
+                guard let self else { throw TaskTargetRunnerError.unsupportedTarget("rss") }
+                return try await self.refreshRSSForScheduledTask(runID: runID)
+            },
+            sessionMessage: { [weak self] request in
+                guard let self else { throw TaskTargetRunnerError.unsupportedTarget("session.ai") }
+                return await self.performTaskSessionMessage(request)
+            }
+        )
+        do {
+            let service = TaskSchedulerRunnerService(repository: taskManagementRepository, scheduler: TaskSchedulerService(), runner: runner)
+            _ = try await service.runDueTasks()
+            reloadTaskManagementPresentation()
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    private func refreshMailForScheduledTask(runID: String?) async throws -> String {
+        guard let mailStore else { return "Mail store unavailable" }
+        let runtime = MailRuntime(repository: mailStore, cache: mailStore)
+        let accounts = try await runtime.listAccounts(runID: runID, sessionID: selectedChatSessionID)
+        await reloadMailBrowserPresentation()
+        return "Mail refreshed \(accounts.count) accounts"
+    }
+
+    private func refreshCalendarForScheduledTask(runID: String?) async -> String {
+        let succeeded = await syncSystemCalendarNow()
+        return succeeded ? (calendarSyncMessage ?? "Calendar refreshed") : (calendarSyncMessage ?? "Calendar refresh failed")
+    }
+
+    private func refreshRSSForScheduledTask(runID: String?) async throws -> String {
+        let sources = try await rssRuntime.listSources(runID: runID, sessionID: selectedChatSessionID)
+        var inserted = 0
+        var duplicates = 0
+        for source in sources {
+            let result = try await rssRuntime.syncSource(sourceID: source.id, runID: runID, sessionID: selectedChatSessionID)
+            inserted += result.insertedCount
+            duplicates += result.duplicateCount
+        }
+        await reloadRSSBrowserPresentation()
+        return "RSS refreshed \(sources.count) sources; inserted \(inserted), duplicates \(duplicates)"
+    }
+
+    private func performTaskSessionMessage(_ request: TaskSessionMessageRequest) async -> String {
+        if request.createNewSession {
+            guard let chatSessionRepository else { return "Session repository unavailable" }
+            do {
+                let session = try chatSessionRepository.createSession(title: request.title ?? "定时任务会话")
+                reloadChatSessions()
+                selectedChatSessionID = session.id
+                fallbackChatSession = session
+                nativeSessionManager = makeNativeSessionManager(for: session)
+                _ = await submitChat(prompt: request.message, clearComposer: false)
+                return "created session \(session.id) and sent task message"
+            } catch {
+                return "failed to create task session: \(error)"
+            }
+        }
+        guard let sessionID = request.sessionID else { return "Missing sessionID" }
+        selectedChatSessionID = sessionID
+        if let session = try? chatSessionRepository?.loadSession(id: sessionID) {
+            fallbackChatSession = session
+            nativeSessionManager = makeNativeSessionManager(for: session)
+        }
+        _ = await submitChat(prompt: request.message, clearComposer: false)
+        return "sent task message to session \(sessionID)"
     }
 
     func reloadProductOSRegistry() {
@@ -1480,9 +1639,26 @@ final class AppViewModel: NSObject, ObservableObject {
         let incomingHost = rawIncomingHost.trimmingCharacters(in: .whitespacesAndNewlines)
         let outgoingHost = rawOutgoingHost.trimmingCharacters(in: .whitespacesAndNewlines)
         guard email.contains("@"), email.contains(".") else { throw AppMailAccountSetupError.invalidEmail }
-        guard !credential.isEmpty else { throw AppMailAccountSetupError.missingCredential }
+        if preset != .microsoft {
+            guard !credential.isEmpty else { throw AppMailAccountSetupError.missingCredential }
+        }
         guard !incomingHost.isEmpty, !outgoingHost.isEmpty, incomingPort > 0, outgoingPort > 0 else {
             throw AppMailAccountSetupError.missingServerConfiguration
+        }
+
+        let credentialToStore: String
+        if preset == .microsoft {
+            guard let oauthConfiguration = MicrosoftMailOAuthConfiguration.loadFromProcessAndDefaults() else {
+                throw AppMailAccountSetupError.missingMicrosoftOAuthClientID
+            }
+            let oauthCredential = try await MicrosoftMailOAuthService.shared.authenticate(
+                configuration: oauthConfiguration,
+                loginHint: email,
+                openURL: { url in NSWorkspace.shared.open(url) }
+            )
+            credentialToStore = try oauthCredential.encodedString()
+        } else {
+            credentialToStore = credential
         }
 
         let now = Date()
@@ -1517,7 +1693,7 @@ final class AppViewModel: NSObject, ObservableObject {
             updatedAt: now
         )
         let defaultMailboxes = Self.defaultMailboxes(accountID: accountID, now: now)
-        try mailCredentialStore.saveCredential(credential, binding: credentialBinding)
+        try mailCredentialStore.saveCredential(credentialToStore, binding: credentialBinding)
         try await mailStore?.saveAccount(account)
         for mailbox in defaultMailboxes {
             try await mailStore?.saveMailbox(mailbox)
@@ -1617,6 +1793,46 @@ final class AppViewModel: NSObject, ObservableObject {
         errorMessage = nil
     }
 
+    func reloadCalendarContactsFromStorage() async {
+        do {
+            if let snapshot = try await calendarStore?.loadSnapshot() {
+                calendarAccounts = snapshot.accounts
+                calendarCollections = snapshot.collections
+                calendarEvents = snapshot.events
+                reloadCalendarBrowserPresentation()
+            }
+            if let records = try await contactStore?.loadRecords() {
+                contactRecords = records
+                reloadContactsBrowserPresentation()
+            }
+            errorMessage = nil
+        } catch {
+            errorMessage = "无法加载日历/联系人缓存：\(error.localizedDescription)"
+        }
+    }
+
+    private func persistCalendarSnapshot() async {
+        do {
+            try await calendarStore?.saveSnapshot(
+                FileBackedCalendarSourceStore.Snapshot(
+                    accounts: calendarAccounts,
+                    collections: calendarCollections,
+                    events: calendarEvents
+                )
+            )
+        } catch {
+            errorMessage = "无法保存日历缓存：\(error.localizedDescription)"
+        }
+    }
+
+    private func persistContactRecords() async {
+        do {
+            try await contactStore?.saveRecords(contactRecords)
+        } catch {
+            errorMessage = "无法保存联系人缓存：\(error.localizedDescription)"
+        }
+    }
+
     @discardableResult
     func syncSystemCalendarNow() async -> Bool {
         guard !isSyncingSystemCalendar else { return false }
@@ -1625,6 +1841,7 @@ final class AppViewModel: NSObject, ObservableObject {
         do {
             let snapshot = try await CalendarEventKitAdapter.fetchSystemSnapshot()
             upsertSystemCalendarSnapshot(snapshot)
+            await persistCalendarSnapshot()
             calendarSyncMessage = "已同步本机日历：\(snapshot.collections.count) 个日历，\(snapshot.events.count) 个日程"
             appSettingsMessage = calendarSyncMessage
             errorMessage = nil
@@ -1654,6 +1871,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 let records = try await ContactsSystemAdapter.fetchSystemContacts()
                 contactRecords = records
                 reloadContactsBrowserPresentation()
+                await persistContactRecords()
                 contactsSyncMessage = "已同步系统通讯录：\(records.count) 个联系人"
                 appSettingsMessage = contactsSyncMessage
                 errorMessage = nil
@@ -1720,6 +1938,7 @@ final class AppViewModel: NSObject, ObservableObject {
         selectedCalendarEventID = nil
         isPresentingAddCalendarSourceSheet = false
         reloadCalendarBrowserPresentation()
+        Task { await persistCalendarSnapshot() }
         appSettingsMessage = "已添加日历源：\(resolvedDisplayName)"
     }
 
@@ -1733,6 +1952,7 @@ final class AppViewModel: NSObject, ObservableObject {
             self.selectedCalendarEventID = nil
         }
         reloadCalendarBrowserPresentation()
+        Task { await persistCalendarSnapshot() }
         appSettingsMessage = "已移除日历源：\(account.displayName)"
     }
 
@@ -4203,6 +4423,7 @@ final class AppViewModel: NSObject, ObservableObject {
     func setChatSessionStatus(_ sessionID: String, status: AgentSessionStatus) {
         guard let chatSessionRepository else { return }
         do {
+            let previousStatus = try chatSessionRepository.loadSession(id: sessionID)?.governance.status
             let session = try chatSessionRepository.setStatus(sessionID: sessionID, status: status)
             if selectedChatSessionID == sessionID {
                 self.selectedChatSessionID = session.id
@@ -4211,9 +4432,41 @@ final class AppViewModel: NSObject, ObservableObject {
             reloadChatSessions()
             appendGovernanceEvent(.sessionStatusChanged(AgentSessionGovernanceEvent(sessionID: session.id, message: "状态已更新为 \(status.displayName)", status: status)))
             evaluateAutomation(ProductOSAutomationEventContext(triggerKind: .sessionStatusChanged, sessionID: session.id, status: status))
+            dispatchTaskSessionStatusChanged(sessionID: session.id, fromStatus: previousStatus?.rawValue, toStatus: status.rawValue)
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
+        }
+    }
+
+    private func dispatchTaskSessionStatusChanged(sessionID: String, fromStatus: String?, toStatus: String) {
+        guard let taskManagementRepository else { return }
+        let runner = TaskTargetRunner.appRuntime(
+            mailRefresh: { [weak self] runID in
+                guard let self else { throw TaskTargetRunnerError.unsupportedTarget("mail") }
+                return try await self.refreshMailForScheduledTask(runID: runID)
+            },
+            calendarRefresh: { [weak self] runID in
+                guard let self else { throw TaskTargetRunnerError.unsupportedTarget("calendar") }
+                return await self.refreshCalendarForScheduledTask(runID: runID)
+            },
+            rssRefresh: { [weak self] runID in
+                guard let self else { throw TaskTargetRunnerError.unsupportedTarget("rss") }
+                return try await self.refreshRSSForScheduledTask(runID: runID)
+            },
+            sessionMessage: { [weak self] request in
+                guard let self else { throw TaskTargetRunnerError.unsupportedTarget("session.ai") }
+                return await self.performTaskSessionMessage(request)
+            }
+        )
+        Task { @MainActor in
+            do {
+                let dispatcher = TaskEventDispatcher(repository: taskManagementRepository, runner: runner)
+                _ = try await dispatcher.dispatchSessionStatusChanged(sessionID: sessionID, fromStatus: fromStatus, toStatus: toStatus)
+                reloadTaskManagementPresentation()
+            } catch {
+                errorMessage = String(describing: error)
+            }
         }
     }
 
