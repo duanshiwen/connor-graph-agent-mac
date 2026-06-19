@@ -14,6 +14,7 @@ struct AgentComposerState {
     var sessionHasLLMOverride: Bool
     var permissionMode: AgentPermissionMode
     var selectedSessionStatus: AgentSessionStatus?
+    var isSpeechTranscriptionRunning: Bool
 
     init(
         input: String,
@@ -25,7 +26,8 @@ struct AgentComposerState {
         selectedModel: String,
         sessionHasLLMOverride: Bool,
         permissionMode: AgentPermissionMode,
-        selectedSessionStatus: AgentSessionStatus?
+        selectedSessionStatus: AgentSessionStatus?,
+        isSpeechTranscriptionRunning: Bool
     ) {
         self.input = input
         self.pendingAttachments = pendingAttachments
@@ -37,5 +39,6 @@ struct AgentComposerState {
         self.sessionHasLLMOverride = sessionHasLLMOverride
         self.permissionMode = permissionMode
         self.selectedSessionStatus = selectedSessionStatus
+        self.isSpeechTranscriptionRunning = isSpeechTranscriptionRunning
     }
 }
