@@ -1404,7 +1404,7 @@ struct CraftSessionRow: View {
                 Text("NEW!")
                     .font(.system(size: 8, weight: .black, design: .rounded))
                     .foregroundStyle(Color.yellow)
-                    .padding(.horizontal, 4)
+                    .padding(.horizontal, 6)
                     .padding(.vertical, 1)
                     .background(Color.red, in: Capsule())
                     .overlay(
@@ -1412,7 +1412,7 @@ struct CraftSessionRow: View {
                             .stroke(Color.yellow, lineWidth: 1)
                     )
             }
-            .frame(width: 30)
+            .frame(width: 34)
             .padding(.top, 5)
         }
     }
