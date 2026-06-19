@@ -4322,6 +4322,7 @@ final class AppViewModel: NSObject, ObservableObject {
     func setChatSessionStatus(_ sessionID: String, status: AgentSessionStatus) {
         guard let chatSessionRepository else { return }
         do {
+            let previousStatus = try chatSessionRepository.loadSession(id: sessionID)?.governance.status
             let session = try chatSessionRepository.setStatus(sessionID: sessionID, status: status)
             if selectedChatSessionID == sessionID {
                 self.selectedChatSessionID = session.id
@@ -4330,9 +4331,41 @@ final class AppViewModel: NSObject, ObservableObject {
             reloadChatSessions()
             appendGovernanceEvent(.sessionStatusChanged(AgentSessionGovernanceEvent(sessionID: session.id, message: "状态已更新为 \(status.displayName)", status: status)))
             evaluateAutomation(ProductOSAutomationEventContext(triggerKind: .sessionStatusChanged, sessionID: session.id, status: status))
+            dispatchTaskSessionStatusChanged(sessionID: session.id, fromStatus: previousStatus?.rawValue, toStatus: status.rawValue)
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
+        }
+    }
+
+    private func dispatchTaskSessionStatusChanged(sessionID: String, fromStatus: String?, toStatus: String) {
+        guard let taskManagementRepository else { return }
+        let runner = TaskTargetRunner.appRuntime(
+            mailRefresh: { [weak self] runID in
+                guard let self else { throw TaskTargetRunnerError.unsupportedTarget("mail") }
+                return try await self.refreshMailForScheduledTask(runID: runID)
+            },
+            calendarRefresh: { [weak self] runID in
+                guard let self else { throw TaskTargetRunnerError.unsupportedTarget("calendar") }
+                return await self.refreshCalendarForScheduledTask(runID: runID)
+            },
+            rssRefresh: { [weak self] runID in
+                guard let self else { throw TaskTargetRunnerError.unsupportedTarget("rss") }
+                return try await self.refreshRSSForScheduledTask(runID: runID)
+            },
+            sessionMessage: { [weak self] request in
+                guard let self else { throw TaskTargetRunnerError.unsupportedTarget("session.ai") }
+                return await self.performTaskSessionMessage(request)
+            }
+        )
+        Task { @MainActor in
+            do {
+                let dispatcher = TaskEventDispatcher(repository: taskManagementRepository, runner: runner)
+                _ = try await dispatcher.dispatchSessionStatusChanged(sessionID: sessionID, fromStatus: fromStatus, toStatus: toStatus)
+                reloadTaskManagementPresentation()
+            } catch {
+                errorMessage = String(describing: error)
+            }
         }
     }
 
