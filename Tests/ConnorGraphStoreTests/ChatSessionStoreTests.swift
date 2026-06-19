@@ -28,6 +28,56 @@ private func temporaryChatDatabaseURL(_ name: String = UUID().uuidString) -> URL
     #expect(loaded.messages.isEmpty)
 }
 
+@Test func graphKernelStorePersistsAgentSessionReadState() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryChatDatabaseURL().path)
+    try store.migrate()
+    var readState = SessionReadState.initial(updatedAt: Date(timeIntervalSince1970: 1_000))
+    readState.markUnread(
+        messageID: "message-2",
+        preview: "Assistant finished the work",
+        level: .actionable,
+        at: Date(timeIntervalSince1970: 2_000)
+    )
+    let session = AgentSession(
+        id: "session-1",
+        title: "Needs attention",
+        messages: [],
+        createdAt: Date(timeIntervalSince1970: 1_000),
+        updatedAt: Date(timeIntervalSince1970: 3_000),
+        governance: .default,
+        readState: readState
+    )
+
+    try store.upsertSession(session)
+    let loaded = try #require(try store.session(id: "session-1"))
+
+    #expect(loaded.readState == readState)
+    #expect(loaded.readState.highestLevel == .actionable)
+    #expect(loaded.readState.unreadCount == 1)
+}
+
+@Test func graphKernelStoreUpdatesSessionReadStateWithoutChangingUpdatedAt() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryChatDatabaseURL().path)
+    try store.migrate()
+    let originalUpdatedAt = Date(timeIntervalSince1970: 3_000)
+    let session = AgentSession(
+        id: "session-1",
+        title: "Stable order",
+        messages: [],
+        createdAt: Date(timeIntervalSince1970: 1_000),
+        updatedAt: originalUpdatedAt
+    )
+    try store.upsertSession(session)
+    var readState = SessionReadState.initial(updatedAt: Date(timeIntervalSince1970: 4_000))
+    readState.markUnread(messageID: "message-3", preview: "Preview", level: .interruptive, at: Date(timeIntervalSince1970: 4_000))
+
+    try store.updateSessionReadState(sessionID: "session-1", readState: readState)
+    let loaded = try #require(try store.session(id: "session-1"))
+
+    #expect(loaded.readState == readState)
+    #expect(loaded.updatedAt == originalUpdatedAt)
+}
+
 @Test func graphKernelStorePersistsAgentSessionMessagesInOrder() throws {
     let store = try SQLiteGraphKernelStore(path: temporaryChatDatabaseURL().path)
     try store.migrate()
