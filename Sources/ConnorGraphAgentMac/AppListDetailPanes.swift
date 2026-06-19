@@ -1153,23 +1153,13 @@ struct CalendarSourceSettingsView: View {
 
     var body: some View {
         Group {
-            if let selected = selectedEventRow {
-                VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
-                    CalendarContactsDetailHeader(title: "日历", subtitle: "轻量日程数据源：列表、详情和 AI 工具管理，不做完整日历客户端。")
-                    Divider().opacity(0.6)
-                    VStack(alignment: .leading, spacing: AppShellLayout.spaceM) {
-                        Label(selected.title, systemImage: "calendar.badge.clock")
-                            .font(AgentChatTypography.title)
-                        Text(selected.timeText)
-                            .font(AgentChatTypography.meta)
-                            .foregroundStyle(.secondary)
-                        if let location = selected.location {
-                            Text(location).font(AgentChatTypography.meta)
-                        }
-                    }
-                    .padding(AppShellLayout.spaceXL)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            if let selectedEvent {
+                CalendarEventDetailPane(
+                    event: selectedEvent,
+                    row: selectedEventRow,
+                    calendarName: calendarName(for: selectedEvent.calendarID),
+                    accountName: accountName(for: selectedEvent.calendarID)
+                )
             } else {
                 Color.clear
             }
@@ -1178,9 +1168,278 @@ struct CalendarSourceSettingsView: View {
         .background(AppShellColors.detailBackground)
     }
 
+    private var selectedEvent: CalendarEvent? {
+        guard let id = viewModel.selectedCalendarEventID else { return nil }
+        return viewModel.calendarEvents.first { $0.id == id }
+    }
+
     private var selectedEventRow: NativeCalendarEventRowPresentation? {
         guard let id = viewModel.selectedCalendarEventID else { return nil }
         return viewModel.calendarBrowserPresentation.daySections.flatMap(\.events).first { $0.id == id }
+    }
+
+    private func calendarName(for calendarID: CalendarID) -> String? {
+        viewModel.calendarCollections.first { $0.id == calendarID }?.displayName
+    }
+
+    private func accountName(for calendarID: CalendarID) -> String? {
+        guard let collection = viewModel.calendarCollections.first(where: { $0.id == calendarID }) else { return nil }
+        return viewModel.calendarAccounts.first { $0.id == collection.accountID }?.displayName
+    }
+}
+
+private struct CalendarEventDetailPane: View {
+    var event: CalendarEvent
+    var row: NativeCalendarEventRowPresentation?
+    var calendarName: String?
+    var accountName: String?
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
+                CalendarEventHero(event: event, row: row, calendarName: calendarName)
+
+                if let notes = trimmed(event.notes), !notes.isEmpty {
+                    CalendarDetailSection(title: "备注", systemImage: "note.text") {
+                        Text(notes)
+                            .font(AgentChatTypography.body)
+                            .lineSpacing(2)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+
+                if !event.attendees.isEmpty {
+                    CalendarDetailSection(title: "参与人", systemImage: "person.2") {
+                        VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+                            ForEach(event.attendees, id: \.id) { attendee in
+                                CalendarAttendeeRow(attendee: attendee)
+                            }
+                        }
+                    }
+                }
+
+                CalendarDetailSection(title: "来源信息", systemImage: "calendar") {
+                    VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+                        CalendarMetadataLine(label: "日历", value: calendarName ?? event.calendarID.rawValue)
+                        if let accountName, !accountName.isEmpty {
+                            CalendarMetadataLine(label: "账户", value: accountName)
+                        }
+                        CalendarMetadataLine(label: "更新", value: event.updatedAt.formatted(date: .abbreviated, time: .shortened))
+                        if let recurrence = event.recurrenceSummary?.ruleDescription, !recurrence.isEmpty {
+                            CalendarMetadataLine(label: "重复", value: recurrence)
+                        }
+                        if let url = event.url {
+                            CalendarMetadataLinkLine(url: url)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, AgentChatLayout.spaceXL)
+            .padding(.vertical, AgentChatLayout.spaceL)
+            .frame(maxWidth: AgentChatLayout.chatContentMaxWidth, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .top)
+        }
+        .scrollContentBackground(.hidden)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func trimmed(_ value: String?) -> String? {
+        value?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+private struct CalendarEventHero: View {
+    var event: CalendarEvent
+    var row: NativeCalendarEventRowPresentation?
+    var calendarName: String?
+
+    var body: some View {
+        HStack(alignment: .top, spacing: AgentChatLayout.spaceM) {
+            ZStack {
+                RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                    .fill(Color.orange.opacity(0.12))
+                Image(systemName: event.isAllDay ? "calendar" : "calendar.badge.clock")
+                    .font(.system(size: 23, weight: .semibold))
+                    .foregroundStyle(.orange)
+            }
+            .frame(width: 54, height: 54)
+
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+                Text(event.title)
+                    .font(.system(size: 24, weight: .semibold))
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+
+                Text(primaryTimeText)
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+
+                HStack(spacing: AgentChatLayout.spaceS) {
+                    CalendarStatusPill(status: event.isAllDay ? "全天" : "已排期", color: .orange, systemImage: event.isAllDay ? "sun.max" : "clock")
+                    if let calendarName, !calendarName.isEmpty {
+                        CalendarStatusPill(status: calendarName, color: .secondary, systemImage: "calendar")
+                    }
+                }
+
+                if let location = row?.location ?? event.location, !location.isEmpty {
+                    Label(location, systemImage: "mappin.and.ellipse")
+                        .font(AgentChatTypography.meta)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(AgentChatLayout.spaceM)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.85), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous).stroke(Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1))
+    }
+
+    private var primaryTimeText: String {
+        if event.isAllDay {
+            return event.start.date.formatted(date: .complete, time: .omitted)
+        }
+        let start = event.start.date.formatted(date: .complete, time: .shortened)
+        let end = event.end.date.formatted(date: .omitted, time: .shortened)
+        return "\(start) – \(end)"
+    }
+}
+
+private struct CalendarDetailSection<Content: View>: View {
+    var title: String
+    var systemImage: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
+            Label(title, systemImage: systemImage)
+                .font(AgentChatTypography.metaEmphasis)
+                .foregroundStyle(.primary)
+            content
+        }
+        .padding(AgentChatLayout.spaceM)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.85), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous).stroke(Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1))
+    }
+}
+
+private struct CalendarMetadataLine: View {
+    var label: String
+    var value: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(label)
+                .font(AgentChatTypography.microEmphasis)
+                .foregroundStyle(.secondary)
+                .frame(width: 72, alignment: .leading)
+            Text(value)
+                .font(AgentChatTypography.meta)
+                .textSelection(.enabled)
+        }
+    }
+}
+
+private struct CalendarMetadataLinkLine: View {
+    var url: URL
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text("链接")
+                .font(AgentChatTypography.microEmphasis)
+                .foregroundStyle(.secondary)
+                .frame(width: 72, alignment: .leading)
+            Link(destination: url) {
+                HStack(spacing: 5) {
+                    Text(url.absoluteString)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Image(systemName: "arrow.up.forward.app")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .font(AgentChatTypography.meta)
+            }
+        }
+    }
+}
+
+private struct CalendarAttendeeRow: View {
+    var attendee: CalendarAttendee
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: AgentChatLayout.spaceS) {
+            Image(systemName: "person.crop.circle")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(displayName)
+                    .font(AgentChatTypography.meta)
+                    .textSelection(.enabled)
+                if let email = attendee.email, !email.isEmpty, email != displayName {
+                    Text(email)
+                        .font(AgentChatTypography.micro)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+            Spacer(minLength: 8)
+            CalendarStatusPill(status: attendee.responseStatus.displayTitle, color: attendee.responseStatus.displayColor)
+        }
+    }
+
+    private var displayName: String {
+        if let name = attendee.name, !name.isEmpty { return name }
+        if let email = attendee.email, !email.isEmpty { return email }
+        return attendee.id.rawValue
+    }
+}
+
+private struct CalendarStatusPill: View {
+    var status: String
+    var color: Color
+    var systemImage: String?
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            Text(status)
+                .font(AgentChatTypography.microEmphasis)
+        }
+        .foregroundStyle(color)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(color.opacity(0.10), in: Capsule())
+    }
+}
+
+private extension CalendarAttendeeResponseStatus {
+    var displayTitle: String {
+        switch self {
+        case .needsAction: "待回应"
+        case .accepted: "已接受"
+        case .declined: "已拒绝"
+        case .tentative: "暂定"
+        case .delegated: "已委派"
+        case .unknown: "未知"
+        }
+    }
+
+    var displayColor: Color {
+        switch self {
+        case .accepted: .green
+        case .declined: .red
+        case .tentative, .delegated: .orange
+        case .needsAction, .unknown: .secondary
+        }
     }
 }
 
