@@ -71,6 +71,7 @@ struct BrowserBookmarksPanelView: View {
             }
             .buttonStyle(.plain)
             .help("关闭收藏夹面板")
+            .accessibilityLabel("关闭收藏夹面板")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -119,6 +120,8 @@ struct BrowserBookmarksPanelView: View {
                         .foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.plain)
+                .help("清空收藏搜索")
+                .accessibilityLabel("清空收藏搜索")
             }
         }
         .padding(.horizontal, 10)
