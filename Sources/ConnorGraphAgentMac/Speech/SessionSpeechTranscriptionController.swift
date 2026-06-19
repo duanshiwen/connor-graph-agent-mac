@@ -26,15 +26,15 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
         stop(reason: .appLifecycle)
         runningSessionID = sessionID
 
-        SFSpeechRecognizer.requestAuthorization { [weak self] authorizationStatus in
+        requestMicrophoneAccessIfNeeded { [weak self] microphoneGranted in
             Task { @MainActor in
                 guard let self, self.runningSessionID == sessionID else { return }
-                guard authorizationStatus == .authorized else {
+                guard microphoneGranted else {
                     self.cleanupAfterFailure()
-                    onError(self.authorizationMessage(for: authorizationStatus))
+                    onError("麦克风权限已被拒绝，请在系统设置中允许康纳同学访问麦克风。")
                     return
                 }
-                self.startAuthorizedRecognition(sessionID: sessionID, onPartial: onPartial, onError: onError)
+                self.requestSpeechRecognitionAccessIfNeeded(sessionID: sessionID, onPartial: onPartial, onError: onError)
             }
         }
     }
@@ -65,6 +65,52 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
         }
 
         cleanup()
+    }
+
+    private func requestMicrophoneAccessIfNeeded(completion: @escaping (Bool) -> Void) {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            completion(true)
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .audio, completionHandler: completion)
+        case .denied, .restricted:
+            completion(false)
+        @unknown default:
+            completion(false)
+        }
+    }
+
+    private func requestSpeechRecognitionAccessIfNeeded(
+        sessionID: String,
+        onPartial: @escaping (String) -> Void,
+        onError: @escaping (String) -> Void
+    ) {
+        let currentStatus = SFSpeechRecognizer.authorizationStatus()
+        guard currentStatus == .notDetermined else {
+            handleSpeechAuthorizationStatus(currentStatus, sessionID: sessionID, onPartial: onPartial, onError: onError)
+            return
+        }
+
+        SFSpeechRecognizer.requestAuthorization { [weak self] authorizationStatus in
+            Task { @MainActor in
+                self?.handleSpeechAuthorizationStatus(authorizationStatus, sessionID: sessionID, onPartial: onPartial, onError: onError)
+            }
+        }
+    }
+
+    private func handleSpeechAuthorizationStatus(
+        _ authorizationStatus: SFSpeechRecognizerAuthorizationStatus,
+        sessionID: String,
+        onPartial: @escaping (String) -> Void,
+        onError: @escaping (String) -> Void
+    ) {
+        guard runningSessionID == sessionID else { return }
+        guard authorizationStatus == .authorized else {
+            cleanupAfterFailure()
+            onError(authorizationMessage(for: authorizationStatus))
+            return
+        }
+        startAuthorizedRecognition(sessionID: sessionID, onPartial: onPartial, onError: onError)
     }
 
     private func startAuthorizedRecognition(
