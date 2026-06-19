@@ -20,6 +20,10 @@ struct CraftListPaneView: View {
                 CraftSettingsListPane(viewModel: viewModel, selection: $selection)
             case .mail:
                 CraftMailListPane(viewModel: viewModel)
+            case .calendar:
+                CraftCalendarListPane(viewModel: viewModel)
+            case .contacts:
+                CraftContactsListPane(viewModel: viewModel)
             case .rss:
                 CraftRSSListPane(viewModel: viewModel)
             case .sources:
@@ -34,6 +38,230 @@ struct CraftListPaneView: View {
                 CraftSimpleListPane(title: (selection ?? .agentChat).rawValue, subtitle: "康纳同学工作区", rows: [])
             }
         }
+    }
+}
+
+struct CraftCalendarListPane: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Spacer(minLength: 24)
+                Text("日历")
+                    .font(AppListTypography.header)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                Button(action: { viewModel.isPresentingAddCalendarSourceSheet = true }) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .help("添加日历源")
+                .accessibilityLabel("添加日历源")
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
+
+            if viewModel.calendarBrowserPresentation.daySections.isEmpty {
+                ContentUnavailableView("暂无日程", systemImage: "calendar", description: Text("添加支持 Calendar capability 的账户后，日程会显示在这里。"))
+                    .padding(.top, 80)
+            } else {
+                CalendarSectionScrollView(
+                    sections: viewModel.calendarBrowserPresentation.daySections,
+                    selectedID: viewModel.selectedCalendarEventID,
+                    onSelect: { viewModel.selectedCalendarEventID = $0 }
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .sheet(isPresented: $viewModel.isPresentingAddCalendarSourceSheet) {
+            AddCalendarSourceSheet { provider, displayName, calendarName in
+                viewModel.addCalendarSource(provider: provider, displayName: displayName, calendarName: calendarName)
+            }
+        }
+    }
+}
+
+struct AddCalendarSourceSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var onAdd: (ConnectedAccountProviderKind, String, String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
+            HStack {
+                VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
+                    Text("添加日历源")
+                        .font(.system(size: 24, weight: .semibold))
+                    Text("当前接入 macOS Calendar / EventKit。你在系统日历中登录的 iCloud、Google、Exchange / Microsoft 365 日历都会一起同步。")
+                        .font(AgentChatTypography.meta)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Button(action: { dismiss() }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.cancelAction)
+            }
+
+            VStack(alignment: .leading, spacing: AppShellLayout.spaceM) {
+                Label("本机日历", systemImage: "calendar")
+                    .font(AgentChatTypography.title)
+                Text("点击同步后，系统会弹出日历权限请求。授权后，康纳同学会读取未来 90 天和过去 7 天的事件，并按天展示在日历列表。")
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("如果要同步 Google 或 Microsoft 日历，请先在 macOS 系统设置 / 日历 App 中添加对应账户；Connor 会通过 EventKit 读取系统已经聚合的日历。")
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(AppShellLayout.spaceL)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(nsColor: .textBackgroundColor).opacity(0.5), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(AppShellColors.hairline, lineWidth: 1))
+
+            Spacer()
+
+            HStack {
+                Spacer()
+                Button("取消") { dismiss() }
+                Button("同步本机日历") {
+                    onAdd(.localFixture, "本机日历", "系统日历")
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(AppShellLayout.spaceXL)
+        .frame(width: 560, height: 360)
+    }
+}
+
+private struct CalendarSectionScrollView: View {
+    var sections: [NativeCalendarDaySectionPresentation]
+    var selectedID: CalendarEventID?
+    var onSelect: (CalendarEventID) -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(sections) { section in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(section.title)
+                            .font(AppListTypography.rowCaption)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 10)
+                        ForEach(section.events) { event in
+                            CalendarEventButton(row: event, isSelected: event.id == selectedID, onSelect: { onSelect(event.id) })
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 8)
+        }
+        .scrollContentBackground(.hidden)
+    }
+}
+
+private struct CalendarEventButton: View {
+    var row: NativeCalendarEventRowPresentation
+    var isSelected: Bool
+    var onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(alignment: .top, spacing: 8) {
+                Text(row.timeText)
+                    .font(AppListTypography.rowCaption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 92, alignment: .leading)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(row.title)
+                        .font(AppListTypography.rowTitle)
+                        .foregroundStyle(.primary)
+                    if let location = row.location, !location.isEmpty {
+                        Text(location)
+                            .font(AppListTypography.rowSubtitle)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(10)
+            .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct CraftContactsListPane: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Text("联系人")
+                .font(AppListTypography.header)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 13)
+
+            if viewModel.contactsBrowserPresentation.rows.isEmpty {
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ContactsRowsScrollView(rows: viewModel.contactsBrowserPresentation.rows, selectedID: viewModel.selectedContactID, onSelect: { viewModel.selectedContactID = $0 })
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+}
+
+private struct ContactsRowsScrollView: View {
+    var rows: [NativeContactRowPresentation]
+    var selectedID: MailContactID?
+    var onSelect: (MailContactID) -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 4) {
+                ForEach(rows) { row in
+                    ContactRowButton(row: row, isSelected: row.id == selectedID, onSelect: { onSelect(row.id) })
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 8)
+        }
+        .scrollContentBackground(.hidden)
+    }
+}
+
+private struct ContactRowButton: View {
+    var row: NativeContactRowPresentation
+    var isSelected: Bool
+    var onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(row.displayName)
+                    .font(AppListTypography.rowTitle)
+                    .foregroundStyle(.primary)
+                Text(row.primaryEmail ?? row.organizationName ?? "无邮箱")
+                    .font(AppListTypography.rowSubtitle)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+            .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -884,6 +1112,10 @@ struct CraftDetailPaneView: View {
                 ProductOSRegistryView(viewModel: viewModel)
             case .mail:
                 MailSourceSettingsView(viewModel: viewModel)
+            case .calendar:
+                CalendarSourceSettingsView(viewModel: viewModel)
+            case .contacts:
+                ContactsSourceSettingsView(viewModel: viewModel)
             case .rss:
                 RSSSourceSettingsView(viewModel: viewModel)
             case .sources:
@@ -897,6 +1129,95 @@ struct CraftDetailPaneView: View {
     }
 }
 
+
+struct CalendarSourceSettingsView: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        Group {
+            if let selected = selectedEventRow {
+                VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
+                    CalendarContactsDetailHeader(title: "日历", subtitle: "轻量日程数据源：列表、详情和 AI 工具管理，不做完整日历客户端。")
+                    Divider().opacity(0.6)
+                    VStack(alignment: .leading, spacing: AppShellLayout.spaceM) {
+                        Label(selected.title, systemImage: "calendar.badge.clock")
+                            .font(AgentChatTypography.title)
+                        Text(selected.timeText)
+                            .font(AgentChatTypography.meta)
+                            .foregroundStyle(.secondary)
+                        if let location = selected.location {
+                            Text(location).font(AgentChatTypography.meta)
+                        }
+                    }
+                    .padding(AppShellLayout.spaceXL)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else {
+                Color.clear
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(AppShellColors.detailBackground)
+    }
+
+    private var selectedEventRow: NativeCalendarEventRowPresentation? {
+        guard let id = viewModel.selectedCalendarEventID else { return nil }
+        return viewModel.calendarBrowserPresentation.daySections.flatMap(\.events).first { $0.id == id }
+    }
+}
+
+struct ContactsSourceSettingsView: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        Group {
+            if let selected = selectedContactRow {
+                VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
+                    CalendarContactsDetailHeader(title: "联系人", subtitle: "轻量联系人数据源：列表和详情，不做 CRM。")
+                    Divider().opacity(0.6)
+                    VStack(alignment: .leading, spacing: AppShellLayout.spaceM) {
+                        Label(selected.displayName, systemImage: "person.crop.circle")
+                            .font(AgentChatTypography.title)
+                        if let email = selected.primaryEmail {
+                            Text(email).font(AgentChatTypography.meta).textSelection(.enabled)
+                        }
+                        if let organization = selected.organizationName {
+                            Text(organization).font(AgentChatTypography.meta).foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(AppShellLayout.spaceXL)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else {
+                Color.clear
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(AppShellColors.detailBackground)
+    }
+
+    private var selectedContactRow: NativeContactRowPresentation? {
+        guard let id = viewModel.selectedContactID else { return nil }
+        return viewModel.contactsBrowserPresentation.rows.first { $0.id == id }
+    }
+}
+
+private struct CalendarContactsDetailHeader: View {
+    var title: String
+    var subtitle: String
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
+                Text(title).font(.system(size: 24, weight: .semibold))
+                Text(subtitle).font(AgentChatTypography.meta).foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, AppShellLayout.spaceXL)
+        .padding(.vertical, AppShellLayout.spaceL)
+    }
+}
 
 struct RSSSourceSettingsView: View {
     @ObservedObject var viewModel: AppViewModel
