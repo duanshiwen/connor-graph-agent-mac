@@ -274,13 +274,16 @@ public struct NativeSwiftScientificEngine: ScientificComputeEngine {
         let mean = sum / Double(count)
         let median = count % 2 == 1 ? values[count / 2] : (values[count / 2 - 1] + values[count / 2]) / 2
         let sampleVariance = count > 1 ? values.reduce(0) { $0 + pow($1 - mean, 2) } / Double(count - 1) : 0
+        guard let minimum = values.first, let maximum = values.last else {
+            throw ScientificComputeError.invalidInput("summary requires non-empty values")
+        }
         return .object([
             "count": .int(count),
             "sum": .double(sum),
             "mean": .double(mean),
             "median": .double(median),
-            "min": .double(values.first!),
-            "max": .double(values.last!),
+            "min": .double(minimum),
+            "max": .double(maximum),
             "sample_standard_deviation": .double(sqrt(sampleVariance))
         ])
     }
