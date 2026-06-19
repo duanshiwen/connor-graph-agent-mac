@@ -3825,6 +3825,12 @@ final class AppViewModel: NSObject, ObservableObject {
         agentEventTimeline = []
     }
 
+    func openSessionFromNotification(_ sessionID: String) {
+        selection = .agentChat
+        sessionSearchQuery = ""
+        selectChatSession(sessionID)
+    }
+
     func selectChatSession(_ sessionID: String) {
         guard let chatSessionRepository else { return }
         rememberCurrentWorkspaceMode()
