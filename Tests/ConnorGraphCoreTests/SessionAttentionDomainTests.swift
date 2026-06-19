@@ -4,6 +4,33 @@ import Testing
 
 @Suite("Session Attention Domain")
 struct SessionAttentionDomainTests {
+    @Test("legacy agent session JSON decodes with default read state")
+    func legacyAgentSessionJSONDecodesWithDefaultReadState() throws {
+        let json = """
+        {
+          "id": "legacy-session",
+          "title": "Legacy Session",
+          "messages": [],
+          "createdAt": "2026-06-19T01:00:00Z",
+          "updatedAt": "2026-06-19T02:00:00Z",
+          "governance": {
+            "status": "todo",
+            "labels": [],
+            "isArchived": false,
+            "isFlagged": false
+          }
+        }
+        """.data(using: .utf8)!
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let session = try decoder.decode(AgentSession.self, from: json)
+
+        #expect(session.readState.highestLevel == .none)
+        #expect(session.readState.unreadCount == 0)
+        #expect(session.readState.updatedAt == session.updatedAt)
+    }
+
     @Test("attention levels keep product severity order")
     func attentionLevelsKeepSeverityOrder() {
         #expect(SessionAttentionLevel.none < .unread)
