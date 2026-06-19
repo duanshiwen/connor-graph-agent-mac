@@ -201,7 +201,6 @@ struct AddMailAccountSheet: View {
     @State private var displayName: String = ""
     @State private var email: String = ""
     @State private var credential: String = ""
-    @State private var microsoftOAuthClientID: String = MicrosoftMailOAuthConfiguration.loadFromProcessAndDefaults()?.clientID ?? ""
     @State private var lastAutofilledDisplayName: String = ""
     @State private var incomingHost: String = MailAccountProviderPreset.apple.incomingHost
     @State private var incomingPort: Int = MailAccountProviderPreset.apple.incomingPort
@@ -217,7 +216,6 @@ struct AddMailAccountSheet: View {
 
     private var saveDisabled: Bool {
         email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            || (selectedPreset == .microsoft && microsoftOAuthClientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             || (selectedPreset != .microsoft && credential.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             || incomingHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || outgoingHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -296,7 +294,7 @@ struct AddMailAccountSheet: View {
                         HStack(spacing: SettingsListLayout.spaceS) {
                             Image(systemName: "person.crop.circle.badge.checkmark")
                                 .foregroundStyle(Color.accentColor)
-                            Text("点击底部按钮后会在 Connor 内置浏览器打开 Microsoft 登录页，授权 IMAP/SMTP OAuth 访问。")
+                            Text("点击底部按钮后会打开系统默认浏览器进入 Microsoft 登录页，授权 IMAP/SMTP OAuth 访问。")
                                 .font(SettingsListTypography.rowSubtitle)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -307,18 +305,6 @@ struct AddMailAccountSheet: View {
                     }
                 }
 
-                if selectedPreset == .microsoft {
-                    MailAccountSetupRow("Client ID", labelWidth: Layout.labelColumnWidth) {
-                        VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
-                            TextField("Microsoft Entra Application (client) ID", text: $microsoftOAuthClientID)
-                                .textFieldStyle(.roundedBorder)
-                            Text("Client ID 不是密钥。请在 Microsoft Entra 注册桌面应用，并配置回调 URI：http://localhost:1476/mail/microsoft/callback")
-                                .font(SettingsListTypography.rowCaption)
-                                .foregroundStyle(.tertiary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                }
             }
 
             MailAccountSetupSection(title: "服务器预设") {
@@ -396,10 +382,7 @@ struct AddMailAccountSheet: View {
         guard !isSubmitting else { return }
         isSubmitting = true
         setupError = nil
-        setupMessage = selectedPreset == .microsoft ? "正在打开 Connor 内置浏览器进行 Microsoft 登录…" : "正在添加账户并准备同步…"
-        if selectedPreset == .microsoft {
-            UserDefaults.standard.set(microsoftOAuthClientID.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "ConnorMicrosoftMailOAuthClientID")
-        }
+        setupMessage = selectedPreset == .microsoft ? "正在打开系统默认浏览器进行 Microsoft 登录…" : "正在添加账户并准备同步…"
         do {
             try await viewModel.addMailAccountAndPrepareSync(
                 preset: selectedPreset,
