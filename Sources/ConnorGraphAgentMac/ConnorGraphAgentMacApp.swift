@@ -137,12 +137,22 @@ private final class ConnorMenuActionSelectors: NSObject {
 
 @MainActor
 private final class ConnorApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, @preconcurrency UNUserNotificationCenterDelegate {
+    private static let isRuntimeMenuLocalizationEnabled = false
+
     private var menuLocalizationWarmupTimer: Timer?
     private var menuLocalizationWarmupTickCount = 0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         registerCurrentApplicationBundleWithLaunchServices()
         UNUserNotificationCenter.current().delegate = self
+
+        // SwiftUI owns the main menu's backing item views. Recursively mutating NSMenu
+        // titles while SwiftUI is reconciling submenu contents can trip AppKit's
+        // `didChangeSubmenuContents` consistency assertion, e.g. expected Window but
+        // received Help at the same item index. Keep runtime menu rewriting disabled
+        // unless it is replaced by a SwiftUI Commands/localization-based approach.
+        guard Self.isRuntimeMenuLocalizationEnabled else { return }
+
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(localizeMenuBeforeTracking(_:)),
@@ -154,10 +164,12 @@ private final class ConnorApplicationDelegate: NSObject, NSApplicationDelegate, 
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
+        guard Self.isRuntimeMenuLocalizationEnabled else { return }
         normalizeMenusSoon()
     }
 
     func applicationDidUpdate(_ notification: Notification) {
+        guard Self.isRuntimeMenuLocalizationEnabled else { return }
         normalizeMenusSoon()
     }
 
@@ -211,12 +223,14 @@ private final class ConnorApplicationDelegate: NSObject, NSApplicationDelegate, 
     }
 
     private func normalizeMenusSoon() {
+        guard Self.isRuntimeMenuLocalizationEnabled else { return }
         DispatchQueue.main.async { [weak self] in
             self?.normalizeMenus()
         }
     }
 
     private func startMenuLocalizationWarmup() {
+        guard Self.isRuntimeMenuLocalizationEnabled else { return }
         menuLocalizationWarmupTimer?.invalidate()
         menuLocalizationWarmupTickCount = 0
         menuLocalizationWarmupTimer = Timer.scheduledTimer(
@@ -229,6 +243,11 @@ private final class ConnorApplicationDelegate: NSObject, NSApplicationDelegate, 
     }
 
     @objc private func handleMenuLocalizationWarmupTimer(_ timer: Timer) {
+        guard Self.isRuntimeMenuLocalizationEnabled else {
+            timer.invalidate()
+            menuLocalizationWarmupTimer = nil
+            return
+        }
         normalizeMenus()
         menuLocalizationWarmupTickCount += 1
         if menuLocalizationWarmupTickCount >= 25 {
@@ -238,6 +257,7 @@ private final class ConnorApplicationDelegate: NSObject, NSApplicationDelegate, 
     }
 
     private func normalizeMenus() {
+        guard Self.isRuntimeMenuLocalizationEnabled else { return }
         guard let mainMenu = NSApp.mainMenu else { return }
         localizeApplicationMenu(in: mainMenu)
         localizeTopLevelStandardMenus(in: mainMenu)
@@ -246,23 +266,28 @@ private final class ConnorApplicationDelegate: NSObject, NSApplicationDelegate, 
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
+        guard Self.isRuntimeMenuLocalizationEnabled else { return }
         localizeAndObserveMenuTree(menu)
     }
 
     func menuWillOpen(_ menu: NSMenu) {
+        guard Self.isRuntimeMenuLocalizationEnabled else { return }
         localizeAndObserveMenuTree(menu)
     }
 
     @objc private func localizeMenuBeforeTracking(_ notification: Notification) {
+        guard Self.isRuntimeMenuLocalizationEnabled else { return }
         guard let menu = notification.object as? NSMenu else { return }
         localizeAndObserveMenuTree(menu)
     }
 
     private func localizeAndObserveMenuTree(_ menu: NSMenu) {
+        guard Self.isRuntimeMenuLocalizationEnabled else { return }
         localizeAndObserveMenuTree(menu, scheduleFollowUp: true)
     }
 
     private func localizeAndObserveMenuTree(_ menu: NSMenu, scheduleFollowUp: Bool) {
+        guard Self.isRuntimeMenuLocalizationEnabled else { return }
         menu.delegate = self
         ConnorMenuLocalizer.localizeMenuTree(menu)
         for item in menu.items {
