@@ -307,7 +307,7 @@ public struct URLSessionAgentSSEHTTPClient: AgentSSEHTTPClient, Sendable, Equata
     public init() {}
 
     public func stream(_ request: AgentHTTPRequest) async throws -> AsyncThrowingStream<String, Error> {
-        var urlRequest = URLRequest(url: request.url)
+        var urlRequest = request.timeoutInterval.map { URLRequest(url: request.url, timeoutInterval: $0) } ?? URLRequest(url: request.url)
         urlRequest.httpMethod = request.method
         urlRequest.httpBody = request.body
         for (key, value) in request.headers { urlRequest.setValue(value, forHTTPHeaderField: key) }
