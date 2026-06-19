@@ -1,9 +1,9 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-19 00:30 GMT+8  
-当前代码基线:`feature/apple-iwork-attachment-support`,在已合入的浏览器 / Session Capsule / Native UI / Local Automation Surface / session-scoped multi-root project workspace / Connor-owned Scientific Compute Runtime skeleton / 商用级 Document Attachment OS / WKWebView-backed `web_fetch(js)` 基础上,继续收紧 Apple 原生 UI 边界:PDF/Word/Excel/PowerPoint 与 Apple iWork（Pages/Numbers/Keynote）一等附件仍由 Connor Session Capsule 和 Attachment Store 管理;PDF selectable text 抽取和多页原文预览继续使用 PDFKit;Office/iWork/Presentation/Spreadsheet 抽取继续通过 MarkItDown/Docling sidecar best-effort 编排与 hardening;Office/iWork/Presentation/Spreadsheet 原文件预览优先交给 macOS Quick Look / QuickLookUI,Connor 自有 UI 只负责 manifest、extraction status、retry、omitted attachment summary 和治理证据;AI 设置页 Add Connection 前置 DeepSeek、Xiaomi MiMo 和中国常用模型入口,在 OpenAI Compatible 统一底座上支持 MiMo 官方 `api-key` 认证头。
+文档更新时间：2026-06-19 18:04 GMT+8  
+当前代码基线:`feature/apple-iwork-attachment-support`,在已合入的浏览器 / Session Capsule / Native UI / Task Management Stack / session-scoped multi-root project workspace / Connor-owned Scientific Compute Runtime skeleton / 商用级 Document Attachment OS / WKWebView-backed `web_fetch(js)` 基础上,继续收紧 Apple 原生 UI 边界:PDF/Word/Excel/PowerPoint 与 Apple iWork（Pages/Numbers/Keynote）一等附件仍由 Connor Session Capsule 和 Attachment Store 管理;PDF selectable text 抽取和多页原文预览继续使用 PDFKit;Office/iWork/Presentation/Spreadsheet 抽取继续通过 MarkItDown/Docling sidecar best-effort 编排与 hardening;Office/iWork/Presentation/Spreadsheet 原文件预览优先交给 macOS Quick Look / QuickLookUI,Connor 自有 UI 只负责 manifest、extraction status、retry、omitted attachment summary 和治理证据;AI 设置页 Add Connection 前置 DeepSeek、Xiaomi MiMo 和中国常用模型入口,在 OpenAI Compatible 统一底座上支持 MiMo 官方 `api-key` 认证头。
 
-Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package,目标是把 Connor 建成 **graph-memory-native Agent OS**:它不是"图谱编辑器",也不是"Claude SDK 外壳",而是以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI 和 Local Automation Surface 共同构成的本地 Agent 操作系统。
+Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package,目标是把 Connor 建成 **graph-memory-native Agent OS**:它不是"图谱编辑器",也不是"Claude SDK 外壳",而是以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI 和 Task Management Stack 共同构成的本地 Agent 操作系统。
 
 核心产品判断:**图谱是后台记忆基础设施,不是前台主导航概念。** 普通用户面对的是会话、数据源、技能、自动化、设置和本地 CLI/API 控制面;Graph Memory 在后台提供连续性、精确性、可追溯性和治理证据。
 
@@ -18,7 +18,7 @@ Connor 当前坚持以下主权边界:
 - **Memory sovereignty belongs to Connor Graph Memory**:对话 LLM 不直接写图谱;Graph Memory 写入走 staging、distillation、candidate review、admission policy 与 SQLite temporal graph。
 - **Source sovereignty belongs to Connor Source Platform**:MCP servers 是外部能力提供者,不拥有 Connor source registry、permission policy、audit、graph ingestion policy 或 readiness state。
 - **UI sovereignty belongs to Swift Native Shell**:不 fork Craft UI,不引入 Electron/Web UI,不引入 Craft-style multi-workspace。对于文件预览、设置窗口、inspector、文件/目录选择、菜单命令等 Apple 已有稳定语义的能力,优先使用 macOS / SwiftUI / AppKit 原生实现;Connor 自定义 UI 只承载 Agent OS 特有状态和治理工作流。
-- **Automation sovereignty belongs to Connor Local Automation Surface**:CLI/API 只能通过本地、可审计、可 dry-run、可 review 的 contract 调用 Connor runtime。
+- **Task sovereignty belongs to Connor Task Management Stack**:后台任务、定时任务、事件触发任务、系统/用户/AI 发起者治理、运行历史和 Local CLI/API 管理面统一属于 Connor 抽象任务管理栈。Task Management Stack 只提供统一任务接口和生命周期,不关心任务具体操作或 runtime 实现,不提供 manual task 类型,也不承担审批 / Review Gate。
 - **Attachment sovereignty belongs to Connor Session OS / Attachment Store**:用户文件先进入本地 Session Capsule,原文件、manifest、派生抽取文本和 message refs 由 Connor 管理;OpenAI/Claude/Gemini 等 provider-native file API 未来只能作为可治理的投递/缓存策略,不能成为 source of truth。
 - **Mail sovereignty belongs to Connor Native Mail System**:邮件账号、身份、凭据绑定、OAuth token 生命周期、同步游标、source cache、读取状态变更、草稿、发信审批、联系人候选、邮件附件导入、tool audit 与 Graph Memory evidence policy 均由 Connor 拥有。AI、MCP server、LLM provider、协议 adapter 或任何外部 sidecar 都不能直接拥有邮件状态、绕过 Connor Policy Engine 发信、或把邮件事实直接写入 Graph Memory。内置邮件读取工具默认允许,不会触发权限获取操作;但读取正文仍写入隐私级 audit,且读取邮件默认不改变已读状态。
 - **RSS sovereignty belongs to Connor Native RSS System**:RSS / Atom / JSON Feed 订阅源、分组、抓取策略、同步游标、source cache、阅读状态、收藏/隐藏、OPML 导入导出、tool audit 与 Graph Memory evidence policy 均由 Connor 拥有。外部 feed parser、网络 adapter 或任何 MCP/server/provider 只能作为协议/解析 I/O 组件,不能拥有 source registry、cache、阅读状态、同步游标、Graph admission 或 UI 状态。
@@ -35,7 +35,9 @@ Craft-style multi-workspace
 CLI/API direct graph write
 MCP server owning product state
 Claude SDK owning Connor session state
-Unreviewed automation execution bypass
+Task runtime implementation leaking into Task Management Stack
+Manual task type inside Task Management Stack
+Task approval / Review Gate inside Task Management Stack
 Unmanaged external mail MCP server owning account / sync / draft / send state
 Direct LLM access to IMAP / SMTP / OAuth / Contacts credentials
 Copy-pasted Thunderbird Core protocol implementation
@@ -119,7 +121,7 @@ Connor/
 ├── sessions/
 ├── sources/
 ├── skills/
-├── automations/
+├── tasks/
 ├── labels/
 ├── statuses/
 ├── artifacts/
@@ -197,9 +199,10 @@ config/session-governance.json
 config/product-os-registry.json
 config/runtime-settings.json
 config/llm-settings.json
-automations/automations.json
-automations/automation-trigger-log.json
-automations/automation-execution-history.json
+tasks/task-definitions.json
+tasks/task-run-history.jsonl
+tasks/task-event-log.jsonl
+tasks/task-deletion-log.jsonl
 labels/labels.json
 statuses/statuses.json
 graph/evaluations/retrieval-evaluation-cases.json
@@ -241,7 +244,7 @@ SwiftUI Native Shell
   ↓
 ConnorGraphAppSupport
   ↓
-Session OS / Source Platform / Skill Runtime / Automation Surface / Readiness Gate
+Session OS / Source Platform / Skill Runtime / Task Surface / Readiness Gate
   ↓
 ConnorGraphAgent + Claude SDK Sidecar Boundary
   ↓
@@ -261,7 +264,7 @@ SQLite Temporal Graph + Hybrid Retrieval + Memory Governance
 - Session OS domain
 - Session governance model
 - Product OS registry model
-- Product OS automation model
+- Task management domain model
 - Graph extraction domain
 - Structured extraction domain
 - Graph write candidate domain
@@ -277,7 +280,7 @@ Sources/ConnorGraphCore/AgentRuntimeDomain.swift
 Sources/ConnorGraphCore/SessionOSDomain.swift
 Sources/ConnorGraphCore/AgentSessionGovernance.swift
 Sources/ConnorGraphCore/ProductOSRegistry.swift
-Sources/ConnorGraphCore/ProductOSAutomation.swift
+Sources/ConnorGraphCore/TaskManagementDomain.swift
 Sources/ConnorGraphCore/GraphExtractionDomain.swift
 Sources/ConnorGraphCore/GraphStructuredExtraction.swift
 Sources/ConnorGraphCore/GraphWriteCandidate.swift
@@ -433,9 +436,9 @@ App repositories、runtime factory、runtime integration、commercial readiness 
 - Product OS registry repository
 - Source runtime repository
 - Skill runtime repository
-- Automation repository
-- Automation engine and execution history
-- Local API / CLI / Automation Surface contract
+- Task repository
+- Abstract Task Management Stack and run history
+- Local API / CLI / Task Surface contract
 - Retrieval evaluation repository
 - LLM settings repository
 - LLM provider health checker
@@ -469,9 +472,9 @@ Sources/ConnorGraphAppSupport/AppSessionArtifactManager.swift
 Sources/ConnorGraphAppSupport/AppProductOSRegistryRepository.swift
 Sources/ConnorGraphAppSupport/AppMCPSourceRuntimeRepository.swift
 Sources/ConnorGraphAppSupport/AppSkillRuntimeRepository.swift
-Sources/ConnorGraphAppSupport/AppProductOSAutomationRepository.swift
-Sources/ConnorGraphAppSupport/AutomationEngine.swift
-Sources/ConnorGraphAppSupport/ConnorLocalAutomationSurface.swift
+Sources/ConnorGraphAppSupport/AppTaskManagementRepository.swift
+Sources/ConnorGraphAppSupport/TaskManagementStack.swift
+Sources/ConnorGraphAppSupport/ConnorLocalTaskSurface.swift
 Sources/ConnorGraphAppSupport/AppGraphRetrievalEvaluationRepository.swift
 Sources/ConnorGraphAppSupport/AppLLMSettingsRepository.swift
 Sources/ConnorGraphAppSupport/AppLLMProviderHealthChecker.swift
@@ -510,7 +513,7 @@ SwiftUI macOS executable target。当前前台体验采用 Native Agent OS shell
 - Settings center
 - Source runtime panel
 - Skill runtime panel
-- Automation runtime panel
+- Task management panel
 - Local API / CLI surface entry
 - Browser workspace view
 
@@ -573,7 +576,7 @@ Sources/ConnorCLI/main.swift
 ```bash
 swift run connor commands
 swift run connor readiness
-swift run connor automations evaluate --trigger sessionStatusChanged --session demo --status needs_review --dry-run
+swift run connor tasks list
 ```
 
 ---
@@ -1437,91 +1440,106 @@ Graph write candidate 或 extraction draft 可进入 admission hold queue。Revi
 
 ---
 
-## Automation Engine and Local Automation Surface
+## Task Management Stack and Local Task Surface
 
-Automation Engine 文件:
+Task Management Stack 是 Connor 的抽象任务管理栈。它统一管理任务定义、发起者、触发描述、生命周期、运行历史和本地 CLI/API 管理面,但**不关心任务具体操作和实现方式**。邮件、日历、RSS、技能、会话或其他 runtime 只通过 opaque target 引用和统一回写接口与任务栈交互;任务栈不调用、不解析、不审批这些业务操作。
 
-```text
-Sources/ConnorGraphCore/ProductOSAutomation.swift
-Sources/ConnorGraphAppSupport/AppProductOSAutomationRepository.swift
-Sources/ConnorGraphAppSupport/AutomationEngine.swift
-```
-
-Automation Engine 当前能力:
-
-- Automation rule persistence
-- Trigger log persistence
-- Status trigger matching
-- Label trigger matching
-- Governed planning layer
-- Safe action execution
-- Pending-review action skip
-- Execution history persistence
-- AgentEvent audit bridge
-- Repeated-trigger rate limiting
-
-执行历史路径:
+Task Management Stack 文件:
 
 ```text
-automations/automation-execution-history.json
+Sources/ConnorGraphCore/TaskManagementDomain.swift
+Sources/ConnorGraphAppSupport/AppTaskManagementRepository.swift
+Sources/ConnorGraphAppSupport/TaskManagementStack.swift
+Sources/ConnorGraphAppSupport/ConnorLocalTaskSurface.swift
+Sources/ConnorGraphAppSupport/TaskManagementUIPresentation.swift
 ```
 
-Commercial Train 6 新增 Local API / CLI / Automation Surface:
+任务发起者:
 
 ```text
-Sources/ConnorGraphAppSupport/ConnorLocalAutomationSurface.swift
-Sources/ConnorCLI/main.swift
+system  系统创建:Connor 内置基础任务,默认 protected;用户可停止、恢复、查看历史,默认不可删除或改核心 target/trigger。
+user    用户创建:用户可修改、停止、删除、查看历史。
+ai      AI 创建:用户可修改、停止、删除、查看历史;记录 createdBySessionID 与 rationale。
 ```
 
-当前 Local API route catalog:
+任务触发类型只包含两类:
 
 ```text
-GET  /v1/readiness
-GET  /v1/automation/rules
-POST /v1/automation/evaluate
-POST /v1/automation/execute-reviewed
-GET  /v1/commands
+scheduled       定时任务,例如每 10 分钟检查邮件。
+eventTriggered  事件触发任务,例如某外部 runtime 回写事件。
 ```
 
-当前 CLI catalog:
+明确没有 `manual` 任务类型。“立即运行”如果未来需要,属于具体 runtime 的控制动作,不进入 Task Management Stack 的 trigger kind。
+
+默认系统任务定义:
+
+```text
+system.mail.check-every-10-minutes
+- name: 检查邮件
+- origin: system
+- trigger: scheduled, intervalSeconds = 600
+- target: source.runtime / mail / check
+- protected: true
+
+system.calendar.check-every-10-minutes
+- name: 检查日历
+- origin: system
+- trigger: scheduled, intervalSeconds = 600
+- target: source.runtime / calendar / check
+- protected: true
+
+system.rss.check-every-30-minutes
+- name: 检查 RSS
+- origin: system
+- trigger: scheduled, intervalSeconds = 1800
+- target: source.runtime / rss / check
+- protected: true
+```
+
+任务状态文件:
+
+```text
+tasks/task-definitions.json
+tasks/task-run-history.jsonl
+tasks/task-event-log.jsonl
+tasks/task-deletion-log.jsonl
+```
+
+Local Task Surface:
+
+```text
+GET    /v1/tasks
+GET    /v1/tasks/{id}
+POST   /v1/tasks
+PATCH  /v1/tasks/{id}
+POST   /v1/tasks/{id}/stop
+POST   /v1/tasks/{id}/restore
+DELETE /v1/tasks/{id}
+GET    /v1/tasks/{id}/runs
+POST   /v1/tasks/{id}/runs
+```
+
+CLI catalog:
 
 ```text
 connor commands
 connor readiness
-connor automations list
-connor automations evaluate --trigger <kind> --session <id> --status <status> --dry-run
-connor automations execute-reviewed --review-token <token>
-```
-
-其中当前 smoke-tested commands:
-
-```text
-connor commands
-connor readiness
-connor automations evaluate --trigger sessionStatusChanged --session demo --status needs_review --dry-run
-```
-
-Automation Surface readiness evidence:
-
-```text
-endpointCount
-cliCommandCount
-automationTriggerCount
-dryRunEvaluationReady
-reviewedExecutionGateReady
-auditSurfaceReady
-localOnlySafetyReady
+connor tasks list
+connor tasks show <task-id>
+connor tasks stop <task-id>
+connor tasks restore <task-id>
+connor tasks delete <task-id>
+connor tasks runs <task-id>
 ```
 
 安全边界:
 
-- Local API 是 contract/router,不默认启动长期 server。
+- Task Management Stack 是抽象控制面,不是业务执行器。
+- Task target 是 opaque reference,不在任务栈中解释邮件、日历、RSS 或技能语义。
+- Task Management Stack 不提供审批 / Review Gate / pendingReview / execute-reviewed。
 - CLI/API 不直接写图谱。
-- State-changing automation 必须经过 reviewed execution gate。
-- Dry-run evaluation 输出 matched rules、action plans、ready/pending/blocked counts 和 audit summary。
-- Unsafe 或 pending-review actions 不会被未审查执行。
-
----
+- protected system task 默认不可删除;user / AI task 可停止、删除和修改。
+- 运行历史由外部 runtime 通过统一接口回写。
 
 ## Native UI
 
@@ -1985,7 +2003,7 @@ Phase 2 · Claude SDK Sidecar Runtime
 Phase 3 · Source / MCP Platform
 Phase 4 · Graph Memory Core Capability
 Phase 5 · Native Commercial UI
-Phase 6 · Local API / CLI / Automation Surface
+Phase 6 · Local API / CLI / Task Surface
 Phase 7 · Native Mail System
 ```
 
@@ -2038,7 +2056,7 @@ CLI smoke:
 ```bash
 swift run connor commands
 swift run connor readiness
-swift run connor automations evaluate --trigger sessionStatusChanged --session demo --status needs_review --dry-run
+swift run connor tasks list
 ```
 
 最近验证结果:
@@ -2221,7 +2239,7 @@ Commercial Train 2: Claude SDK Sidecar Productionization
 Commercial Train 3: Source / MCP Platformization
 Commercial Train 4: Graph Memory as Agent Core Capability
 Commercial Train 5: Native UI Commercialization
-Commercial Train 6: Local API / CLI / Automation Surface
+Commercial Train 6: Local API / CLI / Task Surface
 Commercial Train 7: Native Mail System
 ```
 
