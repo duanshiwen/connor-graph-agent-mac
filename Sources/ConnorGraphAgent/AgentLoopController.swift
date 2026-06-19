@@ -682,13 +682,13 @@ private struct AgentToolBatchResult: Sendable, Equatable {
 private extension AgentPermissionCapability {
     var isSafeForParallelNativeToolExecution: Bool {
         switch self {
-        case .readGraph, .readSession, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific, .readMail, .readMailBody, .readContacts, .readRSS, .readRSSContent, .exportRSSOPML:
+        case .readGraph, .readSession, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .computeScientific, .readMail, .readMailBody, .readContacts, .readCalendar, .readRSS, .readRSSContent, .exportRSSOPML:
             return true
         case .proposeGraphWrite, .commitGraphWrite, .invalidateGraphStatement, .deleteGraphObject,
              .externalNetwork, .modelCall, .costlyModelCall,
              .writeWorkspaceFile, .editWorkspaceFile, .deleteWorkspaceFile,
              .runReadOnlyShellCommand, .runWorkspaceShellCommand, .runNetworkShellCommand, .runDestructiveShellCommand,
-             .mutateMailState, .manageMailboxes, .createMailDraft, .sendMail, .mutateContacts, .importMailAttachment,
+             .mutateMailState, .manageMailboxes, .createMailDraft, .sendMail, .mutateContacts, .mutateCalendar, .importMailAttachment,
              .mutateRSSState, .manageRSSSources, .syncRSSSources, .importRSSOPML:
             return false
         }

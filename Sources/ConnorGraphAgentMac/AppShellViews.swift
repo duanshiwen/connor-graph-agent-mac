@@ -111,6 +111,10 @@ struct AppShellView: View {
         .onChange(of: viewModel.runtimeSettingsAutosaveSignature) { _, _ in
             viewModel.scheduleRuntimeSettingsAutosave()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .connorSessionNotificationActivated)) { notification in
+            guard let sessionID = notification.userInfo?["sessionID"] as? String else { return }
+            viewModel.openSessionFromNotification(sessionID)
+        }
     }
 
     private func installTopSearchKeyMonitorIfNeeded() {

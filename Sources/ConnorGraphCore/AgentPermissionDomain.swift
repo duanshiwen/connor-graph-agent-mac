@@ -29,6 +29,8 @@ public enum AgentPermissionCapability: String, Codable, Sendable, Equatable, Has
     case sendMail
     case readContacts
     case mutateContacts
+    case readCalendar
+    case mutateCalendar
     case importMailAttachment
     case readRSS
     case readRSSContent

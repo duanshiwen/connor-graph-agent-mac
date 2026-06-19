@@ -188,6 +188,7 @@ public struct AgentSession: Codable, Sendable, Equatable, Identifiable {
     public var createdAt: Date
     public var updatedAt: Date
     public var governance: AgentSessionGovernanceMetadata
+    public var readState: SessionReadState
 
     public init(
         id: String = UUID().uuidString,
@@ -195,7 +196,8 @@ public struct AgentSession: Codable, Sendable, Equatable, Identifiable {
         messages: [AgentMessage] = [],
         createdAt: Date = Date(),
         updatedAt: Date? = nil,
-        governance: AgentSessionGovernanceMetadata = .default
+        governance: AgentSessionGovernanceMetadata = .default,
+        readState: SessionReadState = .initial()
     ) {
         self.id = id
         self.title = title
@@ -203,6 +205,39 @@ public struct AgentSession: Codable, Sendable, Equatable, Identifiable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt ?? createdAt
         self.governance = governance
+        self.readState = readState
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case messages
+        case createdAt
+        case updatedAt
+        case governance
+        case readState
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        messages = try container.decode([AgentMessage].self, forKey: .messages)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        governance = try container.decodeIfPresent(AgentSessionGovernanceMetadata.self, forKey: .governance) ?? .default
+        readState = try container.decodeIfPresent(SessionReadState.self, forKey: .readState) ?? .initial(updatedAt: updatedAt)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encode(messages, forKey: .messages)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(governance, forKey: .governance)
+        try container.encode(readState, forKey: .readState)
     }
 
     public var status: AgentSessionStatus {
@@ -241,7 +276,8 @@ public struct AgentSession: Codable, Sendable, Equatable, Identifiable {
             messages: messages,
             createdAt: createdAt,
             updatedAt: updatedAt,
-            governance: .default
+            governance: .default,
+            readState: .initial(updatedAt: updatedAt ?? createdAt)
         )
     }
 

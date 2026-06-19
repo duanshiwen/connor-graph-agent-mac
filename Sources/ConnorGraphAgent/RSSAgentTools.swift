@@ -214,8 +214,6 @@ public extension AgentToolRegistry {
         register(RSSSetReadStateTool(runtime: runtime))
         register(RSSSetStarStateTool(runtime: runtime))
         register(RSSSetHiddenStateTool(runtime: runtime))
-        register(RSSImportOPMLTool(runtime: runtime))
-        register(RSSExportOPMLTool(runtime: runtime))
         register(RSSCreateEvidenceCandidateTool(runtime: runtime))
     }
 }
