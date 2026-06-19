@@ -2826,7 +2826,11 @@ final class AppViewModel: NSObject, ObservableObject {
         content.title = title
         content.body = body
         content.sound = .default
-        content.userInfo = ["sessionID": sessionID, "attentionLevel": level.rawValue]
+        content.userInfo = [
+            "sessionID": sessionID,
+            "attentionLevel": level.rawValue,
+            "bundlePath": Bundle.main.bundlePath
+        ]
         let request = UNNotificationRequest(identifier: "session-\(sessionID)-\(UUID().uuidString)", content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
     }
