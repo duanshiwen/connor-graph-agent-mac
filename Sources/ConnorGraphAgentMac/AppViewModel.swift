@@ -680,6 +680,7 @@ final class AppViewModel: NSObject, ObservableObject {
     func updateSelectedChatInputDraft(_ draft: String) {
         guard autoSaveDraftsEnabled, !isRestoringChatInputDraft, let selectedChatSessionID else { return }
         chatInputDraftsBySessionID[selectedChatSessionID] = draft
+        speechTranscriptionCoordinator.noteUserEditedDraft(sessionID: selectedChatSessionID, draft: draft)
     }
 
     private func restoreChatInputDraft(for sessionID: String?) {
@@ -3804,6 +3805,7 @@ final class AppViewModel: NSObject, ObservableObject {
 
     func newChatSession() {
         guard let chatSessionRepository else { return }
+        _ = stopSpeechTranscriptionIfRunningForLeavingSession(selectedChatSessionID)
         rememberCurrentWorkspaceMode()
         do {
             let session = try chatSessionRepository.createSession()
