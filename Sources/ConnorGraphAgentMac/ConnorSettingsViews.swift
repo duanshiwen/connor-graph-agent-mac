@@ -219,7 +219,7 @@ struct SettingsMailSection: View {
             providerPresets
         }
         .sheet(isPresented: $viewModel.isPresentingAddMailAccountSheet) {
-            AddMailAccountSheet()
+            AddMailAccountSheet(viewModel: viewModel)
         }
     }
 
