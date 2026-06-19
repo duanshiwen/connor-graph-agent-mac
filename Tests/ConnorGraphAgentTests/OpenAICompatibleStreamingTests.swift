@@ -82,6 +82,32 @@ private struct OpenAIStreamingFallbackHTTPClient: AgentHTTPClient {
     #expect(object["stream"] as? Bool == true)
 }
 
+@Test func anyAgentModelProviderPreservesOpenAICompatibleStreamingPath() async throws {
+    let sseClient = OpenAIStreamingCapturingSSEClient(frames: [
+        "data: {\"choices\":[{\"delta\":{\"content\":\"streamed\"},\"finish_reason\":\"stop\"}]}\n",
+        "data: [DONE]\n"
+    ])
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(
+            baseURL: URL(string: "https://llm.example.com/v1")!,
+            apiKey: "test-key",
+            model: "gpt-test"
+        ),
+        httpClient: OpenAIStreamingFallbackHTTPClient(),
+        sseClient: sseClient
+    )
+    let erased = AnyAgentModelProvider(provider)
+
+    var events: [AgentModelStreamEvent] = []
+    for try await event in erased.streamComplete(AgentModelRequest(messages: [AgentModelMessage(role: .user, content: "stream")])) {
+        events.append(event)
+    }
+
+    #expect(erased.capabilities.supportsStreaming == true)
+    #expect(events.contains(.textDelta("streamed")))
+    #expect(sseClient.captured != nil)
+}
+
 @Test func openAICompatibleProviderStreamsToolCallArgumentsAndCompletedResponse() async throws {
     let sseClient = OpenAIStreamingCapturingSSEClient(frames: [
         "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"graph_search\",\"arguments\":\"{\\\"query\\\":\"}}]}}]}\n",
