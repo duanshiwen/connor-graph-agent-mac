@@ -15,6 +15,8 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case automation = "自动化"
     case productOS = "Product OS"
     case mail = "Mail"
+    case calendar = "Calendar"
+    case contacts = "Contacts"
     case rss = "RSS"
     case sources = "Sources"
     case skills = "Skills"
@@ -49,6 +51,8 @@ enum ConnorSettingsSection: String, CaseIterable, Identifiable {
     case app
     case ai
     case mail
+    case calendar
+    case contacts
     case rss
     case permissions
     case labels
@@ -63,6 +67,8 @@ enum ConnorSettingsSection: String, CaseIterable, Identifiable {
         case .app: "应用"
         case .ai: "AI"
         case .mail: "邮件系统"
+        case .calendar: "日历"
+        case .contacts: "联系人"
         case .rss: "RSS 阅读"
         case .permissions: "权限"
         case .labels: "标签"
@@ -77,6 +83,8 @@ enum ConnorSettingsSection: String, CaseIterable, Identifiable {
         case .app: "通知和更新"
         case .ai: "模型、思考、连接"
         case .mail: "账户、同步、安全"
+        case .calendar: "日程、账户能力、轻量管理"
+        case .contacts: "联系人、搜索、轻量管理"
         case .rss: "订阅源、抓取、OPML"
         case .permissions: "默认权限和审批"
         case .labels: "管理会话标签"
@@ -91,6 +99,8 @@ enum ConnorSettingsSection: String, CaseIterable, Identifiable {
         case .app: "app.badge"
         case .ai: "sparkles"
         case .mail: "envelope.badge"
+        case .calendar: "calendar"
+        case .contacts: "person.crop.circle.badge"
         case .rss: "dot.radiowaves.left.and.right"
         case .permissions: "shield"
         case .labels: "tag"
