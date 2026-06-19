@@ -1649,11 +1649,7 @@ final class AppViewModel: NSObject, ObservableObject {
             let oauthCredential = try await MicrosoftMailOAuthService.shared.authenticate(
                 configuration: oauthConfiguration,
                 loginHint: email,
-                openURL: { [weak self] url in
-                    Task { @MainActor in
-                        self?.openURLInCurrentChatBrowser(url)
-                    }
-                }
+                openURL: { url in NSWorkspace.shared.open(url) }
             )
             credentialToStore = try oauthCredential.encodedString()
         } else {
