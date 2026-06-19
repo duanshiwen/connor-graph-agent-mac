@@ -143,7 +143,11 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
 
         let inputNode = audioEngine.inputNode
         let recordingFormat = inputNode.outputFormat(forBus: 0)
-        inputNode.removeTap(onBus: 0)
+        guard recordingFormat.channelCount > 0, recordingFormat.sampleRate > 0 else {
+            cleanupAfterFailure()
+            onError("麦克风输入格式不可用，请检查系统麦克风权限和输入设备。")
+            return
+        }
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak request] buffer, _ in
             request?.append(buffer)
         }
