@@ -251,6 +251,14 @@ tasks/task-definitions.json
 tasks/task-run-history.jsonl
 tasks/task-event-log.jsonl
 tasks/task-deletion-log.jsonl
+
+内置系统任务会在启动时自动补齐到 `task-definitions.json`：
+
+```text
+system.mail.check-every-10-minutes      source.runtime:mail.refresh
+system.calendar.check-every-10-minutes  source.runtime:calendar.refresh
+system.rss.check-every-30-minutes       source.runtime:rss.refresh
+```
 labels/labels.json
 statuses/statuses.json
 graph/evaluations/retrieval-evaluation-cases.json
@@ -335,9 +343,23 @@ API keys and provider credentials must not be stored in JSON settings files. The
 
 - Skill package scanning, lifecycle and invocation parsing
 - Skill prompt augmentation
-- Product OS automation repositories
-- Task definitions, run history, event log and deletion log
-- Session-scoped background task adapter
+- Product OS automation legacy repositories remain for compatibility, but new background work is owned by Task Management Stack
+- Three task origins：
+  - `system`：Connor protected tasks，用户可查看、暂停和恢复，不可删除；当前包括 10 分钟邮件刷新、10 分钟日历刷新、30 分钟 RSS 刷新
+  - `user`：用户创建的任务，可编辑/删除；当前受模板约束
+  - `ai`：AI 通过受治理工具创建的任务，可被用户编辑/删除；当前受模板约束
+- Two trigger modes：
+  - `scheduled`：指定时间或周期触发，支持一次性、每日、每周、每月，以及系统 interval 任务
+  - `eventTriggered`：事件触发；当前用户/AI 可创建的事件任务仅限 `session.status.changed`
+- Current user/AI task templates：
+  - 当某个会话状态变为特定状态后，向该会话的 AI 发送特定内容
+  - 在某个特定时间，或每日/每周/每月周期，新建会话并向 AI 发送特定内容
+- AI task tools：
+  - `tasks_list`
+  - `tasks_create_scheduled_session_message`
+  - `tasks_create_session_status_message`
+- Task runtime execution：`TaskSchedulerService` 计算 due tasks，`TaskSchedulerRunnerService` 记录 run history 并调用 `TaskTargetRunner`，真实分发到 Native Mail / Calendar / RSS runtimes 或 Session OS message flow
+- Session-scoped background task adapter remains for recoverable per-session runtime intents
 
 ---
 

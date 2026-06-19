@@ -1453,6 +1453,33 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
+    func stopTask(_ id: String) {
+        do {
+            _ = try taskManagementRepository?.stopTask(id: id, reason: "Stopped from Task Management UI")
+            reloadTaskManagementPresentation()
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func restoreTask(_ id: String) {
+        do {
+            _ = try taskManagementRepository?.restoreTask(id: id)
+            reloadTaskManagementPresentation()
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func deleteTask(_ id: String) {
+        do {
+            _ = try taskManagementRepository?.deleteTask(id: id, reason: "Deleted from Task Management UI")
+            reloadTaskManagementPresentation()
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
     func startTaskSchedulerTimer() {
         guard taskSchedulerTimer == nil else { return }
         Task { await runScheduledTasksNow() }
