@@ -27,6 +27,26 @@ struct TaskLocalSurfaceTests {
         #expect(commands.contains { $0.usage.contains("execute-reviewed") } == false)
     }
 
+    @Test func localTaskSurfaceExposesSessionTaskRoutes() {
+        let presentation = ConnorLocalTaskSurfacePresentation.default
+
+        #expect(presentation.endpoints.contains { $0.id == .sessionTasks && $0.path == "/v1/sessions/{sessionID}/tasks" })
+        #expect(presentation.endpoints.contains { $0.id == .sessionRecoverableTasks && $0.path == "/v1/sessions/{sessionID}/tasks/recoverable" })
+        #expect(presentation.endpoints.contains { $0.id == .sessionTaskStop && $0.path == "/v1/sessions/{sessionID}/tasks/{taskID}/stop" })
+        #expect(presentation.endpoints.contains { $0.id == .sessionTaskRestore && $0.path == "/v1/sessions/{sessionID}/tasks/{taskID}/restore" })
+    }
+
+    @Test func cliCatalogUsesSessionTaskCommands() {
+        let commands = ConnorLocalTaskSurfaceCatalog.defaultCommands
+
+        #expect(commands.contains { $0.id == .sessionTaskList && $0.usage == "connor tasks session list <session-id>" })
+        #expect(commands.contains { $0.id == .sessionTaskRecoverable && $0.usage == "connor tasks session recoverable <session-id>" })
+        #expect(commands.contains { $0.id == .sessionTaskStop && $0.usage == "connor tasks session stop <session-id> <task-id>" })
+        #expect(commands.contains { $0.id == .sessionTaskRestore && $0.usage == "connor tasks session restore <session-id> <task-id>" })
+        #expect(commands.allSatisfy { $0.requiresReview == false })
+        #expect(commands.contains { $0.usage.contains("execute-reviewed") || $0.usage.contains("manual") } == false)
+    }
+
     @Test func taskSurfaceReadinessPayloadDoesNotExposeApprovalFields() {
         let payload = ConnorLocalTaskSurfaceReadiness.default
 
