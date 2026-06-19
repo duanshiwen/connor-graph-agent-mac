@@ -48,7 +48,12 @@ public struct SessionBackgroundTaskManagementAdapter: Sendable {
         tasks
             .filter { $0.sessionID == sessionID }
             .filter { isRecoverable(status: $0.status) }
-            .sorted { $0.createdAt < $1.createdAt }
+            .sorted { lhs, rhs in
+                let lhsPriority = recoveryPriority(for: lhs.status)
+                let rhsPriority = recoveryPriority(for: rhs.status)
+                if lhsPriority != rhsPriority { return lhsPriority < rhsPriority }
+                return lhs.createdAt < rhs.createdAt
+            }
             .map(taskDefinition(from:))
     }
 
@@ -117,6 +122,15 @@ public struct SessionBackgroundTaskManagementAdapter: Sendable {
         switch status {
         case .queued, .running, .interrupted: true
         case .succeeded, .failed: false
+        }
+    }
+
+    private func recoveryPriority(for status: PersistedSessionBackgroundTaskStatus) -> Int {
+        switch status {
+        case .queued: 0
+        case .running: 1
+        case .interrupted: 2
+        case .succeeded, .failed: 3
         }
     }
 
