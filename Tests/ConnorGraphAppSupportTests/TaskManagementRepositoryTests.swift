@@ -19,6 +19,25 @@ struct TaskManagementRepositoryTests {
         #expect(repository.taskDefinitionsURL.path.contains("/tasks/task-definitions.json"))
     }
 
+    @Test func repositoryBackfillsMissingSystemTasksWithoutReactivatingStoppedOnes() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
+        let defaults = ConnorTaskDefinition.systemDefaults(now: Date(timeIntervalSince1970: 0))
+        var mail = try #require(defaults.first { $0.id == "system.mail.check-every-10-minutes" })
+        mail.lifecycle.status = .stopped
+        try repository.saveTask(mail)
+
+        let tasks = try repository.loadOrCreateDefault(now: Date(timeIntervalSince1970: 10))
+        let reloadedMail = try #require(tasks.first { $0.id == mail.id })
+
+        #expect(tasks.contains { $0.id == "system.calendar.check-every-10-minutes" })
+        #expect(tasks.contains { $0.id == "system.rss.check-every-30-minutes" })
+        #expect(reloadedMail.lifecycle.status == .stopped)
+        #expect(reloadedMail.target == ConnorTaskTarget.sourceRuntimeRefresh(sourceID: "mail"))
+        #expect(FileManager.default.fileExists(atPath: repository.taskEventLogURL.path))
+    }
+
     @Test func repositoryStopsRestoresAndProtectsSystemTasks() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
