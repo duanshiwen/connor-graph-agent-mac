@@ -29,6 +29,24 @@ private func temporaryAppChatStoragePaths(_ name: String = UUID().uuidString) ->
     #expect(try cacheStore.loadBlocks(sessionID: session.id, messageID: user.id, content: user.content) == nil)
 }
 
+@Test func appChatRepositoryUpdatesSessionReadState() throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryAppChatDatabaseURL().path)
+    try store.migrate()
+    let repository = AppChatSessionRepository(store: store)
+    let updatedAt = Date(timeIntervalSince1970: 2_000)
+    let session = AgentSession(id: "session-read-state", title: "Read State", updatedAt: updatedAt)
+    try repository.saveSession(session)
+    var readState = SessionReadState.initial(updatedAt: Date(timeIntervalSince1970: 3_000))
+    readState.markUnread(messageID: "assistant-1", preview: "Done", level: .actionable, at: Date(timeIntervalSince1970: 3_000))
+
+    let updated = try repository.updateReadState(sessionID: session.id, readState: readState)
+    let loaded = try #require(try repository.loadSession(id: session.id))
+
+    #expect(updated.readState == readState)
+    #expect(loaded.readState == readState)
+    #expect(loaded.updatedAt == updatedAt)
+}
+
 @Test func appChatRepositoryPersistsBackgroundTasksIsolatedBySession() throws {
     let store = try SQLiteGraphKernelStore(path: temporaryAppChatDatabaseURL().path)
     try store.migrate()

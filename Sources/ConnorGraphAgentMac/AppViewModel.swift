@@ -2722,8 +2722,7 @@ final class AppViewModel: NSObject, ObservableObject {
         guard sessionReadStates[sessionID]?.highestLevel != SessionAttentionLevel.none || sessionReadStates[sessionID]?.unreadCount ?? 0 > 0 else { return }
         var state = sessionReadStates[sessionID] ?? .initial()
         state.markRead(messageID: latestMessageID(for: sessionID), at: Date())
-        sessionReadStates[sessionID] = state
-        refreshDockBadge()
+        applySessionReadState(state, sessionID: sessionID, persist: true)
     }
 
     private func markSessionUnread(
@@ -2734,8 +2733,7 @@ final class AppViewModel: NSObject, ObservableObject {
     ) {
         var state = sessionReadStates[sessionID] ?? .initial()
         state.markUnread(messageID: messageID, preview: preview, level: level, at: Date())
-        sessionReadStates[sessionID] = state
-        refreshDockBadge()
+        applySessionReadState(state, sessionID: sessionID, persist: true)
     }
 
     private func latestMessageID(for sessionID: String) -> String? {
@@ -2755,8 +2753,7 @@ final class AppViewModel: NSObject, ObservableObject {
         if isSessionCurrentlyVisible(sessionID) {
             var state = sessionReadStates[sessionID] ?? .initial()
             state.markRead(messageID: messageID ?? latestMessageID(for: sessionID), at: Date())
-            sessionReadStates[sessionID] = state
-            refreshDockBadge()
+            applySessionReadState(state, sessionID: sessionID, persist: true)
             return
         }
         let unreadMessageID = messageID ?? "attention-event-\(UUID().uuidString)"
@@ -2797,6 +2794,44 @@ final class AppViewModel: NSObject, ObservableObject {
         content.userInfo = ["sessionID": sessionID, "attentionLevel": level.rawValue]
         let request = UNNotificationRequest(identifier: "session-\(sessionID)-\(UUID().uuidString)", content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
+    }
+
+    private func synchronizeSessionReadStates(from sessions: [AgentSession]) {
+        sessionReadStates = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0.readState) })
+        refreshDockBadge()
+    }
+
+    private func applySessionReadState(_ state: SessionReadState, sessionID: String, persist: Bool) {
+        sessionReadStates[sessionID] = state
+        updateLoadedSessionReadState(sessionID: sessionID, readState: state)
+        if persist {
+            persistSessionReadState(state, sessionID: sessionID)
+        }
+        refreshDockBadge()
+    }
+
+    private func updateLoadedSessionReadState(sessionID: String, readState: SessionReadState) {
+        if let index = chatSessions.firstIndex(where: { $0.id == sessionID }) {
+            chatSessions[index].readState = readState
+        }
+        if let index = allChatSessions.firstIndex(where: { $0.id == sessionID }) {
+            allChatSessions[index].readState = readState
+        }
+        if fallbackChatSession.id == sessionID {
+            fallbackChatSession.readState = readState
+        }
+    }
+
+    private func persistSessionReadState(_ state: SessionReadState, sessionID: String) {
+        do {
+            let updated = try chatSessionRepository?.updateReadState(sessionID: sessionID, readState: state)
+            if let updated {
+                updateLoadedSessionReadState(sessionID: updated.id, readState: updated.readState)
+            }
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
     }
 
     private func refreshDockBadge() {
@@ -3071,6 +3106,7 @@ final class AppViewModel: NSObject, ObservableObject {
             transcript = activeChatTranscript
             chatSessions = [activeChatSession]
             allChatSessions = [activeChatSession]
+            synchronizeSessionReadStates(from: allChatSessions)
             selectedChatSessionID = activeChatSession.id
             return
         }
@@ -3082,6 +3118,7 @@ final class AppViewModel: NSObject, ObservableObject {
             }
             chatSessions = sessions
             allChatSessions = try chatSessionRepository.loadSessions(filter: .all)
+            synchronizeSessionReadStates(from: allChatSessions)
             let selectedID = selectedChatSessionID ?? sessions.first?.id
             selectedChatSessionID = selectedID
             if let selectedID, let session = try chatSessionRepository.loadSession(id: selectedID) {
