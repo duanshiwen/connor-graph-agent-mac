@@ -46,11 +46,22 @@ struct CraftCalendarListPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Text("日历")
-                .font(AppListTypography.header)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 13)
+            HStack {
+                Spacer(minLength: 24)
+                Text("日历")
+                    .font(AppListTypography.header)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                Button(action: { viewModel.isPresentingAddCalendarSourceSheet = true }) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .help("添加日历源")
+                .accessibilityLabel("添加日历源")
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
 
             if viewModel.calendarBrowserPresentation.daySections.isEmpty {
                 ContentUnavailableView("暂无日程", systemImage: "calendar", description: Text("添加支持 Calendar capability 的账户后，日程会显示在这里。"))
@@ -64,6 +75,71 @@ struct CraftCalendarListPane: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .sheet(isPresented: $viewModel.isPresentingAddCalendarSourceSheet) {
+            AddCalendarSourceSheet { provider, displayName, calendarName in
+                viewModel.addCalendarSource(provider: provider, displayName: displayName, calendarName: calendarName)
+            }
+        }
+    }
+}
+
+struct AddCalendarSourceSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var onAdd: (ConnectedAccountProviderKind, String, String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
+            HStack {
+                VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
+                    Text("添加日历源")
+                        .font(.system(size: 24, weight: .semibold))
+                    Text("当前接入 macOS Calendar / EventKit。你在系统日历中登录的 iCloud、Google、Exchange / Microsoft 365 日历都会一起同步。")
+                        .font(AgentChatTypography.meta)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Button(action: { dismiss() }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.cancelAction)
+            }
+
+            VStack(alignment: .leading, spacing: AppShellLayout.spaceM) {
+                Label("本机日历", systemImage: "calendar")
+                    .font(AgentChatTypography.title)
+                Text("点击同步后，系统会弹出日历权限请求。授权后，康纳同学会读取未来 90 天和过去 7 天的事件，并按天展示在日历列表。")
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("如果要同步 Google 或 Microsoft 日历，请先在 macOS 系统设置 / 日历 App 中添加对应账户；Connor 会通过 EventKit 读取系统已经聚合的日历。")
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(AppShellLayout.spaceL)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(nsColor: .textBackgroundColor).opacity(0.5), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(AppShellColors.hairline, lineWidth: 1))
+
+            Spacer()
+
+            HStack {
+                Spacer()
+                Button("取消") { dismiss() }
+                Button("同步本机日历") {
+                    onAdd(.localFixture, "本机日历", "系统日历")
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(AppShellLayout.spaceXL)
+        .frame(width: 560, height: 360)
     }
 }
 
@@ -127,15 +203,6 @@ private struct CalendarEventButton: View {
 
 struct CraftContactsListPane: View {
     @ObservedObject var viewModel: AppViewModel
-    @State private var query = ""
-
-    private var rows: [NativeContactRowPresentation] {
-        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !normalized.isEmpty else { return viewModel.contactsBrowserPresentation.rows }
-        return viewModel.contactsBrowserPresentation.rows.filter { row in
-            row.displayName.lowercased().contains(normalized) || (row.primaryEmail?.lowercased().contains(normalized) ?? false)
-        }
-    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -145,36 +212,14 @@ struct CraftContactsListPane: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 13)
 
-            ContactsSearchField(query: $query)
-                .padding(.horizontal, 14)
-                .padding(.bottom, 8)
-
-            if rows.isEmpty {
-                ContentUnavailableView("暂无联系人", systemImage: "person.crop.circle.badge", description: Text("添加支持 Contacts capability 的账户后，联系人会显示在这里。"))
-                    .padding(.top, 80)
+            if viewModel.contactsBrowserPresentation.rows.isEmpty {
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ContactsRowsScrollView(rows: rows, selectedID: viewModel.selectedContactID, onSelect: { viewModel.selectedContactID = $0 })
+                ContactsRowsScrollView(rows: viewModel.contactsBrowserPresentation.rows, selectedID: viewModel.selectedContactID, onSelect: { viewModel.selectedContactID = $0 })
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-    }
-}
-
-private struct ContactsSearchField: View {
-    @Binding var query: String
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
-            TextField("搜索姓名或邮箱", text: $query)
-                .textFieldStyle(.plain)
-        }
-        .padding(.horizontal, 9)
-        .frame(height: 28)
-        .background(Color(nsColor: .textBackgroundColor).opacity(0.62), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(AppShellColors.hairline, lineWidth: 1))
     }
 }
 
@@ -1089,27 +1134,29 @@ struct CalendarSourceSettingsView: View {
     @ObservedObject var viewModel: AppViewModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
-            CalendarContactsDetailHeader(title: "日历", subtitle: "轻量日程数据源：列表、详情和 AI 工具管理，不做完整日历客户端。")
-            Divider().opacity(0.6)
+        Group {
             if let selected = selectedEventRow {
-                VStack(alignment: .leading, spacing: AppShellLayout.spaceM) {
-                    Label(selected.title, systemImage: "calendar.badge.clock")
-                        .font(AgentChatTypography.title)
-                    Text(selected.timeText)
-                        .font(AgentChatTypography.meta)
-                        .foregroundStyle(.secondary)
-                    if let location = selected.location {
-                        Text(location).font(AgentChatTypography.meta)
+                VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
+                    CalendarContactsDetailHeader(title: "日历", subtitle: "轻量日程数据源：列表、详情和 AI 工具管理，不做完整日历客户端。")
+                    Divider().opacity(0.6)
+                    VStack(alignment: .leading, spacing: AppShellLayout.spaceM) {
+                        Label(selected.title, systemImage: "calendar.badge.clock")
+                            .font(AgentChatTypography.title)
+                        Text(selected.timeText)
+                            .font(AgentChatTypography.meta)
+                            .foregroundStyle(.secondary)
+                        if let location = selected.location {
+                            Text(location).font(AgentChatTypography.meta)
+                        }
                     }
+                    .padding(AppShellLayout.spaceXL)
                 }
-                .padding(AppShellLayout.spaceXL)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
-                ContentUnavailableView("选择一个日程", systemImage: "calendar", description: Text("从左侧日程列表选择后查看详情。"))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Color.clear
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppShellColors.detailBackground)
     }
 
@@ -1123,27 +1170,29 @@ struct ContactsSourceSettingsView: View {
     @ObservedObject var viewModel: AppViewModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
-            CalendarContactsDetailHeader(title: "联系人", subtitle: "轻量联系人数据源：列表、搜索和详情，不做 CRM。")
-            Divider().opacity(0.6)
+        Group {
             if let selected = selectedContactRow {
-                VStack(alignment: .leading, spacing: AppShellLayout.spaceM) {
-                    Label(selected.displayName, systemImage: "person.crop.circle")
-                        .font(AgentChatTypography.title)
-                    if let email = selected.primaryEmail {
-                        Text(email).font(AgentChatTypography.meta).textSelection(.enabled)
+                VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
+                    CalendarContactsDetailHeader(title: "联系人", subtitle: "轻量联系人数据源：列表和详情，不做 CRM。")
+                    Divider().opacity(0.6)
+                    VStack(alignment: .leading, spacing: AppShellLayout.spaceM) {
+                        Label(selected.displayName, systemImage: "person.crop.circle")
+                            .font(AgentChatTypography.title)
+                        if let email = selected.primaryEmail {
+                            Text(email).font(AgentChatTypography.meta).textSelection(.enabled)
+                        }
+                        if let organization = selected.organizationName {
+                            Text(organization).font(AgentChatTypography.meta).foregroundStyle(.secondary)
+                        }
                     }
-                    if let organization = selected.organizationName {
-                        Text(organization).font(AgentChatTypography.meta).foregroundStyle(.secondary)
-                    }
+                    .padding(AppShellLayout.spaceXL)
                 }
-                .padding(AppShellLayout.spaceXL)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
-                ContentUnavailableView("选择一个联系人", systemImage: "person.crop.circle.badge", description: Text("从左侧联系人列表选择后查看详情。"))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Color.clear
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppShellColors.detailBackground)
     }
 
