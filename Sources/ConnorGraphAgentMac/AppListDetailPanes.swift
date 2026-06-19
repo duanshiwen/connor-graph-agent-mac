@@ -33,9 +33,9 @@ struct CraftListPaneView: View {
             case .automation:
                 CraftSimpleListPane(title: "自动化", subtitle: "事件触发与执行历史", rows: viewModel.automationConfig.rules.map(\.name))
             case .scheduledTasks:
-                CraftSimpleListPane(title: "定时任务", subtitle: "按时间或周期执行", rows: viewModel.taskManagementPresentation.scheduledTasks.map(\.title))
+                CraftTaskAutomationListPane(viewModel: viewModel, kind: .scheduled)
             case .eventTriggeredTasks:
-                CraftSimpleListPane(title: "事件触发", subtitle: "由会话状态等事件触发", rows: viewModel.taskManagementPresentation.eventTriggeredTasks.map(\.title))
+                CraftTaskAutomationListPane(viewModel: viewModel, kind: .eventTriggered)
             case .productOS:
                 CraftSimpleListPane(title: "Product OS", subtitle: "本地控制面模块", rows: viewModel.productOSRegistry.sources.map(\.displayName) + viewModel.productOSRegistry.skills.map(\.displayName))
             default:
@@ -804,6 +804,178 @@ private struct RSSHintCard: View {
             RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
                 .stroke(Color.orange.opacity(0.18), lineWidth: 1)
         }
+    }
+}
+
+private enum TaskAutomationKind {
+    case scheduled
+    case eventTriggered
+
+    var title: String {
+        switch self {
+        case .scheduled: "定时任务"
+        case .eventTriggered: "事件触发"
+        }
+    }
+
+    var emptyTitle: String {
+        switch self {
+        case .scheduled: "暂无定时任务"
+        case .eventTriggered: "暂无事件触发任务"
+        }
+    }
+
+    var emptyDescription: String {
+        switch self {
+        case .scheduled: "系统任务会在启动时自动补齐；用户和 AI 任务可按时间或周期新建会话并发送消息。"
+        case .eventTriggered: "用户或 AI 可创建：当会话状态变为特定状态后，向 AI 发送指定内容。"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .scheduled: "clock"
+        case .eventTriggered: "dot.radiowaves.left.and.right"
+        }
+    }
+
+    func cards(from presentation: TaskManagementUIPresentation) -> [TaskManagementUICard] {
+        switch self {
+        case .scheduled: presentation.scheduledTasks
+        case .eventTriggered: presentation.eventTriggeredTasks
+        }
+    }
+}
+
+private struct CraftTaskAutomationListPane: View {
+    @ObservedObject var viewModel: AppViewModel
+    var kind: TaskAutomationKind
+
+    private var cards: [TaskManagementUICard] {
+        kind.cards(from: viewModel.taskManagementPresentation)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Text(kind.title)
+                .font(AppListTypography.header)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 13)
+
+            if cards.isEmpty {
+                ContentUnavailableView(kind.emptyTitle, systemImage: kind.systemImage, description: Text(kind.emptyDescription))
+                    .padding(.top, 80)
+            } else {
+                List(cards) { card in
+                    TaskAutomationListRow(
+                        card: card,
+                        isSelected: card.id == viewModel.selectedTaskAutomationID,
+                        onSelect: { viewModel.selectedTaskAutomationID = card.id }
+                    )
+                    .mailListRowStyle()
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .contentMargins(.top, 6, for: .scrollContent)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .task {
+            viewModel.reloadTaskManagementPresentation()
+            selectDefaultIfNeeded()
+        }
+        .onChange(of: cards.map(\.id)) { _, _ in
+            selectDefaultIfNeeded()
+        }
+    }
+
+    private func selectDefaultIfNeeded() {
+        if let selected = viewModel.selectedTaskAutomationID,
+           cards.contains(where: { $0.id == selected }) {
+            return
+        }
+        viewModel.selectedTaskAutomationID = cards.first?.id
+    }
+}
+
+private struct TaskAutomationListRow: View {
+    var card: TaskManagementUICard
+    var isSelected: Bool
+    var onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(alignment: .top, spacing: 10) {
+                Circle()
+                    .fill(severityColor)
+                    .frame(width: 8, height: 8)
+                    .padding(.top, 7)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 6) {
+                        Text(card.title)
+                            .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                        Text(card.originBadge)
+                            .font(AppListTypography.rowCaption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(card.targetLabel)
+                        .font(AppListTypography.rowCaptionEmphasized)
+                        .lineLimit(1)
+                    Text(contextText)
+                        .font(AppListTypography.rowCaption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                    HStack(spacing: 5) {
+                        TaskAutomationChip(text: card.triggerLabel)
+                        TaskAutomationChip(text: card.statusLabel)
+                        if let reason = card.deleteDisabledReason, !reason.isEmpty {
+                            TaskAutomationChip(text: reason)
+                        }
+                    }
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isSelected ? Color.orange.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var contextText: String {
+        [
+            card.nextRunLabel.isEmpty ? nil : "下次：\(card.nextRunLabel)",
+            card.lastRunLabel.isEmpty ? nil : "上次：\(card.lastRunLabel)",
+            card.lastErrorLabel.isEmpty ? nil : "错误：\(card.lastErrorLabel)"
+        ]
+        .compactMap { $0 }
+        .joined(separator: " · ")
+    }
+
+    private var severityColor: Color {
+        switch card.severity {
+        case .info: .blue
+        case .success: .green
+        case .warning: .orange
+        case .error: .red
+        }
+    }
+}
+
+private struct TaskAutomationChip: View {
+    var text: String
+
+    var body: some View {
+        Text(text)
+            .font(AppListTypography.rowCaption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color.secondary.opacity(0.10), in: Capsule())
+            .lineLimit(1)
     }
 }
 
