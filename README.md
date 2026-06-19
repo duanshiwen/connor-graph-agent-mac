@@ -146,7 +146,7 @@ Agent runtime layer. It provides：
 
 - Agent loop orchestration
 - Streaming model provider abstraction
-- OpenAI-compatible / Anthropic-compatible providers with streaming agent completion paths
+- OpenAI-compatible / Anthropic-compatible providers with streaming agent completion paths and explicit LLM request timeouts
 - Tool registration, tool execution and tool result gating
 - Local workspace tools and policy checks
 - Mail/RSS/Calendar/Contacts/scientific compute tool boundaries
@@ -293,8 +293,11 @@ API keys and provider credentials must not be stored in JSON settings files. The
 - Anthropic-compatible provider path
 - OpenAI-compatible and Anthropic-compatible agent completions support SSE streaming through Connor's model-provider abstraction
 - OpenAI-compatible chat completion requests use an explicit 180-second default request timeout instead of relying on `URLSession.shared` defaults
+- Anthropic-compatible Messages API requests use the same explicit 180-second default request timeout for streaming, non-streaming and health-check paths
 - Non-streaming completion and provider health-check paths remain available as fallbacks
 - Claude SDK sidecar boundary
+- Persistent Claude SDK sidecar sessions stream stdout JSONL events and use Connor-owned cancel commands for session shutdown
+- Non-persistent Claude SDK sidecar process transport uses a 300-second watchdog timeout to prevent stuck child processes from blocking indefinitely
 - Per-connection settings and per-session model override
 - Provider health checks and credential boundary
 - Guardrails to avoid routing governed sidecar mode through legacy direct provider paths
