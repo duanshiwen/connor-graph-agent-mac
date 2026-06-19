@@ -65,13 +65,17 @@ public struct MicrosoftMailOAuthConfiguration: Sendable, Equatable {
     public static func loadFromProcessAndDefaults() -> MicrosoftMailOAuthConfiguration? {
         let environment = ProcessInfo.processInfo.environment
         let defaults = UserDefaults.standard
-        let clientID = environment["CONNOR_MICROSOFT_MAIL_CLIENT_ID"]
+        let bundle = Bundle.main
+        let clientID = bundle.string(forInfoDictionaryKey: "ConnorMicrosoftMailOAuthClientID")
+            ?? environment["CONNOR_MICROSOFT_MAIL_CLIENT_ID"]
             ?? defaults.string(forKey: "ConnorMicrosoftMailOAuthClientID")
         guard let clientID = clientID?.trimmingCharacters(in: .whitespacesAndNewlines), !clientID.isEmpty else { return nil }
-        let tenant = environment["CONNOR_MICROSOFT_MAIL_TENANT"]
+        let tenant = bundle.string(forInfoDictionaryKey: "ConnorMicrosoftMailOAuthTenant")
+            ?? environment["CONNOR_MICROSOFT_MAIL_TENANT"]
             ?? defaults.string(forKey: "ConnorMicrosoftMailOAuthTenant")
             ?? "common"
-        let redirectURI = environment["CONNOR_MICROSOFT_MAIL_REDIRECT_URI"]
+        let redirectURI = bundle.string(forInfoDictionaryKey: "ConnorMicrosoftMailOAuthRedirectURI")
+            ?? environment["CONNOR_MICROSOFT_MAIL_REDIRECT_URI"]
             ?? defaults.string(forKey: "ConnorMicrosoftMailOAuthRedirectURI")
             ?? "http://localhost:\(defaultCallbackPort)\(defaultCallbackPath)"
         return MicrosoftMailOAuthConfiguration(
