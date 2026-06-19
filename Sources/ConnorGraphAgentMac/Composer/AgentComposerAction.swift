@@ -15,5 +15,6 @@ enum AgentComposerAction {
     case setPermissionMode(AgentPermissionMode)
     case setSessionStatus(AgentSessionStatus)
     case toggleBrowserWorkspaceVisibility
+    case toggleSpeechTranscription
     case showBackgroundTasks
 }

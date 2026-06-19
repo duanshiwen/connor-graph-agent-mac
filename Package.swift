@@ -48,6 +48,8 @@ let package = Package(
             ],
             linkerSettings: [
                 .linkedFramework("WebKit"),
+                .linkedFramework("AVFoundation"),
+                .linkedFramework("Speech"),
                 .linkedFramework("CoreLocation"),
                 .linkedFramework("EventKit"),
                 .linkedFramework("Contacts"),

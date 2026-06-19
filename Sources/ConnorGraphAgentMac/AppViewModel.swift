@@ -359,6 +359,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published private(set) var sessionReadStates: [String: SessionReadState] = [:]
     @Published var regeneratingTitleSessionIDs: Set<String> = []
     @Published var backgroundTasksBySessionID: [String: [AppSessionBackgroundTask]] = [:]
+    @Published var speechTranscriptionStatus: SessionSpeechTranscriptionStatus = .idle
     @Published var isBackgroundTasksPresented: Bool = false
     @Published var sessionListFilter: AgentSessionListFilter = .all
     @Published var sessionSearchQuery: String = ""
@@ -542,6 +543,9 @@ final class AppViewModel: NSObject, ObservableObject {
     private var hasActivatedRuntimeSettingsSideEffects = false
     private var locationCoordinator: UserLocationCoordinator?
     private var taskSchedulerTimer: Timer?
+    private lazy var speechTranscriptionCoordinator = SessionSpeechTranscriptionCoordinator(
+        transcriber: SessionSpeechTranscriptionController()
+    )
 
     private var activeChatSession: AgentSession {
         nativeSessionManager?.session ?? fallbackChatSession
@@ -3874,6 +3878,54 @@ final class AppViewModel: NSObject, ObservableObject {
             .contains { $0.status == .queued || $0.status == .running }
     }
 
+    var isSpeechTranscriptionRunningForSelectedSession: Bool {
+        speechTranscriptionCoordinator.isRunning(sessionID: selectedChatSessionID)
+    }
+
+    func toggleSpeechTranscriptionForSelectedSession() {
+        let task = speechTranscriptionCoordinator.toggle(
+            selectedSessionID: selectedChatSessionID,
+            currentDraft: chatInput,
+            setDraft: { [weak self] sessionID, draft in
+                self?.setSpeechTranscriptionDraft(draft, for: sessionID)
+            }
+        )
+        syncSpeechTranscriptionState()
+        upsertSpeechTranscriptionBackgroundTask(task)
+    }
+
+    @discardableResult
+    private func stopSpeechTranscriptionIfRunningForLeavingSession(_ sessionID: String?) -> AppSessionBackgroundTask? {
+        let task = speechTranscriptionCoordinator.stopIfRunningForLeavingSession(sessionID)
+        syncSpeechTranscriptionState()
+        upsertSpeechTranscriptionBackgroundTask(task)
+        return task
+    }
+
+    @discardableResult
+    private func stopSpeechTranscriptionIfRunningForDeletedSession(_ sessionID: String?) -> AppSessionBackgroundTask? {
+        let task = speechTranscriptionCoordinator.stopIfRunningForDeletedSession(sessionID)
+        syncSpeechTranscriptionState()
+        upsertSpeechTranscriptionBackgroundTask(task)
+        return task
+    }
+
+    private func setSpeechTranscriptionDraft(_ draft: String, for sessionID: String) {
+        chatInputDraftsBySessionID[sessionID] = draft
+        if selectedChatSessionID == sessionID {
+            setChatInputDraft(draft, for: sessionID)
+        }
+    }
+
+    private func syncSpeechTranscriptionState() {
+        speechTranscriptionStatus = speechTranscriptionCoordinator.status
+    }
+
+    private func upsertSpeechTranscriptionBackgroundTask(_ task: AppSessionBackgroundTask?) {
+        guard let task else { return }
+        upsertBackgroundTask(task)
+    }
+
     private func runningBackgroundTasksForDeletionCheck(sessionID: String) throws -> [AppSessionBackgroundTask] {
         let persistedTasks = try chatSessionRepository?.loadBackgroundTasks(sessionID: sessionID).map(AppSessionBackgroundTask.init(persisted:)) ?? []
         let memoryTasks = backgroundTasksBySessionID[sessionID, default: []]
@@ -3954,6 +4006,24 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
+    private func upsertBackgroundTask(_ task: AppSessionBackgroundTask) {
+        var tasks = backgroundTasksBySessionID[task.sessionID, default: []]
+        if let index = tasks.firstIndex(where: { $0.id == task.id }) {
+            tasks[index] = task
+        } else {
+            tasks.append(task)
+        }
+        backgroundTasksBySessionID[task.sessionID] = tasks
+        do {
+            try chatSessionRepository?.saveBackgroundTask(task.persisted)
+        } catch {
+            errorMessage = String(describing: error)
+        }
+        if !hasRunningTitleTask(sessionID: task.sessionID) {
+            regeneratingTitleSessionIDs.remove(task.sessionID)
+        }
+    }
+
     private func runTitleGenerationTask(taskID: String, sessionID: String) {
         updateBackgroundTask(sessionID: sessionID, taskID: taskID, status: .running)
         Task {
@@ -4014,6 +4084,7 @@ final class AppViewModel: NSObject, ObservableObject {
     func deleteChatSession(_ sessionID: String) {
         guard let chatSessionRepository else { return }
         do {
+            _ = stopSpeechTranscriptionIfRunningForDeletedSession(sessionID)
             let runningTasks = try runningBackgroundTasksForDeletionCheck(sessionID: sessionID)
             guard runningTasks.isEmpty else {
                 errorMessage = "无法删除会话: 仍有 \(runningTasks.count) 个后台任务正在运行。"
@@ -4446,6 +4517,9 @@ final class AppViewModel: NSObject, ObservableObject {
 
     func selectChatSession(_ sessionID: String) {
         guard let chatSessionRepository else { return }
+        if selectedChatSessionID != sessionID {
+            _ = stopSpeechTranscriptionIfRunningForLeavingSession(selectedChatSessionID)
+        }
         rememberCurrentWorkspaceMode()
         do {
             guard let session = try chatSessionRepository.loadSession(id: sessionID) else { return }
