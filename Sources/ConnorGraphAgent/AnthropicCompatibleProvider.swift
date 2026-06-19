@@ -17,6 +17,7 @@ public struct AnthropicCompatibleConfig: Sendable, Equatable {
     public var anthropicVersion: String
     public var extraHeaders: [String: String]
     public var maxTokens: Int
+    public var requestTimeout: TimeInterval
     public var featureOptions: AnthropicCompatibleFeatureOptions
 
     public init(
@@ -27,6 +28,7 @@ public struct AnthropicCompatibleConfig: Sendable, Equatable {
         anthropicVersion: String = "2023-06-01",
         extraHeaders: [String: String] = [:],
         maxTokens: Int = 4096,
+        requestTimeout: TimeInterval = 180,
         featureOptions: AnthropicCompatibleFeatureOptions = AnthropicCompatibleFeatureOptions()
     ) {
         self.baseURL = baseURL
@@ -36,7 +38,31 @@ public struct AnthropicCompatibleConfig: Sendable, Equatable {
         self.anthropicVersion = anthropicVersion
         self.extraHeaders = extraHeaders
         self.maxTokens = maxTokens
+        self.requestTimeout = requestTimeout
         self.featureOptions = featureOptions
+    }
+
+    public init(
+        baseURL: URL,
+        apiKey: String,
+        model: String,
+        authHeaderKind: AnthropicCompatibleAuthHeaderKind = .xAPIKey,
+        anthropicVersion: String = "2023-06-01",
+        extraHeaders: [String: String] = [:],
+        maxTokens: Int = 4096,
+        featureOptions: AnthropicCompatibleFeatureOptions
+    ) {
+        self.init(
+            baseURL: baseURL,
+            apiKey: apiKey,
+            model: model,
+            authHeaderKind: authHeaderKind,
+            anthropicVersion: anthropicVersion,
+            extraHeaders: extraHeaders,
+            maxTokens: maxTokens,
+            requestTimeout: 180,
+            featureOptions: featureOptions
+        )
     }
 
     public var requestModel: String {
@@ -177,7 +203,13 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
             body["tool_choice"] = ["type": "auto"]
         }
         let data = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
-        return AgentHTTPRequest(url: messagesEndpoint(), method: "POST", headers: requestHeaders(), body: data)
+        return AgentHTTPRequest(
+            url: messagesEndpoint(),
+            method: "POST",
+            headers: requestHeaders(),
+            body: data,
+            timeoutInterval: config.requestTimeout
+        )
     }
 
     private func anthropicMessage(for message: AgentModelMessage) -> [String: Any]? {

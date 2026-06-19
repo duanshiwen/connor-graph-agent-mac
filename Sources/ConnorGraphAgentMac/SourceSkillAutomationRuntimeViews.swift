@@ -817,49 +817,139 @@ private struct SkillPill: View {
 struct AutomationRuntimePanelView: View {
     @ObservedObject var viewModel: AppViewModel
 
-    private var presentation: AutomationRuntimeUIPresentation {
-        AutomationRuntimeUIPresentation.build(
-            config: viewModel.automationConfig,
-            triggers: viewModel.automationTriggerRecords,
-            history: viewModel.automationExecutionHistory
-        )
+    private var presentation: TaskManagementUIPresentation {
+        viewModel.taskManagementPresentation
     }
 
     var body: some View {
         RuntimePanelScaffold(
-            title: "Automation",
-            subtitle: "康纳同学负责事件/动作治理。Ready 动作可执行，待审核动作仍由人确认。",
+            title: "任务与自动化",
+            subtitle: "三类任务：系统任务、用户任务、AI 任务。系统任务受保护；用户和 AI 任务暂时只支持会话状态触发消息，以及按时间/周期新建会话并发送消息。",
             metrics: [
-                ("Rules", "\(presentation.summary.totalRuleCount)"),
-                ("Enabled", "\(presentation.summary.enabledRuleCount)"),
-                ("Review", "\(presentation.summary.pendingReviewRuleCount)"),
-                ("History", "\(presentation.summary.historyCount)")
+                ("Total", "\(presentation.summary.totalTaskCount)"),
+                ("系统", "\(presentation.summary.systemTaskCount)"),
+                ("用户", "\(presentation.summary.userTaskCount)"),
+                ("AI", "\(presentation.summary.aiTaskCount)"),
+                ("定时", "\(presentation.summary.scheduledTaskCount)"),
+                ("事件", "\(presentation.summary.eventTriggeredTaskCount)")
             ],
             onRefresh: {
-                viewModel.reloadAutomationConfig()
-                viewModel.reloadAutomationExecutionHistory()
+                viewModel.reloadTaskManagementPresentation()
             }
         ) {
-            SectionHeader(title: "Rules")
-            ForEach(presentation.ruleCards) { card in
-                RuntimePanelCard(title: card.title, subtitle: card.subtitle, detail: card.detail, chips: [card.dispositionLabel], severity: card.severity)
+            if viewModel.isRunningScheduledTasks {
+                Label("正在执行到期任务…", systemImage: "clock.arrow.circlepath")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            SectionHeader(title: "Recent triggers")
-            ForEach(presentation.triggerCards) { card in
-                RuntimePanelCard(title: card.title, subtitle: card.subtitle, detail: card.detail, chips: [card.dispositionLabel], severity: card.severity)
+
+            SectionHeader(title: "定时任务")
+            if presentation.scheduledTasks.isEmpty {
+                Text("暂无定时任务。系统任务会在启动时自动补齐。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
-            SectionHeader(title: "Execution history")
-            ForEach(presentation.historyCards) { card in
-                RuntimePanelCard(title: card.title, subtitle: card.subtitle, detail: card.detail, chips: [card.dispositionLabel], severity: card.severity)
+            ForEach(presentation.scheduledTasks) { card in
+                TaskRuntimeCard(card: card, viewModel: viewModel)
+            }
+
+            SectionHeader(title: "事件触发")
+            if presentation.eventTriggeredTasks.isEmpty {
+                Text("暂无事件触发任务。用户或 AI 可创建：当会话状态变为特定状态后，向 AI 发送指定内容。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(presentation.eventTriggeredTasks) { card in
+                TaskRuntimeCard(card: card, viewModel: viewModel)
             }
         }
         .task {
             viewModel.deferViewUpdate {
-                viewModel.reloadAutomationConfig()
-                viewModel.reloadAutomationExecutionHistory()
+                viewModel.reloadTaskManagementPresentation()
             }
         }
     }
+}
+
+private struct TaskRuntimeCard: View {
+    var card: TaskManagementUICard
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        RuntimePanelCard(
+            title: card.title,
+            subtitle: card.originBadge,
+            detail: detail,
+            chips: chips,
+            severity: card.severity
+        )
+        .overlay(alignment: .topTrailing) {
+            HStack(spacing: 8) {
+                if card.canStop {
+                    TaskRuntimeCardActionButton(title: "暂停", systemImage: "pause.fill") {
+                        viewModel.stopTask(card.id)
+                    }
+                }
+                if card.canRestore {
+                    TaskRuntimeCardActionButton(title: "恢复", systemImage: "play.fill") {
+                        viewModel.restoreTask(card.id)
+                    }
+                }
+                if card.canDelete {
+                    TaskRuntimeCardActionButton(title: "删除", systemImage: "trash", role: .destructive) {
+                        viewModel.deleteTask(card.id)
+                    }
+                }
+            }
+            .padding(12)
+        }
+    }
+
+    private var detail: String {
+        [
+            card.targetLabel.isEmpty ? nil : "目标：\(card.targetLabel)",
+            card.nextRunLabel.isEmpty ? nil : "下次：\(card.nextRunLabel)",
+            card.lastRunLabel.isEmpty ? nil : "上次：\(card.lastRunLabel)",
+            card.lastErrorLabel.isEmpty ? nil : "错误：\(card.lastErrorLabel)",
+            card.rationaleLabel.isEmpty ? nil : "原因：\(card.rationaleLabel)"
+        ].compactMap { $0 }.joined(separator: "\n")
+    }
+
+    private var chips: [String] {
+        var values = [card.triggerLabel, card.statusLabel]
+        if !card.deleteDisabledReason.isEmptyOrNil { values.append(card.deleteDisabledReason ?? "") }
+        return values
+    }
+}
+
+private struct TaskRuntimeCardActionButton: View {
+    var title: String
+    var systemImage: String
+    var role: ButtonRole?
+    var action: () -> Void
+
+    init(title: String, systemImage: String, role: ButtonRole? = nil, action: @escaping () -> Void) {
+        self.title = title
+        self.systemImage = systemImage
+        self.role = role
+        self.action = action
+    }
+
+    var body: some View {
+        Button(role: role, action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.caption.weight(.semibold))
+                .frame(minWidth: 72, minHeight: 30)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.regular)
+        .help(title)
+    }
+}
+
+private extension Optional where Wrapped == String {
+    var isEmptyOrNil: Bool { self?.isEmpty ?? true }
 }
 
 private struct RuntimePanelScaffold<Content: View>: View {
