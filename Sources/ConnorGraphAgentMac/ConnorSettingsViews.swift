@@ -153,7 +153,7 @@ struct SettingsAppSection: View {
                 }
                 Divider()
                 VStack(alignment: .leading, spacing: SettingsListLayout.spaceS) {
-                    HStack {
+                    HStack(alignment: .top, spacing: SettingsListLayout.spaceM) {
                         VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
                             Text("消息类型策略")
                                 .font(SettingsListTypography.rowTitleSelected)
@@ -161,8 +161,13 @@ struct SettingsAppSection: View {
                                 .font(SettingsListTypography.rowCaption)
                                 .foregroundStyle(.secondary)
                         }
-                        Spacer()
-                        Button("恢复默认") { viewModel.resetSessionNotificationPolicy() }
+                        Spacer(minLength: SettingsListLayout.spaceL)
+                        Button(action: viewModel.resetSessionNotificationPolicy) {
+                            Label("恢复默认策略", systemImage: "arrow.counterclockwise")
+                                .frame(minWidth: 132, minHeight: 34)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
                     }
                     ForEach(SessionAttentionMessageType.allCases) { messageType in
                         Divider()
