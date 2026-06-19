@@ -13,6 +13,8 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case memoryChangeLog = "记忆变更"
     case extractionDiagnostics = "记忆准入"
     case automation = "自动化"
+    case scheduledTasks = "定时任务"
+    case eventTriggeredTasks = "事件触发"
     case productOS = "Product OS"
     case mail = "Mail"
     case calendar = "Calendar"
