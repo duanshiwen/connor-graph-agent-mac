@@ -8,7 +8,7 @@ struct TaskManagementDomainTests {
         #expect(ConnorTaskTriggerKind.allCases == [.scheduled, .eventTriggered])
     }
 
-    @Test func defaultSystemTasksDescribeMailCalendarAndRSSChecks() {
+    @Test func defaultSystemTasksDescribeMailCalendarAndRSSRefreshes() {
         let defaults = ConnorTaskDefinition.systemDefaults(now: Date(timeIntervalSince1970: 0))
 
         let mail = defaults.first { $0.id == "system.mail.check-every-10-minutes" }
@@ -18,7 +18,8 @@ struct TaskManagementDomainTests {
         #expect(mail?.origin == .system)
         #expect(mail?.trigger.kind == .scheduled)
         #expect(mail?.trigger.intervalSeconds == 600)
-        #expect(mail?.target == ConnorTaskTarget(targetKind: "source.runtime", targetID: "mail", operationName: "check", parameters: [:]))
+        #expect(mail?.trigger.recurrence == .interval)
+        #expect(mail?.target == ConnorTaskTarget.sourceRuntimeRefresh(sourceID: "mail"))
         #expect(mail?.metadata.isProtectedSystemTask == true)
         #expect(mail?.metadata.scope == .global)
         #expect(mail?.metadata.ownerSessionID == nil)
@@ -27,13 +28,51 @@ struct TaskManagementDomainTests {
 
         #expect(calendar?.origin == .system)
         #expect(calendar?.trigger.intervalSeconds == 600)
-        #expect(calendar?.target.targetID == "calendar")
+        #expect(calendar?.trigger.recurrence == .interval)
+        #expect(calendar?.target == ConnorTaskTarget.sourceRuntimeRefresh(sourceID: "calendar"))
         #expect(calendar?.metadata.isProtectedSystemTask == true)
 
         #expect(rss?.origin == .system)
         #expect(rss?.trigger.intervalSeconds == 1_800)
-        #expect(rss?.target.targetID == "rss")
+        #expect(rss?.trigger.recurrence == .interval)
+        #expect(rss?.target == ConnorTaskTarget.sourceRuntimeRefresh(sourceID: "rss"))
         #expect(rss?.metadata.isProtectedSystemTask == true)
+    }
+
+    @Test func taskRecurrenceAndAllowedTemplatesAreExplicit() throws {
+        #expect(ConnorTaskRecurrence.allCases == [.once, .daily, .weekly, .monthly, .interval])
+
+        let scheduled = ConnorTaskDefinition(
+            id: "user.daily-session",
+            name: "Daily session",
+            origin: .user,
+            trigger: ConnorTaskTrigger(kind: .scheduled, runAt: Date(timeIntervalSince1970: 100), recurrence: .daily, timezoneIdentifier: "Asia/Shanghai"),
+            target: .createSessionAndSendMessage(message: "Start daily review", title: "Daily Review"),
+            lifecycle: ConnorTaskLifecycle(status: .active),
+            metadata: ConnorTaskMetadata(rationale: "Daily review")
+        )
+        let event = ConnorTaskDefinition(
+            id: "ai.done-followup",
+            name: "Done followup",
+            origin: .ai,
+            trigger: ConnorTaskTrigger(kind: .eventTriggered, eventName: ConnorTaskEventName.sessionStatusChanged, eventFilter: ["toStatus": "done"]),
+            target: .sendMessageToSession(message: "Summarize this completed session"),
+            lifecycle: ConnorTaskLifecycle(status: .active),
+            metadata: ConnorTaskMetadata(createdBySessionID: "session-1")
+        )
+        let invalid = ConnorTaskDefinition(
+            id: "user.shell",
+            name: "Shell",
+            origin: .user,
+            trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 60),
+            target: ConnorTaskTarget(targetKind: "shell", targetID: "local", operationName: "run"),
+            lifecycle: ConnorTaskLifecycle(status: .active),
+            metadata: ConnorTaskMetadata()
+        )
+
+        #expect(throws: Never.self) { try scheduled.validateUserCreatableTemplate() }
+        #expect(throws: Never.self) { try event.validateUserCreatableTemplate() }
+        #expect(throws: ConnorTaskValidationError.self) { try invalid.validateUserCreatableTemplate() }
     }
 
     @Test func userAndAITasksRoundTripThroughCodable() throws {
