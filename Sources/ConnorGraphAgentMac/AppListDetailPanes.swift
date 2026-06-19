@@ -168,7 +168,7 @@ struct CraftMailListPane: View {
                 ContentUnavailableView("暂无邮件账户", systemImage: "envelope.badge", description: Text("点击右上角 + 添加邮件账户。"))
                     .padding(.top, 80)
             } else if presentation.messages.isEmpty {
-                ContentUnavailableView("暂无邮件", systemImage: "tray", description: Text("账户添加后，同步到的邮件会在这里按时间显示。"))
+                ContentUnavailableView("尚未同步邮件", systemImage: "tray", description: Text("账户已添加，但当前 Mail Runtime 尚未完成远端邮箱发现和邮件拉取。同步完成后邮件会按时间显示在这里。"))
                     .padding(.top, 80)
             } else if visibleMessages.isEmpty {
                 ContentUnavailableView("没有匹配的邮件", systemImage: "magnifyingglass", description: Text("筛选会匹配标题、正文摘要和发件人。"))

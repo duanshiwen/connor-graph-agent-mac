@@ -1444,7 +1444,7 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
-    func addMailAccountAndRefresh(
+    func addMailAccountAndPrepareSync(
         preset: MailAccountProviderPreset,
         displayName rawDisplayName: String,
         email rawEmail: String,
@@ -1490,7 +1490,12 @@ final class AppViewModel: NSObject, ObservableObject {
             incoming: incoming,
             outgoing: outgoing,
             credentialBinding: credentialBinding,
-            health: MailAccountHealth(status: .ready, checkedAt: now, summary: "初始刷新完成 · 已发现 3 个系统邮箱"),
+            health: MailAccountHealth(
+                status: .degraded,
+                checkedAt: now,
+                summary: "账户已配置 · 等待真实 IMAP 同步",
+                blockingReasons: ["Mail IMAP adapter has not completed remote mailbox discovery or message fetch"]
+            ),
             createdAt: now,
             updatedAt: now
         )
@@ -1507,7 +1512,7 @@ final class AppViewModel: NSObject, ObservableObject {
         selectedMailMailboxID = mailboxes.first?.id
         selectedMailMessageID = nil
         isPresentingAddMailAccountSheet = false
-        appSettingsMessage = "已添加邮件账户：\(displayName)，初始刷新完成。"
+        appSettingsMessage = "已添加邮件账户：\(displayName)，等待邮件同步。"
         errorMessage = nil
     }
 

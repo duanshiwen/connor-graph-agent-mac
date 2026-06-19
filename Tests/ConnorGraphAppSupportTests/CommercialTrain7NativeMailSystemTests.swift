@@ -115,8 +115,8 @@ struct CommercialTrain7NativeMailSystemTests {
         let smtp = MailSMTPAdapter()
         let imapHealth = try await imap.testConnection(endpoint: MailServerEndpoint(host: "imap.example.com", port: 993, security: .tls, protocolKind: .imap))
         let smtpHealth = try await smtp.testConnection(endpoint: MailServerEndpoint(host: "smtp.example.com", port: 587, security: .startTLS, protocolKind: .smtp))
-        #expect(imapHealth.status == .ready)
-        #expect(smtpHealth.status == .ready)
+        #expect(imapHealth.status == .degraded)
+        #expect(smtpHealth.status == .degraded)
 
         let account = MailAccount(id: MailAccountID(rawValue: "a"), provider: .genericIMAPSMTP, displayName: "A", identities: [], credentialBinding: MailCredentialBinding(keychainService: "svc", accountName: "a", authMode: .oauth2))
         let syncHealth = MailSyncEngine().readiness(account: account, mailboxCount: 1, cursorCount: 1)

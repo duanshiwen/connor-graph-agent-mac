@@ -308,7 +308,7 @@ private struct MailSettingsAccountRow: View {
     private var statusTitle: String {
         switch account.health.status {
         case .ready: "正常"
-        case .degraded: "降级"
+        case .degraded: "待同步"
         case .blocked: "阻止"
         case .unauthenticated: "未认证"
         case .unknown: "未知"
