@@ -481,7 +481,7 @@ private enum RSSSourcePreset: String, CaseIterable, Identifiable {
         case .hackerNews:
             "适合发现技术趋势。进入 Graph Memory 前必须先生成 evidence candidate 并人工审查。"
         case .custom:
-            "输入自定义 feed URL。同步、状态变更、OPML 导入导出都经过 Connor Policy Engine 和 audit trail。"
+            "输入自定义 feed URL。同步和状态变更都经过 Connor Policy Engine 和 audit trail。"
         }
     }
 }
