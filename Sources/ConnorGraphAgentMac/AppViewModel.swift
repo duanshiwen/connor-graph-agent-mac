@@ -353,6 +353,11 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var automationConfig: ProductOSAutomationConfig = .default
     @Published var automationTriggerRecords: [ProductOSAutomationTriggerRecord] = []
     @Published var automationExecutionHistory: [ProductOSAutomationExecutionHistoryRecord] = []
+    @Published var taskManagementPresentation = TaskManagementUIPresentation(
+        summary: TaskManagementUISummary(totalTaskCount: 0, scheduledTaskCount: 0, eventTriggeredTaskCount: 0, systemTaskCount: 0, userTaskCount: 0, aiTaskCount: 0, stoppedTaskCount: 0, failedTaskCount: 0),
+        cards: []
+    )
+    @Published var isRunningScheduledTasks: Bool = false
     @Published var sourceRuntimeConfigurations: [MCPSourceRuntimeConfiguration] = []
     @Published var sourceRuntimeHealthRecords: [MCPSourceRuntimeHealthRecord] = []
     @Published var sourceRuntimeToolCatalogs: [String: [MCPSourceToolDescriptor]] = [:]
@@ -478,6 +483,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var governanceConfigRepository: AppSessionGovernanceConfigRepository?
     private var productOSRegistryRepository: AppProductOSRegistryRepository?
     private var automationRepository: AppProductOSAutomationRepository?
+    private var taskManagementRepository: AppTaskManagementRepository?
     private var sourceRuntimeRepository: AppMCPSourceRuntimeRepository?
     private var mcpSourceCredentialStore = MCPSourceCredentialStore()
     private var skillRuntimeRepository: AppSkillRuntimeRepository?
@@ -518,6 +524,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var idleSleepAssertionID: IOPMAssertionID = 0
     private var hasActivatedRuntimeSettingsSideEffects = false
     private var locationCoordinator: UserLocationCoordinator?
+    private var taskSchedulerTimer: Timer?
 
     private var activeChatSession: AgentSession {
         nativeSessionManager?.session ?? fallbackChatSession
@@ -1320,6 +1327,7 @@ final class AppViewModel: NSObject, ObservableObject {
             self.governanceConfigRepository = AppSessionGovernanceConfigRepository(configDirectory: storagePaths.configDirectory)
             self.productOSRegistryRepository = AppProductOSRegistryRepository(storagePaths: storagePaths)
             self.automationRepository = AppProductOSAutomationRepository(storagePaths: storagePaths)
+            self.taskManagementRepository = AppTaskManagementRepository(storagePaths: storagePaths)
             self.sourceRuntimeRepository = AppMCPSourceRuntimeRepository(storagePaths: storagePaths)
             self.skillRuntimeRepository = AppSkillRuntimeRepository(storagePaths: storagePaths)
             self.browserHistoryStore = BrowserHistoryStore(historyURL: storagePaths.browserHistoryURL)
@@ -1384,6 +1392,7 @@ final class AppViewModel: NSObject, ObservableObject {
         reloadProductOSRegistry()
         reloadAutomationConfig()
         reloadAutomationExecutionHistory()
+        reloadTaskManagementPresentation()
         reloadSourceRuntimeConfigurations()
         reloadSkillRuntimeDefinitions()
         reloadSidecarRuntimeDiagnostics()
@@ -1430,6 +1439,143 @@ final class AppViewModel: NSObject, ObservableObject {
         } catch {
             await MainActor.run { errorMessage = String(describing: error) }
         }
+    }
+
+    func reloadTaskManagementPresentation() {
+        do {
+            guard let taskManagementRepository else { return }
+            let tasks = try taskManagementRepository.loadOrCreateDefault()
+            let history = try taskManagementRepository.loadRunHistory(taskID: nil, limit: 100)
+            taskManagementPresentation = TaskManagementUIPresentation.build(tasks: tasks, runHistory: history)
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func stopTask(_ id: String) {
+        do {
+            _ = try taskManagementRepository?.stopTask(id: id, reason: "Stopped from Task Management UI")
+            reloadTaskManagementPresentation()
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func restoreTask(_ id: String) {
+        do {
+            _ = try taskManagementRepository?.restoreTask(id: id)
+            reloadTaskManagementPresentation()
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func deleteTask(_ id: String) {
+        do {
+            _ = try taskManagementRepository?.deleteTask(id: id, reason: "Deleted from Task Management UI")
+            reloadTaskManagementPresentation()
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func startTaskSchedulerTimer() {
+        guard taskSchedulerTimer == nil else { return }
+        Task { await runScheduledTasksNow() }
+        taskSchedulerTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                await self?.runScheduledTasksNow()
+            }
+        }
+    }
+
+    func stopTaskSchedulerTimer() {
+        taskSchedulerTimer?.invalidate()
+        taskSchedulerTimer = nil
+    }
+
+    func runScheduledTasksNow() async {
+        guard !isRunningScheduledTasks else { return }
+        guard let taskManagementRepository else { return }
+        isRunningScheduledTasks = true
+        defer { isRunningScheduledTasks = false }
+        let runner = TaskTargetRunner.appRuntime(
+            mailRefresh: { [weak self] runID in
+                guard let self else { throw TaskTargetRunnerError.unsupportedTarget("mail") }
+                return try await self.refreshMailForScheduledTask(runID: runID)
+            },
+            calendarRefresh: { [weak self] runID in
+                guard let self else { throw TaskTargetRunnerError.unsupportedTarget("calendar") }
+                return await self.refreshCalendarForScheduledTask(runID: runID)
+            },
+            rssRefresh: { [weak self] runID in
+                guard let self else { throw TaskTargetRunnerError.unsupportedTarget("rss") }
+                return try await self.refreshRSSForScheduledTask(runID: runID)
+            },
+            sessionMessage: { [weak self] request in
+                guard let self else { throw TaskTargetRunnerError.unsupportedTarget("session.ai") }
+                return await self.performTaskSessionMessage(request)
+            }
+        )
+        do {
+            let service = TaskSchedulerRunnerService(repository: taskManagementRepository, scheduler: TaskSchedulerService(), runner: runner)
+            _ = try await service.runDueTasks()
+            reloadTaskManagementPresentation()
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    private func refreshMailForScheduledTask(runID: String?) async throws -> String {
+        guard let mailStore else { return "Mail store unavailable" }
+        let runtime = MailRuntime(repository: mailStore, cache: mailStore)
+        let accounts = try await runtime.listAccounts(runID: runID, sessionID: selectedChatSessionID)
+        await reloadMailBrowserPresentation()
+        return "Mail refreshed \(accounts.count) accounts"
+    }
+
+    private func refreshCalendarForScheduledTask(runID: String?) async -> String {
+        let succeeded = await syncSystemCalendarNow()
+        return succeeded ? (calendarSyncMessage ?? "Calendar refreshed") : (calendarSyncMessage ?? "Calendar refresh failed")
+    }
+
+    private func refreshRSSForScheduledTask(runID: String?) async throws -> String {
+        let sources = try await rssRuntime.listSources(runID: runID, sessionID: selectedChatSessionID)
+        var inserted = 0
+        var duplicates = 0
+        for source in sources {
+            let result = try await rssRuntime.syncSource(sourceID: source.id, runID: runID, sessionID: selectedChatSessionID)
+            inserted += result.insertedCount
+            duplicates += result.duplicateCount
+        }
+        await reloadRSSBrowserPresentation()
+        return "RSS refreshed \(sources.count) sources; inserted \(inserted), duplicates \(duplicates)"
+    }
+
+    private func performTaskSessionMessage(_ request: TaskSessionMessageRequest) async -> String {
+        if request.createNewSession {
+            guard let chatSessionRepository else { return "Session repository unavailable" }
+            do {
+                let session = try chatSessionRepository.createSession(title: request.title ?? "定时任务会话")
+                reloadChatSessions()
+                selectedChatSessionID = session.id
+                fallbackChatSession = session
+                nativeSessionManager = makeNativeSessionManager(for: session)
+                _ = await submitChat(prompt: request.message, clearComposer: false)
+                return "created session \(session.id) and sent task message"
+            } catch {
+                return "failed to create task session: \(error)"
+            }
+        }
+        guard let sessionID = request.sessionID else { return "Missing sessionID" }
+        selectedChatSessionID = sessionID
+        if let session = try? chatSessionRepository?.loadSession(id: sessionID) {
+            fallbackChatSession = session
+            nativeSessionManager = makeNativeSessionManager(for: session)
+        }
+        _ = await submitChat(prompt: request.message, clearComposer: false)
+        return "sent task message to session \(sessionID)"
     }
 
     func reloadProductOSRegistry() {
@@ -4203,6 +4349,7 @@ final class AppViewModel: NSObject, ObservableObject {
     func setChatSessionStatus(_ sessionID: String, status: AgentSessionStatus) {
         guard let chatSessionRepository else { return }
         do {
+            let previousStatus = try chatSessionRepository.loadSession(id: sessionID)?.governance.status
             let session = try chatSessionRepository.setStatus(sessionID: sessionID, status: status)
             if selectedChatSessionID == sessionID {
                 self.selectedChatSessionID = session.id
@@ -4211,9 +4358,41 @@ final class AppViewModel: NSObject, ObservableObject {
             reloadChatSessions()
             appendGovernanceEvent(.sessionStatusChanged(AgentSessionGovernanceEvent(sessionID: session.id, message: "状态已更新为 \(status.displayName)", status: status)))
             evaluateAutomation(ProductOSAutomationEventContext(triggerKind: .sessionStatusChanged, sessionID: session.id, status: status))
+            dispatchTaskSessionStatusChanged(sessionID: session.id, fromStatus: previousStatus?.rawValue, toStatus: status.rawValue)
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
+        }
+    }
+
+    private func dispatchTaskSessionStatusChanged(sessionID: String, fromStatus: String?, toStatus: String) {
+        guard let taskManagementRepository else { return }
+        let runner = TaskTargetRunner.appRuntime(
+            mailRefresh: { [weak self] runID in
+                guard let self else { throw TaskTargetRunnerError.unsupportedTarget("mail") }
+                return try await self.refreshMailForScheduledTask(runID: runID)
+            },
+            calendarRefresh: { [weak self] runID in
+                guard let self else { throw TaskTargetRunnerError.unsupportedTarget("calendar") }
+                return await self.refreshCalendarForScheduledTask(runID: runID)
+            },
+            rssRefresh: { [weak self] runID in
+                guard let self else { throw TaskTargetRunnerError.unsupportedTarget("rss") }
+                return try await self.refreshRSSForScheduledTask(runID: runID)
+            },
+            sessionMessage: { [weak self] request in
+                guard let self else { throw TaskTargetRunnerError.unsupportedTarget("session.ai") }
+                return await self.performTaskSessionMessage(request)
+            }
+        )
+        Task { @MainActor in
+            do {
+                let dispatcher = TaskEventDispatcher(repository: taskManagementRepository, runner: runner)
+                _ = try await dispatcher.dispatchSessionStatusChanged(sessionID: sessionID, fromStatus: fromStatus, toStatus: toStatus)
+                reloadTaskManagementPresentation()
+            } catch {
+                errorMessage = String(describing: error)
+            }
         }
     }
 

@@ -30,11 +30,43 @@ public struct AppTaskManagementRepository: Sendable {
     public func loadOrCreateDefault(now: Date = Date()) throws -> [ConnorTaskDefinition] {
         try storagePaths.ensureDirectoryHierarchy()
         if FileManager.default.fileExists(atPath: taskDefinitionsURL.path) {
-            return try loadTasks(includeDeleted: true)
+            return try ensureSystemDefaultTasks(now: now)
         }
         let tasks = ConnorTaskDefinition.systemDefaults(now: now)
         try write(tasks: tasks)
         return tasks
+    }
+
+    public func ensureSystemDefaultTasks(now: Date = Date()) throws -> [ConnorTaskDefinition] {
+        var tasks = try loadTasks(includeDeleted: true)
+        let defaults = ConnorTaskDefinition.systemDefaults(now: now)
+        var changed = false
+        for defaultTask in defaults {
+            if let index = tasks.firstIndex(where: { $0.id == defaultTask.id }) {
+                var existing = tasks[index]
+                let previousTarget = existing.target
+                existing.origin = .system
+                existing.trigger.kind = .scheduled
+                existing.trigger.intervalSeconds = defaultTask.trigger.intervalSeconds
+                existing.trigger.recurrence = .interval
+                existing.target = defaultTask.target
+                existing.metadata.isProtectedSystemTask = true
+                existing.metadata.scope = .global
+                existing.metadata.isRecoverable = false
+                existing.metadata.recoveryPolicy = .none
+                existing.updatedAt = previousTarget == existing.target ? existing.updatedAt : now
+                if existing != tasks[index] {
+                    tasks[index] = existing
+                    changed = true
+                }
+            } else {
+                tasks.append(defaultTask)
+                changed = true
+                try appendEventLine(["event": "task.system-default.backfilled", "taskID": defaultTask.id])
+            }
+        }
+        if changed { try write(tasks: tasks) }
+        return try loadTasks(includeDeleted: true)
     }
 
     public func loadTasks(includeDeleted: Bool = false) throws -> [ConnorTaskDefinition] {

@@ -1,0 +1,69 @@
+import Foundation
+import Testing
+import ConnorGraphCore
+import ConnorGraphAppSupport
+
+@Suite("Task Target Runner Tests")
+struct TaskTargetRunnerTests {
+    @Test func runnerDispatchesSystemRefreshTargets() async throws {
+        let mail = MailRefreshSpy()
+        let calendar = CalendarRefreshSpy()
+        let rss = RSSRefreshSpy()
+        let runner = TaskTargetRunner(mailRefresher: mail.refresh, calendarRefresher: calendar.refresh, rssRefresher: rss.refresh, sessionMessenger: SessionMessageSpy().perform)
+        let tasks = ConnorTaskDefinition.systemDefaults(now: Date(timeIntervalSince1970: 0))
+
+        for task in tasks {
+            _ = try await runner.run(task: task, runID: "run-")
+        }
+
+        #expect(await mail.count == 1)
+        #expect(await calendar.count == 1)
+        #expect(await rss.count == 1)
+    }
+
+    @Test func runnerDispatchesSessionMessageTargets() async throws {
+        let session = SessionMessageSpy()
+        let runner = TaskTargetRunner(mailRefresher: { _ in "mail" }, calendarRefresher: { _ in "calendar" }, rssRefresher: { _ in "rss" }, sessionMessenger: session.perform)
+        let send = ConnorTaskDefinition(
+            id: "ai.done-followup",
+            name: "Done followup",
+            origin: .ai,
+            trigger: ConnorTaskTrigger(kind: .eventTriggered, eventName: ConnorTaskEventName.sessionStatusChanged, eventFilter: ["toStatus": "done"]),
+            target: .sendMessageToSession(sessionID: "session-1", message: "Summarize"),
+            lifecycle: ConnorTaskLifecycle(status: .active),
+            metadata: ConnorTaskMetadata(createdBySessionID: "session-1")
+        )
+        let create = ConnorTaskDefinition(
+            id: "user.daily",
+            name: "Daily",
+            origin: .user,
+            trigger: ConnorTaskTrigger(kind: .scheduled, runAt: Date(timeIntervalSince1970: 0), recurrence: .daily),
+            target: .createSessionAndSendMessage(message: "Plan today", title: "Daily Plan"),
+            lifecycle: ConnorTaskLifecycle(status: .active),
+            metadata: ConnorTaskMetadata()
+        )
+
+        let sendResult = try await runner.run(task: send, runID: "run-1", eventPayload: ["sessionID": "event-session"])
+        let createResult = try await runner.run(task: create, runID: "run-2")
+        let calls = await session.calls
+
+        #expect(sendResult.summary.contains("session-1"))
+        #expect(createResult.summary.contains("created session"))
+        #expect(calls.map(\.message) == ["Summarize", "Plan today"])
+        #expect(calls.map(\.title) == [nil, "Daily Plan"])
+    }
+}
+
+private actor MailRefreshSpy { var count = 0; func refresh(_ runID: String?) async throws -> String { count += 1; return "mail refreshed" } }
+private actor CalendarRefreshSpy { var count = 0; func refresh(_ runID: String?) async throws -> String { count += 1; return "calendar refreshed" } }
+private actor RSSRefreshSpy { var count = 0; func refresh(_ runID: String?) async throws -> String { count += 1; return "rss refreshed" } }
+
+private actor SessionMessageSpy {
+    struct Call: Equatable { var sessionID: String?; var title: String?; var message: String; var createNewSession: Bool }
+    var calls: [Call] = []
+    func perform(_ request: TaskSessionMessageRequest) async throws -> String {
+        calls.append(Call(sessionID: request.sessionID, title: request.title, message: request.message, createNewSession: request.createNewSession))
+        if request.createNewSession { return "created session for \(request.title ?? "untitled")" }
+        return "sent message to \(request.sessionID ?? "unknown")"
+    }
+}
