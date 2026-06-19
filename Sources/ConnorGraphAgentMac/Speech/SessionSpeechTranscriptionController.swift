@@ -131,6 +131,12 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
             return
         }
 
+        guard AVCaptureDevice.default(for: .audio) != nil else {
+            cleanupAfterFailure()
+            onError("没有可用的麦克风输入设备，请连接或启用系统输入设备后再试。")
+            return
+        }
+
         let audioEngine = AVAudioEngine()
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
@@ -148,7 +154,7 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
             onError("麦克风输入格式不可用，请检查系统麦克风权限和输入设备。")
             return
         }
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak request] buffer, _ in
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak request] buffer, _ in
             request?.append(buffer)
         }
         didInstallInputTap = true
