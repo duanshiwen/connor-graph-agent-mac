@@ -11,6 +11,17 @@ public enum ConnorTaskTriggerKind: String, Codable, Sendable, Equatable, CaseIte
     case eventTriggered
 }
 
+public enum ConnorTaskScope: String, Codable, Sendable, Equatable, CaseIterable {
+    case global
+    case session
+}
+
+public enum ConnorTaskRecoveryPolicy: String, Codable, Sendable, Equatable, CaseIterable {
+    case none
+    case restoreIfInterrupted
+    case restoreIfQueuedOrRunning
+}
+
 public struct ConnorTaskTrigger: Codable, Sendable, Equatable {
     public var kind: ConnorTaskTriggerKind
     public var intervalSeconds: TimeInterval?
@@ -94,6 +105,10 @@ public struct ConnorTaskMetadata: Codable, Sendable, Equatable {
     public var createdByDisplayName: String?
     public var rationale: String?
     public var tags: [String]
+    public var scope: ConnorTaskScope
+    public var ownerSessionID: String?
+    public var isRecoverable: Bool
+    public var recoveryPolicy: ConnorTaskRecoveryPolicy
     public var isProtectedSystemTask: Bool
     public var userEditableFields: Set<ConnorTaskEditableField>
 
@@ -102,6 +117,10 @@ public struct ConnorTaskMetadata: Codable, Sendable, Equatable {
         createdByDisplayName: String? = nil,
         rationale: String? = nil,
         tags: [String] = [],
+        scope: ConnorTaskScope = .global,
+        ownerSessionID: String? = nil,
+        isRecoverable: Bool = false,
+        recoveryPolicy: ConnorTaskRecoveryPolicy = .none,
         isProtectedSystemTask: Bool = false,
         userEditableFields: Set<ConnorTaskEditableField> = Set(ConnorTaskEditableField.allCases)
     ) {
@@ -109,12 +128,19 @@ public struct ConnorTaskMetadata: Codable, Sendable, Equatable {
         self.createdByDisplayName = createdByDisplayName
         self.rationale = rationale
         self.tags = tags
+        self.scope = scope
+        self.ownerSessionID = ownerSessionID
+        self.isRecoverable = isRecoverable
+        self.recoveryPolicy = recoveryPolicy
         self.isProtectedSystemTask = isProtectedSystemTask
         self.userEditableFields = userEditableFields
     }
 
     public static let protectedSystem = ConnorTaskMetadata(
         tags: ["system", "protected"],
+        scope: .global,
+        isRecoverable: false,
+        recoveryPolicy: .none,
         isProtectedSystemTask: true,
         userEditableFields: [.name, .tags]
     )
