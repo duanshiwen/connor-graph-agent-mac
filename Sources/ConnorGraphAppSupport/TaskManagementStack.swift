@@ -3,9 +3,17 @@ import ConnorGraphCore
 
 public struct TaskManagementStack: Sendable {
     public var repository: AppTaskManagementRepository
+    public var sessionRepository: AppChatSessionRepository?
+    public var sessionTaskAdapter: SessionBackgroundTaskManagementAdapter
 
-    public init(repository: AppTaskManagementRepository) {
+    public init(
+        repository: AppTaskManagementRepository,
+        sessionRepository: AppChatSessionRepository? = nil,
+        sessionTaskAdapter: SessionBackgroundTaskManagementAdapter = SessionBackgroundTaskManagementAdapter()
+    ) {
         self.repository = repository
+        self.sessionRepository = sessionRepository
+        self.sessionTaskAdapter = sessionTaskAdapter
     }
 
     public func listTasks(includeDeleted: Bool = false) throws -> [ConnorTaskDefinition] {
@@ -42,5 +50,52 @@ public struct TaskManagementStack: Sendable {
 
     public func runHistory(taskID: String? = nil, limit: Int = 50) throws -> [ConnorTaskRunRecord] {
         try repository.loadRunHistory(taskID: taskID, limit: limit)
+    }
+
+    public func listSessionTasks(sessionID: String, limit: Int? = nil) throws -> [ConnorTaskDefinition] {
+        guard let sessionRepository else { return [] }
+        return try sessionRepository
+            .loadBackgroundTasks(sessionID: sessionID, limit: limit)
+            .map(sessionTaskAdapter.taskDefinition(from:))
+    }
+
+    public func recoverableSessionTasks(sessionID: String) throws -> [ConnorTaskDefinition] {
+        guard let sessionRepository else { return [] }
+        let tasks = try sessionRepository.loadBackgroundTasks(sessionID: sessionID)
+        return sessionTaskAdapter.recoverableTasks(from: tasks, sessionID: sessionID)
+    }
+
+    @discardableResult
+    public func stopSessionTask(sessionID: String, taskID: String, reason: String? = nil) throws -> ConnorTaskDefinition {
+        guard let sessionRepository else { throw AppTaskManagementError.taskNotFound(taskID) }
+        let backgroundTaskID = sessionTaskAdapter.originalBackgroundTaskID(from: taskID, sessionID: sessionID) ?? taskID
+        try sessionRepository.updateBackgroundTask(
+            sessionID: sessionID,
+            taskID: backgroundTaskID,
+            status: .interrupted,
+            detail: "Interrupted by Task Management Stack",
+            errorMessage: reason
+        )
+        guard let task = try sessionRepository.loadBackgroundTasks(sessionID: sessionID).first(where: { $0.id == backgroundTaskID }) else {
+            throw AppTaskManagementError.taskNotFound(taskID)
+        }
+        return sessionTaskAdapter.taskDefinition(from: task)
+    }
+
+    @discardableResult
+    public func restoreSessionTask(sessionID: String, taskID: String) throws -> ConnorTaskDefinition {
+        guard let sessionRepository else { throw AppTaskManagementError.taskNotFound(taskID) }
+        let backgroundTaskID = sessionTaskAdapter.originalBackgroundTaskID(from: taskID, sessionID: sessionID) ?? taskID
+        try sessionRepository.updateBackgroundTask(
+            sessionID: sessionID,
+            taskID: backgroundTaskID,
+            status: .queued,
+            detail: "Queued for runtime recovery",
+            errorMessage: nil
+        )
+        guard let task = try sessionRepository.loadBackgroundTasks(sessionID: sessionID).first(where: { $0.id == backgroundTaskID }) else {
+            throw AppTaskManagementError.taskNotFound(taskID)
+        }
+        return sessionTaskAdapter.taskDefinition(from: task)
     }
 }
