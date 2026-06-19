@@ -36,7 +36,7 @@ let package = Package(
                 "ConnorGraphSearch",
                 "ConnorGraphAgent"
             ],
-            linkerSettings: [.linkedFramework("Security")]
+            linkerSettings: [.linkedFramework("Security"), .linkedFramework("EventKit"), .linkedFramework("Contacts")]
         ),
         .executableTarget(
             name: "ConnorGraphAgentMac",

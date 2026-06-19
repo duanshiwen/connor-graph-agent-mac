@@ -20,6 +20,10 @@ struct CraftListPaneView: View {
                 CraftSettingsListPane(viewModel: viewModel, selection: $selection)
             case .mail:
                 CraftMailListPane(viewModel: viewModel)
+            case .calendar:
+                CraftCalendarListPane(viewModel: viewModel)
+            case .contacts:
+                CraftContactsListPane(viewModel: viewModel)
             case .rss:
                 CraftRSSListPane(viewModel: viewModel)
             case .sources:
@@ -884,6 +888,10 @@ struct CraftDetailPaneView: View {
                 ProductOSRegistryView(viewModel: viewModel)
             case .mail:
                 MailSourceSettingsView(viewModel: viewModel)
+            case .calendar:
+                CalendarSourceSettingsView(viewModel: viewModel)
+            case .contacts:
+                ContactsSourceSettingsView(viewModel: viewModel)
             case .rss:
                 RSSSourceSettingsView(viewModel: viewModel)
             case .sources:
