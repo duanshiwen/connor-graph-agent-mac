@@ -294,7 +294,7 @@ struct AddMailAccountSheet: View {
                         HStack(spacing: SettingsListLayout.spaceS) {
                             Image(systemName: "person.crop.circle.badge.checkmark")
                                 .foregroundStyle(Color.accentColor)
-                            Text("点击底部按钮后会打开 Microsoft 登录页，授权 IMAP/SMTP OAuth 访问。")
+                            Text("点击底部按钮后会在 Connor 内置浏览器打开 Microsoft 登录页，授权 IMAP/SMTP OAuth 访问。")
                                 .font(SettingsListTypography.rowSubtitle)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -381,7 +381,7 @@ struct AddMailAccountSheet: View {
         guard !isSubmitting else { return }
         isSubmitting = true
         setupError = nil
-        setupMessage = selectedPreset == .microsoft ? "正在打开 Microsoft 登录页…" : "正在添加账户并准备同步…"
+        setupMessage = selectedPreset == .microsoft ? "正在打开 Connor 内置浏览器进行 Microsoft 登录…" : "正在添加账户并准备同步…"
         do {
             try await viewModel.addMailAccountAndPrepareSync(
                 preset: selectedPreset,
