@@ -325,6 +325,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var chatSessions: [AgentSession] = []
     @Published var allChatSessions: [AgentSession] = []
     @Published var selectedChatSessionID: String?
+    @Published private(set) var sessionReadStates: [String: SessionReadState] = [:]
     @Published var regeneratingTitleSessionIDs: Set<String> = []
     @Published var backgroundTasksBySessionID: [String: [AppSessionBackgroundTask]] = [:]
     @Published var isBackgroundTasksPresented: Bool = false
@@ -478,6 +479,8 @@ final class AppViewModel: NSObject, ObservableObject {
     private var chatSessionWorkspaceModes = ChatSessionWorkspaceModeStore()
     private var isLoadingRuntimeSettings = false
     private var runtimeSettingsAutosaveTask: Task<Void, Never>?
+    private var lastSessionNotificationAt: [String: Date] = [:]
+    private let sameSessionNotificationCooldown: TimeInterval = 300
     private var idleSleepAssertionID: IOPMAssertionID = 0
     private var hasActivatedRuntimeSettingsSideEffects = false
     private var locationCoordinator: UserLocationCoordinator?
@@ -2715,6 +2718,95 @@ final class AppViewModel: NSObject, ObservableObject {
         UNUserNotificationCenter.current().add(request)
     }
 
+    func markSessionRead(_ sessionID: String) {
+        guard sessionReadStates[sessionID]?.highestLevel != SessionAttentionLevel.none || sessionReadStates[sessionID]?.unreadCount ?? 0 > 0 else { return }
+        var state = sessionReadStates[sessionID] ?? .initial()
+        state.markRead(messageID: latestMessageID(for: sessionID), at: Date())
+        sessionReadStates[sessionID] = state
+        refreshDockBadge()
+    }
+
+    private func markSessionUnread(
+        sessionID: String,
+        messageID: String,
+        preview: String?,
+        level: SessionAttentionLevel
+    ) {
+        var state = sessionReadStates[sessionID] ?? .initial()
+        state.markUnread(messageID: messageID, preview: preview, level: level, at: Date())
+        sessionReadStates[sessionID] = state
+        refreshDockBadge()
+    }
+
+    private func latestMessageID(for sessionID: String) -> String? {
+        if selectedChatSessionID == sessionID, let last = transcript.last { return last.id }
+        return chatSessions.first(where: { $0.id == sessionID })?.messages.last?.id
+            ?? allChatSessions.first(where: { $0.id == sessionID })?.messages.last?.id
+    }
+
+    private func noteSessionUpdate(
+        sessionID: String,
+        messageID: String?,
+        preview: String?,
+        level: SessionAttentionLevel,
+        notificationTitle: String,
+        notificationBody: String
+    ) {
+        if isSessionCurrentlyVisible(sessionID) {
+            var state = sessionReadStates[sessionID] ?? .initial()
+            state.markRead(messageID: messageID ?? latestMessageID(for: sessionID), at: Date())
+            sessionReadStates[sessionID] = state
+            refreshDockBadge()
+            return
+        }
+        let unreadMessageID = messageID ?? "attention-event-\(UUID().uuidString)"
+        markSessionUnread(sessionID: sessionID, messageID: unreadMessageID, preview: preview, level: level)
+        postSessionNotificationIfNeeded(sessionID: sessionID, title: notificationTitle, body: notificationBody, level: level)
+    }
+
+    private func notificationPreview(from content: String) -> String {
+        let collapsed = content
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard collapsed.count > 140 else { return collapsed }
+        return String(collapsed.prefix(140)) + "…"
+    }
+
+    private func isSessionCurrentlyVisible(_ sessionID: String) -> Bool {
+        NSApp.isActive && selection == .agentChat && selectedChatSessionID == sessionID
+    }
+
+    private func postSessionNotificationIfNeeded(
+        sessionID: String,
+        title: String,
+        body: String,
+        level: SessionAttentionLevel
+    ) {
+        guard desktopNotificationsEnabled, canUseUserNotifications else { return }
+        guard level.shouldRequestSystemNotification else { return }
+        guard !isSessionCurrentlyVisible(sessionID) else { return }
+        let now = Date()
+        if let last = lastSessionNotificationAt[sessionID], now.timeIntervalSince(last) < sameSessionNotificationCooldown {
+            return
+        }
+        lastSessionNotificationAt[sessionID] = now
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        content.userInfo = ["sessionID": sessionID, "attentionLevel": level.rawValue]
+        let request = UNNotificationRequest(identifier: "session-\(sessionID)-\(UUID().uuidString)", content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
+    }
+
+    private func refreshDockBadge() {
+        let count = sessionReadStates.values.reduce(0) { partial, state in
+            guard state.highestLevel.shouldCountInDockBadge else { return partial }
+            return partial + max(state.unreadCount, 1)
+        }
+        NSApp.dockTile.badgeLabel = count > 0 ? "\(count)" : nil
+    }
+
     private var canUseUserNotifications: Bool {
         Bundle.main.bundleURL.pathExtension == "app"
     }
@@ -3667,6 +3759,7 @@ final class AppViewModel: NSObject, ObservableObject {
         do {
             guard let session = try chatSessionRepository.loadSession(id: sessionID) else { return }
             selectedChatSessionID = session.id
+            markSessionRead(session.id)
             agentEventTimelinesByProcessKey.removeAll(keepingCapacity: true)
             try loadSessionCapsule(sessionID: session.id)
             try loadBackgroundTasks(sessionID: session.id)
@@ -4351,12 +4444,19 @@ final class AppViewModel: NSObject, ObservableObject {
                 regenerateChatSessionTitle(submittingSessionID)
             }
             errorMessage = nil
-            postDesktopNotification(title: "康纳同学完成了工作", body: response.session.title)
-            Task { await runBackgroundJobs() }
-            return response.session.messages
+            let latestAssistantMessage = response.session.messages
                 .dropFirst(baselineMessageCount)
-                .last(where: { $0.role == .assistant })?
-                .content
+                .last(where: { $0.role == .assistant })
+            noteSessionUpdate(
+                sessionID: response.session.id,
+                messageID: latestAssistantMessage?.id,
+                preview: latestAssistantMessage.map { notificationPreview(from: $0.content) },
+                level: .interruptive,
+                notificationTitle: "康纳同学完成了工作",
+                notificationBody: response.session.title
+            )
+            Task { await runBackgroundJobs() }
+            return latestAssistantMessage?.content
         } catch {
             let recoveredSession = (try? chatSessionRepository?.loadSession(id: submittingSessionID)) ?? manager.session
             if selectedChatSessionID == submittingSessionID {
@@ -4369,8 +4469,16 @@ final class AppViewModel: NSObject, ObservableObject {
             if case NativeSessionManagerError.runCancelled = error {
                 errorMessage = nil
             } else {
-                errorMessage = String(describing: error)
-                postDesktopNotification(title: "康纳同学遇到错误", body: String(describing: error))
+                let errorDescription = String(describing: error)
+                errorMessage = errorDescription
+                noteSessionUpdate(
+                    sessionID: submittingSessionID,
+                    messageID: nil,
+                    preview: errorDescription,
+                    level: .interruptive,
+                    notificationTitle: "康纳同学遇到错误",
+                    notificationBody: errorDescription
+                )
             }
             return nil
         }
