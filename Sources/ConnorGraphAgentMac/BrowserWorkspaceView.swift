@@ -708,7 +708,9 @@ private struct BrowserAddressTextField: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSTextField, context: Context) {
         if nsView.stringValue != text {
+            context.coordinator.isApplyingSwiftUIValue = true
             nsView.stringValue = text
+            context.coordinator.isApplyingSwiftUIValue = false
         }
         nsView.placeholderString = placeholder
         if context.coordinator.lastFocusRequestID != focusRequestID {
@@ -725,6 +727,7 @@ private struct BrowserAddressTextField: NSViewRepresentable {
         @Binding var text: String
         var onSubmit: () -> Void
         var lastFocusRequestID: UUID?
+        var isApplyingSwiftUIValue = false
 
         init(text: Binding<String>, onSubmit: @escaping () -> Void) {
             _text = text
@@ -732,8 +735,14 @@ private struct BrowserAddressTextField: NSViewRepresentable {
         }
 
         func controlTextDidChange(_ notification: Notification) {
-            guard let field = notification.object as? NSTextField else { return }
-            text = field.stringValue
+            guard !isApplyingSwiftUIValue,
+                  let field = notification.object as? NSTextField else { return }
+            let newValue = field.stringValue
+            guard text != newValue else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.text != newValue else { return }
+                self.text = newValue
+            }
         }
 
         func scheduleFocus(for field: NSTextField) {

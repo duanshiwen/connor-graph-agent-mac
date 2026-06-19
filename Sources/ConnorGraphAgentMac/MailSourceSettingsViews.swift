@@ -37,7 +37,7 @@ struct MailSourceSettingsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppShellColors.detailBackground)
         .sheet(isPresented: $viewModel.isPresentingAddMailAccountSheet) {
-            AddMailAccountSheet()
+            AddMailAccountSheet(viewModel: viewModel)
         }
     }
 }
@@ -196,6 +196,7 @@ struct AddMailAccountSheet: View {
     }
 
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject var viewModel: AppViewModel
     @State private var selectedPreset: MailAccountProviderPreset = .apple
     @State private var displayName: String = ""
     @State private var email: String = ""
@@ -205,6 +206,9 @@ struct AddMailAccountSheet: View {
     @State private var incomingPort: Int = MailAccountProviderPreset.apple.incomingPort
     @State private var outgoingHost: String = MailAccountProviderPreset.apple.outgoingHost
     @State private var outgoingPort: Int = MailAccountProviderPreset.apple.outgoingPort
+    @State private var isSubmitting: Bool = false
+    @State private var setupMessage: String?
+    @State private var setupError: String?
 
     private var isManualPreset: Bool {
         selectedPreset == .other
@@ -212,6 +216,9 @@ struct AddMailAccountSheet: View {
 
     private var saveDisabled: Bool {
         email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || credential.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || incomingHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || outgoingHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var body: some View {
@@ -222,6 +229,7 @@ struct AddMailAccountSheet: View {
                 title: selectedPreset.subtitle,
                 guidance: selectedPreset.guidance
             )
+            setupFeedback
             footer
         }
         .padding(SettingsListLayout.spaceXL)
@@ -244,7 +252,7 @@ struct AddMailAccountSheet: View {
             VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
                 Text("添加邮件账户")
                     .font(SettingsListTypography.header)
-                Text("选择服务商后，Connor 会预填常见 IMAP/SMTP 配置。真实凭据接入会继续走本地凭据边界和审批治理。")
+                Text("选择服务商后，Connor 会预填常见 IMAP/SMTP 配置。添加后会创建账户并准备同步；真实邮件拉取由 Mail Runtime 同步层完成。")
                     .font(SettingsListTypography.rowSubtitle)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -282,7 +290,7 @@ struct AddMailAccountSheet: View {
                 }
 
                 MailAccountSetupRow("授权凭据", labelWidth: Layout.labelColumnWidth) {
-                    SecureField(selectedPreset == .microsoft ? "OAuth / 授权凭据（稍后接入）" : "授权码 / App Password", text: $credential)
+                    SecureField(selectedPreset == .microsoft ? "OAuth / 授权凭据" : "授权码 / App Password", text: $credential)
                         .textFieldStyle(.roundedBorder)
                 }
             }
@@ -321,15 +329,64 @@ struct AddMailAccountSheet: View {
         }
     }
 
+    @ViewBuilder
+    private var setupFeedback: some View {
+        if let setupError {
+            Text(setupError)
+                .font(SettingsListTypography.rowCaption)
+                .foregroundStyle(.red)
+                .textSelection(.enabled)
+        } else if let setupMessage {
+            Text(setupMessage)
+                .font(SettingsListTypography.rowCaption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     private var footer: some View {
         HStack(spacing: SettingsListLayout.spaceS) {
             Spacer()
             Button("取消") { dismiss() }
                 .keyboardShortcut(.cancelAction)
-            Button("保存草稿") { dismiss() }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
-                .disabled(saveDisabled)
+                .disabled(isSubmitting)
+            Button {
+                Task { await submitAccountSetup() }
+            } label: {
+                if isSubmitting {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Text("添加账户")
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .keyboardShortcut(.defaultAction)
+            .disabled(saveDisabled || isSubmitting)
+        }
+    }
+
+    @MainActor
+    private func submitAccountSetup() async {
+        guard !isSubmitting else { return }
+        isSubmitting = true
+        setupError = nil
+        setupMessage = "正在添加账户并准备同步…"
+        do {
+            try await viewModel.addMailAccountAndPrepareSync(
+                preset: selectedPreset,
+                displayName: displayName,
+                email: email,
+                credential: credential,
+                incomingHost: incomingHost,
+                incomingPort: incomingPort,
+                outgoingHost: outgoingHost,
+                outgoingPort: outgoingPort
+            )
+            dismiss()
+        } catch {
+            setupError = String(describing: error)
+            setupMessage = nil
+            isSubmitting = false
         }
     }
 
@@ -411,7 +468,7 @@ private struct MailAccountSetupHintCard: View {
                     .font(SettingsListTypography.rowSubtitle)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("本轮界面先保存为连接草稿；真实登录、测试连接和凭据持久化会在后续 Mail Runtime 接入中完成。")
+                Text("本轮会创建本地账户与默认邮箱结构；真实 IMAP/SMTP 登录、远端邮箱发现和邮件拉取需要 Mail Runtime 同步适配器接入后完成。")
                     .font(SettingsListTypography.rowCaption)
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)

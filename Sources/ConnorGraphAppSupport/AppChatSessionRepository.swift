@@ -64,6 +64,14 @@ public struct AppChatSessionRepository: Sendable {
         return session
     }
 
+    @discardableResult
+    public func updateReadState(sessionID: String, readState: SessionReadState) throws -> AgentSession {
+        guard var session = try loadSession(id: sessionID) else { throw AppChatSessionRepositoryError.sessionNotFound(sessionID) }
+        session.readState = readState
+        try store.updateSessionReadState(sessionID: sessionID, readState: readState)
+        return session
+    }
+
     private func prewarmMarkdownRenderCacheIfNeeded(for session: AgentSession, previousMessageCount: Int) throws {
         guard let storagePaths else { return }
         guard session.messages.count > previousMessageCount else { return }

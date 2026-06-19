@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import CoreLocation
+import CoreServices
 import IOKit.pwr_mgt
 import UserNotifications
 import ConnorGraphCore
@@ -21,7 +22,7 @@ struct ConnorGraphAgentMacApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("康纳同学") {
+        Window("康纳同学", id: "main") {
             AppShellView(viewModel: viewModel)
                 .preferredColorScheme(viewModel.appearanceMode.colorScheme)
                 .toolbarBackground(.visible, for: .windowToolbar)
@@ -112,6 +113,10 @@ struct ConnorGraphAgentMacApp: App {
     }
 }
 
+extension Notification.Name {
+    static let connorSessionNotificationActivated = Notification.Name("connorSessionNotificationActivated")
+}
+
 @MainActor
 private func sendResponderAction(_ selector: Selector) {
     NSApp.sendAction(selector, to: nil, from: nil)
@@ -128,11 +133,13 @@ private final class ConnorMenuActionSelectors: NSObject {
 }
 
 @MainActor
-private final class ConnorApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+private final class ConnorApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, @preconcurrency UNUserNotificationCenterDelegate {
     private var menuLocalizationWarmupTimer: Timer?
     private var menuLocalizationWarmupTickCount = 0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        registerCurrentApplicationBundleWithLaunchServices()
+        UNUserNotificationCenter.current().delegate = self
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(localizeMenuBeforeTracking(_:)),
@@ -149,6 +156,55 @@ private final class ConnorApplicationDelegate: NSObject, NSApplicationDelegate, 
 
     func applicationDidUpdate(_ notification: Notification) {
         normalizeMenusSoon()
+    }
+
+    func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
+        orderExistingMainWindowToFront()
+        return false
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        orderExistingMainWindowToFront()
+        return false
+    }
+
+    private func registerCurrentApplicationBundleWithLaunchServices() {
+        let bundleURL = Bundle.main.bundleURL
+        guard bundleURL.pathExtension == "app" else { return }
+        let status = LSRegisterURL(bundleURL as CFURL, true)
+        if status != noErr {
+            NSLog("Connor failed to register app bundle with LaunchServices: status=\(status), path=\(bundleURL.path)")
+        }
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        let userInfo = response.notification.request.content.userInfo
+        let sessionID = userInfo["sessionID"] as? String
+        DispatchQueue.main.async {
+            NSApp.activate(ignoringOtherApps: true)
+            self.orderExistingMainWindowToFront()
+            if let sessionID {
+                NotificationCenter.default.post(
+                    name: .connorSessionNotificationActivated,
+                    object: nil,
+                    userInfo: ["sessionID": sessionID]
+                )
+            }
+            completionHandler()
+        }
+    }
+
+    private func orderExistingMainWindowToFront() {
+        let candidate = NSApp.windows.first { window in
+            window.isVisible && !window.isMiniaturized && window.canBecomeKey
+        } ?? NSApp.windows.first { window in
+            !window.isMiniaturized && window.canBecomeKey
+        }
+        candidate?.makeKeyAndOrderFront(nil)
     }
 
     private func normalizeMenusSoon() {

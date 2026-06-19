@@ -40,6 +40,38 @@ struct CommercialTrain7NativeMailSystemTests {
         #expect(updated.summary.flags.isRead)
     }
 
+    @Test func fileBackedMailStorePersistsAccountsMailboxesMessagesAndReadState() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("mail-store-\(UUID().uuidString)", isDirectory: true)
+        let storeURL = directory.appendingPathComponent("mail-store.json")
+        let accountID = MailAccountID(rawValue: "mail-test")
+        let mailboxID = MailMailboxID(rawValue: "mail-test-inbox")
+        let messageID = MailMessageID(rawValue: "mail-test-message")
+        let account = MailAccount(id: accountID, provider: .genericIMAPSMTP, displayName: "Test Mail", identities: [MailIdentity(id: MailIdentityID(rawValue: "identity"), displayName: "Test", address: MailAddress(email: "test@example.com"))], health: MailAccountHealth(status: .ready, summary: "ready"))
+        let mailbox = MailMailbox(id: mailboxID, accountID: accountID, name: "收件箱", path: "INBOX", role: .inbox, status: MailMailboxStatus(messageCount: 1, unreadCount: 1, syncCursor: MailSyncCursor(value: "42", uidValidity: "7"), lastSyncedAt: Date()))
+        let summary = MailMessageSummary(id: messageID, accountID: accountID, mailboxID: mailboxID, subject: "Unread", from: MailAddress(email: "sender@example.com"), to: [MailAddress(email: "test@example.com")], snippet: "hello", flags: MailMessageFlags(isRead: false))
+        let detail = MailMessageDetail(summary: summary, headers: MailMessageHeaders(messageIDHeader: "<msg@example.com>"), body: MailMessageBody(redactedPreview: "hello"))
+
+        let writer = FileBackedMailSourceStore(storeURL: storeURL)
+        try await writer.saveAccount(account)
+        try await writer.saveMailbox(mailbox)
+        try await writer.saveMessage(detail)
+
+        let reader = FileBackedMailSourceStore(storeURL: storeURL)
+        let presentation = try await reader.presentation()
+        #expect(presentation.accounts.map(\.id) == [accountID])
+        #expect(presentation.mailboxes.map(\.id) == [mailboxID])
+        #expect(presentation.messages.map(\.id) == [messageID])
+        #expect(presentation.messages.first?.flags.isRead == false)
+
+        try await reader.updateFlags(messageIDs: [messageID]) { flags in
+            var copy = flags
+            copy.isRead = true
+            return copy
+        }
+        let reloaded = FileBackedMailSourceStore(storeURL: storeURL)
+        #expect(try await reloaded.message(id: messageID)?.summary.flags.isRead == true)
+    }
+
     @Test func agentToolRegistryExposesNativeMailToolsAndBlocksSendWithoutApproval() async throws {
         let runtime = MailRuntime.fixture()
         var registry = AgentToolRegistry()
@@ -115,8 +147,8 @@ struct CommercialTrain7NativeMailSystemTests {
         let smtp = MailSMTPAdapter()
         let imapHealth = try await imap.testConnection(endpoint: MailServerEndpoint(host: "imap.example.com", port: 993, security: .tls, protocolKind: .imap))
         let smtpHealth = try await smtp.testConnection(endpoint: MailServerEndpoint(host: "smtp.example.com", port: 587, security: .startTLS, protocolKind: .smtp))
-        #expect(imapHealth.status == .ready)
-        #expect(smtpHealth.status == .ready)
+        #expect(imapHealth.status == .degraded)
+        #expect(smtpHealth.status == .degraded)
 
         let account = MailAccount(id: MailAccountID(rawValue: "a"), provider: .genericIMAPSMTP, displayName: "A", identities: [], credentialBinding: MailCredentialBinding(keychainService: "svc", accountName: "a", authMode: .oauth2))
         let syncHealth = MailSyncEngine().readiness(account: account, mailboxCount: 1, cursorCount: 1)
