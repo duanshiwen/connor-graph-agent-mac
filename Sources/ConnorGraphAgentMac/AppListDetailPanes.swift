@@ -32,6 +32,10 @@ struct CraftListPaneView: View {
                 CraftSkillListPane(viewModel: viewModel)
             case .automation:
                 CraftSimpleListPane(title: "自动化", subtitle: "事件触发与执行历史", rows: viewModel.automationConfig.rules.map(\.name))
+            case .scheduledTasks:
+                CraftSimpleListPane(title: "定时任务", subtitle: "按时间或周期执行", rows: viewModel.taskManagementPresentation.scheduledTasks.map(\.title))
+            case .eventTriggeredTasks:
+                CraftSimpleListPane(title: "事件触发", subtitle: "由会话状态等事件触发", rows: viewModel.taskManagementPresentation.eventTriggeredTasks.map(\.title))
             case .productOS:
                 CraftSimpleListPane(title: "Product OS", subtitle: "本地控制面模块", rows: viewModel.productOSRegistry.sources.map(\.displayName) + viewModel.productOSRegistry.skills.map(\.displayName))
             default:
@@ -1124,7 +1128,7 @@ struct CraftDetailPaneView: View {
                 MemoryChangeLogView(viewModel: viewModel)
             case .extractionDiagnostics:
                 GraphExtractionDiagnosticsView(viewModel: viewModel)
-            case .automation:
+            case .automation, .scheduledTasks, .eventTriggeredTasks:
                 AutomationRuntimePanelView(viewModel: viewModel)
             case .productOS:
                 ProductOSRegistryView(viewModel: viewModel)
