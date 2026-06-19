@@ -170,9 +170,7 @@ struct SettingsCalendarSection: View {
             }
         }
         .sheet(isPresented: $viewModel.isPresentingAddCalendarSourceSheet) {
-            AddCalendarSourceSheet { provider, displayName, calendarName in
-                viewModel.addCalendarSource(provider: provider, displayName: displayName, calendarName: calendarName)
-            }
+            AddCalendarSourceSheet(viewModel: viewModel)
         }
     }
 }

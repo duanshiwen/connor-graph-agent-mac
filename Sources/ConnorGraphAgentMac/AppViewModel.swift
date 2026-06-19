@@ -1617,23 +1617,31 @@ final class AppViewModel: NSObject, ObservableObject {
         errorMessage = nil
     }
 
-    func syncSystemCalendar() {
-        guard !isSyncingSystemCalendar else { return }
+    @discardableResult
+    func syncSystemCalendarNow() async -> Bool {
+        guard !isSyncingSystemCalendar else { return false }
         isSyncingSystemCalendar = true
         calendarSyncMessage = "正在请求日历权限并同步…"
-        Task { @MainActor in
-            do {
-                let snapshot = try await CalendarEventKitAdapter.fetchSystemSnapshot()
-                upsertSystemCalendarSnapshot(snapshot)
-                calendarSyncMessage = "已同步本机日历：\(snapshot.collections.count) 个日历，\(snapshot.events.count) 个未来日程"
-                appSettingsMessage = calendarSyncMessage
-                errorMessage = nil
-            } catch {
-                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                calendarSyncMessage = message
-                errorMessage = message
-            }
+        do {
+            let snapshot = try await CalendarEventKitAdapter.fetchSystemSnapshot()
+            upsertSystemCalendarSnapshot(snapshot)
+            calendarSyncMessage = "已同步本机日历：\(snapshot.collections.count) 个日历，\(snapshot.events.count) 个日程"
+            appSettingsMessage = calendarSyncMessage
+            errorMessage = nil
             isSyncingSystemCalendar = false
+            return true
+        } catch {
+            let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            calendarSyncMessage = message
+            errorMessage = message
+            isSyncingSystemCalendar = false
+            return false
+        }
+    }
+
+    func syncSystemCalendar() {
+        Task { @MainActor in
+            _ = await syncSystemCalendarNow()
         }
     }
 
