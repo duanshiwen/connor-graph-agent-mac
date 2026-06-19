@@ -56,16 +56,22 @@ final class ComposerInputCommandRouter {
         }
     }
 
-    func handleInsertText(_ string: Any, replacementRange: NSRange, textView: NSTextView, slashAnchorRect: () -> CGRect) -> Bool {
+    func handleInsertText(_ string: Any, replacementRange: NSRange, textView: NSTextView, slashAnchorRect: @escaping () -> CGRect) -> Bool {
         guard let str = string as? NSString, str.length == 1, str.character(at: 0) == UInt16(47) else { return false }
-        let currentString = textView.string as NSString
-        let cursorLocation = textView.selectedRange().location
-        let isStartOfLine = cursorLocation == 0 || (cursorLocation > 0 && currentString.character(at: cursorLocation - 1) == UInt16(10))
-        guard isStartOfLine else { return false }
-        textView.insertText(string, replacementRange: replacementRange)
-        let slashLocation = max(0, textView.selectedRange().location - 1)
-        configuration.onSlashCommand?(slashAnchorRect(), NSRange(location: slashLocation, length: 1))
-        return true
+        let slashLocation = textView.selectedRange().location
+        guard slashLocation != NSNotFound else { return false }
+        let onSlashCommand = configuration.onSlashCommand
+
+        DispatchQueue.main.async { [weak textView] in
+            guard let textView else { return }
+            let currentString = textView.string as NSString
+            guard slashLocation < currentString.length,
+                  currentString.character(at: slashLocation) == UInt16(47)
+            else { return }
+            onSlashCommand?(slashAnchorRect(), NSRange(location: slashLocation, length: 1))
+        }
+
+        return false
     }
 
     func draggingEntered(_ pasteboard: NSPasteboard) -> NSDragOperation? {
