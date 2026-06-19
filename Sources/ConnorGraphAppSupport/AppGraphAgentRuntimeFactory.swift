@@ -260,6 +260,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             registry.register(ConnorSkillCreateTool(service: skillMutationService))
             registry.register(ConnorSkillUpdateTool(service: skillMutationService))
             registry.register(ConnorSkillDeleteTool(service: skillMutationService))
+            registry.registerTaskManagementTools(repository: AppTaskManagementRepository(storagePaths: storagePaths))
         }
         let scientificRuntime = ScientificComputeRuntime(engines: [NativeSwiftScientificEngine()])
         registry.register(ScienceComputeTool(runtime: scientificRuntime))
