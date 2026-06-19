@@ -66,8 +66,6 @@ struct ConnorSettingsDetailView: View {
                         SettingsMailSection(viewModel: viewModel)
                     case .calendar:
                         SettingsCalendarSection(viewModel: viewModel)
-                    case .contacts:
-                        SettingsContactsSection(viewModel: viewModel)
                     case .rss:
                         SettingsRSSSection(viewModel: viewModel)
                     case .permissions:
@@ -107,6 +105,128 @@ struct ConnorSettingsDetailView: View {
         .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
         .task {
             viewModel.loadRuntimeSettings()
+        }
+    }
+}
+
+struct SettingsCalendarSection: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceL) {
+            SettingsGroup(title: "日历能力") {
+                SettingsValueRow(title: "定位", value: "独立日历数据源")
+                SettingsValueRow(title: "已添加源", value: "\(viewModel.calendarAccounts.count) 个")
+                SettingsValueRow(title: "日历", value: "\(viewModel.calendarCollections.count) 个")
+                SettingsValueRow(title: "当前事件", value: "\(viewModel.calendarBrowserPresentation.eventCount) 个")
+                Text("Calendar 可以独立添加和管理，也可以作为 Connected Account capability 被发现；MVP 保持轻量，不复制完整日历客户端、月视图、周视图或复杂 recurrence 编辑器。")
+                    .font(SettingsListTypography.rowCaption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: SettingsListLayout.spaceS) {
+                    Button(action: { viewModel.syncSystemCalendar() }) {
+                        Label(viewModel.isSyncingSystemCalendar ? "同步中…" : "同步本机日历", systemImage: "arrow.triangle.2.circlepath")
+                            .font(SettingsListTypography.actionTitle)
+                            .padding(.horizontal, SettingsListLayout.spaceM)
+                            .padding(.vertical, SettingsListLayout.spaceXS)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(viewModel.isSyncingSystemCalendar)
+
+                    Button(action: { viewModel.isPresentingAddCalendarSourceSheet = true }) {
+                        Label("添加日历源", systemImage: "plus")
+                            .font(SettingsListTypography.actionTitle)
+                            .padding(.horizontal, SettingsListLayout.spaceM)
+                            .padding(.vertical, SettingsListLayout.spaceXS)
+                    }
+                    .buttonStyle(.bordered)
+                }
+                if let message = viewModel.calendarSyncMessage {
+                    Text(message)
+                        .font(SettingsListTypography.rowCaption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+
+            SettingsGroup(title: "已添加日历源") {
+                if viewModel.calendarAccounts.isEmpty {
+                    Text("暂无日历源。点击“添加日历源”开始。")
+                        .font(SettingsListTypography.rowCaption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    ForEach(viewModel.calendarAccounts) { account in
+                        CalendarSourceSettingsRow(
+                            account: account,
+                            calendarCount: viewModel.calendarCollections.filter { $0.accountID == account.id }.count,
+                            onDelete: { viewModel.deleteCalendarSource(account) }
+                        )
+                        if account.id != viewModel.calendarAccounts.last?.id {
+                            Divider().opacity(0.6)
+                        }
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $viewModel.isPresentingAddCalendarSourceSheet) {
+            AddCalendarSourceSheet { provider, displayName, calendarName in
+                viewModel.addCalendarSource(provider: provider, displayName: displayName, calendarName: calendarName)
+            }
+        }
+    }
+}
+
+private struct CalendarSourceSettingsRow: View {
+    var account: CalendarAccount
+    var calendarCount: Int
+    var onDelete: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: SettingsListLayout.spaceM) {
+            Image(systemName: iconName)
+                .font(SettingsListTypography.largeIcon)
+                .foregroundStyle(.orange)
+                .frame(width: 30)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(account.displayName)
+                    .font(SettingsListTypography.rowTitle)
+                Text("\(providerName) · \(calendarCount) 个日历 · \(account.health.summary)")
+                    .font(SettingsListTypography.rowSubtitle)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button(role: .destructive, action: onDelete) {
+                Label("删除", systemImage: "trash")
+                    .labelStyle(.iconOnly)
+            }
+            .buttonStyle(.borderless)
+            .help("删除日历源")
+            .accessibilityLabel("删除 \(account.displayName)")
+        }
+        .frame(minHeight: SettingsListLayout.prominentRowMinHeight)
+    }
+
+    private var providerName: String {
+        switch account.provider {
+        case .appleICloud: "Apple iCloud"
+        case .microsoft365: "Microsoft 365"
+        case .google: "Google"
+        case .qq: "QQ"
+        case .netEase: "网易"
+        case .genericIMAPSMTP: "自定义 IMAP/SMTP"
+        case .genericCalDAVCardDAV: "自定义 CalDAV / CardDAV"
+        case .localFixture: "本机日历"
+        }
+    }
+
+    private var iconName: String {
+        switch account.provider {
+        case .appleICloud: "icloud"
+        case .microsoft365: "m.circle"
+        case .google: "g.circle"
+        case .localFixture: "calendar"
+        default: "calendar"
         }
     }
 }

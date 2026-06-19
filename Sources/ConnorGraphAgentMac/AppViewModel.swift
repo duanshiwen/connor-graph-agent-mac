@@ -371,9 +371,18 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var selectedMailMessageID: MailMessageID?
     @Published var isPresentingAddMailAccountSheet: Bool = false
     @Published var calendarBrowserPresentation: NativeCalendarBrowserPresentation = .empty
+    @Published var calendarAccounts: [CalendarAccount] = []
+    @Published var calendarCollections: [CalendarCollection] = []
+    @Published var calendarEvents: [CalendarEvent] = []
     @Published var selectedCalendarEventID: CalendarEventID?
+    @Published var isPresentingAddCalendarSourceSheet: Bool = false
+    @Published var isSyncingSystemCalendar: Bool = false
+    @Published var calendarSyncMessage: String?
     @Published var contactsBrowserPresentation: NativeContactsBrowserPresentation = .empty
+    @Published var contactRecords: [ContactRecord] = []
     @Published var selectedContactID: MailContactID?
+    @Published var isSyncingSystemContacts: Bool = false
+    @Published var contactsSyncMessage: String?
     @Published var rssBrowserPresentation: NativeRSSBrowserPresentation = .empty
     @Published var selectedRSSSourceID: RSSSourceID?
     @Published var selectedRSSItemID: RSSItemID?
@@ -1587,6 +1596,148 @@ final class AppViewModel: NSObject, ObservableObject {
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
+        }
+    }
+
+    func reloadCalendarBrowserPresentation() {
+        calendarBrowserPresentation = NativeCalendarBrowserPresentation.build(events: calendarEvents)
+        if let selectedCalendarEventID,
+           !calendarEvents.contains(where: { $0.id == selectedCalendarEventID }) {
+            self.selectedCalendarEventID = calendarEvents.first?.id
+        }
+        errorMessage = nil
+    }
+
+    func reloadContactsBrowserPresentation() {
+        contactsBrowserPresentation = NativeContactsBrowserPresentation.build(records: contactRecords)
+        if let selectedContactID,
+           !contactRecords.contains(where: { $0.id == selectedContactID }) {
+            self.selectedContactID = nil
+        }
+        errorMessage = nil
+    }
+
+    func syncSystemCalendar() {
+        guard !isSyncingSystemCalendar else { return }
+        isSyncingSystemCalendar = true
+        calendarSyncMessage = "正在请求日历权限并同步…"
+        Task { @MainActor in
+            do {
+                let snapshot = try await CalendarEventKitAdapter.fetchSystemSnapshot()
+                upsertSystemCalendarSnapshot(snapshot)
+                calendarSyncMessage = "已同步本机日历：\(snapshot.collections.count) 个日历，\(snapshot.events.count) 个未来日程"
+                appSettingsMessage = calendarSyncMessage
+                errorMessage = nil
+            } catch {
+                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                calendarSyncMessage = message
+                errorMessage = message
+            }
+            isSyncingSystemCalendar = false
+        }
+    }
+
+    func syncSystemContacts() {
+        guard !isSyncingSystemContacts else { return }
+        isSyncingSystemContacts = true
+        contactsSyncMessage = "正在请求通讯录权限并同步…"
+        Task { @MainActor in
+            do {
+                let records = try await ContactsSystemAdapter.fetchSystemContacts()
+                contactRecords = records
+                reloadContactsBrowserPresentation()
+                contactsSyncMessage = "已同步系统通讯录：\(records.count) 个联系人"
+                appSettingsMessage = contactsSyncMessage
+                errorMessage = nil
+            } catch {
+                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                contactsSyncMessage = message
+                errorMessage = message
+            }
+            isSyncingSystemContacts = false
+        }
+    }
+
+    private func upsertSystemCalendarSnapshot(_ snapshot: CalendarEventKitSnapshot) {
+        let systemAccountIDs = Set(snapshot.accounts.map(\.id))
+        let systemCalendarIDs = Set(snapshot.collections.map(\.id))
+        calendarAccounts.removeAll { systemAccountIDs.contains($0.id) }
+        calendarCollections.removeAll { $0.accountID == CalendarEventKitAdapter.systemAccountID || systemCalendarIDs.contains($0.id) }
+        calendarEvents.removeAll { systemCalendarIDs.contains($0.calendarID) }
+        calendarAccounts.append(contentsOf: snapshot.accounts)
+        calendarCollections.append(contentsOf: snapshot.collections)
+        calendarEvents.append(contentsOf: snapshot.events)
+        calendarAccounts.sort { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+        calendarCollections.sort { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+        calendarEvents.sort { $0.start.date < $1.start.date }
+        reloadCalendarBrowserPresentation()
+    }
+
+    func addCalendarSource(
+        provider: ConnectedAccountProviderKind,
+        displayName rawDisplayName: String,
+        calendarName rawCalendarName: String
+    ) {
+        if provider == .localFixture {
+            syncSystemCalendar()
+            isPresentingAddCalendarSourceSheet = false
+            return
+        }
+        let displayName = rawDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let calendarName = rawCalendarName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedDisplayName = displayName.isEmpty ? calendarProviderDisplayName(provider) : displayName
+        let resolvedCalendarName = calendarName.isEmpty ? "默认日历" : calendarName
+        let slugBase = AccountConnectionRuntime.slug(for: "\(provider.rawValue)-\(resolvedDisplayName)-\(calendarAccounts.count + 1)")
+        let accountID = CalendarAccountID(rawValue: "calendar-account-\(slugBase)")
+        let collectionID = CalendarID(rawValue: "calendar-\(slugBase)")
+        let now = Date()
+        let account = CalendarAccount(
+            id: accountID,
+            provider: provider,
+            displayName: resolvedDisplayName,
+            health: CalendarAccountHealth(status: .ready, checkedAt: now, summary: "已添加，等待同步日程"),
+            createdAt: now,
+            updatedAt: now
+        )
+        let collection = CalendarCollection(
+            id: collectionID,
+            accountID: accountID,
+            displayName: resolvedCalendarName,
+            colorHex: "#F97316",
+            isReadOnly: false,
+            source: "connor-calendar-source"
+        )
+        calendarAccounts.append(account)
+        calendarCollections.append(collection)
+        selectedCalendarEventID = nil
+        isPresentingAddCalendarSourceSheet = false
+        reloadCalendarBrowserPresentation()
+        appSettingsMessage = "已添加日历源：\(resolvedDisplayName)"
+    }
+
+    func deleteCalendarSource(_ account: CalendarAccount) {
+        let collectionIDs = Set(calendarCollections.filter { $0.accountID == account.id }.map(\.id))
+        calendarAccounts.removeAll { $0.id == account.id }
+        calendarCollections.removeAll { $0.accountID == account.id }
+        calendarEvents.removeAll { collectionIDs.contains($0.calendarID) }
+        if let selectedCalendarEventID,
+           !calendarEvents.contains(where: { $0.id == selectedCalendarEventID }) {
+            self.selectedCalendarEventID = nil
+        }
+        reloadCalendarBrowserPresentation()
+        appSettingsMessage = "已移除日历源：\(account.displayName)"
+    }
+
+    private func calendarProviderDisplayName(_ provider: ConnectedAccountProviderKind) -> String {
+        switch provider {
+        case .appleICloud: "Apple iCloud"
+        case .microsoft365: "Microsoft 365"
+        case .google: "Google"
+        case .qq: "QQ"
+        case .netEase: "网易"
+        case .genericIMAPSMTP: "自定义 IMAP/SMTP"
+        case .genericCalDAVCardDAV: "自定义 CalDAV / CardDAV"
+        case .localFixture: "本机日历"
         }
     }
 
