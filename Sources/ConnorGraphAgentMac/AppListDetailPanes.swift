@@ -1397,17 +1397,22 @@ struct CraftSessionRow: View {
     @ViewBuilder
     private var attentionIndicator: some View {
         if let dotColor = cardStyle.dotColor {
-            VStack(spacing: 3) {
+            VStack(spacing: 4) {
                 Circle()
                     .fill(dotColor)
                     .frame(width: 8, height: 8)
-                if let count = readState?.unreadCount, count > 1 {
-                    Text(count > 99 ? "99+" : "\(count)")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(dotColor)
-                }
+                Text("NEW!")
+                    .font(.system(size: 8, weight: .black, design: .rounded))
+                    .foregroundStyle(Color.yellow)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(Color.red, in: Capsule())
+                    .overlay(
+                        Capsule()
+                            .stroke(Color.yellow, lineWidth: 1)
+                    )
             }
-            .frame(width: 10)
+            .frame(width: 30)
             .padding(.top, 5)
         }
     }
