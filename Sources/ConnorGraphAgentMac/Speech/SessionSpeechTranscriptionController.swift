@@ -51,18 +51,8 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
             }
         }
 
-        // For an ordinary user stop, finish the recognition stream instead of
-        // cancelling the task. Cancelling tears down Speech.framework's XPC
-        // connection aggressively and can emit noisy runtime diagnostics such as
-        // "XPC connection was invalidated" / task-name-port failures even though
-        // the app state is healthy. Interruptions still cancel immediately.
         recognitionRequest?.endAudio()
-        switch reason {
-        case .manual:
-            recognitionTask?.finish()
-        case .leavingSession, .deletedSession, .appLifecycle:
-            recognitionTask?.cancel()
-        }
+        recognitionTask?.cancel()
 
         cleanup()
     }
@@ -154,7 +144,7 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
             onError("麦克风输入格式不可用，请检查系统麦克风权限和输入设备。")
             return
         }
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak request] buffer, _ in
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak request] buffer, _ in
             request?.append(buffer)
         }
         didInstallInputTap = true
