@@ -492,6 +492,52 @@ private actor FakeClaudeSDKSidecarSessionTransport: ClaudeSDKSidecarSessionTrans
     ])
 }
 
+@Test func claudeSDKSidecarProcessTransportDefaultsProcessTimeoutTo300Seconds() throws {
+    let transport = ClaudeSDKSidecarProcessTransport(executableURL: URL(fileURLWithPath: "/bin/sh"))
+
+    #expect(transport.processTimeout == 300)
+}
+
+@Test func claudeSDKSidecarProcessTransportTimesOutHungProcess() async throws {
+    let temporaryDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorSidecarTimeoutTests-")
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+    let scriptURL = temporaryDirectory.appendingPathComponent("hung-sidecar.sh")
+    try """
+    #!/bin/sh
+    IFS= read -r request
+    sleep 5
+    """.write(to: scriptURL, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+    let transport = ClaudeSDKSidecarProcessTransport(
+        executableURL: URL(fileURLWithPath: "/bin/sh"),
+        arguments: [scriptURL.path],
+        currentDirectoryURL: temporaryDirectory,
+        processTimeout: 0.1
+    )
+    let request = ClaudeSDKSidecarRequest(
+        connorRunID: "run-timeout",
+        connorSessionID: "session-timeout",
+        groupID: "default",
+        prompt: "Timeout please",
+        cwd: temporaryDirectory.path,
+        permissionMode: .readOnly
+    )
+
+    do {
+        for try await _ in await transport.stream(request) {}
+        Issue.record("Expected hung sidecar process to time out")
+    } catch let error as ClaudeSDKSidecarProcessTransportError {
+        #expect(error == .timedOut(seconds: 0.1))
+    } catch {
+        Issue.record("Expected ClaudeSDKSidecarProcessTransportError.timedOut, got \(error)")
+    }
+}
+
 @Test func claudeSDKSidecarProcessTransportRejectsApprovalResolutionCommandUntilStreamingSessionExists() async throws {
     let transport = ClaudeSDKSidecarProcessTransport(executableURL: URL(fileURLWithPath: "/bin/sh"))
     let approval = AgentPendingApproval(
