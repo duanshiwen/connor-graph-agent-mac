@@ -7,6 +7,7 @@ public struct AppStoragePaths: Sendable, Equatable {
     public var sessionsDirectory: URL
     public var sourcesDirectory: URL
     public var skillsDirectory: URL
+    public var tasksDirectory: URL
     public var automationsDirectory: URL
     public var labelsDirectory: URL
     public var statusesDirectory: URL
@@ -28,6 +29,7 @@ public struct AppStoragePaths: Sendable, Equatable {
         sessionsDirectory: URL? = nil,
         sourcesDirectory: URL? = nil,
         skillsDirectory: URL? = nil,
+        tasksDirectory: URL? = nil,
         automationsDirectory: URL? = nil,
         labelsDirectory: URL? = nil,
         statusesDirectory: URL? = nil,
@@ -55,6 +57,7 @@ public struct AppStoragePaths: Sendable, Equatable {
         self.sessionsDirectory = resolvedSessionsDirectory
         self.sourcesDirectory = resolvedSourcesDirectory
         self.skillsDirectory = resolvedSkillsDirectory
+        self.tasksDirectory = tasksDirectory ?? applicationSupportDirectory.appendingPathComponent("tasks", isDirectory: true)
         self.automationsDirectory = automationsDirectory ?? applicationSupportDirectory.appendingPathComponent("automations", isDirectory: true)
         self.labelsDirectory = labelsDirectory ?? applicationSupportDirectory.appendingPathComponent("labels", isDirectory: true)
         self.statusesDirectory = statusesDirectory ?? applicationSupportDirectory.appendingPathComponent("statuses", isDirectory: true)
@@ -93,6 +96,7 @@ public struct AppStoragePaths: Sendable, Equatable {
             sessionsDirectory,
             sourcesDirectory,
             skillsDirectory,
+            tasksDirectory,
             automationsDirectory,
             labelsDirectory,
             statusesDirectory,

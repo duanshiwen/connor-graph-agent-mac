@@ -38,8 +38,10 @@ struct NativeRSSSystemTests {
         var registry = AgentToolRegistry()
         registry.registerNativeRSSTools(runtime: runtime)
 
-        #expect(registry.definitions.map(\.name).contains("rss_search_items"))
-        #expect(registry.definitions.map(\.name).contains("rss_import_opml"))
+        let toolNames = registry.definitions.map(\.name)
+        #expect(toolNames.contains("rss_search_items"))
+        #expect(!toolNames.contains("rss_import_opml"))
+        #expect(!toolNames.contains("rss_export_opml"))
         #expect(registry.permission(named: "rss_get_item") == .readRSSContent)
         #expect(registry.permission(named: "rss_add_source") == .manageRSSSources)
 
@@ -83,6 +85,26 @@ struct NativeRSSSystemTests {
         let parsed = try service.parse(xml)
         #expect(parsed.outlines.count == 1)
         #expect(parsed.outlines.first?.xmlURL.absoluteString == "https://example.com/a.xml")
+    }
+
+    @Test func runtimeUpdatesAndDeletesRSSSources() async throws {
+        let sourceID = RSSSourceID(rawValue: "example-source")
+        let itemID = RSSItemID(rawValue: "example-item")
+        let source = RSSSource(id: sourceID, feedURL: URL(string: "https://example.com/feed.xml")!, displayName: "Example")
+        let item = RSSItemDetail(summary: RSSItemSummary(id: itemID, sourceID: sourceID, title: "Example Item", snippet: "Cached feed item"))
+        let runtime = RSSRuntime(repository: InMemoryRSSSourceRepository(sources: [source]), cache: InMemoryRSSSourceCache(items: [item]))
+
+        let updated = try await runtime.updateSource(sourceID: sourceID, feedURL: URL(string: "https://example.org/rss.xml")!, displayName: "Example Updated")
+        #expect(updated.id == sourceID)
+        #expect(updated.feedURL.absoluteString == "https://example.org/rss.xml")
+        #expect(updated.displayName == "Example Updated")
+        #expect(updated.health.status == .unknown)
+
+        try await runtime.deleteSource(sourceID: sourceID)
+        let sources = try await runtime.listSources()
+        let items = try await runtime.listItems(sourceID: nil, includeHidden: true)
+        #expect(sources.isEmpty)
+        #expect(items.isEmpty)
     }
 
     @Test func fileBackedRSSStorageSurvivesRuntimeRestart() async throws {

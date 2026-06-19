@@ -58,24 +58,23 @@ private struct SourceListHeader: View {
     var onAdd: () -> Void
 
     var body: some View {
-        HStack(alignment: .center, spacing: AppShellLayout.spaceS) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("MCP Sources")
-                    .font(AppListTypography.header)
-                Text("外部工具连接")
-                    .font(AppListTypography.rowCaption)
-                    .foregroundStyle(.secondary)
+        ZStack {
+            Text("MCP Sources")
+                .font(AppListTypography.header)
+                .frame(maxWidth: .infinity, alignment: .center)
+
+            HStack {
+                Spacer()
+                Button(action: onAdd) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .contentShape(Circle())
+                .help("添加 MCP Source")
+                .accessibilityLabel("添加 MCP Source")
             }
-            Spacer()
-            Button(action: onAdd) {
-                Image(systemName: "plus")
-                    .font(.system(size: 12.5, weight: .semibold))
-                    .frame(width: 24, height: 24)
-            }
-            .buttonStyle(.plain)
-            .contentShape(Circle())
-            .help("添加 MCP Source")
-            .accessibilityLabel("添加 MCP Source")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
