@@ -50,7 +50,7 @@ struct AppShellView: View {
                 .controlSize(.small)
         }
         .toolbar {
-            ToolbarItem(placement: .navigation) {
+            ToolbarItem(placement: .automatic) {
                 Button {
                     withAnimation(.easeInOut(duration: 0.16)) {
                         isPrimarySidebarVisible.toggle()

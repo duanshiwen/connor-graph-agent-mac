@@ -1,7 +1,6 @@
 import SwiftUI
 import AppKit
 import CoreLocation
-import CoreServices
 import IOKit.pwr_mgt
 import UserNotifications
 import ConnorGraphCore
@@ -143,7 +142,6 @@ private final class ConnorApplicationDelegate: NSObject, NSApplicationDelegate, 
     private var menuLocalizationWarmupTickCount = 0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        registerCurrentApplicationBundleWithLaunchServices()
         UNUserNotificationCenter.current().delegate = self
 
         // SwiftUI owns the main menu's backing item views. Recursively mutating NSMenu
@@ -181,15 +179,6 @@ private final class ConnorApplicationDelegate: NSObject, NSApplicationDelegate, 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         orderExistingMainWindowToFront()
         return false
-    }
-
-    private func registerCurrentApplicationBundleWithLaunchServices() {
-        let bundleURL = Bundle.main.bundleURL
-        guard bundleURL.pathExtension == "app" else { return }
-        let status = LSRegisterURL(bundleURL as CFURL, true)
-        if status != noErr {
-            NSLog("Connor failed to register app bundle with LaunchServices: status=\(status), path=\(bundleURL.path)")
-        }
     }
 
     func userNotificationCenter(
