@@ -29,19 +29,51 @@ public struct AgentRuntimeAppSettings: Codable, Sendable, Equatable {
     public var internalBrowserEnabled: Bool
     public var httpProxyEnabled: Bool
     public var httpProxyURLString: String
+    public var sessionNotificationPolicy: SessionNotificationPolicy
 
     public init(
         desktopNotificationsEnabled: Bool = true,
         keepScreenAwake: Bool = false,
         internalBrowserEnabled: Bool = true,
         httpProxyEnabled: Bool = false,
-        httpProxyURLString: String = ""
+        httpProxyURLString: String = "",
+        sessionNotificationPolicy: SessionNotificationPolicy = .default
     ) {
         self.desktopNotificationsEnabled = desktopNotificationsEnabled
         self.keepScreenAwake = keepScreenAwake
         self.internalBrowserEnabled = internalBrowserEnabled
         self.httpProxyEnabled = httpProxyEnabled
         self.httpProxyURLString = httpProxyURLString
+        self.sessionNotificationPolicy = sessionNotificationPolicy
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case desktopNotificationsEnabled
+        case keepScreenAwake
+        case internalBrowserEnabled
+        case httpProxyEnabled
+        case httpProxyURLString
+        case sessionNotificationPolicy
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        desktopNotificationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .desktopNotificationsEnabled) ?? true
+        keepScreenAwake = try container.decodeIfPresent(Bool.self, forKey: .keepScreenAwake) ?? false
+        internalBrowserEnabled = try container.decodeIfPresent(Bool.self, forKey: .internalBrowserEnabled) ?? true
+        httpProxyEnabled = try container.decodeIfPresent(Bool.self, forKey: .httpProxyEnabled) ?? false
+        httpProxyURLString = try container.decodeIfPresent(String.self, forKey: .httpProxyURLString) ?? ""
+        sessionNotificationPolicy = try container.decodeIfPresent(SessionNotificationPolicy.self, forKey: .sessionNotificationPolicy) ?? .default
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(desktopNotificationsEnabled, forKey: .desktopNotificationsEnabled)
+        try container.encode(keepScreenAwake, forKey: .keepScreenAwake)
+        try container.encode(internalBrowserEnabled, forKey: .internalBrowserEnabled)
+        try container.encode(httpProxyEnabled, forKey: .httpProxyEnabled)
+        try container.encode(httpProxyURLString, forKey: .httpProxyURLString)
+        try container.encode(sessionNotificationPolicy, forKey: .sessionNotificationPolicy)
     }
 }
 

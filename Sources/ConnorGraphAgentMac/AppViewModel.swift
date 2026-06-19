@@ -404,6 +404,8 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var filteredBrowserHistoryRecords: [BrowserHistoryRecord] = []
     @Published var selectedSettingsSection: ConnorSettingsSection = .app
     @Published var desktopNotificationsEnabled: Bool = true
+    @Published var sessionNotificationMinimumLevel: SessionAttentionLevel = .unread
+    @Published var sessionNotificationLevelsByMessageType: [SessionAttentionMessageType: SessionAttentionLevel] = [:]
     @Published var keepScreenAwake: Bool = false
     @Published var internalBrowserEnabled: Bool = true
     @Published var httpProxyEnabled: Bool = false
@@ -496,6 +498,11 @@ final class AppViewModel: NSObject, ObservableObject {
     var runtimeSettingsAutosaveSignature: String {
         [
             desktopNotificationsEnabled.description,
+            sessionNotificationMinimumLevel.rawValue.description,
+            sessionNotificationLevelsByMessageType
+                .sorted { $0.key.rawValue < $1.key.rawValue }
+                .map { "\($0.key.rawValue)=\($0.value.rawValue)" }
+                .joined(separator: ","),
             keepScreenAwake.description,
             httpProxyEnabled.description,
             httpProxyURLString,
@@ -2589,6 +2596,8 @@ final class AppViewModel: NSObject, ObservableObject {
             showProviderIcons = settings.ui.showProviderIcons
             richToolDescriptionsEnabled = settings.ui.richToolDescriptionsEnabled
             desktopNotificationsEnabled = settings.app.desktopNotificationsEnabled
+            sessionNotificationMinimumLevel = settings.app.sessionNotificationPolicy.minimumLevel
+            sessionNotificationLevelsByMessageType = settings.app.sessionNotificationPolicy.levelsByMessageType
             keepScreenAwake = settings.app.keepScreenAwake
             internalBrowserEnabled = settings.app.internalBrowserEnabled
             httpProxyEnabled = settings.app.httpProxyEnabled
@@ -2629,6 +2638,7 @@ final class AppViewModel: NSObject, ObservableObject {
             settings.ui.showProviderIcons = showProviderIcons
             settings.ui.richToolDescriptionsEnabled = richToolDescriptionsEnabled
             settings.app.desktopNotificationsEnabled = desktopNotificationsEnabled
+            settings.app.sessionNotificationPolicy = currentSessionNotificationPolicy
             settings.app.keepScreenAwake = keepScreenAwake
             settings.app.internalBrowserEnabled = internalBrowserEnabled
             settings.app.httpProxyEnabled = httpProxyEnabled
@@ -2708,6 +2718,30 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
+    var currentSessionNotificationPolicy: SessionNotificationPolicy {
+        SessionNotificationPolicy(
+            minimumLevel: sessionNotificationMinimumLevel,
+            levelsByMessageType: sessionNotificationLevelsByMessageType
+        )
+    }
+
+    func sessionNotificationLevel(for messageType: SessionAttentionMessageType) -> SessionAttentionLevel {
+        currentSessionNotificationPolicy.configuredLevel(for: messageType)
+    }
+
+    func effectiveSessionNotificationLevel(for messageType: SessionAttentionMessageType) -> SessionAttentionLevel {
+        currentSessionNotificationPolicy.effectiveLevel(for: messageType)
+    }
+
+    func setSessionNotificationLevel(_ level: SessionAttentionLevel, for messageType: SessionAttentionMessageType) {
+        sessionNotificationLevelsByMessageType[messageType] = level
+    }
+
+    func resetSessionNotificationPolicy() {
+        sessionNotificationMinimumLevel = .unread
+        sessionNotificationLevelsByMessageType = [:]
+    }
+
     private func postDesktopNotification(title: String, body: String) {
         guard desktopNotificationsEnabled, canUseUserNotifications else { return }
         let content = UNMutableNotificationContent()
@@ -2746,10 +2780,11 @@ final class AppViewModel: NSObject, ObservableObject {
         sessionID: String,
         messageID: String?,
         preview: String?,
-        level: SessionAttentionLevel,
+        messageType: SessionAttentionMessageType,
         notificationTitle: String,
         notificationBody: String
     ) {
+        let level = effectiveSessionNotificationLevel(for: messageType)
         if isSessionCurrentlyVisible(sessionID) {
             var state = sessionReadStates[sessionID] ?? .initial()
             state.markRead(messageID: messageID ?? latestMessageID(for: sessionID), at: Date())
@@ -4488,7 +4523,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 sessionID: response.session.id,
                 messageID: latestAssistantMessage?.id,
                 preview: latestAssistantMessage.map { notificationPreview(from: $0.content) },
-                level: .interruptive,
+                messageType: .taskCompleted,
                 notificationTitle: "康纳同学完成了工作",
                 notificationBody: response.session.title
             )
@@ -4512,7 +4547,7 @@ final class AppViewModel: NSObject, ObservableObject {
                     sessionID: submittingSessionID,
                     messageID: nil,
                     preview: errorDescription,
-                    level: .interruptive,
+                    messageType: .taskFailed,
                     notificationTitle: "康纳同学遇到错误",
                     notificationBody: errorDescription
                 )

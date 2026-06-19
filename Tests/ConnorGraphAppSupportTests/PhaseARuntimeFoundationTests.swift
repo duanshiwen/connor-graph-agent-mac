@@ -140,6 +140,31 @@ private func phaseAStore() throws -> SQLiteGraphKernelStore {
     #expect(loaded.ui.textDeltaFlushCharacterThreshold == 120)
 }
 
+@Test func runtimeSettingsRepositoryPersistsSessionNotificationPolicy() throws {
+    let root = phaseATemporaryRoot()
+    let paths = AppStoragePaths(applicationSupportDirectory: root)
+    try paths.ensureDirectoryHierarchy()
+    let repository = AppRuntimeSettingsRepository(configDirectory: paths.configDirectory)
+
+    var settings = AgentRuntimeSettings.default
+    settings.app.sessionNotificationPolicy = SessionNotificationPolicy(
+        minimumLevel: .actionable,
+        levelsByMessageType: [
+            .assistantReply: .emphasized,
+            .taskFailed: .interruptive,
+            .proactiveBriefing: .unread
+        ]
+    )
+
+    try repository.save(settings)
+    let loaded = try repository.loadOrCreateDefault()
+
+    #expect(loaded.app.sessionNotificationPolicy.minimumLevel == .actionable)
+    #expect(loaded.app.sessionNotificationPolicy.configuredLevel(for: .assistantReply) == .emphasized)
+    #expect(loaded.app.sessionNotificationPolicy.configuredLevel(for: .taskFailed) == .interruptive)
+    #expect(loaded.app.sessionNotificationPolicy.effectiveLevel(for: .proactiveBriefing) == .actionable)
+}
+
 @Test func runtimeSettingsRepositoryPersistsWorkspaceDefaults() throws {
     let root = phaseATemporaryRoot()
     let paths = AppStoragePaths(applicationSupportDirectory: root)
