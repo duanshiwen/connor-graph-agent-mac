@@ -1401,7 +1401,7 @@ struct CraftSessionRow: View {
                 Circle()
                     .fill(dotColor)
                     .frame(width: 8, height: 8)
-                Text("NEW!")
+                Text("NEW")
                     .font(.system(size: 8, weight: .black, design: .rounded))
                     .foregroundStyle(Color.yellow)
                     .padding(.horizontal, 6)
