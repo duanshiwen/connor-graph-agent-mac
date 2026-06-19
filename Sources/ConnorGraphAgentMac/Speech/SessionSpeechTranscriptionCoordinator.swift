@@ -6,8 +6,8 @@ protocol SessionSpeechTranscribing: AnyObject {
 
     func start(
         sessionID: String,
-        onPartial: @escaping (String) -> Void,
-        onError: @escaping (String) -> Void
+        onPartial: @escaping @MainActor @Sendable (String) -> Void,
+        onError: @escaping @MainActor @Sendable (String) -> Void
     )
 
     func stop(reason: SessionSpeechTranscriptionStopReason)
@@ -45,11 +45,27 @@ final class SessionSpeechTranscriptionCoordinator {
     static let backgroundTaskKind = "speech_transcription"
 
     var transcriber: SessionSpeechTranscribing
-    private(set) var status: SessionSpeechTranscriptionStatus = .idle
+    var onStatusChange: ((SessionSpeechTranscriptionStatus) -> Void)?
+    var onTaskUpdate: ((AppSessionBackgroundTask) -> Void)?
+    private(set) var status: SessionSpeechTranscriptionStatus = .idle {
+        didSet { onStatusChange?(status) }
+    }
 
     private var activeRunID: UUID?
     private var activeTask: AppSessionBackgroundTask?
+
+    // Mature streaming-ASR UI model:
+    // - draftBaseText is stable text that existed before the current dictation run.
+    // - liveSpeechText is the replaceable interim hypothesis region for this run.
+    // - lastSpeechHypothesis is the raw previous SFSpeech partial hypothesis.
+    // - userEditedSpeechText preserves user edits inside the live region and only
+    //   accepts later hypothesis suffixes when the recognizer continues from the
+    //   previous hypothesis. This matches the common final-results + current
+    //   interim-hypothesis model used by Web Speech/UWP continuous dictation.
     private var draftBaseText: String = ""
+    private var lastSpeechHypothesis: String = ""
+    private var liveSpeechText: String = ""
+    private var userEditedSpeechText: String?
     private var lastGeneratedDraft: String = ""
     private var setDraft: ((String, String) -> Void)?
 
@@ -96,6 +112,9 @@ final class SessionSpeechTranscriptionCoordinator {
         activeRunID = runID
         activeTask = task
         draftBaseText = currentDraft
+        lastSpeechHypothesis = ""
+        liveSpeechText = ""
+        userEditedSpeechText = nil
         lastGeneratedDraft = currentDraft
         self.setDraft = setDraft
         status = .running(sessionID: sessionID, taskID: task.id)
@@ -111,6 +130,25 @@ final class SessionSpeechTranscriptionCoordinator {
         )
 
         return task
+    }
+
+    func noteUserEditedDraft(sessionID: String?, draft: String) {
+        guard let sessionID, status.runningSessionID == sessionID else { return }
+        guard draft != lastGeneratedDraft else { return }
+
+        let prefix = generatedSpeechPrefix()
+        if !lastSpeechHypothesis.isEmpty, draft.hasPrefix(prefix) {
+            liveSpeechText = String(draft.dropFirst(prefix.count))
+            userEditedSpeechText = liveSpeechText
+            lastGeneratedDraft = draft
+            return
+        }
+
+        draftBaseText = draft
+        lastSpeechHypothesis = ""
+        liveSpeechText = ""
+        userEditedSpeechText = nil
+        lastGeneratedDraft = draft
     }
 
     @discardableResult
@@ -143,17 +181,45 @@ final class SessionSpeechTranscriptionCoordinator {
 
     private func applyPartial(_ partialText: String, sessionID: String, runID: UUID) {
         guard activeRunID == runID, status.runningSessionID == sessionID else { return }
-        let trimmed = partialText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let nextDraft: String
-        if trimmed.isEmpty {
-            nextDraft = draftBaseText
-        } else if draftBaseText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            nextDraft = trimmed
-        } else {
-            nextDraft = draftBaseText + "\n\n" + trimmed
-        }
+        let hypothesis = partialText.trimmingCharacters(in: .whitespacesAndNewlines)
+        liveSpeechText = mergedLiveSpeechText(for: hypothesis)
+        lastSpeechHypothesis = hypothesis
+        let nextDraft = renderDraft(withLiveSpeechText: liveSpeechText)
         lastGeneratedDraft = nextDraft
         setDraft?(sessionID, nextDraft)
+    }
+
+    private func mergedLiveSpeechText(for hypothesis: String) -> String {
+        guard let userEditedSpeechText else {
+            return hypothesis
+        }
+
+        guard hypothesis.hasPrefix(lastSpeechHypothesis) else {
+            self.userEditedSpeechText = nil
+            return hypothesis
+        }
+
+        let suffix = hypothesis.dropFirst(lastSpeechHypothesis.count)
+        let merged = userEditedSpeechText + suffix
+        self.userEditedSpeechText = merged
+        return merged
+    }
+
+    private func renderDraft(withLiveSpeechText speechText: String) -> String {
+        if speechText.isEmpty {
+            return draftBaseText
+        }
+        if draftBaseText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return speechText
+        }
+        return generatedSpeechPrefix() + speechText
+    }
+
+    private func generatedSpeechPrefix() -> String {
+        if draftBaseText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return ""
+        }
+        return draftBaseText + "\n\n"
     }
 
     private func fail(message: String, sessionID: String, runID: UUID) {
@@ -166,12 +232,18 @@ final class SessionSpeechTranscriptionCoordinator {
         activeTask = failedTask
         transcriber.stop(reason: .appLifecycle)
         status = .failed(message: message)
+        if let failedTask {
+            onTaskUpdate?(failedTask)
+        }
     }
 
     private func reset() {
         activeRunID = nil
         activeTask = nil
         draftBaseText = ""
+        lastSpeechHypothesis = ""
+        liveSpeechText = ""
+        userEditedSpeechText = nil
         lastGeneratedDraft = ""
         setDraft = nil
         status = .idle
