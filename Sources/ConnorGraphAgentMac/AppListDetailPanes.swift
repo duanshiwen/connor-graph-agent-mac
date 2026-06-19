@@ -1300,8 +1300,12 @@ struct CraftDetailPaneView: View {
                 MemoryChangeLogView(viewModel: viewModel)
             case .extractionDiagnostics:
                 GraphExtractionDiagnosticsView(viewModel: viewModel)
-            case .automation, .scheduledTasks, .eventTriggeredTasks:
+            case .automation:
                 AutomationRuntimePanelView(viewModel: viewModel)
+            case .scheduledTasks:
+                TaskAutomationDetailPane(viewModel: viewModel, kind: .scheduled)
+            case .eventTriggeredTasks:
+                TaskAutomationDetailPane(viewModel: viewModel, kind: .eventTriggered)
             case .productOS:
                 ProductOSRegistryView(viewModel: viewModel)
             case .mail:
@@ -1669,6 +1673,217 @@ private struct CalendarContactsDetailHeader: View {
         }
         .padding(.horizontal, AppShellLayout.spaceXL)
         .padding(.vertical, AppShellLayout.spaceL)
+    }
+}
+
+private struct TaskAutomationDetailPane: View {
+    @ObservedObject var viewModel: AppViewModel
+    var kind: TaskAutomationKind
+
+    private var cards: [TaskManagementUICard] {
+        kind.cards(from: viewModel.taskManagementPresentation)
+    }
+
+    private var selectedCard: TaskManagementUICard? {
+        guard let selectedID = viewModel.selectedTaskAutomationID else { return cards.first }
+        return cards.first { $0.id == selectedID } ?? cards.first
+    }
+
+    var body: some View {
+        Group {
+            if let selectedCard {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
+                        TaskAutomationHero(card: selectedCard)
+                        TaskAutomationDetailSection(title: "运行信息", systemImage: "clock.arrow.circlepath") {
+                            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+                                TaskAutomationMetadataLine(label: "下次", value: selectedCard.nextRunLabel.isEmpty ? "无" : selectedCard.nextRunLabel)
+                                TaskAutomationMetadataLine(label: "上次", value: selectedCard.lastRunLabel.isEmpty ? "无" : selectedCard.lastRunLabel)
+                                if !selectedCard.lastErrorLabel.isEmpty {
+                                    TaskAutomationMetadataLine(label: "错误", value: selectedCard.lastErrorLabel, valueColor: .red)
+                                }
+                            }
+                        }
+                        TaskAutomationDetailSection(title: "目标", systemImage: "scope") {
+                            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+                                TaskAutomationMetadataLine(label: "目标", value: selectedCard.targetLabel)
+                                if !selectedCard.rationaleLabel.isEmpty {
+                                    TaskAutomationMetadataLine(label: "原因", value: selectedCard.rationaleLabel)
+                                }
+                            }
+                        }
+                        TaskAutomationDetailSection(title: "治理", systemImage: "shield.checkered") {
+                            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+                                TaskAutomationMetadataLine(label: "来源", value: selectedCard.originBadge)
+                                TaskAutomationMetadataLine(label: "触发", value: selectedCard.triggerLabel)
+                                TaskAutomationMetadataLine(label: "状态", value: selectedCard.statusLabel)
+                                if let reason = selectedCard.deleteDisabledReason, !reason.isEmpty {
+                                    TaskAutomationMetadataLine(label: "保护", value: reason)
+                                }
+                            }
+                        }
+                        TaskAutomationActionSection(card: selectedCard, viewModel: viewModel)
+                    }
+                    .padding(.horizontal, AgentChatLayout.spaceXL)
+                    .padding(.vertical, AgentChatLayout.spaceL)
+                    .frame(maxWidth: AgentChatLayout.chatContentMaxWidth, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .top)
+                }
+                .scrollContentBackground(.hidden)
+            } else {
+                ContentUnavailableView(kind.emptyTitle, systemImage: kind.systemImage, description: Text(kind.emptyDescription))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(AppShellColors.detailBackground)
+        .task { viewModel.reloadTaskManagementPresentation() }
+    }
+}
+
+private struct TaskAutomationHero: View {
+    var card: TaskManagementUICard
+
+    var body: some View {
+        HStack(alignment: .top, spacing: AgentChatLayout.spaceM) {
+            ZStack {
+                RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                    .fill(severityColor.opacity(0.12))
+                Image(systemName: card.triggerLabel == "定时" ? "clock" : "dot.radiowaves.left.and.right")
+                    .font(.system(size: 23, weight: .semibold))
+                    .foregroundStyle(severityColor)
+            }
+            .frame(width: 54, height: 54)
+
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+                Text(card.title)
+                    .font(.system(size: 24, weight: .semibold))
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                Text(card.targetLabel)
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .textSelection(.enabled)
+                HStack(spacing: AgentChatLayout.spaceS) {
+                    TaskAutomationStatusPill(status: card.triggerLabel, color: severityColor, systemImage: card.triggerLabel == "定时" ? "clock" : "dot.radiowaves.left.and.right")
+                    TaskAutomationStatusPill(status: card.statusLabel, color: statusColor)
+                    TaskAutomationStatusPill(status: card.originBadge, color: .secondary, systemImage: "person.badge.key")
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(AgentChatLayout.spaceM)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.85), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous).stroke(Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1))
+    }
+
+    private var severityColor: Color {
+        switch card.severity {
+        case .info: .blue
+        case .success: .green
+        case .warning: .orange
+        case .error: .red
+        }
+    }
+
+    private var statusColor: Color {
+        switch card.statusLabel {
+        case "active": .green
+        case "stopped": .orange
+        case "failed": .red
+        default: .secondary
+        }
+    }
+}
+
+private struct TaskAutomationDetailSection<Content: View>: View {
+    var title: String
+    var systemImage: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
+            Label(title, systemImage: systemImage)
+                .font(AgentChatTypography.metaEmphasis)
+                .foregroundStyle(.primary)
+            content
+        }
+        .padding(AgentChatLayout.spaceM)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.85), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous).stroke(Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1))
+    }
+}
+
+private struct TaskAutomationMetadataLine: View {
+    var label: String
+    var value: String
+    var valueColor: Color = .primary
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(label)
+                .font(AgentChatTypography.microEmphasis)
+                .foregroundStyle(.secondary)
+                .frame(width: 72, alignment: .leading)
+            Text(value)
+                .font(AgentChatTypography.meta)
+                .foregroundStyle(valueColor)
+                .textSelection(.enabled)
+        }
+    }
+}
+
+private struct TaskAutomationActionSection: View {
+    var card: TaskManagementUICard
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        TaskAutomationDetailSection(title: "操作", systemImage: "slider.horizontal.3") {
+            HStack(spacing: AgentChatLayout.spaceS) {
+                if card.canStop {
+                    Button("暂停") { viewModel.stopTask(card.id) }
+                        .controlSize(.small)
+                }
+                if card.canRestore {
+                    Button("恢复") { viewModel.restoreTask(card.id) }
+                        .controlSize(.small)
+                }
+                if card.canDelete {
+                    Button("删除", role: .destructive) { viewModel.deleteTask(card.id) }
+                        .controlSize(.small)
+                }
+                if !card.canStop && !card.canRestore && !card.canDelete {
+                    Text(card.deleteDisabledReason ?? "当前任务无需手动操作。")
+                        .font(AgentChatTypography.meta)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+}
+
+private struct TaskAutomationStatusPill: View {
+    var status: String
+    var color: Color
+    var systemImage: String?
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            Text(status)
+                .font(AgentChatTypography.microEmphasis)
+        }
+        .foregroundStyle(color)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(color.opacity(0.10), in: Capsule())
     }
 }
 
