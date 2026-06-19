@@ -1,6 +1,11 @@
 import Foundation
 import ConnorGraphCore
 
+// LEGACY COMPATIBILITY SHIM:
+// Formal local task management is exposed by ConnorLocalTaskSurface. This file
+// remains temporarily for old readiness/UI tests and should be removed once
+// ProductOSAutomation call sites finish migrating.
+
 public enum ConnorLocalAPIMethod: String, Codable, Sendable, Equatable, Hashable {
     case get = "GET"
     case post = "POST"

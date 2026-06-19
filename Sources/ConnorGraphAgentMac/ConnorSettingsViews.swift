@@ -170,9 +170,7 @@ struct SettingsCalendarSection: View {
             }
         }
         .sheet(isPresented: $viewModel.isPresentingAddCalendarSourceSheet) {
-            AddCalendarSourceSheet { provider, displayName, calendarName in
-                viewModel.addCalendarSource(provider: provider, displayName: displayName, calendarName: calendarName)
-            }
+            AddCalendarSourceSheet(viewModel: viewModel)
         }
     }
 }
@@ -494,7 +492,6 @@ struct SettingsRSSSection: View {
         VStack(alignment: .leading, spacing: SettingsListLayout.spaceXL) {
             sourceConnections
             fetchPolicy
-            importExport
         }
         .sheet(isPresented: $viewModel.isPresentingAddRSSSourceSheet) {
             AddRSSSourceSheet { feedURL, displayName in
@@ -574,13 +571,6 @@ struct SettingsRSSSection: View {
         }
     }
 
-    private var importExport: some View {
-        SettingsGroup(title: "导入导出") {
-            SettingsValueRow(title: "OPML 导入", value: "通过 Native RSS Runtime 审批后导入")
-            Divider()
-            SettingsValueRow(title: "OPML 导出", value: "生成可审计 OPML 文本")
-        }
-    }
 }
 
 private struct RSSSettingsSourceRow: View {

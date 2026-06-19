@@ -39,11 +39,14 @@ public struct CalendarEventKitSnapshot: Sendable, Equatable {
 
 public enum CalendarEventKitAdapterError: LocalizedError, Sendable, Equatable {
     case accessDenied
+    case accessRestricted
 
     public var errorDescription: String? {
         switch self {
         case .accessDenied:
-            return "未获得日历访问权限。请在系统设置中允许康纳同学访问日历。"
+            return "未获得日历访问权限。系统只会在首次请求时弹出授权窗口；如果之前拒绝过，请在 系统设置 → 隐私与安全性 → 日历 中允许康纳同学访问日历。"
+        case .accessRestricted:
+            return "当前系统限制了日历访问，无法弹出授权窗口。请检查 屏幕使用时间、设备管理 或 系统设置 → 隐私与安全性 → 日历。"
         }
     }
 }
@@ -80,6 +83,19 @@ public struct CalendarEventKitAdapter: Sendable {
     }
 
     public static func requestCalendarAccess(store: EKEventStore) async throws -> Bool {
+        switch EKEventStore.authorizationStatus(for: .event) {
+        case .authorized, .fullAccess:
+            return true
+        case .denied:
+            throw CalendarEventKitAdapterError.accessDenied
+        case .restricted:
+            throw CalendarEventKitAdapterError.accessRestricted
+        case .notDetermined, .writeOnly:
+            break
+        @unknown default:
+            break
+        }
+
         if #available(macOS 14.0, *) {
             return try await store.requestFullAccessToEvents()
         } else {
