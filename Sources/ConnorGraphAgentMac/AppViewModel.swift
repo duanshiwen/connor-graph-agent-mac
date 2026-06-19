@@ -3838,6 +3838,7 @@ final class AppViewModel: NSObject, ObservableObject {
 
     func newChatSession() {
         guard let chatSessionRepository else { return }
+        _ = stopSpeechTranscriptionIfRunningForLeavingSession(selectedChatSessionID)
         rememberCurrentWorkspaceMode()
         do {
             let session = try chatSessionRepository.createSession()

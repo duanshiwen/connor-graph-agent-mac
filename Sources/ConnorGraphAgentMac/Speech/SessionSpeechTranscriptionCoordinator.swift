@@ -34,8 +34,9 @@ final class SessionSpeechTranscriptionCoordinator {
     private var activeRunID: UUID?
     private var activeTask: AppSessionBackgroundTask?
     private var draftBaseText: String = ""
-    private var lastRecognizedText: String = ""
-    private var userEditedRecognizedText: String?
+    private var lastSpeechHypothesis: String = ""
+    private var liveSpeechText: String = ""
+    private var userEditedSpeechText: String?
     private var lastGeneratedDraft: String = ""
     private var setDraft: ((String, String) -> Void)?
 
@@ -82,6 +83,9 @@ final class SessionSpeechTranscriptionCoordinator {
         activeRunID = runID
         activeTask = task
         draftBaseText = currentDraft
+        lastSpeechHypothesis = ""
+        liveSpeechText = ""
+        userEditedSpeechText = nil
         lastGeneratedDraft = currentDraft
         self.setDraft = setDraft
         status = .running(sessionID: sessionID, taskID: task.id)
@@ -103,21 +107,25 @@ final class SessionSpeechTranscriptionCoordinator {
         guard let sessionID, status.runningSessionID == sessionID else { return }
         guard draft != lastGeneratedDraft else { return }
 
-        // Speech partial results are cumulative for the current recognition run.
-        // If the user edits text inside the generated speech region, keep the
-        // original pre-speech base so the next partial replaces the speech
-        // region instead of appending the full cumulative transcript again.
-        if !lastRecognizedText.isEmpty, draft.hasPrefix(generatedSpeechPrefix()) {
-            userEditedRecognizedText = String(draft.dropFirst(generatedSpeechPrefix().count))
+        // Streaming ASR partials are mutable hypotheses, not append-only deltas.
+        // Treat the dictated text as a replaceable live region after the stable
+        // pre-dictation base. If the user edits inside that live region, preserve
+        // the edit and only apply future hypothesis suffixes when possible.
+        let prefix = generatedSpeechPrefix()
+        if !lastSpeechHypothesis.isEmpty, draft.hasPrefix(prefix) {
+            liveSpeechText = String(draft.dropFirst(prefix.count))
+            userEditedSpeechText = liveSpeechText
             lastGeneratedDraft = draft
             return
         }
 
-        // If the user edited outside the generated region, treat their current
-        // composer content as the new base for future dictated text.
+        // The user changed text outside the live speech region. Start a fresh
+        // region from the current composer content so old hypotheses cannot leak
+        // into a new manual base or a later session.
         draftBaseText = draft
-        lastRecognizedText = ""
-        userEditedRecognizedText = nil
+        lastSpeechHypothesis = ""
+        liveSpeechText = ""
+        userEditedSpeechText = nil
         lastGeneratedDraft = draft
     }
 
@@ -151,35 +159,38 @@ final class SessionSpeechTranscriptionCoordinator {
 
     private func applyPartial(_ partialText: String, sessionID: String, runID: UUID) {
         guard activeRunID == runID, status.runningSessionID == sessionID else { return }
-        let trimmed = partialText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let displayText = displayTextForPartial(trimmed)
-        let nextDraft = renderDraft(withRecognizedText: displayText)
-        lastRecognizedText = trimmed
-        if userEditedRecognizedText != nil {
-            userEditedRecognizedText = displayText
-        }
+        let hypothesis = partialText.trimmingCharacters(in: .whitespacesAndNewlines)
+        liveSpeechText = mergedLiveSpeechText(for: hypothesis)
+        lastSpeechHypothesis = hypothesis
+        let nextDraft = renderDraft(withLiveSpeechText: liveSpeechText)
         lastGeneratedDraft = nextDraft
         setDraft?(sessionID, nextDraft)
     }
 
-    private func displayTextForPartial(_ recognizedText: String) -> String {
-        guard let userEditedRecognizedText, recognizedText.hasPrefix(lastRecognizedText) else {
-            self.userEditedRecognizedText = nil
-            return recognizedText
+    private func mergedLiveSpeechText(for hypothesis: String) -> String {
+        guard let userEditedSpeechText else {
+            return hypothesis
         }
 
-        let suffix = recognizedText.dropFirst(lastRecognizedText.count)
-        return userEditedRecognizedText + suffix
+        guard hypothesis.hasPrefix(lastSpeechHypothesis) else {
+            self.userEditedSpeechText = nil
+            return hypothesis
+        }
+
+        let suffix = hypothesis.dropFirst(lastSpeechHypothesis.count)
+        let merged = userEditedSpeechText + suffix
+        self.userEditedSpeechText = merged
+        return merged
     }
 
-    private func renderDraft(withRecognizedText recognizedText: String) -> String {
-        if recognizedText.isEmpty {
+    private func renderDraft(withLiveSpeechText speechText: String) -> String {
+        if speechText.isEmpty {
             return draftBaseText
         }
         if draftBaseText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return recognizedText
+            return speechText
         }
-        return generatedSpeechPrefix() + recognizedText
+        return generatedSpeechPrefix() + speechText
     }
 
     private func generatedSpeechPrefix() -> String {
@@ -208,8 +219,9 @@ final class SessionSpeechTranscriptionCoordinator {
         activeRunID = nil
         activeTask = nil
         draftBaseText = ""
-        lastRecognizedText = ""
-        userEditedRecognizedText = nil
+        lastSpeechHypothesis = ""
+        liveSpeechText = ""
+        userEditedSpeechText = nil
         lastGeneratedDraft = ""
         setDraft = nil
         status = .idle

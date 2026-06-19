@@ -27,6 +27,7 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
     private var speechRecognizer: SFSpeechRecognizer?
+    private var recognitionGeneration = UUID()
     private var isStopping = false
 
     init(localeIdentifier: String? = "zh-CN") {
@@ -39,17 +40,21 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
         onError: @escaping @MainActor @Sendable (String) -> Void
     ) {
         stop(reason: .appLifecycle)
+        let generation = UUID()
+        recognitionGeneration = generation
         runningSessionID = sessionID
 
         requestMicrophoneAccessIfNeeded { [weak self] microphoneGranted in
             Task { @MainActor in
-                guard let self, self.runningSessionID == sessionID else { return }
+                guard let self,
+                      self.runningSessionID == sessionID,
+                      self.recognitionGeneration == generation else { return }
                 guard microphoneGranted else {
                     self.cleanupAfterFailure()
                     onError("麦克风权限已被拒绝，请在系统设置中允许康纳同学访问麦克风。")
                     return
                 }
-                self.requestSpeechRecognitionAccessIfNeeded(sessionID: sessionID, onPartial: onPartial, onError: onError)
+                self.requestSpeechRecognitionAccessIfNeeded(sessionID: sessionID, generation: generation, onPartial: onPartial, onError: onError)
             }
         }
     }
@@ -57,6 +62,7 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
     func stop(reason: SessionSpeechTranscriptionStopReason) {
         guard runningSessionID != nil || captureSession != nil || recognitionRequest != nil || recognitionTask != nil else { return }
         isStopping = true
+        recognitionGeneration = UUID()
         runningSessionID = nil
 
         audioOutput?.setSampleBufferDelegate(nil, queue: nil)
@@ -90,18 +96,19 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
 
     private func requestSpeechRecognitionAccessIfNeeded(
         sessionID: String,
+        generation: UUID,
         onPartial: @escaping @MainActor @Sendable (String) -> Void,
         onError: @escaping @MainActor @Sendable (String) -> Void
     ) {
         let currentStatus = SFSpeechRecognizer.authorizationStatus()
         guard currentStatus == .notDetermined else {
-            handleSpeechAuthorizationStatus(currentStatus, sessionID: sessionID, onPartial: onPartial, onError: onError)
+            handleSpeechAuthorizationStatus(currentStatus, sessionID: sessionID, generation: generation, onPartial: onPartial, onError: onError)
             return
         }
 
         SFSpeechRecognizer.requestAuthorization { [weak self] authorizationStatus in
             Task { @MainActor in
-                self?.handleSpeechAuthorizationStatus(authorizationStatus, sessionID: sessionID, onPartial: onPartial, onError: onError)
+                self?.handleSpeechAuthorizationStatus(authorizationStatus, sessionID: sessionID, generation: generation, onPartial: onPartial, onError: onError)
             }
         }
     }
@@ -109,20 +116,22 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
     private func handleSpeechAuthorizationStatus(
         _ authorizationStatus: SFSpeechRecognizerAuthorizationStatus,
         sessionID: String,
+        generation: UUID,
         onPartial: @escaping @MainActor @Sendable (String) -> Void,
         onError: @escaping @MainActor @Sendable (String) -> Void
     ) {
-        guard runningSessionID == sessionID else { return }
+        guard runningSessionID == sessionID, recognitionGeneration == generation else { return }
         guard authorizationStatus == .authorized else {
             cleanupAfterFailure()
             onError(authorizationMessage(for: authorizationStatus))
             return
         }
-        startAuthorizedRecognition(sessionID: sessionID, onPartial: onPartial, onError: onError)
+        startAuthorizedRecognition(sessionID: sessionID, generation: generation, onPartial: onPartial, onError: onError)
     }
 
     private func startAuthorizedRecognition(
         sessionID: String,
+        generation: UUID,
         onPartial: @escaping @MainActor @Sendable (String) -> Void,
         onError: @escaping @MainActor @Sendable (String) -> Void
     ) {
@@ -188,7 +197,9 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
 
         recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
             Task { @MainActor in
-                guard let self, self.runningSessionID == sessionID else { return }
+                guard let self,
+                      self.runningSessionID == sessionID,
+                      self.recognitionGeneration == generation else { return }
                 if let result {
                     onPartial(result.bestTranscription.formattedString)
                 }

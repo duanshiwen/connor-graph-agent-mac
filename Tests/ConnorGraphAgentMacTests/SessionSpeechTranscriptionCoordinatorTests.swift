@@ -132,6 +132,36 @@ struct SessionSpeechTranscriptionCoordinatorTests {
         #expect(draftBySession["session-1"] == "你现在可以说中文了 App 呢棒了太棒了")
     }
 
+    @Test func startingNewSessionAfterStopDoesNotCarryPreviousHypothesis() {
+        var draftBySession: [String: String] = ["session-1": "", "session-2": ""]
+        let firstTranscriber = FakeSessionSpeechTranscriber()
+        let coordinator = SessionSpeechTranscriptionCoordinator(transcriber: firstTranscriber)
+        _ = coordinator.toggle(
+            selectedSessionID: "session-1",
+            currentDraft: "",
+            setDraft: { sessionID, draft in draftBySession[sessionID] = draft }
+        )
+        firstTranscriber.emitPartial("上一轮内容")
+        _ = coordinator.toggle(
+            selectedSessionID: "session-1",
+            currentDraft: draftBySession["session-1", default: ""],
+            setDraft: { sessionID, draft in draftBySession[sessionID] = draft }
+        )
+
+        let secondTranscriber = FakeSessionSpeechTranscriber()
+        coordinator.transcriber = secondTranscriber
+        _ = coordinator.toggle(
+            selectedSessionID: "session-2",
+            currentDraft: draftBySession["session-2", default: ""],
+            setDraft: { sessionID, draft in draftBySession[sessionID] = draft }
+        )
+        secondTranscriber.emitPartial("新的会话内容")
+        firstTranscriber.emitPartial("上一轮内容迟到")
+
+        #expect(draftBySession["session-1"] == "上一轮内容")
+        #expect(draftBySession["session-2"] == "新的会话内容")
+    }
+
     @Test func transcriberErrorPublishesFailedStatusAndTaskUpdate() {
         let transcriber = FakeSessionSpeechTranscriber()
         let coordinator = SessionSpeechTranscriptionCoordinator(transcriber: transcriber)
