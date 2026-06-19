@@ -76,17 +76,15 @@ struct CraftCalendarListPane: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .sheet(isPresented: $viewModel.isPresentingAddCalendarSourceSheet) {
-            AddCalendarSourceSheet { provider, displayName, calendarName in
-                viewModel.addCalendarSource(provider: provider, displayName: displayName, calendarName: calendarName)
-            }
+            AddCalendarSourceSheet(viewModel: viewModel)
         }
     }
 }
 
 struct AddCalendarSourceSheet: View {
+    @ObservedObject var viewModel: AppViewModel
     @Environment(\.dismiss) private var dismiss
-
-    var onAdd: (ConnectedAccountProviderKind, String, String) -> Void
+    @State private var localMessage: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
@@ -115,10 +113,20 @@ struct AddCalendarSourceSheet: View {
                     .font(AgentChatTypography.meta)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("如果要同步 Google 或 Microsoft 日历，请先在 macOS 系统设置 / 日历 App 中添加对应账户；Connor 会通过 EventKit 读取系统已经聚合的日历。")
+                Text("如果要同步 Google、Microsoft 365、Exchange 或 iCloud 日历，请先在 macOS 系统设置 / 日历 App 中添加对应账户；Connor 会通过 EventKit 读取系统已经聚合的日历。")
                     .font(AgentChatTypography.meta)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                Text("如果要在 Connor 中配置 CalDAV / CardDAV、自定义协议或其他服务商，请前往 设置 → 日历 管理日历源。")
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let message = localMessage ?? viewModel.calendarSyncMessage {
+                    Text(message)
+                        .font(AgentChatTypography.meta)
+                        .foregroundStyle(message.contains("失败") || message.contains("拒绝") || message.contains("未授权") ? .red : .secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             .padding(AppShellLayout.spaceL)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -128,18 +136,28 @@ struct AddCalendarSourceSheet: View {
             Spacer()
 
             HStack {
+                Button("前往日历设置") {
+                    viewModel.selectSettingsSection(.calendar)
+                    viewModel.isPresentingAddCalendarSourceSheet = false
+                }
                 Spacer()
                 Button("取消") { dismiss() }
-                Button("同步本机日历") {
-                    onAdd(.localFixture, "本机日历", "系统日历")
-                    dismiss()
+                    .disabled(viewModel.isSyncingSystemCalendar)
+                Button(viewModel.isSyncingSystemCalendar ? "同步中…" : "同步本机日历") {
+                    localMessage = "正在请求日历权限并同步…"
+                    Task { @MainActor in
+                        let succeeded = await viewModel.syncSystemCalendarNow()
+                        localMessage = viewModel.calendarSyncMessage
+                        if succeeded { dismiss() }
+                    }
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(viewModel.isSyncingSystemCalendar)
                 .keyboardShortcut(.defaultAction)
             }
         }
         .padding(AppShellLayout.spaceXL)
-        .frame(width: 560, height: 360)
+        .frame(width: 600, height: 420)
     }
 }
 
@@ -481,7 +499,7 @@ private enum RSSSourcePreset: String, CaseIterable, Identifiable {
         case .hackerNews:
             "适合发现技术趋势。进入 Graph Memory 前必须先生成 evidence candidate 并人工审查。"
         case .custom:
-            "输入自定义 feed URL。同步、状态变更、OPML 导入导出都经过 Connor Policy Engine 和 audit trail。"
+            "输入自定义 feed URL。同步和状态变更都经过 Connor Policy Engine 和 audit trail。"
         }
     }
 }
