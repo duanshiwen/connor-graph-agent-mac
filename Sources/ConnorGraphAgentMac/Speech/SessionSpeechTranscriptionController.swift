@@ -134,12 +134,12 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
         let audioEngine = AVAudioEngine()
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
-        if recognizer.supportsOnDeviceRecognition {
-            // Keep live dictation local when the recognizer supports it. Besides
-            // matching the app's local-first boundary, this avoids unnecessary
-            // Speech service/network XPC churn during short recording sessions.
-            request.requiresOnDeviceRecognition = true
-        }
+        // Do not force on-device recognition by default. Apple documents this
+        // flag as a hard network-prevention setting rather than a general
+        // quality/performance recommendation. Some macOS locale/model
+        // combinations advertise partial support but fail immediately for live
+        // audio, which makes the session appear to start and then stop. Let the
+        // recognizer choose the available path so live dictation remains stable.
 
         let inputNode = audioEngine.inputNode
         let recordingFormat = inputNode.outputFormat(forBus: 0)
@@ -165,9 +165,11 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
                     onError(error.localizedDescription)
                     return
                 }
-                if result?.isFinal == true {
-                    self.stop(reason: .manual)
-                }
+                // Keep the session-level dictation running until the user stops
+                // it, leaves the session, or an actual error occurs. For live
+                // audio, `isFinal` only means the current recognition request has
+                // produced a final hypothesis; treating it as a user stop makes
+                // short pauses look like the microphone immediately turns off.
             }
         }
 
