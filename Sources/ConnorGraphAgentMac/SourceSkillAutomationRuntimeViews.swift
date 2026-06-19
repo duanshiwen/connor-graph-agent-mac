@@ -884,18 +884,21 @@ private struct TaskRuntimeCard: View {
             severity: card.severity
         )
         .overlay(alignment: .topTrailing) {
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 if card.canStop {
-                    Button("暂停") { viewModel.stopTask(card.id) }
-                        .controlSize(.small)
+                    TaskRuntimeCardActionButton(title: "暂停", systemImage: "pause.fill") {
+                        viewModel.stopTask(card.id)
+                    }
                 }
                 if card.canRestore {
-                    Button("恢复") { viewModel.restoreTask(card.id) }
-                        .controlSize(.small)
+                    TaskRuntimeCardActionButton(title: "恢复", systemImage: "play.fill") {
+                        viewModel.restoreTask(card.id)
+                    }
                 }
                 if card.canDelete {
-                    Button("删除", role: .destructive) { viewModel.deleteTask(card.id) }
-                        .controlSize(.small)
+                    TaskRuntimeCardActionButton(title: "删除", systemImage: "trash", role: .destructive) {
+                        viewModel.deleteTask(card.id)
+                    }
                 }
             }
             .padding(12)
@@ -916,6 +919,32 @@ private struct TaskRuntimeCard: View {
         var values = [card.triggerLabel, card.statusLabel]
         if !card.deleteDisabledReason.isEmptyOrNil { values.append(card.deleteDisabledReason ?? "") }
         return values
+    }
+}
+
+private struct TaskRuntimeCardActionButton: View {
+    var title: String
+    var systemImage: String
+    var role: ButtonRole?
+    var action: () -> Void
+
+    init(title: String, systemImage: String, role: ButtonRole? = nil, action: @escaping () -> Void) {
+        self.title = title
+        self.systemImage = systemImage
+        self.role = role
+        self.action = action
+    }
+
+    var body: some View {
+        Button(role: role, action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.caption.weight(.semibold))
+                .frame(minWidth: 72, minHeight: 30)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.regular)
+        .help(title)
     }
 }
 
