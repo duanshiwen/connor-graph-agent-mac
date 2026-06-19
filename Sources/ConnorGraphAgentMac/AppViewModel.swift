@@ -792,7 +792,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func attachmentImportSummary(_ result: AttachmentImportBatchResult) -> String {
-        let supportedSummary = "Connor 当前支持添加文本、Markdown、日志、JSON/JSONL、CSV/TSV、XML/YAML、代码文件、常见图片（PNG/JPEG/GIF/WebP/HEIC/BMP/ICO/TIFF），以及 PDF、Word、Excel、PowerPoint 文档附件。暂不支持 HTML、音频、视频、iWork、压缩包、SVG/AVIF、数据库、可执行文件或未知格式。"
+        let supportedSummary = "Connor 当前支持添加文本、Markdown、日志、JSON/JSONL、CSV/TSV、XML/YAML、代码文件、常见图片（PNG/JPEG/GIF/WebP/HEIC/BMP/ICO/TIFF），以及 PDF、Word、Excel、PowerPoint 和 Apple iWork（Pages/Numbers/Keynote）文档附件。暂不支持 HTML、音频、视频、压缩包、SVG/AVIF、数据库、可执行文件或未知格式。"
         let rejectedLines = result.rejected.prefix(8).map { "- \($0.filename)：\($0.reason.userMessage)" }.joined(separator: "\n")
         let remaining = result.rejected.count > 8 ? "\n…另有 \(result.rejected.count - 8) 个文件未添加" : ""
         if result.accepted.isEmpty {
