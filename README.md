@@ -1441,6 +1441,8 @@ Task Management Stack 文件:
 Sources/ConnorGraphCore/TaskManagementDomain.swift
 Sources/ConnorGraphAppSupport/AppTaskManagementRepository.swift
 Sources/ConnorGraphAppSupport/TaskManagementStack.swift
+Sources/ConnorGraphAppSupport/SessionBackgroundTaskManagementAdapter.swift
+Sources/ConnorGraphAppSupport/SessionTaskRecoveryPlanner.swift
 Sources/ConnorGraphAppSupport/ConnorLocalTaskSurface.swift
 Sources/ConnorGraphAppSupport/TaskManagementUIPresentation.swift
 ```
@@ -1461,6 +1463,22 @@ eventTriggered  事件触发任务,例如某外部 runtime 回写事件。
 ```
 
 明确没有 `manual` 任务类型。“立即运行”如果未来需要,属于具体 runtime 的控制动作,不进入 Task Management Stack 的 trigger kind。
+
+任务作用域:
+
+```text
+global   全局任务,由 Task Management Stack 的 global repository 管理,落盘到 tasks/task-definitions.json。
+session  会话作用域后台任务,仍属于 owner session,通过 Task Management Stack 统一暴露生命周期和恢复意图,底层 source of truth 保持为 session_background_tasks SQLite 表。
+```
+
+Session-scoped background task 规则:
+
+- 会话后台任务不会被提升为全局任务;每条任务必须带 ownerSessionID。
+- Task Management Stack 只把它们映射为抽象 ConnorTaskDefinition,用于 list / stop / restore / recoverable / presentation。
+- opaque target 形如 `session.background-runtime / <sessionID> / <kind>`,参数包含原始 `backgroundTaskID` 与 `payloadJSON`。
+- 恢复是 recovery intent:Task Stack 返回 opaque target,不直接 resume WebView、Claude sidecar、LLM run 或 Swift continuation。
+- `queued`、`running`、`interrupted` 可成为恢复候选;`succeeded` 和默认 `failed` 不自动恢复。
+- 明确不可恢复的 interrupted task 会保留在 session 中并写入清晰错误原因,由会话 UI 提供重试入口。
 
 默认系统任务定义:
 
@@ -1494,6 +1512,7 @@ tasks/task-definitions.json
 tasks/task-run-history.jsonl
 tasks/task-event-log.jsonl
 tasks/task-deletion-log.jsonl
+SQLite session_background_tasks table  # session-scoped background tasks remain session-owned
 ```
 
 Local Task Surface:
@@ -1508,6 +1527,10 @@ POST   /v1/tasks/{id}/restore
 DELETE /v1/tasks/{id}
 GET    /v1/tasks/{id}/runs
 POST   /v1/tasks/{id}/runs
+GET    /v1/sessions/{sessionID}/tasks
+GET    /v1/sessions/{sessionID}/tasks/recoverable
+POST   /v1/sessions/{sessionID}/tasks/{taskID}/stop
+POST   /v1/sessions/{sessionID}/tasks/{taskID}/restore
 ```
 
 CLI catalog:
@@ -1521,15 +1544,20 @@ connor tasks stop <task-id>
 connor tasks restore <task-id>
 connor tasks delete <task-id>
 connor tasks runs <task-id>
+connor tasks session list <session-id>
+connor tasks session recoverable <session-id>
+connor tasks session stop <session-id> <task-id>
+connor tasks session restore <session-id> <task-id>
 ```
 
 安全边界:
 
 - Task Management Stack 是抽象控制面,不是业务执行器。
-- Task target 是 opaque reference,不在任务栈中解释邮件、日历、RSS 或技能语义。
+- Task target 是 opaque reference,不在任务栈中解释邮件、日历、RSS、技能或 session runtime 语义。
 - Task Management Stack 不提供审批 / Review Gate / pendingReview / execute-reviewed。
 - CLI/API 不直接写图谱。
 - protected system task 默认不可删除;user / AI task 可停止、删除和修改。
+- session-scoped task 仍归属对应 session;Task Stack 不接管 session 删除、快照或 runtime continuation 主权。
 - 运行历史由外部 runtime 通过统一接口回写。
 
 ## Native UI
