@@ -37,6 +37,17 @@ enum AppMailAccountSetupError: LocalizedError {
     }
 }
 
+enum AppViewModelTaskCreationError: LocalizedError {
+    case missingRepository
+
+    var errorDescription: String? {
+        switch self {
+        case .missingRepository:
+            return "任务管理存储尚未初始化，请稍后重试。"
+        }
+    }
+}
+
 enum AppSessionBackgroundTaskStatus: String, Codable, Equatable, Sendable {
     case queued
     case running
@@ -1464,6 +1475,55 @@ final class AppViewModel: NSObject, ObservableObject {
         } catch {
             errorMessage = String(describing: error)
         }
+    }
+
+    @discardableResult
+    func createScheduledSessionMessageTask(
+        name: String,
+        runAt: Date,
+        recurrence: ConnorTaskRecurrence,
+        message: String,
+        title: String,
+        rationale: String?
+    ) throws -> String {
+        guard let taskManagementRepository else { throw AppViewModelTaskCreationError.missingRepository }
+        let task = try TaskCreationService(repository: taskManagementRepository).createScheduledSessionMessageTask(
+            origin: .user,
+            name: name,
+            runAt: runAt,
+            recurrence: recurrence,
+            timezoneIdentifier: TimeZone.current.identifier,
+            message: message,
+            title: title,
+            createdBySessionID: selectedChatSessionID ?? activeChatSession.id,
+            rationale: rationale
+        )
+        reloadTaskManagementPresentation()
+        selectedTaskAutomationID = task.id
+        return task.id
+    }
+
+    @discardableResult
+    func createSessionStatusMessageTask(
+        name: String,
+        toStatus: String,
+        message: String,
+        sessionID: String?,
+        rationale: String?
+    ) throws -> String {
+        guard let taskManagementRepository else { throw AppViewModelTaskCreationError.missingRepository }
+        let task = try TaskCreationService(repository: taskManagementRepository).createSessionStatusMessageTask(
+            origin: .user,
+            name: name,
+            toStatus: toStatus,
+            message: message,
+            sessionID: sessionID,
+            createdBySessionID: selectedChatSessionID ?? activeChatSession.id,
+            rationale: rationale
+        )
+        reloadTaskManagementPresentation()
+        selectedTaskAutomationID = task.id
+        return task.id
     }
 
     func stopTask(_ id: String) {

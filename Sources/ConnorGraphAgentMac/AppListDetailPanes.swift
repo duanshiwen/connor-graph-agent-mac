@@ -837,6 +837,13 @@ private enum TaskAutomationKind {
         }
     }
 
+    var createButtonHelp: String {
+        switch self {
+        case .scheduled: "新建定时任务"
+        case .eventTriggered: "新建事件触发任务"
+        }
+    }
+
     func cards(from presentation: TaskManagementUIPresentation) -> [TaskManagementUICard] {
         switch self {
         case .scheduled: presentation.scheduledTasks
@@ -848,6 +855,7 @@ private enum TaskAutomationKind {
 private struct CraftTaskAutomationListPane: View {
     @ObservedObject var viewModel: AppViewModel
     var kind: TaskAutomationKind
+    @State private var isPresentingCreateSheet = false
 
     private var cards: [TaskManagementUICard] {
         kind.cards(from: viewModel.taskManagementPresentation)
@@ -855,14 +863,24 @@ private struct CraftTaskAutomationListPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Text(kind.title)
-                .font(AppListTypography.header)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 13)
+            HStack(spacing: 8) {
+                Text(kind.title)
+                    .font(AppListTypography.header)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                Button(action: { isPresentingCreateSheet = true }) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .help(kind.createButtonHelp)
+                .accessibilityLabel(kind.createButtonHelp)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
 
             if cards.isEmpty {
-                ContentUnavailableView(kind.emptyTitle, systemImage: kind.systemImage, description: Text(kind.emptyDescription))
+                ContentUnavailableView(kind.emptyTitle, systemImage: kind.systemImage, description: Text("\(kind.emptyDescription) 点击右上角 + 新建。"))
                     .padding(.top, 80)
             } else {
                 List(cards) { card in
@@ -879,6 +897,29 @@ private struct CraftTaskAutomationListPane: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .sheet(isPresented: $isPresentingCreateSheet) {
+            AddTaskAutomationSheet(kind: kind, governanceConfig: viewModel.governanceConfig) { request in
+                switch request.kind {
+                case .scheduled:
+                    try viewModel.createScheduledSessionMessageTask(
+                        name: request.name,
+                        runAt: request.runAt,
+                        recurrence: request.recurrence,
+                        message: request.message,
+                        title: request.sessionTitle,
+                        rationale: request.rationale
+                    )
+                case .eventTriggered:
+                    try viewModel.createSessionStatusMessageTask(
+                        name: request.name,
+                        toStatus: request.toStatus,
+                        message: request.message,
+                        sessionID: nil,
+                        rationale: request.rationale
+                    )
+                }
+            }
+        }
         .task {
             viewModel.reloadTaskManagementPresentation()
         }
@@ -962,6 +1003,273 @@ private struct TaskAutomationChip: View {
             .padding(.vertical, 2)
             .background(Color.secondary.opacity(0.10), in: Capsule())
             .lineLimit(1)
+    }
+}
+
+private struct AddTaskAutomationRequest {
+    var kind: TaskAutomationKind
+    var name: String
+    var runAt: Date
+    var recurrence: ConnorTaskRecurrence
+    var toStatus: String
+    var message: String
+    var sessionTitle: String
+    var rationale: String?
+}
+
+private struct AddTaskAutomationSheet: View {
+    private enum Layout {
+        static let sheetWidth: CGFloat = 700
+        static let sheetHeight: CGFloat = 620
+        static let labelWidth: CGFloat = 122
+        static let compactControlWidth: CGFloat = 220
+    }
+
+    var kind: TaskAutomationKind
+    var governanceConfig: AppSessionGovernanceConfig
+    var onCreate: (AddTaskAutomationRequest) throws -> String
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var name: String = ""
+    @State private var runAt: Date = Date().addingTimeInterval(3600)
+    @State private var recurrence: ConnorTaskRecurrence = .once
+    @State private var toStatus: String = AgentSessionStatus.done.rawValue
+    @State private var message: String = ""
+    @State private var sessionTitle: String = ""
+    @State private var rationale: String = ""
+    @State private var isSaving = false
+    @State private var saveMessage: String?
+
+    private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var trimmedMessage: String { message.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var normalizedTitle: String { sessionTitle.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var normalizedRationale: String? {
+        let value = rationale.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+
+    private var saveDisabled: Bool {
+        trimmedName.isEmpty || trimmedMessage.isEmpty || isSaving
+    }
+
+    private var selectableRecurrences: [ConnorTaskRecurrence] {
+        [.once, .daily, .weekly, .monthly]
+    }
+
+    private var selectableStatuses: [AgentSessionStatusDefinition] {
+        let configured = governanceConfig.statuses
+            .filter { $0.id != AgentSessionStatus.archived.rawValue }
+            .filter { AgentSessionStatus(rawValue: $0.id) != nil }
+            .sorted { $0.sortOrder < $1.sortOrder }
+        if configured.isEmpty {
+            return AgentSessionStatusDefinition.defaults
+                .filter { $0.id != AgentSessionStatus.archived.rawValue }
+                .sorted { $0.sortOrder < $1.sortOrder }
+        }
+        return configured
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            dialogHeader
+
+            Divider()
+                .padding(.top, AppShellLayout.spaceL)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
+                    RSSSetupSection(title: "基础信息", systemImage: kind.systemImage) {
+                        RSSSetupRow("任务名称", labelWidth: Layout.labelWidth) {
+                            TextField(kind == .scheduled ? "例如：每日复盘" : "例如：完成后总结", text: $name)
+                                .textFieldStyle(.roundedBorder)
+                        }
+
+                        if kind == .scheduled {
+                            RSSSetupRow("首次运行", labelWidth: Layout.labelWidth) {
+                                DatePicker("首次运行", selection: $runAt, displayedComponents: [.date, .hourAndMinute])
+                                    .labelsHidden()
+                                    .frame(width: Layout.compactControlWidth, alignment: .leading)
+                            }
+                            RSSSetupRow("重复", labelWidth: Layout.labelWidth) {
+                                Picker("重复", selection: $recurrence) {
+                                    ForEach(selectableRecurrences, id: \.self) { recurrence in
+                                        Text(label(for: recurrence)).tag(recurrence)
+                                    }
+                                }
+                                .labelsHidden()
+                                .frame(width: Layout.compactControlWidth, alignment: .leading)
+                            }
+                            RSSSetupRow("会话标题", labelWidth: Layout.labelWidth) {
+                                TextField("可选；留空时由会话自动命名", text: $sessionTitle)
+                                    .textFieldStyle(.roundedBorder)
+                            }
+                        } else {
+                            RSSSetupRow("触发状态", labelWidth: Layout.labelWidth) {
+                                Picker("触发状态", selection: $toStatus) {
+                                    ForEach(selectableStatuses) { definition in
+                                        Label(definition.name, systemImage: definition.systemImage)
+                                            .tag(definition.id)
+                                    }
+                                }
+                                .labelsHidden()
+                                .frame(width: Layout.compactControlWidth, alignment: .leading)
+                            }
+                        }
+                    }
+
+                    RSSSetupSection(title: kind == .scheduled ? "发送给新会话" : "发送给当前会话", systemImage: "paperplane") {
+                        RSSSetupRow("消息", labelWidth: Layout.labelWidth, alignment: .top) {
+                            TextEditor(text: $message)
+                                .font(AgentChatTypography.body)
+                                .scrollContentBackground(.hidden)
+                                .padding(8)
+                                .frame(minHeight: 118)
+                                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous))
+                                .overlay(RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous).stroke(AppShellColors.hairline, lineWidth: 1))
+                        }
+                        RSSSetupHint(kind == .scheduled ? "到达时间后，Connor 会创建一个新会话并发送这段消息。" : "当会话状态切换到所选状态时，Connor 会向该会话发送这段消息。")
+                    }
+
+                    RSSSetupSection(title: "治理备注", systemImage: "checkmark.shield") {
+                        RSSSetupRow("备注", labelWidth: Layout.labelWidth) {
+                            TextField("可选；说明为什么需要这个任务", text: $rationale)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        RSSSetupHint("任务会以“用户”来源创建，可在详情页暂停、恢复或删除；系统保护任务不受此表单影响。")
+                    }
+
+                    RSSHintCard(title: hintTitle, guidance: hintGuidance)
+
+                    if let saveMessage {
+                        RSSSetupHint(saveMessage, color: .red)
+                    }
+                }
+                .padding(.vertical, AppShellLayout.spaceL)
+            }
+            .scrollIndicators(.visible)
+
+            Divider()
+
+            dialogFooter
+        }
+        .padding(AppShellLayout.spaceXL)
+        .frame(width: Layout.sheetWidth, height: Layout.sheetHeight)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear {
+            if let first = selectableStatuses.first, !selectableStatuses.contains(where: { $0.id == toStatus }) {
+                toStatus = first.id
+            }
+        }
+    }
+
+    private var dialogHeader: some View {
+        HStack(alignment: .top, spacing: AppShellLayout.spaceM) {
+            ZStack {
+                RoundedRectangle(cornerRadius: AppShellLayout.radiusM, style: .continuous)
+                    .fill(Color.orange.opacity(0.13))
+                Image(systemName: kind.systemImage)
+                    .font(SettingsListTypography.largeIcon)
+                    .foregroundStyle(.orange)
+            }
+            .frame(width: 46, height: 46)
+
+            VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
+                Text(kind.createButtonHelp)
+                    .font(.system(size: 26, weight: .semibold))
+                Text(kind == .scheduled ? "创建一个按时间触发的用户任务，到点后新建会话并发送消息。" : "创建一个由会话状态变化触发的用户任务，状态命中后向该会话发送消息。")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer()
+
+            Button(action: { dismiss() }) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 13, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut(.cancelAction)
+            .help("关闭")
+            .accessibilityLabel("关闭新建任务")
+        }
+    }
+
+    private var dialogFooter: some View {
+        HStack(spacing: AppShellLayout.spaceM) {
+            Spacer()
+            Button("取消") { dismiss() }
+                .disabled(isSaving)
+            Button {
+                save()
+            } label: {
+                if isSaving {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Text("创建任务")
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(saveDisabled)
+            .keyboardShortcut(.defaultAction)
+        }
+        .padding(.top, AppShellLayout.spaceM)
+    }
+
+    private var hintTitle: String {
+        switch kind {
+        case .scheduled: "定时任务只负责触发，不绕过权限"
+        case .eventTriggered: "事件触发任务跟随会话治理状态"
+        }
+    }
+
+    private var hintGuidance: String {
+        switch kind {
+        case .scheduled:
+            "任务运行时仍会走 Connor 的会话、审计和工具权限机制。建议把消息写成清晰的目标，而不是隐藏复杂策略。"
+        case .eventTriggered:
+            "当前支持 session.status.changed 事件。任务只在状态命中时发送消息，不直接修改会话内容或绕过审批。"
+        }
+    }
+
+    private func save() {
+        isSaving = true
+        saveMessage = nil
+        do {
+            _ = try onCreate(AddTaskAutomationRequest(
+                kind: kind,
+                name: trimmedName,
+                runAt: runAt,
+                recurrence: recurrence,
+                toStatus: toStatus,
+                message: trimmedMessage,
+                sessionTitle: normalizedTitle,
+                rationale: normalizedRationale
+            ))
+            isSaving = false
+            dismiss()
+        } catch {
+            isSaving = false
+            saveMessage = errorMessage(for: error)
+        }
+    }
+
+    private func label(for recurrence: ConnorTaskRecurrence) -> String {
+        switch recurrence {
+        case .once: "仅一次"
+        case .daily: "每天"
+        case .weekly: "每周"
+        case .monthly: "每月"
+        case .interval: "固定间隔"
+        }
+    }
+
+    private func errorMessage(for error: Error) -> String {
+        if let localized = (error as? LocalizedError)?.errorDescription, !localized.isEmpty {
+            return localized
+        }
+        return String(describing: error)
     }
 }
 

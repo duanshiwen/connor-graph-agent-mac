@@ -152,6 +152,15 @@ public struct NativeMailBrowserPresentation: Sendable, Equatable {
         .sorted { lhs, rhs in lhs.date > rhs.date }
     }
 
+    public var totalMessageCount: Int {
+        let mailboxMessageCount = mailboxes.reduce(0) { $0 + $1.status.messageCount }
+        return max(mailboxMessageCount, messages.count)
+    }
+
+    public var totalUnreadCount: Int {
+        mailboxes.reduce(0) { $0 + $1.status.unreadCount }
+    }
+
     public func defaultAccountID() -> MailAccountID? {
         accounts.first?.id
     }
