@@ -22,7 +22,7 @@ struct ConnorGraphAgentMacApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("康纳同学") {
+        Window("康纳同学", id: "main") {
             AppShellView(viewModel: viewModel)
                 .preferredColorScheme(viewModel.appearanceMode.colorScheme)
                 .toolbarBackground(.visible, for: .windowToolbar)
@@ -158,6 +158,16 @@ private final class ConnorApplicationDelegate: NSObject, NSApplicationDelegate, 
         normalizeMenusSoon()
     }
 
+    func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
+        orderExistingMainWindowToFront()
+        return false
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        orderExistingMainWindowToFront()
+        return false
+    }
+
     private func registerCurrentApplicationBundleWithLaunchServices() {
         let bundleURL = Bundle.main.bundleURL
         guard bundleURL.pathExtension == "app" else { return }
@@ -176,7 +186,7 @@ private final class ConnorApplicationDelegate: NSObject, NSApplicationDelegate, 
         let sessionID = userInfo["sessionID"] as? String
         DispatchQueue.main.async {
             NSApp.activate(ignoringOtherApps: true)
-            NSApp.windows.first(where: { $0.isVisible })?.makeKeyAndOrderFront(nil)
+            self.orderExistingMainWindowToFront()
             if let sessionID {
                 NotificationCenter.default.post(
                     name: .connorSessionNotificationActivated,
@@ -186,6 +196,15 @@ private final class ConnorApplicationDelegate: NSObject, NSApplicationDelegate, 
             }
             completionHandler()
         }
+    }
+
+    private func orderExistingMainWindowToFront() {
+        let candidate = NSApp.windows.first { window in
+            window.isVisible && !window.isMiniaturized && window.canBecomeKey
+        } ?? NSApp.windows.first { window in
+            !window.isMiniaturized && window.canBecomeKey
+        }
+        candidate?.makeKeyAndOrderFront(nil)
     }
 
     private func normalizeMenusSoon() {
