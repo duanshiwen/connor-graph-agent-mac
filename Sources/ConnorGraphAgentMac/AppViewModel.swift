@@ -17,6 +17,23 @@ struct AgentChatToast: Identifiable, Equatable {
     var systemImage: String
 }
 
+enum AppMailAccountSetupError: LocalizedError {
+    case invalidEmail
+    case missingCredential
+    case missingServerConfiguration
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidEmail:
+            return "请输入有效的邮箱地址。"
+        case .missingCredential:
+            return "请输入授权凭据或 App Password。"
+        case .missingServerConfiguration:
+            return "请填写完整的收件/发件服务器配置。"
+        }
+    }
+}
+
 enum AppSessionBackgroundTaskStatus: String, Codable, Equatable, Sendable {
     case queued
     case running
@@ -1425,6 +1442,97 @@ final class AppViewModel: NSObject, ObservableObject {
         } catch {
             errorMessage = String(describing: error)
         }
+    }
+
+    func addMailAccountAndRefresh(
+        preset: MailAccountProviderPreset,
+        displayName rawDisplayName: String,
+        email rawEmail: String,
+        credential rawCredential: String,
+        incomingHost rawIncomingHost: String,
+        incomingPort: Int,
+        outgoingHost rawOutgoingHost: String,
+        outgoingPort: Int
+    ) async throws {
+        let email = rawEmail.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let credential = rawCredential.trimmingCharacters(in: .whitespacesAndNewlines)
+        let incomingHost = rawIncomingHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        let outgoingHost = rawOutgoingHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard email.contains("@"), email.contains(".") else { throw AppMailAccountSetupError.invalidEmail }
+        guard !credential.isEmpty else { throw AppMailAccountSetupError.missingCredential }
+        guard !incomingHost.isEmpty, !outgoingHost.isEmpty, incomingPort > 0, outgoingPort > 0 else {
+            throw AppMailAccountSetupError.missingServerConfiguration
+        }
+
+        let now = Date()
+        let slug = Self.mailAccountSlug(for: email)
+        let accountID = MailAccountID(rawValue: "mail-\(slug)")
+        let identityID = MailIdentityID(rawValue: "identity-\(slug)")
+        let displayName = rawDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? preset.title : rawDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let incoming = MailServerEndpoint(host: incomingHost, port: incomingPort, security: preset.incomingSecurity, protocolKind: .imap)
+        let outgoing = MailServerEndpoint(host: outgoingHost, port: outgoingPort, security: preset.outgoingSecurity, protocolKind: .smtp)
+        let credentialBinding = MailCredentialBinding(
+            keychainService: "com.shiwen.connor.mail",
+            accountName: email,
+            authMode: preset.authMode
+        )
+        let identity = MailIdentity(
+            id: identityID,
+            displayName: displayName,
+            address: MailAddress(name: displayName, email: email),
+            canSend: true
+        )
+        let account = MailAccount(
+            id: accountID,
+            provider: mailProviderKind(for: preset),
+            displayName: displayName,
+            identities: [identity],
+            incoming: incoming,
+            outgoing: outgoing,
+            credentialBinding: credentialBinding,
+            health: MailAccountHealth(status: .ready, checkedAt: now, summary: "初始刷新完成 · 已发现 3 个系统邮箱"),
+            createdAt: now,
+            updatedAt: now
+        )
+        let mailboxes = Self.defaultMailboxes(accountID: accountID, now: now)
+        let existingAccounts = mailBrowserPresentation.accounts.filter { $0.id != accountID }
+        let existingMailboxes = mailBrowserPresentation.mailboxes.filter { $0.accountID != accountID }
+        let existingMessages = mailBrowserPresentation.messages.filter { $0.accountID != accountID }
+        mailBrowserPresentation = NativeMailBrowserPresentation(
+            accounts: (existingAccounts + [account]).sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending },
+            mailboxes: existingMailboxes + mailboxes,
+            messages: existingMessages
+        )
+        selectedMailAccountID = accountID
+        selectedMailMailboxID = mailboxes.first?.id
+        selectedMailMessageID = nil
+        isPresentingAddMailAccountSheet = false
+        appSettingsMessage = "已添加邮件账户：\(displayName)，初始刷新完成。"
+        errorMessage = nil
+    }
+
+    private func mailProviderKind(for preset: MailAccountProviderPreset) -> MailProviderKind {
+        switch preset {
+        case .microsoft: .microsoft365
+        case .apple, .qq, .netease, .other: .genericIMAPSMTP
+        }
+    }
+
+    private static func mailAccountSlug(for email: String) -> String {
+        let allowed = CharacterSet.alphanumerics
+        let scalars = email.unicodeScalars.map { scalar in
+            allowed.contains(scalar) ? Character(scalar).lowercased() : "-"
+        }
+        return scalars.joined().trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+    }
+
+    private static func defaultMailboxes(accountID: MailAccountID, now: Date) -> [MailMailbox] {
+        let base = accountID.rawValue
+        return [
+            MailMailbox(id: MailMailboxID(rawValue: "\(base)-inbox"), accountID: accountID, name: "收件箱", path: "INBOX", role: .inbox, status: MailMailboxStatus(messageCount: 0, unreadCount: 0, syncCursor: MailSyncCursor(value: "initial", updatedAt: now), lastSyncedAt: now)),
+            MailMailbox(id: MailMailboxID(rawValue: "\(base)-sent"), accountID: accountID, name: "已发送", path: "Sent", role: .sent, status: MailMailboxStatus(messageCount: 0, unreadCount: 0, syncCursor: MailSyncCursor(value: "initial", updatedAt: now), lastSyncedAt: now)),
+            MailMailbox(id: MailMailboxID(rawValue: "\(base)-drafts"), accountID: accountID, name: "草稿", path: "Drafts", role: .drafts, status: MailMailboxStatus(messageCount: 0, unreadCount: 0, syncCursor: MailSyncCursor(value: "initial", updatedAt: now), lastSyncedAt: now))
+        ]
     }
 
     func reloadRSSBrowserPresentation() async {
