@@ -13,7 +13,7 @@ struct MailSettingsSectionTests {
     @Test func settingsSectionsExposeRSSSystemSettings() {
         #expect(ConnorSettingsSection.allCases.contains(.rss))
         #expect(ConnorSettingsSection.rss.title == "RSS 阅读")
-        #expect(ConnorSettingsSection.rss.subtitle == "订阅源、抓取、OPML")
+        #expect(ConnorSettingsSection.rss.subtitle == "订阅源、抓取、安全")
         #expect(ConnorSettingsSection.rss.systemImage == "dot.radiowaves.left.and.right")
     }
 }

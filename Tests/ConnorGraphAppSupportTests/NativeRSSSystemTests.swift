@@ -38,8 +38,10 @@ struct NativeRSSSystemTests {
         var registry = AgentToolRegistry()
         registry.registerNativeRSSTools(runtime: runtime)
 
-        #expect(registry.definitions.map(\.name).contains("rss_search_items"))
-        #expect(registry.definitions.map(\.name).contains("rss_import_opml"))
+        let toolNames = registry.definitions.map(\.name)
+        #expect(toolNames.contains("rss_search_items"))
+        #expect(!toolNames.contains("rss_import_opml"))
+        #expect(!toolNames.contains("rss_export_opml"))
         #expect(registry.permission(named: "rss_get_item") == .readRSSContent)
         #expect(registry.permission(named: "rss_add_source") == .manageRSSSources)
 
