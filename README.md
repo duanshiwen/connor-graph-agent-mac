@@ -21,7 +21,7 @@ Connor 当前坚持以下主权边界:
 - **Task sovereignty belongs to Connor Task Management Stack**:后台任务、定时任务、事件触发任务、系统/用户/AI 发起者治理、运行历史和 Local CLI/API 管理面统一属于 Connor 抽象任务管理栈。Task Management Stack 只提供统一任务接口和生命周期,不关心任务具体操作或 runtime 实现,不提供 manual task 类型,也不承担审批 / Review Gate。
 - **Attachment sovereignty belongs to Connor Session OS / Attachment Store**:用户文件先进入本地 Session Capsule,原文件、manifest、派生抽取文本和 message refs 由 Connor 管理;OpenAI/Claude/Gemini 等 provider-native file API 未来只能作为可治理的投递/缓存策略,不能成为 source of truth。
 - **Mail sovereignty belongs to Connor Native Mail System**:邮件账号、身份、凭据绑定、OAuth token 生命周期、同步游标、source cache、读取状态变更、草稿、发信审批、联系人候选、邮件附件导入、tool audit 与 Graph Memory evidence policy 均由 Connor 拥有。AI、MCP server、LLM provider、协议 adapter 或任何外部 sidecar 都不能直接拥有邮件状态、绕过 Connor Policy Engine 发信、或把邮件事实直接写入 Graph Memory。内置邮件读取工具默认允许,不会触发权限获取操作;但读取正文仍写入隐私级 audit,且读取邮件默认不改变已读状态。
-- **RSS sovereignty belongs to Connor Native RSS System**:RSS / Atom / JSON Feed 订阅源、分组、抓取策略、同步游标、source cache、阅读状态、收藏/隐藏、OPML 导入导出、tool audit 与 Graph Memory evidence policy 均由 Connor 拥有。外部 feed parser、网络 adapter 或任何 MCP/server/provider 只能作为协议/解析 I/O 组件,不能拥有 source registry、cache、阅读状态、同步游标、Graph admission 或 UI 状态。
+- **RSS sovereignty belongs to Connor Native RSS System**:RSS / Atom / JSON Feed 订阅源、分组、抓取策略、同步游标、source cache、阅读状态、收藏/隐藏、tool audit 与 Graph Memory evidence policy 均由 Connor 拥有。外部 feed parser、网络 adapter 或任何 MCP/server/provider 只能作为协议/解析 I/O 组件,不能拥有 source registry、cache、阅读状态、同步游标、Graph admission 或 UI 状态。
 
 明确不做:
 
@@ -1183,9 +1183,9 @@ Stage 13: Commercial Hardening
 
 ## Connor Native RSS System
 
-Commercial Train 8 将 RSS / Atom / JSON Feed 能力定义为 Connor 自研的商用级 native source + governed tool surface。它不是 Fluent Reader 的复制品,也不是普通网页收藏夹;Fluent Reader 仅作为订阅源、条目、过滤、抓取频率、OPML 与阅读状态的产品逻辑参考。Connor 自己实现 domain、runtime facade、fetch/parser adapter、OPML service、tool contracts、permission model、audit pipeline、source cache、阅读状态治理和 Graph evidence pipeline。
+Commercial Train 8 将 RSS / Atom / JSON Feed 能力定义为 Connor 自研的商用级 native source + governed tool surface。它不是 Fluent Reader 的复制品,也不是普通网页收藏夹;Fluent Reader 仅作为订阅源、条目、过滤、抓取频率与阅读状态的产品逻辑参考。Connor 自己实现 domain、runtime facade、fetch/parser adapter、tool contracts、permission model、audit pipeline、source cache、阅读状态治理和 Graph evidence pipeline。
 
-正式能力面命名为 **Native RSS Tool Surface**。AI 通过 Connor 注册的一组 native tool calls 读取订阅源、搜索文章、读取正文、显式修改阅读/收藏/隐藏状态、同步订阅源、导入导出 OPML 和创建 Graph evidence candidate。AI 不直接拥有 feed URL 抓取、source cache、阅读状态或 Graph 写入。
+正式能力面命名为 **Native RSS Tool Surface**。AI 通过 Connor 注册的一组 native tool calls 读取订阅源、搜索文章、读取正文、显式修改阅读/收藏/隐藏状态、同步订阅源和创建 Graph evidence candidate。AI 不直接拥有 feed URL 抓取、source cache、阅读状态或 Graph 写入。
 
 核心运行路径:
 
@@ -1205,10 +1205,9 @@ AI Agent
 RSSRuntime
 ├── RSSFetchAdapter           # URLSession + timeout + User-Agent + HTTP status handling
 ├── RSSFeedParsingAdapter     # RSS 2.0 / Atom / JSON Feed → unified domain
-├── RSSOPMLService            # OPML import/export
 ├── RSSSourceRepository       # Connor-owned source registry
 ├── RSSSourceCache            # rebuildable item/content/state cache
-├── RSSAuditLog               # read/content/mutation/network/import-export audit
+├── RSSAuditLog               # read/content/mutation/network audit
 └── RSSEvidenceCandidate      # graph evidence candidate, no direct graph write
 ```
 
@@ -1220,7 +1219,6 @@ RSSRuntime
 - `RSSItem`: title、link、date、fetchedDate、thumb、content、snippet、creator、hasRead、starred、hidden、notify。
 - `FeedFilter`: 未读、收藏、隐藏、标题/全文/作者搜索、大小写敏感。
 - source + title + date 等去重思想。
-- OPML import/export。
 
 明确不复制:
 
@@ -1253,7 +1251,7 @@ RSSSourceID / RSSItemID / RSSGroupID / RSSFetchRunID
 RSSSource / RSSSourceHealth / RSSSourceFetchPolicy / RSSSourceOpenTarget / RSSSourceTextDirection
 RSSSyncCursor / RSSFeedMetadata / RSSParsedFeed / RSSFetchResult / RSSParseReport
 RSSItemSummary / RSSItemDetail / RSSItemContent / RSSItemMedia / RSSItemState
-OPMLDocument / OPMLSubscriptionOutline / RSSEvidenceCandidate / RSSAuditRecord
+RSSEvidenceCandidate / RSSAuditRecord
 ```
 
 ### Native RSS Tool Surface
@@ -1268,8 +1266,6 @@ rss_get_item
 rss_set_read_state
 rss_set_star_state
 rss_set_hidden_state
-rss_import_opml
-rss_export_opml
 rss_create_evidence_candidate
 ```
 
@@ -1280,7 +1276,7 @@ Tool contract rules:
 - 读取 RSS summary 默认允许并写 audit。
 - 正文读取默认允许但归为 `readRSSContent`,写更高风险 audit。
 - 阅读、收藏、隐藏状态必须显式 mutation tool,不能由读取隐式改变。
-- `rss_add_source`、`rss_import_opml` 等 source management/import 行为默认审批。
+- `rss_add_source` 等 source management 行为默认审批。
 - `rss_create_evidence_candidate` 只创建证据候选,不直接写 Graph Memory。
 
 ### RSS Permission Capabilities
@@ -1293,8 +1289,6 @@ case readRSSContent
 case mutateRSSState
 case manageRSSSources
 case syncRSSSources
-case importRSSOPML
-case exportRSSOPML
 ```
 
 策略:
@@ -1305,8 +1299,6 @@ readRSSContent: 默认允许,但标记 contentRead risk 并受 safe extraction/b
 mutateRSSState: readOnly 拒绝;askToWrite 审批;trustedWrite/allowAll 可允许并 audit
 manageRSSSources: 默认审批
 syncRSSSources: askToWrite/trustedWrite/allowAll 可允许;readOnly 拒绝
-importRSSOPML: 默认审批
-exportRSSOPML: 默认允许生成文本;写入文件仍走 workspace/file policy
 ```
 
 ### RSS Storage Layout
@@ -1358,7 +1350,7 @@ Connor 不做 Fluent Reader 替代品。Native UI 承载订阅源、文章列表
 - 筛选匹配标题、摘要、来源、作者;筛选状态是 transient UI state。
 - 无订阅源、无文章、无匹配文章使用 `ContentUnavailableView`。
 - 右侧详情未选中文章时保持空白;选中文章后展示 Hero、摘要、来源信息与治理提示。
-- 设置中心新增「RSS 阅读」设置页:订阅源、抓取策略、导入导出。
+- 设置中心新增「RSS 阅读」设置页:订阅源、抓取策略和正文安全。
 - 添加订阅源 sheet 支持 Apple Developer News、Swift Blog、Hacker News 和自定义 URL preset;首轮保存为 UI draft,真实持久化与同步通过 Native RSS Runtime / Policy Engine。
 
 ### Commercial Engineering Sequence
@@ -1368,13 +1360,12 @@ Stage 1: Architecture Contract Landing
 Stage 2: Domain + Audit Models
 Stage 3: Runtime + Repository + Cache + Audit
 Stage 4: RSS / Atom / JSON Feed Parser + Safe HTML Extraction
-Stage 5: OPML Import / Export
-Stage 6: Native RSS Tool Surface + Permission Policy
-Stage 7: Native RSS Browser Presentation
-Stage 8: SwiftUI Main Surface + Settings Center
-Stage 9: Persistent Repository + SQLite Cache Migration
-Stage 10: Graph Memory Evidence Integration Hardening
-Stage 11: Commercial Network/Parser Hardening
+Stage 5: Native RSS Tool Surface + Permission Policy
+Stage 6: Native RSS Browser Presentation
+Stage 7: SwiftUI Main Surface + Settings Center
+Stage 8: Persistent Repository + SQLite Cache Migration
+Stage 9: Graph Memory Evidence Integration Hardening
+Stage 10: Commercial Network/Parser Hardening
 ```
 
 每个 stage 必须遵守 Superpowers / TDD:先写失败测试,再实现最小通过代码,再验证测试、audit、readiness evidence 与 README contract 一致。
