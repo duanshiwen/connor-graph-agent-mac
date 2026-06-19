@@ -19,6 +19,7 @@ private struct CapturingHTTPClient: AgentHTTPClient {
         var method: String
         var headers: [String: String]
         var body: Data
+        var timeoutInterval: TimeInterval?
     }
 
     init(responseBody: Data, statusCode: Int = 200) {
@@ -28,9 +29,73 @@ private struct CapturingHTTPClient: AgentHTTPClient {
     }
 
     mutating func send(_ request: AgentHTTPRequest) async throws -> AgentHTTPResponse {
-        storage.captured = CapturedRequest(url: request.url, method: request.method, headers: request.headers, body: request.body)
+        storage.captured = CapturedRequest(
+            url: request.url,
+            method: request.method,
+            headers: request.headers,
+            body: request.body,
+            timeoutInterval: request.timeoutInterval
+        )
         return AgentHTTPResponse(statusCode: statusCode, body: responseBody)
     }
+}
+
+@Test func openAICompatibleConfigDefaultsRequestTimeoutToThreeMinutes() throws {
+    let config = OpenAICompatibleConfig(
+        baseURL: URL(string: "https://llm.example.com/v1")!,
+        apiKey: "test-key",
+        model: "gpt-test"
+    )
+
+    #expect(config.requestTimeout == 180)
+}
+
+@Test func openAICompatibleProviderAppliesConfiguredRequestTimeout() async throws {
+    let body = """
+    {
+      "choices": [
+        { "message": { "role": "assistant", "content": "OK" } }
+      ]
+    }
+    """.data(using: .utf8)!
+    let client = CapturingHTTPClient(responseBody: body)
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(
+            baseURL: URL(string: "https://llm.example.com/v1")!,
+            apiKey: "test-key",
+            model: "gpt-test",
+            requestTimeout: 240
+        ),
+        httpClient: client
+    )
+
+    _ = try await provider.complete(prompt: "ping", context: AgentContext(query: "ping", items: []))
+
+    #expect(client.captured?.timeoutInterval == 240)
+}
+
+@Test func openAICompatibleToolCallingRequestAppliesConfiguredRequestTimeout() async throws {
+    let body = """
+    {
+      "choices": [
+        { "message": { "role": "assistant", "content": "OK" }, "finish_reason": "stop" }
+      ]
+    }
+    """.data(using: .utf8)!
+    let client = CapturingHTTPClient(responseBody: body)
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(
+            baseURL: URL(string: "https://llm.example.com/v1")!,
+            apiKey: "test-key",
+            model: "gpt-test",
+            requestTimeout: 240
+        ),
+        httpClient: client
+    )
+
+    _ = try await provider.complete(AgentModelRequest(messages: [AgentModelMessage(role: .user, content: "ping")]))
+
+    #expect(client.captured?.timeoutInterval == 240)
 }
 
 @Test func openAICompatibleConfigReadsEnvironmentWithoutHardcodingSecrets() throws {

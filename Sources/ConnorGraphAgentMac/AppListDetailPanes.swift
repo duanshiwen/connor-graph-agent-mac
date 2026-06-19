@@ -2009,6 +2009,7 @@ struct CraftSessionRow: View {
                         Capsule()
                             .stroke(Color.yellow, lineWidth: 1)
                     )
+                    .offset(y: 3)
             }
             .frame(width: 34)
             .padding(.top, 5)
