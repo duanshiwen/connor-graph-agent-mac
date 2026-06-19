@@ -164,10 +164,11 @@ struct SettingsAppSection: View {
                         Spacer(minLength: SettingsListLayout.spaceL)
                         Button(action: viewModel.resetSessionNotificationPolicy) {
                             Label("恢复默认策略", systemImage: "arrow.counterclockwise")
-                                .frame(minWidth: 132, minHeight: 34)
+                                .font(SettingsListTypography.rowCaptionEmphasized)
                         }
                         .buttonStyle(.bordered)
-                        .controlSize(.large)
+                        .controlSize(.regular)
+                        .frame(width: SettingsListLayout.pickerControlWidth, alignment: .trailing)
                     }
                     ForEach(SessionAttentionMessageType.allCases) { messageType in
                         Divider()
