@@ -1104,11 +1104,12 @@ private struct SessionCardAttentionStyle {
 
     init(level: SessionAttentionLevel, isSelected: Bool) {
         if isSelected {
-            dotColor = level == .none ? nil : Self.dotColor(for: level)
-            backgroundColor = Color.accentColor.opacity(0.14)
-            borderColor = level >= .actionable ? Self.dotColor(for: level).opacity(0.60) : Color.clear
+            let color = Self.attentionColor
+            dotColor = level == .none ? nil : color
+            backgroundColor = level == .none ? Color.accentColor.opacity(0.14) : color.opacity(0.16)
+            borderColor = level >= .actionable ? color.opacity(0.60) : Color.clear
             borderWidth = level >= .actionable ? 1 : 0
-            leadingBarColor = level >= .actionable ? Self.dotColor(for: level) : nil
+            leadingBarColor = level >= .actionable ? color : nil
             leadingBarWidth = level >= .actionable ? 3 : 0
             titleWeight = level == .none ? .semibold : .bold
             shadowColor = .clear
@@ -1128,7 +1129,7 @@ private struct SessionCardAttentionStyle {
             shadowColor = .clear
             shadowRadius = 0
         case .unread:
-            let color = Color.accentColor
+            let color = Self.attentionColor
             dotColor = color
             backgroundColor = color.opacity(0.045)
             borderColor = Color.clear
@@ -1139,7 +1140,7 @@ private struct SessionCardAttentionStyle {
             shadowColor = .clear
             shadowRadius = 0
         case .emphasized:
-            let color = Color.blue
+            let color = Self.attentionColor
             dotColor = color
             backgroundColor = color.opacity(0.075)
             borderColor = color.opacity(0.22)
@@ -1150,7 +1151,7 @@ private struct SessionCardAttentionStyle {
             shadowColor = .clear
             shadowRadius = 0
         case .actionable:
-            let color = Color.orange
+            let color = Self.attentionColor
             dotColor = color
             backgroundColor = color.opacity(0.10)
             borderColor = color.opacity(0.45)
@@ -1161,28 +1162,20 @@ private struct SessionCardAttentionStyle {
             shadowColor = color.opacity(0.08)
             shadowRadius = 3
         case .interruptive:
-            let color = Color.red
+            let color = Self.attentionColor
             dotColor = color
-            backgroundColor = color.opacity(0.10)
-            borderColor = color.opacity(0.55)
+            backgroundColor = color.opacity(0.13)
+            borderColor = color.opacity(0.60)
             borderWidth = 1.2
             leadingBarColor = color
-            leadingBarWidth = 3
+            leadingBarWidth = 4
             titleWeight = .bold
-            shadowColor = color.opacity(0.10)
+            shadowColor = color.opacity(0.12)
             shadowRadius = 4
         }
     }
 
-    private static func dotColor(for level: SessionAttentionLevel) -> Color {
-        switch level {
-        case .none: .clear
-        case .unread: .accentColor
-        case .emphasized: .blue
-        case .actionable: .orange
-        case .interruptive: .red
-        }
-    }
+    private static var attentionColor: Color { ConnorCraftPalette.accent }
 }
 
 struct CraftSessionRow: View {
