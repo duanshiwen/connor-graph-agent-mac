@@ -42,14 +42,28 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
     func stop(reason: SessionSpeechTranscriptionStopReason) {
         guard runningSessionID != nil || audioEngine != nil || recognitionRequest != nil || recognitionTask != nil else { return }
         isStopping = true
+        runningSessionID = nil
+
         if let audioEngine {
             audioEngine.stop()
             if didInstallInputTap {
                 audioEngine.inputNode.removeTap(onBus: 0)
             }
         }
+
+        // For an ordinary user stop, finish the recognition stream instead of
+        // cancelling the task. Cancelling tears down Speech.framework's XPC
+        // connection aggressively and can emit noisy runtime diagnostics such as
+        // "XPC connection was invalidated" / task-name-port failures even though
+        // the app state is healthy. Interruptions still cancel immediately.
         recognitionRequest?.endAudio()
-        recognitionTask?.cancel()
+        switch reason {
+        case .manual:
+            recognitionTask?.finish()
+        case .leavingSession, .deletedSession, .appLifecycle:
+            recognitionTask?.cancel()
+        }
+
         cleanup()
     }
 
@@ -74,6 +88,12 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
         let audioEngine = AVAudioEngine()
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
+        if recognizer.supportsOnDeviceRecognition {
+            // Keep live dictation local when the recognizer supports it. Besides
+            // matching the app's local-first boundary, this avoids unnecessary
+            // Speech service/network XPC churn during short recording sessions.
+            request.requiresOnDeviceRecognition = true
+        }
 
         let inputNode = audioEngine.inputNode
         let recordingFormat = inputNode.outputFormat(forBus: 0)
