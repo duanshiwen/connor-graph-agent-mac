@@ -252,7 +252,7 @@ struct AddMailAccountSheet: View {
             VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
                 Text("添加邮件账户")
                     .font(SettingsListTypography.header)
-                Text("选择服务商后，Connor 会预填常见 IMAP/SMTP 配置。添加后会创建账户、建立默认邮箱列表，并执行初始刷新。")
+                Text("选择服务商后，Connor 会预填常见 IMAP/SMTP 配置。添加后会创建账户并准备同步；真实邮件拉取由 Mail Runtime 同步层完成。")
                     .font(SettingsListTypography.rowSubtitle)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -356,7 +356,7 @@ struct AddMailAccountSheet: View {
                     ProgressView()
                         .controlSize(.small)
                 } else {
-                    Text("添加账户并刷新")
+                    Text("添加账户")
                 }
             }
             .buttonStyle(.borderedProminent)
@@ -370,9 +370,9 @@ struct AddMailAccountSheet: View {
         guard !isSubmitting else { return }
         isSubmitting = true
         setupError = nil
-        setupMessage = "正在添加账户并执行初始刷新…"
+        setupMessage = "正在添加账户并准备同步…"
         do {
-            try await viewModel.addMailAccountAndRefresh(
+            try await viewModel.addMailAccountAndPrepareSync(
                 preset: selectedPreset,
                 displayName: displayName,
                 email: email,
@@ -468,7 +468,7 @@ private struct MailAccountSetupHintCard: View {
                     .font(SettingsListTypography.rowSubtitle)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("本轮界面先保存为连接草稿；真实登录、测试连接和凭据持久化会在后续 Mail Runtime 接入中完成。")
+                Text("本轮会创建本地账户与默认邮箱结构；真实 IMAP/SMTP 登录、远端邮箱发现和邮件拉取需要 Mail Runtime 同步适配器接入后完成。")
                     .font(SettingsListTypography.rowCaption)
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
