@@ -107,6 +107,7 @@ struct AgentChatComposerView: View {
                     .frame(width: AgentChatLayout.hitTargetSize, height: AgentChatLayout.hitTargetSize)
                     .contentShape(Rectangle())
                     .help("添加附件")
+                    .accessibilityLabel("添加附件")
 
                     workingDirectoryMenu
 
@@ -121,6 +122,8 @@ struct AgentChatComposerView: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    .help(viewModel.isBrowserVisible ? "隐藏浏览器工作区" : "显示浏览器工作区")
+                    .accessibilityLabel(viewModel.isBrowserVisible ? "隐藏浏览器工作区" : "显示浏览器工作区")
 
                     if let inspection = viewModel.lastPromptInspection {
                         Label("约 \(inspection.estimatedPromptTokenCount) tokens", systemImage: "text.alignleft")
