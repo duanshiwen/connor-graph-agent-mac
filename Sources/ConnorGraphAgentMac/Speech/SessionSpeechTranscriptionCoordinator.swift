@@ -97,6 +97,13 @@ final class SessionSpeechTranscriptionCoordinator {
         return task
     }
 
+    func noteUserEditedDraft(sessionID: String?, draft: String) {
+        guard let sessionID, status.runningSessionID == sessionID else { return }
+        guard draft != lastGeneratedDraft else { return }
+        draftBaseText = draft
+        lastGeneratedDraft = draft
+    }
+
     @discardableResult
     func stopIfRunningForLeavingSession(_ sessionID: String?) -> AppSessionBackgroundTask? {
         guard let sessionID, status.runningSessionID == sessionID else { return nil }

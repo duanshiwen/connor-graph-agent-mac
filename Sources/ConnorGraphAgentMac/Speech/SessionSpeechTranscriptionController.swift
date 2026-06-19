@@ -29,7 +29,7 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
     private var speechRecognizer: SFSpeechRecognizer?
     private var isStopping = false
 
-    init(localeIdentifier: String? = nil) {
+    init(localeIdentifier: String? = "zh-CN") {
         self.localeIdentifier = localeIdentifier
     }
 
@@ -126,16 +126,11 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
         onPartial: @escaping @MainActor @Sendable (String) -> Void,
         onError: @escaping @MainActor @Sendable (String) -> Void
     ) {
-        let recognizer: SFSpeechRecognizer?
-        if let localeIdentifier {
-            recognizer = SFSpeechRecognizer(locale: Locale(identifier: localeIdentifier))
-        } else {
-            recognizer = SFSpeechRecognizer()
-        }
+        let recognizer = makeSpeechRecognizer()
 
         guard let recognizer, recognizer.isAvailable else {
             cleanupAfterFailure()
-            onError("语音识别当前不可用，请稍后再试。")
+            onError("中文语音识别当前不可用，请确认系统语音识别已启用，或稍后再试。")
             return
         }
 
@@ -147,6 +142,7 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
+        request.taskHint = .dictation
 
         let captureSession = AVCaptureSession()
         captureSession.beginConfiguration()
@@ -210,6 +206,19 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
         captureQueue.async { [weak captureSession] in
             captureSession?.startRunning()
         }
+    }
+
+    private func makeSpeechRecognizer() -> SFSpeechRecognizer? {
+        guard let localeIdentifier else {
+            return SFSpeechRecognizer()
+        }
+
+        let locale = Locale(identifier: localeIdentifier)
+        if SFSpeechRecognizer.supportedLocales().contains(locale) {
+            return SFSpeechRecognizer(locale: locale)
+        }
+
+        return SFSpeechRecognizer()
     }
 
     private func authorizationMessage(for status: SFSpeechRecognizerAuthorizationStatus) -> String {

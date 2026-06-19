@@ -92,6 +92,26 @@ struct SessionSpeechTranscriptionCoordinatorTests {
         #expect(draftBySession["session-2"] == "")
     }
 
+    @Test func userEditedDraftBecomesNewBaseForLaterPartials() {
+        var draftBySession: [String: String] = ["session-1": ""]
+        let transcriber = FakeSessionSpeechTranscriber()
+        let coordinator = SessionSpeechTranscriptionCoordinator(transcriber: transcriber)
+        _ = coordinator.toggle(
+            selectedSessionID: "session-1",
+            currentDraft: "",
+            setDraft: { sessionID, draft in draftBySession[sessionID] = draft }
+        )
+
+        transcriber.emitPartial("第一段会被删除")
+        #expect(draftBySession["session-1"] == "第一段会被删除")
+
+        draftBySession["session-1"] = ""
+        coordinator.noteUserEditedDraft(sessionID: "session-1", draft: "")
+        transcriber.emitPartial("新的内容")
+
+        #expect(draftBySession["session-1"] == "新的内容")
+    }
+
     @Test func transcriberErrorPublishesFailedStatusAndTaskUpdate() {
         let transcriber = FakeSessionSpeechTranscriber()
         let coordinator = SessionSpeechTranscriptionCoordinator(transcriber: transcriber)
