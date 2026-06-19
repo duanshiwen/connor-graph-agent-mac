@@ -1105,12 +1105,12 @@ private struct SessionCardAttentionStyle {
     init(level: SessionAttentionLevel, isSelected: Bool) {
         if isSelected {
             let color = Self.attentionColor
-            dotColor = level == .none ? nil : color
-            backgroundColor = level == .none ? Color.accentColor.opacity(0.14) : color.opacity(0.16)
-            borderColor = level >= .actionable ? color.opacity(0.60) : Color.clear
-            borderWidth = level >= .actionable ? 1 : 0
-            leadingBarColor = level >= .actionable ? color : nil
-            leadingBarWidth = level >= .actionable ? 3 : 0
+            dotColor = level >= .emphasized ? .white.opacity(0.86) : (level == .none ? nil : color)
+            backgroundColor = level >= .emphasized ? color : Color.accentColor.opacity(0.14)
+            borderColor = level >= .emphasized ? Color.white.opacity(0.24) : Color.clear
+            borderWidth = level >= .emphasized ? 1 : 0
+            leadingBarColor = nil
+            leadingBarWidth = 0
             titleWeight = level == .none ? .semibold : .bold
             shadowColor = .clear
             shadowRadius = 0
@@ -1141,37 +1141,37 @@ private struct SessionCardAttentionStyle {
             shadowRadius = 0
         case .emphasized:
             let color = Self.attentionColor
-            dotColor = color
-            backgroundColor = color.opacity(0.075)
-            borderColor = color.opacity(0.22)
+            dotColor = .white.opacity(0.86)
+            backgroundColor = color
+            borderColor = Color.white.opacity(0.18)
             borderWidth = 1
-            leadingBarColor = color.opacity(0.75)
-            leadingBarWidth = 2
+            leadingBarColor = nil
+            leadingBarWidth = 0
             titleWeight = .semibold
-            shadowColor = .clear
-            shadowRadius = 0
+            shadowColor = color.opacity(0.16)
+            shadowRadius = 5
         case .actionable:
             let color = Self.attentionColor
-            dotColor = color
-            backgroundColor = color.opacity(0.10)
-            borderColor = color.opacity(0.45)
+            dotColor = .white.opacity(0.92)
+            backgroundColor = color
+            borderColor = Color.white.opacity(0.26)
             borderWidth = 1
-            leadingBarColor = color
-            leadingBarWidth = 3
+            leadingBarColor = nil
+            leadingBarWidth = 0
             titleWeight = .bold
-            shadowColor = color.opacity(0.08)
-            shadowRadius = 3
+            shadowColor = color.opacity(0.22)
+            shadowRadius = 7
         case .interruptive:
             let color = Self.attentionColor
-            dotColor = color
-            backgroundColor = color.opacity(0.13)
-            borderColor = color.opacity(0.60)
+            dotColor = .white
+            backgroundColor = color
+            borderColor = Color.white.opacity(0.34)
             borderWidth = 1.2
-            leadingBarColor = color
-            leadingBarWidth = 4
+            leadingBarColor = nil
+            leadingBarWidth = 0
             titleWeight = .bold
-            shadowColor = color.opacity(0.12)
-            shadowRadius = 4
+            shadowColor = color.opacity(0.28)
+            shadowRadius = 9
         }
     }
 
@@ -1290,21 +1290,12 @@ struct CraftSessionRow: View {
     }
 
     private var rowContent: some View {
-        HStack(spacing: 0) {
-            if let leadingBarColor = cardStyle.leadingBarColor {
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(leadingBarColor)
-                    .frame(width: cardStyle.leadingBarWidth)
-                    .padding(.vertical, 8)
-            }
-
-            HStack(alignment: .top, spacing: 10) {
-                attentionIndicator
-                leadingSessionIcon
-                sessionTextContent
-            }
-            .padding(10)
+        HStack(alignment: .top, spacing: 10) {
+            attentionIndicator
+            leadingSessionIcon
+            sessionTextContent
         }
+        .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(rowBackgroundColor, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(
@@ -1331,7 +1322,7 @@ struct CraftSessionRow: View {
                 .frame(width: 18, height: 18)
         } else {
             Image(systemName: row.isFlagged ? "pin.fill" : icon(for: row.status))
-                .foregroundStyle(row.isFlagged ? .orange : (isSelected ? .accentColor : .secondary))
+                .foregroundStyle(leadingIconColor)
                 .frame(width: 18)
         }
     }
@@ -1343,6 +1334,7 @@ struct CraftSessionRow: View {
                     TextField("会话标题", text: $titleDraft)
                         .textFieldStyle(.plain)
                         .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
+                        .foregroundStyle(primaryTextColor)
                         .focused($isTitleFocused)
                         .lineLimit(1)
                         .onSubmit { commitTitleEdit() }
@@ -1350,6 +1342,7 @@ struct CraftSessionRow: View {
                     Text(row.title)
                         .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
                         .fontWeight(cardStyle.titleWeight)
+                        .foregroundStyle(primaryTextColor)
                         .lineLimit(1)
                         .onTapGesture(count: 2) { beginTitleEdit() }
                 }
@@ -1360,12 +1353,13 @@ struct CraftSessionRow: View {
             HStack(spacing: 6) {
                 Text(row.statusText)
                     .font(AppListTypography.rowCaptionEmphasized)
+                    .foregroundStyle(statusPillForegroundColor)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(statusColor(row.status).opacity(0.14), in: Capsule())
+                    .background(statusPillBackgroundColor, in: Capsule())
                 Text("\(row.messageCount) 条消息")
                     .font(AppListTypography.rowCaption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(secondaryTextColor)
             }
 
             if !row.labels.isEmpty {
@@ -1373,9 +1367,10 @@ struct CraftSessionRow: View {
                     ForEach(Array(row.labels.prefix(3)), id: \.id) { label in
                         Text(label.id)
                             .font(AppListTypography.rowCaption)
+                            .foregroundStyle(labelForegroundColor)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(.purple.opacity(0.10), in: Capsule())
+                            .background(labelBackgroundColor, in: Capsule())
                     }
                 }
             }
@@ -1387,15 +1382,15 @@ struct CraftSessionRow: View {
         if isRunning {
             Text("运行中")
                 .font(AppListTypography.rowCaptionEmphasized)
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(activeMetaTextColor)
         } else if isRegeneratingTitle {
             Text("生成中")
                 .font(AppListTypography.rowCaptionEmphasized)
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(activeMetaTextColor)
         } else {
             Text(row.relativeUpdatedTime)
                 .font(AppListTypography.rowCaption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(secondaryTextColor)
         }
     }
 
@@ -1415,6 +1410,44 @@ struct CraftSessionRow: View {
             .frame(width: 10)
             .padding(.top, 5)
         }
+    }
+
+    private var usesFilledAttentionStyle: Bool {
+        attentionLevel >= .emphasized
+    }
+
+    private var primaryTextColor: Color {
+        usesFilledAttentionStyle ? .white : .primary
+    }
+
+    private var secondaryTextColor: Color {
+        usesFilledAttentionStyle ? .white.opacity(0.72) : .secondary
+    }
+
+    private var activeMetaTextColor: Color {
+        usesFilledAttentionStyle ? .white.opacity(0.86) : Color.accentColor
+    }
+
+    private var leadingIconColor: Color {
+        if row.isFlagged { return usesFilledAttentionStyle ? .white.opacity(0.88) : .orange }
+        if usesFilledAttentionStyle { return .white.opacity(0.78) }
+        return isSelected ? .accentColor : .secondary
+    }
+
+    private var statusPillForegroundColor: Color {
+        usesFilledAttentionStyle ? .white : statusColor(row.status)
+    }
+
+    private var statusPillBackgroundColor: Color {
+        usesFilledAttentionStyle ? Color.white.opacity(0.18) : statusColor(row.status).opacity(0.14)
+    }
+
+    private var labelForegroundColor: Color {
+        usesFilledAttentionStyle ? .white.opacity(0.86) : .primary
+    }
+
+    private var labelBackgroundColor: Color {
+        usesFilledAttentionStyle ? Color.white.opacity(0.14) : Color.purple.opacity(0.10)
     }
 
     private var attentionLevel: SessionAttentionLevel {
