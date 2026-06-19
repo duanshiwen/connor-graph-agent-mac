@@ -4,6 +4,19 @@ import Testing
 
 @Suite("Session Attention Domain")
 struct SessionAttentionDomainTests {
+    @Test("notification policy applies global minimum level")
+    func notificationPolicyAppliesGlobalMinimumLevel() {
+        let policy = SessionNotificationPolicy(
+            minimumLevel: .actionable,
+            levelsByMessageType: [.assistantReply: .unread, .taskFailed: .interruptive]
+        )
+
+        #expect(policy.configuredLevel(for: .assistantReply) == .unread)
+        #expect(policy.effectiveLevel(for: .assistantReply) == .actionable)
+        #expect(policy.effectiveLevel(for: .taskFailed) == .interruptive)
+        #expect(policy.effectiveLevel(for: .governanceChange) == .actionable)
+    }
+
     @Test("legacy agent session JSON decodes with default read state")
     func legacyAgentSessionJSONDecodesWithDefaultReadState() throws {
         let json = """
