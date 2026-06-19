@@ -475,6 +475,8 @@ final class AppViewModel: NSObject, ObservableObject {
     private var llmSettingsRepository: AppLLMSettingsRepository
     private var llmProviderHealthChecker: AppLLMProviderHealthChecker
     private var rssRuntime = RSSRuntime(repository: InMemoryRSSSourceRepository(), cache: InMemoryRSSSourceCache())
+    private var mailStore: FileBackedMailSourceStore?
+    private var mailCredentialStore = AppMailCredentialStore()
     private var agentRuntimeFactory: AppGraphAgentRuntimeFactory?
     private var hybridSearchService: (any GraphHybridSearchService)?
     private var backgroundJobRunner: AppGraphBackgroundJobRunner?
@@ -1309,6 +1311,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 repository: FileBackedRSSSourceRepository(storagePaths: storagePaths),
                 cache: FileBackedRSSSourceCache(storagePaths: storagePaths)
             )
+            self.mailStore = FileBackedMailSourceStore(storagePaths: storagePaths)
         }
         if let repository {
             self.promotionRepository = AppPromotionQueueRepository(store: repository.store)
@@ -1368,6 +1371,7 @@ final class AppViewModel: NSObject, ObservableObject {
         reloadSkillRuntimeDefinitions()
         reloadSidecarRuntimeDiagnostics()
         Task { await reloadRSSBrowserPresentation() }
+        Task { await reloadMailBrowserPresentation() }
         reloadChatSessions()
         loadBrowserHistory()
         reloadSchemaHealthReport()
@@ -1471,11 +1475,7 @@ final class AppViewModel: NSObject, ObservableObject {
         let displayName = rawDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? preset.title : rawDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
         let incoming = MailServerEndpoint(host: incomingHost, port: incomingPort, security: preset.incomingSecurity, protocolKind: .imap)
         let outgoing = MailServerEndpoint(host: outgoingHost, port: outgoingPort, security: preset.outgoingSecurity, protocolKind: .smtp)
-        let credentialBinding = MailCredentialBinding(
-            keychainService: "com.shiwen.connor.mail",
-            accountName: email,
-            authMode: preset.authMode
-        )
+        let credentialBinding = AppMailCredentialStore.binding(accountID: accountID, email: email, authMode: preset.authMode)
         let identity = MailIdentity(
             id: identityID,
             displayName: displayName,
@@ -1499,20 +1499,32 @@ final class AppViewModel: NSObject, ObservableObject {
             createdAt: now,
             updatedAt: now
         )
-        let mailboxes = Self.defaultMailboxes(accountID: accountID, now: now)
-        let existingAccounts = mailBrowserPresentation.accounts.filter { $0.id != accountID }
-        let existingMailboxes = mailBrowserPresentation.mailboxes.filter { $0.accountID != accountID }
-        let existingMessages = mailBrowserPresentation.messages.filter { $0.accountID != accountID }
-        mailBrowserPresentation = NativeMailBrowserPresentation(
-            accounts: (existingAccounts + [account]).sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending },
-            mailboxes: existingMailboxes + mailboxes,
-            messages: existingMessages
-        )
-        selectedMailAccountID = accountID
-        selectedMailMailboxID = mailboxes.first?.id
+        let defaultMailboxes = Self.defaultMailboxes(accountID: accountID, now: now)
+        try mailCredentialStore.saveCredential(credential, binding: credentialBinding)
+        try await mailStore?.saveAccount(account)
+        for mailbox in defaultMailboxes {
+            try await mailStore?.saveMailbox(mailbox)
+        }
+
+        let syncService = MailIMAPInitialSyncService(credentialStore: mailCredentialStore, messageLimit: 25)
+        let syncResult = try await syncService.sync(account: account)
+        try await mailStore?.saveAccount(syncResult.account)
+        let syncedMailboxIDs = Set(syncResult.mailboxes.map(\.id))
+        for mailbox in syncResult.mailboxes.isEmpty ? defaultMailboxes : syncResult.mailboxes {
+            try await mailStore?.saveMailbox(mailbox)
+        }
+        for message in syncResult.messages {
+            try await mailStore?.saveMessage(message)
+        }
+
+        await reloadMailBrowserPresentation(preferredAccountID: accountID, preferredMailboxID: syncedMailboxIDs.first ?? defaultMailboxes.first?.id)
         selectedMailMessageID = nil
         isPresentingAddMailAccountSheet = false
-        appSettingsMessage = "已添加邮件账户：\(displayName)，等待邮件同步。"
+        if syncResult.account.health.status == .ready {
+            appSettingsMessage = "已添加邮件账户：\(displayName)，首次同步完成，拉取 \(syncResult.messages.count) 封邮件。"
+        } else {
+            appSettingsMessage = "已添加邮件账户：\(displayName)，但首次同步未完成：\(syncResult.account.health.summary)。"
+        }
         errorMessage = nil
     }
 
@@ -1538,6 +1550,36 @@ final class AppViewModel: NSObject, ObservableObject {
             MailMailbox(id: MailMailboxID(rawValue: "\(base)-sent"), accountID: accountID, name: "已发送", path: "Sent", role: .sent, status: MailMailboxStatus(messageCount: 0, unreadCount: 0, syncCursor: MailSyncCursor(value: "initial", updatedAt: now), lastSyncedAt: now)),
             MailMailbox(id: MailMailboxID(rawValue: "\(base)-drafts"), accountID: accountID, name: "草稿", path: "Drafts", role: .drafts, status: MailMailboxStatus(messageCount: 0, unreadCount: 0, syncCursor: MailSyncCursor(value: "initial", updatedAt: now), lastSyncedAt: now))
         ]
+    }
+
+    func reloadMailBrowserPresentation(preferredAccountID: MailAccountID? = nil, preferredMailboxID: MailMailboxID? = nil) async {
+        do {
+            guard let mailStore else {
+                mailBrowserPresentation = .empty
+                return
+            }
+            let presentation = try await mailStore.presentation()
+            mailBrowserPresentation = presentation
+            let resolvedAccountID = preferredAccountID ?? selectedMailAccountID ?? presentation.defaultAccountID()
+            if let resolvedAccountID, presentation.accounts.contains(where: { $0.id == resolvedAccountID }) {
+                selectedMailAccountID = resolvedAccountID
+            } else {
+                selectedMailAccountID = presentation.defaultAccountID()
+            }
+            let resolvedMailboxID = preferredMailboxID ?? selectedMailMailboxID ?? presentation.defaultMailboxID(for: selectedMailAccountID)
+            if let resolvedMailboxID, presentation.mailboxes.contains(where: { $0.id == resolvedMailboxID }) {
+                selectedMailMailboxID = resolvedMailboxID
+            } else {
+                selectedMailMailboxID = presentation.defaultMailboxID(for: selectedMailAccountID)
+            }
+            if let selectedMailMessageID,
+               !presentation.messages.contains(where: { $0.id == selectedMailMessageID }) {
+                self.selectedMailMessageID = nil
+            }
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
     }
 
     func reloadRSSBrowserPresentation() async {
