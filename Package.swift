@@ -36,16 +36,28 @@ let package = Package(
                 "ConnorGraphSearch",
                 "ConnorGraphAgent"
             ],
-            linkerSettings: [.linkedFramework("Security")]
+            linkerSettings: [.linkedFramework("Security"), .linkedFramework("EventKit"), .linkedFramework("Contacts")]
         ),
         .executableTarget(
             name: "ConnorGraphAgentMac",
             dependencies: ["ConnorGraphAgent", "ConnorGraphStore", "ConnorGraphAppSupport"],
+            exclude: ["Info.plist"],
             resources: [
                 .process("Assets.xcassets"),
                 .process("zh-Hans.lproj")
             ],
-            linkerSettings: [.linkedFramework("WebKit"), .linkedFramework("CoreLocation")]
+            linkerSettings: [
+                .linkedFramework("WebKit"),
+                .linkedFramework("CoreLocation"),
+                .linkedFramework("EventKit"),
+                .linkedFramework("Contacts"),
+                .unsafeFlags([
+                    "-Xlinker", "-sectcreate",
+                    "-Xlinker", "__TEXT",
+                    "-Xlinker", "__info_plist",
+                    "-Xlinker", "Sources/ConnorGraphAgentMac/Info.plist"
+                ])
+            ]
         ),
         .executableTarget(
             name: "ConnorCLI",

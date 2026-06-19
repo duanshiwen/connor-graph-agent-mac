@@ -77,10 +77,68 @@ public struct ContactCommitDraftTool: AgentTool {
     }
 }
 
+public struct ContactsReadTool: AgentTool {
+    public let runtime: any AgentContactRuntime
+    public var name: String { "contacts_read" }
+    public var description: String { "Read governed contacts using operations: list_contacts, search_contacts, get_contact, resolve_contact. MVP supports search/list via the existing contact runtime." }
+    public var permission: AgentPermissionCapability { .readContacts }
+    public var inputSchema: AgentToolInputSchema {
+        .object(properties: [
+            "operation": .string(description: "list_contacts | search_contacts | get_contact | resolve_contact"),
+            "query": .string(description: "Contact query")
+        ], required: ["operation"])
+    }
+    public init(runtime: any AgentContactRuntime) { self.runtime = runtime }
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        let operation = arguments.string("operation") ?? "search_contacts"
+        switch operation {
+        case "list_contacts", "search_contacts", "resolve_contact":
+            let records = try await runtime.search(query: arguments.string("query") ?? "")
+            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(records.count) contacts", contentJSON: try MailJSON.encode(records))
+        case "get_contact":
+            let records = try await runtime.search(query: arguments.string("query") ?? "")
+            let record = records.first
+            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: record == nil ? "Contact not found" : "Loaded contact", contentJSON: try MailJSON.encode(record))
+        default:
+            throw AgentToolError.invalidArguments("Unsupported contacts_read operation: \(operation)")
+        }
+    }
+}
+
+public struct ContactsWriteTool: AgentTool {
+    public let runtime: any AgentContactRuntime
+    public var name: String { "contacts_write" }
+    public var description: String { "Write governed contacts using operations: create_contact, update_contact, delete_contact, merge_contacts. MVP supports approved create_contact." }
+    public var permission: AgentPermissionCapability { .mutateContacts }
+    public var inputSchema: AgentToolInputSchema {
+        .object(properties: [
+            "operation": .string(description: "create_contact | update_contact | delete_contact | merge_contacts"),
+            "email": .string(description: "Email"),
+            "name": .string(description: "Display name"),
+            "approved": .boolean(description: "Explicit approval")
+        ], required: ["operation", "approved"])
+    }
+    public init(runtime: any AgentContactRuntime) { self.runtime = runtime }
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        let operation = arguments.string("operation") ?? ""
+        guard operation == "create_contact" else { throw AgentToolError.invalidArguments("MVP contacts_write supports create_contact") }
+        guard let email = arguments.string("email") else { throw AgentToolError.invalidArguments("email is required") }
+        let record = ContactRecord(id: MailContactID(rawValue: email.lowercased()), givenName: arguments.string("name") ?? email, emails: [ContactEmailAddress(email: email)])
+        let draft = try await runtime.createDraft(record: record)
+        let committed = try await runtime.commitDraft(id: draft.id, approved: arguments.bool("approved") ?? false)
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Created approved contact \(committed.record.id.rawValue)", contentJSON: try MailJSON.encode(committed))
+    }
+}
+
 public extension AgentToolRegistry {
     mutating func registerNativeContactTools(runtime: any AgentContactRuntime) {
         register(ContactSearchTool(runtime: runtime))
         register(ContactCreateDraftTool(runtime: runtime))
         register(ContactCommitDraftTool(runtime: runtime))
+    }
+
+    mutating func registerNativeContactsAggregateTools(runtime: any AgentContactRuntime) {
+        register(ContactsReadTool(runtime: runtime))
+        register(ContactsWriteTool(runtime: runtime))
     }
 }
