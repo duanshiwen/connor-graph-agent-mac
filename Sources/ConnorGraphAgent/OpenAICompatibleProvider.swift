@@ -16,6 +16,7 @@ public struct OpenAICompatibleConfig: Sendable, Equatable {
     public var extraHeaders: [String: String]
     public var apiKeyHeaderKind: OpenAICompatibleAPIKeyHeaderKind
     public var reasoningEffort: String?
+    public var requestTimeout: TimeInterval
 
     public init(
         baseURL: URL,
@@ -25,12 +26,33 @@ public struct OpenAICompatibleConfig: Sendable, Equatable {
         apiKeyHeaderKind: OpenAICompatibleAPIKeyHeaderKind = .bearer,
         reasoningEffort: String? = nil
     ) {
+        self.init(
+            baseURL: baseURL,
+            apiKey: apiKey,
+            model: model,
+            extraHeaders: extraHeaders,
+            apiKeyHeaderKind: apiKeyHeaderKind,
+            reasoningEffort: reasoningEffort,
+            requestTimeout: 180
+        )
+    }
+
+    public init(
+        baseURL: URL,
+        apiKey: String,
+        model: String,
+        extraHeaders: [String: String] = [:],
+        apiKeyHeaderKind: OpenAICompatibleAPIKeyHeaderKind = .bearer,
+        reasoningEffort: String? = nil,
+        requestTimeout: TimeInterval
+    ) {
         self.baseURL = baseURL
         self.apiKey = apiKey
         self.model = model
         self.extraHeaders = extraHeaders
         self.apiKeyHeaderKind = apiKeyHeaderKind
         self.reasoningEffort = reasoningEffort
+        self.requestTimeout = requestTimeout
     }
 
     public var requestModel: String {
@@ -85,12 +107,14 @@ public struct AgentHTTPRequest: Sendable, Equatable {
     public var method: String
     public var headers: [String: String]
     public var body: Data
+    public var timeoutInterval: TimeInterval?
 
-    public init(url: URL, method: String, headers: [String: String], body: Data) {
+    public init(url: URL, method: String, headers: [String: String], body: Data, timeoutInterval: TimeInterval? = nil) {
         self.url = url
         self.method = method
         self.headers = headers
         self.body = body
+        self.timeoutInterval = timeoutInterval
     }
 }
 
@@ -112,7 +136,7 @@ public struct URLSessionAgentHTTPClient: AgentHTTPClient, Sendable, Equatable {
     public init() {}
 
     public mutating func send(_ request: AgentHTTPRequest) async throws -> AgentHTTPResponse {
-        var urlRequest = URLRequest(url: request.url)
+        var urlRequest = request.timeoutInterval.map { URLRequest(url: request.url, timeoutInterval: $0) } ?? URLRequest(url: request.url)
         urlRequest.httpMethod = request.method
         urlRequest.httpBody = request.body
         for (key, value) in request.headers {
@@ -198,7 +222,8 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, Ag
             url: endpoint,
             method: "POST",
             headers: requestHeaders(),
-            body: try encoder.encode(body)
+            body: try encoder.encode(body),
+            timeoutInterval: config.requestTimeout
         )
     }
 
@@ -257,7 +282,8 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, Ag
             url: endpoint,
             method: "POST",
             headers: requestHeaders(),
-            body: data
+            body: data,
+            timeoutInterval: config.requestTimeout
         )
     }
 
