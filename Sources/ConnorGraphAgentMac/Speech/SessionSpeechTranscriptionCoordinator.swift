@@ -20,26 +20,6 @@ enum SessionSpeechTranscriptionStopReason: Equatable, Sendable {
     case appLifecycle
 }
 
-enum SessionSpeechTranscriptionStatus: Equatable, Sendable {
-    case idle
-    case running(sessionID: String, taskID: String)
-    case failed(message: String)
-
-    var runningSessionID: String? {
-        guard case .running(let sessionID, _) = self else { return nil }
-        return sessionID
-    }
-
-    var runningTaskID: String? {
-        guard case .running(_, let taskID) = self else { return nil }
-        return taskID
-    }
-
-    var isRunning: Bool {
-        runningSessionID != nil
-    }
-}
-
 @MainActor
 final class SessionSpeechTranscriptionCoordinator {
     static let backgroundTaskKind = "speech_transcription"
