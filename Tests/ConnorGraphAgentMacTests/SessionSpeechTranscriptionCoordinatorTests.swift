@@ -112,6 +112,26 @@ struct SessionSpeechTranscriptionCoordinatorTests {
         #expect(draftBySession["session-1"] == "新的内容")
     }
 
+    @Test func userMiddleEditKeepsEditedSpeechRegionAndAppendsOnlyNewSuffix() {
+        var draftBySession: [String: String] = ["session-1": ""]
+        let transcriber = FakeSessionSpeechTranscriber()
+        let coordinator = SessionSpeechTranscriptionCoordinator(transcriber: transcriber)
+        _ = coordinator.toggle(
+            selectedSessionID: "session-1",
+            currentDraft: "",
+            setDraft: { sessionID, draft in draftBySession[sessionID] = draft }
+        )
+
+        transcriber.emitPartial("你现在是不是可以说中文了")
+        #expect(draftBySession["session-1"] == "你现在是不是可以说中文了")
+
+        draftBySession["session-1"] = "你现在可以说中文了"
+        coordinator.noteUserEditedDraft(sessionID: "session-1", draft: "你现在可以说中文了")
+        transcriber.emitPartial("你现在是不是可以说中文了 App 呢棒了太棒了")
+
+        #expect(draftBySession["session-1"] == "你现在可以说中文了 App 呢棒了太棒了")
+    }
+
     @Test func transcriberErrorPublishesFailedStatusAndTaskUpdate() {
         let transcriber = FakeSessionSpeechTranscriber()
         let coordinator = SessionSpeechTranscriptionCoordinator(transcriber: transcriber)

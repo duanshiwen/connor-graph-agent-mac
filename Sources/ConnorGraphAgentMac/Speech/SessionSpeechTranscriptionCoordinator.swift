@@ -34,6 +34,8 @@ final class SessionSpeechTranscriptionCoordinator {
     private var activeRunID: UUID?
     private var activeTask: AppSessionBackgroundTask?
     private var draftBaseText: String = ""
+    private var lastRecognizedText: String = ""
+    private var userEditedRecognizedText: String?
     private var lastGeneratedDraft: String = ""
     private var setDraft: ((String, String) -> Void)?
 
@@ -100,7 +102,22 @@ final class SessionSpeechTranscriptionCoordinator {
     func noteUserEditedDraft(sessionID: String?, draft: String) {
         guard let sessionID, status.runningSessionID == sessionID else { return }
         guard draft != lastGeneratedDraft else { return }
+
+        // Speech partial results are cumulative for the current recognition run.
+        // If the user edits text inside the generated speech region, keep the
+        // original pre-speech base so the next partial replaces the speech
+        // region instead of appending the full cumulative transcript again.
+        if !lastRecognizedText.isEmpty, draft.hasPrefix(generatedSpeechPrefix()) {
+            userEditedRecognizedText = String(draft.dropFirst(generatedSpeechPrefix().count))
+            lastGeneratedDraft = draft
+            return
+        }
+
+        // If the user edited outside the generated region, treat their current
+        // composer content as the new base for future dictated text.
         draftBaseText = draft
+        lastRecognizedText = ""
+        userEditedRecognizedText = nil
         lastGeneratedDraft = draft
     }
 
@@ -135,16 +152,41 @@ final class SessionSpeechTranscriptionCoordinator {
     private func applyPartial(_ partialText: String, sessionID: String, runID: UUID) {
         guard activeRunID == runID, status.runningSessionID == sessionID else { return }
         let trimmed = partialText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let nextDraft: String
-        if trimmed.isEmpty {
-            nextDraft = draftBaseText
-        } else if draftBaseText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            nextDraft = trimmed
-        } else {
-            nextDraft = draftBaseText + "\n\n" + trimmed
+        let displayText = displayTextForPartial(trimmed)
+        let nextDraft = renderDraft(withRecognizedText: displayText)
+        lastRecognizedText = trimmed
+        if userEditedRecognizedText != nil {
+            userEditedRecognizedText = displayText
         }
         lastGeneratedDraft = nextDraft
         setDraft?(sessionID, nextDraft)
+    }
+
+    private func displayTextForPartial(_ recognizedText: String) -> String {
+        guard let userEditedRecognizedText, recognizedText.hasPrefix(lastRecognizedText) else {
+            self.userEditedRecognizedText = nil
+            return recognizedText
+        }
+
+        let suffix = recognizedText.dropFirst(lastRecognizedText.count)
+        return userEditedRecognizedText + suffix
+    }
+
+    private func renderDraft(withRecognizedText recognizedText: String) -> String {
+        if recognizedText.isEmpty {
+            return draftBaseText
+        }
+        if draftBaseText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return recognizedText
+        }
+        return generatedSpeechPrefix() + recognizedText
+    }
+
+    private func generatedSpeechPrefix() -> String {
+        if draftBaseText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return ""
+        }
+        return draftBaseText + "\n\n"
     }
 
     private func fail(message: String, sessionID: String, runID: UUID) {
@@ -166,6 +208,8 @@ final class SessionSpeechTranscriptionCoordinator {
         activeRunID = nil
         activeTask = nil
         draftBaseText = ""
+        lastRecognizedText = ""
+        userEditedRecognizedText = nil
         lastGeneratedDraft = ""
         setDraft = nil
         status = .idle
