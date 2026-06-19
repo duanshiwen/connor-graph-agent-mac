@@ -20,8 +20,8 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
 
     func start(
         sessionID: String,
-        onPartial: @escaping (String) -> Void,
-        onError: @escaping (String) -> Void
+        onPartial: @escaping @MainActor @Sendable (String) -> Void,
+        onError: @escaping @MainActor @Sendable (String) -> Void
     ) {
         stop(reason: .appLifecycle)
         runningSessionID = sessionID
@@ -67,7 +67,7 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
         cleanup()
     }
 
-    private func requestMicrophoneAccessIfNeeded(completion: @escaping (Bool) -> Void) {
+    private func requestMicrophoneAccessIfNeeded(completion: @escaping @Sendable (Bool) -> Void) {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized:
             completion(true)
@@ -82,8 +82,8 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
 
     private func requestSpeechRecognitionAccessIfNeeded(
         sessionID: String,
-        onPartial: @escaping (String) -> Void,
-        onError: @escaping (String) -> Void
+        onPartial: @escaping @MainActor @Sendable (String) -> Void,
+        onError: @escaping @MainActor @Sendable (String) -> Void
     ) {
         let currentStatus = SFSpeechRecognizer.authorizationStatus()
         guard currentStatus == .notDetermined else {
@@ -101,8 +101,8 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
     private func handleSpeechAuthorizationStatus(
         _ authorizationStatus: SFSpeechRecognizerAuthorizationStatus,
         sessionID: String,
-        onPartial: @escaping (String) -> Void,
-        onError: @escaping (String) -> Void
+        onPartial: @escaping @MainActor @Sendable (String) -> Void,
+        onError: @escaping @MainActor @Sendable (String) -> Void
     ) {
         guard runningSessionID == sessionID else { return }
         guard authorizationStatus == .authorized else {
@@ -115,8 +115,8 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
 
     private func startAuthorizedRecognition(
         sessionID: String,
-        onPartial: @escaping (String) -> Void,
-        onError: @escaping (String) -> Void
+        onPartial: @escaping @MainActor @Sendable (String) -> Void,
+        onError: @escaping @MainActor @Sendable (String) -> Void
     ) {
         let recognizer: SFSpeechRecognizer?
         if let localeIdentifier {

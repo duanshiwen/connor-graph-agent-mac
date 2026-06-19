@@ -6,8 +6,8 @@ protocol SessionSpeechTranscribing: AnyObject {
 
     func start(
         sessionID: String,
-        onPartial: @escaping (String) -> Void,
-        onError: @escaping (String) -> Void
+        onPartial: @escaping @MainActor @Sendable (String) -> Void,
+        onError: @escaping @MainActor @Sendable (String) -> Void
     )
 
     func stop(reason: SessionSpeechTranscriptionStopReason)
@@ -45,7 +45,11 @@ final class SessionSpeechTranscriptionCoordinator {
     static let backgroundTaskKind = "speech_transcription"
 
     var transcriber: SessionSpeechTranscribing
-    private(set) var status: SessionSpeechTranscriptionStatus = .idle
+    var onStatusChange: ((SessionSpeechTranscriptionStatus) -> Void)?
+    var onTaskUpdate: ((AppSessionBackgroundTask) -> Void)?
+    private(set) var status: SessionSpeechTranscriptionStatus = .idle {
+        didSet { onStatusChange?(status) }
+    }
 
     private var activeRunID: UUID?
     private var activeTask: AppSessionBackgroundTask?
@@ -166,6 +170,9 @@ final class SessionSpeechTranscriptionCoordinator {
         activeTask = failedTask
         transcriber.stop(reason: .appLifecycle)
         status = .failed(message: message)
+        if let failedTask {
+            onTaskUpdate?(failedTask)
+        }
     }
 
     private func reset() {

@@ -91,18 +91,39 @@ struct SessionSpeechTranscriptionCoordinatorTests {
         #expect(draftBySession["session-1"] == "")
         #expect(draftBySession["session-2"] == "")
     }
+
+    @Test func transcriberErrorPublishesFailedStatusAndTaskUpdate() {
+        let transcriber = FakeSessionSpeechTranscriber()
+        let coordinator = SessionSpeechTranscriptionCoordinator(transcriber: transcriber)
+        var statuses: [SessionSpeechTranscriptionStatus] = []
+        var updatedTasks: [AppSessionBackgroundTask] = []
+        coordinator.onStatusChange = { statuses.append($0) }
+        coordinator.onTaskUpdate = { updatedTasks.append($0) }
+
+        _ = coordinator.toggle(
+            selectedSessionID: "session-1",
+            currentDraft: "",
+            setDraft: { _, _ in }
+        )
+        transcriber.emitError("麦克风不可用")
+
+        #expect(statuses.last == .failed(message: "麦克风不可用"))
+        #expect(updatedTasks.last?.status == .failed)
+        #expect(updatedTasks.last?.errorMessage == "麦克风不可用")
+        #expect(transcriber.stopReasons == [.appLifecycle])
+    }
 }
 
 private final class FakeSessionSpeechTranscriber: SessionSpeechTranscribing {
     private(set) var runningSessionID: String?
     private(set) var stopReasons: [SessionSpeechTranscriptionStopReason] = []
-    private var onPartial: ((String) -> Void)?
-    private var onError: ((String) -> Void)?
+    private var onPartial: (@MainActor @Sendable (String) -> Void)?
+    private var onError: (@MainActor @Sendable (String) -> Void)?
 
     func start(
         sessionID: String,
-        onPartial: @escaping (String) -> Void,
-        onError: @escaping (String) -> Void
+        onPartial: @escaping @MainActor @Sendable (String) -> Void,
+        onError: @escaping @MainActor @Sendable (String) -> Void
     ) {
         runningSessionID = sessionID
         self.onPartial = onPartial
@@ -116,5 +137,9 @@ private final class FakeSessionSpeechTranscriber: SessionSpeechTranscribing {
 
     func emitPartial(_ text: String) {
         onPartial?(text)
+    }
+
+    func emitError(_ message: String) {
+        onError?(message)
     }
 }

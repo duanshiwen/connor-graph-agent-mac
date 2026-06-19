@@ -543,9 +543,18 @@ final class AppViewModel: NSObject, ObservableObject {
     private var hasActivatedRuntimeSettingsSideEffects = false
     private var locationCoordinator: UserLocationCoordinator?
     private var taskSchedulerTimer: Timer?
-    private lazy var speechTranscriptionCoordinator = SessionSpeechTranscriptionCoordinator(
-        transcriber: SessionSpeechTranscriptionController()
-    )
+    private lazy var speechTranscriptionCoordinator: SessionSpeechTranscriptionCoordinator = {
+        let coordinator = SessionSpeechTranscriptionCoordinator(
+            transcriber: SessionSpeechTranscriptionController()
+        )
+        coordinator.onStatusChange = { [weak self] status in
+            self?.speechTranscriptionStatus = status
+        }
+        coordinator.onTaskUpdate = { [weak self] task in
+            self?.upsertSpeechTranscriptionBackgroundTask(task)
+        }
+        return coordinator
+    }()
 
     private var activeChatSession: AgentSession {
         nativeSessionManager?.session ?? fallbackChatSession
@@ -673,7 +682,11 @@ final class AppViewModel: NSObject, ObservableObject {
 
     private func setChatInputDraft(_ draft: String, for sessionID: String?) {
         isRestoringChatInputDraft = true
-        chatInput = sessionID.flatMap { chatInputDraftsBySessionID[$0] } ?? draft
+        if let sessionID {
+            chatInput = chatInputDraftsBySessionID[sessionID] ?? draft
+        } else {
+            chatInput = draft
+        }
         isRestoringChatInputDraft = false
     }
 
