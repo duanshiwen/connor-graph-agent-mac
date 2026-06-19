@@ -2,6 +2,11 @@ import Foundation
 import ConnorGraphAgent
 import ConnorGraphCore
 
+// LEGACY COMPATIBILITY SHIM:
+// The formal task lifecycle/control plane is TaskManagementStack. This engine
+// remains temporarily for legacy session automation call sites and should not be
+// extended as a standalone background-task architecture.
+
 public enum AutomationEngineError: Error, Sendable, Equatable, CustomStringConvertible {
     case rateLimited(String)
 

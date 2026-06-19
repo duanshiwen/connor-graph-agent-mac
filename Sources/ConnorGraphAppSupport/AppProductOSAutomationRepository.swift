@@ -1,6 +1,11 @@
 import Foundation
 import ConnorGraphCore
 
+// LEGACY COMPATIBILITY SHIM:
+// New task definitions, lifecycle state, and run history are owned by
+// AppTaskManagementRepository. This repository remains only to keep existing
+// ProductOS automation call sites compiling during migration.
+
 public enum AppProductOSAutomationError: Error, Equatable, CustomStringConvertible {
     case duplicateRuleID(String)
     case invalidID(String)
