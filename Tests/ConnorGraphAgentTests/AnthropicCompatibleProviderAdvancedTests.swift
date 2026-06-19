@@ -33,6 +33,61 @@ private struct FixtureSSEClient: AgentSSEHTTPClient {
     }
 }
 
+@Test func anthropicCompatibleConfigDefaultsRequestTimeoutTo180Seconds() throws {
+    let config = AnthropicCompatibleConfig(
+        baseURL: URL(string: "https://api.anthropic.com")!,
+        apiKey: "sk-ant-test",
+        model: "claude-sonnet-test"
+    )
+
+    #expect(config.requestTimeout == 180)
+}
+
+@Test func anthropicCompletionRequestUsesConfiguredTimeout() async throws {
+    let client = AdvancedAnthropicCapturingHTTPClient()
+    let provider = AnthropicCompatibleProvider(
+        config: AnthropicCompatibleConfig(
+            baseURL: URL(string: "https://api.anthropic.com")!,
+            apiKey: "sk-ant-test",
+            model: "claude-sonnet-test",
+            requestTimeout: 240
+        ),
+        httpClient: client
+    )
+
+    _ = try await provider.complete(AgentModelRequest(messages: [AgentModelMessage(role: .user, content: "Hello")]))
+
+    #expect(client.storage.capturedRequest?.timeoutInterval == 240)
+}
+
+@Test func anthropicStreamRequestUsesConfiguredTimeout() async throws {
+    let httpClient = AdvancedAnthropicCapturingHTTPClient()
+    let sseClient = FixtureSSEClient(frames: [
+        #"""
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":1,"output_tokens":1}}
+"""#,
+        #"""
+event: message_stop
+data: {"type":"message_stop"}
+"""#
+    ])
+    let provider = AnthropicCompatibleProvider(
+        config: AnthropicCompatibleConfig(
+            baseURL: URL(string: "https://api.anthropic.com")!,
+            apiKey: "sk-ant-test",
+            model: "claude-sonnet-test",
+            requestTimeout: 240
+        ),
+        httpClient: httpClient,
+        sseClient: sseClient
+    )
+
+    for try await _ in provider.streamComplete(AgentModelRequest(messages: [AgentModelMessage(role: .user, content: "Hi")])) {}
+
+    #expect(sseClient.storage.capturedRequest?.timeoutInterval == 240)
+}
+
 @Test func anthropicRequestIncludesManualThinkingConfig() async throws {
     let client = AdvancedAnthropicCapturingHTTPClient()
     let provider = AnthropicCompatibleProvider(
