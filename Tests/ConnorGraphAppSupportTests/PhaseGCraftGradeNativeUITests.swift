@@ -30,6 +30,8 @@ struct PhaseGCraftGradeNativeUITests {
             .openAutomation,
             .openLocalAutomationSurface,
             .openMailSources,
+            .openCalendarSources,
+            .openContactsSources,
             .openRSSSources,
             .checkCommercialReadiness,
             .openSettings
@@ -55,6 +57,8 @@ struct PhaseGCraftGradeNativeUITests {
         #expect(resolver.route(for: .settings).legacySidebarID == "llmSettings")
         #expect(resolver.route(for: .browserWorkspace).requiresBrowserVisible == true)
         #expect(resolver.route(for: .mail).legacySidebarID == "mail")
+        #expect(resolver.route(for: .calendar).legacySidebarID == "calendar")
+        #expect(resolver.route(for: .contacts).legacySidebarID == "contacts")
         #expect(resolver.route(for: .rss).legacySidebarID == "rss")
         #expect(resolver.route(for: .sources).legacySidebarID == "sources")
         #expect(resolver.route(for: .skills).legacySidebarID == "skills")

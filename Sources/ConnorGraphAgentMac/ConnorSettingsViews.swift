@@ -64,6 +64,8 @@ struct ConnorSettingsDetailView: View {
                         SettingsAISection(viewModel: viewModel)
                     case .mail:
                         SettingsMailSection(viewModel: viewModel)
+                    case .calendar:
+                        SettingsCalendarSection(viewModel: viewModel)
                     case .rss:
                         SettingsRSSSection(viewModel: viewModel)
                     case .permissions:
@@ -107,6 +109,126 @@ struct ConnorSettingsDetailView: View {
     }
 }
 
+struct SettingsCalendarSection: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceL) {
+            SettingsGroup(title: "日历能力") {
+                SettingsValueRow(title: "定位", value: "独立日历数据源")
+                SettingsValueRow(title: "已添加源", value: "\(viewModel.calendarAccounts.count) 个")
+                SettingsValueRow(title: "日历", value: "\(viewModel.calendarCollections.count) 个")
+                SettingsValueRow(title: "当前事件", value: "\(viewModel.calendarBrowserPresentation.eventCount) 个")
+                Text("Calendar 可以独立添加和管理，也可以作为 Connected Account capability 被发现；MVP 保持轻量，不复制完整日历客户端、月视图、周视图或复杂 recurrence 编辑器。")
+                    .font(SettingsListTypography.rowCaption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: SettingsListLayout.spaceS) {
+                    Button(action: { viewModel.syncSystemCalendar() }) {
+                        Label(viewModel.isSyncingSystemCalendar ? "同步中…" : "同步本机日历", systemImage: "arrow.triangle.2.circlepath")
+                            .font(SettingsListTypography.actionTitle)
+                            .padding(.horizontal, SettingsListLayout.spaceM)
+                            .padding(.vertical, SettingsListLayout.spaceXS)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(viewModel.isSyncingSystemCalendar)
+
+                    Button(action: { viewModel.isPresentingAddCalendarSourceSheet = true }) {
+                        Label("添加日历源", systemImage: "plus")
+                            .font(SettingsListTypography.actionTitle)
+                            .padding(.horizontal, SettingsListLayout.spaceM)
+                            .padding(.vertical, SettingsListLayout.spaceXS)
+                    }
+                    .buttonStyle(.bordered)
+                }
+                if let message = viewModel.calendarSyncMessage {
+                    Text(message)
+                        .font(SettingsListTypography.rowCaption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+
+            SettingsGroup(title: "已添加日历源") {
+                if viewModel.calendarAccounts.isEmpty {
+                    Text("暂无日历源。点击“添加日历源”开始。")
+                        .font(SettingsListTypography.rowCaption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    ForEach(viewModel.calendarAccounts) { account in
+                        CalendarSourceSettingsRow(
+                            account: account,
+                            calendarCount: viewModel.calendarCollections.filter { $0.accountID == account.id }.count,
+                            onDelete: { viewModel.deleteCalendarSource(account) }
+                        )
+                        if account.id != viewModel.calendarAccounts.last?.id {
+                            Divider().opacity(0.6)
+                        }
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $viewModel.isPresentingAddCalendarSourceSheet) {
+            AddCalendarSourceSheet(viewModel: viewModel)
+        }
+    }
+}
+
+private struct CalendarSourceSettingsRow: View {
+    var account: CalendarAccount
+    var calendarCount: Int
+    var onDelete: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: SettingsListLayout.spaceM) {
+            Image(systemName: iconName)
+                .font(SettingsListTypography.largeIcon)
+                .foregroundStyle(.orange)
+                .frame(width: 30)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(account.displayName)
+                    .font(SettingsListTypography.rowTitle)
+                Text("\(providerName) · \(calendarCount) 个日历 · \(account.health.summary)")
+                    .font(SettingsListTypography.rowSubtitle)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button(role: .destructive, action: onDelete) {
+                Label("删除", systemImage: "trash")
+                    .labelStyle(.iconOnly)
+            }
+            .buttonStyle(.borderless)
+            .help("删除日历源")
+            .accessibilityLabel("删除 \(account.displayName)")
+        }
+        .frame(minHeight: SettingsListLayout.prominentRowMinHeight)
+    }
+
+    private var providerName: String {
+        switch account.provider {
+        case .appleICloud: "Apple iCloud"
+        case .microsoft365: "Microsoft 365"
+        case .google: "Google"
+        case .qq: "QQ"
+        case .netEase: "网易"
+        case .genericIMAPSMTP: "自定义 IMAP/SMTP"
+        case .genericCalDAVCardDAV: "自定义 CalDAV / CardDAV"
+        case .localFixture: "本机日历"
+        }
+    }
+
+    private var iconName: String {
+        switch account.provider {
+        case .appleICloud: "icloud"
+        case .microsoft365: "m.circle"
+        case .google: "g.circle"
+        case .localFixture: "calendar"
+        default: "calendar"
+        }
+    }
+}
+
 struct SettingsAppSection: View {
     @ObservedObject var viewModel: AppViewModel
 
@@ -130,10 +252,59 @@ struct SettingsAppSection: View {
         Bundle.main.bundleIdentifier ?? "未知"
     }
 
+    private func notificationLevelBinding(for messageType: SessionAttentionMessageType) -> Binding<SessionAttentionLevel> {
+        Binding(
+            get: { viewModel.sessionNotificationLevel(for: messageType) },
+            set: { viewModel.setSessionNotificationLevel($0, for: messageType) }
+        )
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsGroup(title: "通知") {
-                SettingsToggleRow(title: "桌面通知", subtitle: "AI 在聊天中完成工作时发送通知。", isOn: $viewModel.desktopNotificationsEnabled)
+                SettingsToggleRow(title: "桌面通知", subtitle: "允许达到系统通知等级的会话消息发送 macOS 通知。", isOn: $viewModel.desktopNotificationsEnabled)
+                Divider()
+                SettingsPickerRow(
+                    title: "最低通知等级",
+                    subtitle: "所有消息最终至少使用这个等级。例如设为「系统通知」后,任何新消息都会系统提示并在聊天列表突出显示。",
+                    selection: $viewModel.sessionNotificationMinimumLevel
+                ) {
+                    ForEach(SessionAttentionLevel.allCases) { level in
+                        Text(level.displayName).tag(level)
+                    }
+                }
+                Divider()
+                VStack(alignment: .leading, spacing: SettingsListLayout.spaceS) {
+                    HStack(alignment: .top, spacing: SettingsListLayout.spaceM) {
+                        VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
+                            Text("消息类型策略")
+                                .font(SettingsListTypography.rowTitleSelected)
+                            Text("为不同来源/语义的消息设置默认通知等级；最终等级会再受上方最低等级约束。")
+                                .font(SettingsListTypography.rowCaption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: SettingsListLayout.spaceL)
+                        Button(action: viewModel.resetSessionNotificationPolicy) {
+                            Label("恢复默认策略", systemImage: "arrow.counterclockwise")
+                                .font(SettingsListTypography.rowCaptionEmphasized)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.regular)
+                        .frame(width: SettingsListLayout.pickerControlWidth, alignment: .trailing)
+                    }
+                    ForEach(SessionAttentionMessageType.allCases) { messageType in
+                        Divider()
+                        SettingsPickerRow(
+                            title: messageType.displayName,
+                            subtitle: "\(messageType.detail) 当前有效：\(viewModel.effectiveSessionNotificationLevel(for: messageType).displayName)",
+                            selection: notificationLevelBinding(for: messageType)
+                        ) {
+                            ForEach(SessionAttentionLevel.allCases) { level in
+                                Text(level.displayName).tag(level)
+                            }
+                        }
+                    }
+                }
             }
             SettingsGroup(title: "电源") {
                 SettingsToggleRow(title: "保持屏幕常亮", subtitle: "会话运行时防止屏幕关闭。", isOn: $viewModel.keepScreenAwake)
@@ -170,7 +341,7 @@ struct SettingsMailSection: View {
             providerPresets
         }
         .sheet(isPresented: $viewModel.isPresentingAddMailAccountSheet) {
-            AddMailAccountSheet()
+            AddMailAccountSheet(viewModel: viewModel)
         }
     }
 
@@ -259,7 +430,7 @@ private struct MailSettingsAccountRow: View {
     private var statusTitle: String {
         switch account.health.status {
         case .ready: "正常"
-        case .degraded: "降级"
+        case .degraded: "待同步"
         case .blocked: "阻止"
         case .unauthenticated: "未认证"
         case .unknown: "未知"
@@ -321,12 +492,33 @@ struct SettingsRSSSection: View {
         VStack(alignment: .leading, spacing: SettingsListLayout.spaceXL) {
             sourceConnections
             fetchPolicy
-            importExport
         }
         .sheet(isPresented: $viewModel.isPresentingAddRSSSourceSheet) {
             AddRSSSourceSheet { feedURL, displayName in
                 try await viewModel.addRSSSourceAndSync(feedURL: feedURL, displayName: displayName)
             }
+        }
+        .sheet(item: $viewModel.editingRSSSource) { source in
+            AddRSSSourceSheet(source: source) { feedURL, displayName in
+                try await viewModel.updateRSSSource(sourceID: source.id, feedURL: feedURL, displayName: displayName)
+            }
+        }
+        .confirmationDialog(
+            "删除 RSS 订阅源？",
+            isPresented: Binding(
+                get: { viewModel.pendingRSSSourceDeletion != nil },
+                set: { if !$0 { viewModel.pendingRSSSourceDeletion = nil } }
+            ),
+            presenting: viewModel.pendingRSSSourceDeletion
+        ) { source in
+            Button("删除订阅源", role: .destructive) {
+                viewModel.deleteRSSSource(source)
+            }
+            Button("取消", role: .cancel) {
+                viewModel.pendingRSSSourceDeletion = nil
+            }
+        } message: { source in
+            Text("将删除“\(source.displayName)”及其本地文章缓存。此操作会写入 RSS source management audit。")
         }
     }
 
@@ -343,7 +535,12 @@ struct SettingsRSSSection: View {
             if !presentation.sources.isEmpty {
                 VStack(spacing: 0) {
                     ForEach(presentation.sources) { source in
-                        RSSSettingsSourceRow(source: source, unreadCount: presentation.unreadCount(sourceID: source.id))
+                        RSSSettingsSourceRow(
+                            source: source,
+                            unreadCount: presentation.unreadCount(sourceID: source.id),
+                            onEdit: { viewModel.editingRSSSource = source },
+                            onDelete: { viewModel.pendingRSSSourceDeletion = source }
+                        )
                         if source.id != presentation.sources.last?.id { Divider().padding(.leading, 32) }
                     }
                 }
@@ -374,18 +571,13 @@ struct SettingsRSSSection: View {
         }
     }
 
-    private var importExport: some View {
-        SettingsGroup(title: "导入导出") {
-            SettingsValueRow(title: "OPML 导入", value: "通过 Native RSS Runtime 审批后导入")
-            Divider()
-            SettingsValueRow(title: "OPML 导出", value: "生成可审计 OPML 文本")
-        }
-    }
 }
 
 private struct RSSSettingsSourceRow: View {
     var source: RSSSource
     var unreadCount: Int
+    var onEdit: () -> Void
+    var onDelete: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: SettingsListLayout.spaceM) {
@@ -405,6 +597,23 @@ private struct RSSSettingsSourceRow: View {
             Text(unreadCount > 0 ? "\(unreadCount) 未读" : statusTitle)
                 .font(SettingsListTypography.rowCaptionEmphasized)
                 .foregroundStyle(statusColor)
+            HStack(spacing: SettingsListLayout.spaceXS) {
+                Button(action: onEdit) {
+                    Label("修改", systemImage: "pencil")
+                        .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.borderless)
+                .help("修改订阅源")
+                .accessibilityLabel("修改 \(source.displayName)")
+
+                Button(role: .destructive, action: onDelete) {
+                    Label("删除", systemImage: "trash")
+                        .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.borderless)
+                .help("删除订阅源")
+                .accessibilityLabel("删除 \(source.displayName)")
+            }
         }
         .frame(minHeight: SettingsListLayout.prominentRowMinHeight, alignment: .center)
     }

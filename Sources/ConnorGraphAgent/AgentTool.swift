@@ -105,12 +105,20 @@ public enum SendableJSONValue: Sendable, Equatable {
         switch any {
         case let value as String:
             self = .string(value)
+        case let value as NSNumber:
+            if CFGetTypeID(value) == CFBooleanGetTypeID() {
+                self = .bool(value.boolValue)
+            } else if value.doubleValue.rounded(.towardZero) == value.doubleValue {
+                self = .int(value.intValue)
+            } else {
+                self = .double(value.doubleValue)
+            }
+        case let value as Bool:
+            self = .bool(value)
         case let value as Int:
             self = .int(value)
         case let value as Double:
             self = .double(value)
-        case let value as Bool:
-            self = .bool(value)
         case let value as [String: Any]:
             self = .object(try value.mapValues { try SendableJSONValue(any: $0) })
         case let value as [Any]:

@@ -20,6 +20,10 @@ struct CraftListPaneView: View {
                 CraftSettingsListPane(viewModel: viewModel, selection: $selection)
             case .mail:
                 CraftMailListPane(viewModel: viewModel)
+            case .calendar:
+                CraftCalendarListPane(viewModel: viewModel)
+            case .contacts:
+                CraftContactsListPane(viewModel: viewModel)
             case .rss:
                 CraftRSSListPane(viewModel: viewModel)
             case .sources:
@@ -34,6 +38,248 @@ struct CraftListPaneView: View {
                 CraftSimpleListPane(title: (selection ?? .agentChat).rawValue, subtitle: "康纳同学工作区", rows: [])
             }
         }
+    }
+}
+
+struct CraftCalendarListPane: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Spacer(minLength: 24)
+                Text("日历")
+                    .font(AppListTypography.header)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                Button(action: { viewModel.isPresentingAddCalendarSourceSheet = true }) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .help("添加日历源")
+                .accessibilityLabel("添加日历源")
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
+
+            if viewModel.calendarBrowserPresentation.daySections.isEmpty {
+                ContentUnavailableView("暂无日程", systemImage: "calendar", description: Text("添加支持 Calendar capability 的账户后，日程会显示在这里。"))
+                    .padding(.top, 80)
+            } else {
+                CalendarSectionScrollView(
+                    sections: viewModel.calendarBrowserPresentation.daySections,
+                    selectedID: viewModel.selectedCalendarEventID,
+                    onSelect: { viewModel.selectedCalendarEventID = $0 }
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .sheet(isPresented: $viewModel.isPresentingAddCalendarSourceSheet) {
+            AddCalendarSourceSheet(viewModel: viewModel)
+        }
+    }
+}
+
+struct AddCalendarSourceSheet: View {
+    @ObservedObject var viewModel: AppViewModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var localMessage: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
+            HStack {
+                VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
+                    Text("添加日历源")
+                        .font(.system(size: 24, weight: .semibold))
+                    Text("当前接入 macOS Calendar / EventKit。你在系统日历中登录的 iCloud、Google、Exchange / Microsoft 365 日历都会一起同步。")
+                        .font(AgentChatTypography.meta)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Button(action: { dismiss() }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.cancelAction)
+            }
+
+            VStack(alignment: .leading, spacing: AppShellLayout.spaceM) {
+                Label("本机日历", systemImage: "calendar")
+                    .font(AgentChatTypography.title)
+                Text("点击同步后，系统会弹出日历权限请求。授权后，康纳同学会读取未来 90 天和过去 7 天的事件，并按天展示在日历列表。")
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("如果要同步 Google、Microsoft 365、Exchange 或 iCloud 日历，请先在 macOS 系统设置 / 日历 App 中添加对应账户；Connor 会通过 EventKit 读取系统已经聚合的日历。")
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("如果要在 Connor 中配置 CalDAV / CardDAV、自定义协议或其他服务商，请前往 设置 → 日历 管理日历源。")
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let message = localMessage ?? viewModel.calendarSyncMessage {
+                    Text(message)
+                        .font(AgentChatTypography.meta)
+                        .foregroundStyle(message.contains("失败") || message.contains("拒绝") || message.contains("未授权") ? .red : .secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(AppShellLayout.spaceL)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(nsColor: .textBackgroundColor).opacity(0.5), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(AppShellColors.hairline, lineWidth: 1))
+
+            Spacer()
+
+            HStack {
+                Button("前往日历设置") {
+                    viewModel.selectSettingsSection(.calendar)
+                    viewModel.isPresentingAddCalendarSourceSheet = false
+                }
+                Spacer()
+                Button("取消") { dismiss() }
+                    .disabled(viewModel.isSyncingSystemCalendar)
+                Button(viewModel.isSyncingSystemCalendar ? "同步中…" : "同步本机日历") {
+                    localMessage = "正在请求日历权限并同步…"
+                    Task { @MainActor in
+                        let succeeded = await viewModel.syncSystemCalendarNow()
+                        localMessage = viewModel.calendarSyncMessage
+                        if succeeded { dismiss() }
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(viewModel.isSyncingSystemCalendar)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(AppShellLayout.spaceXL)
+        .frame(width: 600, height: 420)
+    }
+}
+
+private struct CalendarSectionScrollView: View {
+    var sections: [NativeCalendarDaySectionPresentation]
+    var selectedID: CalendarEventID?
+    var onSelect: (CalendarEventID) -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(sections) { section in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(section.title)
+                            .font(AppListTypography.rowCaption)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 10)
+                        ForEach(section.events) { event in
+                            CalendarEventButton(row: event, isSelected: event.id == selectedID, onSelect: { onSelect(event.id) })
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 8)
+        }
+        .scrollContentBackground(.hidden)
+    }
+}
+
+private struct CalendarEventButton: View {
+    var row: NativeCalendarEventRowPresentation
+    var isSelected: Bool
+    var onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(alignment: .top, spacing: 8) {
+                Text(row.timeText)
+                    .font(AppListTypography.rowCaption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 92, alignment: .leading)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(row.title)
+                        .font(AppListTypography.rowTitle)
+                        .foregroundStyle(.primary)
+                    if let location = row.location, !location.isEmpty {
+                        Text(location)
+                            .font(AppListTypography.rowSubtitle)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(10)
+            .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct CraftContactsListPane: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Text("联系人")
+                .font(AppListTypography.header)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 13)
+
+            if viewModel.contactsBrowserPresentation.rows.isEmpty {
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ContactsRowsScrollView(rows: viewModel.contactsBrowserPresentation.rows, selectedID: viewModel.selectedContactID, onSelect: { viewModel.selectedContactID = $0 })
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+}
+
+private struct ContactsRowsScrollView: View {
+    var rows: [NativeContactRowPresentation]
+    var selectedID: MailContactID?
+    var onSelect: (MailContactID) -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 4) {
+                ForEach(rows) { row in
+                    ContactRowButton(row: row, isSelected: row.id == selectedID, onSelect: { onSelect(row.id) })
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 8)
+        }
+        .scrollContentBackground(.hidden)
+    }
+}
+
+private struct ContactRowButton: View {
+    var row: NativeContactRowPresentation
+    var isSelected: Bool
+    var onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(row.displayName)
+                    .font(AppListTypography.rowTitle)
+                    .foregroundStyle(.primary)
+                Text(row.primaryEmail ?? row.organizationName ?? "无邮箱")
+                    .font(AppListTypography.rowSubtitle)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+            .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -62,6 +308,7 @@ struct CraftSessionListPane: View {
                         ForEach(filteredSessions) { session in
                             CraftSessionRow(
                                 row: AgentChatSessionPresentation(session: session),
+                                readState: viewModel.sessionReadStates[session.id],
                                 isSelected: session.id == viewModel.selectedChatSessionID,
                                 isRunning: viewModel.isChatSessionSubmitting(session.id),
                                 isRegeneratingTitle: viewModel.regeneratingTitleSessionIDs.contains(session.id),
@@ -167,7 +414,7 @@ struct CraftMailListPane: View {
                 ContentUnavailableView("暂无邮件账户", systemImage: "envelope.badge", description: Text("点击右上角 + 添加邮件账户。"))
                     .padding(.top, 80)
             } else if presentation.messages.isEmpty {
-                ContentUnavailableView("暂无邮件", systemImage: "tray", description: Text("账户添加后，同步到的邮件会在这里按时间显示。"))
+                ContentUnavailableView("尚未同步邮件", systemImage: "tray", description: Text("账户已添加，但当前 Mail Runtime 尚未完成远端邮箱发现和邮件拉取。同步完成后邮件会按时间显示在这里。"))
                     .padding(.top, 80)
             } else if visibleMessages.isEmpty {
                 ContentUnavailableView("没有匹配的邮件", systemImage: "magnifyingglass", description: Text("筛选会匹配标题、正文摘要和发件人。"))
@@ -252,7 +499,7 @@ private enum RSSSourcePreset: String, CaseIterable, Identifiable {
         case .hackerNews:
             "适合发现技术趋势。进入 Graph Memory 前必须先生成 evidence candidate 并人工审查。"
         case .custom:
-            "输入自定义 feed URL。同步、状态变更、OPML 导入导出都经过 Connor Policy Engine 和 audit trail。"
+            "输入自定义 feed URL。同步和状态变更都经过 Connor Policy Engine 和 audit trail。"
         }
     }
 }
@@ -266,15 +513,24 @@ struct AddRSSSourceSheet: View {
         static let compactControlWidth: CGFloat = 180
     }
 
+    private let source: RSSSource?
     var onSave: (URL, String?) async throws -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var selectedPreset: RSSSourcePreset = .appleDeveloper
-    @State private var feedURLString: String = RSSSourcePreset.appleDeveloper.feedURLString
-    @State private var displayName: String = ""
+    @State private var selectedPreset: RSSSourcePreset
+    @State private var feedURLString: String
+    @State private var displayName: String
     @State private var intervalMinutes: Int = 30
     @State private var isSaving = false
     @State private var saveMessage: String?
+
+    init(source: RSSSource? = nil, onSave: @escaping (URL, String?) async throws -> Void) {
+        self.source = source
+        self.onSave = onSave
+        self._selectedPreset = State(initialValue: source == nil ? .appleDeveloper : .custom)
+        self._feedURLString = State(initialValue: source?.feedURL.absoluteString ?? RSSSourcePreset.appleDeveloper.feedURLString)
+        self._displayName = State(initialValue: source?.displayName ?? "")
+    }
 
     private var trimmedFeedURLString: String {
         feedURLString.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -289,6 +545,7 @@ struct AddRSSSourceSheet: View {
     }
 
     private var saveDisabled: Bool { feedURL == nil || isSaving }
+    private var isEditing: Bool { source != nil }
 
     private var normalizedDisplayName: String? {
         let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -347,7 +604,7 @@ struct AddRSSSourceSheet: View {
                             .labelsHidden()
                             .frame(width: Layout.compactControlWidth, alignment: .leading)
                         }
-                        RSSSetupHint("首次添加后会立刻抓取一次。阅读时默认使用 Connor 阅读器；原网页/外部浏览器属于后续文章操作，不在添加订阅源时选择。")
+                        RSSSetupHint(isEditing ? "保存后会保留源 ID 和治理记录；如果修改 Feed URL，会清理旧文章缓存并等待下次同步。" : "首次添加后会立刻抓取一次。阅读时默认使用 Connor 阅读器；原网页/外部浏览器属于后续文章操作，不在添加订阅源时选择。")
                     }
 
                     RSSHintCard(title: selectedPreset.subtitle, guidance: selectedPreset.guidance)
@@ -381,9 +638,9 @@ struct AddRSSSourceSheet: View {
             .frame(width: 46, height: 46)
 
             VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
-                Text("添加 RSS 订阅源")
+                Text(isEditing ? "修改 RSS 订阅源" : "添加 RSS 订阅源")
                     .font(.system(size: 26, weight: .semibold))
-                Text("支持 RSS 2.0、Atom 与 JSON Feed。订阅、同步和状态变更继续由 Native RSS Runtime 与 Policy Engine 托管。")
+                Text(isEditing ? "更新显示名称或 Feed URL。源注册、缓存清理和审计继续由 Native RSS Runtime 托管。" : "支持 RSS 2.0、Atom 与 JSON Feed。订阅、同步和状态变更继续由 Native RSS Runtime 与 Policy Engine 托管。")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -415,7 +672,7 @@ struct AddRSSSourceSheet: View {
                     ProgressView()
                         .controlSize(.small)
                 } else {
-                    Text("添加并抓取")
+                    Text(isEditing ? "保存修改" : "添加并抓取")
                 }
             }
             .buttonStyle(.borderedProminent)
@@ -873,6 +1130,10 @@ struct CraftDetailPaneView: View {
                 ProductOSRegistryView(viewModel: viewModel)
             case .mail:
                 MailSourceSettingsView(viewModel: viewModel)
+            case .calendar:
+                CalendarSourceSettingsView(viewModel: viewModel)
+            case .contacts:
+                ContactsSourceSettingsView(viewModel: viewModel)
             case .rss:
                 RSSSourceSettingsView(viewModel: viewModel)
             case .sources:
@@ -886,6 +1147,95 @@ struct CraftDetailPaneView: View {
     }
 }
 
+
+struct CalendarSourceSettingsView: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        Group {
+            if let selected = selectedEventRow {
+                VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
+                    CalendarContactsDetailHeader(title: "日历", subtitle: "轻量日程数据源：列表、详情和 AI 工具管理，不做完整日历客户端。")
+                    Divider().opacity(0.6)
+                    VStack(alignment: .leading, spacing: AppShellLayout.spaceM) {
+                        Label(selected.title, systemImage: "calendar.badge.clock")
+                            .font(AgentChatTypography.title)
+                        Text(selected.timeText)
+                            .font(AgentChatTypography.meta)
+                            .foregroundStyle(.secondary)
+                        if let location = selected.location {
+                            Text(location).font(AgentChatTypography.meta)
+                        }
+                    }
+                    .padding(AppShellLayout.spaceXL)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else {
+                Color.clear
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(AppShellColors.detailBackground)
+    }
+
+    private var selectedEventRow: NativeCalendarEventRowPresentation? {
+        guard let id = viewModel.selectedCalendarEventID else { return nil }
+        return viewModel.calendarBrowserPresentation.daySections.flatMap(\.events).first { $0.id == id }
+    }
+}
+
+struct ContactsSourceSettingsView: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        Group {
+            if let selected = selectedContactRow {
+                VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
+                    CalendarContactsDetailHeader(title: "联系人", subtitle: "轻量联系人数据源：列表和详情，不做 CRM。")
+                    Divider().opacity(0.6)
+                    VStack(alignment: .leading, spacing: AppShellLayout.spaceM) {
+                        Label(selected.displayName, systemImage: "person.crop.circle")
+                            .font(AgentChatTypography.title)
+                        if let email = selected.primaryEmail {
+                            Text(email).font(AgentChatTypography.meta).textSelection(.enabled)
+                        }
+                        if let organization = selected.organizationName {
+                            Text(organization).font(AgentChatTypography.meta).foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(AppShellLayout.spaceXL)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else {
+                Color.clear
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(AppShellColors.detailBackground)
+    }
+
+    private var selectedContactRow: NativeContactRowPresentation? {
+        guard let id = viewModel.selectedContactID else { return nil }
+        return viewModel.contactsBrowserPresentation.rows.first { $0.id == id }
+    }
+}
+
+private struct CalendarContactsDetailHeader: View {
+    var title: String
+    var subtitle: String
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
+                Text(title).font(.system(size: 24, weight: .semibold))
+                Text(subtitle).font(AgentChatTypography.meta).foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, AppShellLayout.spaceXL)
+        .padding(.vertical, AppShellLayout.spaceL)
+    }
+}
 
 struct RSSSourceSettingsView: View {
     @ObservedObject var viewModel: AppViewModel
@@ -1080,8 +1430,96 @@ private struct RSSStatusPill: View {
 }
 
 
+private struct SessionCardAttentionStyle {
+    var dotColor: Color?
+    var backgroundColor: Color
+    var borderColor: Color
+    var borderWidth: CGFloat
+    var leadingBarColor: Color?
+    var leadingBarWidth: CGFloat
+    var titleWeight: Font.Weight
+    var shadowColor: Color
+    var shadowRadius: CGFloat
+
+    init(level: SessionAttentionLevel, isSelected: Bool) {
+        if isSelected {
+            let color = Self.attentionColor
+            dotColor = level >= .emphasized ? .white.opacity(0.86) : (level == .none ? nil : color)
+            backgroundColor = level >= .emphasized ? color : Color.accentColor.opacity(0.14)
+            borderColor = level >= .emphasized ? Color.white.opacity(0.24) : Color.clear
+            borderWidth = level >= .emphasized ? 1 : 0
+            leadingBarColor = nil
+            leadingBarWidth = 0
+            titleWeight = level == .none ? .semibold : .bold
+            shadowColor = .clear
+            shadowRadius = 0
+            return
+        }
+
+        switch level {
+        case .none:
+            dotColor = nil
+            backgroundColor = Color(nsColor: .windowBackgroundColor)
+            borderColor = Color.clear
+            borderWidth = 0
+            leadingBarColor = nil
+            leadingBarWidth = 0
+            titleWeight = .regular
+            shadowColor = .clear
+            shadowRadius = 0
+        case .unread:
+            let color = Self.attentionColor
+            dotColor = color
+            backgroundColor = color.opacity(0.045)
+            borderColor = Color.clear
+            borderWidth = 0
+            leadingBarColor = nil
+            leadingBarWidth = 0
+            titleWeight = .semibold
+            shadowColor = .clear
+            shadowRadius = 0
+        case .emphasized:
+            let color = Self.attentionColor
+            dotColor = .white.opacity(0.86)
+            backgroundColor = color
+            borderColor = Color.white.opacity(0.18)
+            borderWidth = 1
+            leadingBarColor = nil
+            leadingBarWidth = 0
+            titleWeight = .semibold
+            shadowColor = color.opacity(0.16)
+            shadowRadius = 5
+        case .actionable:
+            let color = Self.attentionColor
+            dotColor = .white.opacity(0.92)
+            backgroundColor = color
+            borderColor = Color.white.opacity(0.26)
+            borderWidth = 1
+            leadingBarColor = nil
+            leadingBarWidth = 0
+            titleWeight = .bold
+            shadowColor = color.opacity(0.22)
+            shadowRadius = 7
+        case .interruptive:
+            let color = Self.attentionColor
+            dotColor = .white
+            backgroundColor = color
+            borderColor = Color.white.opacity(0.34)
+            borderWidth = 1.2
+            leadingBarColor = nil
+            leadingBarWidth = 0
+            titleWeight = .bold
+            shadowColor = color.opacity(0.28)
+            shadowRadius = 9
+        }
+    }
+
+    private static var attentionColor: Color { ConnorCraftPalette.accent }
+}
+
 struct CraftSessionRow: View {
     var row: AgentChatSessionPresentation
+    var readState: SessionReadState?
     var isSelected: Bool
     var isRunning: Bool
     var isRegeneratingTitle: Bool
@@ -1192,71 +1630,18 @@ struct CraftSessionRow: View {
 
     private var rowContent: some View {
         HStack(alignment: .top, spacing: 10) {
-            if isRunning || isRegeneratingTitle {
-                ProgressView()
-                    .controlSize(.small)
-                    .frame(width: 18, height: 18)
-            } else {
-                Image(systemName: row.isFlagged ? "pin.fill" : icon(for: row.status))
-                    .foregroundStyle(row.isFlagged ? .orange : (isSelected ? .accentColor : .secondary))
-                    .frame(width: 18)
-            }
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    if isEditingTitle {
-                        TextField("会话标题", text: $titleDraft)
-                            .textFieldStyle(.plain)
-                            .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
-                            .focused($isTitleFocused)
-                            .lineLimit(1)
-                            .onSubmit { commitTitleEdit() }
-                    } else {
-                        Text(row.title)
-                            .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
-                            .lineLimit(1)
-                            .onTapGesture(count: 2) { beginTitleEdit() }
-                    }
-                    Spacer(minLength: 4)
-                    if isRunning {
-                        Text("运行中")
-                            .font(AppListTypography.rowCaptionEmphasized)
-                            .foregroundStyle(Color.accentColor)
-                    } else if isRegeneratingTitle {
-                        Text("生成中")
-                            .font(AppListTypography.rowCaptionEmphasized)
-                            .foregroundStyle(Color.accentColor)
-                    } else {
-                        Text(row.relativeUpdatedTime)
-                            .font(AppListTypography.rowCaption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                HStack(spacing: 6) {
-                    Text(row.statusText)
-                        .font(AppListTypography.rowCaptionEmphasized)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(statusColor(row.status).opacity(0.14), in: Capsule())
-                    Text("\(row.messageCount) 条消息")
-                        .font(AppListTypography.rowCaption)
-                        .foregroundStyle(.secondary)
-                }
-                if !row.labels.isEmpty {
-                    HStack(spacing: 4) {
-                        ForEach(Array(row.labels.prefix(3)), id: \.id) { label in
-                            Text(label.id)
-                                .font(AppListTypography.rowCaption)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(.purple.opacity(0.10), in: Capsule())
-                        }
-                    }
-                }
-            }
+            attentionIndicator
+            leadingSessionIcon
+            sessionTextContent
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(rowBackgroundColor, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(cardStyle.borderColor, lineWidth: cardStyle.borderWidth)
+        )
+        .shadow(color: cardStyle.shadowColor, radius: cardStyle.shadowRadius, x: 0, y: 1)
         .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .onTapGesture {
             if !isEditingTitle { onSelect() }
@@ -1268,8 +1653,157 @@ struct CraftSessionRow: View {
         .accessibilityAddTraits(.isButton)
     }
 
+    @ViewBuilder
+    private var leadingSessionIcon: some View {
+        if isRunning || isRegeneratingTitle {
+            ProgressView()
+                .controlSize(.small)
+                .frame(width: 18, height: 18)
+        } else {
+            Image(systemName: row.isFlagged ? "pin.fill" : icon(for: row.status))
+                .foregroundStyle(leadingIconColor)
+                .frame(width: 18)
+        }
+    }
+
+    private var sessionTextContent: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                if isEditingTitle {
+                    TextField("会话标题", text: $titleDraft)
+                        .textFieldStyle(.plain)
+                        .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
+                        .foregroundStyle(primaryTextColor)
+                        .focused($isTitleFocused)
+                        .lineLimit(1)
+                        .onSubmit { commitTitleEdit() }
+                } else {
+                    Text(row.title)
+                        .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
+                        .fontWeight(cardStyle.titleWeight)
+                        .foregroundStyle(primaryTextColor)
+                        .lineLimit(1)
+                        .onTapGesture(count: 2) { beginTitleEdit() }
+                }
+                Spacer(minLength: 4)
+                trailingSessionStatusText
+            }
+
+            HStack(spacing: 6) {
+                Text(row.statusText)
+                    .font(AppListTypography.rowCaptionEmphasized)
+                    .foregroundStyle(statusPillForegroundColor)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(statusPillBackgroundColor, in: Capsule())
+                Text("\(row.messageCount) 条消息")
+                    .font(AppListTypography.rowCaption)
+                    .foregroundStyle(secondaryTextColor)
+            }
+
+            if !row.labels.isEmpty {
+                HStack(spacing: 4) {
+                    ForEach(Array(row.labels.prefix(3)), id: \.id) { label in
+                        Text(label.id)
+                            .font(AppListTypography.rowCaption)
+                            .foregroundStyle(labelForegroundColor)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(labelBackgroundColor, in: Capsule())
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var trailingSessionStatusText: some View {
+        if isRunning {
+            Text("运行中")
+                .font(AppListTypography.rowCaptionEmphasized)
+                .foregroundStyle(activeMetaTextColor)
+        } else if isRegeneratingTitle {
+            Text("生成中")
+                .font(AppListTypography.rowCaptionEmphasized)
+                .foregroundStyle(activeMetaTextColor)
+        } else {
+            Text(row.relativeUpdatedTime)
+                .font(AppListTypography.rowCaption)
+                .foregroundStyle(secondaryTextColor)
+        }
+    }
+
+    @ViewBuilder
+    private var attentionIndicator: some View {
+        if let dotColor = cardStyle.dotColor {
+            VStack(spacing: 4) {
+                Circle()
+                    .fill(dotColor)
+                    .frame(width: 8, height: 8)
+                Text("NEW")
+                    .font(.system(size: 8, weight: .black, design: .rounded))
+                    .foregroundStyle(Color.yellow)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(Color.red, in: Capsule())
+                    .overlay(
+                        Capsule()
+                            .stroke(Color.yellow, lineWidth: 1)
+                    )
+            }
+            .frame(width: 34)
+            .padding(.top, 5)
+        }
+    }
+
+    private var usesFilledAttentionStyle: Bool {
+        attentionLevel >= .emphasized
+    }
+
+    private var primaryTextColor: Color {
+        usesFilledAttentionStyle ? .white : .primary
+    }
+
+    private var secondaryTextColor: Color {
+        usesFilledAttentionStyle ? .white.opacity(0.72) : .secondary
+    }
+
+    private var activeMetaTextColor: Color {
+        usesFilledAttentionStyle ? .white.opacity(0.86) : Color.accentColor
+    }
+
+    private var leadingIconColor: Color {
+        if row.isFlagged { return usesFilledAttentionStyle ? .white.opacity(0.88) : .orange }
+        if usesFilledAttentionStyle { return .white.opacity(0.78) }
+        return isSelected ? .accentColor : .secondary
+    }
+
+    private var statusPillForegroundColor: Color {
+        usesFilledAttentionStyle ? .white : statusColor(row.status)
+    }
+
+    private var statusPillBackgroundColor: Color {
+        usesFilledAttentionStyle ? Color.white.opacity(0.18) : statusColor(row.status).opacity(0.14)
+    }
+
+    private var labelForegroundColor: Color {
+        usesFilledAttentionStyle ? .white.opacity(0.86) : .primary
+    }
+
+    private var labelBackgroundColor: Color {
+        usesFilledAttentionStyle ? Color.white.opacity(0.14) : Color.purple.opacity(0.10)
+    }
+
+    private var attentionLevel: SessionAttentionLevel {
+        readState?.highestLevel ?? .none
+    }
+
+    private var cardStyle: SessionCardAttentionStyle {
+        SessionCardAttentionStyle(level: attentionLevel, isSelected: isSelected)
+    }
+
     private var rowBackgroundColor: Color {
-        isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor)
+        cardStyle.backgroundColor
     }
 
 
