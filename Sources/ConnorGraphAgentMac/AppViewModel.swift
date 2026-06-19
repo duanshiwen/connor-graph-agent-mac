@@ -357,6 +357,7 @@ final class AppViewModel: NSObject, ObservableObject {
         summary: TaskManagementUISummary(totalTaskCount: 0, scheduledTaskCount: 0, eventTriggeredTaskCount: 0, systemTaskCount: 0, userTaskCount: 0, aiTaskCount: 0, stoppedTaskCount: 0, failedTaskCount: 0),
         cards: []
     )
+    @Published var selectedTaskAutomationID: String?
     @Published var isRunningScheduledTasks: Bool = false
     @Published var sourceRuntimeConfigurations: [MCPSourceRuntimeConfiguration] = []
     @Published var sourceRuntimeHealthRecords: [MCPSourceRuntimeHealthRecord] = []
@@ -1447,6 +1448,10 @@ final class AppViewModel: NSObject, ObservableObject {
             let tasks = try taskManagementRepository.loadOrCreateDefault()
             let history = try taskManagementRepository.loadRunHistory(taskID: nil, limit: 100)
             taskManagementPresentation = TaskManagementUIPresentation.build(tasks: tasks, runHistory: history)
+            if let selectedTaskAutomationID,
+               !taskManagementPresentation.cards.contains(where: { $0.id == selectedTaskAutomationID }) {
+                self.selectedTaskAutomationID = nil
+            }
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
