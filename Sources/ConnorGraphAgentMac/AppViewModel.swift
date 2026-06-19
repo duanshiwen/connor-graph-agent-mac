@@ -17,6 +17,23 @@ struct AgentChatToast: Identifiable, Equatable {
     var systemImage: String
 }
 
+enum AppMailAccountSetupError: LocalizedError {
+    case invalidEmail
+    case missingCredential
+    case missingServerConfiguration
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidEmail:
+            return "请输入有效的邮箱地址。"
+        case .missingCredential:
+            return "请输入授权凭据或 App Password。"
+        case .missingServerConfiguration:
+            return "请填写完整的收件/发件服务器配置。"
+        }
+    }
+}
+
 enum AppSessionBackgroundTaskStatus: String, Codable, Equatable, Sendable {
     case queued
     case running
@@ -325,6 +342,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var chatSessions: [AgentSession] = []
     @Published var allChatSessions: [AgentSession] = []
     @Published var selectedChatSessionID: String?
+    @Published private(set) var sessionReadStates: [String: SessionReadState] = [:]
     @Published var regeneratingTitleSessionIDs: Set<String> = []
     @Published var backgroundTasksBySessionID: [String: [AppSessionBackgroundTask]] = [:]
     @Published var isBackgroundTasksPresented: Bool = false
@@ -403,6 +421,8 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var filteredBrowserHistoryRecords: [BrowserHistoryRecord] = []
     @Published var selectedSettingsSection: ConnorSettingsSection = .app
     @Published var desktopNotificationsEnabled: Bool = true
+    @Published var sessionNotificationMinimumLevel: SessionAttentionLevel = .unread
+    @Published var sessionNotificationLevelsByMessageType: [SessionAttentionMessageType: SessionAttentionLevel] = [:]
     @Published var keepScreenAwake: Bool = false
     @Published var internalBrowserEnabled: Bool = true
     @Published var httpProxyEnabled: Bool = false
@@ -455,6 +475,8 @@ final class AppViewModel: NSObject, ObservableObject {
     private var llmSettingsRepository: AppLLMSettingsRepository
     private var llmProviderHealthChecker: AppLLMProviderHealthChecker
     private var rssRuntime = RSSRuntime(repository: InMemoryRSSSourceRepository(), cache: InMemoryRSSSourceCache())
+    private var mailStore: FileBackedMailSourceStore?
+    private var mailCredentialStore = AppMailCredentialStore()
     private var agentRuntimeFactory: AppGraphAgentRuntimeFactory?
     private var hybridSearchService: (any GraphHybridSearchService)?
     private var backgroundJobRunner: AppGraphBackgroundJobRunner?
@@ -478,6 +500,8 @@ final class AppViewModel: NSObject, ObservableObject {
     private var chatSessionWorkspaceModes = ChatSessionWorkspaceModeStore()
     private var isLoadingRuntimeSettings = false
     private var runtimeSettingsAutosaveTask: Task<Void, Never>?
+    private var lastSessionNotificationAt: [String: Date] = [:]
+    private let sameSessionNotificationCooldown: TimeInterval = 300
     private var idleSleepAssertionID: IOPMAssertionID = 0
     private var hasActivatedRuntimeSettingsSideEffects = false
     private var locationCoordinator: UserLocationCoordinator?
@@ -493,6 +517,11 @@ final class AppViewModel: NSObject, ObservableObject {
     var runtimeSettingsAutosaveSignature: String {
         [
             desktopNotificationsEnabled.description,
+            sessionNotificationMinimumLevel.rawValue.description,
+            sessionNotificationLevelsByMessageType
+                .sorted { $0.key.rawValue < $1.key.rawValue }
+                .map { "\($0.key.rawValue)=\($0.value.rawValue)" }
+                .joined(separator: ","),
             keepScreenAwake.description,
             httpProxyEnabled.description,
             httpProxyURLString,
@@ -1282,6 +1311,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 repository: FileBackedRSSSourceRepository(storagePaths: storagePaths),
                 cache: FileBackedRSSSourceCache(storagePaths: storagePaths)
             )
+            self.mailStore = FileBackedMailSourceStore(storagePaths: storagePaths)
         }
         if let repository {
             self.promotionRepository = AppPromotionQueueRepository(store: repository.store)
@@ -1341,6 +1371,7 @@ final class AppViewModel: NSObject, ObservableObject {
         reloadSkillRuntimeDefinitions()
         reloadSidecarRuntimeDiagnostics()
         Task { await reloadRSSBrowserPresentation() }
+        Task { await reloadMailBrowserPresentation() }
         reloadChatSessions()
         loadBrowserHistory()
         reloadSchemaHealthReport()
@@ -1411,6 +1442,140 @@ final class AppViewModel: NSObject, ObservableObject {
     func reloadAutomationExecutionHistory() {
         do {
             automationExecutionHistory = try automationRepository?.loadRecentExecutionHistory() ?? []
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func addMailAccountAndPrepareSync(
+        preset: MailAccountProviderPreset,
+        displayName rawDisplayName: String,
+        email rawEmail: String,
+        credential rawCredential: String,
+        incomingHost rawIncomingHost: String,
+        incomingPort: Int,
+        outgoingHost rawOutgoingHost: String,
+        outgoingPort: Int
+    ) async throws {
+        let email = rawEmail.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let credential = rawCredential.trimmingCharacters(in: .whitespacesAndNewlines)
+        let incomingHost = rawIncomingHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        let outgoingHost = rawOutgoingHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard email.contains("@"), email.contains(".") else { throw AppMailAccountSetupError.invalidEmail }
+        guard !credential.isEmpty else { throw AppMailAccountSetupError.missingCredential }
+        guard !incomingHost.isEmpty, !outgoingHost.isEmpty, incomingPort > 0, outgoingPort > 0 else {
+            throw AppMailAccountSetupError.missingServerConfiguration
+        }
+
+        let now = Date()
+        let slug = Self.mailAccountSlug(for: email)
+        let accountID = MailAccountID(rawValue: "mail-\(slug)")
+        let identityID = MailIdentityID(rawValue: "identity-\(slug)")
+        let displayName = rawDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? preset.title : rawDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let incoming = MailServerEndpoint(host: incomingHost, port: incomingPort, security: preset.incomingSecurity, protocolKind: .imap)
+        let outgoing = MailServerEndpoint(host: outgoingHost, port: outgoingPort, security: preset.outgoingSecurity, protocolKind: .smtp)
+        let credentialBinding = AppMailCredentialStore.binding(accountID: accountID, email: email, authMode: preset.authMode)
+        let identity = MailIdentity(
+            id: identityID,
+            displayName: displayName,
+            address: MailAddress(name: displayName, email: email),
+            canSend: true
+        )
+        let account = MailAccount(
+            id: accountID,
+            provider: mailProviderKind(for: preset),
+            displayName: displayName,
+            identities: [identity],
+            incoming: incoming,
+            outgoing: outgoing,
+            credentialBinding: credentialBinding,
+            health: MailAccountHealth(
+                status: .degraded,
+                checkedAt: now,
+                summary: "账户已配置 · 等待真实 IMAP 同步",
+                blockingReasons: ["Mail IMAP adapter has not completed remote mailbox discovery or message fetch"]
+            ),
+            createdAt: now,
+            updatedAt: now
+        )
+        let defaultMailboxes = Self.defaultMailboxes(accountID: accountID, now: now)
+        try mailCredentialStore.saveCredential(credential, binding: credentialBinding)
+        try await mailStore?.saveAccount(account)
+        for mailbox in defaultMailboxes {
+            try await mailStore?.saveMailbox(mailbox)
+        }
+
+        let syncService = MailIMAPInitialSyncService(credentialStore: mailCredentialStore, messageLimit: 25)
+        let syncResult = try await syncService.sync(account: account)
+        try await mailStore?.saveAccount(syncResult.account)
+        let syncedMailboxIDs = Set(syncResult.mailboxes.map(\.id))
+        for mailbox in syncResult.mailboxes.isEmpty ? defaultMailboxes : syncResult.mailboxes {
+            try await mailStore?.saveMailbox(mailbox)
+        }
+        for message in syncResult.messages {
+            try await mailStore?.saveMessage(message)
+        }
+
+        await reloadMailBrowserPresentation(preferredAccountID: accountID, preferredMailboxID: syncedMailboxIDs.first ?? defaultMailboxes.first?.id)
+        selectedMailMessageID = nil
+        isPresentingAddMailAccountSheet = false
+        if syncResult.account.health.status == .ready {
+            appSettingsMessage = "已添加邮件账户：\(displayName)，首次同步完成，拉取 \(syncResult.messages.count) 封邮件。"
+        } else {
+            appSettingsMessage = "已添加邮件账户：\(displayName)，但首次同步未完成：\(syncResult.account.health.summary)。"
+        }
+        errorMessage = nil
+    }
+
+    private func mailProviderKind(for preset: MailAccountProviderPreset) -> MailProviderKind {
+        switch preset {
+        case .microsoft: .microsoft365
+        case .apple, .qq, .netease, .other: .genericIMAPSMTP
+        }
+    }
+
+    private static func mailAccountSlug(for email: String) -> String {
+        let allowed = CharacterSet.alphanumerics
+        let scalars = email.unicodeScalars.map { scalar in
+            allowed.contains(scalar) ? Character(scalar).lowercased() : "-"
+        }
+        return scalars.joined().trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+    }
+
+    private static func defaultMailboxes(accountID: MailAccountID, now: Date) -> [MailMailbox] {
+        let base = accountID.rawValue
+        return [
+            MailMailbox(id: MailMailboxID(rawValue: "\(base)-inbox"), accountID: accountID, name: "收件箱", path: "INBOX", role: .inbox, status: MailMailboxStatus(messageCount: 0, unreadCount: 0, syncCursor: MailSyncCursor(value: "initial", updatedAt: now), lastSyncedAt: now)),
+            MailMailbox(id: MailMailboxID(rawValue: "\(base)-sent"), accountID: accountID, name: "已发送", path: "Sent", role: .sent, status: MailMailboxStatus(messageCount: 0, unreadCount: 0, syncCursor: MailSyncCursor(value: "initial", updatedAt: now), lastSyncedAt: now)),
+            MailMailbox(id: MailMailboxID(rawValue: "\(base)-drafts"), accountID: accountID, name: "草稿", path: "Drafts", role: .drafts, status: MailMailboxStatus(messageCount: 0, unreadCount: 0, syncCursor: MailSyncCursor(value: "initial", updatedAt: now), lastSyncedAt: now))
+        ]
+    }
+
+    func reloadMailBrowserPresentation(preferredAccountID: MailAccountID? = nil, preferredMailboxID: MailMailboxID? = nil) async {
+        do {
+            guard let mailStore else {
+                mailBrowserPresentation = .empty
+                return
+            }
+            let presentation = try await mailStore.presentation()
+            mailBrowserPresentation = presentation
+            let resolvedAccountID = preferredAccountID ?? selectedMailAccountID ?? presentation.defaultAccountID()
+            if let resolvedAccountID, presentation.accounts.contains(where: { $0.id == resolvedAccountID }) {
+                selectedMailAccountID = resolvedAccountID
+            } else {
+                selectedMailAccountID = presentation.defaultAccountID()
+            }
+            let resolvedMailboxID = preferredMailboxID ?? selectedMailMailboxID ?? presentation.defaultMailboxID(for: selectedMailAccountID)
+            if let resolvedMailboxID, presentation.mailboxes.contains(where: { $0.id == resolvedMailboxID }) {
+                selectedMailMailboxID = resolvedMailboxID
+            } else {
+                selectedMailMailboxID = presentation.defaultMailboxID(for: selectedMailAccountID)
+            }
+            if let selectedMailMessageID,
+               !presentation.messages.contains(where: { $0.id == selectedMailMessageID }) {
+                self.selectedMailMessageID = nil
+            }
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -2586,6 +2751,8 @@ final class AppViewModel: NSObject, ObservableObject {
             showProviderIcons = settings.ui.showProviderIcons
             richToolDescriptionsEnabled = settings.ui.richToolDescriptionsEnabled
             desktopNotificationsEnabled = settings.app.desktopNotificationsEnabled
+            sessionNotificationMinimumLevel = settings.app.sessionNotificationPolicy.minimumLevel
+            sessionNotificationLevelsByMessageType = settings.app.sessionNotificationPolicy.levelsByMessageType
             keepScreenAwake = settings.app.keepScreenAwake
             internalBrowserEnabled = settings.app.internalBrowserEnabled
             httpProxyEnabled = settings.app.httpProxyEnabled
@@ -2626,6 +2793,7 @@ final class AppViewModel: NSObject, ObservableObject {
             settings.ui.showProviderIcons = showProviderIcons
             settings.ui.richToolDescriptionsEnabled = richToolDescriptionsEnabled
             settings.app.desktopNotificationsEnabled = desktopNotificationsEnabled
+            settings.app.sessionNotificationPolicy = currentSessionNotificationPolicy
             settings.app.keepScreenAwake = keepScreenAwake
             settings.app.internalBrowserEnabled = internalBrowserEnabled
             settings.app.httpProxyEnabled = httpProxyEnabled
@@ -2705,6 +2873,30 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
+    var currentSessionNotificationPolicy: SessionNotificationPolicy {
+        SessionNotificationPolicy(
+            minimumLevel: sessionNotificationMinimumLevel,
+            levelsByMessageType: sessionNotificationLevelsByMessageType
+        )
+    }
+
+    func sessionNotificationLevel(for messageType: SessionAttentionMessageType) -> SessionAttentionLevel {
+        currentSessionNotificationPolicy.configuredLevel(for: messageType)
+    }
+
+    func effectiveSessionNotificationLevel(for messageType: SessionAttentionMessageType) -> SessionAttentionLevel {
+        currentSessionNotificationPolicy.effectiveLevel(for: messageType)
+    }
+
+    func setSessionNotificationLevel(_ level: SessionAttentionLevel, for messageType: SessionAttentionMessageType) {
+        sessionNotificationLevelsByMessageType[messageType] = level
+    }
+
+    func resetSessionNotificationPolicy() {
+        sessionNotificationMinimumLevel = .unread
+        sessionNotificationLevelsByMessageType = [:]
+    }
+
     private func postDesktopNotification(title: String, body: String) {
         guard desktopNotificationsEnabled, canUseUserNotifications else { return }
         let content = UNMutableNotificationContent()
@@ -2713,6 +2905,135 @@ final class AppViewModel: NSObject, ObservableObject {
         content.sound = .default
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
+    }
+
+    func markSessionRead(_ sessionID: String) {
+        guard sessionReadStates[sessionID]?.highestLevel != SessionAttentionLevel.none || sessionReadStates[sessionID]?.unreadCount ?? 0 > 0 else { return }
+        var state = sessionReadStates[sessionID] ?? .initial()
+        state.markRead(messageID: latestMessageID(for: sessionID), at: Date())
+        applySessionReadState(state, sessionID: sessionID, persist: true)
+    }
+
+    private func markSessionUnread(
+        sessionID: String,
+        messageID: String,
+        preview: String?,
+        level: SessionAttentionLevel
+    ) {
+        var state = sessionReadStates[sessionID] ?? .initial()
+        state.markUnread(messageID: messageID, preview: preview, level: level, at: Date())
+        applySessionReadState(state, sessionID: sessionID, persist: true)
+    }
+
+    private func latestMessageID(for sessionID: String) -> String? {
+        if selectedChatSessionID == sessionID, let last = transcript.last { return last.id }
+        return chatSessions.first(where: { $0.id == sessionID })?.messages.last?.id
+            ?? allChatSessions.first(where: { $0.id == sessionID })?.messages.last?.id
+    }
+
+    private func noteSessionUpdate(
+        sessionID: String,
+        messageID: String?,
+        preview: String?,
+        messageType: SessionAttentionMessageType,
+        notificationTitle: String,
+        notificationBody: String
+    ) {
+        let level = effectiveSessionNotificationLevel(for: messageType)
+        if isSessionCurrentlyVisible(sessionID) {
+            var state = sessionReadStates[sessionID] ?? .initial()
+            state.markRead(messageID: messageID ?? latestMessageID(for: sessionID), at: Date())
+            applySessionReadState(state, sessionID: sessionID, persist: true)
+            return
+        }
+        let unreadMessageID = messageID ?? "attention-event-\(UUID().uuidString)"
+        markSessionUnread(sessionID: sessionID, messageID: unreadMessageID, preview: preview, level: level)
+        postSessionNotificationIfNeeded(sessionID: sessionID, title: notificationTitle, body: notificationBody, level: level)
+    }
+
+    private func notificationPreview(from content: String) -> String {
+        let collapsed = content
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard collapsed.count > 140 else { return collapsed }
+        return String(collapsed.prefix(140)) + "…"
+    }
+
+    private func isSessionCurrentlyVisible(_ sessionID: String) -> Bool {
+        NSApp.isActive && selection == .agentChat && selectedChatSessionID == sessionID
+    }
+
+    private func postSessionNotificationIfNeeded(
+        sessionID: String,
+        title: String,
+        body: String,
+        level: SessionAttentionLevel
+    ) {
+        guard desktopNotificationsEnabled, canUseUserNotifications else { return }
+        guard level.shouldRequestSystemNotification else { return }
+        guard !isSessionCurrentlyVisible(sessionID) else { return }
+        let now = Date()
+        if let last = lastSessionNotificationAt[sessionID], now.timeIntervalSince(last) < sameSessionNotificationCooldown {
+            return
+        }
+        lastSessionNotificationAt[sessionID] = now
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        content.userInfo = [
+            "sessionID": sessionID,
+            "attentionLevel": level.rawValue,
+            "bundlePath": Bundle.main.bundlePath
+        ]
+        let request = UNNotificationRequest(identifier: "session-\(sessionID)-\(UUID().uuidString)", content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
+    }
+
+    private func synchronizeSessionReadStates(from sessions: [AgentSession]) {
+        sessionReadStates = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0.readState) })
+        refreshDockBadge()
+    }
+
+    private func applySessionReadState(_ state: SessionReadState, sessionID: String, persist: Bool) {
+        sessionReadStates[sessionID] = state
+        updateLoadedSessionReadState(sessionID: sessionID, readState: state)
+        if persist {
+            persistSessionReadState(state, sessionID: sessionID)
+        }
+        refreshDockBadge()
+    }
+
+    private func updateLoadedSessionReadState(sessionID: String, readState: SessionReadState) {
+        if let index = chatSessions.firstIndex(where: { $0.id == sessionID }) {
+            chatSessions[index].readState = readState
+        }
+        if let index = allChatSessions.firstIndex(where: { $0.id == sessionID }) {
+            allChatSessions[index].readState = readState
+        }
+        if fallbackChatSession.id == sessionID {
+            fallbackChatSession.readState = readState
+        }
+    }
+
+    private func persistSessionReadState(_ state: SessionReadState, sessionID: String) {
+        do {
+            let updated = try chatSessionRepository?.updateReadState(sessionID: sessionID, readState: state)
+            if let updated {
+                updateLoadedSessionReadState(sessionID: updated.id, readState: updated.readState)
+            }
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    private func refreshDockBadge() {
+        let count = sessionReadStates.values.reduce(0) { partial, state in
+            guard state.highestLevel.shouldCountInDockBadge else { return partial }
+            return partial + max(state.unreadCount, 1)
+        }
+        NSApp.dockTile.badgeLabel = count > 0 ? "\(count)" : nil
     }
 
     private var canUseUserNotifications: Bool {
@@ -2979,6 +3300,7 @@ final class AppViewModel: NSObject, ObservableObject {
             transcript = activeChatTranscript
             chatSessions = [activeChatSession]
             allChatSessions = [activeChatSession]
+            synchronizeSessionReadStates(from: allChatSessions)
             selectedChatSessionID = activeChatSession.id
             return
         }
@@ -2990,6 +3312,7 @@ final class AppViewModel: NSObject, ObservableObject {
             }
             chatSessions = sessions
             allChatSessions = try chatSessionRepository.loadSessions(filter: .all)
+            synchronizeSessionReadStates(from: allChatSessions)
             let selectedID = selectedChatSessionID ?? sessions.first?.id
             selectedChatSessionID = selectedID
             if let selectedID, let session = try chatSessionRepository.loadSession(id: selectedID) {
@@ -3661,12 +3984,19 @@ final class AppViewModel: NSObject, ObservableObject {
         agentEventTimeline = []
     }
 
+    func openSessionFromNotification(_ sessionID: String) {
+        selection = .agentChat
+        sessionSearchQuery = ""
+        selectChatSession(sessionID)
+    }
+
     func selectChatSession(_ sessionID: String) {
         guard let chatSessionRepository else { return }
         rememberCurrentWorkspaceMode()
         do {
             guard let session = try chatSessionRepository.loadSession(id: sessionID) else { return }
             selectedChatSessionID = session.id
+            markSessionRead(session.id)
             agentEventTimelinesByProcessKey.removeAll(keepingCapacity: true)
             try loadSessionCapsule(sessionID: session.id)
             try loadBackgroundTasks(sessionID: session.id)
@@ -4351,12 +4681,19 @@ final class AppViewModel: NSObject, ObservableObject {
                 regenerateChatSessionTitle(submittingSessionID)
             }
             errorMessage = nil
-            postDesktopNotification(title: "康纳同学完成了工作", body: response.session.title)
-            Task { await runBackgroundJobs() }
-            return response.session.messages
+            let latestAssistantMessage = response.session.messages
                 .dropFirst(baselineMessageCount)
-                .last(where: { $0.role == .assistant })?
-                .content
+                .last(where: { $0.role == .assistant })
+            noteSessionUpdate(
+                sessionID: response.session.id,
+                messageID: latestAssistantMessage?.id,
+                preview: latestAssistantMessage.map { notificationPreview(from: $0.content) },
+                messageType: .taskCompleted,
+                notificationTitle: "康纳同学完成了工作",
+                notificationBody: response.session.title
+            )
+            Task { await runBackgroundJobs() }
+            return latestAssistantMessage?.content
         } catch {
             let recoveredSession = (try? chatSessionRepository?.loadSession(id: submittingSessionID)) ?? manager.session
             if selectedChatSessionID == submittingSessionID {
@@ -4369,8 +4706,16 @@ final class AppViewModel: NSObject, ObservableObject {
             if case NativeSessionManagerError.runCancelled = error {
                 errorMessage = nil
             } else {
-                errorMessage = String(describing: error)
-                postDesktopNotification(title: "康纳同学遇到错误", body: String(describing: error))
+                let errorDescription = String(describing: error)
+                errorMessage = errorDescription
+                noteSessionUpdate(
+                    sessionID: submittingSessionID,
+                    messageID: nil,
+                    preview: errorDescription,
+                    messageType: .taskFailed,
+                    notificationTitle: "康纳同学遇到错误",
+                    notificationBody: errorDescription
+                )
             }
             return nil
         }
