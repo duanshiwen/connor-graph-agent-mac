@@ -38,8 +38,8 @@ public struct MailIMAPInitialSyncService: Sendable {
             )
         }
         guard let binding = originalAccount.credentialBinding,
-              let password = try credentialStore.readCredential(binding: binding),
-              !password.isEmpty else {
+              let rawCredential = try credentialStore.readCredential(binding: binding),
+              !rawCredential.isEmpty else {
             return MailInitialSyncResult(
                 account: updatedAccount(originalAccount, status: .unauthenticated, summary: "缺少邮件账户凭据", reasons: ["Missing Keychain credential"]),
                 mailboxes: [],
@@ -57,7 +57,20 @@ public struct MailIMAPInitialSyncService: Sendable {
         do {
             let client = BlockingIMAPClient(host: endpoint.host, port: endpoint.port)
             let loginUsernames = candidateUsernames(email: email, provider: originalAccount.provider)
-            let snapshot = try client.withSession(usernames: loginUsernames, password: password, messageLimit: messageLimit)
+            let snapshot: BlockingIMAPClient.Snapshot
+            if binding.authMode == .oauth2 {
+                let oauthCredential = try MicrosoftMailOAuthCredentialPackage.decode(from: rawCredential)
+                guard oauthCredential.isAccessTokenUsable else {
+                    return MailInitialSyncResult(
+                        account: updatedAccount(originalAccount, status: .unauthenticated, summary: "Microsoft OAuth token 已过期", reasons: ["Please sign in with Microsoft again to refresh mail access"]),
+                        mailboxes: [],
+                        messages: []
+                    )
+                }
+                snapshot = try client.withOAuth2Session(usernames: loginUsernames, accessToken: oauthCredential.accessToken, messageLimit: messageLimit)
+            } else {
+                snapshot = try client.withPasswordSession(usernames: loginUsernames, password: rawCredential, messageLimit: messageLimit)
+            }
             let accountID = originalAccount.id
             let inboxID = MailMailboxID(rawValue: "\(accountID.rawValue)-inbox")
             let now = Date()
@@ -182,7 +195,7 @@ private struct BlockingIMAPClient {
     var host: String
     var port: Int
 
-    func withSession(usernames: [String], password: String, messageLimit: Int) throws -> Snapshot {
+    func withPasswordSession(usernames: [String], password: String, messageLimit: Int) throws -> Snapshot {
         var readStream: Unmanaged<CFReadStream>?
         var writeStream: Unmanaged<CFWriteStream>?
         CFStreamCreatePairWithSocketToHost(nil, host as CFString, UInt32(port), &readStream, &writeStream)
@@ -205,6 +218,38 @@ private struct BlockingIMAPClient {
             output.close()
         }
         _ = try readUntilLine(input: input, timeout: 20)
+        try authenticateWithPassword(usernames: usernames, password: password, input: input, output: output)
+        return try fetchInboxSnapshot(input: input, output: output, messageLimit: messageLimit)
+    }
+
+    func withOAuth2Session(usernames: [String], accessToken: String, messageLimit: Int) throws -> Snapshot {
+        var readStream: Unmanaged<CFReadStream>?
+        var writeStream: Unmanaged<CFWriteStream>?
+        CFStreamCreatePairWithSocketToHost(nil, host as CFString, UInt32(port), &readStream, &writeStream)
+        guard let readStream, let writeStream else { throw IMAPError.connectionFailed("Cannot create socket streams for \(host):\(port)") }
+        let input = readStream.takeRetainedValue() as InputStream
+        let output = writeStream.takeRetainedValue() as OutputStream
+        input.setProperty(StreamSocketSecurityLevel.negotiatedSSL, forKey: .socketSecurityLevelKey)
+        output.setProperty(StreamSocketSecurityLevel.negotiatedSSL, forKey: .socketSecurityLevelKey)
+        let sslSettings: [String: Any] = [
+            kCFStreamSSLPeerName as String: host,
+            kCFStreamSSLValidatesCertificateChain as String: true
+        ]
+        let sslSettingsKey = Stream.PropertyKey(rawValue: kCFStreamPropertySSLSettings as String)
+        input.setProperty(sslSettings, forKey: sslSettingsKey)
+        output.setProperty(sslSettings, forKey: sslSettingsKey)
+        input.open()
+        output.open()
+        defer {
+            input.close()
+            output.close()
+        }
+        _ = try readUntilLine(input: input, timeout: 20)
+        try authenticateWithOAuth2(usernames: usernames, accessToken: accessToken, input: input, output: output)
+        return try fetchInboxSnapshot(input: input, output: output, messageLimit: messageLimit)
+    }
+
+    private func authenticateWithPassword(usernames: [String], password: String, input: InputStream, output: OutputStream) throws {
         var authenticated = false
         var lastLoginError = "Authentication failed"
         for username in usernames {
@@ -218,7 +263,27 @@ private struct BlockingIMAPClient {
             lastLoginError = response.lastLine ?? response
         }
         guard authenticated else { throw IMAPError.authenticationFailed(lastLoginError) }
+    }
 
+    private func authenticateWithOAuth2(usernames: [String], accessToken: String, input: InputStream, output: OutputStream) throws {
+        var authenticated = false
+        var lastLoginError = "OAuth2 authentication failed"
+        for username in usernames {
+            let tag = nextTag()
+            let xoauth2 = "user=\(username)\u{001}auth=Bearer \(accessToken)\u{001}\u{001}"
+            let payload = Data(xoauth2.utf8).base64EncodedString()
+            try write("\(tag) AUTHENTICATE XOAUTH2 \(payload)\r\n", output: output)
+            let response = try readUntilTagged(tag: tag, input: input, timeout: 30)
+            if response.contains("\(tag) OK") {
+                authenticated = true
+                break
+            }
+            lastLoginError = response.lastLine ?? response
+        }
+        guard authenticated else { throw IMAPError.authenticationFailed(lastLoginError) }
+    }
+
+    private func fetchInboxSnapshot(input: InputStream, output: OutputStream, messageLimit: Int) throws -> Snapshot {
         let statusTag = nextTag()
         try write("\(statusTag) STATUS \"INBOX\" (MESSAGES UNSEEN UIDVALIDITY UIDNEXT)\r\n", output: output)
         let statusResponse = try readUntilTagged(tag: statusTag, input: input, timeout: 30)

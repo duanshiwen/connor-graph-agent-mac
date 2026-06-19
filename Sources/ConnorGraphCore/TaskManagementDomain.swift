@@ -22,9 +22,23 @@ public enum ConnorTaskRecoveryPolicy: String, Codable, Sendable, Equatable, Case
     case restoreIfQueuedOrRunning
 }
 
+public enum ConnorTaskRecurrence: String, Codable, Sendable, Equatable, CaseIterable {
+    case once
+    case daily
+    case weekly
+    case monthly
+    case interval
+}
+
+public enum ConnorTaskEventName {
+    public static let sessionStatusChanged = "session.status.changed"
+}
+
 public struct ConnorTaskTrigger: Codable, Sendable, Equatable {
     public var kind: ConnorTaskTriggerKind
     public var intervalSeconds: TimeInterval?
+    public var runAt: Date?
+    public var recurrence: ConnorTaskRecurrence?
     public var eventName: String?
     public var eventFilter: [String: String]
     public var timezoneIdentifier: String?
@@ -32,12 +46,16 @@ public struct ConnorTaskTrigger: Codable, Sendable, Equatable {
     public init(
         kind: ConnorTaskTriggerKind,
         intervalSeconds: TimeInterval? = nil,
+        runAt: Date? = nil,
+        recurrence: ConnorTaskRecurrence? = nil,
         eventName: String? = nil,
         eventFilter: [String: String] = [:],
         timezoneIdentifier: String? = nil
     ) {
         self.kind = kind
         self.intervalSeconds = intervalSeconds
+        self.runAt = runAt
+        self.recurrence = recurrence ?? (intervalSeconds == nil ? nil : .interval)
         self.eventName = eventName
         self.eventFilter = eventFilter
         self.timezoneIdentifier = timezoneIdentifier
@@ -55,6 +73,36 @@ public struct ConnorTaskTarget: Codable, Sendable, Equatable {
         self.targetID = targetID
         self.operationName = operationName
         self.parameters = parameters
+    }
+
+    public static func sourceRuntimeRefresh(sourceID: String) -> ConnorTaskTarget {
+        ConnorTaskTarget(targetKind: "source.runtime", targetID: sourceID, operationName: "refresh")
+    }
+
+    public static func sendMessageToSession(sessionID: String = "", message: String) -> ConnorTaskTarget {
+        ConnorTaskTarget(targetKind: "session.ai", targetID: sessionID, operationName: "sendMessage", parameters: ["message": message])
+    }
+
+    public static func createSessionAndSendMessage(message: String, title: String = "") -> ConnorTaskTarget {
+        var parameters = ["message": message]
+        if !title.isEmpty { parameters["title"] = title }
+        return ConnorTaskTarget(targetKind: "session.ai", targetID: "new", operationName: "createSessionAndSendMessage", parameters: parameters)
+    }
+}
+
+public enum ConnorTaskValidationError: Error, Sendable, Equatable, CustomStringConvertible {
+    case systemTaskTemplateRequired(String)
+    case unsupportedUserCreatableTarget(String)
+    case unsupportedUserCreatableTrigger(String)
+    case missingRequiredParameter(String)
+
+    public var description: String {
+        switch self {
+        case .systemTaskTemplateRequired(let id): "systemTaskTemplateRequired: \(id)"
+        case .unsupportedUserCreatableTarget(let target): "unsupportedUserCreatableTarget: \(target)"
+        case .unsupportedUserCreatableTrigger(let trigger): "unsupportedUserCreatableTrigger: \(trigger)"
+        case .missingRequiredParameter(let parameter): "missingRequiredParameter: \(parameter)"
+        }
     }
 }
 
@@ -226,8 +274,8 @@ public struct ConnorTaskDefinition: Codable, Sendable, Equatable, Identifiable {
                 id: "system.mail.check-every-10-minutes",
                 name: "检查邮件",
                 origin: .system,
-                trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 600),
-                target: ConnorTaskTarget(targetKind: "source.runtime", targetID: "mail", operationName: "check"),
+                trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 600, recurrence: .interval),
+                target: .sourceRuntimeRefresh(sourceID: "mail"),
                 lifecycle: ConnorTaskLifecycle(status: .active),
                 metadata: .protectedSystem,
                 createdAt: now,
@@ -237,8 +285,8 @@ public struct ConnorTaskDefinition: Codable, Sendable, Equatable, Identifiable {
                 id: "system.calendar.check-every-10-minutes",
                 name: "检查日历",
                 origin: .system,
-                trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 600),
-                target: ConnorTaskTarget(targetKind: "source.runtime", targetID: "calendar", operationName: "check"),
+                trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 600, recurrence: .interval),
+                target: .sourceRuntimeRefresh(sourceID: "calendar"),
                 lifecycle: ConnorTaskLifecycle(status: .active),
                 metadata: .protectedSystem,
                 createdAt: now,
@@ -248,8 +296,8 @@ public struct ConnorTaskDefinition: Codable, Sendable, Equatable, Identifiable {
                 id: "system.rss.check-every-30-minutes",
                 name: "检查 RSS",
                 origin: .system,
-                trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 1_800),
-                target: ConnorTaskTarget(targetKind: "source.runtime", targetID: "rss", operationName: "check"),
+                trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 1_800, recurrence: .interval),
+                target: .sourceRuntimeRefresh(sourceID: "rss"),
                 lifecycle: ConnorTaskLifecycle(status: .active),
                 metadata: .protectedSystem,
                 createdAt: now,
@@ -295,5 +343,46 @@ public struct ConnorTaskRunRecord: Codable, Sendable, Equatable, Identifiable {
         self.outputSummary = outputSummary
         self.errorMessage = errorMessage
         self.externalRunID = externalRunID
+    }
+}
+
+public extension ConnorTaskDefinition {
+    func validateUserCreatableTemplate() throws {
+        guard origin == .user || origin == .ai else {
+            throw ConnorTaskValidationError.unsupportedUserCreatableTarget(origin.rawValue)
+        }
+        switch trigger.kind {
+        case .scheduled:
+            guard target.targetKind == "session.ai", target.targetID == "new", target.operationName == "createSessionAndSendMessage" else {
+                throw ConnorTaskValidationError.unsupportedUserCreatableTarget("\(target.targetKind):\(target.targetID).\(target.operationName)")
+            }
+            guard target.parameters["message"]?.isEmpty == false else {
+                throw ConnorTaskValidationError.missingRequiredParameter("message")
+            }
+            let recurrence = trigger.recurrence ?? (trigger.intervalSeconds == nil ? .once : .interval)
+            guard [.once, .daily, .weekly, .monthly].contains(recurrence) else {
+                throw ConnorTaskValidationError.unsupportedUserCreatableTrigger(recurrence.rawValue)
+            }
+        case .eventTriggered:
+            guard trigger.eventName == ConnorTaskEventName.sessionStatusChanged else {
+                throw ConnorTaskValidationError.unsupportedUserCreatableTrigger(trigger.eventName ?? "")
+            }
+            guard trigger.eventFilter["toStatus"]?.isEmpty == false else {
+                throw ConnorTaskValidationError.missingRequiredParameter("toStatus")
+            }
+            guard target.targetKind == "session.ai", target.operationName == "sendMessage" else {
+                throw ConnorTaskValidationError.unsupportedUserCreatableTarget("\(target.targetKind):\(target.targetID).\(target.operationName)")
+            }
+            guard target.parameters["message"]?.isEmpty == false else {
+                throw ConnorTaskValidationError.missingRequiredParameter("message")
+            }
+        }
+    }
+
+    func validateSystemTaskTemplate() throws {
+        guard origin == .system else { return }
+        guard target.targetKind == "source.runtime", target.operationName == "refresh", ["mail", "calendar", "rss"].contains(target.targetID) else {
+            throw ConnorTaskValidationError.systemTaskTemplateRequired(id)
+        }
     }
 }

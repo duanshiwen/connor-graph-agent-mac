@@ -30,8 +30,10 @@ struct CraftListPaneView: View {
                 CraftSourceListPane(viewModel: viewModel)
             case .skills:
                 CraftSkillListPane(viewModel: viewModel)
-            case .automation:
-                CraftSimpleListPane(title: "自动化", subtitle: "事件触发与执行历史", rows: viewModel.automationConfig.rules.map(\.name))
+            case .automation, .scheduledTasks:
+                CraftTaskAutomationListPane(viewModel: viewModel, kind: .scheduled)
+            case .eventTriggeredTasks:
+                CraftTaskAutomationListPane(viewModel: viewModel, kind: .eventTriggered)
             case .productOS:
                 CraftSimpleListPane(title: "Product OS", subtitle: "本地控制面模块", rows: viewModel.productOSRegistry.sources.map(\.displayName) + viewModel.productOSRegistry.skills.map(\.displayName))
             default:
@@ -803,6 +805,166 @@ private struct RSSHintCard: View {
     }
 }
 
+private enum TaskAutomationKind {
+    case scheduled
+    case eventTriggered
+
+    var title: String {
+        switch self {
+        case .scheduled: "定时任务"
+        case .eventTriggered: "事件触发"
+        }
+    }
+
+    var emptyTitle: String {
+        switch self {
+        case .scheduled: "暂无定时任务"
+        case .eventTriggered: "暂无事件触发任务"
+        }
+    }
+
+    var emptyDescription: String {
+        switch self {
+        case .scheduled: "系统任务会在启动时自动补齐；用户和 AI 任务可按时间或周期新建会话并发送消息。"
+        case .eventTriggered: "用户或 AI 可创建：当会话状态变为特定状态后，向 AI 发送指定内容。"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .scheduled: "clock"
+        case .eventTriggered: "dot.radiowaves.left.and.right"
+        }
+    }
+
+    func cards(from presentation: TaskManagementUIPresentation) -> [TaskManagementUICard] {
+        switch self {
+        case .scheduled: presentation.scheduledTasks
+        case .eventTriggered: presentation.eventTriggeredTasks
+        }
+    }
+}
+
+private struct CraftTaskAutomationListPane: View {
+    @ObservedObject var viewModel: AppViewModel
+    var kind: TaskAutomationKind
+
+    private var cards: [TaskManagementUICard] {
+        kind.cards(from: viewModel.taskManagementPresentation)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Text(kind.title)
+                .font(AppListTypography.header)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 13)
+
+            if cards.isEmpty {
+                ContentUnavailableView(kind.emptyTitle, systemImage: kind.systemImage, description: Text(kind.emptyDescription))
+                    .padding(.top, 80)
+            } else {
+                List(cards) { card in
+                    TaskAutomationListRow(
+                        card: card,
+                        isSelected: card.id == viewModel.selectedTaskAutomationID,
+                        onSelect: { viewModel.selectedTaskAutomationID = card.id }
+                    )
+                    .mailListRowStyle()
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .contentMargins(.top, 6, for: .scrollContent)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .task {
+            viewModel.reloadTaskManagementPresentation()
+        }
+    }
+}
+
+private struct TaskAutomationListRow: View {
+    var card: TaskManagementUICard
+    var isSelected: Bool
+    var onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(alignment: .top, spacing: 10) {
+                Circle()
+                    .fill(severityColor)
+                    .frame(width: 8, height: 8)
+                    .padding(.top, 7)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 6) {
+                        Text(card.title)
+                            .font(isSelected ? AppListTypography.rowTitleSelected : AppListTypography.rowTitle)
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                        Text(card.originBadge)
+                            .font(AppListTypography.rowCaption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(card.targetLabel)
+                        .font(AppListTypography.rowCaptionEmphasized)
+                        .lineLimit(1)
+                    Text(contextText)
+                        .font(AppListTypography.rowCaption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                    HStack(spacing: 5) {
+                        TaskAutomationChip(text: card.triggerLabel)
+                        TaskAutomationChip(text: card.statusLabel)
+                        if let reason = card.deleteDisabledReason, !reason.isEmpty {
+                            TaskAutomationChip(text: reason)
+                        }
+                    }
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isSelected ? Color.orange.opacity(0.14) : Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var contextText: String {
+        [
+            card.nextRunLabel.isEmpty ? nil : "下次：\(card.nextRunLabel)",
+            card.lastRunLabel.isEmpty ? nil : "上次：\(card.lastRunLabel)",
+            card.lastErrorLabel.isEmpty ? nil : "错误：\(card.lastErrorLabel)"
+        ]
+        .compactMap { $0 }
+        .joined(separator: " · ")
+    }
+
+    private var severityColor: Color {
+        switch card.severity {
+        case .info: .blue
+        case .success: .green
+        case .warning: .orange
+        case .error: .red
+        }
+    }
+}
+
+private struct TaskAutomationChip: View {
+    var text: String
+
+    var body: some View {
+        Text(text)
+            .font(AppListTypography.rowCaption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color.secondary.opacity(0.10), in: Capsule())
+            .lineLimit(1)
+    }
+}
+
 struct CraftRSSListPane: View {
     @ObservedObject var viewModel: AppViewModel
 
@@ -1124,8 +1286,10 @@ struct CraftDetailPaneView: View {
                 MemoryChangeLogView(viewModel: viewModel)
             case .extractionDiagnostics:
                 GraphExtractionDiagnosticsView(viewModel: viewModel)
-            case .automation:
-                AutomationRuntimePanelView(viewModel: viewModel)
+            case .automation, .scheduledTasks:
+                TaskAutomationDetailPane(viewModel: viewModel, kind: .scheduled)
+            case .eventTriggeredTasks:
+                TaskAutomationDetailPane(viewModel: viewModel, kind: .eventTriggered)
             case .productOS:
                 ProductOSRegistryView(viewModel: viewModel)
             case .mail:
@@ -1153,23 +1317,13 @@ struct CalendarSourceSettingsView: View {
 
     var body: some View {
         Group {
-            if let selected = selectedEventRow {
-                VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
-                    CalendarContactsDetailHeader(title: "日历", subtitle: "轻量日程数据源：列表、详情和 AI 工具管理，不做完整日历客户端。")
-                    Divider().opacity(0.6)
-                    VStack(alignment: .leading, spacing: AppShellLayout.spaceM) {
-                        Label(selected.title, systemImage: "calendar.badge.clock")
-                            .font(AgentChatTypography.title)
-                        Text(selected.timeText)
-                            .font(AgentChatTypography.meta)
-                            .foregroundStyle(.secondary)
-                        if let location = selected.location {
-                            Text(location).font(AgentChatTypography.meta)
-                        }
-                    }
-                    .padding(AppShellLayout.spaceXL)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            if let selectedEvent {
+                CalendarEventDetailPane(
+                    event: selectedEvent,
+                    row: selectedEventRow,
+                    calendarName: calendarName(for: selectedEvent.calendarID),
+                    accountName: accountName(for: selectedEvent.calendarID)
+                )
             } else {
                 Color.clear
             }
@@ -1178,9 +1332,278 @@ struct CalendarSourceSettingsView: View {
         .background(AppShellColors.detailBackground)
     }
 
+    private var selectedEvent: CalendarEvent? {
+        guard let id = viewModel.selectedCalendarEventID else { return nil }
+        return viewModel.calendarEvents.first { $0.id == id }
+    }
+
     private var selectedEventRow: NativeCalendarEventRowPresentation? {
         guard let id = viewModel.selectedCalendarEventID else { return nil }
         return viewModel.calendarBrowserPresentation.daySections.flatMap(\.events).first { $0.id == id }
+    }
+
+    private func calendarName(for calendarID: CalendarID) -> String? {
+        viewModel.calendarCollections.first { $0.id == calendarID }?.displayName
+    }
+
+    private func accountName(for calendarID: CalendarID) -> String? {
+        guard let collection = viewModel.calendarCollections.first(where: { $0.id == calendarID }) else { return nil }
+        return viewModel.calendarAccounts.first { $0.id == collection.accountID }?.displayName
+    }
+}
+
+private struct CalendarEventDetailPane: View {
+    var event: CalendarEvent
+    var row: NativeCalendarEventRowPresentation?
+    var calendarName: String?
+    var accountName: String?
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
+                CalendarEventHero(event: event, row: row, calendarName: calendarName)
+
+                if let notes = trimmed(event.notes), !notes.isEmpty {
+                    CalendarDetailSection(title: "备注", systemImage: "note.text") {
+                        Text(notes)
+                            .font(AgentChatTypography.body)
+                            .lineSpacing(2)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+
+                if !event.attendees.isEmpty {
+                    CalendarDetailSection(title: "参与人", systemImage: "person.2") {
+                        VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+                            ForEach(event.attendees, id: \.id) { attendee in
+                                CalendarAttendeeRow(attendee: attendee)
+                            }
+                        }
+                    }
+                }
+
+                CalendarDetailSection(title: "来源信息", systemImage: "calendar") {
+                    VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+                        CalendarMetadataLine(label: "日历", value: calendarName ?? event.calendarID.rawValue)
+                        if let accountName, !accountName.isEmpty {
+                            CalendarMetadataLine(label: "账户", value: accountName)
+                        }
+                        CalendarMetadataLine(label: "更新", value: event.updatedAt.formatted(date: .abbreviated, time: .shortened))
+                        if let recurrence = event.recurrenceSummary?.ruleDescription, !recurrence.isEmpty {
+                            CalendarMetadataLine(label: "重复", value: recurrence)
+                        }
+                        if let url = event.url {
+                            CalendarMetadataLinkLine(url: url)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, AgentChatLayout.spaceXL)
+            .padding(.vertical, AgentChatLayout.spaceL)
+            .frame(maxWidth: AgentChatLayout.chatContentMaxWidth, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .top)
+        }
+        .scrollContentBackground(.hidden)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func trimmed(_ value: String?) -> String? {
+        value?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+private struct CalendarEventHero: View {
+    var event: CalendarEvent
+    var row: NativeCalendarEventRowPresentation?
+    var calendarName: String?
+
+    var body: some View {
+        HStack(alignment: .top, spacing: AgentChatLayout.spaceM) {
+            ZStack {
+                RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                    .fill(Color.orange.opacity(0.12))
+                Image(systemName: event.isAllDay ? "calendar" : "calendar.badge.clock")
+                    .font(.system(size: 23, weight: .semibold))
+                    .foregroundStyle(.orange)
+            }
+            .frame(width: 54, height: 54)
+
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+                Text(event.title)
+                    .font(.system(size: 24, weight: .semibold))
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+
+                Text(primaryTimeText)
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+
+                HStack(spacing: AgentChatLayout.spaceS) {
+                    CalendarStatusPill(status: event.isAllDay ? "全天" : "已排期", color: .orange, systemImage: event.isAllDay ? "sun.max" : "clock")
+                    if let calendarName, !calendarName.isEmpty {
+                        CalendarStatusPill(status: calendarName, color: .secondary, systemImage: "calendar")
+                    }
+                }
+
+                if let location = row?.location ?? event.location, !location.isEmpty {
+                    Label(location, systemImage: "mappin.and.ellipse")
+                        .font(AgentChatTypography.meta)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(AgentChatLayout.spaceM)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.85), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous).stroke(Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1))
+    }
+
+    private var primaryTimeText: String {
+        if event.isAllDay {
+            return event.start.date.formatted(date: .complete, time: .omitted)
+        }
+        let start = event.start.date.formatted(date: .complete, time: .shortened)
+        let end = event.end.date.formatted(date: .omitted, time: .shortened)
+        return "\(start) – \(end)"
+    }
+}
+
+private struct CalendarDetailSection<Content: View>: View {
+    var title: String
+    var systemImage: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
+            Label(title, systemImage: systemImage)
+                .font(AgentChatTypography.metaEmphasis)
+                .foregroundStyle(.primary)
+            content
+        }
+        .padding(AgentChatLayout.spaceM)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.85), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous).stroke(Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1))
+    }
+}
+
+private struct CalendarMetadataLine: View {
+    var label: String
+    var value: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(label)
+                .font(AgentChatTypography.microEmphasis)
+                .foregroundStyle(.secondary)
+                .frame(width: 72, alignment: .leading)
+            Text(value)
+                .font(AgentChatTypography.meta)
+                .textSelection(.enabled)
+        }
+    }
+}
+
+private struct CalendarMetadataLinkLine: View {
+    var url: URL
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text("链接")
+                .font(AgentChatTypography.microEmphasis)
+                .foregroundStyle(.secondary)
+                .frame(width: 72, alignment: .leading)
+            Link(destination: url) {
+                HStack(spacing: 5) {
+                    Text(url.absoluteString)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Image(systemName: "arrow.up.forward.app")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .font(AgentChatTypography.meta)
+            }
+        }
+    }
+}
+
+private struct CalendarAttendeeRow: View {
+    var attendee: CalendarAttendee
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: AgentChatLayout.spaceS) {
+            Image(systemName: "person.crop.circle")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(displayName)
+                    .font(AgentChatTypography.meta)
+                    .textSelection(.enabled)
+                if let email = attendee.email, !email.isEmpty, email != displayName {
+                    Text(email)
+                        .font(AgentChatTypography.micro)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+            Spacer(minLength: 8)
+            CalendarStatusPill(status: attendee.responseStatus.displayTitle, color: attendee.responseStatus.displayColor)
+        }
+    }
+
+    private var displayName: String {
+        if let name = attendee.name, !name.isEmpty { return name }
+        if let email = attendee.email, !email.isEmpty { return email }
+        return attendee.id.rawValue
+    }
+}
+
+private struct CalendarStatusPill: View {
+    var status: String
+    var color: Color
+    var systemImage: String?
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            Text(status)
+                .font(AgentChatTypography.microEmphasis)
+        }
+        .foregroundStyle(color)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(color.opacity(0.10), in: Capsule())
+    }
+}
+
+private extension CalendarAttendeeResponseStatus {
+    var displayTitle: String {
+        switch self {
+        case .needsAction: "待回应"
+        case .accepted: "已接受"
+        case .declined: "已拒绝"
+        case .tentative: "暂定"
+        case .delegated: "已委派"
+        case .unknown: "未知"
+        }
+    }
+
+    var displayColor: Color {
+        switch self {
+        case .accepted: .green
+        case .declined: .red
+        case .tentative, .delegated: .orange
+        case .needsAction, .unknown: .secondary
+        }
     }
 }
 
@@ -1234,6 +1657,245 @@ private struct CalendarContactsDetailHeader: View {
         }
         .padding(.horizontal, AppShellLayout.spaceXL)
         .padding(.vertical, AppShellLayout.spaceL)
+    }
+}
+
+private struct TaskAutomationDetailPane: View {
+    @ObservedObject var viewModel: AppViewModel
+    var kind: TaskAutomationKind
+
+    private var cards: [TaskManagementUICard] {
+        kind.cards(from: viewModel.taskManagementPresentation)
+    }
+
+    private var selectedCard: TaskManagementUICard? {
+        guard let selectedID = viewModel.selectedTaskAutomationID else { return nil }
+        return cards.first { $0.id == selectedID }
+    }
+
+    var body: some View {
+        Group {
+            if let selectedCard {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
+                        TaskAutomationHero(card: selectedCard)
+                        TaskAutomationDetailSection(title: "运行信息", systemImage: "clock.arrow.circlepath") {
+                            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+                                TaskAutomationMetadataLine(label: "下次", value: selectedCard.nextRunLabel.isEmpty ? "无" : selectedCard.nextRunLabel)
+                                TaskAutomationMetadataLine(label: "上次", value: selectedCard.lastRunLabel.isEmpty ? "无" : selectedCard.lastRunLabel)
+                                if !selectedCard.lastErrorLabel.isEmpty {
+                                    TaskAutomationMetadataLine(label: "错误", value: selectedCard.lastErrorLabel, valueColor: .red)
+                                }
+                            }
+                        }
+                        TaskAutomationDetailSection(title: "目标", systemImage: "scope") {
+                            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+                                TaskAutomationMetadataLine(label: "目标", value: selectedCard.targetLabel)
+                                if !selectedCard.rationaleLabel.isEmpty {
+                                    TaskAutomationMetadataLine(label: "原因", value: selectedCard.rationaleLabel)
+                                }
+                            }
+                        }
+                        TaskAutomationDetailSection(title: "治理", systemImage: "shield.checkered") {
+                            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+                                TaskAutomationMetadataLine(label: "来源", value: selectedCard.originBadge)
+                                TaskAutomationMetadataLine(label: "触发", value: selectedCard.triggerLabel)
+                                TaskAutomationMetadataLine(label: "状态", value: selectedCard.statusLabel)
+                                if let reason = selectedCard.deleteDisabledReason, !reason.isEmpty {
+                                    TaskAutomationMetadataLine(label: "保护", value: reason)
+                                }
+                            }
+                        }
+                        TaskAutomationActionSection(card: selectedCard, viewModel: viewModel)
+                    }
+                    .padding(.horizontal, AgentChatLayout.spaceXL)
+                    .padding(.vertical, AgentChatLayout.spaceL)
+                    .frame(maxWidth: AgentChatLayout.chatContentMaxWidth, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .top)
+                }
+                .scrollContentBackground(.hidden)
+            } else {
+                Color.clear
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(AppShellColors.detailBackground)
+        .task { viewModel.reloadTaskManagementPresentation() }
+    }
+}
+
+private struct TaskAutomationHero: View {
+    var card: TaskManagementUICard
+
+    var body: some View {
+        HStack(alignment: .top, spacing: AgentChatLayout.spaceM) {
+            ZStack {
+                RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                    .fill(severityColor.opacity(0.12))
+                Image(systemName: card.triggerLabel == "定时" ? "clock" : "dot.radiowaves.left.and.right")
+                    .font(.system(size: 23, weight: .semibold))
+                    .foregroundStyle(severityColor)
+            }
+            .frame(width: 54, height: 54)
+
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+                Text(card.title)
+                    .font(.system(size: 24, weight: .semibold))
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                Text(card.targetLabel)
+                    .font(AgentChatTypography.meta)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .textSelection(.enabled)
+                HStack(spacing: AgentChatLayout.spaceS) {
+                    TaskAutomationStatusPill(status: card.triggerLabel, color: severityColor, systemImage: card.triggerLabel == "定时" ? "clock" : "dot.radiowaves.left.and.right")
+                    TaskAutomationStatusPill(status: card.statusLabel, color: statusColor)
+                    TaskAutomationStatusPill(status: card.originBadge, color: .secondary, systemImage: "person.badge.key")
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(AgentChatLayout.spaceM)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.85), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous).stroke(Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1))
+    }
+
+    private var severityColor: Color {
+        switch card.severity {
+        case .info: .blue
+        case .success: .green
+        case .warning: .orange
+        case .error: .red
+        }
+    }
+
+    private var statusColor: Color {
+        switch card.statusLabel {
+        case "active": .green
+        case "stopped": .orange
+        case "failed": .red
+        default: .secondary
+        }
+    }
+}
+
+private struct TaskAutomationDetailSection<Content: View>: View {
+    var title: String
+    var systemImage: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AgentChatLayout.spaceM) {
+            Label(title, systemImage: systemImage)
+                .font(AgentChatTypography.metaEmphasis)
+                .foregroundStyle(.primary)
+            content
+        }
+        .padding(AgentChatLayout.spaceM)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.85), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous).stroke(Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1))
+    }
+}
+
+private struct TaskAutomationMetadataLine: View {
+    var label: String
+    var value: String
+    var valueColor: Color = .primary
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(label)
+                .font(AgentChatTypography.microEmphasis)
+                .foregroundStyle(.secondary)
+                .frame(width: 72, alignment: .leading)
+            Text(value)
+                .font(AgentChatTypography.meta)
+                .foregroundStyle(valueColor)
+                .textSelection(.enabled)
+        }
+    }
+}
+
+private struct TaskAutomationActionSection: View {
+    var card: TaskManagementUICard
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        TaskAutomationDetailSection(title: "操作", systemImage: "slider.horizontal.3") {
+            HStack(spacing: AgentChatLayout.spaceS) {
+                if card.canStop {
+                    TaskAutomationActionButton(title: "暂停", systemImage: "pause.fill") {
+                        viewModel.stopTask(card.id)
+                    }
+                }
+                if card.canRestore {
+                    TaskAutomationActionButton(title: "恢复", systemImage: "play.fill") {
+                        viewModel.restoreTask(card.id)
+                    }
+                }
+                if card.canDelete {
+                    TaskAutomationActionButton(title: "删除", systemImage: "trash", role: .destructive) {
+                        viewModel.deleteTask(card.id)
+                    }
+                }
+                if !card.canStop && !card.canRestore && !card.canDelete {
+                    Text(card.deleteDisabledReason ?? "当前任务无需手动操作。")
+                        .font(AgentChatTypography.meta)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+}
+
+private struct TaskAutomationActionButton: View {
+    var title: String
+    var systemImage: String
+    var role: ButtonRole?
+    var action: () -> Void
+
+    init(title: String, systemImage: String, role: ButtonRole? = nil, action: @escaping () -> Void) {
+        self.title = title
+        self.systemImage = systemImage
+        self.role = role
+        self.action = action
+    }
+
+    var body: some View {
+        Button(role: role, action: action) {
+            Label(title, systemImage: systemImage)
+                .font(AgentChatTypography.metaEmphasis)
+                .frame(minWidth: 82, minHeight: 32)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.regular)
+        .help(title)
+    }
+}
+
+private struct TaskAutomationStatusPill: View {
+    var status: String
+    var color: Color
+    var systemImage: String?
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            Text(status)
+                .font(AgentChatTypography.microEmphasis)
+        }
+        .foregroundStyle(color)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(color.opacity(0.10), in: Capsule())
     }
 }
 
@@ -1750,6 +2412,7 @@ struct CraftSessionRow: View {
                         Capsule()
                             .stroke(Color.yellow, lineWidth: 1)
                     )
+                    .offset(y: 3)
             }
             .frame(width: 34)
             .padding(.top, 5)
