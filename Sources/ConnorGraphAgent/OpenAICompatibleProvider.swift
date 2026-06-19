@@ -150,14 +150,15 @@ public struct URLSessionAgentHTTPClient: AgentHTTPClient, Sendable, Equatable {
     }
 }
 
-public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, AgentModelProvider, Sendable {
+public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, StreamingAgentModelProvider, Sendable {
     public var config: OpenAICompatibleConfig
     public var httpClient: Client
+    public var sseClient: (any AgentSSEHTTPClient)?
 
     public var modelID: String { config.requestModel }
     public var capabilities: AgentModelCapabilities {
         AgentModelCapabilities(
-            supportsStreaming: false,
+            supportsStreaming: true,
             supportsToolCalling: true,
             supportsParallelToolCalls: false,
             supportsStructuredOutput: false,
@@ -166,8 +167,13 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, Ag
     }
 
     public init(config: OpenAICompatibleConfig, httpClient: Client) {
+        self.init(config: config, httpClient: httpClient, sseClient: nil)
+    }
+
+    public init(config: OpenAICompatibleConfig, httpClient: Client, sseClient: (any AgentSSEHTTPClient)?) {
         self.config = config
         self.httpClient = httpClient
+        self.sseClient = sseClient
     }
 
     public func complete(prompt: String, context: AgentContext) async throws -> LLMResponse {
@@ -193,6 +199,36 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, Ag
             throw OpenAICompatibleProviderError.httpStatus(response.statusCode)
         }
         return try parseToolCallingResponse(response.body)
+    }
+
+    public func streamComplete(_ request: AgentModelRequest) -> AsyncThrowingStream<AgentModelStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                do {
+                    guard let sseClient else {
+                        continuation.yield(.completed(try await complete(request)))
+                        continuation.finish()
+                        return
+                    }
+                    let httpRequest = try makeToolCallingRequest(request, stream: true)
+                    let frames = try await sseClient.stream(httpRequest)
+                    var accumulator = OpenAIChatCompletionStreamAccumulator()
+                    for try await frame in frames {
+                        for payload in OpenAISSEParser.payloads(from: frame) {
+                            guard payload != "[DONE]" else { continue }
+                            let chunk = try JSONDecoder().decode(OpenAIChatCompletionStreamChunk.self, from: Data(payload.utf8))
+                            for event in accumulator.append(chunk: chunk, rawJSON: payload) {
+                                continuation.yield(event)
+                            }
+                        }
+                    }
+                    continuation.yield(.completed(accumulator.response()))
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
     }
 
     public func healthCheck() async throws -> LLMProviderHealthCheckResult {
@@ -243,7 +279,7 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, Ag
         return headers
     }
 
-    private func makeToolCallingRequest(_ request: AgentModelRequest) throws -> AgentHTTPRequest {
+    private func makeToolCallingRequest(_ request: AgentModelRequest, stream: Bool = false) throws -> AgentHTTPRequest {
         let endpoint = config.baseURL.appendingPathComponent("chat/completions")
         let messages = request.messages.enumerated().map { index, message in
             let role = projectedRole(for: message, index: index, instructionPlacement: request.instructionPlacement)
@@ -275,7 +311,8 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, Ag
             temperature: request.temperature,
             tools: tools.isEmpty ? nil : tools,
             toolChoice: tools.isEmpty ? nil : "auto",
-            reasoningEffort: config.reasoningEffort
+            reasoningEffort: config.reasoningEffort,
+            stream: stream
         )
         let data = try JSONSerialization.data(withJSONObject: try body.jsonObject(), options: [.sortedKeys])
         return AgentHTTPRequest(
@@ -326,7 +363,7 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, Ag
 
 public extension OpenAICompatibleProvider where Client == URLSessionAgentHTTPClient {
     init(config: OpenAICompatibleConfig) {
-        self.init(config: config, httpClient: URLSessionAgentHTTPClient())
+        self.init(config: config, httpClient: URLSessionAgentHTTPClient(), sseClient: URLSessionAgentSSEHTTPClient())
     }
 }
 
@@ -337,14 +374,16 @@ private struct OpenAIChatCompletionRequest: Encodable {
     var tools: [OpenAIToolDefinition]?
     var toolChoice: String?
     var reasoningEffort: String?
+    var stream: Bool?
 
-    init(model: String, messages: [OpenAIChatMessage], temperature: Double, tools: [OpenAIToolDefinition]? = nil, toolChoice: String? = nil, reasoningEffort: String? = nil) {
+    init(model: String, messages: [OpenAIChatMessage], temperature: Double, tools: [OpenAIToolDefinition]? = nil, toolChoice: String? = nil, reasoningEffort: String? = nil, stream: Bool? = nil) {
         self.model = model
         self.messages = messages
         self.temperature = temperature
         self.tools = tools
         self.toolChoice = toolChoice
         self.reasoningEffort = reasoningEffort
+        self.stream = stream
     }
 
     enum CodingKeys: String, CodingKey {
@@ -354,6 +393,7 @@ private struct OpenAIChatCompletionRequest: Encodable {
         case tools
         case toolChoice = "tool_choice"
         case reasoningEffort = "reasoning_effort"
+        case stream
     }
 
     func jsonObject() throws -> [String: Any] {
@@ -509,6 +549,114 @@ private struct OpenAIChatCompletionResponse: Decodable {
             case completionTokens = "completion_tokens"
             case totalTokens = "total_tokens"
         }
+    }
+}
+
+private enum OpenAISSEParser {
+    static func payloads(from frame: String) -> [String] {
+        frame
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .compactMap { line -> String? in
+                guard line.hasPrefix("data:") else { return nil }
+                return line.dropFirst(5).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            .filter { !$0.isEmpty }
+    }
+}
+
+private struct OpenAIChatCompletionStreamChunk: Decodable {
+    var choices: [Choice]
+    var usage: OpenAIChatCompletionResponse.Usage?
+
+    struct Choice: Decodable {
+        var delta: Delta
+        var finishReason: String?
+
+        enum CodingKeys: String, CodingKey {
+            case delta
+            case finishReason = "finish_reason"
+        }
+    }
+
+    struct Delta: Decodable {
+        var role: String?
+        var content: String?
+        var toolCalls: [ToolCallDelta]?
+
+        enum CodingKeys: String, CodingKey {
+            case role
+            case content
+            case toolCalls = "tool_calls"
+        }
+    }
+
+    struct ToolCallDelta: Decodable {
+        var index: Int
+        var id: String?
+        var type: String?
+        var function: FunctionDelta?
+    }
+
+    struct FunctionDelta: Decodable {
+        var name: String?
+        var arguments: String?
+    }
+}
+
+private struct OpenAIChatCompletionStreamAccumulator {
+    private struct ToolCallState {
+        var id: String?
+        var name: String?
+        var arguments = ""
+    }
+
+    private var text = ""
+    private var finishReason: AgentModelFinishReason = .unknown
+    private var usage: AgentModelUsage?
+    private var rawEvents: [String] = []
+    private var toolCalls: [Int: ToolCallState] = [:]
+
+    mutating func append(chunk: OpenAIChatCompletionStreamChunk, rawJSON: String) -> [AgentModelStreamEvent] {
+        rawEvents.append(rawJSON)
+        if let chunkUsage = chunk.usage {
+            usage = AgentModelUsage(promptTokens: chunkUsage.promptTokens, completionTokens: chunkUsage.completionTokens, totalTokens: chunkUsage.totalTokens)
+        }
+        var events: [AgentModelStreamEvent] = []
+        for choice in chunk.choices {
+            if let reason = choice.finishReason {
+                finishReason = AgentModelFinishReason(rawValue: reason) ?? .unknown
+            }
+            if let content = choice.delta.content, !content.isEmpty {
+                text += content
+                events.append(.textDelta(content))
+            }
+            for toolCall in choice.delta.toolCalls ?? [] {
+                var state = toolCalls[toolCall.index] ?? ToolCallState()
+                if let id = toolCall.id { state.id = id }
+                if let name = toolCall.function?.name { state.name = name }
+                let arguments = toolCall.function?.arguments ?? ""
+                if !arguments.isEmpty { state.arguments += arguments }
+                toolCalls[toolCall.index] = state
+                if !arguments.isEmpty {
+                    events.append(.toolInputDelta(toolCallID: state.id, name: state.name, partialJSON: arguments))
+                }
+            }
+        }
+        return events
+    }
+
+    func response() -> AgentModelResponse {
+        let calls = toolCalls.keys.sorted().compactMap { index -> AgentToolCall? in
+            guard let state = toolCalls[index], let name = state.name else { return nil }
+            return AgentToolCall(id: state.id ?? "call_\(index)", name: name, argumentsJSON: state.arguments)
+        }
+        return AgentModelResponse(
+            text: text.isEmpty ? nil : text,
+            toolCalls: calls,
+            usage: usage,
+            finishReason: finishReason,
+            rawResponseJSON: rawEvents.joined(separator: "\n")
+        )
     }
 }
 
