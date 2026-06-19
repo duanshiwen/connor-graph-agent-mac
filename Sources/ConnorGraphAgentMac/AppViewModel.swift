@@ -499,6 +499,8 @@ final class AppViewModel: NSObject, ObservableObject {
     private var llmProviderHealthChecker: AppLLMProviderHealthChecker
     private var rssRuntime = RSSRuntime(repository: InMemoryRSSSourceRepository(), cache: InMemoryRSSSourceCache())
     private var mailStore: FileBackedMailSourceStore?
+    private var calendarStore: FileBackedCalendarSourceStore?
+    private var contactStore: FileBackedContactSourceStore?
     private var mailCredentialStore = AppMailCredentialStore()
     private var agentRuntimeFactory: AppGraphAgentRuntimeFactory?
     private var hybridSearchService: (any GraphHybridSearchService)?
@@ -1341,6 +1343,8 @@ final class AppViewModel: NSObject, ObservableObject {
                 cache: FileBackedRSSSourceCache(storagePaths: storagePaths)
             )
             self.mailStore = FileBackedMailSourceStore(storagePaths: storagePaths)
+            self.calendarStore = FileBackedCalendarSourceStore(storagePaths: storagePaths)
+            self.contactStore = FileBackedContactSourceStore(storagePaths: storagePaths)
         }
         if let repository {
             self.promotionRepository = AppPromotionQueueRepository(store: repository.store)
@@ -1402,6 +1406,7 @@ final class AppViewModel: NSObject, ObservableObject {
         reloadSidecarRuntimeDiagnostics()
         Task { await reloadRSSBrowserPresentation() }
         Task { await reloadMailBrowserPresentation() }
+        Task { await reloadCalendarContactsFromStorage() }
         reloadChatSessions()
         loadBrowserHistory()
         reloadSchemaHealthReport()
@@ -1788,6 +1793,46 @@ final class AppViewModel: NSObject, ObservableObject {
         errorMessage = nil
     }
 
+    func reloadCalendarContactsFromStorage() async {
+        do {
+            if let snapshot = try await calendarStore?.loadSnapshot() {
+                calendarAccounts = snapshot.accounts
+                calendarCollections = snapshot.collections
+                calendarEvents = snapshot.events
+                reloadCalendarBrowserPresentation()
+            }
+            if let records = try await contactStore?.loadRecords() {
+                contactRecords = records
+                reloadContactsBrowserPresentation()
+            }
+            errorMessage = nil
+        } catch {
+            errorMessage = "无法加载日历/联系人缓存：\(error.localizedDescription)"
+        }
+    }
+
+    private func persistCalendarSnapshot() async {
+        do {
+            try await calendarStore?.saveSnapshot(
+                FileBackedCalendarSourceStore.Snapshot(
+                    accounts: calendarAccounts,
+                    collections: calendarCollections,
+                    events: calendarEvents
+                )
+            )
+        } catch {
+            errorMessage = "无法保存日历缓存：\(error.localizedDescription)"
+        }
+    }
+
+    private func persistContactRecords() async {
+        do {
+            try await contactStore?.saveRecords(contactRecords)
+        } catch {
+            errorMessage = "无法保存联系人缓存：\(error.localizedDescription)"
+        }
+    }
+
     @discardableResult
     func syncSystemCalendarNow() async -> Bool {
         guard !isSyncingSystemCalendar else { return false }
@@ -1796,6 +1841,7 @@ final class AppViewModel: NSObject, ObservableObject {
         do {
             let snapshot = try await CalendarEventKitAdapter.fetchSystemSnapshot()
             upsertSystemCalendarSnapshot(snapshot)
+            await persistCalendarSnapshot()
             calendarSyncMessage = "已同步本机日历：\(snapshot.collections.count) 个日历，\(snapshot.events.count) 个日程"
             appSettingsMessage = calendarSyncMessage
             errorMessage = nil
@@ -1825,6 +1871,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 let records = try await ContactsSystemAdapter.fetchSystemContacts()
                 contactRecords = records
                 reloadContactsBrowserPresentation()
+                await persistContactRecords()
                 contactsSyncMessage = "已同步系统通讯录：\(records.count) 个联系人"
                 appSettingsMessage = contactsSyncMessage
                 errorMessage = nil
@@ -1891,6 +1938,7 @@ final class AppViewModel: NSObject, ObservableObject {
         selectedCalendarEventID = nil
         isPresentingAddCalendarSourceSheet = false
         reloadCalendarBrowserPresentation()
+        Task { await persistCalendarSnapshot() }
         appSettingsMessage = "已添加日历源：\(resolvedDisplayName)"
     }
 
@@ -1904,6 +1952,7 @@ final class AppViewModel: NSObject, ObservableObject {
             self.selectedCalendarEventID = nil
         }
         reloadCalendarBrowserPresentation()
+        Task { await persistCalendarSnapshot() }
         appSettingsMessage = "已移除日历源：\(account.displayName)"
     }
 
