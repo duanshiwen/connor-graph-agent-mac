@@ -924,7 +924,7 @@ final class AppViewModel: NSObject, ObservableObject {
         case .approvals:
             selection = .pendingApprovals
         case .automation, .localAutomationSurface:
-            selection = .automation
+            selection = .scheduledTasks
         case .productOS:
             selection = .productOS
         case .mail:

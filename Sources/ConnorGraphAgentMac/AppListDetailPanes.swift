@@ -30,9 +30,7 @@ struct CraftListPaneView: View {
                 CraftSourceListPane(viewModel: viewModel)
             case .skills:
                 CraftSkillListPane(viewModel: viewModel)
-            case .automation:
-                CraftSimpleListPane(title: "自动化", subtitle: "事件触发与执行历史", rows: viewModel.automationConfig.rules.map(\.name))
-            case .scheduledTasks:
+            case .automation, .scheduledTasks:
                 CraftTaskAutomationListPane(viewModel: viewModel, kind: .scheduled)
             case .eventTriggeredTasks:
                 CraftTaskAutomationListPane(viewModel: viewModel, kind: .eventTriggered)
@@ -1300,9 +1298,7 @@ struct CraftDetailPaneView: View {
                 MemoryChangeLogView(viewModel: viewModel)
             case .extractionDiagnostics:
                 GraphExtractionDiagnosticsView(viewModel: viewModel)
-            case .automation:
-                AutomationRuntimePanelView(viewModel: viewModel)
-            case .scheduledTasks:
+            case .automation, .scheduledTasks:
                 TaskAutomationDetailPane(viewModel: viewModel, kind: .scheduled)
             case .eventTriggeredTasks:
                 TaskAutomationDetailPane(viewModel: viewModel, kind: .eventTriggered)
