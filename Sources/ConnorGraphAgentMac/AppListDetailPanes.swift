@@ -881,19 +881,7 @@ private struct CraftTaskAutomationListPane: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .task {
             viewModel.reloadTaskManagementPresentation()
-            selectDefaultIfNeeded()
         }
-        .onChange(of: cards.map(\.id)) { _, _ in
-            selectDefaultIfNeeded()
-        }
-    }
-
-    private func selectDefaultIfNeeded() {
-        if let selected = viewModel.selectedTaskAutomationID,
-           cards.contains(where: { $0.id == selected }) {
-            return
-        }
-        viewModel.selectedTaskAutomationID = cards.first?.id
     }
 }
 
@@ -1681,8 +1669,8 @@ private struct TaskAutomationDetailPane: View {
     }
 
     private var selectedCard: TaskManagementUICard? {
-        guard let selectedID = viewModel.selectedTaskAutomationID else { return cards.first }
-        return cards.first { $0.id == selectedID } ?? cards.first
+        guard let selectedID = viewModel.selectedTaskAutomationID else { return nil }
+        return cards.first { $0.id == selectedID }
     }
 
     var body: some View {
@@ -1727,8 +1715,7 @@ private struct TaskAutomationDetailPane: View {
                 }
                 .scrollContentBackground(.hidden)
             } else {
-                ContentUnavailableView(kind.emptyTitle, systemImage: kind.systemImage, description: Text(kind.emptyDescription))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Color.clear
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1841,16 +1828,19 @@ private struct TaskAutomationActionSection: View {
         TaskAutomationDetailSection(title: "操作", systemImage: "slider.horizontal.3") {
             HStack(spacing: AgentChatLayout.spaceS) {
                 if card.canStop {
-                    Button("暂停") { viewModel.stopTask(card.id) }
-                        .controlSize(.small)
+                    TaskAutomationActionButton(title: "暂停", systemImage: "pause.fill") {
+                        viewModel.stopTask(card.id)
+                    }
                 }
                 if card.canRestore {
-                    Button("恢复") { viewModel.restoreTask(card.id) }
-                        .controlSize(.small)
+                    TaskAutomationActionButton(title: "恢复", systemImage: "play.fill") {
+                        viewModel.restoreTask(card.id)
+                    }
                 }
                 if card.canDelete {
-                    Button("删除", role: .destructive) { viewModel.deleteTask(card.id) }
-                        .controlSize(.small)
+                    TaskAutomationActionButton(title: "删除", systemImage: "trash", role: .destructive) {
+                        viewModel.deleteTask(card.id)
+                    }
                 }
                 if !card.canStop && !card.canRestore && !card.canDelete {
                     Text(card.deleteDisabledReason ?? "当前任务无需手动操作。")
@@ -1859,6 +1849,32 @@ private struct TaskAutomationActionSection: View {
                 }
             }
         }
+    }
+}
+
+private struct TaskAutomationActionButton: View {
+    var title: String
+    var systemImage: String
+    var role: ButtonRole?
+    var action: () -> Void
+
+    init(title: String, systemImage: String, role: ButtonRole? = nil, action: @escaping () -> Void) {
+        self.title = title
+        self.systemImage = systemImage
+        self.role = role
+        self.action = action
+    }
+
+    var body: some View {
+        Button(role: role, action: action) {
+            Label(title, systemImage: systemImage)
+                .font(AgentChatTypography.metaEmphasis)
+                .frame(minWidth: 82, minHeight: 32)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.regular)
+        .help(title)
     }
 }
 
