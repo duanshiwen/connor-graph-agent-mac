@@ -101,6 +101,19 @@ public enum ConnorTaskEditableField: String, Codable, Sendable, Equatable, Hasha
 }
 
 public struct ConnorTaskMetadata: Codable, Sendable, Equatable {
+    private enum CodingKeys: String, CodingKey {
+        case createdBySessionID
+        case createdByDisplayName
+        case rationale
+        case tags
+        case scope
+        case ownerSessionID
+        case isRecoverable
+        case recoveryPolicy
+        case isProtectedSystemTask
+        case userEditableFields
+    }
+
     public var createdBySessionID: String?
     public var createdByDisplayName: String?
     public var rationale: String?
@@ -134,6 +147,34 @@ public struct ConnorTaskMetadata: Codable, Sendable, Equatable {
         self.recoveryPolicy = recoveryPolicy
         self.isProtectedSystemTask = isProtectedSystemTask
         self.userEditableFields = userEditableFields
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.createdBySessionID = try container.decodeIfPresent(String.self, forKey: .createdBySessionID)
+        self.createdByDisplayName = try container.decodeIfPresent(String.self, forKey: .createdByDisplayName)
+        self.rationale = try container.decodeIfPresent(String.self, forKey: .rationale)
+        self.tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
+        self.scope = try container.decodeIfPresent(ConnorTaskScope.self, forKey: .scope) ?? .global
+        self.ownerSessionID = try container.decodeIfPresent(String.self, forKey: .ownerSessionID)
+        self.isRecoverable = try container.decodeIfPresent(Bool.self, forKey: .isRecoverable) ?? false
+        self.recoveryPolicy = try container.decodeIfPresent(ConnorTaskRecoveryPolicy.self, forKey: .recoveryPolicy) ?? .none
+        self.isProtectedSystemTask = try container.decodeIfPresent(Bool.self, forKey: .isProtectedSystemTask) ?? false
+        self.userEditableFields = try container.decodeIfPresent(Set<ConnorTaskEditableField>.self, forKey: .userEditableFields) ?? Set(ConnorTaskEditableField.allCases)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(createdBySessionID, forKey: .createdBySessionID)
+        try container.encodeIfPresent(createdByDisplayName, forKey: .createdByDisplayName)
+        try container.encodeIfPresent(rationale, forKey: .rationale)
+        try container.encode(tags, forKey: .tags)
+        try container.encode(scope, forKey: .scope)
+        try container.encodeIfPresent(ownerSessionID, forKey: .ownerSessionID)
+        try container.encode(isRecoverable, forKey: .isRecoverable)
+        try container.encode(recoveryPolicy, forKey: .recoveryPolicy)
+        try container.encode(isProtectedSystemTask, forKey: .isProtectedSystemTask)
+        try container.encode(userEditableFields, forKey: .userEditableFields)
     }
 
     public static let protectedSystem = ConnorTaskMetadata(
