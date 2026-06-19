@@ -1887,15 +1887,15 @@ final class AppViewModel: NSObject, ObservableObject {
     private func upsertSystemCalendarSnapshot(_ snapshot: CalendarEventKitSnapshot) {
         let systemAccountIDs = Set(snapshot.accounts.map(\.id))
         let systemCalendarIDs = Set(snapshot.collections.map(\.id))
-        calendarAccounts.removeAll { systemAccountIDs.contains($0.id) }
-        calendarCollections.removeAll { $0.accountID == CalendarEventKitAdapter.systemAccountID || systemCalendarIDs.contains($0.id) }
-        calendarEvents.removeAll { systemCalendarIDs.contains($0.calendarID) }
-        calendarAccounts.append(contentsOf: snapshot.accounts)
-        calendarCollections.append(contentsOf: snapshot.collections)
-        calendarEvents.append(contentsOf: snapshot.events)
-        calendarAccounts.sort { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
-        calendarCollections.sort { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
-        calendarEvents.sort { $0.start.date < $1.start.date }
+        let nextAccounts = (calendarAccounts.filter { !systemAccountIDs.contains($0.id) } + snapshot.accounts)
+            .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+        let nextCollections = (calendarCollections.filter { $0.accountID != CalendarEventKitAdapter.systemAccountID && !systemCalendarIDs.contains($0.id) } + snapshot.collections)
+            .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+        let nextEvents = (calendarEvents.filter { !systemCalendarIDs.contains($0.calendarID) } + snapshot.events)
+            .sorted { $0.start.date < $1.start.date }
+        calendarAccounts = nextAccounts
+        calendarCollections = nextCollections
+        calendarEvents = nextEvents
         reloadCalendarBrowserPresentation()
     }
 
@@ -1933,27 +1933,34 @@ final class AppViewModel: NSObject, ObservableObject {
             isReadOnly: false,
             source: "connor-calendar-source"
         )
-        calendarAccounts.append(account)
-        calendarCollections.append(collection)
+        calendarAccounts = (calendarAccounts + [account])
+            .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+        calendarCollections = (calendarCollections + [collection])
+            .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
         selectedCalendarEventID = nil
         isPresentingAddCalendarSourceSheet = false
         reloadCalendarBrowserPresentation()
+        calendarSyncMessage = "已添加日历源：\(resolvedDisplayName)"
+        appSettingsMessage = calendarSyncMessage
         Task { await persistCalendarSnapshot() }
-        appSettingsMessage = "已添加日历源：\(resolvedDisplayName)"
     }
 
     func deleteCalendarSource(_ account: CalendarAccount) {
         let collectionIDs = Set(calendarCollections.filter { $0.accountID == account.id }.map(\.id))
-        calendarAccounts.removeAll { $0.id == account.id }
-        calendarCollections.removeAll { $0.accountID == account.id }
-        calendarEvents.removeAll { collectionIDs.contains($0.calendarID) }
+        let nextAccounts = calendarAccounts.filter { $0.id != account.id }
+        let nextCollections = calendarCollections.filter { $0.accountID != account.id }
+        let nextEvents = calendarEvents.filter { !collectionIDs.contains($0.calendarID) }
+        calendarAccounts = nextAccounts
+        calendarCollections = nextCollections
+        calendarEvents = nextEvents
         if let selectedCalendarEventID,
-           !calendarEvents.contains(where: { $0.id == selectedCalendarEventID }) {
+           !nextEvents.contains(where: { $0.id == selectedCalendarEventID }) {
             self.selectedCalendarEventID = nil
         }
         reloadCalendarBrowserPresentation()
+        calendarSyncMessage = "已移除日历源：\(account.displayName)"
+        appSettingsMessage = calendarSyncMessage
         Task { await persistCalendarSnapshot() }
-        appSettingsMessage = "已移除日历源：\(account.displayName)"
     }
 
     private func calendarProviderDisplayName(_ provider: ConnectedAccountProviderKind) -> String {
