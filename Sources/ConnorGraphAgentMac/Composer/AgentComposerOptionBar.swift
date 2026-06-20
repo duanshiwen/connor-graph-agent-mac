@@ -230,7 +230,7 @@ struct SpeechInputHoldToTalkButton: View {
         case .recording:
             "松开结束"
         case .finalizing:
-            "整理中"
+            "按住说话"
         case .failed:
             "语音失败"
         case .idle:
@@ -274,7 +274,7 @@ struct SpeechInputHoldToTalkButton: View {
 
     private var helpText: String {
         guard isEnabled else { return "请选择一个会话后再开始语音输入" }
-        return "鼠标按住开始录音，松开后短暂整理最终结果；如果超时会自动使用实时识别结果。也可以按住 Option 开始，松开 Option 结束。"
+        return "鼠标按住开始录音，松开即提交当前识别结果；也可以按住 Option 开始，松开 Option 结束。"
     }
 
     private func beginIfNeeded() {
