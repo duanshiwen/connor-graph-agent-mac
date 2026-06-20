@@ -1553,33 +1553,37 @@ final class AppViewModel: NSObject, ObservableObject {
         let ownerSessionID = selectedChatSessionID ?? activeChatSession.id
         guard runningMediaTranscriptionTask(for: ownerSessionID) == nil else { throw AppViewModelTaskCreationError.mediaTranscriptionAlreadyRunning }
         let stack = TaskManagementStack(repository: taskManagementRepository, sessionRepository: chatSessionRepository)
-        let selectedSnapshot = selection.selectedSnapshot
-        let result = try stack.createMediaTranscriptionTask(
-            ownerSessionID: ownerSessionID,
-            source: selectedSnapshot,
-            request: selection.mediaTranscriptionRequest
-        )
-        reloadTaskManagementPresentation()
-        selectedTaskAutomationID = result.task.id
-        let selectedCount = max(1, selectedSnapshot.mediaElements.count + selectedSnapshot.openGraphMedia.count)
-        upsertBackgroundTask(
-            AppSessionBackgroundTask(
-                id: result.task.id,
-                sessionID: ownerSessionID,
-                kind: Self.mediaTranscriptionBackgroundTaskKind,
-                title: "网页媒体转写",
-                detail: mediaTranscriptionBackgroundTaskDetail(sourceCount: selectedCount, mode: selection.mode),
-                status: .queued,
-                payloadJSON: mediaTranscriptionBackgroundTaskPayload(taskID: result.task.id, jobID: result.job.id, mode: selection.mode)
+        let selectedSnapshots = selection.selectedSingleSourceSnapshots
+        var results: [MediaTranscriptionTaskCreationResult] = []
+        for snapshot in selectedSnapshots {
+            let result = try stack.createMediaTranscriptionTask(
+                ownerSessionID: ownerSessionID,
+                source: snapshot,
+                request: selection.mediaTranscriptionRequest
             )
-        )
+            results.append(result)
+            upsertBackgroundTask(
+                AppSessionBackgroundTask(
+                    id: result.task.id,
+                    sessionID: ownerSessionID,
+                    kind: Self.mediaTranscriptionBackgroundTaskKind,
+                    title: "网页媒体转写",
+                    detail: mediaTranscriptionBackgroundTaskDetail(sourceCount: 1, mode: selection.mode),
+                    status: .queued,
+                    payloadJSON: mediaTranscriptionBackgroundTaskPayload(taskID: result.task.id, jobID: result.job.id, mode: selection.mode)
+                )
+            )
+        }
+        reloadTaskManagementPresentation()
+        selectedTaskAutomationID = results.first?.task.id
+        let selectedCount = results.count
         isBackgroundTasksPresented = true
         showAttachmentToast(
             title: "已开始媒体处理",
-            message: "Connor 将处理 \(selectedCount) 个媒体源：\(selection.mode.displayTitle)。完成后结果会写入当前会话附件。",
+            message: "Connor 将处理 \(selectedCount) 个媒体源：\(selection.mode.displayTitle)。完成后结果会分别写入当前会话附件。",
             systemImage: "waveform.badge.magnifyingglass"
         )
-        return result.task.id
+        return results.first?.task.id ?? ""
     }
 
     func stopTask(_ id: String) {
@@ -1709,7 +1713,7 @@ final class AppViewModel: NSObject, ObservableObject {
         let ownerSessionID = task.target.parameters["ownerSessionID"] ?? task.metadata.ownerSessionID
         guard let ownerSessionID, !ownerSessionID.isEmpty else { return }
         guard let job = try? MediaTranscriptionJobStore(paths: storagePaths).load(sessionID: ownerSessionID, jobID: jobID) else { return }
-        guard let attachmentID = job.artifacts.attachmentIDs.first else { return }
+        guard let attachmentID = job.artifacts.attachmentIDs.last else { return }
         guard let manifest = try? AppSessionAttachmentStore(paths: storagePaths).loadManifest(sessionID: ownerSessionID, attachmentID: attachmentID) else { return }
         let prompt = MediaTranscriptionPromptBuilder().analysisPrompt(job: job, attachmentID: attachmentID)
         selectedChatSessionID = ownerSessionID
