@@ -90,7 +90,7 @@ public struct MediaTranscriptionTaskHandler: Sendable {
         runtimeSupervisor: any MediaRuntimeSupervising,
         requireHealthyRuntime: Bool = false,
         processRunner: any MediaProcessRunning = DefaultMediaProcessRunner(),
-        localTranscriber: any MediaLocalTranscriptionProviding = UnavailableMediaLocalTranscriber()
+        localTranscriber: any MediaLocalTranscriptionProviding = SystemSpeechMediaLocalTranscriber()
     ) {
         self.store = store
         self.runtimeSupervisor = runtimeSupervisor
