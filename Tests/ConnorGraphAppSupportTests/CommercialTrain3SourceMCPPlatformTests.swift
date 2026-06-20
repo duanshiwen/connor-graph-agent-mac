@@ -245,13 +245,11 @@ private func temporaryTrain3StoragePaths(_ name: String = UUID().uuidString) -> 
     let audit = MCPSourceRuntimeAuditRecord(sourceID: "github", eventKind: .toolFinished)
     let input = CommercialReadinessInput(
         sessionGovernance: .ready(sessionCount: 1, statusDefinitionCount: 1, labelDefinitionCount: 1, artifactDirectoriesReady: true),
-        claudeSidecar: .ready(runtimeStatus: .ready, sdkSessionID: "sdk-1", healthStatus: "ready"),
+        modelProvider: .ready(providerMode: .anthropicMessages, connectionKind: .anthropicCompatible, modelID: "claude-sonnet-4-5", healthStatus: "ready"),
         extensionRuntime: CommercialReadinessSnapshotBuilder().build(
             sessions: [AgentSession(id: "session-1", title: "Test")],
             governanceConfig: AppSessionGovernanceConfig.default,
             artifactDirectoriesReady: true,
-            sidecarRecord: nil,
-            sidecarHealthStatus: nil,
             sources: [source],
             sourceHealthRecords: [health],
             sourceAuditRecords: [audit],
