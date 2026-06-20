@@ -26,20 +26,15 @@ public struct TaskSchedulerService: Sendable {
     }
 
     public func computeNextRunAt(task: ConnorTaskDefinition, after date: Date) -> Date? {
-        let recurrence = task.trigger.recurrence ?? (task.trigger.intervalSeconds == nil ? .once : .interval)
-        switch recurrence {
+        switch recurrence(for: task) {
         case .interval:
             guard let seconds = task.trigger.intervalSeconds else { return nil }
             return date.addingTimeInterval(seconds)
         case .once:
             if let runAt = task.trigger.runAt, runAt > date { return runAt }
             return nil
-        case .daily:
-            return calendar.date(byAdding: .day, value: 1, to: date)
-        case .weekly:
-            return calendar.date(byAdding: .day, value: 7, to: date)
-        case .monthly:
-            return calendar.date(byAdding: .month, value: 1, to: date)
+        case .daily, .weekly, .monthly:
+            return nextAnchoredRunAt(task: task, after: date)
         }
     }
 
@@ -78,13 +73,13 @@ public struct TaskSchedulerService: Sendable {
 
     private func effectiveDueDate(for task: ConnorTaskDefinition, now: Date) -> Date? {
         let scheduled = nextDueDate(for: task)
-        guard let missedInterval = missedIntervalDueDate(for: task, now: now) else { return scheduled }
-        guard let scheduled else { return missedInterval }
-        return min(scheduled, missedInterval)
+        guard let missed = missedRecurringDueDate(for: task, now: now) else { return scheduled }
+        guard let scheduled else { return missed }
+        return min(scheduled, missed)
     }
 
     private func nextDueDate(for task: ConnorTaskDefinition) -> Date? {
-        let recurrence = task.trigger.recurrence ?? (task.trigger.intervalSeconds == nil ? .once : .interval)
+        let recurrence = recurrence(for: task)
         if recurrence == .once {
             guard task.lifecycle.lastFinishedAt == nil else { return nil }
             guard task.lifecycle.lastRunAt == nil || task.lifecycle.status == .active else { return nil }
@@ -97,11 +92,64 @@ public struct TaskSchedulerService: Sendable {
         return task.createdAt
     }
 
-    private func missedIntervalDueDate(for task: ConnorTaskDefinition, now: Date) -> Date? {
-        let recurrence = task.trigger.recurrence ?? (task.trigger.intervalSeconds == nil ? .once : .interval)
-        guard recurrence == .interval, let seconds = task.trigger.intervalSeconds else { return nil }
-        let anchor = task.lifecycle.lastFinishedAt ?? task.lifecycle.lastRunAt ?? task.trigger.runAt ?? task.createdAt
-        let expected = anchor.addingTimeInterval(seconds)
-        return expected <= now ? expected : nil
+    private func missedRecurringDueDate(for task: ConnorTaskDefinition, now: Date) -> Date? {
+        switch recurrence(for: task) {
+        case .interval:
+            guard let seconds = task.trigger.intervalSeconds else { return nil }
+            let anchor = task.lifecycle.lastFinishedAt ?? task.lifecycle.lastRunAt ?? task.trigger.runAt ?? task.createdAt
+            let expected = anchor.addingTimeInterval(seconds)
+            return expected <= now ? expected : nil
+        case .daily, .weekly, .monthly:
+            return latestAnchoredRunAt(task: task, onOrBefore: now)
+        case .once:
+            return nil
+        }
+    }
+
+    private func recurrence(for task: ConnorTaskDefinition) -> ConnorTaskRecurrence {
+        task.trigger.recurrence ?? (task.trigger.intervalSeconds == nil ? .once : .interval)
+    }
+
+    private func anchoredStartDate(for task: ConnorTaskDefinition) -> Date {
+        task.trigger.runAt ?? task.createdAt
+    }
+
+    private func nextAnchoredRunAt(task: ConnorTaskDefinition, after date: Date) -> Date? {
+        let anchor = anchoredStartDate(for: task)
+        if anchor > date { return anchor }
+        var candidate = anchor
+        for _ in 0..<10_000 {
+            guard let next = addOneRecurrence(to: candidate, recurrence: recurrence(for: task)) else { return nil }
+            candidate = next
+            if candidate > date { return candidate }
+        }
+        return nil
+    }
+
+    private func latestAnchoredRunAt(task: ConnorTaskDefinition, onOrBefore date: Date) -> Date? {
+        let anchor = anchoredStartDate(for: task)
+        guard anchor <= date else { return nil }
+        var latest = anchor
+        var candidate = anchor
+        for _ in 0..<10_000 {
+            guard let next = addOneRecurrence(to: candidate, recurrence: recurrence(for: task)) else { return latest }
+            guard next <= date else { return latest }
+            latest = next
+            candidate = next
+        }
+        return latest
+    }
+
+    private func addOneRecurrence(to date: Date, recurrence: ConnorTaskRecurrence) -> Date? {
+        switch recurrence {
+        case .daily:
+            return calendar.date(byAdding: .day, value: 1, to: date)
+        case .weekly:
+            return calendar.date(byAdding: .day, value: 7, to: date)
+        case .monthly:
+            return calendar.date(byAdding: .month, value: 1, to: date)
+        case .interval, .once:
+            return nil
+        }
     }
 }
