@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 2,
+  "product": "Connor built-in media runtime",
+  "distribution": "app-managed",
+  "consumerFacingPolicy": "Connor prepares and verifies media transcription tools and baseline WhisperKit models inside the app. Users should not be asked to install Python, yt-dlp, ffmpeg, WhisperKit, or baseline ASR models manually.",
+  "modelPolicy": {
+    "defaultModel": "openai_whisper-medium",
+    "fastModel": "openai_whisper-small",
+    "requiredBundledModels": [
+      "openai_whisper-small",
+      "openai_whisper-medium"
+    ],
+    "optionalHighAccuracyModels": [
+      "openai_whisper-large-v3-v20240930_547MB",
+      "openai_whisper-large-v3-v20240930_626MB",
+      "distil-whisper_distil-large-v3_594MB"
+    ],
+    "notes": "Consumer-grade offline media transcription requires both small and medium WhisperKit CoreML models in the app-managed runtime. Large/distilled-large models remain manual high-accuracy opt-in downloads."
+  },
+  "components": [
+    {
+      "id": "python",
+      "version": "app-managed",
+      "source": "bundled-or-bootstrapped",
+      "executableRelativePath": "python/runtime/bin/python3",
+      "license": "Python Software Foundation License"
+    },
+    {
+      "id": "yt-dlp",
+      "version": "app-managed",
+      "source": "bundled-or-bootstrapped",
+      "executableRelativePath": "yt-dlp/runtime/yt-dlp.sh",
+      "license": "Unlicense"
+    },
+    {
+      "id": "ffmpeg",
+      "version": "app-managed",
+      "source": "bundled-or-bootstrapped",
+      "executableRelativePath": "ffmpeg/runtime/ffmpeg",
+      "license": "LGPL/GPL depending on build configuration"
+    },
+    {
+      "id": "whisperkit",
+      "version": "app-managed",
+      "source": "bundled-or-bootstrapped",
+      "executableRelativePath": null,
+      "requiredModels": [
+        "openai_whisper-small",
+        "openai_whisper-medium"
+      ],
+      "defaultModel": "openai_whisper-medium",
+      "fastModel": "openai_whisper-small",
+      "license": "MIT"
+    }
+  ]
+}
