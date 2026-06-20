@@ -5,7 +5,7 @@ import ConnorGraphAppSupport
 
 @Suite("Media Transcription Task Handler Tests")
 struct MediaTranscriptionTaskHandlerTests {
-    @Test func handlerRunsThroughRecoverableCheckpointsWithoutRealRuntimeRequirement() async throws {
+    @Test func handlerFailsWhenNoTranscriptArtifactIsProduced() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let paths = AppStoragePaths(applicationSupportDirectory: root)
@@ -28,17 +28,19 @@ struct MediaTranscriptionTaskHandlerTests {
         )
         let handler = MediaTranscriptionTaskHandler(store: store, runtimeSupervisor: FakeMediaRuntimeSupervisor(report: report), requireHealthyRuntime: false)
 
-        let summary = try await handler.run(MediaTranscriptionTaskRequest(jobID: "job-1", ownerSessionID: "session-1", runID: "run-1"), now: Date(timeIntervalSince1970: 0))
+        await #expect(throws: MediaTranscriptionTaskHandlerError.self) {
+            _ = try await handler.run(MediaTranscriptionTaskRequest(jobID: "job-1", ownerSessionID: "session-1", runID: "run-1"), now: Date(timeIntervalSince1970: 0))
+        }
         let loaded = try store.load(sessionID: "session-1", jobID: "job-1")
         let events = try store.loadEvents(sessionID: "session-1", jobID: "job-1")
 
-        #expect(summary.contains("job-1"))
-        #expect(loaded.state == .completed)
-        #expect(loaded.progress.fractionCompleted == 1)
+        #expect(loaded.state == .failed)
+        #expect(loaded.lastErrorCode == .transcriptionFailed)
+        #expect(loaded.lastErrorMessage?.contains("未获取到") == true)
         #expect(store.hasCheckpoint("runtime-ready", sessionID: "session-1", jobID: "job-1"))
-        #expect(store.hasCheckpoint("completed", sessionID: "session-1", jobID: "job-1"))
+        #expect(!store.hasCheckpoint("completed", sessionID: "session-1", jobID: "job-1"))
         #expect(events.contains { $0.state == .preparingRuntime })
-        #expect(events.contains { $0.state == .completed })
+        #expect(events.contains { $0.state == .failed })
     }
 
     @Test func handlerCanFailFastWhenRuntimeHealthIsRequired() async throws {

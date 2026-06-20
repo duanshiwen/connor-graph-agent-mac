@@ -1660,6 +1660,9 @@ final class AppViewModel: NSObject, ObservableObject {
                 guard dueTasks.contains(where: { $0.id == outcome.taskID && $0.target.targetKind == "media.transcription" }) else { continue }
                 if outcome.succeeded {
                     updateMediaTranscriptionBackgroundTask(taskID: outcome.taskID, status: .succeeded, detail: outcome.summary)
+                    if let task = dueTasks.first(where: { $0.id == outcome.taskID }) {
+                        await sendMediaTranscriptionFollowUpIfPossible(for: task)
+                    }
                 } else {
                     updateMediaTranscriptionBackgroundTask(taskID: outcome.taskID, status: .failed, detail: outcome.summary, errorMessage: outcome.errorMessage)
                 }
@@ -1678,6 +1681,22 @@ final class AppViewModel: NSObject, ObservableObject {
             requireHealthyRuntime: false
         )
         return try await handler.run(request)
+    }
+
+    private func sendMediaTranscriptionFollowUpIfPossible(for task: ConnorTaskDefinition) async {
+        guard let storagePaths else { return }
+        let jobID = task.target.parameters["jobID"] ?? task.target.targetID
+        let ownerSessionID = task.target.parameters["ownerSessionID"] ?? task.metadata.ownerSessionID
+        guard let ownerSessionID, !ownerSessionID.isEmpty else { return }
+        guard let job = try? MediaTranscriptionJobStore(paths: storagePaths).load(sessionID: ownerSessionID, jobID: jobID) else { return }
+        guard let attachmentID = job.artifacts.attachmentIDs.first else { return }
+        let prompt = MediaTranscriptionPromptBuilder().analysisPrompt(job: job, attachmentID: attachmentID)
+        selectedChatSessionID = ownerSessionID
+        if let session = try? chatSessionRepository?.loadSession(id: ownerSessionID) {
+            fallbackChatSession = session
+            nativeSessionManager = makeNativeSessionManager(for: session)
+        }
+        _ = await submitChat(prompt: prompt, clearComposer: false)
     }
 
     private func refreshMailForScheduledTask(runID: String?) async throws -> String {
