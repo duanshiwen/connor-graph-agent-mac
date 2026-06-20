@@ -15,6 +15,8 @@ struct AgentComposerState {
     var permissionMode: AgentPermissionMode
     var selectedSessionStatus: AgentSessionStatus?
     var isSpeechTranscriptionRunning: Bool
+    var speechTranscriptionStatus: SessionSpeechTranscriptionStatus
+    var speechProvisionalTranscript: String?
 
     init(
         input: String,
@@ -27,7 +29,9 @@ struct AgentComposerState {
         sessionHasLLMOverride: Bool,
         permissionMode: AgentPermissionMode,
         selectedSessionStatus: AgentSessionStatus?,
-        isSpeechTranscriptionRunning: Bool
+        isSpeechTranscriptionRunning: Bool,
+        speechTranscriptionStatus: SessionSpeechTranscriptionStatus,
+        speechProvisionalTranscript: String?
     ) {
         self.input = input
         self.pendingAttachments = pendingAttachments
@@ -40,5 +44,7 @@ struct AgentComposerState {
         self.permissionMode = permissionMode
         self.selectedSessionStatus = selectedSessionStatus
         self.isSpeechTranscriptionRunning = isSpeechTranscriptionRunning
+        self.speechTranscriptionStatus = speechTranscriptionStatus
+        self.speechProvisionalTranscript = speechProvisionalTranscript
     }
 }

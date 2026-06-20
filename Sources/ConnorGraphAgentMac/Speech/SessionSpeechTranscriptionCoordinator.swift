@@ -22,21 +22,30 @@ enum SessionSpeechTranscriptionStopReason: Equatable, Sendable {
 
 enum SessionSpeechTranscriptionStatus: Equatable, Sendable {
     case idle
-    case running(sessionID: String, taskID: String)
+    case recording(sessionID: String, taskID: String)
     case failed(message: String)
 
     var runningSessionID: String? {
-        guard case .running(let sessionID, _) = self else { return nil }
-        return sessionID
+        switch self {
+        case .recording(let sessionID, _): sessionID
+        case .idle, .failed: nil
+        }
     }
 
     var runningTaskID: String? {
-        guard case .running(_, let taskID) = self else { return nil }
-        return taskID
+        switch self {
+        case .recording(_, let taskID): taskID
+        case .idle, .failed: nil
+        }
     }
 
     var isRunning: Bool {
         runningSessionID != nil
+    }
+
+    var isRecording: Bool {
+        guard case .recording = self else { return false }
+        return true
     }
 }
 
@@ -67,7 +76,10 @@ final class SessionSpeechTranscriptionCoordinator {
     private var liveSpeechText: String = ""
     private var userEditedSpeechText: String?
     private var lastGeneratedDraft: String = ""
+    private var provisionalSpeechText: String = ""
+    private var speechInsertionRange: NSRange?
     private var setDraft: ((String, String) -> Void)?
+    private var setProvisionalTranscript: ((String, String?) -> Void)?
 
     init(transcriber: SessionSpeechTranscribing) {
         self.transcriber = transcriber
@@ -86,26 +98,49 @@ final class SessionSpeechTranscriptionCoordinator {
     ) -> AppSessionBackgroundTask? {
         guard let selectedSessionID else { return nil }
         if isRunning(sessionID: selectedSessionID) {
-            return stop(reason: .manual)
+            return finishHoldToTalk(reason: .manual)
         }
+        return beginHoldToTalk(selectedSessionID: selectedSessionID, currentDraft: currentDraft, setDraft: setDraft)
+    }
+
+    @discardableResult
+    func beginHoldToTalk(
+        selectedSessionID: String?,
+        currentDraft: String,
+        speechInsertionRange: NSRange? = nil,
+        setDraft: @escaping (String, String) -> Void,
+        setProvisionalTranscript: ((String, String?) -> Void)? = nil
+    ) -> AppSessionBackgroundTask? {
+        guard let selectedSessionID else { return nil }
+        if isRunning(sessionID: selectedSessionID) { return nil }
         if status.isRunning {
             _ = stop(reason: .leavingSession)
         }
-        return start(sessionID: selectedSessionID, currentDraft: currentDraft, setDraft: setDraft)
+        setProvisionalTranscript?(selectedSessionID, nil)
+        clearRecognitionCache()
+        return start(
+            sessionID: selectedSessionID,
+            currentDraft: currentDraft,
+            speechInsertionRange: speechInsertionRange,
+            setDraft: setDraft,
+            setProvisionalTranscript: setProvisionalTranscript
+        )
     }
 
     @discardableResult
     func start(
         sessionID: String,
         currentDraft: String,
-        setDraft: @escaping (String, String) -> Void
+        speechInsertionRange: NSRange? = nil,
+        setDraft: @escaping (String, String) -> Void,
+        setProvisionalTranscript: ((String, String?) -> Void)? = nil
     ) -> AppSessionBackgroundTask {
         let runID = UUID()
         let task = AppSessionBackgroundTask(
             sessionID: sessionID,
             kind: Self.backgroundTaskKind,
-            title: "实时语音转文字",
-            detail: "正在把麦克风语音实时写入当前会话输入框",
+            title: "按住说话",
+            detail: "正在听写语音，松开即提交当前识别结果",
             status: .running,
             payloadJSON: "{\"runID\":\"\(runID.uuidString)\"}"
         )
@@ -116,8 +151,11 @@ final class SessionSpeechTranscriptionCoordinator {
         liveSpeechText = ""
         userEditedSpeechText = nil
         lastGeneratedDraft = currentDraft
+        provisionalSpeechText = ""
+        self.speechInsertionRange = speechInsertionRange
         self.setDraft = setDraft
-        status = .running(sessionID: sessionID, taskID: task.id)
+        self.setProvisionalTranscript = setProvisionalTranscript
+        status = .recording(sessionID: sessionID, taskID: task.id)
 
         transcriber.start(
             sessionID: sessionID,
@@ -164,6 +202,30 @@ final class SessionSpeechTranscriptionCoordinator {
     }
 
     @discardableResult
+    func finishHoldToTalk(reason: SessionSpeechTranscriptionStopReason = .manual) -> AppSessionBackgroundTask? {
+        guard reason == .manual else { return stop(reason: reason) }
+        guard var task = activeTask, let sessionID = status.runningSessionID else {
+            status = .idle
+            return nil
+        }
+
+        let committedSpeechText = provisionalSpeechText
+        let nextDraft = renderDraft(withLiveSpeechText: committedSpeechText)
+        lastGeneratedDraft = nextDraft
+        setDraft?(sessionID, nextDraft)
+        setProvisionalTranscript?(sessionID, nil)
+
+        task.status = .succeeded
+        task.detail = "语音输入已完成"
+        task.updatedAt = Date()
+
+        reset()
+        transcriber.stop(reason: reason)
+        onTaskUpdate?(task)
+        return task
+    }
+
+    @discardableResult
     func stop(reason: SessionSpeechTranscriptionStopReason) -> AppSessionBackgroundTask? {
         guard var task = activeTask else {
             status = .idle
@@ -184,9 +246,8 @@ final class SessionSpeechTranscriptionCoordinator {
         let hypothesis = partialText.trimmingCharacters(in: .whitespacesAndNewlines)
         liveSpeechText = mergedLiveSpeechText(for: hypothesis)
         lastSpeechHypothesis = hypothesis
-        let nextDraft = renderDraft(withLiveSpeechText: liveSpeechText)
-        lastGeneratedDraft = nextDraft
-        setDraft?(sessionID, nextDraft)
+        provisionalSpeechText = liveSpeechText
+        setProvisionalTranscript?(sessionID, liveSpeechText)
     }
 
     private func mergedLiveSpeechText(for hypothesis: String) -> String {
@@ -208,6 +269,12 @@ final class SessionSpeechTranscriptionCoordinator {
     private func renderDraft(withLiveSpeechText speechText: String) -> String {
         if speechText.isEmpty {
             return draftBaseText
+        }
+        if let speechInsertionRange,
+           let range = Range(speechInsertionRange, in: draftBaseText) {
+            var draft = draftBaseText
+            draft.replaceSubrange(range, with: speechText)
+            return draft
         }
         if draftBaseText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return speechText
@@ -240,13 +307,20 @@ final class SessionSpeechTranscriptionCoordinator {
     private func reset() {
         activeRunID = nil
         activeTask = nil
+        clearRecognitionCache()
+        setDraft = nil
+        setProvisionalTranscript = nil
+        status = .idle
+    }
+
+    private func clearRecognitionCache() {
         draftBaseText = ""
         lastSpeechHypothesis = ""
         liveSpeechText = ""
         userEditedSpeechText = nil
         lastGeneratedDraft = ""
-        setDraft = nil
-        status = .idle
+        provisionalSpeechText = ""
+        speechInsertionRange = nil
     }
 
     private func statusForStopReason(_ reason: SessionSpeechTranscriptionStopReason) -> AppSessionBackgroundTaskStatus {

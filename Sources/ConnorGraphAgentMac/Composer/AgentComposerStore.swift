@@ -18,7 +18,9 @@ struct AgentComposerStore {
             sessionHasLLMOverride: viewModel.sessionHasLLMOverride,
             permissionMode: viewModel.sidecarPermissionMode,
             selectedSessionStatus: selectedSession?.governance.status,
-            isSpeechTranscriptionRunning: viewModel.isSpeechTranscriptionRunningForSelectedSession
+            isSpeechTranscriptionRunning: viewModel.isSpeechTranscriptionRunningForSelectedSession,
+            speechTranscriptionStatus: viewModel.speechTranscriptionStatus,
+            speechProvisionalTranscript: viewModel.speechProvisionalTranscript
         )
     }
 
@@ -52,6 +54,10 @@ struct AgentComposerStore {
             viewModel.toggleBrowserWorkspaceVisibility()
         case .toggleSpeechTranscription:
             viewModel.toggleSpeechTranscriptionForSelectedSession()
+        case .beginSpeechTranscription(let speechInsertionRange):
+            viewModel.beginSpeechTranscriptionForSelectedSession(speechInsertionRange: speechInsertionRange)
+        case .finishSpeechTranscription:
+            viewModel.finishSpeechTranscriptionForSelectedSession()
         case .showBackgroundTasks:
             viewModel.isBackgroundTasksPresented = true
         }
