@@ -12,9 +12,14 @@ enum SkillPickerKeyCommand {
     case cancel
 }
 
+@MainActor
+final class ComposerTextSelectionTracker {
+    var selectedRange: NSRange?
+}
+
 struct SafeChatComposerTextView: NSViewRepresentable {
     @Binding var text: String
-    @Binding var selectedRange: NSRange?
+    var selectionTracker: ComposerTextSelectionTracker
     var placeholder: String
     var isSpellCheckEnabled: Bool
     var sendShortcut: String
@@ -57,7 +62,7 @@ struct SafeChatComposerTextView: NSViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text, selectedRange: $selectedRange)
+        Coordinator(text: $text, selectionTracker: selectionTracker)
     }
 
     private var textInputConfiguration: ComposerTextInputConfiguration {
@@ -102,22 +107,22 @@ struct SafeChatComposerTextView: NSViewRepresentable {
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         @Binding var text: String
-        @Binding var selectedRange: NSRange?
+        var selectionTracker: ComposerTextSelectionTracker
 
-        init(text: Binding<String>, selectedRange: Binding<NSRange?>) {
+        init(text: Binding<String>, selectionTracker: ComposerTextSelectionTracker) {
             self._text = text
-            self._selectedRange = selectedRange
+            self.selectionTracker = selectionTracker
         }
 
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             text = textView.string
-            selectedRange = textView.selectedRange()
+            selectionTracker.selectedRange = textView.selectedRange()
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
-            selectedRange = textView.selectedRange()
+            selectionTracker.selectedRange = textView.selectedRange()
         }
     }
 }
