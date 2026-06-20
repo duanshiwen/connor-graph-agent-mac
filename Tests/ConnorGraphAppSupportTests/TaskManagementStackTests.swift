@@ -12,8 +12,8 @@ struct TaskManagementStackTests {
         let stack = TaskManagementStack(repository: repository)
         _ = try repository.loadOrCreateDefault(now: Date(timeIntervalSince1970: 0))
 
-        let stopped = try stack.stopTask(id: "system.rss.check-every-30-minutes", reason: "network constrained")
-        let restored = try stack.restoreTask(id: "system.rss.check-every-30-minutes")
+        let stopped = try stack.stopTask(id: "system.mail.check-every-10-minutes", reason: "network constrained")
+        let restored = try stack.restoreTask(id: "system.mail.check-every-10-minutes")
 
         #expect(stopped.lifecycle.status == .stopped)
         #expect(restored.lifecycle.status == .active)

@@ -18,7 +18,7 @@ struct TaskTargetRunnerTests {
 
         #expect(await mail.count == 1)
         #expect(await calendar.count == 1)
-        #expect(await rss.count == 1)
+        #expect(await rss.count == 0)
     }
 
     @Test func runnerPassesSourceInstanceIDToRSSRefreshHandler() async throws {

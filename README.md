@@ -300,7 +300,7 @@ system.calendar.check-every-10-minutes        source.runtime:calendar.refresh
 system.rss.source.{rssSourceID}.refresh       source.runtime:rss.refresh(sourceInstanceID={rssSourceID})
 ```
 
-旧全局 RSS 任务 `system.rss.check-every-30-minutes` 会被保留但标记为 stopped/deprecated，用于保留历史并避免和 per-source RSS 任务重复同步。
+RSS 不再存在全局 source-type refresh task；开发期本地遗留的无 `sourceInstanceID` RSS refresh task 会在 reconcile 时从 task definitions 中物理清除。
 labels/labels.json
 statuses/statuses.json
 graph/evaluations/retrieval-evaluation-cases.json
@@ -407,7 +407,7 @@ API keys and provider credentials must not be stored in JSON settings files. The
   - `tasks_create_scheduled_session_message`
   - `tasks_create_session_status_message`
 - Task runtime execution：`TaskSchedulerService` 计算 due tasks，`TaskSchedulerRunnerService` 记录 run history 并调用 `TaskTargetRunner`，真实分发到 Native Mail / Calendar / RSS runtimes、Session OS message flow 或浏览器媒体转写 handler。`source.runtime` refresh targets 现在通过 `SourceRefreshTaskRequest` 传递 `sourceKind`、`sourceInstanceID` 和 `runID`；RSS source-instance task 会只刷新对应 RSS source，而不是刷新所有 RSS sources。
-- Source sync policy boundary：source config 是同步策略事实来源，TaskDefinition 是 materialized projection。RSS 当前由 `SourceRefreshTaskMaterializer` 根据 `RSSSource.fetchPolicy.intervalMinutes` 生成/更新 `system.rss.source.{rssSourceID}.refresh`；当 RSS source 删除后，对应 task 会 stopped/deprecated 而不是直接删除。
+- Source sync policy boundary：source config 是同步策略事实来源，TaskDefinition 是 materialized projection。RSS 当前由 `SourceRefreshTaskMaterializer` 根据 `RSSSource.fetchPolicy.intervalMinutes` 生成/更新 `system.rss.source.{rssSourceID}.refresh`；当 RSS source 删除后，对应 task definition 会被物理清除，避免开发阶段保留无效结构。
 - Missed recurring schedule semantics：应用启动和 60 秒轮询都会扫描 due tasks；如果每日/每周/每月重复任务在应用未运行期间错过至少一次，Connor 下次启动/轮询时会立即补执行一次，并把 `nextRunAt` 推进到原始 `runAt` 锚点之后的下一个未来计划点；不会对错过的每一个周期批量补跑，避免会话消息或 source refresh 噪音。Source refresh 同步同样采用 catch up once 语义：恢复后运行一次以追平 source cursor，而不是按错过 interval 批量 replay。
 - 浏览器媒体转写任务使用 Task Stack 获得 recoverable run/history 能力，但不作为“系统定时任务”卡片显示；它的用户可见面在对应会话的 background task surface。若用户一次选择多段媒体，App 会拆成多个单源 job/task；每个完成后的 follow-up chat 只携带该 job 最新 transcript 附件 ref，避免跨视频提交错附件。
 - Session-scoped background task adapter remains for recoverable per-session runtime intents

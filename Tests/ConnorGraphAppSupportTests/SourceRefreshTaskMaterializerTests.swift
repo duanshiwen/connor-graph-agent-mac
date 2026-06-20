@@ -43,7 +43,7 @@ struct SourceRefreshTaskMaterializerTests {
         #expect(feedA.trigger.intervalSeconds == 1_800)
     }
 
-    @Test func materializerStopsOrphanedRSSRefreshTasksWhenSourceIsRemoved() async throws {
+    @Test func materializerPurgesOrphanedRSSRefreshTasksWhenSourceIsRemoved() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let taskRepository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
@@ -53,27 +53,32 @@ struct SourceRefreshTaskMaterializerTests {
 
         try await rssRepository.deleteSource(id: RSSSourceID(rawValue: "feed-a"))
         let tasks = try await materializer.reconcileRSSSourceRefreshTasks(now: Date(timeIntervalSince1970: 20))
-        let feedA = try #require(tasks.first { $0.id == "system.rss.source.feed-a.refresh" })
 
-        #expect(feedA.lifecycle.status == .stopped)
-        #expect(feedA.lifecycle.lastErrorMessage?.contains("no longer exists") == true)
-        #expect(feedA.metadata.tags.contains("orphaned-source"))
+        #expect(tasks.contains { $0.id == "system.rss.source.feed-a.refresh" } == false)
     }
 
-    @Test func materializerDeprecatesLegacyGlobalRSSTask() async throws {
+    @Test func materializerPurgesLegacyGlobalRSSTask() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let taskRepository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
         let rssRepository = InMemoryRSSSourceRepository(sources: [makeSource(id: "feed-a", name: "Feed A", intervalMinutes: 15)])
         let materializer = SourceRefreshTaskMaterializer(taskRepository: taskRepository, rssSourceRepository: rssRepository)
+        try taskRepository.saveTask(ConnorTaskDefinition(
+            id: "system.rss.check-every-30-minutes",
+            name: "检查 RSS",
+            origin: .system,
+            trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 1_800, recurrence: .interval),
+            target: .sourceRuntimeRefresh(sourceID: "rss"),
+            lifecycle: ConnorTaskLifecycle(status: .active),
+            metadata: .protectedSystem,
+            createdAt: Date(timeIntervalSince1970: 0),
+            updatedAt: Date(timeIntervalSince1970: 0)
+        ))
 
         let tasks = try await materializer.reconcileRSSSourceRefreshTasks(now: Date(timeIntervalSince1970: 10))
-        let legacy = try #require(tasks.first { $0.id == SourceRefreshTaskMaterializer.legacyGlobalRSSTaskID })
 
-        #expect(legacy.lifecycle.status == .stopped)
-        #expect(legacy.lifecycle.lastErrorMessage == "Replaced by RSS source-instance refresh tasks.")
-        #expect(legacy.metadata.tags.contains("deprecated"))
-        #expect(legacy.metadata.tags.contains("source-type-refresh"))
+        #expect(tasks.contains { $0.id == "system.rss.check-every-30-minutes" } == false)
+        #expect(tasks.contains { $0.id == "system.rss.source.feed-a.refresh" })
     }
 
     private func makeSource(id: String, name: String, intervalMinutes: Int) -> RSSSource {
