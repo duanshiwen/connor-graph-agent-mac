@@ -683,11 +683,14 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func updateSelectedChatInputDraft(_ draft: String) {
-        guard !isRestoringChatInputDraft else { return }
-        chatInput = draft
-        guard autoSaveDraftsEnabled, let selectedChatSessionID else { return }
+        guard autoSaveDraftsEnabled, !isRestoringChatInputDraft, let selectedChatSessionID else { return }
         chatInputDraftsBySessionID[selectedChatSessionID] = draft
         speechTranscriptionCoordinator.noteUserEditedDraft(sessionID: selectedChatSessionID, draft: draft)
+    }
+
+    func currentSelectedChatInputDraftForSpeech() -> String {
+        guard autoSaveDraftsEnabled, let selectedChatSessionID else { return chatInput }
+        return chatInputDraftsBySessionID[selectedChatSessionID] ?? chatInput
     }
 
     private func restoreChatInputDraft(for sessionID: String?) {
@@ -4080,7 +4083,7 @@ final class AppViewModel: NSObject, ObservableObject {
     func beginSpeechTranscriptionForSelectedSession() {
         let task = speechTranscriptionCoordinator.beginHoldToTalk(
             selectedSessionID: selectedChatSessionID,
-            currentDraft: chatInput,
+            currentDraft: currentSelectedChatInputDraftForSpeech(),
             setDraft: { [weak self] sessionID, draft in
                 self?.setSpeechTranscriptionDraft(draft, for: sessionID)
             },
