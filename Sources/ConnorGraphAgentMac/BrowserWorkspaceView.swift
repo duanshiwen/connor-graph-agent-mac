@@ -71,6 +71,7 @@ struct BrowserWorkspaceView: View {
                                         updateMediaSnapshot(snapshot, for: tab.id)
                                     }
                                 )
+                                .id(tab.id)
                                 .opacity(tab.id == activeSelectedTabID ? 1 : 0)
                                 .allowsHitTesting(tab.id == activeSelectedTabID)
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -208,6 +209,12 @@ struct BrowserWorkspaceView: View {
         webViewsByTabID.values.forEach { webView in
             webView.pauseBrowserMediaPlayback()
         }
+    }
+
+    private func prepareWebViewForTabClose(_ webView: WKWebView?) {
+        guard let webView else { return }
+        webView.pauseBrowserMediaPlayback()
+        if webView.isLoading { webView.stopLoading() }
     }
 
     private var runningMediaTranscriptionTask: AppSessionBackgroundTask? {
@@ -415,6 +422,8 @@ struct BrowserWorkspaceView: View {
 
     private func closeTab(_ id: BrowserTabState.ID) {
         var shouldReturnToConversation = false
+        let closingWebView = webViewsByTabID[id]
+        prepareWebViewForTabClose(closingWebView)
         mutateActiveSession { session in
             guard let index = session.tabs.firstIndex(where: { $0.id == id }) else { return }
             let wasSelected = session.selectedTabID == id
