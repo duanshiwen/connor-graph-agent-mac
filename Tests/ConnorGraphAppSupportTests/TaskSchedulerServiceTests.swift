@@ -18,6 +18,56 @@ struct TaskSchedulerServiceTests {
         #expect(scheduler.dueTasks([task], now: now).isEmpty)
     }
 
+    @Test func intervalTaskMissedRoundIsDueImmediatelyEvenWhenStoredNextRunIsStaleFuture() throws {
+        let scheduler = TaskSchedulerService()
+        let now = Date(timeIntervalSince1970: 1_000)
+        let lastFinishedAt = Date(timeIntervalSince1970: 100)
+        var interval = ConnorTaskDefinition(
+            id: "system.rss.check-every-30-minutes",
+            name: "RSS",
+            origin: .system,
+            trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 600, recurrence: .interval),
+            target: .sourceRuntimeRefresh(sourceID: "rss"),
+            lifecycle: ConnorTaskLifecycle(
+                status: .active,
+                nextRunAt: Date(timeIntervalSince1970: 5_000),
+                lastFinishedAt: lastFinishedAt
+            ),
+            metadata: .protectedSystem
+        )
+
+        #expect(scheduler.dueTasks([interval], now: now).map(\.id) == [interval.id])
+
+        interval.trigger.recurrence = .daily
+        #expect(scheduler.dueTasks([interval], now: now).isEmpty)
+    }
+
+    @Test func onceTasksDoNotBecomeDueAgainAfterSuccessOrFailure() throws {
+        let scheduler = TaskSchedulerService()
+        let startedAt = Date(timeIntervalSince1970: 100)
+        let finishedAt = Date(timeIntervalSince1970: 120)
+        let now = Date(timeIntervalSince1970: 1_000)
+        let base = ConnorTaskDefinition(
+            id: "media.transcription.media-job-example",
+            name: "Media",
+            origin: .ai,
+            trigger: ConnorTaskTrigger(kind: .scheduled, runAt: startedAt, recurrence: .once),
+            target: .mediaTranscriptionRun(jobID: "media-job-example", ownerSessionID: "session-1"),
+            lifecycle: ConnorTaskLifecycle(status: .active, nextRunAt: startedAt),
+            metadata: ConnorTaskMetadata(ownerSessionID: "session-1")
+        )
+
+        let active = scheduler.dueTasks([base], now: now)
+        #expect(active.map(\.id) == [base.id])
+
+        let running = scheduler.markRunStarted(task: base, now: startedAt)
+        let succeeded = scheduler.markRunSucceeded(task: running, startedAt: startedAt, finishedAt: finishedAt)
+        #expect(scheduler.dueTasks([succeeded], now: now).isEmpty)
+
+        let failed = scheduler.markRunFailed(task: running, startedAt: startedAt, finishedAt: finishedAt, errorMessage: "boom")
+        #expect(scheduler.dueTasks([failed], now: now).isEmpty)
+    }
+
     @Test func schedulerComputesNextRunForIntervalDailyWeeklyAndMonthly() throws {
         let scheduler = TaskSchedulerService(calendar: Calendar(identifier: .gregorian))
         let start = Date(timeIntervalSince1970: 1_000)

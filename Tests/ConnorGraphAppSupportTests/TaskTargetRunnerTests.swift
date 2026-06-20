@@ -21,6 +21,32 @@ struct TaskTargetRunnerTests {
         #expect(await rss.count == 1)
     }
 
+    @Test func runnerDispatchesMediaTranscriptionTargets() async throws {
+        let media = MediaTranscriptionSpy()
+        let runner = TaskTargetRunner(
+            mailRefresher: { _ in "mail" },
+            calendarRefresher: { _ in "calendar" },
+            rssRefresher: { _ in "rss" },
+            sessionMessenger: { _ in "session" },
+            mediaTranscriptionRunner: media.perform
+        )
+        let task = ConnorTaskDefinition(
+            id: "media.job-1",
+            name: "Transcribe media",
+            origin: .ai,
+            trigger: ConnorTaskTrigger(kind: .scheduled, runAt: Date(timeIntervalSince1970: 0), recurrence: .once),
+            target: .mediaTranscriptionRun(jobID: "job-1", ownerSessionID: "session-1"),
+            lifecycle: ConnorTaskLifecycle(status: .active),
+            metadata: ConnorTaskMetadata(scope: .global, ownerSessionID: "session-1", isRecoverable: true, recoveryPolicy: .restoreIfQueuedOrRunning)
+        )
+
+        let result = try await runner.run(task: task, runID: "run-1")
+        let calls = await media.calls
+
+        #expect(result.summary == "media job-1 for session-1")
+        #expect(calls == [MediaTranscriptionTaskRequest(jobID: "job-1", ownerSessionID: "session-1", runID: "run-1")])
+    }
+
     @Test func runnerDispatchesSessionMessageTargets() async throws {
         let session = SessionMessageSpy()
         let runner = TaskTargetRunner(mailRefresher: { _ in "mail" }, calendarRefresher: { _ in "calendar" }, rssRefresher: { _ in "rss" }, sessionMessenger: session.perform)
@@ -57,6 +83,14 @@ struct TaskTargetRunnerTests {
 private actor MailRefreshSpy { var count = 0; func refresh(_ runID: String?) async throws -> String { count += 1; return "mail refreshed" } }
 private actor CalendarRefreshSpy { var count = 0; func refresh(_ runID: String?) async throws -> String { count += 1; return "calendar refreshed" } }
 private actor RSSRefreshSpy { var count = 0; func refresh(_ runID: String?) async throws -> String { count += 1; return "rss refreshed" } }
+
+private actor MediaTranscriptionSpy {
+    var calls: [MediaTranscriptionTaskRequest] = []
+    func perform(_ request: MediaTranscriptionTaskRequest) async throws -> String {
+        calls.append(request)
+        return "media \(request.jobID) for \(request.ownerSessionID)"
+    }
+}
 
 private actor SessionMessageSpy {
     struct Call: Equatable { var sessionID: String?; var title: String?; var message: String; var createNewSession: Bool }
