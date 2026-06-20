@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import ConnorGraphAgentMac
 
@@ -76,6 +77,56 @@ struct SessionSpeechTranscriptionCoordinatorTests {
         #expect(provisionalBySession["session-1"] == nil)
         #expect(updatedTasks.last?.status == .succeeded)
         #expect(updatedTasks.last?.detail == "语音输入已完成")
+    }
+
+    @Test func finishHoldToTalkInsertsPartialAtCapturedCaretRange() {
+        var draftBySession: [String: String] = ["session-1": "你好世界"]
+        let transcriber = FakeSessionSpeechTranscriber()
+        let coordinator = SessionSpeechTranscriptionCoordinator(transcriber: transcriber)
+        _ = coordinator.beginHoldToTalk(
+            selectedSessionID: "session-1",
+            currentDraft: "你好世界",
+            speechInsertionRange: NSRange(location: 2, length: 0),
+            setDraft: { sessionID, draft in draftBySession[sessionID] = draft }
+        )
+
+        transcriber.emitPartial(" Connor ")
+        _ = coordinator.finishHoldToTalk()
+
+        #expect(draftBySession["session-1"] == "你好Connor世界")
+    }
+
+    @Test func finishHoldToTalkReplacesCapturedSelectionRange() {
+        var draftBySession: [String: String] = ["session-1": "请把这里替换掉"]
+        let transcriber = FakeSessionSpeechTranscriber()
+        let coordinator = SessionSpeechTranscriptionCoordinator(transcriber: transcriber)
+        _ = coordinator.beginHoldToTalk(
+            selectedSessionID: "session-1",
+            currentDraft: "请把这里替换掉",
+            speechInsertionRange: NSRange(location: 2, length: 2),
+            setDraft: { sessionID, draft in draftBySession[sessionID] = draft }
+        )
+
+        transcriber.emitPartial("中间")
+        _ = coordinator.finishHoldToTalk()
+
+        #expect(draftBySession["session-1"] == "请把中间替换掉")
+    }
+
+    @Test func finishHoldToTalkFallsBackToAppendWhenNoCapturedRangeExists() {
+        var draftBySession: [String: String] = ["session-1": "已有内容"]
+        let transcriber = FakeSessionSpeechTranscriber()
+        let coordinator = SessionSpeechTranscriptionCoordinator(transcriber: transcriber)
+        _ = coordinator.beginHoldToTalk(
+            selectedSessionID: "session-1",
+            currentDraft: "已有内容",
+            setDraft: { sessionID, draft in draftBySession[sessionID] = draft }
+        )
+
+        transcriber.emitPartial("追加语音")
+        _ = coordinator.finishHoldToTalk()
+
+        #expect(draftBySession["session-1"] == "已有内容\n\n追加语音")
     }
 
     @Test func latePartialResultIsIgnoredAfterImmediateCommit() {
