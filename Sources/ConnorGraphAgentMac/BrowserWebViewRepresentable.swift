@@ -413,6 +413,12 @@ extension WKWebView {
         }
         load(URLRequest(url: url))
     }
+
+    func pauseBrowserMediaPlayback() {
+        if #available(macOS 12.0, *) {
+            pauseAllMediaPlayback { }
+        }
+    }
 }
 
 extension UUID {
