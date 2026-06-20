@@ -202,9 +202,20 @@ struct BrowserWorkspaceView: View {
         return viewModel.isBrowserBookmarked(url: url)
     }
 
+    private var runningMediaTranscriptionTask: AppSessionBackgroundTask? {
+        viewModel.runningMediaTranscriptionTask(for: activeSessionID)
+    }
+
+    private var hasRunningMediaTranscriptionTask: Bool {
+        runningMediaTranscriptionTask != nil
+    }
+
     private var mediaTranscriptionButtonHelp: String {
+        if let runningMediaTranscriptionTask {
+            return "媒体转写任务正在\(runningMediaTranscriptionTask.status.displayName)，完成前不能创建新的转写任务"
+        }
         if let mediaSnapshot = activeTab?.mediaSnapshot, mediaSnapshot.hasDetectedMedia {
-            return "检测到 \(mediaSnapshot.mediaElements.count + mediaSnapshot.openGraphMedia.count) 个媒体来源；创建本地媒体转写任务并回到当前会话"
+            return "检测到 \(mediaSnapshot.mediaElements.count + mediaSnapshot.openGraphMedia.count) 个媒体来源；选择媒体后创建本地媒体转写任务"
         }
         return "扫描当前网页中的 video/audio 媒体；如果未检测到，会显示诊断提示"
     }
@@ -327,9 +338,12 @@ struct BrowserWorkspaceView: View {
                     snapshot: mediaTranscriptionSnapshot,
                     isScanning: isScanningMediaForPopover,
                     errorMessage: mediaTranscriptionScanError,
+                    runningTask: runningMediaTranscriptionTask,
                     selectedSourceIDs: $selectedMediaSourceIDs,
                     mode: $mediaTranscriptionMode,
                     options: $mediaTranscriptionOptions,
+                    onSelectAll: selectAllMediaSourcesForPopover,
+                    onClearSelection: clearMediaSourceSelectionForPopover,
                     onRescan: scanMediaForPopover,
                     onCancel: closeMediaTranscriptionPopover,
                     onSubmit: submitMediaTranscriptionSelection
@@ -437,7 +451,7 @@ struct BrowserWorkspaceView: View {
 
     private func presentMediaTranscriptionPopoverForActiveTab() {
         mediaTranscriptionSnapshot = activeTab?.mediaSnapshot
-        selectedMediaSourceIDs = Set(mediaTranscriptionSnapshot?.transcriptionSourceOptions.map(\.id) ?? [])
+        selectedMediaSourceIDs = defaultMediaSourceSelectionIDs(for: mediaTranscriptionSnapshot)
         mediaTranscriptionMode = .transcribeSummarizeAndChapters
         mediaTranscriptionOptions = .defaults(for: mediaTranscriptionMode)
         mediaTranscriptionScanError = nil
@@ -476,12 +490,32 @@ struct BrowserWorkspaceView: View {
 
                 updateMediaSnapshot(snapshot, for: selectedTabID)
                 mediaTranscriptionSnapshot = snapshot
-                selectedMediaSourceIDs = Set(snapshot.transcriptionSourceOptions.map(\.id))
+                selectedMediaSourceIDs = defaultMediaSourceSelectionIDs(for: snapshot)
             }
         }
     }
 
+    private func selectAllMediaSourcesForPopover() {
+        selectedMediaSourceIDs = Set(mediaTranscriptionSnapshot?.transcriptionSourceOptions.map(\.id) ?? [])
+    }
+
+    private func clearMediaSourceSelectionForPopover() {
+        selectedMediaSourceIDs.removeAll()
+    }
+
+    private func defaultMediaSourceSelectionIDs(for snapshot: BrowserMediaSourceSnapshot?) -> Set<String> {
+        let options = snapshot?.transcriptionSourceOptions ?? []
+        guard !options.isEmpty else { return [] }
+        if options.count == 1 { return Set(options.map(\.id)) }
+        let playing = options.filter { $0.isPaused == false }.map(\.id)
+        return Set(playing)
+    }
+
     private func submitMediaTranscriptionSelection() {
+        if hasRunningMediaTranscriptionTask {
+            mediaTranscriptionScanError = "当前会话已有媒体转写任务正在运行，请等待完成后再创建新的转写任务。"
+            return
+        }
         guard let snapshot = mediaTranscriptionSnapshot else {
             mediaTranscriptionScanError = "请先扫描当前网页媒体。"
             return
@@ -495,7 +529,7 @@ struct BrowserWorkspaceView: View {
         do {
             _ = try viewModel.requestBrowserMediaTranscription(selection: selection)
             Task { await viewModel.runScheduledTasksNow() }
-            isMediaTranscriptionPopoverPresented = false
+            mediaTranscriptionScanError = nil
         } catch {
             let message = String(describing: error)
             mediaTranscriptionScanError = message
