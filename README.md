@@ -193,7 +193,8 @@ Session Attachment Store + follow-up prompt
 - `MediaTranscriptionJobStore.swift`：`sessions/{sessionID}/data/media-jobs/{jobID}/` 下的 durable manifest、event log、progress、diagnostics 与 checkpoints。
 - `MediaRuntimeSupervisor.swift`：Python / yt-dlp / FFmpeg / WhisperKit sidecar health snapshot；真实 runtime 必须通过 checksum、license manifest 与 Application Support sidecar 目录治理。
 - `MediaTranscriptionTaskHandler.swift`：复用现有 `TaskTargetRunner` 的 `media.transcription.run` 分支；不新增独立 queue。
-- `MediaTranscriptionAttachmentWriter.swift`：将 transcript/segments/diagnostics 写入 Session Attachment Store derivatives。
+- `TaskManagementUIPresentation.swift`：浏览器媒体转写属于可恢复后台任务，不进入系统定时任务列表；用户在会话 background task surface 中查看进度。
+- `MediaTranscriptionAttachmentWriter.swift`：将 transcript/segments/diagnostics 写入 Session Attachment Store derivatives；完成后的 follow-up message 必须携带 transcript attachment ref，让模型通过附件上下文读取全文，而不是只在 prompt 中写附件 ID。
 - `BrowserWebViewRepresentable.swift`：注入媒体检测 JS，识别 `<video>` / `<audio>` / OpenGraph media，不 hook DRM、不抓 cookie、不绕过站点权限。
 
 Runtime 合规边界：
@@ -402,7 +403,8 @@ API keys and provider credentials must not be stored in JSON settings files. The
   - `tasks_list`
   - `tasks_create_scheduled_session_message`
   - `tasks_create_session_status_message`
-- Task runtime execution：`TaskSchedulerService` 计算 due tasks，`TaskSchedulerRunnerService` 记录 run history 并调用 `TaskTargetRunner`，真实分发到 Native Mail / Calendar / RSS runtimes 或 Session OS message flow
+- Task runtime execution：`TaskSchedulerService` 计算 due tasks，`TaskSchedulerRunnerService` 记录 run history 并调用 `TaskTargetRunner`，真实分发到 Native Mail / Calendar / RSS runtimes、Session OS message flow 或浏览器媒体转写 handler
+- 浏览器媒体转写任务使用 Task Stack 获得 recoverable run/history 能力，但不作为“系统定时任务”卡片显示；它的用户可见面在对应会话的 background task surface，完成后 transcript 作为附件 ref 传入 follow-up chat
 - Session-scoped background task adapter remains for recoverable per-session runtime intents
 
 ---
