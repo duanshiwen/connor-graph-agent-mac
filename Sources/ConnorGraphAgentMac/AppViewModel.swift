@@ -1422,6 +1422,14 @@ final class AppViewModel: NSObject, ObservableObject {
         reloadAutomationConfig()
         reloadAutomationExecutionHistory()
         reloadTaskManagementPresentation()
+        Task { @MainActor in
+            do {
+                try await reconcileRSSSourceRefreshTasks()
+                reloadTaskManagementPresentation()
+            } catch {
+                errorMessage = String(describing: error)
+            }
+        }
         reloadSourceRuntimeConfigurations()
         reloadSkillRuntimeDefinitions()
         reloadSidecarRuntimeDiagnostics()
@@ -1651,6 +1659,7 @@ final class AppViewModel: NSObject, ObservableObject {
             }
         )
         do {
+            try await reconcileRSSSourceRefreshTasks()
             let scheduler = TaskSchedulerService()
             let dueTasks = scheduler.dueTasks(try taskManagementRepository.loadOrCreateDefault(), now: Date())
             for task in dueTasks where task.target.targetKind == "media.transcription" {
@@ -1717,6 +1726,12 @@ final class AppViewModel: NSObject, ObservableObject {
             nativeSessionManager = makeNativeSessionManager(for: session)
         }
         _ = await submitChat(prompt: prompt, clearComposer: false, attachments: [manifest.messageRef])
+    }
+
+    private func reconcileRSSSourceRefreshTasks(now: Date = Date()) async throws {
+        guard let taskManagementRepository else { return }
+        let materializer = SourceRefreshTaskMaterializer(taskRepository: taskManagementRepository, rssSourceRepository: rssRuntime.repository)
+        _ = try await materializer.reconcileRSSSourceRefreshTasks(now: now)
     }
 
     private func refreshMailForScheduledTask(runID: String?) async throws -> String {
@@ -2222,6 +2237,8 @@ final class AppViewModel: NSObject, ObservableObject {
         } catch {
             errorMessage = "RSS 订阅源已添加，但首次抓取失败：\(error.localizedDescription)"
         }
+        try await reconcileRSSSourceRefreshTasks()
+        reloadTaskManagementPresentation()
         await reloadRSSBrowserPresentation()
     }
 
@@ -2233,6 +2250,8 @@ final class AppViewModel: NSObject, ObservableObject {
            source.feedURL == feedURL {
             self.selectedRSSItemID = selectedRSSItemID
         }
+        try await reconcileRSSSourceRefreshTasks()
+        reloadTaskManagementPresentation()
         errorMessage = nil
         await reloadRSSBrowserPresentation()
     }
@@ -2246,6 +2265,8 @@ final class AppViewModel: NSObject, ObservableObject {
                    rssBrowserPresentation.item(id: selectedRSSItemID)?.sourceID == source.id {
                     self.selectedRSSItemID = nil
                 }
+                try await reconcileRSSSourceRefreshTasks()
+                reloadTaskManagementPresentation()
                 pendingRSSSourceDeletion = nil
                 errorMessage = nil
                 await reloadRSSBrowserPresentation()
