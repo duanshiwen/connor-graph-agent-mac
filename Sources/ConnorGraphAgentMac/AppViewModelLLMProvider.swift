@@ -13,6 +13,13 @@ static func makeLLMProvider(settingsRepository: AppLLMSettingsRepository) -> Any
             return AnyLLMProvider { _, _ in
                 throw AppGraphAgentRuntimeFactoryError.sidecarRequiresSessionManager
             }
+        case .anthropicMessages:
+            guard let config = try settingsRepository.anthropicCompatibleConfig(connectionID: connection.id) else {
+                return AnyLLMProvider { _, _ in
+                    throw OpenAICompatibleProviderError.missingAPIKey
+                }
+            }
+            return AnyLLMProvider(AnthropicCompatibleProvider(config: config))
         case .openAICompatible:
             guard let config = try settingsRepository.openAICompatibleConfig(connectionID: connection.id) else {
                 return AnyLLMProvider { _, _ in

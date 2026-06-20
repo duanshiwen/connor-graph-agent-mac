@@ -3,12 +3,15 @@ import ConnorGraphAgent
 
 public enum AppLLMProviderMode: String, Sendable, Equatable, CaseIterable, Codable {
     case openAICompatible = "openai_compatible"
+    case anthropicMessages = "anthropic_messages"
     case governedClaudeSidecar = "governed_claude_sidecar"
 
     public var displayName: String {
         switch self {
         case .openAICompatible:
             return "OpenAI Compatible"
+        case .anthropicMessages:
+            return "Anthropic Messages"
         case .governedClaudeSidecar:
             return "Claude"
         }
@@ -143,7 +146,7 @@ public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable
         self.id = id
         self.name = name
         self.providerMode = providerMode
-        self.connectionKind = connectionKind ?? (providerMode == .governedClaudeSidecar ? .claudeSidecar : .openAICompatible)
+        self.connectionKind = connectionKind ?? Self.defaultConnectionKind(for: providerMode)
         self.baseURLString = baseURLString
         self.model = model
         let normalizedSelectedModel = selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -193,6 +196,17 @@ public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable
 
     public static func firstModel(in rawValue: String) -> String {
         modelOptions(in: rawValue).first ?? rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    public static func defaultConnectionKind(for providerMode: AppLLMProviderMode) -> AppLLMConnectionKind {
+        switch providerMode {
+        case .openAICompatible:
+            return .openAICompatible
+        case .anthropicMessages:
+            return .anthropicCompatible
+        case .governedClaudeSidecar:
+            return .claudeSidecar
+        }
     }
 
     public static let defaultOpenAICompatible = AppLLMConnectionConfig(
@@ -269,8 +283,19 @@ public struct AppLLMSettings: Sendable, Equatable {
         sidecarWorkingDirectoryPath: String = "",
         sidecarPermissionMode: AgentPermissionMode = .readOnly
     ) {
-        let id = providerMode == .openAICompatible ? "openai-compatible" : "claude-sidecar"
-        let name = providerMode == .openAICompatible ? "OpenAI Compatible" : "Claude"
+        let id: String
+        let name: String
+        switch providerMode {
+        case .openAICompatible:
+            id = "openai-compatible"
+            name = "OpenAI Compatible"
+        case .anthropicMessages:
+            id = "anthropic"
+            name = "Claude"
+        case .governedClaudeSidecar:
+            id = "claude-sidecar"
+            name = "Claude"
+        }
         let connection = AppLLMConnectionConfig(
             id: id,
             name: name,
@@ -558,6 +583,7 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
     ) throws -> AnthropicCompatibleConfig? {
         let settings = try loadSettings()
         guard let connection = settings.connection(id: connectionID), connection.connectionKind == .anthropicCompatible else { return nil }
+        guard connection.providerMode == .anthropicMessages || connection.providerMode == .openAICompatible else { return nil }
         guard let apiKey = try apiKey(for: connection.id), !apiKey.isEmpty else { return nil }
         let urlString = baseURLOverride ?? connection.baseURLString
         guard let baseURL = URL(string: urlString) else {
@@ -599,6 +625,8 @@ public struct AppLLMModelCatalog<Client: AgentHTTPClient>: Sendable {
                     } else {
                         result.append(await openAICompatibleConnection(connection: connection, isDefault: connection.id == settings.defaultConnectionID))
                     }
+                case .anthropicMessages:
+                    result.append(anthropicCompatibleConnection(connection: connection, isDefault: connection.id == settings.defaultConnectionID))
                 case .governedClaudeSidecar:
                     result.append(sidecarConnection(connection: connection, isDefault: connection.id == settings.defaultConnectionID))
                 }
@@ -627,7 +655,7 @@ public struct AppLLMModelCatalog<Client: AgentHTTPClient>: Sendable {
             id: connection.id,
             title: connection.name + (isDefault ? " · 默认" : ""),
             subtitle: "Anthropic Compatible · \(connection.baseURLString)",
-            providerMode: .openAICompatible,
+            providerMode: connection.providerMode,
             models: options(from: connection, fallback: fallbackModel),
             isLiveCatalog: false
         )
