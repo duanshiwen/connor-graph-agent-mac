@@ -17,6 +17,7 @@
 		A0000000000000000000000B /* ConnorGraphAgent in Frameworks */ = {isa = PBXBuildFile; productRef = A0000000000000000000000C /* ConnorGraphAgent */; };
 		A0000000000000000000000F /* ConnorGraphAppSupport in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000010 /* ConnorGraphAppSupport */; };
 		51A7E0010000000000000003 /* WhisperKit in Frameworks */ = {isa = PBXBuildFile; productRef = 51A7E0010000000000000013 /* WhisperKit */; };
+		51A7E0010000000000000004 /* yyjson in Frameworks */ = {isa = PBXBuildFile; productRef = 51A7E0010000000000000015 /* yyjson */; };
 		A0000000000000000000002C /* AgentChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000002D /* AgentChatView.swift */; };
 		A0000000000000000000002E /* Sources/ConnorGraphAgentMac/EmptyGraphHybridSearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000002F /* Sources/ConnorGraphAgentMac/EmptyGraphHybridSearchService.swift */; };
 		A00000000000000000000030 /* Sources/ConnorGraphAgentMac/BrowserWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000031 /* Sources/ConnorGraphAgentMac/BrowserWorkspaceView.swift */; };
@@ -185,6 +186,7 @@
 				A0000000000000000000000B /* ConnorGraphAgent in Frameworks */,
 				A0000000000000000000000F /* ConnorGraphAppSupport in Frameworks */,
 				51A7E0010000000000000003 /* WhisperKit in Frameworks */,
+				51A7E0010000000000000004 /* yyjson in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -334,6 +336,7 @@
 				A0000000000000000000000C /* ConnorGraphAgent */,
 				A00000000000000000000010 /* ConnorGraphAppSupport */,
 				51A7E0010000000000000013 /* WhisperKit */,
+				51A7E0010000000000000015 /* yyjson */,
 			);
 			productName = ConnorGraphAgentMacApp;
 			productReference = A00000000000000000000011 /* ConnorGraphAgentMacApp.app */;
@@ -388,6 +391,7 @@
 			packageReferences = (
 				A0000000000000000000001A /* XCLocalSwiftPackageReference "." */,
 				51A7E0010000000000000014 /* XCRemoteSwiftPackageReference "argmax-oss-swift" */,
+				51A7E0010000000000000016 /* XCRemoteSwiftPackageReference "yyjson" */,
 			);
 			productRefGroup = A00000000000000000000014 /* Products */;
 			projectDirPath = "";
@@ -776,6 +780,14 @@
 				minimumVersion = 0.9.0;
 			};
 		};
+		51A7E0010000000000000016 /* XCRemoteSwiftPackageReference "yyjson" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ibireme/yyjson.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.12.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -813,6 +825,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 51A7E0010000000000000014 /* XCRemoteSwiftPackageReference "argmax-oss-swift" */;
 			productName = WhisperKit;
+		};
+		51A7E0010000000000000015 /* yyjson */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 51A7E0010000000000000016 /* XCRemoteSwiftPackageReference "yyjson" */;
+			productName = yyjson;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
