@@ -138,8 +138,16 @@ public struct MediaTranscriptionTaskHandler: Sendable {
 
         if !hasTranscriptArtifact(job), job.request.shouldRunLocalTranscription {
             job = try transition(job, to: .transcribing, message: "Running local transcription", at: now)
-            job = try await runLocalTranscription(for: job, at: now)
-            try store.markCheckpoint("local-transcription-completed", sessionID: job.ownerSessionID, jobID: job.id, at: now)
+            do {
+                job = try await runLocalTranscription(for: job, at: now)
+                try store.markCheckpoint("local-transcription-completed", sessionID: job.ownerSessionID, jobID: job.id, at: now)
+            } catch {
+                let message = "本地转写未完成：\(String(describing: error))"
+                let failed = job.failing(code: .transcriptionFailed, message: message, at: now)
+                try store.save(failed)
+                try store.appendEvent(MediaTranscriptionJobEvent(jobID: failed.id, state: .failed, message: "Local transcription failed", createdAt: now, metadata: ["diagnostics": message]), sessionID: failed.ownerSessionID)
+                throw MediaTranscriptionTaskHandlerError.transcriptUnavailable(message)
+            }
         }
 
         if job.request.shouldRunSpeakerDiarization {
@@ -396,7 +404,7 @@ public struct MediaTranscriptionTaskHandler: Sendable {
         if diagnostics.isEmpty {
             diagnostics.append("媒体处理未生成 transcript artifact")
         }
-        let userFacing = "Connor 正在准备内置媒体转写能力，或当前网页没有可获取的字幕/音频。请稍后重试；如果持续失败，请在设置中更新媒体运行时。"
+        let userFacing = diagnostics.joined(separator: "；")
         return (userFacing, diagnostics.joined(separator: "；"))
     }
 

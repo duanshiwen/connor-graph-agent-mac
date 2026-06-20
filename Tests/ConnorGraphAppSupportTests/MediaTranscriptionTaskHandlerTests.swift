@@ -36,9 +36,9 @@ struct MediaTranscriptionTaskHandlerTests {
 
         #expect(loaded.state == .failed)
         #expect(loaded.lastErrorCode == .transcriptionFailed)
-        #expect(loaded.lastErrorMessage?.contains("Connor 正在准备内置媒体转写能力") == true)
-        #expect(loaded.lastErrorMessage?.contains("yt-dlp") == false)
-        #expect(loaded.lastErrorMessage?.contains("ffmpeg") == false)
+        #expect(loaded.lastErrorMessage?.contains("未获取到平台字幕产物") == true)
+        #expect(loaded.lastErrorMessage?.contains("未获取到可转写音频或本地转写产物") == true)
+        #expect(loaded.lastErrorMessage?.contains("App-managed runtime not ready") == true)
         #expect(store.hasCheckpoint("runtime-ready", sessionID: "session-1", jobID: "job-1"))
         #expect(!store.hasCheckpoint("completed", sessionID: "session-1", jobID: "job-1"))
         #expect(events.contains { $0.state == .preparingRuntime })
@@ -133,6 +133,49 @@ struct MediaTranscriptionTaskHandlerTests {
         #expect(!loaded.artifacts.attachmentIDs.isEmpty)
         #expect(try String(contentsOf: transcriptPath, encoding: .utf8) == "Hello local transcript")
         #expect(store.hasCheckpoint("local-transcription-completed", sessionID: job.ownerSessionID, jobID: job.id))
+    }
+
+    @Test func handlerSurfacesLocalTranscriptionFailureReason() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = AppStoragePaths(applicationSupportDirectory: root)
+        let store = MediaTranscriptionJobStore(paths: paths)
+        let job = BrowserMediaTranscriptionJob(id: "job-local-failure", ownerSessionID: "session-local-failure", source: BrowserMediaSourceSnapshot(pageURLString: "https://example.com/video"))
+        try store.save(job)
+        let jobDirectory = store.jobDirectory(sessionID: job.ownerSessionID, jobID: job.id)
+        let audioDirectory = jobDirectory.appendingPathComponent("audio/original", isDirectory: true)
+        try FileManager.default.createDirectory(at: audioDirectory, withIntermediateDirectories: true)
+        let originalAudio = audioDirectory.appendingPathComponent("source.m4a")
+        try Data("audio".utf8).write(to: originalAudio)
+        var seeded = try store.load(sessionID: job.ownerSessionID, jobID: job.id)
+        seeded.artifacts.originalAudio = MediaTranscriptionArtifactRef(kind: "originalAudio", relativePath: "audio/original/source.m4a", byteCount: 5, createdAt: Date(timeIntervalSince1970: 0))
+        try store.save(seeded)
+
+        let handler = MediaTranscriptionTaskHandler(
+            store: store,
+            runtimeSupervisor: FakeMediaRuntimeSupervisor(report: MediaRuntimeHealthReport(snapshot: MediaRuntimeSnapshot())),
+            requireHealthyRuntime: false,
+            processRunner: CapturingMediaProcessRunner { invocation in
+                if invocation.executable.lastPathComponent == "ffmpeg", let outputPath = invocation.arguments.last {
+                    try? FileManager.default.createDirectory(at: URL(fileURLWithPath: outputPath).deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try? Data("normalized".utf8).write(to: URL(fileURLWithPath: outputPath))
+                    return MediaProcessResult(exitCode: 0, stdout: "", stderr: "")
+                }
+                return MediaProcessResult(exitCode: 1, stdout: "", stderr: "forced no subtitles/audio download")
+            },
+            localTranscriber: UnavailableMediaLocalTranscriber(reason: "WhisperKit SDK is not linked")
+        )
+
+        await #expect(throws: MediaTranscriptionTaskHandlerError.self) {
+            _ = try await handler.run(MediaTranscriptionTaskRequest(jobID: job.id, ownerSessionID: job.ownerSessionID), now: Date(timeIntervalSince1970: 1))
+        }
+        let loaded = try store.load(sessionID: job.ownerSessionID, jobID: job.id)
+        let events = try store.loadEvents(sessionID: job.ownerSessionID, jobID: job.id)
+
+        #expect(loaded.state == .failed)
+        #expect(loaded.lastErrorMessage?.contains("本地转写未完成") == true)
+        #expect(loaded.lastErrorMessage?.contains("WhisperKit SDK is not linked") == true)
+        #expect(events.contains { $0.message.contains("Local transcription failed") })
     }
 
     @Test func handlerPassesAppManagedFFmpegLocationToYTDLP() async throws {
