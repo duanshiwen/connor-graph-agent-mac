@@ -116,23 +116,29 @@ public struct TaskManagementUIPresentation: Codable, Sendable, Equatable {
                 return (lhs.finishedAt ?? .distantPast) > (rhs.finishedAt ?? .distantPast)
             }.first
         }
-        let cards = tasks
-            .filter { $0.lifecycle.status != .deleted }
+        let visibleTasks = tasks.filter { $0.lifecycle.status != .deleted && !$0.isHiddenFromTaskManagementUI }
+        let cards = visibleTasks
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
             .map { TaskManagementUICard(task: $0, latestRun: latestRunByTask[$0.id]) }
         return TaskManagementUIPresentation(
             summary: TaskManagementUISummary(
                 totalTaskCount: cards.count,
-                scheduledTaskCount: tasks.filter { $0.trigger.kind == .scheduled && $0.lifecycle.status != .deleted }.count,
-                eventTriggeredTaskCount: tasks.filter { $0.trigger.kind == .eventTriggered && $0.lifecycle.status != .deleted }.count,
-                systemTaskCount: tasks.filter { $0.origin == .system && $0.lifecycle.status != .deleted }.count,
-                userTaskCount: tasks.filter { $0.origin == .user && $0.lifecycle.status != .deleted }.count,
-                aiTaskCount: tasks.filter { $0.origin == .ai && $0.lifecycle.status != .deleted }.count,
-                stoppedTaskCount: tasks.filter { $0.lifecycle.status == .stopped }.count,
-                failedTaskCount: tasks.filter { $0.lifecycle.status == .failed }.count
+                scheduledTaskCount: visibleTasks.filter { $0.trigger.kind == .scheduled }.count,
+                eventTriggeredTaskCount: visibleTasks.filter { $0.trigger.kind == .eventTriggered }.count,
+                systemTaskCount: visibleTasks.filter { $0.origin == .system }.count,
+                userTaskCount: visibleTasks.filter { $0.origin == .user }.count,
+                aiTaskCount: visibleTasks.filter { $0.origin == .ai }.count,
+                stoppedTaskCount: visibleTasks.filter { $0.lifecycle.status == .stopped }.count,
+                failedTaskCount: visibleTasks.filter { $0.lifecycle.status == .failed }.count
             ),
             cards: cards
         )
+    }
+}
+
+private extension ConnorTaskDefinition {
+    var isHiddenFromTaskManagementUI: Bool {
+        target.targetKind == "media.transcription" && target.operationName == "run"
     }
 }
 

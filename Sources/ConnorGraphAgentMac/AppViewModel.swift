@@ -1710,13 +1710,14 @@ final class AppViewModel: NSObject, ObservableObject {
         guard let ownerSessionID, !ownerSessionID.isEmpty else { return }
         guard let job = try? MediaTranscriptionJobStore(paths: storagePaths).load(sessionID: ownerSessionID, jobID: jobID) else { return }
         guard let attachmentID = job.artifacts.attachmentIDs.first else { return }
+        guard let manifest = try? AppSessionAttachmentStore(paths: storagePaths).loadManifest(sessionID: ownerSessionID, attachmentID: attachmentID) else { return }
         let prompt = MediaTranscriptionPromptBuilder().analysisPrompt(job: job, attachmentID: attachmentID)
         selectedChatSessionID = ownerSessionID
         if let session = try? chatSessionRepository?.loadSession(id: ownerSessionID) {
             fallbackChatSession = session
             nativeSessionManager = makeNativeSessionManager(for: session)
         }
-        _ = await submitChat(prompt: prompt, clearComposer: false)
+        _ = await submitChat(prompt: prompt, clearComposer: false, attachments: [manifest.messageRef])
     }
 
     private func refreshMailForScheduledTask(runID: String?) async throws -> String {
@@ -5325,10 +5326,15 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     @discardableResult
-    func submitChat(prompt rawPrompt: String, clearComposer: Bool = false, displayPrompt rawDisplayPrompt: String? = nil) async -> String? {
+    func submitChat(
+        prompt rawPrompt: String,
+        clearComposer: Bool = false,
+        displayPrompt rawDisplayPrompt: String? = nil,
+        attachments explicitAttachments: [AgentMessageAttachmentRef]? = nil
+    ) async -> String? {
         let prompt = rawPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let displayPrompt = rawDisplayPrompt?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let attachmentsForSubmission = pendingAttachmentRefs
+        let attachmentsForSubmission = explicitAttachments ?? pendingAttachmentRefs
         guard !prompt.isEmpty || !attachmentsForSubmission.isEmpty else { return nil }
         guard var manager = nativeSessionManager else {
             errorMessage = String(describing: AppChatRuntimeUnavailableError.nativeSessionManagerUnavailable)
