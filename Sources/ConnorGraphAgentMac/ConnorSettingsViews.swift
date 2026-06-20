@@ -746,7 +746,6 @@ struct SettingsAISection: View {
 }
 
 enum AIConnectionAuthenticationKind: Equatable {
-    case authorizationCode
     case browserCallback
     case deviceCode(code: String, verificationURL: String)
     case direct
@@ -875,7 +874,7 @@ struct AIConnectionOnboardingOption: Identifiable, Equatable {
             model: "claude-sonnet-4-5",
             selectedModel: "claude-sonnet-4-5",
             setupTitle: "连接 Anthropic / Claude",
-            setupSubtitle: "使用 API Key 连接 Claude；不再使用 Claude SDK Sidecar。",
+            setupSubtitle: "使用 API Key 连接 Claude。",
             setupInstruction: "填写 Anthropic API Key、Base URL 和模型名称。康纳同学会通过原生 Swift Messages API 管线运行模型。",
             loginButtonTitle: "验证并添加连接",
             authURLString: "https://console.anthropic.com/settings/keys",
@@ -1019,12 +1018,10 @@ struct AIConnectionSetupView: View {
     var back: () -> Void
     var cancel: () -> Void
 
-    @State private var authorizationCode = ""
     @State private var didOpenBrowser = false
     @State private var isAuthenticating = false
     @State private var statusMessage: String?
     @State private var errorMessage: String?
-    @State private var claudeFlow: AppLLMOAuthService.ClaudePreparedFlow?
     @State private var githubDeviceCode: AppLLMGitHubDeviceCode?
     @State private var connectionName = ""
     @State private var baseURLString = ""
@@ -1035,10 +1032,6 @@ struct AIConnectionSetupView: View {
     @State private var showAPIKey = false
     @State private var selectedProviderPresetID = "openai"
     @State private var customProtocol: AIConnectionCustomProtocol = .openAICompatible
-    @State private var sidecarExecutablePath = Self.defaultSidecarExecutablePath()
-    @State private var sidecarArguments = Self.defaultSidecarArguments()
-    @State private var sidecarWorkingDirectoryPath = Self.defaultSidecarWorkingDirectoryPath()
-    @State private var sidecarPermissionMode: AgentPermissionMode = .readOnly
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1105,43 +1098,6 @@ struct AIConnectionSetupView: View {
     @ViewBuilder
     private var setupContent: some View {
         switch option.authenticationKind {
-        case .authorizationCode:
-            VStack(spacing: 20) {
-                VStack(spacing: 10) {
-                    Image(systemName: "lock.shield")
-                        .font(.system(size: 34, weight: .semibold))
-                        .foregroundStyle(option.tint)
-                    Text(option.setupInstruction)
-                        .font(SettingsListTypography.rowSubtitle)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity)
-                }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 22)
-                .frame(maxWidth: .infinity)
-                .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-
-                Button(action: startClaudeOAuth) {
-                    Label(didOpenBrowser ? "重新打开 Claude 登录页" : option.loginButtonTitle, systemImage: "arrow.up.right.square")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("授权码")
-                        .font(SettingsListTypography.header)
-                    TextField("粘贴 Claude 页面显示的授权码", text: $authorizationCode)
-                        .textFieldStyle(.roundedBorder)
-                        .font(SettingsListTypography.rowTitle)
-                        .textContentType(.oneTimeCode)
-                    Text("授权码只用于完成本次连接。康纳同学会先验证，再保存连接。")
-                        .font(SettingsListTypography.rowTitle)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
         case .browserCallback:
             VStack(spacing: 20) {
                 VStack(spacing: 10) {
@@ -1490,8 +1446,6 @@ struct AIConnectionSetupView: View {
     private var primaryButtonTitle: String {
         if isAuthenticating { return "正在认证…" }
         switch option.authenticationKind {
-        case .authorizationCode:
-            return "验证并添加连接"
         case .browserCallback:
             return option.loginButtonTitle
         case .deviceCode:
@@ -1504,8 +1458,6 @@ struct AIConnectionSetupView: View {
     private var primaryButtonIcon: String {
         if isAuthenticating { return "hourglass" }
         switch option.authenticationKind {
-        case .authorizationCode:
-            return "checkmark.shield"
         case .browserCallback:
             return "arrow.up.right.square"
         case .deviceCode:
@@ -1517,8 +1469,6 @@ struct AIConnectionSetupView: View {
 
     private var isPrimaryButtonDisabled: Bool {
         switch option.authenticationKind {
-        case .authorizationCode:
-            return authorizationCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .direct:
             return connectionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || baseURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -1531,61 +1481,12 @@ struct AIConnectionSetupView: View {
 
     private func primaryAction() {
         switch option.authenticationKind {
-        case .authorizationCode:
-            exchangeClaudeCodeAndAddConnection()
         case .browserCallback:
             authenticateChatGPTAndAddConnection()
         case .deviceCode:
             authenticateGitHubCopilotAndAddConnection()
         case .direct:
             setupDirectOpenAICompatibleConnection()
-        }
-    }
-
-    private func startClaudeOAuth() {
-        do {
-            let flow = try AppLLMOAuthService.shared.prepareClaudeOAuth()
-            claudeFlow = flow
-            viewModel.openURLInCurrentChatBrowser(flow.authURL)
-            didOpenBrowser = true
-            statusMessage = "内置浏览器已打开。完成 Claude 登录后，复制授权码并粘贴到这里。"
-            errorMessage = nil
-        } catch {
-            errorMessage = displayError(error)
-        }
-    }
-
-    private func exchangeClaudeCodeAndAddConnection() {
-        isAuthenticating = true
-        statusMessage = "正在验证 Claude 授权码…"
-        errorMessage = nil
-        Task {
-            do {
-                let tokens = try await AppLLMOAuthService.shared.exchangeClaudeCode(authorizationCode)
-                let input = AppLLMConnectionSetupInput(
-                    id: stableConnectionID,
-                    kind: .claudeSidecar,
-                    name: connectionName,
-                    model: model,
-                    selectedModel: selectedModel,
-                    oauthTokens: tokens,
-                    sidecarExecutablePath: sidecarExecutablePath,
-                    sidecarArguments: sidecarArguments,
-                    sidecarWorkingDirectoryPath: sidecarWorkingDirectoryPath,
-                    sidecarPermissionMode: sidecarPermissionMode
-                )
-                _ = try await viewModel.setupLLMConnection(input)
-                await MainActor.run {
-                    isAuthenticating = false
-                    complete()
-                }
-            } catch {
-                await MainActor.run {
-                    isAuthenticating = false
-                    statusMessage = nil
-                    errorMessage = displayError(error)
-                }
-            }
         }
     }
 
@@ -1720,9 +1621,6 @@ struct AIConnectionSetupView: View {
             applySelectedProviderPreset()
         }
         if option.id == "claude-pro-max" {
-            sidecarExecutablePath = sidecarExecutablePath.isEmpty ? Self.defaultSidecarExecutablePath() : sidecarExecutablePath
-            sidecarArguments = sidecarArguments.isEmpty ? Self.defaultSidecarArguments() : sidecarArguments
-            sidecarWorkingDirectoryPath = sidecarWorkingDirectoryPath.isEmpty ? Self.defaultSidecarWorkingDirectoryPath() : sidecarWorkingDirectoryPath
         }
     }
 
@@ -1805,25 +1703,8 @@ struct AIConnectionSetupView: View {
         return host == "localhost" || host == "127.0.0.1" || host == "::1"
     }
 
-    private static func defaultSidecarExecutablePath() -> String {
-        for candidate in ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"] {
-            if FileManager.default.isExecutableFile(atPath: candidate) { return candidate }
-        }
-        return "/opt/homebrew/bin/node"
-    }
-
-    private static func defaultSidecarArguments() -> String {
-        let projectRoot = "/Users/duanshiwen/code/agent-os/agents/connor-graph-agent-mac"
-        return "\(projectRoot)/sidecars/claude-agent-engine/claude-sidecar.mjs"
-    }
-
-    private static func defaultSidecarWorkingDirectoryPath() -> String {
-        "/Users/duanshiwen/code/agent-os/agents/connor-graph-agent-mac"
-    }
-
     private var stableConnectionID: String {
         switch option.id {
-        case "claude-pro-max": "claude-pro-max"
         case "codex-chatgpt-plus": "codex-chatgpt-plus"
         case "github-copilot": "github-copilot"
         default: option.id
@@ -2039,8 +1920,6 @@ struct AIConnectionEntryRow: View {
             return "OpenAI Compatible"
         case .anthropicMessages:
             return "Anthropic Messages"
-        case .governedClaudeSidecar:
-            return "Claude"
         }
     }
 
@@ -2048,10 +1927,6 @@ struct AIConnectionEntryRow: View {
         switch connection.providerMode {
         case .openAIResponses, .openAICompatible, .anthropicMessages:
             return host(from: connection.baseURLString)
-        case .governedClaudeSidecar:
-            let arguments = connection.sidecarArguments.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !arguments.isEmpty { return URL(fileURLWithPath: arguments).lastPathComponent }
-            return "Claude SDK Sidecar"
         }
     }
 
@@ -2063,8 +1938,6 @@ struct AIConnectionEntryRow: View {
             return "sparkles"
         case .anthropicMessages:
             return "sparkles.rectangle.stack"
-        case .governedClaudeSidecar:
-            return "terminal"
         }
     }
 
@@ -2075,8 +1948,6 @@ struct AIConnectionEntryRow: View {
         case .openAICompatible:
             return .primary
         case .anthropicMessages:
-            return .purple
-        case .governedClaudeSidecar:
             return .purple
         }
     }
@@ -2125,7 +1996,7 @@ struct SettingsPermissionsSection: View {
             }
 
             SettingsGroup(title: "安全边界") {
-                PermissionBoundaryRow(systemImage: "lock.shield", title: "不提供全部允许", message: "allowAll 不在界面中开放。Claude Sidecar 的 bypassPermissions 只表示 Connor 接管审批，不代表无限制授权。")
+                PermissionBoundaryRow(systemImage: "lock.shield", title: "不提供全部允许", message: "allowAll 不在界面中开放。模型提供方只负责推理，Connor 统一接管工具审批与审计。")
                 Divider()
                 PermissionBoundaryRow(systemImage: "folder", title: "Workspace 属于会话", message: "Primary root 和 additional roots 在会话顶部设置，不在全局权限页管理。")
                 Divider()

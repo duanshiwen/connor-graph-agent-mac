@@ -5,7 +5,6 @@ public enum AppLLMProviderMode: String, Sendable, Equatable, CaseIterable, Codab
     case openAIResponses = "openai_responses"
     case openAICompatible = "openai_compatible"
     case anthropicMessages = "anthropic_messages"
-    case governedClaudeSidecar = "governed_claude_sidecar"
 
     public var displayName: String {
         switch self {
@@ -15,8 +14,6 @@ public enum AppLLMProviderMode: String, Sendable, Equatable, CaseIterable, Codab
             return "OpenAI Compatible"
         case .anthropicMessages:
             return "Anthropic Messages"
-        case .governedClaudeSidecar:
-            return "Claude"
         }
     }
 }
@@ -24,7 +21,6 @@ public enum AppLLMProviderMode: String, Sendable, Equatable, CaseIterable, Codab
 public enum AppLLMConnectionKind: String, Sendable, Equatable, CaseIterable, Codable {
     case openAIResponses = "openai_responses"
     case openAICompatible = "openai_compatible"
-    case claudeSidecar = "claude_sidecar"
     case chatGPTCodex = "chatgpt_codex"
     case githubCopilot = "github_copilot"
     case anthropicCompatible = "anthropic_compatible"
@@ -33,7 +29,6 @@ public enum AppLLMConnectionKind: String, Sendable, Equatable, CaseIterable, Cod
         switch self {
         case .openAIResponses: return "OpenAI Responses"
         case .openAICompatible: return "OpenAI Compatible"
-        case .claudeSidecar: return "Claude SDK Sidecar"
         case .chatGPTCodex: return "Codex · ChatGPT"
         case .githubCopilot: return "GitHub Copilot"
         case .anthropicCompatible: return "Anthropic Compatible"
@@ -122,15 +117,11 @@ public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable
     public var model: String
     public var selectedModel: String
     public var hasAPIKey: Bool
-    public var sidecarExecutablePath: String
-    public var sidecarArguments: String
-    public var sidecarWorkingDirectoryPath: String
-    public var sidecarPermissionMode: AgentPermissionMode
     public var extraHTTPHeaders: [String: String]
 
     private enum CodingKeys: String, CodingKey {
         case id, name, providerMode, connectionKind, baseURLString, model, selectedModel, hasAPIKey
-        case sidecarExecutablePath, sidecarArguments, sidecarWorkingDirectoryPath, sidecarPermissionMode, extraHTTPHeaders
+        case extraHTTPHeaders
     }
 
     public init(
@@ -142,10 +133,6 @@ public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable
         model: String = "",
         selectedModel: String = "",
         hasAPIKey: Bool = false,
-        sidecarExecutablePath: String = "",
-        sidecarArguments: String = "",
-        sidecarWorkingDirectoryPath: String = "",
-        sidecarPermissionMode: AgentPermissionMode = .readOnly,
         extraHTTPHeaders: [String: String] = [:]
     ) {
         self.id = id
@@ -157,10 +144,6 @@ public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable
         let normalizedSelectedModel = selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
         self.selectedModel = normalizedSelectedModel.isEmpty ? Self.firstModel(in: model) : normalizedSelectedModel
         self.hasAPIKey = hasAPIKey
-        self.sidecarExecutablePath = sidecarExecutablePath
-        self.sidecarArguments = sidecarArguments
-        self.sidecarWorkingDirectoryPath = sidecarWorkingDirectoryPath
-        self.sidecarPermissionMode = sidecarPermissionMode == .allowAll ? .readOnly : sidecarPermissionMode
         self.extraHTTPHeaders = extraHTTPHeaders
     }
 
@@ -176,10 +159,6 @@ public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable
             model: try container.decodeIfPresent(String.self, forKey: .model) ?? "",
             selectedModel: try container.decodeIfPresent(String.self, forKey: .selectedModel) ?? "",
             hasAPIKey: try container.decodeIfPresent(Bool.self, forKey: .hasAPIKey) ?? false,
-            sidecarExecutablePath: try container.decodeIfPresent(String.self, forKey: .sidecarExecutablePath) ?? "",
-            sidecarArguments: try container.decodeIfPresent(String.self, forKey: .sidecarArguments) ?? "",
-            sidecarWorkingDirectoryPath: try container.decodeIfPresent(String.self, forKey: .sidecarWorkingDirectoryPath) ?? "",
-            sidecarPermissionMode: try container.decodeIfPresent(AgentPermissionMode.self, forKey: .sidecarPermissionMode) ?? .readOnly,
             extraHTTPHeaders: try container.decodeIfPresent([String: String].self, forKey: .extraHTTPHeaders) ?? [:]
         )
     }
@@ -211,8 +190,6 @@ public struct AppLLMConnectionConfig: Sendable, Identifiable, Equatable, Codable
             return .openAICompatible
         case .anthropicMessages:
             return .anthropicCompatible
-        case .governedClaudeSidecar:
-            return .claudeSidecar
         }
     }
 
@@ -295,10 +272,6 @@ public struct AppLLMSettings: Sendable, Equatable {
         selectedModel: String = "",
         hasAPIKey: Bool,
         providerMode: AppLLMProviderMode,
-        sidecarExecutablePath: String = "",
-        sidecarArguments: String = "",
-        sidecarWorkingDirectoryPath: String = "",
-        sidecarPermissionMode: AgentPermissionMode = .readOnly
     ) {
         let id: String
         let name: String
@@ -312,9 +285,6 @@ public struct AppLLMSettings: Sendable, Equatable {
         case .anthropicMessages:
             id = "anthropic"
             name = "Claude"
-        case .governedClaudeSidecar:
-            id = "claude-sidecar"
-            name = "Claude"
         }
         let connection = AppLLMConnectionConfig(
             id: id,
@@ -324,10 +294,6 @@ public struct AppLLMSettings: Sendable, Equatable {
             model: model,
             selectedModel: selectedModel,
             hasAPIKey: hasAPIKey,
-            sidecarExecutablePath: sidecarExecutablePath,
-            sidecarArguments: sidecarArguments,
-            sidecarWorkingDirectoryPath: sidecarWorkingDirectoryPath,
-            sidecarPermissionMode: sidecarPermissionMode
         )
         self.init(connections: [connection], defaultConnectionID: id)
     }
@@ -346,10 +312,6 @@ public struct AppLLMSettings: Sendable, Equatable {
     public var selectedModel: String { defaultConnection.selectedModel }
     public var hasAPIKey: Bool { defaultConnection.hasAPIKey }
     public var providerMode: AppLLMProviderMode { defaultConnection.providerMode }
-    public var sidecarExecutablePath: String { defaultConnection.sidecarExecutablePath }
-    public var sidecarArguments: String { defaultConnection.sidecarArguments }
-    public var sidecarWorkingDirectoryPath: String { defaultConnection.sidecarWorkingDirectoryPath }
-    public var sidecarPermissionMode: AgentPermissionMode { defaultConnection.sidecarPermissionMode }
     public var modelOptions: [String] { defaultConnection.modelOptions }
     public var effectiveModel: String { defaultConnection.effectiveModel }
     public var effectiveThinkingLevel: AppLLMThinkingLevel { defaultThinkingLevel }
@@ -397,10 +359,6 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
         static let baseURLString = "llm.baseURLString"
         static let model = "llm.model"
         static let selectedModel = "llm.selectedModel"
-        static let sidecarExecutablePath = "llm.sidecar.executablePath"
-        static let sidecarArguments = "llm.sidecar.arguments"
-        static let sidecarWorkingDirectoryPath = "llm.sidecar.workingDirectoryPath"
-        static let sidecarPermissionMode = "llm.sidecar.permissionMode"
         static let defaultThinkingLevel = "llm.defaultThinkingLevel"
     }
 
@@ -446,8 +404,6 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
         let modeRaw = settingsStore.string(forKey: Keys.providerMode) ?? defaultConnection.providerMode.rawValue
         let mode = AppLLMProviderMode(rawValue: modeRaw) ?? defaultConnection.providerMode
         let apiKey = try credentialStore.readSecret(service: Self.keychainService, account: Self.apiKeyAccount)
-        let sidecarPermissionRaw = settingsStore.string(forKey: Keys.sidecarPermissionMode) ?? defaultConnection.sidecarPermissionMode.rawValue
-        let sidecarPermissionMode = AgentPermissionMode(rawValue: sidecarPermissionRaw) ?? defaultConnection.sidecarPermissionMode
         let id: String
         let name: String
         switch mode {
@@ -457,7 +413,7 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
         case .openAICompatible:
             id = "openai-compatible"
             name = "OpenAI Compatible"
-        case .anthropicMessages, .governedClaudeSidecar:
+        case .anthropicMessages:
             id = "anthropic"
             name = "Claude"
         }
@@ -469,10 +425,6 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
             model: settingsStore.string(forKey: Keys.model) ?? defaultConnection.model,
             selectedModel: settingsStore.string(forKey: Keys.selectedModel) ?? "",
             hasAPIKey: apiKey?.isEmpty == false,
-            sidecarExecutablePath: settingsStore.string(forKey: Keys.sidecarExecutablePath) ?? defaultConnection.sidecarExecutablePath,
-            sidecarArguments: settingsStore.string(forKey: Keys.sidecarArguments) ?? defaultConnection.sidecarArguments,
-            sidecarWorkingDirectoryPath: settingsStore.string(forKey: Keys.sidecarWorkingDirectoryPath) ?? defaultConnection.sidecarWorkingDirectoryPath,
-            sidecarPermissionMode: sidecarPermissionMode
         )
         return AppLLMSettings(
             connections: [connection],
@@ -486,7 +438,6 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
             connections: settings.connections.map { connection in
                 var copy = connection
                 copy.hasAPIKey = false
-                copy.sidecarPermissionMode = copy.sidecarPermissionMode == .allowAll ? .readOnly : copy.sidecarPermissionMode
                 return copy
             },
             defaultConnectionID: settings.defaultConnectionID,
@@ -502,10 +453,6 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
         settingsStore.set(defaultConnection.baseURLString, forKey: Keys.baseURLString)
         settingsStore.set(defaultConnection.model, forKey: Keys.model)
         settingsStore.set(defaultConnection.effectiveModel, forKey: Keys.selectedModel)
-        settingsStore.set(defaultConnection.sidecarExecutablePath, forKey: Keys.sidecarExecutablePath)
-        settingsStore.set(defaultConnection.sidecarArguments, forKey: Keys.sidecarArguments)
-        settingsStore.set(defaultConnection.sidecarWorkingDirectoryPath, forKey: Keys.sidecarWorkingDirectoryPath)
-        settingsStore.set(defaultConnection.sidecarPermissionMode == .allowAll ? AgentPermissionMode.readOnly.rawValue : defaultConnection.sidecarPermissionMode.rawValue, forKey: Keys.sidecarPermissionMode)
         if let apiKey, !apiKey.isEmpty {
             try credentialStore.saveSecret(apiKey, service: Self.keychainService, account: Self.apiKeyAccount(for: defaultConnection.id))
             if defaultConnection.id == "openai-compatible" || defaultConnection.id == "openai-responses" {
@@ -545,7 +492,6 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
         guard let index = settings.connections.firstIndex(where: { $0.id == connection.id }) else { return }
         var sanitized = connection
         sanitized.hasAPIKey = try hasAPIKey(for: connection.id)
-        sanitized.sidecarPermissionMode = sanitized.sidecarPermissionMode == .allowAll ? .readOnly : sanitized.sidecarPermissionMode
         settings.connections[index] = sanitized
         try save(settings: settings, apiKey: nil)
     }
@@ -689,25 +635,12 @@ public struct AppLLMModelCatalog<Client: AgentHTTPClient>: Sendable {
                     }
                 case .anthropicMessages:
                     result.append(anthropicCompatibleConnection(connection: connection, isDefault: connection.id == settings.defaultConnectionID))
-                case .governedClaudeSidecar:
-                    result.append(sidecarConnection(connection: connection, isDefault: connection.id == settings.defaultConnectionID))
                 }
             }
             return result
         } catch {
             return fallbackConnections(error: error)
         }
-    }
-
-    private func sidecarConnection(connection: AppLLMConnectionConfig, isDefault: Bool) -> AppLLMModelConnection {
-        AppLLMModelConnection(
-            id: connection.id,
-            title: connection.name + (isDefault ? " · 默认" : ""),
-            subtitle: connection.sidecarExecutablePath.isEmpty ? "Claude · Sidecar 未配置 executable" : "Claude · \(connection.sidecarExecutablePath)",
-            providerMode: .governedClaudeSidecar,
-            models: options(from: connection, fallback: "claude-sdk-default"),
-            isLiveCatalog: false
-        )
     }
 
     private func anthropicCompatibleConnection(connection: AppLLMConnectionConfig, isDefault: Bool) -> AppLLMModelConnection {

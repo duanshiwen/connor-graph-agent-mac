@@ -515,7 +515,7 @@ struct AgentChatComposerView: View {
 
     private var workingDirectoryHelpText: String {
         guard let root = viewModel.primaryWorkspaceRootDraft else {
-            return "设置当前会话工作目录；本地工具和 Claude Sidecar 将从主目录开始。"
+            return "设置当前会话工作目录；本地工具将从主目录开始。"
         }
         return "当前会话工作目录：\(root.path)"
     }

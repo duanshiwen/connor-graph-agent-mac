@@ -120,8 +120,8 @@ public struct ConnorNativeSettingsPresentation: Codable, Sendable, Equatable {
             .init(id: "desktopNotifications", title: "Desktop notifications", detail: "Show run and approval notifications"),
             .init(id: "internalBrowser", title: "Internal browser", detail: "Enable the native browser workspace")
         ]),
-        ConnorNativeSettingsSectionPresentation(id: "ai", title: "AI", subtitle: "Model provider and Claude SDK sidecar", systemImage: "sparkles", fields: [
-            .init(id: "provider", title: "Provider mode", detail: "OpenAI-compatible or Claude SDK sidecar", isRequiredForCommercialReadiness: true),
+        ConnorNativeSettingsSectionPresentation(id: "ai", title: "AI", subtitle: "Native model providers", systemImage: "sparkles", fields: [
+            .init(id: "provider", title: "Provider mode", detail: "OpenAI Responses, OpenAI-compatible, or Anthropic Messages", isRequiredForCommercialReadiness: true),
             .init(id: "model", title: "Model", detail: "Default model selection", isRequiredForCommercialReadiness: true)
         ]),
         ConnorNativeSettingsSectionPresentation(id: "appearance", title: "Appearance", subtitle: "Theme and presentation density", systemImage: "paintpalette", fields: [
