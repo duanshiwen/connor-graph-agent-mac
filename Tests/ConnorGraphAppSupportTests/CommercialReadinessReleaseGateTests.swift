@@ -26,12 +26,12 @@ struct CommercialReadinessReleaseGateTests {
 
     @Test func releaseGateBlocksCommercialReleaseWhenAnyPhaseIsBlocked() {
         let blocked = CommercialReadinessCard(
-            phase: .claudeSDKSidecar,
+            phase: .nativeModelProviders,
             status: .blocked,
-            evidence: "Claude SDK sidecar runtime has not been initialized"
+            evidence: "Native model provider has not been configured"
         )
         let readyCards = CommercialReadinessPhase.allCases
-            .filter { $0 != .claudeSDKSidecar }
+            .filter { $0 != .nativeModelProviders }
             .map { CommercialReadinessCard(phase: $0, status: .ready, evidence: "ready") }
         let dashboard = CommercialReadinessDashboard(cards: readyCards + [blocked])
 
@@ -39,7 +39,7 @@ struct CommercialReadinessReleaseGateTests {
 
         #expect(result.status == .blocked)
         #expect(!result.isCommercialReady)
-        #expect(result.blockingCards.map(\.phase) == [.claudeSDKSidecar])
+        #expect(result.blockingCards.map(\.phase) == [.nativeModelProviders])
         #expect(result.summary == "BLOCKED · 6/7 commercial readiness phases ready · 1 blocked")
     }
 

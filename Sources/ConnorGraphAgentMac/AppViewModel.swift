@@ -433,7 +433,6 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var pendingSkillDeletionCard: SkillManagerCard?
     @Published var activeSkillSlug: String?
     @Published var activeSkillDisplayName: String?
-    @Published var sidecarRuntimeDiagnostics: [ClaudeSDKSidecarRuntimeDiagnostics] = []
     @Published var commercialReleaseGateResult: CommercialReadinessReleaseGateResult?
     @Published var productOSRegistryMessage: String?
     @Published var selectedSessionArtifactDirectories: AgentSessionArtifactDirectories?
@@ -1276,7 +1275,6 @@ final class AppViewModel: NSObject, ObservableObject {
             activeChatSession: activeChatSession,
             governanceConfig: governanceConfig,
             artifactDirectoriesReady: storagePaths != nil,
-            selectedSidecarRuntimeDiagnostics: selectedSidecarRuntimeDiagnostics,
             sourceRuntimeConfigurations: sourceRuntimeConfigurations,
             skillRuntimeDefinitions: skillRuntimeDefinitions,
             automationConfig: automationConfig,
@@ -1284,10 +1282,6 @@ final class AppViewModel: NSObject, ObservableObject {
         )
     }
 
-    private var selectedSidecarRuntimeDiagnostics: ClaudeSDKSidecarRuntimeDiagnostics? {
-        let activeID = activeChatSession.id
-        return sidecarRuntimeDiagnostics.first { $0.record.connorSessionID == activeID } ?? sidecarRuntimeDiagnostics.first
-    }
 
     private var graphMemoryDashboardPresentation: GraphMemoryDashboard {
         AppGraphMemoryDashboardBuilder().build(
@@ -1432,7 +1426,6 @@ final class AppViewModel: NSObject, ObservableObject {
         }
         reloadSourceRuntimeConfigurations()
         reloadSkillRuntimeDefinitions()
-        reloadSidecarRuntimeDiagnostics()
         Task { await reloadRSSBrowserPresentation() }
         Task { await reloadMailBrowserPresentation() }
         Task { await reloadCalendarContactsFromStorage() }
@@ -2804,22 +2797,7 @@ final class AppViewModel: NSObject, ObservableObject {
         return SkillCommercialUIPresentationBuilder().build(snapshot: snapshot)
     }
 
-    func reloadSidecarRuntimeDiagnostics() {
-        do {
-            if let storagePaths {
-                sidecarRuntimeDiagnostics = try AppClaudeSDKSidecarRuntimeStore(configDirectory: storagePaths.configDirectory).loadDiagnostics()
-            } else {
-                sidecarRuntimeDiagnostics = []
-            }
-            errorMessage = nil
-        } catch {
-            sidecarRuntimeDiagnostics = []
-            errorMessage = String(describing: error)
-        }
-    }
-
     func runCommercialReadinessReleaseGate() {
-        reloadSidecarRuntimeDiagnostics()
         let result = CommercialReadinessReleaseGate().evaluate(commercialReadinessDashboard)
         commercialReleaseGateResult = result
         productOSRegistryMessage = result.summary

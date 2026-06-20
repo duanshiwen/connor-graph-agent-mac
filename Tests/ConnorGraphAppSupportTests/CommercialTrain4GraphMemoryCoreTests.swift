@@ -150,7 +150,7 @@ private actor Train4CapturingProvider: AgentModelProvider {
     )
     let input = CommercialReadinessInput(
         sessionGovernance: .ready(sessionCount: 1, statusDefinitionCount: 1, labelDefinitionCount: 1, artifactDirectoriesReady: true),
-        claudeSidecar: .ready(runtimeStatus: .ready, sdkSessionID: "sdk", healthStatus: "ready"),
+        modelProvider: .ready(providerMode: .anthropicMessages, connectionKind: .anthropicCompatible, modelID: "claude-sonnet-4-5", healthStatus: "ready"),
         extensionRuntime: .ready(enabledSourceCount: 1, loadedSkillCount: 1, enabledAutomationRuleCount: 1),
         graphMemory: readiness,
         nativeUI: .ready(shellItemCount: 1, commandCount: 1, settingsPanelsReady: true)

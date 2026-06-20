@@ -8,8 +8,12 @@ public struct CommercialReadinessSnapshotBuilder: Sendable, Equatable {
         sessions: [AgentSession],
         governanceConfig: AppSessionGovernanceConfig,
         artifactDirectoriesReady: Bool,
-        sidecarRecord: ClaudeSDKSidecarRuntimeRecord?,
-        sidecarHealthStatus: String?,
+        modelProvider: CommercialModelProviderReadiness = .ready(
+            providerMode: .anthropicMessages,
+            connectionKind: .anthropicCompatible,
+            modelID: "claude-sonnet-4-5",
+            healthStatus: "configured"
+        ),
         sources: [MCPSourceRuntimeConfiguration],
         sourceHealthRecords: [MCPSourceRuntimeHealthRecord] = [],
         sourceAuditRecords: [MCPSourceRuntimeAuditRecord] = [],
@@ -32,25 +36,6 @@ public struct CommercialReadinessSnapshotBuilder: Sendable, Equatable {
                 branchRecordCount: 0,
                 restorableSnapshotReady: artifactDirectoriesReady
             )
-
-        let claudeSidecar: CommercialClaudeSidecarReadiness
-        if let sidecarRecord {
-            claudeSidecar = .ready(
-                runtimeStatus: sidecarRecord.status,
-                sdkSessionID: sidecarRecord.sdkSessionID,
-                healthStatus: sidecarHealthStatus ?? sidecarRecord.status.rawValue,
-                protocolVersion: sidecarRecord.protocolVersion,
-                sdkCWD: sidecarRecord.sdkCWD,
-                hasHeartbeat: sidecarRecord.lastHeartbeatAt != nil,
-                lastDiagnosticMessage: sidecarRecord.lastDiagnosticMessage,
-                failureCode: sidecarRecord.failureCode,
-                recoverability: sidecarRecord.recoverability,
-                ownsProductState: false,
-                governedPermissionMode: true
-            )
-        } else {
-            claudeSidecar = .missing("Claude SDK sidecar runtime has not been initialized")
-        }
 
         let enabledSources = sources.filter { $0.status == .enabled }
         let enabledAutomations = automationConfig.rules.filter(\.isEnabled)
@@ -124,7 +109,7 @@ public struct CommercialReadinessSnapshotBuilder: Sendable, Equatable {
 
         return CommercialReadinessInput(
             sessionGovernance: sessionGovernance,
-            claudeSidecar: claudeSidecar,
+            modelProvider: modelProvider,
             extensionRuntime: extensionRuntime,
             graphMemory: graphMemory,
             nativeUI: nativeUI,
