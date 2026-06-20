@@ -68,6 +68,72 @@ struct TaskSchedulerServiceTests {
         #expect(scheduler.dueTasks([failed], now: now).isEmpty)
     }
 
+    @Test func dailyTaskMissedWhileAppWasClosedIsDueAndKeepsOriginalScheduleAfterRun() throws {
+        let scheduler = TaskSchedulerService(calendar: Calendar(identifier: .gregorian))
+        let start = Date(timeIntervalSince1970: 1_000)
+        let now = start.addingTimeInterval(3 * 24 * 60 * 60 + 3_600)
+        let expectedNextRun = start.addingTimeInterval(4 * 24 * 60 * 60)
+        let task = ConnorTaskDefinition(
+            id: "user.daily",
+            name: "Daily",
+            origin: .user,
+            trigger: ConnorTaskTrigger(kind: .scheduled, runAt: start, recurrence: .daily),
+            target: .createSessionAndSendMessage(message: "Daily"),
+            lifecycle: ConnorTaskLifecycle(
+                status: .active,
+                nextRunAt: start.addingTimeInterval(10 * 24 * 60 * 60),
+                lastFinishedAt: start
+            ),
+            metadata: ConnorTaskMetadata()
+        )
+
+        #expect(scheduler.dueTasks([task], now: now).map(\.id) == [task.id])
+
+        let running = scheduler.markRunStarted(task: task, now: now)
+        let succeeded = scheduler.markRunSucceeded(task: running, startedAt: now, finishedAt: now)
+        #expect(succeeded.lifecycle.status == .active)
+        #expect(succeeded.lifecycle.nextRunAt == expectedNextRun)
+    }
+
+    @Test func calendarRecurringTasksComputeNextRunFromOriginalAnchor() throws {
+        let scheduler = TaskSchedulerService(calendar: Calendar(identifier: .gregorian))
+        let start = Date(timeIntervalSince1970: 1_000)
+        let afterMissedDailyRun = start.addingTimeInterval(2 * 24 * 60 * 60 + 60)
+        let afterMissedWeeklyRun = start.addingTimeInterval(15 * 24 * 60 * 60)
+        let afterMissedMonthlyRun = try #require(Calendar(identifier: .gregorian).date(byAdding: .day, value: 45, to: start))
+        let daily = ConnorTaskDefinition(
+            id: "user.daily",
+            name: "Daily",
+            origin: .user,
+            trigger: ConnorTaskTrigger(kind: .scheduled, runAt: start, recurrence: .daily),
+            target: .createSessionAndSendMessage(message: "Daily"),
+            lifecycle: ConnorTaskLifecycle(status: .active),
+            metadata: ConnorTaskMetadata()
+        )
+        let weekly = ConnorTaskDefinition(
+            id: "user.weekly",
+            name: "Weekly",
+            origin: .user,
+            trigger: ConnorTaskTrigger(kind: .scheduled, runAt: start, recurrence: .weekly),
+            target: .createSessionAndSendMessage(message: "Weekly"),
+            lifecycle: ConnorTaskLifecycle(status: .active),
+            metadata: ConnorTaskMetadata()
+        )
+        let monthly = ConnorTaskDefinition(
+            id: "user.monthly",
+            name: "Monthly",
+            origin: .user,
+            trigger: ConnorTaskTrigger(kind: .scheduled, runAt: start, recurrence: .monthly),
+            target: .createSessionAndSendMessage(message: "Monthly"),
+            lifecycle: ConnorTaskLifecycle(status: .active),
+            metadata: ConnorTaskMetadata()
+        )
+
+        #expect(scheduler.computeNextRunAt(task: daily, after: afterMissedDailyRun) == start.addingTimeInterval(3 * 24 * 60 * 60))
+        #expect(scheduler.computeNextRunAt(task: weekly, after: afterMissedWeeklyRun) == start.addingTimeInterval(21 * 24 * 60 * 60))
+        #expect(scheduler.computeNextRunAt(task: monthly, after: afterMissedMonthlyRun) == Calendar(identifier: .gregorian).date(byAdding: .month, value: 2, to: start))
+    }
+
     @Test func schedulerComputesNextRunForIntervalDailyWeeklyAndMonthly() throws {
         let scheduler = TaskSchedulerService(calendar: Calendar(identifier: .gregorian))
         let start = Date(timeIntervalSince1970: 1_000)
