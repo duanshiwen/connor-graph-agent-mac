@@ -363,6 +363,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var regeneratingTitleSessionIDs: Set<String> = []
     @Published var backgroundTasksBySessionID: [String: [AppSessionBackgroundTask]] = [:]
     @Published var speechTranscriptionStatus: SessionSpeechTranscriptionStatus = .idle
+    @Published var speechProvisionalTranscript: String?
     @Published var isBackgroundTasksPresented: Bool = false
     @Published var sessionListFilter: AgentSessionListFilter = .all
     @Published var sessionSearchQuery: String = ""
@@ -685,6 +686,11 @@ final class AppViewModel: NSObject, ObservableObject {
         guard autoSaveDraftsEnabled, !isRestoringChatInputDraft, let selectedChatSessionID else { return }
         chatInputDraftsBySessionID[selectedChatSessionID] = draft
         speechTranscriptionCoordinator.noteUserEditedDraft(sessionID: selectedChatSessionID, draft: draft)
+    }
+
+    func currentSelectedChatInputDraftForSpeech() -> String {
+        guard autoSaveDraftsEnabled, let selectedChatSessionID else { return chatInput }
+        return chatInputDraftsBySessionID[selectedChatSessionID] ?? chatInput
     }
 
     private func restoreChatInputDraft(for sessionID: String?) {
@@ -4067,13 +4073,31 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func toggleSpeechTranscriptionForSelectedSession() {
-        let task = speechTranscriptionCoordinator.toggle(
+        if isSpeechTranscriptionRunningForSelectedSession {
+            finishSpeechTranscriptionForSelectedSession()
+        } else {
+            beginSpeechTranscriptionForSelectedSession()
+        }
+    }
+
+    func beginSpeechTranscriptionForSelectedSession(speechInsertionRange: NSRange? = nil) {
+        let task = speechTranscriptionCoordinator.beginHoldToTalk(
             selectedSessionID: selectedChatSessionID,
-            currentDraft: chatInput,
+            currentDraft: currentSelectedChatInputDraftForSpeech(),
+            speechInsertionRange: speechInsertionRange,
             setDraft: { [weak self] sessionID, draft in
                 self?.setSpeechTranscriptionDraft(draft, for: sessionID)
+            },
+            setProvisionalTranscript: { [weak self] sessionID, transcript in
+                self?.setSpeechProvisionalTranscript(transcript, for: sessionID)
             }
         )
+        syncSpeechTranscriptionState()
+        upsertSpeechTranscriptionBackgroundTask(task)
+    }
+
+    func finishSpeechTranscriptionForSelectedSession() {
+        let task = speechTranscriptionCoordinator.finishHoldToTalk()
         syncSpeechTranscriptionState()
         upsertSpeechTranscriptionBackgroundTask(task)
     }
@@ -4081,6 +4105,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @discardableResult
     private func stopSpeechTranscriptionIfRunningForLeavingSession(_ sessionID: String?) -> AppSessionBackgroundTask? {
         let task = speechTranscriptionCoordinator.stopIfRunningForLeavingSession(sessionID)
+        if selectedChatSessionID == sessionID { speechProvisionalTranscript = nil }
         syncSpeechTranscriptionState()
         upsertSpeechTranscriptionBackgroundTask(task)
         return task
@@ -4089,6 +4114,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @discardableResult
     private func stopSpeechTranscriptionIfRunningForDeletedSession(_ sessionID: String?) -> AppSessionBackgroundTask? {
         let task = speechTranscriptionCoordinator.stopIfRunningForDeletedSession(sessionID)
+        if selectedChatSessionID == sessionID { speechProvisionalTranscript = nil }
         syncSpeechTranscriptionState()
         upsertSpeechTranscriptionBackgroundTask(task)
         return task
@@ -4099,6 +4125,11 @@ final class AppViewModel: NSObject, ObservableObject {
         if selectedChatSessionID == sessionID {
             setChatInputDraft(draft, for: sessionID)
         }
+    }
+
+    private func setSpeechProvisionalTranscript(_ transcript: String?, for sessionID: String) {
+        guard selectedChatSessionID == sessionID else { return }
+        speechProvisionalTranscript = transcript?.isEmpty == true ? nil : transcript
     }
 
     private func syncSpeechTranscriptionState() {

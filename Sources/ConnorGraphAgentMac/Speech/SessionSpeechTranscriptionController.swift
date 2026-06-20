@@ -29,6 +29,7 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
     private var speechRecognizer: SFSpeechRecognizer?
     private var recognitionGeneration = UUID()
     private var isStopping = false
+    private var latestPartialTranscript: String = ""
 
     init(localeIdentifier: String? = "zh-CN") {
         self.localeIdentifier = localeIdentifier
@@ -43,6 +44,7 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
         let generation = UUID()
         recognitionGeneration = generation
         runningSessionID = sessionID
+        latestPartialTranscript = ""
 
         requestMicrophoneAccessIfNeeded { [weak self] microphoneGranted in
             Task { @MainActor in
@@ -218,7 +220,9 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
                       self.runningSessionID == sessionID,
                       self.recognitionGeneration == generation else { return }
                 if let result {
-                    onPartial(result.bestTranscription.formattedString)
+                    let transcript = result.bestTranscription.formattedString
+                    self.latestPartialTranscript = transcript
+                    onPartial(transcript)
                 }
                 if let error, !self.isStopping {
                     self.cleanupAfterFailure()
@@ -276,6 +280,7 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
         recognitionTask = nil
         recognitionRequest = nil
         speechRecognizer = nil
+        latestPartialTranscript = ""
         isStopping = false
     }
 }

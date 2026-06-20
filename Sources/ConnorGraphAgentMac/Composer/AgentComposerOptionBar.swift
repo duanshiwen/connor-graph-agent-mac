@@ -8,6 +8,7 @@ struct AgentComposerOptionBar: View {
     var composerState: AgentComposerState
     var governanceConfig: AppSessionGovernanceConfig
     var hasRunningBackgroundTask: Bool
+    var currentTextSelectionRange: () -> NSRange?
     @Binding var isSessionInfoPresented: Bool
     var onAction: (AgentComposerAction) -> Void
 
@@ -47,30 +48,12 @@ struct AgentComposerOptionBar: View {
     }
 
     private var speechTranscriptionButton: some View {
-        Button {
-            onAction(.toggleSpeechTranscription)
-        } label: {
-            ZStack {
-                RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
-                    .fill(composerState.isSpeechTranscriptionRunning ? Color.accentColor.opacity(0.16) : Color.clear)
-                Image(systemName: composerState.isSpeechTranscriptionRunning ? "mic.fill" : "mic")
-                    .font(.system(size: AgentChatTypography.controlIconSize, weight: .medium))
-                    .symbolRenderingMode(.hierarchical)
-            }
-            .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
-            .foregroundStyle(composerState.isSpeechTranscriptionRunning ? activeForeground : controlForeground)
-        }
-        .buttonStyle(.plain)
-        .frame(width: AgentChatLayout.hitTargetSize, height: AgentChatLayout.hitTargetSize)
-        .contentShape(Rectangle())
-        .disabled(selectedSession == nil)
-        .help(speechTranscriptionHelp)
-        .accessibilityLabel(composerState.isSpeechTranscriptionRunning ? "停止实时语音转文字" : "开始实时语音转文字")
-    }
-
-    private var speechTranscriptionHelp: String {
-        guard selectedSession != nil else { return "请选择一个会话后再开始实时语音转文字" }
-        return composerState.isSpeechTranscriptionRunning ? "停止实时语音转文字" : "开始实时语音转文字"
+        SpeechInputHoldToTalkButton(
+            isEnabled: selectedSession != nil,
+            status: composerState.speechTranscriptionStatus,
+            onBegin: { onAction(.beginSpeechTranscription(currentTextSelectionRange())) },
+            onEnd: { onAction(.finishSpeechTranscription) }
+        )
     }
 
     private var backgroundTasksButton: some View {
@@ -200,6 +183,131 @@ struct AgentComposerOptionBar: View {
     private func sessionStatusColor(_ status: AgentSessionStatus) -> Color {
         switch status {
         case .todo, .inProgress, .waiting, .needsReview, .done, .blocked, .cancelled, .archived: controlForeground
+        }
+    }
+}
+
+// MARK: - Speech Input Controls
+
+struct SpeechInputHoldToTalkButton: View {
+    var isEnabled: Bool
+    var status: SessionSpeechTranscriptionStatus
+    var onBegin: () -> Void
+    var onEnd: () -> Void
+
+    @State private var isPressed = false
+
+    var body: some View {
+        HStack(spacing: AgentChatLayout.spaceXS) {
+            Image(systemName: iconName)
+                .font(.system(size: AgentChatTypography.smallIconSize, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
+            Text(title)
+                .font(AgentChatTypography.micro.weight(.medium))
+                .lineLimit(1)
+        }
+        .foregroundStyle(foreground)
+        .padding(.horizontal, AgentChatLayout.spaceS)
+        .frame(minWidth: 176, minHeight: AgentChatLayout.iconButtonSize)
+        .background(background, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous)
+                .stroke(border, lineWidth: 1)
+        )
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in beginIfNeeded() }
+                .onEnded { _ in endIfNeeded() }
+        )
+        .opacity(isEnabled ? 1 : 0.45)
+        .allowsHitTesting(isEnabled)
+        .help(helpText)
+        .accessibilityLabel(title)
+    }
+
+    private var title: String {
+        switch status {
+        case .recording:
+            "松开结束"
+        case .failed:
+            "语音失败"
+        case .idle:
+            "按住（Option ⌥）说话"
+        }
+    }
+
+    private var iconName: String {
+        switch status {
+        case .recording: "mic.fill"
+        case .failed: "exclamationmark.triangle"
+        case .idle: "mic"
+        }
+    }
+
+    private var foreground: Color {
+        switch status {
+        case .recording: .accentColor
+        case .failed: .orange
+        case .idle: .secondary
+        }
+    }
+
+    private var background: Color {
+        switch status {
+        case .recording: Color.accentColor.opacity(0.16)
+        case .failed: Color.orange.opacity(0.10)
+        case .idle: Color.secondary.opacity(0.06)
+        }
+    }
+
+    private var border: Color {
+        switch status {
+        case .recording: Color.accentColor.opacity(0.30)
+        case .failed: Color.orange.opacity(0.30)
+        case .idle: Color.secondary.opacity(0.12)
+        }
+    }
+
+    private var helpText: String {
+        guard isEnabled else { return "请选择一个会话后再开始语音输入" }
+        return "鼠标按住开始录音，松开即提交当前识别结果；也可以按住 Option 开始，松开 Option 结束。"
+    }
+
+    private func beginIfNeeded() {
+        guard isEnabled, !isPressed, !status.isRunning else { return }
+        isPressed = true
+        onBegin()
+    }
+
+    private func endIfNeeded() {
+        guard isPressed else { return }
+        isPressed = false
+        onEnd()
+    }
+}
+
+struct SpeechInputProvisionalTranscriptView: View {
+    var transcript: String?
+
+    var body: some View {
+        if let transcript, !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            HStack(alignment: .top, spacing: AgentChatLayout.spaceXS) {
+                Image(systemName: "waveform")
+                    .font(.system(size: AgentChatTypography.smallIconSize, weight: .medium))
+                Text(transcript)
+                    .font(AgentChatTypography.body)
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+                Spacer(minLength: 0)
+            }
+            .padding(AgentChatLayout.spaceM)
+            .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous)
+                    .stroke(Color.accentColor.opacity(0.16), lineWidth: 1)
+            )
+            .transition(.opacity.combined(with: .move(edge: .bottom)))
         }
     }
 }
