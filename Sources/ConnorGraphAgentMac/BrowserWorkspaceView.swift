@@ -143,6 +143,7 @@ struct BrowserWorkspaceView: View {
             installBrowserKeyMonitorIfNeeded()
         }
         .onDisappear {
+            pauseAllBrowserMedia()
             removeBrowserKeyMonitor()
         }
         .onChange(of: viewModel.browserTargetURLString) { _, newValue in
@@ -150,6 +151,7 @@ struct BrowserWorkspaceView: View {
             navigate(to: newValue)
         }
         .onChange(of: viewModel.selectedChatSessionID) { _, _ in
+            pauseAllBrowserMedia()
             ensureInitialTab()
             syncAddressTextWithActiveTab()
             questionText = ""
@@ -200,6 +202,12 @@ struct BrowserWorkspaceView: View {
     private var activeURLIsBookmarked: Bool {
         guard activeTabCanBeBookmarked, let url = activeTab?.displayURL else { return false }
         return viewModel.isBrowserBookmarked(url: url)
+    }
+
+    private func pauseAllBrowserMedia() {
+        webViewsByTabID.values.forEach { webView in
+            webView.pauseBrowserMediaPlayback()
+        }
     }
 
     private var runningMediaTranscriptionTask: AppSessionBackgroundTask? {
