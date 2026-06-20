@@ -1,6 +1,6 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-20 22:55 GMT+8  
+文档更新时间：2026-06-21 00:17 GMT+8  
 当前分支目标：收紧代码质量、简化文档、保持 Connor 的原生 Agent OS 边界，并为内置浏览器媒体本地转写系统建立可恢复、可治理的地基。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package。它的目标不是做“图谱编辑器”或“Claude SDK 外壳”，而是构建一个本地优先的 **graph-memory-native Agent OS**：以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI、Task Management Stack 和 Attachment Store 共同组成可治理的本地智能工作台。
@@ -292,13 +292,15 @@ tasks/task-run-history.jsonl
 tasks/task-event-log.jsonl
 tasks/task-deletion-log.jsonl
 
-内置系统任务会在启动时自动补齐到 `task-definitions.json`：
+内置系统任务会在启动时自动补齐到 `task-definitions.json`。Mail / Calendar 当前仍保留 source-type level protected tasks；RSS 已迁移到 source-instance level materialized tasks：
 
 ```text
-system.mail.check-every-10-minutes      source.runtime:mail.refresh
-system.calendar.check-every-10-minutes  source.runtime:calendar.refresh
-system.rss.check-every-30-minutes       source.runtime:rss.refresh
+system.mail.check-every-10-minutes            source.runtime:mail.refresh
+system.calendar.check-every-10-minutes        source.runtime:calendar.refresh
+system.rss.source.{rssSourceID}.refresh       source.runtime:rss.refresh(sourceInstanceID={rssSourceID})
 ```
+
+旧全局 RSS 任务 `system.rss.check-every-30-minutes` 会被保留但标记为 stopped/deprecated，用于保留历史并避免和 per-source RSS 任务重复同步。
 labels/labels.json
 statuses/statuses.json
 graph/evaluations/retrieval-evaluation-cases.json
@@ -391,7 +393,7 @@ API keys and provider credentials must not be stored in JSON settings files. The
 - Skill prompt augmentation
 - Product OS automation legacy repositories remain for compatibility, but new background work is owned by Task Management Stack
 - Three task origins：
-  - `system`：Connor protected tasks，用户可查看、暂停和恢复，不可删除；当前包括 10 分钟邮件刷新、10 分钟日历刷新、30 分钟 RSS 刷新
+  - `system`：Connor protected tasks，用户可查看、暂停和恢复，不可删除；当前包括 10 分钟邮件刷新、10 分钟日历刷新，以及由每个 RSS source 的 `fetchPolicy.intervalMinutes` 派生出的 per-source RSS refresh tasks
   - `user`：用户创建的任务，可编辑/删除；当前受模板约束
   - `ai`：AI 通过受治理工具创建的任务，可被用户编辑/删除；当前受模板约束
 - Two trigger modes：
@@ -404,8 +406,9 @@ API keys and provider credentials must not be stored in JSON settings files. The
   - `tasks_list`
   - `tasks_create_scheduled_session_message`
   - `tasks_create_session_status_message`
-- Task runtime execution：`TaskSchedulerService` 计算 due tasks，`TaskSchedulerRunnerService` 记录 run history 并调用 `TaskTargetRunner`，真实分发到 Native Mail / Calendar / RSS runtimes、Session OS message flow 或浏览器媒体转写 handler
-- Missed recurring schedule semantics：应用启动和 60 秒轮询都会扫描 due tasks；如果每日/每周/每月重复任务在应用未运行期间错过至少一次，Connor 下次启动/轮询时会立即补执行一次，并把 `nextRunAt` 推进到原始 `runAt` 锚点之后的下一个未来计划点；不会对错过的每一个周期批量补跑，避免会话消息或 source refresh 噪音。
+- Task runtime execution：`TaskSchedulerService` 计算 due tasks，`TaskSchedulerRunnerService` 记录 run history 并调用 `TaskTargetRunner`，真实分发到 Native Mail / Calendar / RSS runtimes、Session OS message flow 或浏览器媒体转写 handler。`source.runtime` refresh targets 现在通过 `SourceRefreshTaskRequest` 传递 `sourceKind`、`sourceInstanceID` 和 `runID`；RSS source-instance task 会只刷新对应 RSS source，而不是刷新所有 RSS sources。
+- Source sync policy boundary：source config 是同步策略事实来源，TaskDefinition 是 materialized projection。RSS 当前由 `SourceRefreshTaskMaterializer` 根据 `RSSSource.fetchPolicy.intervalMinutes` 生成/更新 `system.rss.source.{rssSourceID}.refresh`；当 RSS source 删除后，对应 task 会 stopped/deprecated 而不是直接删除。
+- Missed recurring schedule semantics：应用启动和 60 秒轮询都会扫描 due tasks；如果每日/每周/每月重复任务在应用未运行期间错过至少一次，Connor 下次启动/轮询时会立即补执行一次，并把 `nextRunAt` 推进到原始 `runAt` 锚点之后的下一个未来计划点；不会对错过的每一个周期批量补跑，避免会话消息或 source refresh 噪音。Source refresh 同步同样采用 catch up once 语义：恢复后运行一次以追平 source cursor，而不是按错过 interval 批量 replay。
 - 浏览器媒体转写任务使用 Task Stack 获得 recoverable run/history 能力，但不作为“系统定时任务”卡片显示；它的用户可见面在对应会话的 background task surface。若用户一次选择多段媒体，App 会拆成多个单源 job/task；每个完成后的 follow-up chat 只携带该 job 最新 transcript 附件 ref，避免跨视频提交错附件。
 - Session-scoped background task adapter remains for recoverable per-session runtime intents
 
