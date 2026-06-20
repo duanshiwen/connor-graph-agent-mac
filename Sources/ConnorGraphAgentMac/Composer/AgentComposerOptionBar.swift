@@ -47,30 +47,12 @@ struct AgentComposerOptionBar: View {
     }
 
     private var speechTranscriptionButton: some View {
-        Button {
-            onAction(.toggleSpeechTranscription)
-        } label: {
-            ZStack {
-                RoundedRectangle(cornerRadius: AgentChatLayout.radiusS, style: .continuous)
-                    .fill(composerState.isSpeechTranscriptionRunning ? Color.accentColor.opacity(0.16) : Color.clear)
-                Image(systemName: composerState.isSpeechTranscriptionRunning ? "mic.fill" : "mic")
-                    .font(.system(size: AgentChatTypography.controlIconSize, weight: .medium))
-                    .symbolRenderingMode(.hierarchical)
-            }
-            .frame(width: AgentChatLayout.iconButtonSize, height: AgentChatLayout.iconButtonSize)
-            .foregroundStyle(composerState.isSpeechTranscriptionRunning ? activeForeground : controlForeground)
-        }
-        .buttonStyle(.plain)
-        .frame(width: AgentChatLayout.hitTargetSize, height: AgentChatLayout.hitTargetSize)
-        .contentShape(Rectangle())
-        .disabled(selectedSession == nil)
-        .help(speechTranscriptionHelp)
-        .accessibilityLabel(composerState.isSpeechTranscriptionRunning ? "停止实时语音转文字" : "开始实时语音转文字")
-    }
-
-    private var speechTranscriptionHelp: String {
-        guard selectedSession != nil else { return "请选择一个会话后再开始实时语音转文字" }
-        return composerState.isSpeechTranscriptionRunning ? "停止实时语音转文字" : "开始实时语音转文字"
+        SpeechInputHoldToTalkButton(
+            isEnabled: selectedSession != nil,
+            status: composerState.speechTranscriptionStatus,
+            onBegin: { onAction(.beginSpeechTranscription) },
+            onEnd: { onAction(.finishSpeechTranscription) }
+        )
     }
 
     private var backgroundTasksButton: some View {
