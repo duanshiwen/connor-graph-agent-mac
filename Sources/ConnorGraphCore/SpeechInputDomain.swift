@@ -17,7 +17,6 @@ public enum SpeechInputTriggerKind: String, Codable, Sendable, Equatable, CaseIt
 public enum SpeechInputCommitPhase: String, Codable, Sendable, Equatable {
     case idle
     case recordingPartial
-    case finalizing
     case committed
     case failed
 }

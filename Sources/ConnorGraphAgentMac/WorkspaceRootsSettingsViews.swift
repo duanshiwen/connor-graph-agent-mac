@@ -188,7 +188,7 @@ struct SettingsShortcutsSection: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("按住说话 · 鼠标按住或按住 Option", systemImage: "mic")
                         .font(SettingsListTypography.rowTitleSelected)
-                    Text("Composer 的语音输入与浏览器媒体转写共用本地 WhisperKit runtime：Medium 是默认质量模型，Small 是低资源 fallback。录音中显示实时 partial 结果，松开后会用完整音频再识别一遍，提高最终准确度。")
+                    Text("Composer 的语音输入使用系统语音识别：录音中显示实时 partial 结果，松开后直接提交当前识别文本，不再启动后台整理任务。浏览器媒体转写仍使用独立的本地媒体运行时。")
                         .font(SettingsListTypography.rowCaption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
