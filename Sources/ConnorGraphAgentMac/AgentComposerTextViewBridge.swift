@@ -14,6 +14,7 @@ enum SkillPickerKeyCommand {
 
 struct SafeChatComposerTextView: NSViewRepresentable {
     @Binding var text: String
+    @Binding var selectedRange: NSRange?
     var placeholder: String
     var isSpellCheckEnabled: Bool
     var sendShortcut: String
@@ -56,7 +57,7 @@ struct SafeChatComposerTextView: NSViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text)
+        Coordinator(text: $text, selectedRange: $selectedRange)
     }
 
     private var textInputConfiguration: ComposerTextInputConfiguration {
@@ -101,14 +102,22 @@ struct SafeChatComposerTextView: NSViewRepresentable {
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         @Binding var text: String
+        @Binding var selectedRange: NSRange?
 
-        init(text: Binding<String>) {
+        init(text: Binding<String>, selectedRange: Binding<NSRange?>) {
             self._text = text
+            self._selectedRange = selectedRange
         }
 
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             text = textView.string
+            selectedRange = textView.selectedRange()
+        }
+
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            selectedRange = textView.selectedRange()
         }
     }
 }

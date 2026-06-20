@@ -54,8 +54,8 @@ struct AgentComposerStore {
             viewModel.toggleBrowserWorkspaceVisibility()
         case .toggleSpeechTranscription:
             viewModel.toggleSpeechTranscriptionForSelectedSession()
-        case .beginSpeechTranscription:
-            viewModel.beginSpeechTranscriptionForSelectedSession()
+        case .beginSpeechTranscription(let speechInsertionRange):
+            viewModel.beginSpeechTranscriptionForSelectedSession(speechInsertionRange: speechInsertionRange)
         case .finishSpeechTranscription:
             viewModel.finishSpeechTranscriptionForSelectedSession()
         case .showBackgroundTasks:
