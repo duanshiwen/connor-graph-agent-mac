@@ -359,6 +359,7 @@ struct AgentChatComposerView: View {
     }
 
     private func submitLocalChatInput() {
+        viewModel.cancelSpeechTranscriptionForComposerSubmit()
         let prompt = localChatInput.trimmingCharacters(in: .whitespacesAndNewlines)
         let displayPrompt = localChatInput
         let submittedText = localChatInput
