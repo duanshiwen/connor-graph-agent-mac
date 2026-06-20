@@ -683,7 +683,9 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func updateSelectedChatInputDraft(_ draft: String) {
-        guard autoSaveDraftsEnabled, !isRestoringChatInputDraft, let selectedChatSessionID else { return }
+        guard !isRestoringChatInputDraft else { return }
+        chatInput = draft
+        guard autoSaveDraftsEnabled, let selectedChatSessionID else { return }
         chatInputDraftsBySessionID[selectedChatSessionID] = draft
         speechTranscriptionCoordinator.noteUserEditedDraft(sessionID: selectedChatSessionID, draft: draft)
     }
