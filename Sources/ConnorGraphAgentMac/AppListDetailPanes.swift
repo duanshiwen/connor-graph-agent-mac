@@ -329,6 +329,7 @@ struct CraftSessionListPane: View {
                                 onRegenerateTitle: { viewModel.regenerateChatSessionTitle(session.id) },
                                 onDelete: { viewModel.deleteChatSession(session.id) }
                             )
+                            .id(session.id)
                         }
                     }
                     .padding(.horizontal, 8)
@@ -2431,10 +2432,12 @@ private struct SessionCardAttentionStyle {
         dotColor = level == .unread ? color : nil
         backgroundColor = level == .unread
             ? (isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor))
-            : color.opacity(0.10)
-        borderColor = level == .unread ? Color.clear : color.opacity(isSelected ? 0.22 : 0.14)
-        borderWidth = level >= .emphasized ? 1 : 0
+            : color.opacity(level == .interruptive ? 0.14 : 0.10)
+        borderColor = level == .unread ? Color.clear : color.opacity(level == .interruptive ? 0.42 : (isSelected ? 0.22 : 0.14))
+        borderWidth = level == .interruptive ? 1.6 : (level >= .emphasized ? 1 : 0)
         titleWeight = level >= .actionable ? .bold : .semibold
+        shadowColor = level == .interruptive ? color.opacity(0.18) : .clear
+        shadowRadius = level == .interruptive ? 8 : 0
     }
 
     private static var attentionColor: Color { ConnorCraftPalette.accent }
@@ -2567,12 +2570,12 @@ struct CraftSessionRow: View {
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(rowBackgroundColor, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: isAttentionPulseOn)
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(cardStyle.borderColor, lineWidth: cardStyle.borderWidth)
         )
-        .shadow(color: cardStyle.shadowColor, radius: cardStyle.shadowRadius, x: 0, y: 1)
+        .shadow(color: cardStyle.shadowColor, radius: cardStyle.shadowRadius, x: 0, y: 2)
+        .scaleEffect(attentionLevel == .interruptive && isAttentionPulseOn ? 1.012 : 1)
         .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .onTapGesture {
             if !isEditingTitle { onSelect() }
@@ -2723,6 +2726,9 @@ struct CraftSessionRow: View {
 
     private var rowBackgroundColor: Color {
         guard shouldPulseAttention else { return cardStyle.backgroundColor }
+        if attentionLevel == .interruptive {
+            return ConnorCraftPalette.accent.opacity(isAttentionPulseOn ? 0.24 : 0.10)
+        }
         return ConnorCraftPalette.accent.opacity(isAttentionPulseOn ? 0.18 : 0.07)
     }
 
@@ -2732,12 +2738,22 @@ struct CraftSessionRow: View {
 
     private func updateAttentionPulseAnimation() {
         guard shouldPulseAttention else {
-            isAttentionPulseOn = false
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                isAttentionPulseOn = false
+            }
             return
         }
-        isAttentionPulseOn = false
+        var resetTransaction = Transaction()
+        resetTransaction.disablesAnimations = true
+        withTransaction(resetTransaction) {
+            isAttentionPulseOn = false
+        }
         DispatchQueue.main.async {
-            isAttentionPulseOn = true
+            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                isAttentionPulseOn = true
+            }
         }
     }
 
