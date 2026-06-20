@@ -1629,17 +1629,17 @@ final class AppViewModel: NSObject, ObservableObject {
         isRunningScheduledTasks = true
         defer { isRunningScheduledTasks = false }
         let runner = TaskTargetRunner.appRuntime(
-            mailRefresh: { [weak self] runID in
+            mailRefresh: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("mail") }
-                return try await self.refreshMailForScheduledTask(runID: runID)
+                return try await self.refreshMailForScheduledTask(runID: request.runID)
             },
-            calendarRefresh: { [weak self] runID in
+            calendarRefresh: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("calendar") }
-                return await self.refreshCalendarForScheduledTask(runID: runID)
+                return await self.refreshCalendarForScheduledTask(runID: request.runID)
             },
-            rssRefresh: { [weak self] runID in
+            rssRefresh: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("rss") }
-                return try await self.refreshRSSForScheduledTask(runID: runID)
+                return try await self.refreshRSSForScheduledTask(sourceInstanceID: request.sourceInstanceID, runID: request.runID)
             },
             sessionMessage: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("session.ai") }
@@ -1732,7 +1732,14 @@ final class AppViewModel: NSObject, ObservableObject {
         return succeeded ? (calendarSyncMessage ?? "Calendar refreshed") : (calendarSyncMessage ?? "Calendar refresh failed")
     }
 
-    private func refreshRSSForScheduledTask(runID: String?) async throws -> String {
+    private func refreshRSSForScheduledTask(sourceInstanceID: String?, runID: String?) async throws -> String {
+        if let sourceInstanceID, !sourceInstanceID.isEmpty {
+            let sourceID = RSSSourceID(rawValue: sourceInstanceID)
+            let result = try await rssRuntime.syncSource(sourceID: sourceID, runID: runID, sessionID: selectedChatSessionID)
+            await reloadRSSBrowserPresentation()
+            return "RSS refreshed source \(sourceInstanceID); inserted \(result.insertedCount), duplicates \(result.duplicateCount)"
+        }
+
         let sources = try await rssRuntime.listSources(runID: runID, sessionID: selectedChatSessionID)
         var inserted = 0
         var duplicates = 0
@@ -4790,17 +4797,17 @@ final class AppViewModel: NSObject, ObservableObject {
     private func dispatchTaskSessionStatusChanged(sessionID: String, fromStatus: String?, toStatus: String) {
         guard let taskManagementRepository else { return }
         let runner = TaskTargetRunner.appRuntime(
-            mailRefresh: { [weak self] runID in
+            mailRefresh: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("mail") }
-                return try await self.refreshMailForScheduledTask(runID: runID)
+                return try await self.refreshMailForScheduledTask(runID: request.runID)
             },
-            calendarRefresh: { [weak self] runID in
+            calendarRefresh: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("calendar") }
-                return await self.refreshCalendarForScheduledTask(runID: runID)
+                return await self.refreshCalendarForScheduledTask(runID: request.runID)
             },
-            rssRefresh: { [weak self] runID in
+            rssRefresh: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("rss") }
-                return try await self.refreshRSSForScheduledTask(runID: runID)
+                return try await self.refreshRSSForScheduledTask(sourceInstanceID: request.sourceInstanceID, runID: request.runID)
             },
             sessionMessage: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("session.ai") }
