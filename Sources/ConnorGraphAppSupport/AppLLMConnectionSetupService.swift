@@ -1,7 +1,6 @@
 import Foundation
 import ConnorGraphAgent
 
-public typealias AppLLMConnectionSidecarValidator = @Sendable (AppLLMConnectionConfig) async throws -> LLMProviderHealthCheckResult
 public typealias AppLLMCodexAPIKeyExchange = @Sendable (String) async throws -> String
 public typealias OpenAIResponsesHealthCheck = @Sendable (OpenAIResponsesConfig) async throws -> LLMProviderHealthCheckResult
 public typealias AnthropicCompatibleHealthCheck = @Sendable (AnthropicCompatibleConfig) async throws -> LLMProviderHealthCheckResult
@@ -15,10 +14,6 @@ public struct AppLLMConnectionSetupInput: Sendable, Equatable {
     public var selectedModel: String
     public var apiKey: String?
     public var oauthTokens: AppLLMOAuthTokens?
-    public var sidecarExecutablePath: String
-    public var sidecarArguments: String
-    public var sidecarWorkingDirectoryPath: String
-    public var sidecarPermissionMode: AgentPermissionMode
     public var anthropicAuthHeaderKind: AnthropicCompatibleAuthHeaderKind
     public var openAIAPIKeyHeaderKind: OpenAICompatibleAPIKeyHeaderKind
     public var makeDefault: Bool
@@ -32,10 +27,6 @@ public struct AppLLMConnectionSetupInput: Sendable, Equatable {
         selectedModel: String = "",
         apiKey: String? = nil,
         oauthTokens: AppLLMOAuthTokens? = nil,
-        sidecarExecutablePath: String = "",
-        sidecarArguments: String = "",
-        sidecarWorkingDirectoryPath: String = "",
-        sidecarPermissionMode: AgentPermissionMode = .readOnly,
         anthropicAuthHeaderKind: AnthropicCompatibleAuthHeaderKind = .xAPIKey,
         openAIAPIKeyHeaderKind: OpenAICompatibleAPIKeyHeaderKind = .bearer,
         makeDefault: Bool = true
@@ -48,10 +39,6 @@ public struct AppLLMConnectionSetupInput: Sendable, Equatable {
         self.selectedModel = selectedModel
         self.apiKey = apiKey
         self.oauthTokens = oauthTokens
-        self.sidecarExecutablePath = sidecarExecutablePath
-        self.sidecarArguments = sidecarArguments
-        self.sidecarWorkingDirectoryPath = sidecarWorkingDirectoryPath
-        self.sidecarPermissionMode = sidecarPermissionMode
         self.anthropicAuthHeaderKind = anthropicAuthHeaderKind
         self.openAIAPIKeyHeaderKind = openAIAPIKeyHeaderKind
         self.makeDefault = makeDefault
@@ -74,10 +61,6 @@ public enum AppLLMConnectionSetupError: Error, Sendable, Equatable, LocalizedErr
     case missingAPIKey
     case missingModel
     case missingOAuthToken(String)
-    case missingSidecarExecutablePath
-    case sidecarExecutableNotFound(String)
-    case sidecarExecutableNotExecutable(String)
-    case unsafePermissionMode
     case healthCheckFailed(String)
 
     public var errorDescription: String? {
@@ -92,14 +75,6 @@ public enum AppLLMConnectionSetupError: Error, Sendable, Equatable, LocalizedErr
             return "连接缺少模型名称。"
         case .missingOAuthToken(let name):
             return "OAuth 结果缺少 \(name)。"
-        case .missingSidecarExecutablePath:
-            return "Claude 连接缺少 sidecar executable path。"
-        case .sidecarExecutableNotFound(let path):
-            return "Claude sidecar executable 不存在：\(path)"
-        case .sidecarExecutableNotExecutable(let path):
-            return "Claude sidecar executable 不可执行：\(path)"
-        case .unsafePermissionMode:
-            return "Claude Sidecar 连接不允许 allowAll 权限模式。"
         case .healthCheckFailed(let message):
             return "连接验证失败：\(message)"
         }
@@ -111,7 +86,6 @@ public struct AppLLMConnectionSetupService: Sendable {
     public var openAIResponsesHealthCheck: OpenAIResponsesHealthCheck
     public var openAICompatibleHealthCheck: OpenAICompatibleHealthCheck
     public var anthropicCompatibleHealthCheck: AnthropicCompatibleHealthCheck
-    public var sidecarValidator: AppLLMConnectionSidecarValidator
     public var codexAPIKeyExchange: AppLLMCodexAPIKeyExchange
 
     public init(
@@ -125,9 +99,6 @@ public struct AppLLMConnectionSetupService: Sendable {
         anthropicCompatibleHealthCheck: @escaping AnthropicCompatibleHealthCheck = { config in
             try await AnthropicCompatibleProvider(config: config).healthCheck()
         },
-        sidecarValidator: @escaping AppLLMConnectionSidecarValidator = { connection in
-            try Self.defaultSidecarValidation(connection: connection)
-        },
         codexAPIKeyExchange: @escaping AppLLMCodexAPIKeyExchange = { idToken in
             try await AppLLMOAuthService.shared.exchangeChatGPTIDTokenForAPIKey(idToken)
         }
@@ -136,7 +107,6 @@ public struct AppLLMConnectionSetupService: Sendable {
         self.openAIResponsesHealthCheck = openAIResponsesHealthCheck
         self.openAICompatibleHealthCheck = openAICompatibleHealthCheck
         self.anthropicCompatibleHealthCheck = anthropicCompatibleHealthCheck
-        self.sidecarValidator = sidecarValidator
         self.codexAPIKeyExchange = codexAPIKeyExchange
     }
 
@@ -149,8 +119,6 @@ public struct AppLLMConnectionSetupService: Sendable {
             return try await setupOpenAIResponses(input, name: name)
         case .openAICompatible:
             return try await setupOpenAICompatible(input, name: name)
-        case .claudeSidecar:
-            return try await setupClaudeSidecar(input, name: name)
         case .chatGPTCodex:
             return try await setupChatGPTCodex(input, name: name)
         case .githubCopilot:
@@ -213,34 +181,6 @@ public struct AppLLMConnectionSetupService: Sendable {
         )
         try settingsRepository.saveConnection(connection, apiKey: apiKey, oauthTokens: input.oauthTokens, makeDefault: input.makeDefault)
         return AppLLMConnectionSetupResult(connection: connection, message: "OpenAI Compatible 连接验证成功：\(health.model)")
-    }
-
-    private func setupClaudeSidecar(_ input: AppLLMConnectionSetupInput, name: String) async throws -> AppLLMConnectionSetupResult {
-        let executablePath = input.sidecarExecutablePath.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !executablePath.isEmpty else { throw AppLLMConnectionSetupError.missingSidecarExecutablePath }
-        guard FileManager.default.fileExists(atPath: executablePath) else { throw AppLLMConnectionSetupError.sidecarExecutableNotFound(executablePath) }
-        guard FileManager.default.isExecutableFile(atPath: executablePath) else { throw AppLLMConnectionSetupError.sidecarExecutableNotExecutable(executablePath) }
-        guard input.sidecarPermissionMode != .allowAll else { throw AppLLMConnectionSetupError.unsafePermissionMode }
-
-        let model = normalizedModel(input.model).isEmpty ? "claude-sdk-default" : normalizedModel(input.model)
-        let connection = AppLLMConnectionConfig(
-            id: normalizedID(input.id, fallbackPrefix: "claude-sidecar"),
-            name: name,
-            providerMode: .governedClaudeSidecar,
-            connectionKind: .claudeSidecar,
-            baseURLString: "",
-            model: model,
-            selectedModel: normalizedSelectedModel(input.selectedModel, model: model),
-            hasAPIKey: input.oauthTokens != nil,
-            sidecarExecutablePath: executablePath,
-            sidecarArguments: input.sidecarArguments.trimmingCharacters(in: .whitespacesAndNewlines),
-            sidecarWorkingDirectoryPath: input.sidecarWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines),
-            sidecarPermissionMode: input.sidecarPermissionMode
-        )
-        let health = try await sidecarValidator(connection)
-        guard health.ok else { throw AppLLMConnectionSetupError.healthCheckFailed(health.message) }
-        try settingsRepository.saveConnection(connection, apiKey: nil, oauthTokens: input.oauthTokens, makeDefault: input.makeDefault)
-        return AppLLMConnectionSetupResult(connection: connection, message: "Claude SDK sidecar 连接验证成功。")
     }
 
     private func setupChatGPTCodex(_ input: AppLLMConnectionSetupInput, name: String) async throws -> AppLLMConnectionSetupResult {
@@ -366,40 +306,6 @@ public struct AppLLMConnectionSetupService: Sendable {
         return trimmed.isEmpty ? AppLLMConnectionConfig.firstModel(in: model) : trimmed
     }
 
-    public static func defaultSidecarValidation(connection: AppLLMConnectionConfig) throws -> LLMProviderHealthCheckResult {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: connection.sidecarExecutablePath)
-        process.arguments = connection.sidecarArguments
-            .split(separator: " ", omittingEmptySubsequences: true)
-            .map(String.init)
-        let cwd = connection.sidecarWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !cwd.isEmpty { process.currentDirectoryURL = URL(fileURLWithPath: cwd, isDirectory: true) }
-
-        let stdin = Pipe()
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardInput = stdin
-        process.standardOutput = stdout
-        process.standardError = stderr
-
-        try process.run()
-        stdin.fileHandleForWriting.write(Data("{\"health\":{}}\n".utf8))
-        try? stdin.fileHandleForWriting.close()
-
-        let deadline = Date().addingTimeInterval(3)
-        while process.isRunning && Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.05)
-        }
-        if process.isRunning { process.terminate() }
-        process.waitUntilExit()
-
-        let output = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let errorText = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        guard output.contains("\"sidecarHealth\"") && output.contains("\"status\":\"ok\"") else {
-            throw AppLLMConnectionSetupError.healthCheckFailed(errorText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? output : errorText)
-        }
-        return LLMProviderHealthCheckResult(ok: true, model: connection.effectiveModel, message: "Claude sidecar health OK.")
-    }
 }
 
 public extension AppLLMSettingsRepository {

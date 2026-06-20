@@ -43,15 +43,6 @@ public struct AppLLMProviderHealthChecker: Sendable {
             let settings = try settingsRepository.loadSettings()
             let connection = settings.defaultConnection
             switch connection.providerMode {
-            case .governedClaudeSidecar:
-                let path = connection.sidecarExecutablePath.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !path.isEmpty else {
-                    return AppLLMProviderHealthCheckResult(status: .notConfigured, message: "Claude 连接缺少 sidecar executable path。")
-                }
-                guard connection.sidecarPermissionMode != .allowAll else {
-                    return AppLLMProviderHealthCheckResult(status: .failed, message: "Claude 连接不允许 allowAll 权限模式。")
-                }
-                return AppLLMProviderHealthCheckResult(status: .success, message: "Claude 连接配置可用；实际 SDK 登录和依赖由 sidecar 运行时验证。")
             case .openAIResponses:
                 guard let config = try settingsRepository.openAIResponsesConfig(connectionID: connection.id) else {
                     return AppLLMProviderHealthCheckResult(status: .notConfigured, message: "OpenAI Responses 连接缺少 API Key。")

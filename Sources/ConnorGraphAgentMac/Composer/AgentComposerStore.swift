@@ -16,7 +16,7 @@ struct AgentComposerStore {
             isSubmitting: viewModel.isSubmittingChat,
             selectedModel: viewModel.llmSelectedModel,
             sessionHasLLMOverride: viewModel.sessionHasLLMOverride,
-            permissionMode: viewModel.sidecarPermissionMode,
+            permissionMode: viewModel.agentPermissionMode,
             selectedSessionStatus: selectedSession?.governance.status,
             isSpeechTranscriptionRunning: viewModel.isSpeechTranscriptionRunningForSelectedSession,
             speechTranscriptionStatus: viewModel.speechTranscriptionStatus,
@@ -45,7 +45,7 @@ struct AgentComposerStore {
         case .clearSkill:
             viewModel.clearActiveSkill()
         case .setPermissionMode(let mode):
-            viewModel.setSidecarPermissionMode(mode)
+            viewModel.setAgentPermissionMode(mode)
         case .setSessionStatus(let status):
             viewModel.deferViewUpdate {
                 viewModel.setSelectedSessionStatus(status)

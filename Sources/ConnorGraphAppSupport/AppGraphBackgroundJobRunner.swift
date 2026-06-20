@@ -161,8 +161,6 @@ public struct AppGraphBackgroundJobRunner: @unchecked Sendable {
             }
             guard let config = try settingsRepository.openAICompatibleConfig(connectionID: connection.id) else { return nil }
             return (AnyAgentModelProvider(OpenAICompatibleProvider(config: config)), "openai-compatible")
-        case .governedClaudeSidecar:
-            return nil
         }
     }
 }

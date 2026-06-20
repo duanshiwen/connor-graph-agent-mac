@@ -369,7 +369,7 @@ struct LLMConnectionSetupTests {
     @Test func legacyConnectionWithoutKindLoadsWithCompatibleDefault() throws {
         let store = MemoryLLMSettingsStore()
         let raw = """
-        [{"id":"old","name":"Old","providerMode":"openai_compatible","baseURLString":"https://api.example.com/v1","model":"gpt","selectedModel":"gpt","hasAPIKey":false,"sidecarExecutablePath":"","sidecarArguments":"","sidecarWorkingDirectoryPath":"","sidecarPermissionMode":"readOnly"}]
+        [{"id":"old","name":"Old","providerMode":"openai_compatible","baseURLString":"https://api.example.com/v1","model":"gpt","selectedModel":"gpt","hasAPIKey":false}]
         """
         store.set(raw, forKey: "llm.connections")
         store.set("old", forKey: "llm.defaultConnectionID")

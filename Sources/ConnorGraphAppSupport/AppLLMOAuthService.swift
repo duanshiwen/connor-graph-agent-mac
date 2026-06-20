@@ -3,7 +3,6 @@ import CryptoKit
 import Network
 
 public enum AppLLMOAuthProvider: Sendable, Equatable {
-    case claude
     case chatGPT
     case githubCopilot
 }
@@ -61,13 +60,6 @@ public enum AppLLMOAuthError: Error, Sendable, LocalizedError, Equatable {
 }
 
 public final class AppLLMOAuthService: @unchecked Sendable {
-    public struct ClaudePreparedFlow: Sendable, Equatable {
-        public var authURL: URL
-        public var state: String
-        public var codeVerifier: String
-        public var expiresAt: Date
-    }
-
     public struct ChatGPTPreparedFlow: Sendable, Equatable {
         public var authURL: URL
         public var state: String
@@ -83,71 +75,10 @@ public final class AppLLMOAuthService: @unchecked Sendable {
     public static let shared = AppLLMOAuthService()
 
     private let session: URLSession
-    private var currentClaudeFlow: ClaudePreparedFlow?
     private var currentChatGPTFlow: ChatGPTPreparedFlow?
 
     public init(session: URLSession = .shared) {
         self.session = session
-    }
-
-    // MARK: - Claude OAuth
-
-    public func prepareClaudeOAuth() throws -> ClaudePreparedFlow {
-        let state = Self.randomBase64URL(byteCount: 32)
-        let verifier = Self.randomBase64URL(byteCount: 32)
-        let challenge = Self.sha256Base64URL(verifier)
-        let expiresAt = Date().addingTimeInterval(10 * 60)
-        var components = URLComponents(string: "https://claude.ai/oauth/authorize")!
-        components.queryItems = [
-            URLQueryItem(name: "code", value: "true"),
-            URLQueryItem(name: "client_id", value: "9d1c250a-e61b-44d9-88ed-5944d1962f5e"),
-            URLQueryItem(name: "response_type", value: "code"),
-            URLQueryItem(name: "redirect_uri", value: "https://console.anthropic.com/oauth/code/callback"),
-            URLQueryItem(name: "scope", value: "org:create_api_key user:profile user:inference"),
-            URLQueryItem(name: "code_challenge", value: challenge),
-            URLQueryItem(name: "code_challenge_method", value: "S256"),
-            URLQueryItem(name: "state", value: state)
-        ]
-        guard let url = components.url else { throw AppLLMOAuthError.invalidURL("Claude auth URL") }
-        let flow = ClaudePreparedFlow(authURL: url, state: state, codeVerifier: verifier, expiresAt: expiresAt)
-        currentClaudeFlow = flow
-        return flow
-    }
-
-    public func exchangeClaudeCode(_ authorizationCode: String) async throws -> AppLLMOAuthTokens {
-        guard let flow = currentClaudeFlow else { throw AppLLMOAuthError.missingOAuthState }
-        guard Date() < flow.expiresAt else {
-            currentClaudeFlow = nil
-            throw AppLLMOAuthError.oauthStateExpired
-        }
-        let cleanedCode = authorizationCode
-            .split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)[0]
-            .split(separator: "&", maxSplits: 1, omittingEmptySubsequences: false)[0]
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleanedCode.isEmpty else { throw AppLLMOAuthError.missingAuthorizationCode }
-
-        let body: [String: String] = [
-            "grant_type": "authorization_code",
-            "client_id": "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
-            "code": cleanedCode,
-            "redirect_uri": "https://console.anthropic.com/oauth/code/callback",
-            "code_verifier": flow.codeVerifier,
-            "state": flow.state
-        ]
-        var request = URLRequest(url: URL(string: "https://platform.claude.com/v1/oauth/token")!)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("ConnorGraphAgent/1", forHTTPHeaderField: "User-Agent")
-        request.httpBody = try JSONEncoder().encode(body)
-        let response: ClaudeTokenResponse = try await sendJSON(request)
-        guard let accessToken = response.accessToken, !accessToken.isEmpty else { throw AppLLMOAuthError.missingToken("access_token") }
-        currentClaudeFlow = nil
-        return AppLLMOAuthTokens(
-            accessToken: accessToken,
-            refreshToken: response.refreshToken,
-            expiresAt: response.expiresIn.map { Date().timeIntervalSince1970 * 1000 + Double($0) * 1000 }
-        )
     }
 
     // MARK: - ChatGPT / Codex OAuth
@@ -484,12 +415,6 @@ private extension Data {
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: "=", with: "")
     }
-}
-
-private struct ClaudeTokenResponse: Decodable {
-    var accessToken: String?
-    var refreshToken: String?
-    var expiresIn: Int?
 }
 
 private struct ChatGPTTokenResponse: Decodable {

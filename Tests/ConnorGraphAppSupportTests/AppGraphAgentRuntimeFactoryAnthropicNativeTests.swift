@@ -139,8 +139,7 @@ private func anthropicNativeTemporaryDatabaseURL(_ name: String = UUID().uuidStr
         connectionKind: .anthropicCompatible,
         baseURLString: "https://api.anthropic.com/v1",
         model: "claude-sonnet-4-5",
-        selectedModel: "claude-sonnet-4-5",
-        sidecarExecutablePath: ""
+        selectedModel: "claude-sonnet-4-5"
     )
     try settingsRepository.save(settings: AppLLMSettings(connections: [connection], defaultConnectionID: "anthropic"), apiKey: "anthropic-key")
     let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: settingsRepository)
@@ -148,6 +147,5 @@ private func anthropicNativeTemporaryDatabaseURL(_ name: String = UUID().uuidStr
     let provider = factory.makeAgentModelProvider()
 
     #expect(provider.modelID == "claude-sonnet-4-5")
-    #expect(provider.modelID != "governed-claude-sidecar-requires-session-manager")
     #expect(provider.capabilities.supportsToolCalling == true)
 }
