@@ -39,11 +39,14 @@ enum AppMailAccountSetupError: LocalizedError {
 
 enum AppViewModelTaskCreationError: LocalizedError {
     case missingRepository
+    case mediaTranscriptionAlreadyRunning
 
     var errorDescription: String? {
         switch self {
         case .missingRepository:
             return "任务管理存储尚未初始化，请稍后重试。"
+        case .mediaTranscriptionAlreadyRunning:
+            return "当前会话已有媒体转写任务正在运行，请等待完成后再创建新的转写任务。"
         }
     }
 }
@@ -1540,6 +1543,7 @@ final class AppViewModel: NSObject, ObservableObject {
     func requestBrowserMediaTranscription(selection: BrowserMediaTranscriptionSelection) throws -> String {
         guard let taskManagementRepository else { throw AppViewModelTaskCreationError.missingRepository }
         let ownerSessionID = selectedChatSessionID ?? activeChatSession.id
+        guard runningMediaTranscriptionTask(for: ownerSessionID) == nil else { throw AppViewModelTaskCreationError.mediaTranscriptionAlreadyRunning }
         let stack = TaskManagementStack(repository: taskManagementRepository, sessionRepository: chatSessionRepository)
         let selectedSnapshot = selection.selectedSnapshot
         let result = try stack.createMediaTranscriptionTask(
@@ -1550,6 +1554,18 @@ final class AppViewModel: NSObject, ObservableObject {
         reloadTaskManagementPresentation()
         selectedTaskAutomationID = result.task.id
         let selectedCount = max(1, selectedSnapshot.mediaElements.count + selectedSnapshot.openGraphMedia.count)
+        upsertBackgroundTask(
+            AppSessionBackgroundTask(
+                id: result.task.id,
+                sessionID: ownerSessionID,
+                kind: Self.mediaTranscriptionBackgroundTaskKind,
+                title: "网页媒体转写",
+                detail: mediaTranscriptionBackgroundTaskDetail(sourceCount: selectedCount, mode: selection.mode),
+                status: .queued,
+                payloadJSON: mediaTranscriptionBackgroundTaskPayload(taskID: result.task.id, jobID: result.job.id, mode: selection.mode)
+            )
+        )
+        isBackgroundTasksPresented = true
         showAttachmentToast(
             title: "已开始媒体处理",
             message: "Connor 将处理 \(selectedCount) 个媒体源：\(selection.mode.displayTitle)。完成后结果会写入当前会话附件。",
@@ -1628,8 +1644,26 @@ final class AppViewModel: NSObject, ObservableObject {
             }
         )
         do {
-            let service = TaskSchedulerRunnerService(repository: taskManagementRepository, scheduler: TaskSchedulerService(), runner: runner)
-            _ = try await service.runDueTasks()
+            let scheduler = TaskSchedulerService()
+            let dueTasks = scheduler.dueTasks(try taskManagementRepository.loadOrCreateDefault(), now: Date())
+            for task in dueTasks where task.target.targetKind == "media.transcription" {
+                updateBackgroundTask(
+                    sessionID: task.target.parameters["ownerSessionID"] ?? selectedChatSessionID ?? activeChatSession.id,
+                    taskID: task.id,
+                    status: .running,
+                    detail: "正在处理网页媒体：获取字幕/音频、转写并写入当前会话附件。"
+                )
+            }
+            let service = TaskSchedulerRunnerService(repository: taskManagementRepository, scheduler: scheduler, runner: runner)
+            let outcomes = try await service.runDueTasks()
+            for outcome in outcomes {
+                guard dueTasks.contains(where: { $0.id == outcome.taskID && $0.target.targetKind == "media.transcription" }) else { continue }
+                if outcome.succeeded {
+                    updateMediaTranscriptionBackgroundTask(taskID: outcome.taskID, status: .succeeded, detail: outcome.summary)
+                } else {
+                    updateMediaTranscriptionBackgroundTask(taskID: outcome.taskID, status: .failed, detail: outcome.summary, errorMessage: outcome.errorMessage)
+                }
+            }
             reloadTaskManagementPresentation()
         } catch {
             errorMessage = String(describing: error)
@@ -3902,10 +3936,33 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
+    private static let mediaTranscriptionBackgroundTaskKind = "media_transcription"
+
     func backgroundTasks(for sessionID: String?) -> [AppSessionBackgroundTask] {
         guard let sessionID else { return [] }
         return backgroundTasksBySessionID[sessionID, default: []]
             .sorted { $0.createdAt > $1.createdAt }
+    }
+
+    func runningMediaTranscriptionTask(for sessionID: String?) -> AppSessionBackgroundTask? {
+        backgroundTasks(for: sessionID).first { task in
+            task.kind == Self.mediaTranscriptionBackgroundTaskKind && (task.status == .queued || task.status == .running)
+        }
+    }
+
+    private func mediaTranscriptionBackgroundTaskDetail(sourceCount: Int, mode: BrowserMediaTranscriptionMode) -> String {
+        "等待处理 \(sourceCount) 个网页媒体源：\(mode.displayTitle)。结果会写入当前会话附件。"
+    }
+
+    private func mediaTranscriptionBackgroundTaskPayload(taskID: String, jobID: String, mode: BrowserMediaTranscriptionMode) -> String {
+        "{\"taskID\":\"\(taskID)\",\"jobID\":\"\(jobID)\",\"mode\":\"\(mode.rawValue)\"}"
+    }
+
+    private func updateMediaTranscriptionBackgroundTask(taskID: String, status: AppSessionBackgroundTaskStatus, detail: String? = nil, errorMessage: String? = nil) {
+        for (sessionID, tasks) in backgroundTasksBySessionID where tasks.contains(where: { $0.id == taskID && $0.kind == Self.mediaTranscriptionBackgroundTaskKind }) {
+            updateBackgroundTask(sessionID: sessionID, taskID: taskID, status: status, detail: detail, errorMessage: errorMessage)
+            return
+        }
     }
 
     var activeSessionBackgroundTasks: [AppSessionBackgroundTask] {

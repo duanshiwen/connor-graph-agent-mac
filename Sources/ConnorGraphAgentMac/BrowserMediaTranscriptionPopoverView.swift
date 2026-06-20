@@ -5,9 +5,12 @@ struct BrowserMediaTranscriptionPopoverView: View {
     var snapshot: BrowserMediaSourceSnapshot?
     var isScanning: Bool
     var errorMessage: String?
+    var runningTask: AppSessionBackgroundTask?
     @Binding var selectedSourceIDs: Set<String>
     @Binding var mode: BrowserMediaTranscriptionMode
     @Binding var options: BrowserMediaTranscriptionOptions
+    var onSelectAll: () -> Void
+    var onClearSelection: () -> Void
     var onRescan: () -> Void
     var onCancel: () -> Void
     var onSubmit: () -> Void
@@ -17,13 +20,17 @@ struct BrowserMediaTranscriptionPopoverView: View {
     }
 
     private var canSubmit: Bool {
-        !isScanning && !selectedSourceIDs.isEmpty && !sourceOptions.isEmpty
+        runningTask == nil && !isScanning && !selectedSourceIDs.isEmpty && !sourceOptions.isEmpty
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
             pageContext
+
+            if let runningTask {
+                runningTaskCard(runningTask)
+            }
 
             if let errorMessage, !errorMessage.isEmpty {
                 diagnosticCard(title: "媒体扫描失败", message: errorMessage, systemImage: "exclamationmark.triangle")
@@ -111,15 +118,34 @@ struct BrowserMediaTranscriptionPopoverView: View {
 
     private var mediaSourceList: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("可用媒体")
-                    .font(BrowserFloatingTypography.messageRole)
-                    .foregroundStyle(.secondary)
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("选择要转写的媒体")
+                        .font(BrowserFloatingTypography.messageRole)
+                        .foregroundStyle(.secondary)
+                    Text("只会处理被勾选的 video/audio/metadata 来源。")
+                        .font(BrowserFloatingTypography.hint)
+                        .foregroundStyle(.tertiary)
+                }
                 Spacer()
                 Text("已选 \(selectedSourceIDs.count)/\(sourceOptions.count)")
                     .font(BrowserFloatingTypography.hint)
                     .foregroundStyle(.tertiary)
             }
+
+            HStack(spacing: 6) {
+                Button("全选", action: onSelectAll)
+                    .disabled(sourceOptions.isEmpty || selectedSourceIDs.count == sourceOptions.count || runningTask != nil)
+                Button("清空", action: onClearSelection)
+                    .disabled(selectedSourceIDs.isEmpty || runningTask != nil)
+                Spacer()
+                if sourceOptions.count > 1, selectedSourceIDs.isEmpty {
+                    Label("请选择至少一个媒体", systemImage: "hand.point.up.left")
+                        .font(BrowserFloatingTypography.hint)
+                        .foregroundStyle(.orange)
+                }
+            }
+            .font(BrowserFloatingTypography.quickAction)
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 6) {
@@ -172,7 +198,7 @@ struct BrowserMediaTranscriptionPopoverView: View {
             Button(action: onRescan) {
                 Label("重新扫描", systemImage: "arrow.clockwise")
             }
-            .disabled(isScanning)
+            .disabled(isScanning || runningTask != nil)
 
             Spacer()
 
@@ -180,12 +206,47 @@ struct BrowserMediaTranscriptionPopoverView: View {
                 .keyboardShortcut(.cancelAction)
 
             Button(action: onSubmit) {
-                Label("开始处理", systemImage: "play.fill")
+                Label(runningTask == nil ? "开始处理" : "任务进行中", systemImage: runningTask == nil ? "play.fill" : "hourglass")
             }
             .keyboardShortcut(.defaultAction)
             .disabled(!canSubmit)
         }
         .font(BrowserFloatingTypography.quickAction)
+    }
+
+    private func runningTaskCard(_ task: AppSessionBackgroundTask) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            ProgressView()
+                .controlSize(.small)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text("媒体转写任务进行中")
+                        .font(BrowserFloatingTypography.messageRole)
+                    Text(task.status.displayName)
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.10), in: Capsule())
+                }
+                Text(task.detail)
+                    .font(BrowserFloatingTypography.hint)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("完成前不能创建新的网页媒体转写任务。可在会话后台任务面板查看进度。")
+                    .font(BrowserFloatingTypography.hint)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(ConnorCraftPalette.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(ConnorCraftPalette.accent.opacity(0.24), lineWidth: 1)
+        )
     }
 
     private func diagnosticCard(title: String, message: String, systemImage: String) -> some View {
@@ -225,8 +286,8 @@ private struct BrowserMediaTranscriptionSourceRow: View {
     var body: some View {
         Button(action: onToggle) {
             HStack(alignment: .top, spacing: 10) {
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 15, weight: .semibold))
+                Image(systemName: isSelected ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(isSelected ? ConnorCraftPalette.accent : Color.secondary)
                     .frame(width: 18)
                 Image(systemName: iconName)
