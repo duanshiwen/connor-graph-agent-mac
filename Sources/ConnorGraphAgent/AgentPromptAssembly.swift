@@ -86,6 +86,7 @@ public struct AgentInstructionSection: Sendable, Equatable {
 
     ## Tool Usage Contract
     - Use tools deliberately and efficiently; do not call tools when a direct answer is sufficient.
+    - When the current date, current time, today, now, or time-sensitive freshness matters, use the system-provided `get_current_time` tool instead of guessing from memory or conversation context.
     - Read or inspect existing files before editing them.
     - Prefer targeted search over reading large files when locating code or text.
     - Treat tool errors as feedback: adjust the approach instead of retrying the same failing operation.
