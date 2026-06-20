@@ -1533,25 +1533,26 @@ final class AppViewModel: NSObject, ObservableObject {
 
     @discardableResult
     func requestBrowserMediaTranscription(source: BrowserMediaSourceSnapshot) throws -> String {
+        try requestBrowserMediaTranscription(selection: .defaultAllSources(from: source))
+    }
+
+    @discardableResult
+    func requestBrowserMediaTranscription(selection: BrowserMediaTranscriptionSelection) throws -> String {
         guard let taskManagementRepository else { throw AppViewModelTaskCreationError.missingRepository }
         let ownerSessionID = selectedChatSessionID ?? activeChatSession.id
         let stack = TaskManagementStack(repository: taskManagementRepository, sessionRepository: chatSessionRepository)
+        let selectedSnapshot = selection.selectedSnapshot
         let result = try stack.createMediaTranscriptionTask(
             ownerSessionID: ownerSessionID,
-            source: source,
-            request: MediaTranscriptionRequest(
-                shouldPreferPlatformSubtitles: true,
-                shouldDownloadAudio: true,
-                shouldRunLocalTranscription: true,
-                shouldRunSpeakerDiarization: false,
-                shouldGenerateChapters: true
-            )
+            source: selectedSnapshot,
+            request: selection.mediaTranscriptionRequest
         )
         reloadTaskManagementPresentation()
         selectedTaskAutomationID = result.task.id
+        let selectedCount = max(1, selectedSnapshot.mediaElements.count + selectedSnapshot.openGraphMedia.count)
         showAttachmentToast(
-            title: "已创建媒体转写任务",
-            message: "Connor 将在本地任务栈中处理当前网页媒体，结果会写入当前会话附件。",
+            title: "已开始媒体处理",
+            message: "Connor 将处理 \(selectedCount) 个媒体源：\(selection.mode.displayTitle)。完成后结果会写入当前会话附件。",
             systemImage: "waveform.badge.magnifyingglass"
         )
         return result.task.id
