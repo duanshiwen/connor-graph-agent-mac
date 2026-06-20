@@ -45,7 +45,8 @@ let package = Package(
             resources: [
                 .process("Assets.xcassets"),
                 .process("zh-Hans.lproj"),
-                .process("Resources/ThirdPartyNotices")
+                .process("Resources/ThirdPartyNotices"),
+                .process("Resources/MediaRuntime")
             ],
             linkerSettings: [
                 .linkedFramework("WebKit"),

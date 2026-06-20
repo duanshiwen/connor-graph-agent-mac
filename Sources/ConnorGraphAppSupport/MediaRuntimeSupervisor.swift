@@ -40,9 +40,11 @@ public protocol MediaRuntimeSupervising: Sendable {
 
 public struct MediaRuntimeSupervisor: MediaRuntimeSupervising, Sendable {
     public var sidecarsDirectory: URL
+    public var bundledRuntimeDirectory: URL?
 
-    public init(sidecarsDirectory: URL) {
+    public init(sidecarsDirectory: URL, bundledRuntimeDirectory: URL? = MediaRuntimeSupervisor.defaultBundledRuntimeDirectory()) {
         self.sidecarsDirectory = sidecarsDirectory
+        self.bundledRuntimeDirectory = bundledRuntimeDirectory
     }
 
     public func healthCheck(now: Date = Date()) async -> MediaRuntimeHealthReport {
@@ -50,8 +52,9 @@ public struct MediaRuntimeSupervisor: MediaRuntimeSupervising, Sendable {
         let ytdlp = component(id: "yt-dlp", defaultExecutable: "yt-dlp/runtime/yt-dlp.sh")
         let ffmpeg = component(id: "ffmpeg", defaultExecutable: "ffmpeg/runtime/ffmpeg")
         let whisperKit = component(id: "whisperkit", defaultExecutable: nil)
-        let missing = [python, ytdlp, ffmpeg, whisperKit].filter { !$0.isAvailable }.map(\.id)
-        let diagnostics = missing.map { "Missing or unavailable media runtime: \($0)" }
+        let components = [python, ytdlp, ffmpeg, whisperKit]
+        let missing = components.filter { !$0.isAvailable }.map(\.id)
+        let diagnostics = components.compactMap(\.diagnostics)
         return MediaRuntimeHealthReport(
             snapshot: MediaRuntimeSnapshot(python: python, ytDLP: ytdlp, ffmpeg: ffmpeg, whisperKit: whisperKit, capturedAt: now),
             missingRuntimeIDs: missing,
@@ -59,30 +62,59 @@ public struct MediaRuntimeSupervisor: MediaRuntimeSupervising, Sendable {
         )
     }
 
+    public static func defaultBundledRuntimeDirectory(bundle: Bundle = .main) -> URL? {
+        if let url = bundle.url(forResource: "MediaRuntime", withExtension: nil), FileManager.default.fileExists(atPath: url.path) {
+            return url
+        }
+        if let resourceURL = bundle.resourceURL {
+            let candidate = resourceURL.appendingPathComponent("MediaRuntime", isDirectory: true)
+            if FileManager.default.fileExists(atPath: candidate.path) { return candidate }
+        }
+        return nil
+    }
+
     private func component(id: String, defaultExecutable: String?) -> MediaRuntimeComponentSnapshot {
-        let manifestURL = sidecarsDirectory
-            .appendingPathComponent(id, isDirectory: true)
-            .appendingPathComponent("manifest.json")
-        let manifest = try? loadDescriptor(from: manifestURL)
-        let executableRelativePath = manifest?.executableRelativePath ?? defaultExecutable
-        let executableURL = executableRelativePath.map { sidecarsDirectory.appendingPathComponent($0) }
+        let installation = resolveComponent(id: id, defaultExecutable: defaultExecutable)
+        let manifest = installation.manifest
+        let executableURL = installation.executableURL
         let available: Bool
         if id == "whisperkit", executableURL == nil {
-            available = FileManager.default.fileExists(atPath: sidecarsDirectory.appendingPathComponent(id, isDirectory: true).path)
+            available = FileManager.default.fileExists(atPath: installation.rootDirectory.appendingPathComponent(id, isDirectory: true).path)
         } else if let executableURL {
             available = FileManager.default.isExecutableFile(atPath: executableURL.path) || FileManager.default.fileExists(atPath: executableURL.path)
         } else {
-            available = FileManager.default.fileExists(atPath: sidecarsDirectory.appendingPathComponent(id, isDirectory: true).path)
+            available = FileManager.default.fileExists(atPath: installation.rootDirectory.appendingPathComponent(id, isDirectory: true).path)
         }
         let checksum = executableURL.flatMap { try? sha256Hex(forItemAt: $0) } ?? manifest?.checksum
+        let source = manifest?.source ?? installation.source
         return MediaRuntimeComponentSnapshot(
             id: id,
-            version: manifest?.version ?? "unknown",
-            source: manifest?.source ?? "unresolved",
+            version: manifest?.version ?? "app-managed",
+            source: source,
             checksum: checksum,
             isAvailable: available,
-            diagnostics: available ? nil : "Runtime \(id) was not found under \(sidecarsDirectory.path)"
+            diagnostics: available ? nil : "App-managed media runtime component \(id) is not ready. Checked bundled runtime and bootstrap directory under \(sidecarsDirectory.path)."
         )
+    }
+
+    private func resolveComponent(id: String, defaultExecutable: String?) -> (rootDirectory: URL, source: String, manifest: MediaRuntimeDescriptor?, executableURL: URL?) {
+        let roots: [(URL, String)] = ([bundledRuntimeDirectory.map { ($0, "bundled") }].compactMap { $0 }) + [(sidecarsDirectory, "bootstrapped")]
+        for (root, source) in roots {
+            let manifestURL = root.appendingPathComponent(id, isDirectory: true).appendingPathComponent("manifest.json")
+            let manifest = try? loadDescriptor(from: manifestURL)
+            let executableRelativePath = manifest?.executableRelativePath ?? defaultExecutable
+            let executableURL = executableRelativePath.map { root.appendingPathComponent($0) }
+            if let executableURL, FileManager.default.fileExists(atPath: executableURL.path) {
+                return (root, source, manifest, executableURL)
+            }
+            if id == "whisperkit", FileManager.default.fileExists(atPath: root.appendingPathComponent(id, isDirectory: true).path) {
+                return (root, source, manifest, executableURL)
+            }
+            if manifest != nil {
+                return (root, source, manifest, executableURL)
+            }
+        }
+        return (sidecarsDirectory, "app-managed", nil, defaultExecutable.map { sidecarsDirectory.appendingPathComponent($0) })
     }
 
     private func loadDescriptor(from url: URL) throws -> MediaRuntimeDescriptor {

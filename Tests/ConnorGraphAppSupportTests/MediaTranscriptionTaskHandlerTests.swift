@@ -36,11 +36,37 @@ struct MediaTranscriptionTaskHandlerTests {
 
         #expect(loaded.state == .failed)
         #expect(loaded.lastErrorCode == .transcriptionFailed)
-        #expect(loaded.lastErrorMessage?.contains("未获取到") == true)
+        #expect(loaded.lastErrorMessage?.contains("Connor 正在准备内置媒体转写能力") == true)
+        #expect(loaded.lastErrorMessage?.contains("yt-dlp") == false)
+        #expect(loaded.lastErrorMessage?.contains("ffmpeg") == false)
         #expect(store.hasCheckpoint("runtime-ready", sessionID: "session-1", jobID: "job-1"))
         #expect(!store.hasCheckpoint("completed", sessionID: "session-1", jobID: "job-1"))
         #expect(events.contains { $0.state == .preparingRuntime })
         #expect(events.contains { $0.state == .failed })
+    }
+
+    @Test func handlerDoesNotRerunTerminalFailedJobs() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = MediaTranscriptionJobStore(paths: AppStoragePaths(applicationSupportDirectory: root))
+        let failed = BrowserMediaTranscriptionJob(
+            id: "job-terminal",
+            ownerSessionID: "session-terminal",
+            source: BrowserMediaSourceSnapshot(pageURLString: "https://example.com/video")
+        ).failing(code: .transcriptionFailed, message: "Connor 正在准备内置媒体转写能力", at: Date(timeIntervalSince1970: 0))
+        try store.save(failed)
+        let handler = MediaTranscriptionTaskHandler(
+            store: store,
+            runtimeSupervisor: FakeMediaRuntimeSupervisor(report: MediaRuntimeHealthReport(snapshot: MediaRuntimeSnapshot())),
+            requireHealthyRuntime: false
+        )
+
+        await #expect(throws: MediaTranscriptionTaskHandlerError.self) {
+            _ = try await handler.run(MediaTranscriptionTaskRequest(jobID: "job-terminal", ownerSessionID: "session-terminal"))
+        }
+        let loaded = try store.load(sessionID: "session-terminal", jobID: "job-terminal")
+        #expect(loaded.state == .failed)
+        #expect(loaded.lastErrorCode == .transcriptionFailed)
     }
 
     @Test func handlerCanFailFastWhenRuntimeHealthIsRequired() async throws {
