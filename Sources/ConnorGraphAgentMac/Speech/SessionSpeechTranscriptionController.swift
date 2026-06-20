@@ -29,6 +29,8 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
     private var speechRecognizer: SFSpeechRecognizer?
     private var recognitionGeneration = UUID()
     private var isStopping = false
+    private var latestPartialTranscript: String = ""
+    private var onFinalTranscript: (@MainActor @Sendable (String) -> Void)?
 
     init(localeIdentifier: String? = "zh-CN") {
         self.localeIdentifier = localeIdentifier
@@ -37,12 +39,15 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
     func start(
         sessionID: String,
         onPartial: @escaping @MainActor @Sendable (String) -> Void,
+        onFinal: @escaping @MainActor @Sendable (String) -> Void,
         onError: @escaping @MainActor @Sendable (String) -> Void
     ) {
         stop(reason: .appLifecycle)
         let generation = UUID()
         recognitionGeneration = generation
         runningSessionID = sessionID
+        latestPartialTranscript = ""
+        onFinalTranscript = onFinal
 
         requestMicrophoneAccessIfNeeded { [weak self] microphoneGranted in
             Task { @MainActor in
@@ -58,6 +63,7 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
                     sessionID: sessionID,
                     generation: generation,
                     onPartial: onPartial,
+                    onFinal: onFinal,
                     onError: onError
                 )
             }
@@ -67,6 +73,8 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
     func stop(reason: SessionSpeechTranscriptionStopReason) {
         guard runningSessionID != nil || captureSession != nil || recognitionRequest != nil || recognitionTask != nil else { return }
         isStopping = true
+        let finalTranscript = latestPartialTranscript
+        let finalCallback = onFinalTranscript
         recognitionGeneration = UUID()
         runningSessionID = nil
 
@@ -84,6 +92,9 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
         recognitionTask?.cancel()
 
         cleanup()
+        if reason == .manual {
+            finalCallback?(finalTranscript)
+        }
     }
 
     private func requestMicrophoneAccessIfNeeded(completion: @escaping @Sendable (Bool) -> Void) {
@@ -103,6 +114,7 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
         sessionID: String,
         generation: UUID,
         onPartial: @escaping @MainActor @Sendable (String) -> Void,
+        onFinal: @escaping @MainActor @Sendable (String) -> Void,
         onError: @escaping @MainActor @Sendable (String) -> Void
     ) {
         let currentStatus = SFSpeechRecognizer.authorizationStatus()
@@ -112,6 +124,7 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
                 sessionID: sessionID,
                 generation: generation,
                 onPartial: onPartial,
+                onFinal: onFinal,
                 onError: onError
             )
             return
@@ -124,6 +137,7 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
                     sessionID: sessionID,
                     generation: generation,
                     onPartial: onPartial,
+                    onFinal: onFinal,
                     onError: onError
                 )
             }
@@ -135,6 +149,7 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
         sessionID: String,
         generation: UUID,
         onPartial: @escaping @MainActor @Sendable (String) -> Void,
+        onFinal: @escaping @MainActor @Sendable (String) -> Void,
         onError: @escaping @MainActor @Sendable (String) -> Void
     ) {
         guard runningSessionID == sessionID, recognitionGeneration == generation else { return }
@@ -143,13 +158,14 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
             onError(authorizationMessage(for: authorizationStatus))
             return
         }
-        startAuthorizedRecognition(sessionID: sessionID, generation: generation, onPartial: onPartial, onError: onError)
+        startAuthorizedRecognition(sessionID: sessionID, generation: generation, onPartial: onPartial, onFinal: onFinal, onError: onError)
     }
 
     private func startAuthorizedRecognition(
         sessionID: String,
         generation: UUID,
         onPartial: @escaping @MainActor @Sendable (String) -> Void,
+        onFinal: @escaping @MainActor @Sendable (String) -> Void,
         onError: @escaping @MainActor @Sendable (String) -> Void
     ) {
         let recognizer = makeSpeechRecognizer()
@@ -218,7 +234,12 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
                       self.runningSessionID == sessionID,
                       self.recognitionGeneration == generation else { return }
                 if let result {
-                    onPartial(result.bestTranscription.formattedString)
+                    let transcript = result.bestTranscription.formattedString
+                    self.latestPartialTranscript = transcript
+                    onPartial(transcript)
+                    if result.isFinal {
+                        onFinal(transcript)
+                    }
                 }
                 if let error, !self.isStopping {
                     self.cleanupAfterFailure()
@@ -276,6 +297,8 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
         recognitionTask = nil
         recognitionRequest = nil
         speechRecognizer = nil
+        latestPartialTranscript = ""
+        onFinalTranscript = nil
         isStopping = false
     }
 }

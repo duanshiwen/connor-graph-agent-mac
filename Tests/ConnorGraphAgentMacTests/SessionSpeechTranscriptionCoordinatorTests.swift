@@ -4,95 +4,131 @@ import Testing
 @MainActor
 @Suite("Session Speech Transcription Coordinator Tests")
 struct SessionSpeechTranscriptionCoordinatorTests {
-    @Test func startCreatesRunningTaskAndAppliesPartialTranscriptToDraft() {
+    @Test func beginHoldToTalkCreatesRunningTaskAndPublishesProvisionalPartial() {
         var draftBySession: [String: String] = ["session-1": "已有内容"]
+        var provisionalBySession: [String: String] = [:]
         let transcriber = FakeSessionSpeechTranscriber()
         let coordinator = SessionSpeechTranscriptionCoordinator(transcriber: transcriber)
 
-        let task = coordinator.toggle(
+        let task = coordinator.beginHoldToTalk(
             selectedSessionID: "session-1",
             currentDraft: draftBySession["session-1", default: ""],
-            setDraft: { sessionID, draft in draftBySession[sessionID] = draft }
+            setDraft: { sessionID, draft in draftBySession[sessionID] = draft },
+            setProvisionalTranscript: { sessionID, text in
+                if let text { provisionalBySession[sessionID] = text } else { provisionalBySession.removeValue(forKey: sessionID) }
+            }
         )
 
         #expect(task?.sessionID == "session-1")
         #expect(task?.kind == SessionSpeechTranscriptionCoordinator.backgroundTaskKind)
         #expect(task?.status == .running)
         #expect(coordinator.isRunning(sessionID: "session-1"))
+        #expect(coordinator.status.isRecording)
 
         transcriber.emitPartial("你好 Connor")
 
-        #expect(draftBySession["session-1"] == "已有内容\n\n你好 Connor")
+        #expect(provisionalBySession["session-1"] == "你好 Connor")
+        #expect(draftBySession["session-1"] == "已有内容")
     }
 
-    @Test func partialHypothesisReplacesLiveRegionInsteadOfAppendingDuplicateText() {
-        var draftBySession: [String: String] = ["session-1": ""]
+    @Test func partialHypothesisReplacesProvisionalLiveRegionInsteadOfAppendingDuplicateText() {
+        var provisionalBySession: [String: String] = [:]
         let transcriber = FakeSessionSpeechTranscriber()
         let coordinator = SessionSpeechTranscriptionCoordinator(transcriber: transcriber)
-        _ = coordinator.toggle(
+        _ = coordinator.beginHoldToTalk(
             selectedSessionID: "session-1",
             currentDraft: "",
-            setDraft: { sessionID, draft in draftBySession[sessionID] = draft }
+            setDraft: { _, _ in },
+            setProvisionalTranscript: { sessionID, text in
+                if let text { provisionalBySession[sessionID] = text } else { provisionalBySession.removeValue(forKey: sessionID) }
+            }
         )
 
         transcriber.emitPartial("你现在可以说中文")
         transcriber.emitPartial("你现在可以说中文了")
 
-        #expect(draftBySession["session-1"] == "你现在可以说中文了")
+        #expect(provisionalBySession["session-1"] == "你现在可以说中文了")
     }
 
-    @Test func userMiddleEditKeepsEditedSpeechRegionAndAppendsOnlyNewSuffix() {
-        var draftBySession: [String: String] = ["session-1": ""]
+    @Test func finishHoldToTalkMovesToFinalizingThenFinalCommitsDraftAndClearsProvisional() {
+        var draftBySession: [String: String] = ["session-1": "已有内容"]
+        var provisionalBySession: [String: String] = [:]
+        var updatedTasks: [AppSessionBackgroundTask] = []
         let transcriber = FakeSessionSpeechTranscriber()
         let coordinator = SessionSpeechTranscriptionCoordinator(transcriber: transcriber)
-        _ = coordinator.toggle(
+        coordinator.onTaskUpdate = { updatedTasks.append($0) }
+        _ = coordinator.beginHoldToTalk(
             selectedSessionID: "session-1",
-            currentDraft: "",
-            setDraft: { sessionID, draft in draftBySession[sessionID] = draft }
+            currentDraft: "已有内容",
+            setDraft: { sessionID, draft in draftBySession[sessionID] = draft },
+            setProvisionalTranscript: { sessionID, text in
+                if let text { provisionalBySession[sessionID] = text } else { provisionalBySession.removeValue(forKey: sessionID) }
+            }
         )
+        transcriber.emitPartial("临时识别")
 
-        transcriber.emitPartial("你现在是不是可以说中文了")
-        #expect(draftBySession["session-1"] == "你现在是不是可以说中文了")
+        let finalizing = coordinator.finishHoldToTalk()
 
-        draftBySession["session-1"] = "你现在可以说中文了"
-        coordinator.noteUserEditedDraft(sessionID: "session-1", draft: "你现在可以说中文了")
-        transcriber.emitPartial("你现在是不是可以说中文了 App 呢棒了太棒了")
-
-        #expect(draftBySession["session-1"] == "你现在可以说中文了 App 呢棒了太棒了")
-    }
-
-    @Test func manualStopCompletesRunningTaskAndKeepsDraftText() {
-        var draftBySession: [String: String] = ["session-1": ""]
-        let transcriber = FakeSessionSpeechTranscriber()
-        let coordinator = SessionSpeechTranscriptionCoordinator(transcriber: transcriber)
-        _ = coordinator.toggle(
-            selectedSessionID: "session-1",
-            currentDraft: "",
-            setDraft: { sessionID, draft in draftBySession[sessionID] = draft }
-        )
-        transcriber.emitPartial("请帮我总结")
-
-        let stopped = coordinator.toggle(
-            selectedSessionID: "session-1",
-            currentDraft: draftBySession["session-1", default: ""],
-            setDraft: { sessionID, draft in draftBySession[sessionID] = draft }
-        )
-
-        #expect(stopped?.status == .succeeded)
-        #expect(stopped?.detail == "语音输入已停止")
+        #expect(finalizing?.detail == "正在优化语音识别结果")
+        #expect(coordinator.status.isFinalizing)
         #expect(transcriber.stopReasons == [.manual])
+        #expect(draftBySession["session-1"] == "已有内容\n\n临时识别")
+        #expect(provisionalBySession["session-1"] == nil)
+        #expect(updatedTasks.last?.status == .succeeded)
+        #expect(updatedTasks.last?.detail == "语音输入已完成")
+    }
+
+    @Test func finalResultReplacesPartialWhenRecognizerProvidesBetterText() {
+        var draftBySession: [String: String] = ["session-1": ""]
+        var provisionalBySession: [String: String] = [:]
+        let transcriber = FakeSessionSpeechTranscriber(emitFinalOnStop: false)
+        let coordinator = SessionSpeechTranscriptionCoordinator(transcriber: transcriber)
+        _ = coordinator.beginHoldToTalk(
+            selectedSessionID: "session-1",
+            currentDraft: "",
+            setDraft: { sessionID, draft in draftBySession[sessionID] = draft },
+            setProvisionalTranscript: { sessionID, text in
+                if let text { provisionalBySession[sessionID] = text } else { provisionalBySession.removeValue(forKey: sessionID) }
+            }
+        )
+
+        transcriber.emitPartial("临时 结果")
+        _ = coordinator.finishHoldToTalk()
+        transcriber.emitFinal("最终结果更准确")
+
+        #expect(draftBySession["session-1"] == "最终结果更准确")
+        #expect(provisionalBySession["session-1"] == nil)
         #expect(coordinator.status == .idle)
-        #expect(draftBySession["session-1"] == "请帮我总结")
+    }
+
+    @Test func finalFailurePathKeepsPartialWhenFinalTextIsEmpty() {
+        var draftBySession: [String: String] = ["session-1": ""]
+        let transcriber = FakeSessionSpeechTranscriber(emitFinalOnStop: false)
+        let coordinator = SessionSpeechTranscriptionCoordinator(transcriber: transcriber)
+        _ = coordinator.beginHoldToTalk(
+            selectedSessionID: "session-1",
+            currentDraft: "",
+            setDraft: { sessionID, draft in draftBySession[sessionID] = draft }
+        )
+
+        transcriber.emitPartial("可用的 partial")
+        _ = coordinator.finishHoldToTalk()
+        transcriber.emitFinal("")
+
+        #expect(draftBySession["session-1"] == "可用的 partial")
     }
 
     @Test func leavingSessionInterruptsTranscriptionAndIgnoresLatePartialResults() {
-        var draftBySession: [String: String] = ["session-1": "", "session-2": "新会话"]
+        var provisionalBySession: [String: String] = [:]
         let transcriber = FakeSessionSpeechTranscriber()
         let coordinator = SessionSpeechTranscriptionCoordinator(transcriber: transcriber)
-        _ = coordinator.toggle(
+        _ = coordinator.beginHoldToTalk(
             selectedSessionID: "session-1",
             currentDraft: "",
-            setDraft: { sessionID, draft in draftBySession[sessionID] = draft }
+            setDraft: { _, _ in },
+            setProvisionalTranscript: { sessionID, text in
+                if let text { provisionalBySession[sessionID] = text } else { provisionalBySession.removeValue(forKey: sessionID) }
+            }
         )
 
         let stopped = coordinator.stopIfRunningForLeavingSession("session-1")
@@ -101,61 +137,26 @@ struct SessionSpeechTranscriptionCoordinatorTests {
         #expect(stopped?.status == .interrupted)
         #expect(stopped?.detail == "离开会话，已自动停止语音输入")
         #expect(transcriber.stopReasons == [.leavingSession])
-        #expect(draftBySession["session-1"] == "")
-        #expect(draftBySession["session-2"] == "新会话")
+        #expect(provisionalBySession["session-1"] == nil)
     }
 
-    @Test func partialFromOldRunDoesNotOverwriteNewSessionDraft() {
-        var draftBySession: [String: String] = ["session-1": "", "session-2": ""]
-        let firstTranscriber = FakeSessionSpeechTranscriber()
-        let coordinator = SessionSpeechTranscriptionCoordinator(transcriber: firstTranscriber)
-        _ = coordinator.toggle(
+    @Test func beginWhileAlreadyRecordingSameSessionDoesNotStartDuplicateRun() {
+        let transcriber = FakeSessionSpeechTranscriber()
+        let coordinator = SessionSpeechTranscriptionCoordinator(transcriber: transcriber)
+        _ = coordinator.beginHoldToTalk(
             selectedSessionID: "session-1",
             currentDraft: "",
-            setDraft: { sessionID, draft in draftBySession[sessionID] = draft }
+            setDraft: { _, _ in }
         )
-        _ = coordinator.stopIfRunningForLeavingSession("session-1")
 
-        coordinator.transcriber = FakeSessionSpeechTranscriber()
-        _ = coordinator.toggle(
-            selectedSessionID: "session-2",
-            currentDraft: "",
-            setDraft: { sessionID, draft in draftBySession[sessionID] = draft }
-        )
-        firstTranscriber.emitPartial("旧会话迟到内容")
-
-        #expect(draftBySession["session-1"] == "")
-        #expect(draftBySession["session-2"] == "")
-    }
-
-    @Test func startingNewSessionAfterStopDoesNotCarryPreviousHypothesis() {
-        var draftBySession: [String: String] = ["session-1": "", "session-2": ""]
-        let firstTranscriber = FakeSessionSpeechTranscriber()
-        let coordinator = SessionSpeechTranscriptionCoordinator(transcriber: firstTranscriber)
-        _ = coordinator.toggle(
+        let duplicate = coordinator.beginHoldToTalk(
             selectedSessionID: "session-1",
             currentDraft: "",
-            setDraft: { sessionID, draft in draftBySession[sessionID] = draft }
-        )
-        firstTranscriber.emitPartial("上一轮内容")
-        _ = coordinator.toggle(
-            selectedSessionID: "session-1",
-            currentDraft: draftBySession["session-1", default: ""],
-            setDraft: { sessionID, draft in draftBySession[sessionID] = draft }
+            setDraft: { _, _ in }
         )
 
-        let secondTranscriber = FakeSessionSpeechTranscriber()
-        coordinator.transcriber = secondTranscriber
-        _ = coordinator.toggle(
-            selectedSessionID: "session-2",
-            currentDraft: draftBySession["session-2", default: ""],
-            setDraft: { sessionID, draft in draftBySession[sessionID] = draft }
-        )
-        secondTranscriber.emitPartial("新的会话内容")
-        firstTranscriber.emitPartial("上一轮内容迟到")
-
-        #expect(draftBySession["session-1"] == "上一轮内容")
-        #expect(draftBySession["session-2"] == "新的会话内容")
+        #expect(duplicate == nil)
+        #expect(transcriber.startCount == 1)
     }
 
     @Test func transcriberErrorPublishesFailedStatusAndTaskUpdate() {
@@ -166,7 +167,7 @@ struct SessionSpeechTranscriptionCoordinatorTests {
         coordinator.onStatusChange = { statuses.append($0) }
         coordinator.onTaskUpdate = { updatedTasks.append($0) }
 
-        _ = coordinator.toggle(
+        _ = coordinator.beginHoldToTalk(
             selectedSessionID: "session-1",
             currentDraft: "",
             setDraft: { _, _ in }
@@ -183,26 +184,45 @@ struct SessionSpeechTranscriptionCoordinatorTests {
 private final class FakeSessionSpeechTranscriber: SessionSpeechTranscribing {
     private(set) var runningSessionID: String?
     private(set) var stopReasons: [SessionSpeechTranscriptionStopReason] = []
+    private(set) var startCount = 0
+    private let emitFinalOnStop: Bool
+    private var latestPartial = ""
     private var onPartial: (@MainActor @Sendable (String) -> Void)?
+    private var onFinal: (@MainActor @Sendable (String) -> Void)?
     private var onError: (@MainActor @Sendable (String) -> Void)?
+
+    init(emitFinalOnStop: Bool = true) {
+        self.emitFinalOnStop = emitFinalOnStop
+    }
 
     func start(
         sessionID: String,
         onPartial: @escaping @MainActor @Sendable (String) -> Void,
+        onFinal: @escaping @MainActor @Sendable (String) -> Void,
         onError: @escaping @MainActor @Sendable (String) -> Void
     ) {
+        startCount += 1
         runningSessionID = sessionID
         self.onPartial = onPartial
+        self.onFinal = onFinal
         self.onError = onError
     }
 
     func stop(reason: SessionSpeechTranscriptionStopReason) {
         stopReasons.append(reason)
         runningSessionID = nil
+        if reason == .manual, emitFinalOnStop {
+            onFinal?(latestPartial)
+        }
     }
 
     func emitPartial(_ text: String) {
+        latestPartial = text
         onPartial?(text)
+    }
+
+    func emitFinal(_ text: String) {
+        onFinal?(text)
     }
 
     func emitError(_ message: String) {
