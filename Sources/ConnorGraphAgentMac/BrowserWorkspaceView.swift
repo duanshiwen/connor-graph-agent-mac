@@ -282,16 +282,18 @@ struct BrowserWorkspaceView: View {
             .accessibilityLabel("收藏夹")
 
             if let mediaSnapshot = activeTab?.mediaSnapshot, mediaSnapshot.hasDetectedMedia {
-                Button(action: {}) {
-                    BrowserToolbarIconButtonLabel(
+                Button(action: requestMediaTranscriptionForActiveTab) {
+                    SidebarActionButtonLabel(
+                        title: "转写/提炼",
                         systemImage: "waveform.badge.magnifyingglass",
-                        isActive: true,
-                        iconFont: .system(size: 16, weight: .semibold)
+                        fillsWidth: false,
+                        titleFont: BrowserFloatingTypography.askButton,
+                        iconFont: BrowserFloatingTypography.askButtonIcon
                     )
                 }
-                .buttonStyle(.plain)
-                .help("检测到 \(mediaSnapshot.mediaElements.count + mediaSnapshot.openGraphMedia.count) 个媒体来源；转写入口将在媒体任务面板中启用")
-                .accessibilityLabel("检测到网页媒体")
+                .buttonStyle(SidebarActionButtonStyle())
+                .help("检测到 \(mediaSnapshot.mediaElements.count + mediaSnapshot.openGraphMedia.count) 个媒体来源；创建本地媒体转写任务并回到当前会话")
+                .accessibilityLabel("转写并提炼网页媒体")
             }
 
             Button(action: { viewModel.toggleBrowserHistoryPanel() }) {
@@ -401,6 +403,17 @@ struct BrowserWorkspaceView: View {
         mutateActiveSession { session in
             guard let index = session.tabs.firstIndex(where: { $0.id == tabID }) else { return }
             session.tabs[index].mediaSnapshot = snapshot
+        }
+    }
+
+    private func requestMediaTranscriptionForActiveTab() {
+        guard let snapshot = activeTab?.mediaSnapshot, snapshot.hasDetectedMedia else { return }
+        do {
+            _ = try viewModel.requestBrowserMediaTranscription(source: snapshot)
+            Task { await viewModel.runScheduledTasksNow() }
+        } catch {
+            viewModel.errorMessage = String(describing: error)
+            viewModel.showAttachmentToast(title: "无法创建媒体转写任务", message: String(describing: error), systemImage: "exclamationmark.triangle")
         }
     }
 

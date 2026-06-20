@@ -1531,6 +1531,32 @@ final class AppViewModel: NSObject, ObservableObject {
         return task.id
     }
 
+    @discardableResult
+    func requestBrowserMediaTranscription(source: BrowserMediaSourceSnapshot) throws -> String {
+        guard let taskManagementRepository else { throw AppViewModelTaskCreationError.missingRepository }
+        let ownerSessionID = selectedChatSessionID ?? activeChatSession.id
+        let stack = TaskManagementStack(repository: taskManagementRepository, sessionRepository: chatSessionRepository)
+        let result = try stack.createMediaTranscriptionTask(
+            ownerSessionID: ownerSessionID,
+            source: source,
+            request: MediaTranscriptionRequest(
+                shouldPreferPlatformSubtitles: true,
+                shouldDownloadAudio: true,
+                shouldRunLocalTranscription: true,
+                shouldRunSpeakerDiarization: false,
+                shouldGenerateChapters: true
+            )
+        )
+        reloadTaskManagementPresentation()
+        selectedTaskAutomationID = result.task.id
+        showAttachmentToast(
+            title: "已创建媒体转写任务",
+            message: "Connor 将在本地任务栈中处理当前网页媒体，结果会写入当前会话附件。",
+            systemImage: "waveform.badge.magnifyingglass"
+        )
+        return result.task.id
+    }
+
     func stopTask(_ id: String) {
         do {
             _ = try taskManagementRepository?.stopTask(id: id, reason: "Stopped from Task Management UI")
@@ -1594,6 +1620,10 @@ final class AppViewModel: NSObject, ObservableObject {
             sessionMessage: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("session.ai") }
                 return await self.performTaskSessionMessage(request)
+            },
+            mediaTranscription: { [weak self] request in
+                guard let self else { throw TaskTargetRunnerError.unsupportedTarget("media.transcription") }
+                return try await self.performMediaTranscriptionTask(request)
             }
         )
         do {
@@ -1603,6 +1633,16 @@ final class AppViewModel: NSObject, ObservableObject {
         } catch {
             errorMessage = String(describing: error)
         }
+    }
+
+    private func performMediaTranscriptionTask(_ request: MediaTranscriptionTaskRequest) async throws -> String {
+        guard let storagePaths else { throw TaskTargetRunnerError.unsupportedTarget("media.transcription storage unavailable") }
+        let handler = MediaTranscriptionTaskHandler(
+            store: MediaTranscriptionJobStore(paths: storagePaths),
+            runtimeSupervisor: MediaRuntimeSupervisor(sidecarsDirectory: storagePaths.sidecarsDirectory),
+            requireHealthyRuntime: false
+        )
+        return try await handler.run(request)
     }
 
     private func refreshMailForScheduledTask(runID: String?) async throws -> String {
