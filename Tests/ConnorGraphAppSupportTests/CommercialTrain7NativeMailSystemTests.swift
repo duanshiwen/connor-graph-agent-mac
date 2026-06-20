@@ -123,7 +123,7 @@ struct CommercialTrain7NativeMailSystemTests {
     @Test func commercialReadinessGateIncludesNativeMailPhase() {
         let input = CommercialReadinessInput(
             sessionGovernance: .ready(sessionCount: 1, statusDefinitionCount: 5, labelDefinitionCount: 5, artifactDirectoriesReady: true),
-            claudeSidecar: .ready(runtimeStatus: .ready, sdkSessionID: "sdk", healthStatus: "ok"),
+            modelProvider: .ready(providerMode: .anthropicMessages, connectionKind: .anthropicCompatible, modelID: "claude-sonnet-4-5", healthStatus: "ready"),
             extensionRuntime: .ready(enabledSourceCount: 1, loadedSkillCount: 1, enabledAutomationRuleCount: 1),
             graphMemory: .ready(pendingCandidateCount: 0, openHoldCount: 0, recentChangeCount: 0, contextReady: true, ingestionReady: true, distillationReady: true),
             nativeUI: .ready(shellItemCount: 13, commandCount: 12, settingsPanelsReady: true, homeSurfaceReady: true, readinessDashboardLinked: true, primaryActionCount: 7, emptyStateCount: 4, keyboardShortcutCount: 10, settingsSectionCount: 7),
