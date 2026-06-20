@@ -193,6 +193,13 @@ struct BrowserWorkspaceView: View {
         return viewModel.isBrowserBookmarked(url: url)
     }
 
+    private var mediaTranscriptionButtonHelp: String {
+        if let mediaSnapshot = activeTab?.mediaSnapshot, mediaSnapshot.hasDetectedMedia {
+            return "检测到 \(mediaSnapshot.mediaElements.count + mediaSnapshot.openGraphMedia.count) 个媒体来源；创建本地媒体转写任务并回到当前会话"
+        }
+        return "扫描当前网页中的 video/audio 媒体；如果未检测到，会显示诊断提示"
+    }
+
     private var tabBar: some View {
         GeometryReader { geometry in
             let addButtonWidth: CGFloat = 30
@@ -281,20 +288,20 @@ struct BrowserWorkspaceView: View {
             .help(activeURLIsBookmarked ? "当前页已收藏，打开收藏夹" : "打开收藏夹")
             .accessibilityLabel("收藏夹")
 
-            if let mediaSnapshot = activeTab?.mediaSnapshot, mediaSnapshot.hasDetectedMedia {
-                Button(action: requestMediaTranscriptionForActiveTab) {
-                    SidebarActionButtonLabel(
-                        title: "转写/提炼",
-                        systemImage: "waveform.badge.magnifyingglass",
-                        fillsWidth: false,
-                        titleFont: BrowserFloatingTypography.askButton,
-                        iconFont: BrowserFloatingTypography.askButtonIcon
-                    )
-                }
-                .buttonStyle(SidebarActionButtonStyle())
-                .help("检测到 \(mediaSnapshot.mediaElements.count + mediaSnapshot.openGraphMedia.count) 个媒体来源；创建本地媒体转写任务并回到当前会话")
-                .accessibilityLabel("转写并提炼网页媒体")
+            Button(action: requestMediaTranscriptionForActiveTab) {
+                SidebarActionButtonLabel(
+                    title: "转写/提炼",
+                    systemImage: activeTab?.mediaSnapshot?.hasDetectedMedia == true ? "waveform.badge.magnifyingglass" : "waveform.badge.plus",
+                    fillsWidth: false,
+                    titleFont: BrowserFloatingTypography.askButton,
+                    iconFont: BrowserFloatingTypography.askButtonIcon
+                )
             }
+            .buttonStyle(SidebarActionButtonStyle())
+            .disabled(activeWebView == nil || activeTab?.navigationState.isLoading == true)
+            .opacity(activeWebView == nil || activeTab?.navigationState.isLoading == true ? 0.48 : 1)
+            .help(mediaTranscriptionButtonHelp)
+            .accessibilityLabel("转写并提炼网页媒体")
 
             Button(action: { viewModel.toggleBrowserHistoryPanel() }) {
                 BrowserToolbarIconButtonLabel(
@@ -407,7 +414,42 @@ struct BrowserWorkspaceView: View {
     }
 
     private func requestMediaTranscriptionForActiveTab() {
-        guard let snapshot = activeTab?.mediaSnapshot, snapshot.hasDetectedMedia else { return }
+        guard let webView = activeWebView, let selectedTabID = activeSelectedTabID else {
+            viewModel.showAttachmentToast(title: "无法扫描媒体", message: "当前没有可用网页。", systemImage: "exclamationmark.triangle")
+            return
+        }
+
+        webView.evaluateJavaScript("window.__connorCollectMediaSnapshot ? window.__connorCollectMediaSnapshot() : null") { result, error in
+            DispatchQueue.main.async {
+                if let error {
+                    viewModel.showAttachmentToast(title: "媒体扫描失败", message: error.localizedDescription, systemImage: "exclamationmark.triangle")
+                    return
+                }
+
+                let snapshot: BrowserMediaSourceSnapshot?
+                if let json = result as? String {
+                    snapshot = BrowserMediaSnapshotDecoder.decode(from: Data(json.utf8))
+                } else {
+                    snapshot = activeTab?.mediaSnapshot
+                }
+
+                guard let snapshot else {
+                    viewModel.showAttachmentToast(title: "未启用媒体扫描", message: "当前页面还没有完成媒体检测脚本初始化，请稍等片刻后重试。", systemImage: "waveform.badge.exclamationmark")
+                    return
+                }
+
+                updateMediaSnapshot(snapshot, for: selectedTabID)
+                guard snapshot.hasDetectedMedia else {
+                    viewModel.showAttachmentToast(title: "未检测到网页媒体", message: "当前页面暂未发现 video/audio 或公开媒体 metadata。若视频仍在加载，请播放几秒后再点一次。", systemImage: "waveform.badge.exclamationmark")
+                    return
+                }
+
+                createMediaTranscriptionTask(from: snapshot)
+            }
+        }
+    }
+
+    private func createMediaTranscriptionTask(from snapshot: BrowserMediaSourceSnapshot) {
         do {
             _ = try viewModel.requestBrowserMediaTranscription(source: snapshot)
             Task { await viewModel.runScheduledTasksNow() }
