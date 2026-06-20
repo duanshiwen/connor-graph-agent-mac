@@ -77,6 +77,7 @@ final class SessionSpeechTranscriptionCoordinator {
     private var userEditedSpeechText: String?
     private var lastGeneratedDraft: String = ""
     private var provisionalSpeechText: String = ""
+    private var speechInsertionRange: NSRange?
     private var setDraft: ((String, String) -> Void)?
     private var setProvisionalTranscript: ((String, String?) -> Void)?
 
@@ -106,6 +107,7 @@ final class SessionSpeechTranscriptionCoordinator {
     func beginHoldToTalk(
         selectedSessionID: String?,
         currentDraft: String,
+        speechInsertionRange: NSRange? = nil,
         setDraft: @escaping (String, String) -> Void,
         setProvisionalTranscript: ((String, String?) -> Void)? = nil
     ) -> AppSessionBackgroundTask? {
@@ -119,6 +121,7 @@ final class SessionSpeechTranscriptionCoordinator {
         return start(
             sessionID: selectedSessionID,
             currentDraft: currentDraft,
+            speechInsertionRange: speechInsertionRange,
             setDraft: setDraft,
             setProvisionalTranscript: setProvisionalTranscript
         )
@@ -128,6 +131,7 @@ final class SessionSpeechTranscriptionCoordinator {
     func start(
         sessionID: String,
         currentDraft: String,
+        speechInsertionRange: NSRange? = nil,
         setDraft: @escaping (String, String) -> Void,
         setProvisionalTranscript: ((String, String?) -> Void)? = nil
     ) -> AppSessionBackgroundTask {
@@ -148,6 +152,7 @@ final class SessionSpeechTranscriptionCoordinator {
         userEditedSpeechText = nil
         lastGeneratedDraft = currentDraft
         provisionalSpeechText = ""
+        self.speechInsertionRange = speechInsertionRange
         self.setDraft = setDraft
         self.setProvisionalTranscript = setProvisionalTranscript
         status = .recording(sessionID: sessionID, taskID: task.id)
@@ -265,6 +270,12 @@ final class SessionSpeechTranscriptionCoordinator {
         if speechText.isEmpty {
             return draftBaseText
         }
+        if let speechInsertionRange,
+           let range = Range(speechInsertionRange, in: draftBaseText) {
+            var draft = draftBaseText
+            draft.replaceSubrange(range, with: speechText)
+            return draft
+        }
         if draftBaseText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return speechText
         }
@@ -309,6 +320,7 @@ final class SessionSpeechTranscriptionCoordinator {
         userEditedSpeechText = nil
         lastGeneratedDraft = ""
         provisionalSpeechText = ""
+        speechInsertionRange = nil
     }
 
     private func statusForStopReason(_ reason: SessionSpeechTranscriptionStopReason) -> AppSessionBackgroundTaskStatus {

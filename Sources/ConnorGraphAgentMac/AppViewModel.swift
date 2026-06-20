@@ -4080,10 +4080,11 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
-    func beginSpeechTranscriptionForSelectedSession() {
+    func beginSpeechTranscriptionForSelectedSession(speechInsertionRange: NSRange? = nil) {
         let task = speechTranscriptionCoordinator.beginHoldToTalk(
             selectedSessionID: selectedChatSessionID,
             currentDraft: currentSelectedChatInputDraftForSpeech(),
+            speechInsertionRange: speechInsertionRange,
             setDraft: { [weak self] sessionID, draft in
                 self?.setSpeechTranscriptionDraft(draft, for: sessionID)
             },
