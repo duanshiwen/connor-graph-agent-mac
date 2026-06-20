@@ -146,6 +146,42 @@ struct MediaTranscriptionTaskHandlerTests {
         #expect(store.hasCheckpoint("local-transcription-completed", sessionID: job.ownerSessionID, jobID: job.id))
     }
 
+    @Test func handlerSurfacesYTDLPPlatformFailureReason() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = AppStoragePaths(applicationSupportDirectory: root)
+        let store = MediaTranscriptionJobStore(paths: paths)
+        let source = BrowserMediaSourceSnapshot(pageURLString: "https://www.bilibili.com/video/BV1Hx4y1s75t/")
+        let job = BrowserMediaTranscriptionJob(id: "job-bilibili-412", ownerSessionID: "session-bilibili-412", source: source)
+        try store.save(job)
+        let handler = MediaTranscriptionTaskHandler(
+            store: store,
+            runtimeSupervisor: FakeMediaRuntimeSupervisor(report: MediaRuntimeHealthReport(snapshot: MediaRuntimeSnapshot())),
+            requireHealthyRuntime: false,
+            processRunner: CapturingMediaProcessRunner { invocation in
+                if invocation.executable.lastPathComponent == "yt-dlp.sh" {
+                    return MediaProcessResult(
+                        exitCode: 1,
+                        stdout: "[BiliBili] Extracting URL",
+                        stderr: "ERROR: [BiliBili] 1Hx4y1s75t: Unable to download JSON metadata: HTTP Error 412: Precondition Failed"
+                    )
+                }
+                return MediaProcessResult(exitCode: 1, stdout: "", stderr: "forced failure")
+            }
+        )
+
+        await #expect(throws: MediaTranscriptionTaskHandlerError.self) {
+            _ = try await handler.run(MediaTranscriptionTaskRequest(jobID: job.id, ownerSessionID: job.ownerSessionID), now: Date(timeIntervalSince1970: 1))
+        }
+        let loaded = try store.load(sessionID: job.ownerSessionID, jobID: job.id)
+
+        #expect(loaded.state == .failed)
+        #expect(loaded.lastErrorMessage?.contains("平台字幕获取失败") == true)
+        #expect(loaded.lastErrorMessage?.contains("音频下载失败") == true)
+        #expect(loaded.lastErrorMessage?.contains("HTTP Error 412") == true)
+        #expect(loaded.lastErrorMessage?.contains("BiliBili") == true)
+    }
+
     @Test func handlerSurfacesLocalTranscriptionFailureReason() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
