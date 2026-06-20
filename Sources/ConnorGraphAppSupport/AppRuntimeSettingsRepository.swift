@@ -29,7 +29,7 @@ public struct AgentRuntimeAppSettings: Codable, Sendable, Equatable {
     public var internalBrowserEnabled: Bool
     public var httpProxyEnabled: Bool
     public var httpProxyURLString: String
-    public var sessionNotificationPolicy: SessionNotificationPolicy
+    public var sessionNotificationSettings: SessionNotificationSettings
 
     public init(
         desktopNotificationsEnabled: Bool = true,
@@ -37,14 +37,14 @@ public struct AgentRuntimeAppSettings: Codable, Sendable, Equatable {
         internalBrowserEnabled: Bool = true,
         httpProxyEnabled: Bool = false,
         httpProxyURLString: String = "",
-        sessionNotificationPolicy: SessionNotificationPolicy = .default
+        sessionNotificationSettings: SessionNotificationSettings = .default
     ) {
         self.desktopNotificationsEnabled = desktopNotificationsEnabled
         self.keepScreenAwake = keepScreenAwake
         self.internalBrowserEnabled = internalBrowserEnabled
         self.httpProxyEnabled = httpProxyEnabled
         self.httpProxyURLString = httpProxyURLString
-        self.sessionNotificationPolicy = sessionNotificationPolicy
+        self.sessionNotificationSettings = sessionNotificationSettings
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -53,6 +53,7 @@ public struct AgentRuntimeAppSettings: Codable, Sendable, Equatable {
         case internalBrowserEnabled
         case httpProxyEnabled
         case httpProxyURLString
+        case sessionNotificationSettings
         case sessionNotificationPolicy
     }
 
@@ -63,7 +64,13 @@ public struct AgentRuntimeAppSettings: Codable, Sendable, Equatable {
         internalBrowserEnabled = try container.decodeIfPresent(Bool.self, forKey: .internalBrowserEnabled) ?? true
         httpProxyEnabled = try container.decodeIfPresent(Bool.self, forKey: .httpProxyEnabled) ?? false
         httpProxyURLString = try container.decodeIfPresent(String.self, forKey: .httpProxyURLString) ?? ""
-        sessionNotificationPolicy = try container.decodeIfPresent(SessionNotificationPolicy.self, forKey: .sessionNotificationPolicy) ?? .default
+        if let settings = try container.decodeIfPresent(SessionNotificationSettings.self, forKey: .sessionNotificationSettings) {
+            sessionNotificationSettings = settings
+        } else if let legacyPolicy = try container.decodeIfPresent(LegacySessionNotificationPolicy.self, forKey: .sessionNotificationPolicy) {
+            sessionNotificationSettings = SessionNotificationSettings(newMessageLevel: legacyPolicy.minimumLevel)
+        } else {
+            sessionNotificationSettings = .default
+        }
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -73,8 +80,12 @@ public struct AgentRuntimeAppSettings: Codable, Sendable, Equatable {
         try container.encode(internalBrowserEnabled, forKey: .internalBrowserEnabled)
         try container.encode(httpProxyEnabled, forKey: .httpProxyEnabled)
         try container.encode(httpProxyURLString, forKey: .httpProxyURLString)
-        try container.encode(sessionNotificationPolicy, forKey: .sessionNotificationPolicy)
+        try container.encode(sessionNotificationSettings, forKey: .sessionNotificationSettings)
     }
+}
+
+private struct LegacySessionNotificationPolicy: Codable {
+    var minimumLevel: SessionAttentionLevel
 }
 
 public struct AgentRuntimeAppearanceSettings: Codable, Sendable, Equatable {
