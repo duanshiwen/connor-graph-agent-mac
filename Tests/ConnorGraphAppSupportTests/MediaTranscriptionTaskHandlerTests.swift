@@ -88,4 +88,61 @@ struct MediaTranscriptionTaskHandlerTests {
         #expect(loaded.state == .failed)
         #expect(loaded.lastErrorCode == .runtimeUnavailable)
     }
+
+    @Test func handlerPassesAppManagedFFmpegLocationToYTDLP() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = AppStoragePaths(applicationSupportDirectory: root)
+        let store = MediaTranscriptionJobStore(paths: paths)
+        let source = BrowserMediaSourceSnapshot(pageURLString: "https://www.youtube.com/watch?v=example")
+        let job = BrowserMediaTranscriptionJob(id: "job-ffmpeg-location", ownerSessionID: "session-ffmpeg-location", source: source)
+        try store.save(job)
+        let recorder = InvocationRecorder()
+        let handler = MediaTranscriptionTaskHandler(
+            store: store,
+            runtimeSupervisor: FakeMediaRuntimeSupervisor(report: MediaRuntimeHealthReport(snapshot: MediaRuntimeSnapshot())),
+            requireHealthyRuntime: false,
+            processRunner: CapturingMediaProcessRunner { invocation in
+                recorder.append(invocation)
+                return MediaProcessResult(exitCode: 1, stdout: "", stderr: "forced failure")
+            }
+        )
+
+        await #expect(throws: MediaTranscriptionTaskHandlerError.self) {
+            _ = try await handler.run(MediaTranscriptionTaskRequest(jobID: job.id, ownerSessionID: job.ownerSessionID))
+        }
+
+        let ytDLPInvocations = recorder.snapshot().filter { $0.executable.lastPathComponent == "yt-dlp.sh" }
+        #expect(!ytDLPInvocations.isEmpty)
+        for invocation in ytDLPInvocations {
+            #expect(invocation.arguments.contains("--ffmpeg-location"))
+            let index = try #require(invocation.arguments.firstIndex(of: "--ffmpeg-location"))
+            #expect(invocation.arguments[index + 1] == paths.sidecarsDirectory.appendingPathComponent("ffmpeg/runtime").path)
+        }
+    }
+}
+
+private struct CapturingMediaProcessRunner: MediaProcessRunning {
+    var handler: @Sendable (MediaProcessInvocation) -> MediaProcessResult
+
+    func run(_ invocation: MediaProcessInvocation) -> MediaProcessResult {
+        handler(invocation)
+    }
+}
+
+private final class InvocationRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var invocations: [MediaProcessInvocation] = []
+
+    func append(_ invocation: MediaProcessInvocation) {
+        lock.lock()
+        defer { lock.unlock() }
+        invocations.append(invocation)
+    }
+
+    func snapshot() -> [MediaProcessInvocation] {
+        lock.lock()
+        defer { lock.unlock() }
+        return invocations
+    }
 }
