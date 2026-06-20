@@ -5,12 +5,14 @@ public enum MediaTranscriptionTaskHandlerError: Error, Sendable, Equatable, Cust
     case missingJobID
     case missingOwnerSessionID
     case runtimeUnhealthy([String])
+    case transcriptUnavailable(String)
 
     public var description: String {
         switch self {
         case .missingJobID: "missingJobID"
         case .missingOwnerSessionID: "missingOwnerSessionID"
         case .runtimeUnhealthy(let ids): "runtimeUnhealthy: \(ids.joined(separator: ","))"
+        case .transcriptUnavailable(let reason): "transcriptUnavailable: \(reason)"
         }
     }
 }
@@ -79,15 +81,44 @@ public struct MediaTranscriptionTaskHandler: Sendable {
             try store.markCheckpoint("diarization-planned", sessionID: job.ownerSessionID, jobID: job.id, at: now)
         }
 
+        guard hasTranscriptArtifact(job) else {
+            let reason = missingTranscriptReason(for: job, report: report)
+            let failed = job.failing(code: .transcriptionFailed, message: reason, at: now)
+            try store.save(failed)
+            try store.appendEvent(MediaTranscriptionJobEvent(jobID: failed.id, state: .failed, message: reason, createdAt: now), sessionID: failed.ownerSessionID)
+            throw MediaTranscriptionTaskHandlerError.transcriptUnavailable(reason)
+        }
+
         job = try transition(job, to: .postProcessing, message: "Preparing transcript post-processing", at: now)
         try store.markCheckpoint("post-processing-planned", sessionID: job.ownerSessionID, jobID: job.id, at: now)
         job = try transition(job, to: .writingAttachments, message: "Preparing transcript attachment write", at: now)
         try store.markCheckpoint("attachments-planned", sessionID: job.ownerSessionID, jobID: job.id, at: now)
         job = try transition(job, to: .sendingToSession, message: "Preparing session return prompt", at: now)
         try store.markCheckpoint("session-return-planned", sessionID: job.ownerSessionID, jobID: job.id, at: now)
-        job = try transition(job, to: .completed, message: "Media transcription task plan completed", at: now)
+        job = try transition(job, to: .completed, message: "Media transcription task completed with transcript artifacts", at: now)
         try store.markCheckpoint("completed", sessionID: job.ownerSessionID, jobID: job.id, at: now)
         return "Media transcription job \(job.id) completed for session \(job.ownerSessionID)"
+    }
+
+    private func hasTranscriptArtifact(_ job: BrowserMediaTranscriptionJob) -> Bool {
+        job.artifacts.transcriptMarkdown != nil || job.artifacts.transcriptText != nil || !job.artifacts.subtitles.isEmpty || !job.artifacts.attachmentIDs.isEmpty
+    }
+
+    private func missingTranscriptReason(for job: BrowserMediaTranscriptionJob, report: MediaRuntimeHealthReport) -> String {
+        var reasons: [String] = []
+        if job.request.shouldPreferPlatformSubtitles {
+            reasons.append("未获取到平台字幕产物")
+        }
+        if job.request.shouldDownloadAudio || job.request.shouldRunLocalTranscription {
+            reasons.append("未获取到可转写音频或本地转写产物")
+        }
+        if !report.missingRuntimeIDs.isEmpty {
+            reasons.append("缺少媒体运行时：\(report.missingRuntimeIDs.joined(separator: ", "))")
+        }
+        if reasons.isEmpty {
+            reasons.append("媒体处理未生成 transcript artifact")
+        }
+        return reasons.joined(separator: "；")
     }
 
     private func transition(_ job: BrowserMediaTranscriptionJob, to state: MediaTranscriptionJobState, message: String, at date: Date) throws -> BrowserMediaTranscriptionJob {
