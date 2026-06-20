@@ -69,6 +69,17 @@ struct MediaTranscriptionTaskHandlerTests {
         #expect(loaded.lastErrorCode == .transcriptionFailed)
     }
 
+    @Test func handlerDefaultsToSystemSpeechLocalTranscriber() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let handler = MediaTranscriptionTaskHandler(
+            store: MediaTranscriptionJobStore(paths: AppStoragePaths(applicationSupportDirectory: root)),
+            runtimeSupervisor: FakeMediaRuntimeSupervisor(report: MediaRuntimeHealthReport(snapshot: MediaRuntimeSnapshot()))
+        )
+
+        #expect(handler.localTranscriber is SystemSpeechMediaLocalTranscriber)
+    }
+
     @Test func handlerCanFailFastWhenRuntimeHealthIsRequired() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
