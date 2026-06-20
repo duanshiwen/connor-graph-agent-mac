@@ -165,6 +165,18 @@ struct EmbeddedWebView: NSViewRepresentable {
         }
       }
 
+      function buildMediaPayload() {
+        return {
+          pageURLString: location.href || '',
+          pageTitle: document.title || '',
+          detectedAt: new Date().toISOString(),
+          mediaElements: mediaElements(),
+          openGraphMedia: openGraphMedia(),
+          canonicalURLString: attr('link[rel="canonical"]', 'href') || null,
+          userVisibleSelection: mediaSessionSelection()
+        };
+      }
+
       function payloadSignature(payload) {
         return JSON.stringify({
           pageURLString: payload.pageURLString,
@@ -188,15 +200,7 @@ struct EmbeddedWebView: NSViewRepresentable {
 
       function reportMediaNow() {
         try {
-          var payload = {
-            pageURLString: location.href || '',
-            pageTitle: document.title || '',
-            detectedAt: new Date().toISOString(),
-            mediaElements: mediaElements(),
-            openGraphMedia: openGraphMedia(),
-            canonicalURLString: attr('link[rel="canonical"]', 'href') || null,
-            userVisibleSelection: mediaSessionSelection()
-          };
+          var payload = buildMediaPayload();
           var signature = payloadSignature(payload);
           if (signature === lastPayloadSignature) { return; }
           lastPayloadSignature = signature;
@@ -224,6 +228,11 @@ struct EmbeddedWebView: NSViewRepresentable {
         mediaElements();
         observedMediaElements.forEach(attachMediaEventListeners);
       }
+
+      window.__connorCollectMediaSnapshot = function() {
+        refreshObservedMediaListeners();
+        return JSON.stringify(buildMediaPayload());
+      };
 
       function instrumentHistory(methodName) {
         var original = history[methodName];
