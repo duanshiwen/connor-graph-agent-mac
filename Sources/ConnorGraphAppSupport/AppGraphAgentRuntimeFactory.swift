@@ -335,6 +335,13 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                 return AnyAgentModelProvider(modelID: "governed-claude-sidecar-requires-session-manager") { _ in
                     throw AppGraphAgentRuntimeFactoryError.sidecarRequiresSessionManager
                 }
+            case .anthropicMessages:
+                guard let config = try anthropicCompatibleConfigWithOverride(connectionID: effectiveConnectionID, model: effectiveModel, baseURLOverride: effectiveBaseURL, thinkingLevel: effectiveThinkingLevel) else {
+                    return AnyAgentModelProvider(modelID: "missing-anthropic-compatible-config") { _ in
+                        throw OpenAICompatibleProviderError.missingAPIKey
+                    }
+                }
+                return AnyAgentModelProvider(AnthropicCompatibleProvider(config: config))
             case .openAICompatible:
                 if effectiveConnectionKind == .anthropicCompatible {
                     guard let config = try anthropicCompatibleConfigWithOverride(connectionID: effectiveConnectionID, model: effectiveModel, baseURLOverride: effectiveBaseURL, thinkingLevel: effectiveThinkingLevel) else {
@@ -407,6 +414,13 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                 return AnyLLMProvider { _, _ in
                     throw AppGraphAgentRuntimeFactoryError.sidecarRequiresSessionManager
                 }
+            case .anthropicMessages:
+                guard let config = try settingsRepository.anthropicCompatibleConfig(connectionID: connection.id) else {
+                    return AnyLLMProvider { _, _ in
+                        throw OpenAICompatibleProviderError.missingAPIKey
+                    }
+                }
+                return AnyLLMProvider(AnthropicCompatibleProvider(config: config))
             case .openAICompatible:
                 if connection.connectionKind == .anthropicCompatible {
                     guard let config = try settingsRepository.anthropicCompatibleConfig(connectionID: connection.id) else {
