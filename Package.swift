@@ -17,6 +17,9 @@ let package = Package(
         .executable(name: "connor-graph-agent-mac", targets: ["ConnorGraphAgentMac"]),
         .executable(name: "connor", targets: ["ConnorCLI"])
     ],
+    dependencies: [
+        .package(url: "https://github.com/argmaxinc/argmax-oss-swift.git", from: "0.9.0")
+    ],
     targets: [
         .target(name: "ConnorGraphCore"),
         .target(name: "ConnorGraphMemory", dependencies: ["ConnorGraphCore"]),
@@ -34,9 +37,10 @@ let package = Package(
                 "ConnorGraphMemory",
                 "ConnorGraphStore",
                 "ConnorGraphSearch",
-                "ConnorGraphAgent"
+                "ConnorGraphAgent",
+                .product(name: "WhisperKit", package: "argmax-oss-swift")
             ],
-            linkerSettings: [.linkedFramework("Security"), .linkedFramework("EventKit"), .linkedFramework("Contacts"), .linkedFramework("Speech")]
+            linkerSettings: [.linkedFramework("Security"), .linkedFramework("EventKit"), .linkedFramework("Contacts")]
         ),
         .executableTarget(
             name: "ConnorGraphAgentMac",
