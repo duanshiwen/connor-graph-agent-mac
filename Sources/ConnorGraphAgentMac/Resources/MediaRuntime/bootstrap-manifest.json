@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "product": "Connor built-in media runtime",
+  "distribution": "app-managed",
+  "consumerFacingPolicy": "Connor prepares and verifies media transcription tools inside the app. Users should not be asked to install Python, yt-dlp, ffmpeg, or WhisperKit manually.",
+  "components": [
+    {
+      "id": "python",
+      "version": "app-managed",
+      "source": "bundled-or-bootstrapped",
+      "executableRelativePath": "python/runtime/bin/python3",
+      "license": "Python Software Foundation License"
+    },
+    {
+      "id": "yt-dlp",
+      "version": "app-managed",
+      "source": "bundled-or-bootstrapped",
+      "executableRelativePath": "yt-dlp/runtime/yt-dlp.sh",
+      "license": "Unlicense"
+    },
+    {
+      "id": "ffmpeg",
+      "version": "app-managed",
+      "source": "bundled-or-bootstrapped",
+      "executableRelativePath": "ffmpeg/runtime/ffmpeg",
+      "license": "LGPL/GPL depending on build configuration"
+    },
+    {
+      "id": "whisperkit",
+      "version": "app-managed",
+      "source": "bundled-or-bootstrapped",
+      "executableRelativePath": null,
+      "license": "MIT"
+    }
+  ]
+}

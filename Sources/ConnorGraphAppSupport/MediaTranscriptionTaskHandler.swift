@@ -11,8 +11,8 @@ public enum MediaTranscriptionTaskHandlerError: Error, Sendable, Equatable, Cust
         switch self {
         case .missingJobID: "missingJobID"
         case .missingOwnerSessionID: "missingOwnerSessionID"
-        case .runtimeUnhealthy(let ids): "runtimeUnhealthy: \(ids.joined(separator: ","))"
-        case .transcriptUnavailable(let reason): "transcriptUnavailable: \(reason)"
+        case .runtimeUnhealthy: "Connor 内置媒体运行时尚未就绪，请稍后重试或在设置中更新媒体运行时。"
+        case .transcriptUnavailable: "媒体转写未能完成：Connor 内置媒体运行时尚未就绪，或当前网页没有可获取的字幕/音频。"
         }
     }
 }
@@ -42,9 +42,12 @@ public struct MediaTranscriptionTaskHandler: Sendable {
 
     public func run(_ request: MediaTranscriptionTaskRequest, now: Date = Date()) async throws -> String {
         var job = try store.load(sessionID: request.ownerSessionID, jobID: request.jobID)
+        if job.state.isTerminal {
+            return try terminalSummary(for: job)
+        }
         try store.appendEvent(MediaTranscriptionJobEvent(jobID: job.id, state: job.state, message: "Media transcription task started", createdAt: now, metadata: ["runID": request.runID ?? ""]), sessionID: job.ownerSessionID)
 
-        job = try transition(job, to: .preparingRuntime, message: "Preparing governed media runtimes", at: now)
+        job = try transition(job, to: .preparingRuntime, message: "Preparing Connor built-in media runtime", at: now)
         let report = await runtimeSupervisor.healthCheck(now: now)
         job.runtime = report.snapshot
         try store.save(job)
@@ -83,10 +86,10 @@ public struct MediaTranscriptionTaskHandler: Sendable {
 
         guard hasTranscriptArtifact(job) else {
             let reason = missingTranscriptReason(for: job, report: report)
-            let failed = job.failing(code: .transcriptionFailed, message: reason, at: now)
+            let failed = job.failing(code: .transcriptionFailed, message: reason.userFacingMessage, at: now)
             try store.save(failed)
-            try store.appendEvent(MediaTranscriptionJobEvent(jobID: failed.id, state: .failed, message: reason, createdAt: now), sessionID: failed.ownerSessionID)
-            throw MediaTranscriptionTaskHandlerError.transcriptUnavailable(reason)
+            try store.appendEvent(MediaTranscriptionJobEvent(jobID: failed.id, state: .failed, message: reason.userFacingMessage, createdAt: now, metadata: ["diagnostics": reason.diagnosticMessage]), sessionID: failed.ownerSessionID)
+            throw MediaTranscriptionTaskHandlerError.transcriptUnavailable(reason.diagnosticMessage)
         }
 
         job = try transition(job, to: .postProcessing, message: "Preparing transcript post-processing", at: now)
@@ -100,25 +103,39 @@ public struct MediaTranscriptionTaskHandler: Sendable {
         return "Media transcription job \(job.id) completed for session \(job.ownerSessionID)"
     }
 
+    private func terminalSummary(for job: BrowserMediaTranscriptionJob) throws -> String {
+        switch job.state {
+        case .completed:
+            return "Media transcription job \(job.id) already completed for session \(job.ownerSessionID)"
+        case .failed:
+            throw MediaTranscriptionTaskHandlerError.transcriptUnavailable(job.lastErrorMessage ?? "Media transcription job \(job.id) already failed")
+        case .cancelled:
+            throw MediaTranscriptionTaskHandlerError.transcriptUnavailable("Media transcription job \(job.id) was cancelled")
+        default:
+            return "Media transcription job \(job.id) is \(job.state.rawValue)"
+        }
+    }
+
     private func hasTranscriptArtifact(_ job: BrowserMediaTranscriptionJob) -> Bool {
         job.artifacts.transcriptMarkdown != nil || job.artifacts.transcriptText != nil || !job.artifacts.subtitles.isEmpty || !job.artifacts.attachmentIDs.isEmpty
     }
 
-    private func missingTranscriptReason(for job: BrowserMediaTranscriptionJob, report: MediaRuntimeHealthReport) -> String {
-        var reasons: [String] = []
+    private func missingTranscriptReason(for job: BrowserMediaTranscriptionJob, report: MediaRuntimeHealthReport) -> (userFacingMessage: String, diagnosticMessage: String) {
+        var diagnostics: [String] = []
         if job.request.shouldPreferPlatformSubtitles {
-            reasons.append("未获取到平台字幕产物")
+            diagnostics.append("未获取到平台字幕产物")
         }
         if job.request.shouldDownloadAudio || job.request.shouldRunLocalTranscription {
-            reasons.append("未获取到可转写音频或本地转写产物")
+            diagnostics.append("未获取到可转写音频或本地转写产物")
         }
         if !report.missingRuntimeIDs.isEmpty {
-            reasons.append("缺少媒体运行时：\(report.missingRuntimeIDs.joined(separator: ", "))")
+            diagnostics.append("App-managed runtime not ready: \(report.missingRuntimeIDs.joined(separator: ", "))")
         }
-        if reasons.isEmpty {
-            reasons.append("媒体处理未生成 transcript artifact")
+        if diagnostics.isEmpty {
+            diagnostics.append("媒体处理未生成 transcript artifact")
         }
-        return reasons.joined(separator: "；")
+        let userFacing = "Connor 正在准备内置媒体转写能力，或当前网页没有可获取的字幕/音频。请稍后重试；如果持续失败，请在设置中更新媒体运行时。"
+        return (userFacing, diagnostics.joined(separator: "；"))
     }
 
     private func transition(_ job: BrowserMediaTranscriptionJob, to state: MediaTranscriptionJobState, message: String, at date: Date) throws -> BrowserMediaTranscriptionJob {
