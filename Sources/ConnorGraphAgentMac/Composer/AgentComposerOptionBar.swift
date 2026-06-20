@@ -229,8 +229,6 @@ struct SpeechInputHoldToTalkButton: View {
         switch status {
         case .recording:
             "松开结束"
-        case .finalizing:
-            "按住说话"
         case .failed:
             "语音失败"
         case .idle:
@@ -241,7 +239,6 @@ struct SpeechInputHoldToTalkButton: View {
     private var iconName: String {
         switch status {
         case .recording: "mic.fill"
-        case .finalizing: "waveform"
         case .failed: "exclamationmark.triangle"
         case .idle: "mic"
         }
@@ -249,7 +246,7 @@ struct SpeechInputHoldToTalkButton: View {
 
     private var foreground: Color {
         switch status {
-        case .recording, .finalizing: .accentColor
+        case .recording: .accentColor
         case .failed: .orange
         case .idle: .secondary
         }
@@ -258,7 +255,6 @@ struct SpeechInputHoldToTalkButton: View {
     private var background: Color {
         switch status {
         case .recording: Color.accentColor.opacity(0.16)
-        case .finalizing: Color.accentColor.opacity(0.10)
         case .failed: Color.orange.opacity(0.10)
         case .idle: Color.secondary.opacity(0.06)
         }
@@ -266,7 +262,7 @@ struct SpeechInputHoldToTalkButton: View {
 
     private var border: Color {
         switch status {
-        case .recording, .finalizing: Color.accentColor.opacity(0.30)
+        case .recording: Color.accentColor.opacity(0.30)
         case .failed: Color.orange.opacity(0.30)
         case .idle: Color.secondary.opacity(0.12)
         }
