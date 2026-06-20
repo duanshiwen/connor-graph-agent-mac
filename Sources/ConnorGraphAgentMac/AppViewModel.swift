@@ -1664,7 +1664,9 @@ final class AppViewModel: NSObject, ObservableObject {
                         await sendMediaTranscriptionFollowUpIfPossible(for: task)
                     }
                 } else {
-                    updateMediaTranscriptionBackgroundTask(taskID: outcome.taskID, status: .failed, detail: outcome.summary, errorMessage: outcome.errorMessage)
+                    let task = dueTasks.first(where: { $0.id == outcome.taskID })
+                    let userFacingError = mediaTranscriptionUserFacingError(for: task) ?? outcome.errorMessage
+                    updateMediaTranscriptionBackgroundTask(taskID: outcome.taskID, status: .failed, detail: outcome.summary, errorMessage: userFacingError)
                 }
             }
             reloadTaskManagementPresentation()
@@ -1681,6 +1683,14 @@ final class AppViewModel: NSObject, ObservableObject {
             requireHealthyRuntime: false
         )
         return try await handler.run(request)
+    }
+
+    private func mediaTranscriptionUserFacingError(for task: ConnorTaskDefinition?) -> String? {
+        guard let task, let storagePaths else { return nil }
+        let jobID = task.target.parameters["jobID"] ?? task.target.targetID
+        let ownerSessionID = task.target.parameters["ownerSessionID"] ?? task.metadata.ownerSessionID
+        guard let ownerSessionID, !ownerSessionID.isEmpty else { return nil }
+        return (try? MediaTranscriptionJobStore(paths: storagePaths).load(sessionID: ownerSessionID, jobID: jobID))?.lastErrorMessage
     }
 
     private func sendMediaTranscriptionFollowUpIfPossible(for task: ConnorTaskDefinition) async {
