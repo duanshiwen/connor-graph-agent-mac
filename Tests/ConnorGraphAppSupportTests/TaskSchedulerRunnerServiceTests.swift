@@ -113,8 +113,10 @@ struct TaskSchedulerRunnerServiceTests {
 
 private actor RefreshCallCounter {
     var count = 0
-    func refresh(_ runID: String?) async throws -> String {
+    var requests: [SourceRefreshTaskRequest] = []
+    func refresh(_ request: SourceRefreshTaskRequest) async throws -> String {
         count += 1
+        requests.append(request)
         return "rss refreshed"
     }
 }

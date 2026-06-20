@@ -25,6 +25,18 @@ public struct TaskTargetRunResult: Sendable, Equatable {
     }
 }
 
+public struct SourceRefreshTaskRequest: Sendable, Equatable {
+    public var sourceKind: String
+    public var sourceInstanceID: String?
+    public var runID: String?
+
+    public init(sourceKind: String, sourceInstanceID: String? = nil, runID: String? = nil) {
+        self.sourceKind = sourceKind
+        self.sourceInstanceID = sourceInstanceID
+        self.runID = runID
+    }
+}
+
 public enum TaskTargetRunnerError: Error, Sendable, Equatable, CustomStringConvertible {
     case unsupportedTarget(String)
     case missingMessage(String)
@@ -40,7 +52,7 @@ public enum TaskTargetRunnerError: Error, Sendable, Equatable, CustomStringConve
 }
 
 public struct TaskTargetRunner: Sendable {
-    public typealias RefreshHandler = @Sendable (_ runID: String?) async throws -> String
+    public typealias RefreshHandler = @Sendable (_ request: SourceRefreshTaskRequest) async throws -> String
     public typealias SessionMessageHandler = @Sendable (_ request: TaskSessionMessageRequest) async throws -> String
     public typealias MediaTranscriptionHandler = @Sendable (_ request: MediaTranscriptionTaskRequest) async throws -> String
 
@@ -64,13 +76,19 @@ public struct TaskTargetRunner: Sendable {
         self.mediaTranscriptionRunner = mediaTranscriptionRunner
     }
 
+
     public func run(task: ConnorTaskDefinition, runID: String? = nil, eventPayload: [String: String] = [:]) async throws -> TaskTargetRunResult {
         if task.target.targetKind == "source.runtime", task.target.operationName == "refresh" {
+            let request = SourceRefreshTaskRequest(
+                sourceKind: task.target.targetID,
+                sourceInstanceID: sourceInstanceID(from: task.target.parameters),
+                runID: runID
+            )
             let summary: String
             switch task.target.targetID {
-            case "mail": summary = try await mailRefresher(runID)
-            case "calendar": summary = try await calendarRefresher(runID)
-            case "rss": summary = try await rssRefresher(runID)
+            case "mail": summary = try await mailRefresher(request)
+            case "calendar": summary = try await calendarRefresher(request)
+            case "rss": summary = try await rssRefresher(request)
             default: throw TaskTargetRunnerError.unsupportedTarget(targetDescription(task))
             }
             return TaskTargetRunResult(summary: summary)
@@ -106,6 +124,12 @@ public struct TaskTargetRunner: Sendable {
     private func targetDescription(_ task: ConnorTaskDefinition) -> String {
         "\(task.target.targetKind):\(task.target.targetID).\(task.target.operationName)"
     }
+
+    private func sourceInstanceID(from parameters: [String: String]) -> String? {
+        ["sourceInstanceID", "sourceID", "accountID", "calendarAccountID", "mailAccountID"]
+            .compactMap { parameters[$0]?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
+    }
 }
 
 public extension TaskTargetRunner {
@@ -118,4 +142,5 @@ public extension TaskTargetRunner {
     ) -> TaskTargetRunner {
         TaskTargetRunner(mailRefresher: mailRefresh, calendarRefresher: calendarRefresh, rssRefresher: rssRefresh, sessionMessenger: sessionMessage, mediaTranscriptionRunner: mediaTranscription)
     }
+
 }
