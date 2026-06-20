@@ -5,7 +5,7 @@ import Testing
 @MainActor
 @Suite("Composer Draft Synchronization Tests")
 struct ComposerDraftSynchronizationTests {
-    @Test func manualComposerEditUpdatesPublishedChatInputForNextSpeechRun() {
+    @Test func manualComposerEditDoesNotPublishChatInputOnEveryKeystroke() {
         _ = NSApplication.shared
         let viewModel = AppViewModel(
             entities: [],
@@ -16,6 +16,20 @@ struct ComposerDraftSynchronizationTests {
         viewModel.chatInput = "上一轮语音"
         viewModel.updateSelectedChatInputDraft("")
 
-        #expect(viewModel.chatInput == "")
+        #expect(viewModel.chatInput == "上一轮语音")
+    }
+
+    @Test func speechInputUsesLatestManualDraftInsteadOfPublishedChatInput() {
+        _ = NSApplication.shared
+        let viewModel = AppViewModel(
+            entities: [],
+            statements: [],
+            observeLogEntries: []
+        )
+
+        viewModel.chatInput = "上一轮语音"
+        viewModel.updateSelectedChatInputDraft("")
+
+        #expect(viewModel.currentSelectedChatInputDraftForSpeech() == "")
     }
 }
