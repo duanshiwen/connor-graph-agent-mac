@@ -549,10 +549,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var taskSchedulerTimer: Timer?
     private var mediaRuntimeBootstrapTask: Task<Void, Never>?
     private lazy var speechTranscriptionCoordinator: SessionSpeechTranscriptionCoordinator = {
-        let coordinator = SessionSpeechTranscriptionCoordinator(
-            transcriber: SessionSpeechTranscriptionController(sidecarsDirectory: storagePaths?.sidecarsDirectory),
-            finalizationTimeoutNanoseconds: 20_000_000_000
-        )
+        let coordinator = SessionSpeechTranscriptionCoordinator(transcriber: SessionSpeechTranscriptionController())
         coordinator.onStatusChange = { [weak self] status in
             self?.speechTranscriptionStatus = status
         }

@@ -337,11 +337,6 @@ final class SessionSpeechTranscriptionCoordinator {
         }
     }
 
-    func forceFinalizationTimeoutForTesting() {
-        guard let sessionID = status.runningSessionID else { return }
-        completeWithPartialAfterFinalizationTimeout(sessionID: sessionID, runID: activeRunID)
-    }
-
     private func completeWithPartialAfterFinalizationTimeout(sessionID: String, runID: UUID?) {
         guard activeRunID == runID, status.runningSessionID == sessionID, status.isFinalizing else { return }
         let nextDraft = renderDraft(withLiveSpeechText: provisionalSpeechText)
