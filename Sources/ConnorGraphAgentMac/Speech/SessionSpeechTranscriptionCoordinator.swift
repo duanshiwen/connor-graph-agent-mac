@@ -86,9 +86,12 @@ final class SessionSpeechTranscriptionCoordinator {
     private var provisionalSpeechText: String = ""
     private var setDraft: ((String, String) -> Void)?
     private var setProvisionalTranscript: ((String, String?) -> Void)?
+    private let finalizationTimeoutNanoseconds: UInt64
+    private var finalizationTimeoutTask: Task<Void, Never>?
 
-    init(transcriber: SessionSpeechTranscribing) {
+    init(transcriber: SessionSpeechTranscribing, finalizationTimeoutNanoseconds: UInt64 = 1_500_000_000) {
         self.transcriber = transcriber
+        self.finalizationTimeoutNanoseconds = finalizationTimeoutNanoseconds
     }
 
     func isRunning(sessionID: String?) -> Bool {
@@ -141,7 +144,7 @@ final class SessionSpeechTranscriptionCoordinator {
             sessionID: sessionID,
             kind: Self.backgroundTaskKind,
             title: "按住说话",
-            detail: "正在听写语音，松开即提交当前识别结果",
+            detail: "正在听写语音，松开后会短暂整理最终识别结果",
             status: .running,
             payloadJSON: "{\"runID\":\"\(runID.uuidString)\"}"
         )
@@ -212,19 +215,12 @@ final class SessionSpeechTranscriptionCoordinator {
             return nil
         }
 
-        let committedSpeechText = provisionalSpeechText
-        let nextDraft = renderDraft(withLiveSpeechText: committedSpeechText)
-        lastGeneratedDraft = nextDraft
-        setDraft?(sessionID, nextDraft)
-        setProvisionalTranscript?(sessionID, nil)
-
-        task.status = .succeeded
-        task.detail = "语音输入已完成"
+        task.detail = "正在整理最终识别结果"
         task.updatedAt = Date()
-
-        reset()
+        activeTask = task
+        status = .finalizing(sessionID: sessionID, taskID: task.id)
+        scheduleFinalizationTimeout(sessionID: sessionID, runID: activeRunID)
         transcriber.stop(reason: reason)
-        onTaskUpdate?(task)
         return task
     }
 
@@ -261,6 +257,9 @@ final class SessionSpeechTranscriptionCoordinator {
         lastGeneratedDraft = nextDraft
         setDraft?(sessionID, nextDraft)
         setProvisionalTranscript?(sessionID, nil)
+
+        finalizationTimeoutTask?.cancel()
+        finalizationTimeoutTask = nil
 
         var completedTask = activeTask
         completedTask?.status = .succeeded
@@ -305,6 +304,37 @@ final class SessionSpeechTranscriptionCoordinator {
         return draftBaseText + "\n\n"
     }
 
+    private func scheduleFinalizationTimeout(sessionID: String, runID: UUID?) {
+        finalizationTimeoutTask?.cancel()
+        finalizationTimeoutTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: self?.finalizationTimeoutNanoseconds ?? 1_500_000_000)
+            } catch {
+                return
+            }
+            await MainActor.run {
+                self?.completeWithPartialAfterFinalizationTimeout(sessionID: sessionID, runID: runID)
+            }
+        }
+    }
+
+    private func completeWithPartialAfterFinalizationTimeout(sessionID: String, runID: UUID?) {
+        guard activeRunID == runID, status.runningSessionID == sessionID, status.isFinalizing else { return }
+        let nextDraft = renderDraft(withLiveSpeechText: provisionalSpeechText)
+        lastGeneratedDraft = nextDraft
+        setDraft?(sessionID, nextDraft)
+        setProvisionalTranscript?(sessionID, nil)
+
+        var completedTask = activeTask
+        completedTask?.status = .succeeded
+        completedTask?.detail = "最终识别超时，已使用实时识别结果"
+        completedTask?.updatedAt = Date()
+        reset()
+        if let completedTask {
+            onTaskUpdate?(completedTask)
+        }
+    }
+
     private func fail(message: String, sessionID: String, runID: UUID) {
         guard activeRunID == runID, status.runningSessionID == sessionID else { return }
         var failedTask = activeTask
@@ -321,6 +351,8 @@ final class SessionSpeechTranscriptionCoordinator {
     }
 
     private func reset() {
+        finalizationTimeoutTask?.cancel()
+        finalizationTimeoutTask = nil
         activeRunID = nil
         activeTask = nil
         draftBaseText = ""

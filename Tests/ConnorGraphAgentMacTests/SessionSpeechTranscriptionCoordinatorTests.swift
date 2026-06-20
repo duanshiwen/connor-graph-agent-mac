@@ -50,7 +50,7 @@ struct SessionSpeechTranscriptionCoordinatorTests {
         #expect(provisionalBySession["session-1"] == "你现在可以说中文了")
     }
 
-    @Test func finishHoldToTalkImmediatelyCommitsPartialAndClearsProvisional() {
+    @Test func finishHoldToTalkEntersFinalizingThenFinalCommitsDraftAndClearsProvisional() {
         var draftBySession: [String: String] = ["session-1": "已有内容"]
         var provisionalBySession: [String: String] = [:]
         var updatedTasks: [AppSessionBackgroundTask] = []
@@ -67,9 +67,9 @@ struct SessionSpeechTranscriptionCoordinatorTests {
         )
         transcriber.emitPartial("临时识别")
 
-        let completed = coordinator.finishHoldToTalk()
+        let finalizing = coordinator.finishHoldToTalk()
 
-        #expect(completed?.detail == "语音输入已完成")
+        #expect(finalizing?.detail == "正在整理最终识别结果")
         #expect(coordinator.status == .idle)
         #expect(transcriber.stopReasons == [.manual])
         #expect(draftBySession["session-1"] == "已有内容\n\n临时识别")
@@ -78,7 +78,7 @@ struct SessionSpeechTranscriptionCoordinatorTests {
         #expect(updatedTasks.last?.detail == "语音输入已完成")
     }
 
-    @Test func lateFinalResultIsIgnoredAfterImmediatePartialCommit() {
+    @Test func finalResultReplacesPartialWhenRecognizerProvidesBetterText() {
         var draftBySession: [String: String] = ["session-1": ""]
         var provisionalBySession: [String: String] = [:]
         let transcriber = FakeSessionSpeechTranscriber(emitFinalOnStop: false)
@@ -96,9 +96,33 @@ struct SessionSpeechTranscriptionCoordinatorTests {
         _ = coordinator.finishHoldToTalk()
         transcriber.emitFinal("最终结果更准确")
 
-        #expect(draftBySession["session-1"] == "临时 结果")
+        #expect(draftBySession["session-1"] == "最终结果更准确")
         #expect(provisionalBySession["session-1"] == nil)
         #expect(coordinator.status == .idle)
+    }
+
+    @Test func finalizationTimeoutKeepsPartialWhenFinalDoesNotArrive() async throws {
+        var draftBySession: [String: String] = ["session-1": ""]
+        var updatedTasks: [AppSessionBackgroundTask] = []
+        let transcriber = FakeSessionSpeechTranscriber(emitFinalOnStop: false)
+        let coordinator = SessionSpeechTranscriptionCoordinator(transcriber: transcriber, finalizationTimeoutNanoseconds: 1_000_000)
+        coordinator.onTaskUpdate = { updatedTasks.append($0) }
+        _ = coordinator.beginHoldToTalk(
+            selectedSessionID: "session-1",
+            currentDraft: "",
+            setDraft: { sessionID, draft in draftBySession[sessionID] = draft }
+        )
+
+        transcriber.emitPartial("可用的 partial")
+        _ = coordinator.finishHoldToTalk()
+
+        #expect(coordinator.status.isFinalizing)
+        try await Task.sleep(nanoseconds: 20_000_000)
+
+        #expect(draftBySession["session-1"] == "可用的 partial")
+        #expect(coordinator.status == .idle)
+        #expect(updatedTasks.last?.status == .succeeded)
+        #expect(updatedTasks.last?.detail == "最终识别超时，已使用实时识别结果")
     }
 
     @Test func finalFailurePathKeepsPartialWhenFinalTextIsEmpty() {
