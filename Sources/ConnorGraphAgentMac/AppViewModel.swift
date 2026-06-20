@@ -548,16 +548,9 @@ final class AppViewModel: NSObject, ObservableObject {
     private var locationCoordinator: UserLocationCoordinator?
     private var taskSchedulerTimer: Timer?
     private var mediaRuntimeBootstrapTask: Task<Void, Never>?
-    private lazy var speechTranscriptionCoordinator: SessionSpeechTranscriptionCoordinator = {
-        let coordinator = SessionSpeechTranscriptionCoordinator(transcriber: SessionSpeechTranscriptionController())
-        coordinator.onStatusChange = { [weak self] status in
-            self?.speechTranscriptionStatus = status
-        }
-        coordinator.onTaskUpdate = { [weak self] task in
-            self?.upsertSpeechTranscriptionBackgroundTask(task)
-        }
-        return coordinator
-    }()
+    private lazy var speechTranscriptionCoordinator = SessionSpeechTranscriptionCoordinator(
+        transcriber: SessionSpeechTranscriptionController()
+    )
 
     private var activeChatSession: AgentSession {
         nativeSessionManager?.session ?? fallbackChatSession
@@ -4099,13 +4092,6 @@ final class AppViewModel: NSObject, ObservableObject {
 
     func finishSpeechTranscriptionForSelectedSession() {
         let task = speechTranscriptionCoordinator.finishHoldToTalk()
-        syncSpeechTranscriptionState()
-        upsertSpeechTranscriptionBackgroundTask(task)
-    }
-
-    func cancelSpeechTranscriptionForComposerSubmit() {
-        let task = speechTranscriptionCoordinator.cancelCurrentRun(detail: "发送消息，已取消未完成的语音整理")
-        speechProvisionalTranscript = nil
         syncSpeechTranscriptionState()
         upsertSpeechTranscriptionBackgroundTask(task)
     }
