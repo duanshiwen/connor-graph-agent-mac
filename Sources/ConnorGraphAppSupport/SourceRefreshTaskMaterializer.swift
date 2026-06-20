@@ -2,7 +2,6 @@ import Foundation
 import ConnorGraphCore
 
 public struct SourceRefreshTaskMaterializer: Sendable {
-    public static let legacyGlobalRSSTaskID = "system.rss.check-every-30-minutes"
     public static let sourceInstanceIDParameter = "sourceInstanceID"
     public static let sourceKindParameter = "sourceKind"
 
@@ -47,21 +46,12 @@ public struct SourceRefreshTaskMaterializer: Sendable {
         }
 
         tasks = try taskRepository.loadTasks(includeDeleted: true)
-        for task in tasks where Self.isRSSSourceInstanceRefreshTask(task) && !desiredIDs.contains(task.id) && task.lifecycle.status != .stopped && task.lifecycle.status != .deleted {
-            var stopped = task
-            stopped.lifecycle.status = .stopped
-            stopped.lifecycle.lastErrorMessage = "RSS source no longer exists; source-instance refresh task stopped by reconcile."
-            stopped.metadata.tags = Self.mergedTags(stopped.metadata.tags, ["deprecated", "orphaned-source"])
-            stopped.updatedAt = now
-            try taskRepository.saveTask(stopped)
+        for task in tasks where Self.isRSSSourceInstanceRefreshTask(task) && !desiredIDs.contains(task.id) {
+            try taskRepository.purgeTaskDefinition(id: task.id, reason: "RSS source no longer exists.")
         }
 
-        if var legacy = try taskRepository.loadTask(id: Self.legacyGlobalRSSTaskID), legacy.lifecycle.status != .stopped && legacy.lifecycle.status != .deleted {
-            legacy.lifecycle.status = .stopped
-            legacy.lifecycle.lastErrorMessage = "Replaced by RSS source-instance refresh tasks."
-            legacy.metadata.tags = Self.mergedTags(legacy.metadata.tags, ["deprecated", "source-type-refresh"])
-            legacy.updatedAt = now
-            try taskRepository.saveTask(legacy)
+        for task in try taskRepository.loadTasks(includeDeleted: true) where Self.isRSSGlobalRefreshTask(task) {
+            try taskRepository.purgeTaskDefinition(id: task.id, reason: "RSS refresh tasks are materialized per source instance.")
         }
 
         return try taskRepository.loadTasks(includeDeleted: true)
@@ -123,13 +113,12 @@ public struct SourceRefreshTaskMaterializer: Sendable {
         && task.target.parameters[sourceInstanceIDParameter]?.isEmpty == false
     }
 
-    private static func mergedTags(_ existing: [String], _ additions: [String]) -> [String] {
-        var seen = Set<String>()
-        var merged: [String] = []
-        for tag in existing + additions where !seen.contains(tag) {
-            seen.insert(tag)
-            merged.append(tag)
-        }
-        return merged
+    public static func isRSSGlobalRefreshTask(_ task: ConnorTaskDefinition) -> Bool {
+        task.origin == .system
+        && task.target.targetKind == "source.runtime"
+        && task.target.targetID == "rss"
+        && task.target.operationName == "refresh"
+        && (task.target.parameters[sourceInstanceIDParameter]?.isEmpty ?? true)
     }
+
 }

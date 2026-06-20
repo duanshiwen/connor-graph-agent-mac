@@ -304,17 +304,6 @@ public struct ConnorTaskDefinition: Codable, Sendable, Equatable, Identifiable {
                 metadata: .protectedSystem,
                 createdAt: now,
                 updatedAt: now
-            ),
-            ConnorTaskDefinition(
-                id: "system.rss.check-every-30-minutes",
-                name: "检查 RSS",
-                origin: .system,
-                trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 1_800, recurrence: .interval),
-                target: .sourceRuntimeRefresh(sourceID: "rss"),
-                lifecycle: ConnorTaskLifecycle(status: .active),
-                metadata: .protectedSystem,
-                createdAt: now,
-                updatedAt: now
             )
         ]
     }
