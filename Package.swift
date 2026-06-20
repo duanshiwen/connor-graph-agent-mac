@@ -18,8 +18,7 @@ let package = Package(
         .executable(name: "connor", targets: ["ConnorCLI"])
     ],
     dependencies: [
-        .package(url: "https://github.com/argmaxinc/argmax-oss-swift.git", from: "0.9.0"),
-        .package(url: "https://github.com/ibireme/yyjson.git", from: "0.12.0")
+        .package(url: "https://github.com/argmaxinc/argmax-oss-swift.git", from: "0.9.0")
     ],
     targets: [
         .target(name: "ConnorGraphCore"),
@@ -48,8 +47,7 @@ let package = Package(
                 "ConnorGraphAgent",
                 "ConnorGraphStore",
                 "ConnorGraphAppSupport",
-                .product(name: "WhisperKit", package: "argmax-oss-swift"),
-                .product(name: "yyjson", package: "yyjson")
+                .product(name: "WhisperKit", package: "argmax-oss-swift")
             ],
             exclude: ["Info.plist"],
             resources: [
