@@ -252,58 +252,29 @@ struct SettingsAppSection: View {
         Bundle.main.bundleIdentifier ?? "未知"
     }
 
-    private func notificationLevelBinding(for messageType: SessionAttentionMessageType) -> Binding<SessionAttentionLevel> {
-        Binding(
-            get: { viewModel.sessionNotificationLevel(for: messageType) },
-            set: { viewModel.setSessionNotificationLevel($0, for: messageType) }
-        )
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsGroup(title: "通知") {
-                SettingsToggleRow(title: "桌面通知", subtitle: "允许达到系统通知等级的会话消息发送 macOS 通知。", isOn: $viewModel.desktopNotificationsEnabled)
+                SettingsToggleRow(title: "桌面通知", subtitle: "允许会话新消息发送 macOS 通知。", isOn: $viewModel.desktopNotificationsEnabled)
                 Divider()
                 SettingsPickerRow(
-                    title: "最低通知等级",
-                    subtitle: "所有消息最终至少使用这个等级。例如设为「系统通知」后,任何新消息都会系统提示并在聊天列表突出显示。",
-                    selection: $viewModel.sessionNotificationMinimumLevel
+                    title: "会话新消息",
+                    subtitle: "Connor 当前只保留这一种通知语义：当不可见会话产生新消息时如何提醒。",
+                    selection: $viewModel.sessionNewMessageNotificationLevel
                 ) {
                     ForEach(SessionAttentionLevel.allCases) { level in
                         Text(level.displayName).tag(level)
                     }
                 }
                 Divider()
-                VStack(alignment: .leading, spacing: SettingsListLayout.spaceS) {
-                    HStack(alignment: .top, spacing: SettingsListLayout.spaceM) {
-                        VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
-                            Text("消息类型策略")
-                                .font(SettingsListTypography.rowTitleSelected)
-                            Text("为不同来源/语义的消息设置默认通知等级；最终等级会再受上方最低等级约束。")
-                                .font(SettingsListTypography.rowCaption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer(minLength: SettingsListLayout.spaceL)
-                        Button(action: viewModel.resetSessionNotificationPolicy) {
-                            Label("恢复默认策略", systemImage: "arrow.counterclockwise")
-                                .font(SettingsListTypography.rowCaptionEmphasized)
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.regular)
-                        .frame(width: SettingsListLayout.pickerControlWidth, alignment: .trailing)
+                HStack {
+                    Spacer()
+                    Button(action: viewModel.resetSessionNotificationSettings) {
+                        Label("恢复默认", systemImage: "arrow.counterclockwise")
+                            .font(SettingsListTypography.rowCaptionEmphasized)
                     }
-                    ForEach(SessionAttentionMessageType.allCases) { messageType in
-                        Divider()
-                        SettingsPickerRow(
-                            title: messageType.displayName,
-                            subtitle: "\(messageType.detail) 当前有效：\(viewModel.effectiveSessionNotificationLevel(for: messageType).displayName)",
-                            selection: notificationLevelBinding(for: messageType)
-                        ) {
-                            ForEach(SessionAttentionLevel.allCases) { level in
-                                Text(level.displayName).tag(level)
-                            }
-                        }
-                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.regular)
                 }
             }
             SettingsGroup(title: "电源") {

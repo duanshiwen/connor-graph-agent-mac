@@ -2413,76 +2413,26 @@ private struct SessionCardAttentionStyle {
     var shadowRadius: CGFloat
 
     init(level: SessionAttentionLevel, isSelected: Bool) {
-        if isSelected {
-            let color = Self.attentionColor
-            dotColor = level >= .emphasized ? .white.opacity(0.86) : (level == .none ? nil : color)
-            backgroundColor = level >= .emphasized ? color : Color.accentColor.opacity(0.14)
-            borderColor = level >= .emphasized ? Color.white.opacity(0.24) : Color.clear
-            borderWidth = level >= .emphasized ? 1 : 0
-            leadingBarColor = nil
-            leadingBarWidth = 0
-            titleWeight = level == .none ? .semibold : .bold
-            shadowColor = .clear
-            shadowRadius = 0
+        let color = Self.attentionColor
+        leadingBarColor = nil
+        leadingBarWidth = 0
+        shadowColor = .clear
+        shadowRadius = 0
+
+        guard level > .none else {
+            dotColor = nil
+            backgroundColor = isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor)
+            borderColor = Color.clear
+            borderWidth = 0
+            titleWeight = isSelected ? .semibold : .regular
             return
         }
 
-        switch level {
-        case .none:
-            dotColor = nil
-            backgroundColor = Color(nsColor: .windowBackgroundColor)
-            borderColor = Color.clear
-            borderWidth = 0
-            leadingBarColor = nil
-            leadingBarWidth = 0
-            titleWeight = .regular
-            shadowColor = .clear
-            shadowRadius = 0
-        case .unread:
-            let color = Self.attentionColor
-            dotColor = color
-            backgroundColor = color.opacity(0.045)
-            borderColor = Color.clear
-            borderWidth = 0
-            leadingBarColor = nil
-            leadingBarWidth = 0
-            titleWeight = .semibold
-            shadowColor = .clear
-            shadowRadius = 0
-        case .emphasized:
-            let color = Self.attentionColor
-            dotColor = .white.opacity(0.86)
-            backgroundColor = color
-            borderColor = Color.white.opacity(0.18)
-            borderWidth = 1
-            leadingBarColor = nil
-            leadingBarWidth = 0
-            titleWeight = .semibold
-            shadowColor = color.opacity(0.16)
-            shadowRadius = 5
-        case .actionable:
-            let color = Self.attentionColor
-            dotColor = .white.opacity(0.92)
-            backgroundColor = color
-            borderColor = Color.white.opacity(0.26)
-            borderWidth = 1
-            leadingBarColor = nil
-            leadingBarWidth = 0
-            titleWeight = .bold
-            shadowColor = color.opacity(0.22)
-            shadowRadius = 7
-        case .interruptive:
-            let color = Self.attentionColor
-            dotColor = .white
-            backgroundColor = color
-            borderColor = Color.white.opacity(0.34)
-            borderWidth = 1.2
-            leadingBarColor = nil
-            leadingBarWidth = 0
-            titleWeight = .bold
-            shadowColor = color.opacity(0.28)
-            shadowRadius = 9
-        }
+        dotColor = level == .unread ? color : nil
+        backgroundColor = color.opacity(0.10)
+        borderColor = color.opacity(isSelected ? 0.22 : 0.14)
+        borderWidth = level >= .emphasized ? 1 : 0
+        titleWeight = level >= .actionable ? .bold : .semibold
     }
 
     private static var attentionColor: Color { ConnorCraftPalette.accent }
@@ -2506,6 +2456,7 @@ struct CraftSessionRow: View {
     @State private var isEditingTitle: Bool = false
     @State private var titleDraft: String = ""
     @State private var isDeleteConfirmationPresented: Bool = false
+    @State private var isAttentionPulseOn: Bool = false
     @FocusState private var isTitleFocused: Bool
 
     var body: some View {
@@ -2531,7 +2482,13 @@ struct CraftSessionRow: View {
             guard !isEditingTitle else { return }
             titleDraft = newTitle
         }
-            .onAppear { titleDraft = row.title }
+            .onAppear {
+                titleDraft = row.title
+                updateAttentionPulseAnimation()
+            }
+            .onChange(of: attentionLevel) { _, _ in
+                updateAttentionPulseAnimation()
+            }
             .confirmationDialog("删除这个会话？", isPresented: $isDeleteConfirmationPresented, titleVisibility: .visible) {
             Button("删除", role: .destructive, action: onDelete)
                 .disabled(hasRunningBackgroundTask)
@@ -2608,6 +2565,7 @@ struct CraftSessionRow: View {
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(rowBackgroundColor, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: isAttentionPulseOn)
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(cardStyle.borderColor, lineWidth: cardStyle.borderWidth)
@@ -2630,7 +2588,7 @@ struct CraftSessionRow: View {
             ProgressView()
                 .controlSize(.small)
                 .frame(width: 18, height: 18)
-        } else {
+        } else if cardStyle.dotColor == nil {
             Image(systemName: row.isFlagged ? "pin.fill" : icon(for: row.status))
                 .foregroundStyle(leadingIconColor)
                 .frame(width: 18)
@@ -2707,29 +2665,16 @@ struct CraftSessionRow: View {
     @ViewBuilder
     private var attentionIndicator: some View {
         if let dotColor = cardStyle.dotColor {
-            VStack(spacing: 4) {
-                Circle()
-                    .fill(dotColor)
-                    .frame(width: 8, height: 8)
-                Text("NEW")
-                    .font(.system(size: 8, weight: .black, design: .rounded))
-                    .foregroundStyle(Color.yellow)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 1)
-                    .background(Color.red, in: Capsule())
-                    .overlay(
-                        Capsule()
-                            .stroke(Color.yellow, lineWidth: 1)
-                    )
-                    .offset(y: 3)
-            }
-            .frame(width: 34)
-            .padding(.top, 5)
+            Circle()
+                .fill(dotColor)
+                .frame(width: 8, height: 8)
+                .frame(width: 18)
+                .padding(.top, 5)
         }
     }
 
     private var usesFilledAttentionStyle: Bool {
-        attentionLevel >= .emphasized
+        false
     }
 
     private var primaryTextColor: Color {
@@ -2775,7 +2720,23 @@ struct CraftSessionRow: View {
     }
 
     private var rowBackgroundColor: Color {
-        cardStyle.backgroundColor
+        guard shouldPulseAttention else { return cardStyle.backgroundColor }
+        return ConnorCraftPalette.accent.opacity(isAttentionPulseOn ? 0.18 : 0.07)
+    }
+
+    private var shouldPulseAttention: Bool {
+        attentionLevel > .none
+    }
+
+    private func updateAttentionPulseAnimation() {
+        guard shouldPulseAttention else {
+            isAttentionPulseOn = false
+            return
+        }
+        isAttentionPulseOn = false
+        DispatchQueue.main.async {
+            isAttentionPulseOn = true
+        }
     }
 
 
