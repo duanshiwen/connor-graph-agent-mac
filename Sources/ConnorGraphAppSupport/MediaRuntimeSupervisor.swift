@@ -9,14 +9,42 @@ public struct MediaRuntimeDescriptor: Codable, Sendable, Equatable, Identifiable
     public var executableRelativePath: String?
     public var checksum: String?
     public var license: String?
+    public var requiredModels: [String]?
 
-    public init(id: String, version: String = "unknown", source: String = "bundled", executableRelativePath: String? = nil, checksum: String? = nil, license: String? = nil) {
+    public init(id: String, version: String = "unknown", source: String = "bundled", executableRelativePath: String? = nil, checksum: String? = nil, license: String? = nil, requiredModels: [String]? = nil) {
         self.id = id
         self.version = version
         self.source = source
         self.executableRelativePath = executableRelativePath
         self.checksum = checksum
         self.license = license
+        self.requiredModels = requiredModels
+    }
+}
+
+public enum WhisperKitModelInventory {
+    public static let requiredBundledModels = ["openai_whisper-small", "openai_whisper-medium"]
+    public static let optionalHighAccuracyModels = [
+        "openai_whisper-large-v3-v20240930_547MB",
+        "openai_whisper-large-v3-v20240930_626MB",
+        "distil-whisper_distil-large-v3_594MB"
+    ]
+    public static let defaultModel = "openai_whisper-medium"
+    public static let fastModel = "openai_whisper-small"
+
+    public static func missingRequiredModels(in runtimeRoot: URL) -> [String] {
+        requiredBundledModels.filter { !isModelUsable(runtimeRoot.appendingPathComponent("whisperkit/models/\($0)", isDirectory: true)) }
+    }
+
+    public static func isModelUsable(_ modelDirectory: URL) -> Bool {
+        let requiredEntries = [
+            "AudioEncoder.mlmodelc",
+            "MelSpectrogram.mlmodelc",
+            "TextDecoder.mlmodelc",
+            "config.json",
+            "generation_config.json"
+        ]
+        return requiredEntries.allSatisfy { FileManager.default.fileExists(atPath: modelDirectory.appendingPathComponent($0).path) }
     }
 }
 
@@ -79,7 +107,7 @@ public struct MediaRuntimeSupervisor: MediaRuntimeSupervising, Sendable {
         let executableURL = installation.executableURL
         let available: Bool
         if id == "whisperkit", executableURL == nil {
-            available = FileManager.default.fileExists(atPath: installation.rootDirectory.appendingPathComponent(id, isDirectory: true).path)
+            available = WhisperKitModelInventory.missingRequiredModels(in: installation.rootDirectory).isEmpty
         } else if let executableURL {
             available = FileManager.default.isExecutableFile(atPath: executableURL.path) || FileManager.default.fileExists(atPath: executableURL.path)
         } else {
@@ -93,8 +121,18 @@ public struct MediaRuntimeSupervisor: MediaRuntimeSupervising, Sendable {
             source: source,
             checksum: checksum,
             isAvailable: available,
-            diagnostics: available ? nil : "App-managed media runtime component \(id) is not ready. Checked bundled runtime and bootstrap directory under \(sidecarsDirectory.path)."
+            diagnostics: available ? nil : missingComponentDiagnostics(id: id, root: installation.rootDirectory)
         )
+    }
+
+    private func missingComponentDiagnostics(id: String, root: URL) -> String {
+        if id == "whisperkit" {
+            let missingModels = WhisperKitModelInventory.missingRequiredModels(in: root)
+            if !missingModels.isEmpty {
+                return "WhisperKit bundled baseline is incomplete. Missing required bundled model(s): \(missingModels.joined(separator: ", ")). Required baseline: small + medium."
+            }
+        }
+        return "App-managed media runtime component \(id) is not ready. Checked bundled runtime and bootstrap directory under \(sidecarsDirectory.path)."
     }
 
     private func resolveComponent(id: String, defaultExecutable: String?) -> (rootDirectory: URL, source: String, manifest: MediaRuntimeDescriptor?, executableURL: URL?) {
