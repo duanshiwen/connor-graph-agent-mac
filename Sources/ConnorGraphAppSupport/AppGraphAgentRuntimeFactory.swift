@@ -199,6 +199,13 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                 return AnyAgentModelProvider(modelID: "governed-claude-sidecar-requires-session-manager") { _ in
                     throw AppGraphAgentRuntimeFactoryError.sidecarRequiresSessionManager
                 }
+            case .openAIResponses:
+                guard let config = try openAIResponsesConfigWithOverride(connectionID: effectiveConnectionID, model: effectiveModel, baseURLOverride: effectiveBaseURL, thinkingLevel: effectiveThinkingLevel) else {
+                    return AnyAgentModelProvider(modelID: "missing-openai-responses-config") { _ in
+                        throw OpenAICompatibleProviderError.missingAPIKey
+                    }
+                }
+                return AnyAgentModelProvider(OpenAIResponsesProvider(config: config))
             case .anthropicMessages:
                 guard let config = try anthropicCompatibleConfigWithOverride(connectionID: effectiveConnectionID, model: effectiveModel, baseURLOverride: effectiveBaseURL, thinkingLevel: effectiveThinkingLevel) else {
                     return AnyAgentModelProvider(modelID: "missing-anthropic-compatible-config") { _ in
@@ -235,6 +242,20 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         } catch {
             return AnyAgentModelProvider(modelID: "settings-error") { _ in throw error }
         }
+    }
+
+    private func openAIResponsesConfigWithOverride(
+        connectionID: String,
+        model: String,
+        baseURLOverride: String?,
+        thinkingLevel: AppLLMThinkingLevel
+    ) throws -> OpenAIResponsesConfig? {
+        try settingsRepository.openAIResponsesConfig(
+            connectionID: connectionID,
+            modelOverride: model,
+            baseURLOverride: baseURLOverride,
+            thinkingLevelOverride: thinkingLevel
+        )
     }
 
     private func openAICompatibleConfigWithOverride(
@@ -278,6 +299,13 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                 return AnyLLMProvider { _, _ in
                     throw AppGraphAgentRuntimeFactoryError.sidecarRequiresSessionManager
                 }
+            case .openAIResponses:
+                guard let config = try settingsRepository.openAIResponsesConfig(connectionID: connection.id) else {
+                    return AnyLLMProvider { _, _ in
+                        throw OpenAICompatibleProviderError.missingAPIKey
+                    }
+                }
+                return AnyLLMProvider(OpenAIResponsesProvider(config: config))
             case .anthropicMessages:
                 guard let config = try settingsRepository.anthropicCompatibleConfig(connectionID: connection.id) else {
                     return AnyLLMProvider { _, _ in

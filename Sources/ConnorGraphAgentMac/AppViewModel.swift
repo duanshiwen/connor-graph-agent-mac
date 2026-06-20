@@ -339,7 +339,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var llmConnectionConfigs: [AppLLMConnectionConfig] = AppLLMSettings.default.connections
     @Published var llmDefaultConnectionID: String = AppLLMSettings.default.defaultConnectionID
     @Published var llmConnectionName: String = AppLLMSettings.default.defaultConnection.name
-    @Published var llmProviderMode: AppLLMProviderMode = .openAICompatible
+    @Published var llmProviderMode: AppLLMProviderMode = AppLLMSettings.default.providerMode
     @Published var llmBaseURLString: String = AppLLMSettings.default.baseURLString
     @Published var llmModel: String = AppLLMSettings.default.model
     @Published var llmSelectedModel: String = AppLLMSettings.default.effectiveModel
