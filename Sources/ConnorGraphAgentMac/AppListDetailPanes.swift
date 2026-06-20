@@ -2429,8 +2429,10 @@ private struct SessionCardAttentionStyle {
         }
 
         dotColor = level == .unread ? color : nil
-        backgroundColor = color.opacity(0.10)
-        borderColor = color.opacity(isSelected ? 0.22 : 0.14)
+        backgroundColor = level == .unread
+            ? (isSelected ? Color.accentColor.opacity(0.14) : Color(nsColor: .windowBackgroundColor))
+            : color.opacity(0.10)
+        borderColor = level == .unread ? Color.clear : color.opacity(isSelected ? 0.22 : 0.14)
         borderWidth = level >= .emphasized ? 1 : 0
         titleWeight = level >= .actionable ? .bold : .semibold
     }
@@ -2725,7 +2727,7 @@ struct CraftSessionRow: View {
     }
 
     private var shouldPulseAttention: Bool {
-        attentionLevel > .none
+        attentionLevel >= .emphasized
     }
 
     private func updateAttentionPulseAnimation() {
