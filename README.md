@@ -192,6 +192,7 @@ Session Attachment Store + follow-up prompt
 - `BrowserMediaTranscriptionDomain.swift`：job、state machine、runtime snapshot、progress、artifact refs。
 - `MediaTranscriptionJobStore.swift`：`sessions/{sessionID}/data/media-jobs/{jobID}/` 下的 durable manifest、event log、progress、diagnostics 与 checkpoints。
 - `MediaRuntimeSupervisor.swift`：Python / yt-dlp / FFmpeg / WhisperKit sidecar health snapshot；真实 runtime 必须通过 checksum、license manifest 与 Application Support sidecar 目录治理。
+- `WhisperKitMediaLocalTranscriber.swift`：默认本地 ASR provider，使用 Argmax `WhisperKit` Swift SDK 加载 app-managed `openai_whisper-medium`（balanced/default）模型；媒体转写不使用 macOS Speech 作为默认路径。
 - `MediaTranscriptionTaskHandler.swift`：复用现有 `TaskTargetRunner` 的 `media.transcription.run` 分支；不新增独立 queue。
 - `TaskManagementUIPresentation.swift`：浏览器媒体转写属于可恢复后台任务，不进入系统定时任务列表；用户在会话 background task surface 中查看进度。
 - `MediaTranscriptionAttachmentWriter.swift`：将 transcript/segments/diagnostics 写入 Session Attachment Store derivatives；完成后的 follow-up message 必须携带 transcript attachment ref，让模型通过附件上下文读取全文，而不是只在 prompt 中写附件 ID。
