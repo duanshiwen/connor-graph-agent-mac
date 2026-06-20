@@ -23,11 +23,11 @@ struct TaskSchedulerServiceTests {
         let now = Date(timeIntervalSince1970: 1_000)
         let lastFinishedAt = Date(timeIntervalSince1970: 100)
         var interval = ConnorTaskDefinition(
-            id: "system.rss.check-every-30-minutes",
-            name: "RSS",
+            id: "system.rss.source.feed-a.refresh",
+            name: "RSS：Feed A",
             origin: .system,
             trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 600, recurrence: .interval),
-            target: .sourceRuntimeRefresh(sourceID: "rss"),
+            target: ConnorTaskTarget(targetKind: "source.runtime", targetID: "rss", operationName: "refresh", parameters: ["sourceInstanceID": "feed-a"]),
             lifecycle: ConnorTaskLifecycle(
                 status: .active,
                 nextRunAt: Date(timeIntervalSince1970: 5_000),
@@ -138,11 +138,11 @@ struct TaskSchedulerServiceTests {
         let scheduler = TaskSchedulerService(calendar: Calendar(identifier: .gregorian))
         let start = Date(timeIntervalSince1970: 1_000)
         let interval = ConnorTaskDefinition(
-            id: "system.rss.check-every-30-minutes",
-            name: "RSS",
+            id: "system.rss.source.feed-a.refresh",
+            name: "RSS：Feed A",
             origin: .system,
             trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 1_800, recurrence: .interval),
-            target: .sourceRuntimeRefresh(sourceID: "rss"),
+            target: ConnorTaskTarget(targetKind: "source.runtime", targetID: "rss", operationName: "refresh", parameters: ["sourceInstanceID": "feed-a"]),
             lifecycle: ConnorTaskLifecycle(status: .active),
             metadata: .protectedSystem
         )

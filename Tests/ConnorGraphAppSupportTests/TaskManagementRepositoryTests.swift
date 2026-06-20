@@ -14,7 +14,7 @@ struct TaskManagementRepositoryTests {
 
         #expect(tasks.contains { $0.id == "system.mail.check-every-10-minutes" })
         #expect(tasks.contains { $0.id == "system.calendar.check-every-10-minutes" })
-        #expect(tasks.contains { $0.id == "system.rss.check-every-30-minutes" })
+        #expect(tasks.contains { $0.target.targetID == "rss" } == false)
         #expect(FileManager.default.fileExists(atPath: repository.taskDefinitionsURL.path))
         #expect(repository.taskDefinitionsURL.path.contains("/tasks/task-definitions.json"))
     }
@@ -32,7 +32,7 @@ struct TaskManagementRepositoryTests {
         let reloadedMail = try #require(tasks.first { $0.id == mail.id })
 
         #expect(tasks.contains { $0.id == "system.calendar.check-every-10-minutes" })
-        #expect(tasks.contains { $0.id == "system.rss.check-every-30-minutes" })
+        #expect(tasks.contains { $0.target.targetID == "rss" } == false)
         #expect(reloadedMail.lifecycle.status == .stopped)
         #expect(reloadedMail.target == ConnorTaskTarget.sourceRuntimeRefresh(sourceID: "mail"))
         #expect(FileManager.default.fileExists(atPath: repository.taskEventLogURL.path))
@@ -88,12 +88,12 @@ struct TaskManagementRepositoryTests {
         let repository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
         let record = ConnorTaskRunRecord(
             id: "run-1",
-            taskID: "system.rss.check-every-30-minutes",
+            taskID: "system.rss.source.feed-a.refresh",
             status: .succeeded,
             startedAt: Date(timeIntervalSince1970: 20),
             finishedAt: Date(timeIntervalSince1970: 21),
             outputSummary: "external runtime completed",
-            externalRunID: "rss-run-1"
+            externalRunID: "rss-feed-a-run-1"
         )
 
         try repository.appendRunRecord(record)
