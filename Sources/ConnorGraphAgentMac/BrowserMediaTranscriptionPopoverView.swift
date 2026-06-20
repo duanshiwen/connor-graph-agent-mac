@@ -23,6 +23,15 @@ struct BrowserMediaTranscriptionPopoverView: View {
         runningTask == nil && !isScanning && !selectedSourceIDs.isEmpty && !sourceOptions.isEmpty
     }
 
+    private var mediaSourceListHeight: CGFloat {
+        guard !sourceOptions.isEmpty else { return 0 }
+        let rowHeight: CGFloat = 74
+        let spacing: CGFloat = 6
+        let visibleRows = min(sourceOptions.count, 3)
+        let contentHeight = CGFloat(visibleRows) * rowHeight + CGFloat(max(0, visibleRows - 1)) * spacing
+        return min(240, max(88, contentHeight))
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
@@ -157,8 +166,10 @@ struct BrowserMediaTranscriptionPopoverView: View {
                         )
                     }
                 }
+                .padding(.vertical, 1)
             }
-            .frame(maxHeight: 220)
+            .frame(height: mediaSourceListHeight)
+            .clipped()
         }
     }
 
