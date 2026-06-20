@@ -546,6 +546,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var hasActivatedRuntimeSettingsSideEffects = false
     private var locationCoordinator: UserLocationCoordinator?
     private var taskSchedulerTimer: Timer?
+    private var mediaRuntimeBootstrapTask: Task<Void, Never>?
     private lazy var speechTranscriptionCoordinator = SessionSpeechTranscriptionCoordinator(
         transcriber: SessionSpeechTranscriptionController()
     )
@@ -1431,6 +1432,7 @@ final class AppViewModel: NSObject, ObservableObject {
         reloadSchemaHealthReport()
         reloadGraphExtractionTraces()
         reloadMemoryChangeLog()
+        Task { await ensureWhisperKitBaselineModelsOnLaunch() }
     }
 
     private func apply(snapshot: GraphStoreSnapshot) {
@@ -3966,6 +3968,52 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private static let mediaTranscriptionBackgroundTaskKind = "media_transcription"
+    private static let mediaRuntimeBootstrapBackgroundTaskKind = "media_runtime_bootstrap"
+
+    private func ensureWhisperKitBaselineModelsOnLaunch() async {
+        guard mediaRuntimeBootstrapTask == nil else { return }
+        guard let storagePaths else { return }
+        let report = await MediaRuntimeSupervisor(sidecarsDirectory: storagePaths.sidecarsDirectory).healthCheck()
+        guard !report.snapshot.whisperKit.isAvailable else { return }
+        let sessionID = selectedChatSessionID ?? activeChatSession.id
+        let task = enqueueBackgroundTask(
+            sessionID: sessionID,
+            title: "准备媒体转写模型",
+            detail: "正在检查并下载 Connor 内置 WhisperKit small + medium 模型。",
+            kind: Self.mediaRuntimeBootstrapBackgroundTaskKind
+        )
+        isBackgroundTasksPresented = true
+        mediaRuntimeBootstrapTask = Task { [weak self] in
+            guard let self else { return }
+            let service = WhisperKitModelBootstrapService(sidecarsDirectory: storagePaths.sidecarsDirectory)
+            do {
+                updateBackgroundTask(sessionID: sessionID, taskID: task.id, status: .running, detail: "正在准备 WhisperKit small + medium 基线模型。")
+                _ = try await service.ensureRequiredBundledModels { [weak self] progress in
+                    Task { @MainActor in
+                        guard let self else { return }
+                        let percent = progress.totalBytes > 0 ? Int(progress.fractionCompleted * 100) : 0
+                        let suffix = progress.totalBytes > 0 ? "（\(percent)%）" : ""
+                        self.updateBackgroundTask(
+                            sessionID: sessionID,
+                            taskID: task.id,
+                            status: .running,
+                            detail: "\(progress.message)\(suffix)"
+                        )
+                    }
+                }
+                await MainActor.run {
+                    self.updateBackgroundTask(sessionID: sessionID, taskID: task.id, status: .succeeded, detail: "WhisperKit small + medium 模型已就绪，媒体转写可离线使用。")
+                    self.showAttachmentToast(title: "媒体转写模型已就绪", message: "Connor 已准备好 WhisperKit small + medium 基线模型。", systemImage: "checkmark.seal.fill")
+                    self.mediaRuntimeBootstrapTask = nil
+                }
+            } catch {
+                await MainActor.run {
+                    self.updateBackgroundTask(sessionID: sessionID, taskID: task.id, status: .failed, detail: "模型准备失败", errorMessage: "模型下载未完成，Connor 会在下次启动或重试时继续断点续传。")
+                    self.mediaRuntimeBootstrapTask = nil
+                }
+            }
+        }
+    }
 
     func backgroundTasks(for sessionID: String?) -> [AppSessionBackgroundTask] {
         guard let sessionID else { return [] }

@@ -1,8 +1,22 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "product": "Connor built-in media runtime",
   "distribution": "app-managed",
-  "consumerFacingPolicy": "Connor prepares and verifies media transcription tools inside the app. Users should not be asked to install Python, yt-dlp, ffmpeg, or WhisperKit manually.",
+  "consumerFacingPolicy": "Connor prepares and verifies media transcription tools and baseline WhisperKit models inside the app. Users should not be asked to install Python, yt-dlp, ffmpeg, WhisperKit, or baseline ASR models manually.",
+  "modelPolicy": {
+    "defaultModel": "openai_whisper-medium",
+    "fastModel": "openai_whisper-small",
+    "requiredBundledModels": [
+      "openai_whisper-small",
+      "openai_whisper-medium"
+    ],
+    "optionalHighAccuracyModels": [
+      "openai_whisper-large-v3-v20240930_547MB",
+      "openai_whisper-large-v3-v20240930_626MB",
+      "distil-whisper_distil-large-v3_594MB"
+    ],
+    "notes": "Consumer-grade offline media transcription requires both small and medium WhisperKit CoreML models in the app-managed runtime. Large/distilled-large models remain manual high-accuracy opt-in downloads."
+  },
   "components": [
     {
       "id": "python",
@@ -30,6 +44,12 @@
       "version": "app-managed",
       "source": "bundled-or-bootstrapped",
       "executableRelativePath": null,
+      "requiredModels": [
+        "openai_whisper-small",
+        "openai_whisper-medium"
+      ],
+      "defaultModel": "openai_whisper-medium",
+      "fastModel": "openai_whisper-small",
       "license": "MIT"
     }
   ]
