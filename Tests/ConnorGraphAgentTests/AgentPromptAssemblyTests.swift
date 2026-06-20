@@ -11,6 +11,7 @@ import ConnorGraphAgent
     #expect(assembly.instruction.text.contains("general-purpose local AI assistant"))
     #expect(assembly.instruction.text.contains("Graph memory is background evidence"))
     #expect(assembly.instruction.text.contains("Follow the latest user request"))
+    #expect(assembly.instruction.text.contains("get_current_time"))
     #expect(!assembly.instruction.text.contains("specialized AI assistant for knowledge graph operations"))
 }
 
@@ -94,7 +95,7 @@ import ConnorGraphAgent
     )
     let assembly = AgentPromptAssembler().assemble(request: request, memoryContract: nil)
 
-    let transformed = try await AgentPromptBudgetTransformer(maxEstimatedTokens: 700).transform(
+    let transformed = try await AgentPromptBudgetTransformer(maxEstimatedTokens: 850).transform(
         assembly,
         projectionMode: .structuredContextMessages
     )
