@@ -120,9 +120,9 @@ final class SessionSpeechTranscriptionCoordinator {
         setProvisionalTranscript: ((String, String?) -> Void)? = nil
     ) -> AppSessionBackgroundTask? {
         guard let selectedSessionID else { return nil }
-        if isRunning(sessionID: selectedSessionID) { return nil }
+        if status.isRecording, status.runningSessionID == selectedSessionID { return nil }
         if status.isRunning {
-            _ = stop(reason: .leavingSession)
+            _ = cancelCurrentRun(detail: "新的语音输入已开始，上一轮已取消")
         }
         return start(
             sessionID: selectedSessionID,
@@ -214,6 +214,9 @@ final class SessionSpeechTranscriptionCoordinator {
             status = .idle
             return nil
         }
+        if status.isFinalizing {
+            return task
+        }
 
         task.detail = "正在整理最终识别结果"
         task.updatedAt = Date()
@@ -221,6 +224,22 @@ final class SessionSpeechTranscriptionCoordinator {
         status = .finalizing(sessionID: sessionID, taskID: task.id)
         scheduleFinalizationTimeout(sessionID: sessionID, runID: activeRunID)
         transcriber.stop(reason: reason)
+        return task
+    }
+
+    @discardableResult
+    func cancelCurrentRun(detail: String = "语音输入已取消") -> AppSessionBackgroundTask? {
+        guard var task = activeTask else {
+            status = .idle
+            return nil
+        }
+        transcriber.stop(reason: .appLifecycle)
+        task.status = .interrupted
+        task.detail = detail
+        task.updatedAt = Date()
+        setProvisionalTranscript?(task.sessionID, nil)
+        reset()
+        onTaskUpdate?(task)
         return task
     }
 

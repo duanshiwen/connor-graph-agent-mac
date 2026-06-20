@@ -104,9 +104,11 @@ struct SessionSpeechTranscriptionCoordinatorTests {
     @Test func finalizationTimeoutKeepsPartialWhenFinalDoesNotArrive() async throws {
         var draftBySession: [String: String] = ["session-1": ""]
         var updatedTasks: [AppSessionBackgroundTask] = []
+        var statuses: [SessionSpeechTranscriptionStatus] = []
         let transcriber = FakeSessionSpeechTranscriber(emitFinalOnStop: false)
         let coordinator = SessionSpeechTranscriptionCoordinator(transcriber: transcriber, finalizationTimeoutNanoseconds: 1_000_000)
         coordinator.onTaskUpdate = { updatedTasks.append($0) }
+        coordinator.onStatusChange = { statuses.append($0) }
         _ = coordinator.beginHoldToTalk(
             selectedSessionID: "session-1",
             currentDraft: "",
@@ -121,8 +123,55 @@ struct SessionSpeechTranscriptionCoordinatorTests {
 
         #expect(draftBySession["session-1"] == "可用的 partial")
         #expect(coordinator.status == .idle)
+        #expect(statuses.last == .idle)
         #expect(updatedTasks.last?.status == .succeeded)
         #expect(updatedTasks.last?.detail == "最终识别超时，已使用实时识别结果")
+    }
+
+    @Test func beginNewRecognitionCancelsPreviousFinalizingRun() {
+        var updatedTasks: [AppSessionBackgroundTask] = []
+        let transcriber = FakeSessionSpeechTranscriber(emitFinalOnStop: false)
+        let coordinator = SessionSpeechTranscriptionCoordinator(transcriber: transcriber)
+        coordinator.onTaskUpdate = { updatedTasks.append($0) }
+        _ = coordinator.beginHoldToTalk(selectedSessionID: "session-1", currentDraft: "", setDraft: { _, _ in })
+        transcriber.emitPartial("上一轮")
+        _ = coordinator.finishHoldToTalk()
+
+        let nextTask = coordinator.beginHoldToTalk(selectedSessionID: "session-1", currentDraft: "", setDraft: { _, _ in })
+
+        #expect(updatedTasks.last?.status == .interrupted)
+        #expect(updatedTasks.last?.detail == "新的语音输入已开始，上一轮已取消")
+        #expect(nextTask?.status == .running)
+        #expect(coordinator.status.isRecording)
+        #expect(transcriber.stopReasons == [.manual, .appLifecycle])
+    }
+
+    @Test func cancelCurrentRunInterruptsFinalizingAndClearsState() {
+        var updatedTasks: [AppSessionBackgroundTask] = []
+        let transcriber = FakeSessionSpeechTranscriber(emitFinalOnStop: false)
+        let coordinator = SessionSpeechTranscriptionCoordinator(transcriber: transcriber)
+        coordinator.onTaskUpdate = { updatedTasks.append($0) }
+        _ = coordinator.beginHoldToTalk(selectedSessionID: "session-1", currentDraft: "", setDraft: { _, _ in })
+        _ = coordinator.finishHoldToTalk()
+
+        let cancelled = coordinator.cancelCurrentRun(detail: "发送消息，已取消未完成的语音整理")
+
+        #expect(cancelled?.status == .interrupted)
+        #expect(updatedTasks.last?.detail == "发送消息，已取消未完成的语音整理")
+        #expect(coordinator.status == .idle)
+        #expect(transcriber.stopReasons == [.manual, .appLifecycle])
+    }
+
+    @Test func repeatedFinishWhileFinalizingDoesNotRestartStopOrTimeout() {
+        let transcriber = FakeSessionSpeechTranscriber(emitFinalOnStop: false)
+        let coordinator = SessionSpeechTranscriptionCoordinator(transcriber: transcriber)
+        _ = coordinator.beginHoldToTalk(selectedSessionID: "session-1", currentDraft: "", setDraft: { _, _ in })
+        let first = coordinator.finishHoldToTalk()
+        let second = coordinator.finishHoldToTalk()
+
+        #expect(first?.id == second?.id)
+        #expect(coordinator.status.isFinalizing)
+        #expect(transcriber.stopReasons == [.manual])
     }
 
     @Test func finalFailurePathKeepsPartialWhenFinalTextIsEmpty() {
