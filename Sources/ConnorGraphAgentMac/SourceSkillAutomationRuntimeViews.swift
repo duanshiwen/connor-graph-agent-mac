@@ -938,12 +938,13 @@ private struct TaskRuntimeCardActionButton: View {
     var body: some View {
         Button(role: role, action: action) {
             Label(title, systemImage: systemImage)
-                .font(.caption.weight(.semibold))
-                .frame(minWidth: 72, minHeight: 30)
+                .font(.caption2.weight(.semibold))
+                .labelStyle(.titleAndIcon)
+                .padding(.horizontal, 4)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.bordered)
-        .controlSize(.regular)
+        .controlSize(.small)
         .help(title)
     }
 }

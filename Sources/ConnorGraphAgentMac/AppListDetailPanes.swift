@@ -2176,12 +2176,13 @@ private struct TaskAutomationActionButton: View {
     var body: some View {
         Button(role: role, action: action) {
             Label(title, systemImage: systemImage)
-                .font(AgentChatTypography.metaEmphasis)
-                .frame(minWidth: 82, minHeight: 32)
+                .font(AgentChatTypography.microEmphasis)
+                .labelStyle(.titleAndIcon)
+                .padding(.horizontal, 4)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.bordered)
-        .controlSize(.regular)
+        .controlSize(.small)
         .help(title)
     }
 }
