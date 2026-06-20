@@ -32,7 +32,7 @@ public enum SessionAttentionLevel: Int, Codable, Sendable, Comparable, CaseItera
         case .unread: "只记录未读,不改变卡片强调样式。"
         case .emphasized: "显示未读,并突出聊天列表卡片。"
         case .actionable: "发送 macOS 通知,突出聊天列表,并计入 Dock badge。"
-        case .interruptive: "用于失败、阻塞、需要立即处理的高优先级提醒。"
+        case .interruptive: "适合需要你尽快处理的会话消息，例如确认请求、权限审批、补充资料、任务失败或流程阻塞。"
         }
     }
 }
