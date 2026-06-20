@@ -233,7 +233,7 @@ struct SpeechInputHoldToTalkButton: View {
         case .failed:
             "语音失败"
         case .idle:
-            "按住（Option）说话"
+            "按住 ⌥ 说话"
         }
     }
 
