@@ -24,19 +24,18 @@ enum SessionSpeechTranscriptionStopReason: Equatable, Sendable {
 enum SessionSpeechTranscriptionStatus: Equatable, Sendable {
     case idle
     case recording(sessionID: String, taskID: String)
-    case finalizing(sessionID: String, taskID: String)
     case failed(message: String)
 
     var runningSessionID: String? {
         switch self {
-        case .recording(let sessionID, _), .finalizing(let sessionID, _): sessionID
+        case .recording(let sessionID, _): sessionID
         case .idle, .failed: nil
         }
     }
 
     var runningTaskID: String? {
         switch self {
-        case .recording(_, let taskID), .finalizing(_, let taskID): taskID
+        case .recording(_, let taskID): taskID
         case .idle, .failed: nil
         }
     }
@@ -47,11 +46,6 @@ enum SessionSpeechTranscriptionStatus: Equatable, Sendable {
 
     var isRecording: Bool {
         guard case .recording = self else { return false }
-        return true
-    }
-
-    var isFinalizing: Bool {
-        guard case .finalizing = self else { return false }
         return true
     }
 }
