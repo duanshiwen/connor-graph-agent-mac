@@ -118,43 +118,6 @@ struct LLMConnectionSetupTests {
         #expect(!store.values.values.contains(where: { $0.contains("mimo-secret") }))
     }
 
-    @Test func claudeSidecarRejectsAllowAll() async throws {
-        let repository = AppLLMSettingsRepository(settingsStore: MemoryLLMSettingsStore(), credentialStore: MemoryCredentialStore())
-        let service = AppLLMConnectionSetupService(settingsRepository: repository)
-
-        await #expect(throws: AppLLMConnectionSetupError.unsafePermissionMode) {
-            try await service.setupConnection(AppLLMConnectionSetupInput(
-                kind: .claudeSidecar,
-                name: "Claude",
-                model: "claude-sdk-default",
-                sidecarExecutablePath: "/bin/echo",
-                sidecarPermissionMode: .allowAll
-            ))
-        }
-    }
-
-    @Test func claudeSidecarSuccessSavesOAuthToken() async throws {
-        let store = MemoryLLMSettingsStore()
-        let credentials = MemoryCredentialStore()
-        let repository = AppLLMSettingsRepository(settingsStore: store, credentialStore: credentials)
-        let service = AppLLMConnectionSetupService(
-            settingsRepository: repository,
-            sidecarValidator: { connection in LLMProviderHealthCheckResult(ok: true, model: connection.effectiveModel, message: "OK") }
-        )
-
-        let result = try await service.setupConnection(AppLLMConnectionSetupInput(
-            id: "claude-test",
-            kind: .claudeSidecar,
-            name: "Claude",
-            model: "claude-sdk-default",
-            oauthTokens: AppLLMOAuthTokens(accessToken: "claude-token"),
-            sidecarExecutablePath: "/bin/echo",
-            sidecarPermissionMode: .readOnly
-        ))
-
-        #expect(result.connection.connectionKind == .claudeSidecar)
-        #expect(try repository.oauthTokens(for: "claude-test")?.accessToken == "claude-token")
-    }
 
     @Test func codexRequiresIDTokenAndSavesDerivedAPIKey() async throws {
         let credentials = MemoryCredentialStore()
@@ -371,7 +334,7 @@ struct LLMConnectionSetupTests {
         ))
 
         #expect(result.connection.connectionKind == .anthropicCompatible)
-        #expect(result.connection.providerMode == .openAICompatible)
+        #expect(result.connection.providerMode == .anthropicMessages)
         #expect(result.connection.baseURLString == "https://api.anthropic.com")
         #expect(result.connection.hasAPIKey)
         #expect(try repository.apiKey(for: "anthropic-test") == "secret")

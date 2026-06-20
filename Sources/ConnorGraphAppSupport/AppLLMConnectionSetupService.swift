@@ -294,7 +294,7 @@ public struct AppLLMConnectionSetupService: Sendable {
         let connection = AppLLMConnectionConfig(
             id: normalizedID(input.id, fallbackPrefix: "anthropic-compatible"),
             name: name,
-            providerMode: .openAICompatible,
+            providerMode: .anthropicMessages,
             connectionKind: .anthropicCompatible,
             baseURLString: baseURLString,
             model: model,

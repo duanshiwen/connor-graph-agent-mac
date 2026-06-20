@@ -846,22 +846,22 @@ struct AIConnectionOnboardingOption: Identifiable, Equatable {
 
     static let all: [AIConnectionOnboardingOption] = [
         AIConnectionOnboardingOption(
-            id: "claude-pro-max",
-            title: "Claude Pro / Max",
-            subtitle: "已经有 Claude Pro / Max？用它来驱动康纳同学。",
-            systemImage: "asterisk",
+            id: "anthropic-claude-api",
+            title: "Anthropic / Claude API",
+            subtitle: "使用 Anthropic API Key 通过 Connor 原生 Messages 管线驱动康纳同学。",
+            systemImage: "sparkles.rectangle.stack",
             tint: .orange,
-            providerMode: .governedClaudeSidecar,
-            connectionName: "Claude Pro / Max",
-            baseURLString: "",
-            model: "claude-sdk-default",
-            selectedModel: "claude-sdk-default",
-            setupTitle: "连接 Claude",
-            setupSubtitle: "使用 Claude Pro / Max 订阅驱动康纳同学。",
-            setupInstruction: "点击下方按钮打开 Claude 登录页。完成登录后，复制浏览器页面显示的授权码并粘贴到这里。",
-            loginButtonTitle: "使用 Claude 登录",
-            authURLString: "https://claude.ai/login",
-            authenticationKind: .authorizationCode
+            providerMode: .anthropicMessages,
+            connectionName: "Anthropic / Claude",
+            baseURLString: "https://api.anthropic.com/v1",
+            model: "claude-sonnet-4-5",
+            selectedModel: "claude-sonnet-4-5",
+            setupTitle: "连接 Anthropic / Claude",
+            setupSubtitle: "使用 API Key 连接 Claude；不再使用 Claude SDK Sidecar。",
+            setupInstruction: "填写 Anthropic API Key、Base URL 和模型名称。康纳同学会通过原生 Swift Messages API 管线运行模型。",
+            loginButtonTitle: "验证并添加连接",
+            authURLString: "https://console.anthropic.com/settings/keys",
+            authenticationKind: .direct
         ),
         AIConnectionOnboardingOption(
             id: "codex-chatgpt-plus",
@@ -1656,7 +1656,7 @@ struct AIConnectionSetupView: View {
         Task {
             do {
                 let usesProviderPreset = option.id == "other-provider" || option.id == "china-provider"
-                let connectionKind: AppLLMConnectionKind = usesProviderPreset && customProtocol == .anthropicCompatible ? .anthropicCompatible : .openAICompatible
+                let connectionKind: AppLLMConnectionKind = option.providerMode == .anthropicMessages || (usesProviderPreset && customProtocol == .anthropicCompatible) ? .anthropicCompatible : .openAICompatible
                 let submittedModelList = effectiveModelListForSubmit()
                 let submittedSelectedModel = selectedModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? submittedModelList : selectedModel
                 let input = AppLLMConnectionSetupInput(
