@@ -4,36 +4,14 @@ import Testing
 
 @Suite("Project working directory resolver")
 struct AppProjectWorkingDirectoryResolverTests {
-    @Test("runtime workspace path takes priority over legacy sidecar path")
-    func runtimeWorkspacePathTakesPriorityOverLegacySidecarPath() throws {
+    @Test("runtime workspace path takes priority over process fallback")
+    func runtimeWorkspacePathTakesPriorityOverProcessFallback() throws {
         let runtime = AgentRuntimeSettings(workspace: AgentRuntimeWorkspaceSettings(defaultWorkingDirectoryPath: "/tmp/runtime-project"))
-        let llm = AppLLMSettings(
-            baseURLString: AppLLMSettings.default.baseURLString,
-            model: AppLLMSettings.default.model,
-            hasAPIKey: false,
-            providerMode: .governedClaudeSidecar,
-            sidecarWorkingDirectoryPath: "/tmp/legacy-sidecar"
-        )
+        let llm = AppLLMSettings.default
         let resolved = AppProjectWorkingDirectoryResolver.resolve(runtimeSettings: runtime, llmSettings: llm, processCurrentDirectoryPath: "/tmp/process")
 
         #expect(resolved.url.path == "/tmp/runtime-project")
         #expect(resolved.source == .runtimeSettings)
-    }
-
-    @Test("legacy sidecar path is compatibility fallback")
-    func legacySidecarPathIsCompatibilityFallback() throws {
-        let runtime = AgentRuntimeSettings.default
-        let llm = AppLLMSettings(
-            baseURLString: AppLLMSettings.default.baseURLString,
-            model: AppLLMSettings.default.model,
-            hasAPIKey: false,
-            providerMode: .governedClaudeSidecar,
-            sidecarWorkingDirectoryPath: "/tmp/legacy-sidecar"
-        )
-        let resolved = AppProjectWorkingDirectoryResolver.resolve(runtimeSettings: runtime, llmSettings: llm, processCurrentDirectoryPath: "/tmp/process")
-
-        #expect(resolved.url.path == "/tmp/legacy-sidecar")
-        #expect(resolved.source == .legacySidecarSettings)
     }
 
     @Test("process current directory is final fallback")

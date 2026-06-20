@@ -52,7 +52,7 @@ struct WorkspaceRootsSettingsContent: View {
                 .buttonStyle(.bordered)
                 .disabled(viewModel.workspaceRootPathInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-            Text("保存到当前 Session Capsule。Native local tools 可访问所有 roots；Claude Sidecar cwd 使用主目录。为空时兼容旧 Sidecar 目录，再回退到进程 cwd。")
+            Text("保存到当前 Session Capsule。Native local tools 可访问所有 roots；为空时回退到进程 cwd。")
                 .font(SettingsListTypography.rowCaption)
                 .foregroundStyle(.secondary)
         }
@@ -65,7 +65,7 @@ struct WorkspaceRootsSettingsContent: View {
         }
         let fallback = viewModel.defaultWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
         if !fallback.isEmpty { return "默认项目目录：\(fallback)" }
-        return "尚未设置；将使用旧 Sidecar 工作目录或进程 cwd。"
+        return "尚未设置；将使用进程 cwd。"
     }
 
     private func chooseDirectories() {

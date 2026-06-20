@@ -3,7 +3,6 @@ import Foundation
 public enum AppProjectWorkingDirectorySource: String, Codable, Sendable, Equatable {
     case session
     case runtimeSettings
-    case legacySidecarSettings
     case processCurrentDirectory
 }
 
@@ -108,18 +107,6 @@ public enum AppProjectWorkingDirectoryResolver {
                 primary: ResolvedProjectWorkingDirectory(url: runtimePrimary.url, source: .runtimeSettings),
                 roots: normalizePrimary(in: runtimeRoots, primaryID: runtimePrimary.id)
             )
-        }
-
-        if let url = directoryURL(from: llmSettings.sidecarWorkingDirectoryPath) {
-            let root = ResolvedProjectWorkspaceRoot(
-                id: "legacy-sidecar-primary",
-                displayName: url.lastPathComponent,
-                url: url,
-                role: "legacy-sidecar",
-                isPrimary: true,
-                source: .legacySidecarSettings
-            )
-            return ResolvedProjectWorkspace(primary: ResolvedProjectWorkingDirectory(url: url, source: .legacySidecarSettings), roots: [root])
         }
 
         let processURL = URL(fileURLWithPath: processCurrentDirectoryPath, isDirectory: true)

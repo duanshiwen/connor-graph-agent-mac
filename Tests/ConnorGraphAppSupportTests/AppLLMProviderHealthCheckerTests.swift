@@ -26,7 +26,7 @@ private final class HealthCheckFakeSettingsStore: LLMSettingsStore, @unchecked S
     func set(_ value: String, forKey key: String) { values[key] = value }
 }
 
-@Test func healthCheckerReportsDefaultOpenAICompatibleProviderNeedsConfiguration() async throws {
+@Test func healthCheckerReportsDefaultOpenAIResponsesProviderNeedsConfiguration() async throws {
     let settingsRepository = AppLLMSettingsRepository(
         settingsStore: HealthCheckFakeSettingsStore(),
         credentialStore: HealthCheckFakeCredentialStore()
@@ -65,10 +65,13 @@ private final class HealthCheckFakeSettingsStore: LLMSettingsStore, @unchecked S
         settings: AppLLMSettings(baseURLString: "https://example.com/v1", model: "model-a", hasAPIKey: false, providerMode: .openAICompatible),
         apiKey: "secret-key"
     )
-    let checker = AppLLMProviderHealthChecker(settingsRepository: settingsRepository) { config in
-        #expect(config.apiKey == "secret-key")
-        return LLMProviderHealthCheckResult(ok: true, model: config.model, message: "Connection OK: \(config.model)")
-    }
+    let checker = AppLLMProviderHealthChecker(
+        settingsRepository: settingsRepository,
+        openAICompatibleHealthCheck: { config in
+            #expect(config.apiKey == "secret-key")
+            return LLMProviderHealthCheckResult(ok: true, model: config.model, message: "Connection OK: \(config.model)")
+        }
+    )
 
     let result = await checker.testConnection()
 
@@ -85,9 +88,12 @@ private final class HealthCheckFakeSettingsStore: LLMSettingsStore, @unchecked S
         settings: AppLLMSettings(baseURLString: "https://example.com/v1", model: "model-a", hasAPIKey: false, providerMode: .openAICompatible),
         apiKey: "secret-key"
     )
-    let checker = AppLLMProviderHealthChecker(settingsRepository: settingsRepository) { _ in
-        throw OpenAICompatibleProviderError.httpStatus(401)
-    }
+    let checker = AppLLMProviderHealthChecker(
+        settingsRepository: settingsRepository,
+        openAICompatibleHealthCheck: { _ in
+            throw OpenAICompatibleProviderError.httpStatus(401)
+        }
+    )
 
     let result = await checker.testConnection()
 
