@@ -83,17 +83,20 @@ public struct MediaTranscriptionTaskHandler: Sendable {
     public var runtimeSupervisor: any MediaRuntimeSupervising
     public var requireHealthyRuntime: Bool
     public var processRunner: any MediaProcessRunning
+    public var localTranscriber: any MediaLocalTranscriptionProviding
 
     public init(
         store: MediaTranscriptionJobStore,
         runtimeSupervisor: any MediaRuntimeSupervising,
         requireHealthyRuntime: Bool = false,
-        processRunner: any MediaProcessRunning = DefaultMediaProcessRunner()
+        processRunner: any MediaProcessRunning = DefaultMediaProcessRunner(),
+        localTranscriber: any MediaLocalTranscriptionProviding = UnavailableMediaLocalTranscriber()
     ) {
         self.store = store
         self.runtimeSupervisor = runtimeSupervisor
         self.requireHealthyRuntime = requireHealthyRuntime
         self.processRunner = processRunner
+        self.localTranscriber = localTranscriber
     }
 
     public func run(_ request: MediaTranscriptionTaskRequest, now: Date = Date()) async throws -> String {
@@ -134,8 +137,9 @@ public struct MediaTranscriptionTaskHandler: Sendable {
         }
 
         if !hasTranscriptArtifact(job), job.request.shouldRunLocalTranscription {
-            job = try transition(job, to: .transcribing, message: "Preparing local transcription", at: now)
-            try store.markCheckpoint("transcription-planned", sessionID: job.ownerSessionID, jobID: job.id, at: now)
+            job = try transition(job, to: .transcribing, message: "Running local transcription", at: now)
+            job = try await runLocalTranscription(for: job, at: now)
+            try store.markCheckpoint("local-transcription-completed", sessionID: job.ownerSessionID, jobID: job.id, at: now)
         }
 
         if job.request.shouldRunSpeakerDiarization {
@@ -247,12 +251,77 @@ public struct MediaTranscriptionTaskHandler: Sendable {
         let output = normalizedDirectory.appendingPathComponent("normalized.wav")
         let ffmpeg = store.paths.sidecarsDirectory.appendingPathComponent("ffmpeg/runtime/ffmpeg")
         let result = runProcess(executable: ffmpeg, arguments: ["-y", "-i", input.path, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", output.path])
-        try store.appendEvent(MediaTranscriptionJobEvent(jobID: job.id, state: .normalizingAudio, message: "ffmpeg normalization exited with \(result.exitCode)", createdAt: now, metadata: ["stderr": String(result.stderr.prefix(2000))]), sessionID: job.ownerSessionID)
+        try store.appendEvent(MediaTranscriptionJobEvent(jobID: job.id, state: .normalizingAudio, message: "ffmpeg normalization exited with \(result.exitCode)", createdAt: now, metadata: ["stderr": String(result.stderr.prefix(2000)), "stdout": String(result.stdout.prefix(2000))]), sessionID: job.ownerSessionID)
         guard result.exitCode == 0, FileManager.default.fileExists(atPath: output.path) else { return job }
         var next = job
         next.artifacts.normalizedAudio = artifactRef(kind: "normalizedAudio", fileURL: output, relativeTo: jobDirectory, at: now)
         try store.save(next)
         return next
+    }
+
+    private func runLocalTranscription(for job: BrowserMediaTranscriptionJob, at now: Date) async throws -> BrowserMediaTranscriptionJob {
+        guard let normalized = job.artifacts.normalizedAudio else { return job }
+        let jobDirectory = store.jobDirectory(sessionID: job.ownerSessionID, jobID: job.id)
+        let normalizedAudioURL = jobDirectory.appendingPathComponent(normalized.relativePath)
+        guard FileManager.default.fileExists(atPath: normalizedAudioURL.path) else { return job }
+        let selectedModel = SharedWhisperKitRuntimeProvider.preferredModel(
+            for: speechModelPolicy(for: job.request.qualityProfile),
+            runtimeRoot: store.paths.sidecarsDirectory
+        )
+        let modelDirectory = selectedModel.map {
+            store.paths.sidecarsDirectory
+                .appendingPathComponent("whisperkit", isDirectory: true)
+                .appendingPathComponent("models", isDirectory: true)
+                .appendingPathComponent($0, isDirectory: true)
+        }
+        let result = try await localTranscriber.transcribe(MediaLocalTranscriptionRequest(
+            job: job,
+            normalizedAudioURL: normalizedAudioURL,
+            modelDirectory: modelDirectory,
+            qualityProfile: job.request.qualityProfile,
+            preferredLanguageCode: job.request.preferredLanguageCode
+        ))
+        let plainText = result.plainText.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+        guard !plainText.isEmpty else { throw MediaLocalTranscriptionProviderError.emptyTranscript }
+        let transcriptMarkdown = Self.transcriptMarkdown(job: job, body: plainText, sourceKind: "local transcription")
+        let transcriptDirectory = jobDirectory.appendingPathComponent("transcripts", isDirectory: true)
+        try FileManager.default.createDirectory(at: transcriptDirectory, withIntermediateDirectories: true)
+        let transcriptURL = transcriptDirectory.appendingPathComponent("transcript.md")
+        let transcriptTextURL = transcriptDirectory.appendingPathComponent("transcript.txt")
+        try transcriptMarkdown.write(to: transcriptURL, atomically: true, encoding: String.Encoding.utf8)
+        try plainText.write(to: transcriptTextURL, atomically: true, encoding: String.Encoding.utf8)
+        var next = job
+        next.artifacts.transcriptMarkdown = artifactRef(kind: "transcriptMarkdown", fileURL: transcriptURL, relativeTo: jobDirectory, at: now)
+        next.artifacts.transcriptText = artifactRef(kind: "transcriptText", fileURL: transcriptTextURL, relativeTo: jobDirectory, at: now)
+        if let segmentsJSONL = result.segmentsJSONL {
+            let segmentsURL = transcriptDirectory.appendingPathComponent("segments.jsonl")
+            try segmentsJSONL.write(to: segmentsURL, atomically: true, encoding: String.Encoding.utf8)
+            next.artifacts.segmentsJSONL = artifactRef(kind: "segmentsJSONL", fileURL: segmentsURL, relativeTo: jobDirectory, at: now)
+        }
+        let diagnosticsJSON: String? = result.diagnostics.isEmpty ? nil : String(data: try JSONSerialization.data(withJSONObject: ["entries": result.diagnostics], options: [.prettyPrinted, .sortedKeys]), encoding: .utf8)
+        let attachment = try MediaTranscriptionAttachmentWriter(paths: store.paths).write(
+            job: next,
+            payload: MediaTranscriptionAttachmentPayload(
+                transcriptMarkdown: transcriptMarkdown,
+                transcriptText: plainText,
+                segmentsJSONL: result.segmentsJSONL,
+                diagnosticsJSON: diagnosticsJSON,
+                displayName: "media-transcript.md"
+            ),
+            now: now
+        )
+        next.artifacts.attachmentIDs.append(attachment.attachmentID)
+        try store.save(next)
+        try store.appendEvent(MediaTranscriptionJobEvent(jobID: next.id, state: .transcribing, message: "Local transcription produced transcript artifacts", createdAt: now, metadata: ["diagnostics": result.diagnostics.joined(separator: "; ")]), sessionID: next.ownerSessionID)
+        return next
+    }
+
+    private func speechModelPolicy(for qualityProfile: MediaTranscriptionQualityProfile) -> SpeechInputModelPolicy {
+        switch qualityProfile {
+        case .fast: .speedFirst
+        case .balanced: .balanced
+        case .highAccuracy: .highAccuracy
+        }
     }
 
     private func primaryMediaURL(for job: BrowserMediaTranscriptionJob) -> String? {
