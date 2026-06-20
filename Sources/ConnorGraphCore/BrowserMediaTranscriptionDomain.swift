@@ -215,6 +215,24 @@ public struct BrowserMediaTranscriptionSelection: Codable, Sendable, Equatable {
         return copy
     }
 
+    public var selectedSingleSourceSnapshots: [BrowserMediaSourceSnapshot] {
+        let selected = selectedSourceIDs.isEmpty ? Set(snapshot.transcriptionSourceOptions.map(\.id)) : Set(selectedSourceIDs)
+        var snapshots: [BrowserMediaSourceSnapshot] = []
+        for element in snapshot.mediaElements where selected.contains(BrowserMediaSourceSnapshot.transcriptionSourceID(forMediaElement: element)) {
+            var copy = snapshot
+            copy.mediaElements = [element]
+            copy.openGraphMedia = []
+            snapshots.append(copy)
+        }
+        for candidate in snapshot.openGraphMedia where selected.contains(BrowserMediaSourceSnapshot.transcriptionSourceID(forOpenGraphMedia: candidate)) {
+            var copy = snapshot
+            copy.mediaElements = []
+            copy.openGraphMedia = [candidate]
+            snapshots.append(copy)
+        }
+        return snapshots.isEmpty ? [selectedSnapshot] : snapshots
+    }
+
     public var mediaTranscriptionRequest: MediaTranscriptionRequest {
         options.mediaTranscriptionRequest()
     }

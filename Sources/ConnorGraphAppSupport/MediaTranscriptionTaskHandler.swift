@@ -29,15 +29,74 @@ public struct MediaTranscriptionTaskRequest: Sendable, Equatable {
     }
 }
 
+public struct MediaProcessInvocation: Sendable, Equatable {
+    public var executable: URL
+    public var arguments: [String]
+
+    public init(executable: URL, arguments: [String]) {
+        self.executable = executable
+        self.arguments = arguments
+    }
+}
+
+public struct MediaProcessResult: Sendable, Equatable {
+    public var exitCode: Int32
+    public var stdout: String
+    public var stderr: String
+
+    public init(exitCode: Int32, stdout: String, stderr: String) {
+        self.exitCode = exitCode
+        self.stdout = stdout
+        self.stderr = stderr
+    }
+}
+
+public protocol MediaProcessRunning: Sendable {
+    func run(_ invocation: MediaProcessInvocation) -> MediaProcessResult
+}
+
+public struct DefaultMediaProcessRunner: MediaProcessRunning, Sendable {
+    public init() {}
+
+    public func run(_ invocation: MediaProcessInvocation) -> MediaProcessResult {
+        let process = Process()
+        process.executableURL = invocation.executable
+        process.arguments = invocation.arguments
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return MediaProcessResult(exitCode: -1, stdout: "", stderr: String(describing: error))
+        }
+        let stdoutText = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let stderrText = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        return MediaProcessResult(exitCode: process.terminationStatus, stdout: stdoutText, stderr: stderrText)
+    }
+}
+
 public struct MediaTranscriptionTaskHandler: Sendable {
     public var store: MediaTranscriptionJobStore
     public var runtimeSupervisor: any MediaRuntimeSupervising
     public var requireHealthyRuntime: Bool
+    public var processRunner: any MediaProcessRunning
+    public var localTranscriber: any MediaLocalTranscriptionProviding
 
-    public init(store: MediaTranscriptionJobStore, runtimeSupervisor: any MediaRuntimeSupervising, requireHealthyRuntime: Bool = false) {
+    public init(
+        store: MediaTranscriptionJobStore,
+        runtimeSupervisor: any MediaRuntimeSupervising,
+        requireHealthyRuntime: Bool = false,
+        processRunner: any MediaProcessRunning = DefaultMediaProcessRunner(),
+        localTranscriber: any MediaLocalTranscriptionProviding = WhisperKitMediaLocalTranscriber()
+    ) {
         self.store = store
         self.runtimeSupervisor = runtimeSupervisor
         self.requireHealthyRuntime = requireHealthyRuntime
+        self.processRunner = processRunner
+        self.localTranscriber = localTranscriber
     }
 
     public func run(_ request: MediaTranscriptionTaskRequest, now: Date = Date()) async throws -> String {
@@ -78,8 +137,17 @@ public struct MediaTranscriptionTaskHandler: Sendable {
         }
 
         if !hasTranscriptArtifact(job), job.request.shouldRunLocalTranscription {
-            job = try transition(job, to: .transcribing, message: "Preparing local transcription", at: now)
-            try store.markCheckpoint("transcription-planned", sessionID: job.ownerSessionID, jobID: job.id, at: now)
+            job = try transition(job, to: .transcribing, message: "Running local transcription", at: now)
+            do {
+                job = try await runLocalTranscription(for: job, at: now)
+                try store.markCheckpoint("local-transcription-completed", sessionID: job.ownerSessionID, jobID: job.id, at: now)
+            } catch {
+                let message = "本地转写未完成：\(String(describing: error))"
+                let failed = job.failing(code: .transcriptionFailed, message: message, at: now)
+                try store.save(failed)
+                try store.appendEvent(MediaTranscriptionJobEvent(jobID: failed.id, state: .failed, message: "Local transcription failed", createdAt: now, metadata: ["diagnostics": message]), sessionID: failed.ownerSessionID)
+                throw MediaTranscriptionTaskHandlerError.transcriptUnavailable(message)
+            }
         }
 
         if job.request.shouldRunSpeakerDiarization {
@@ -132,9 +200,10 @@ public struct MediaTranscriptionTaskHandler: Sendable {
         let outputTemplate = subtitleDirectory.appendingPathComponent("%(id)s.%(ext)s").path
         let result = runProcess(
             executable: ytDLP,
-            arguments: ["--skip-download", "--write-subs", "--write-auto-subs", "--sub-langs", "all", "--sub-format", "vtt/srt/best", "-o", outputTemplate, url]
+            arguments: ytDLPBaseArguments(jobDirectory: jobDirectory)
+                + ["--skip-download", "--write-subs", "--write-auto-subs", "--sub-langs", "all", "--sub-format", "vtt/srt/best", "-o", outputTemplate, url]
         )
-        try store.appendEvent(MediaTranscriptionJobEvent(jobID: job.id, state: .acquiringSubtitles, message: "yt-dlp subtitle acquisition exited with \(result.exitCode)", createdAt: now, metadata: ["stderr": String(result.stderr.prefix(2000))]), sessionID: job.ownerSessionID)
+        try store.appendEvent(MediaTranscriptionJobEvent(jobID: job.id, state: .acquiringSubtitles, message: "yt-dlp subtitle acquisition exited with \(result.exitCode)", createdAt: now, metadata: ["stderr": String(result.stderr.prefix(2000)), "stdout": String(result.stdout.prefix(2000))]), sessionID: job.ownerSessionID)
         guard result.exitCode == 0 else { return job }
         let subtitleFiles = try FileManager.default.contentsOfDirectory(at: subtitleDirectory, includingPropertiesForKeys: [.fileSizeKey])
             .filter { ["vtt", "srt"].contains($0.pathExtension.lowercased()) }
@@ -167,8 +236,8 @@ public struct MediaTranscriptionTaskHandler: Sendable {
         try FileManager.default.createDirectory(at: audioDirectory, withIntermediateDirectories: true)
         let ytDLP = store.paths.sidecarsDirectory.appendingPathComponent("yt-dlp/runtime/yt-dlp.sh")
         let outputTemplate = audioDirectory.appendingPathComponent("%(id)s.%(ext)s").path
-        let result = runProcess(executable: ytDLP, arguments: ["-x", "--audio-format", "m4a", "-o", outputTemplate, url])
-        try store.appendEvent(MediaTranscriptionJobEvent(jobID: job.id, state: .acquiringAudio, message: "yt-dlp audio acquisition exited with \(result.exitCode)", createdAt: now, metadata: ["stderr": String(result.stderr.prefix(2000))]), sessionID: job.ownerSessionID)
+        let result = runProcess(executable: ytDLP, arguments: ytDLPBaseArguments(jobDirectory: jobDirectory) + ["-x", "--audio-format", "m4a", "-o", outputTemplate, url])
+        try store.appendEvent(MediaTranscriptionJobEvent(jobID: job.id, state: .acquiringAudio, message: "yt-dlp audio acquisition exited with \(result.exitCode)", createdAt: now, metadata: ["stderr": String(result.stderr.prefix(2000)), "stdout": String(result.stdout.prefix(2000))]), sessionID: job.ownerSessionID)
         guard result.exitCode == 0 else { return job }
         let audioFiles = try FileManager.default.contentsOfDirectory(at: audioDirectory, includingPropertiesForKeys: [.fileSizeKey])
             .filter { !["part", "ytdl"].contains($0.pathExtension.lowercased()) }
@@ -190,12 +259,77 @@ public struct MediaTranscriptionTaskHandler: Sendable {
         let output = normalizedDirectory.appendingPathComponent("normalized.wav")
         let ffmpeg = store.paths.sidecarsDirectory.appendingPathComponent("ffmpeg/runtime/ffmpeg")
         let result = runProcess(executable: ffmpeg, arguments: ["-y", "-i", input.path, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", output.path])
-        try store.appendEvent(MediaTranscriptionJobEvent(jobID: job.id, state: .normalizingAudio, message: "ffmpeg normalization exited with \(result.exitCode)", createdAt: now, metadata: ["stderr": String(result.stderr.prefix(2000))]), sessionID: job.ownerSessionID)
+        try store.appendEvent(MediaTranscriptionJobEvent(jobID: job.id, state: .normalizingAudio, message: "ffmpeg normalization exited with \(result.exitCode)", createdAt: now, metadata: ["stderr": String(result.stderr.prefix(2000)), "stdout": String(result.stdout.prefix(2000))]), sessionID: job.ownerSessionID)
         guard result.exitCode == 0, FileManager.default.fileExists(atPath: output.path) else { return job }
         var next = job
         next.artifacts.normalizedAudio = artifactRef(kind: "normalizedAudio", fileURL: output, relativeTo: jobDirectory, at: now)
         try store.save(next)
         return next
+    }
+
+    private func runLocalTranscription(for job: BrowserMediaTranscriptionJob, at now: Date) async throws -> BrowserMediaTranscriptionJob {
+        guard let normalized = job.artifacts.normalizedAudio else { return job }
+        let jobDirectory = store.jobDirectory(sessionID: job.ownerSessionID, jobID: job.id)
+        let normalizedAudioURL = jobDirectory.appendingPathComponent(normalized.relativePath)
+        guard FileManager.default.fileExists(atPath: normalizedAudioURL.path) else { return job }
+        let selectedModel = SharedWhisperKitRuntimeProvider.preferredModel(
+            for: speechModelPolicy(for: job.request.qualityProfile),
+            runtimeRoot: store.paths.sidecarsDirectory
+        )
+        let modelDirectory = selectedModel.map {
+            store.paths.sidecarsDirectory
+                .appendingPathComponent("whisperkit", isDirectory: true)
+                .appendingPathComponent("models", isDirectory: true)
+                .appendingPathComponent($0, isDirectory: true)
+        }
+        let result = try await localTranscriber.transcribe(MediaLocalTranscriptionRequest(
+            job: job,
+            normalizedAudioURL: normalizedAudioURL,
+            modelDirectory: modelDirectory,
+            qualityProfile: job.request.qualityProfile,
+            preferredLanguageCode: job.request.preferredLanguageCode
+        ))
+        let plainText = result.plainText.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+        guard !plainText.isEmpty else { throw MediaLocalTranscriptionProviderError.emptyTranscript }
+        let transcriptMarkdown = Self.transcriptMarkdown(job: job, body: plainText, sourceKind: "local transcription")
+        let transcriptDirectory = jobDirectory.appendingPathComponent("transcripts", isDirectory: true)
+        try FileManager.default.createDirectory(at: transcriptDirectory, withIntermediateDirectories: true)
+        let transcriptURL = transcriptDirectory.appendingPathComponent("transcript.md")
+        let transcriptTextURL = transcriptDirectory.appendingPathComponent("transcript.txt")
+        try transcriptMarkdown.write(to: transcriptURL, atomically: true, encoding: String.Encoding.utf8)
+        try plainText.write(to: transcriptTextURL, atomically: true, encoding: String.Encoding.utf8)
+        var next = job
+        next.artifacts.transcriptMarkdown = artifactRef(kind: "transcriptMarkdown", fileURL: transcriptURL, relativeTo: jobDirectory, at: now)
+        next.artifacts.transcriptText = artifactRef(kind: "transcriptText", fileURL: transcriptTextURL, relativeTo: jobDirectory, at: now)
+        if let segmentsJSONL = result.segmentsJSONL {
+            let segmentsURL = transcriptDirectory.appendingPathComponent("segments.jsonl")
+            try segmentsJSONL.write(to: segmentsURL, atomically: true, encoding: String.Encoding.utf8)
+            next.artifacts.segmentsJSONL = artifactRef(kind: "segmentsJSONL", fileURL: segmentsURL, relativeTo: jobDirectory, at: now)
+        }
+        let diagnosticsJSON: String? = result.diagnostics.isEmpty ? nil : String(data: try JSONSerialization.data(withJSONObject: ["entries": result.diagnostics], options: [.prettyPrinted, .sortedKeys]), encoding: .utf8)
+        let attachment = try MediaTranscriptionAttachmentWriter(paths: store.paths).write(
+            job: next,
+            payload: MediaTranscriptionAttachmentPayload(
+                transcriptMarkdown: transcriptMarkdown,
+                transcriptText: plainText,
+                segmentsJSONL: result.segmentsJSONL,
+                diagnosticsJSON: diagnosticsJSON,
+                displayName: "media-transcript.md"
+            ),
+            now: now
+        )
+        next.artifacts.attachmentIDs.append(attachment.attachmentID)
+        try store.save(next)
+        try store.appendEvent(MediaTranscriptionJobEvent(jobID: next.id, state: .transcribing, message: "Local transcription produced transcript artifacts", createdAt: now, metadata: ["diagnostics": result.diagnostics.joined(separator: "; ")]), sessionID: next.ownerSessionID)
+        return next
+    }
+
+    private func speechModelPolicy(for qualityProfile: MediaTranscriptionQualityProfile) -> SpeechInputModelPolicy {
+        switch qualityProfile {
+        case .fast: .speedFirst
+        case .balanced: .balanced
+        case .highAccuracy: .highAccuracy
+        }
     }
 
     private func primaryMediaURL(for job: BrowserMediaTranscriptionJob) -> String? {
@@ -208,23 +342,17 @@ public struct MediaTranscriptionTaskHandler: Sendable {
         }
     }
 
-    private func runProcess(executable: URL, arguments: [String]) -> (exitCode: Int32, stdout: String, stderr: String) {
-        let process = Process()
-        process.executableURL = executable
-        process.arguments = arguments
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            return (-1, "", String(describing: error))
-        }
-        let stdoutText = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let stderrText = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        return (process.terminationStatus, stdoutText, stderrText)
+    private func ytDLPBaseArguments(jobDirectory: URL) -> [String] {
+        let tempDirectory = jobDirectory.appendingPathComponent("tmp", isDirectory: true)
+        try? FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        return [
+            "--ffmpeg-location", store.paths.sidecarsDirectory.appendingPathComponent("ffmpeg/runtime").path,
+            "--paths", "temp:\(tempDirectory.path)"
+        ]
+    }
+
+    private func runProcess(executable: URL, arguments: [String]) -> MediaProcessResult {
+        processRunner.run(MediaProcessInvocation(executable: executable, arguments: arguments))
     }
 
     private func artifactRef(kind: String, fileURL: URL, relativeTo root: URL, at now: Date) -> MediaTranscriptionArtifactRef {
@@ -270,14 +398,35 @@ public struct MediaTranscriptionTaskHandler: Sendable {
         if job.request.shouldDownloadAudio || job.request.shouldRunLocalTranscription {
             diagnostics.append("未获取到可转写音频或本地转写产物")
         }
+        diagnostics.append(contentsOf: recentProcessFailureDiagnostics(for: job))
         if !report.missingRuntimeIDs.isEmpty {
             diagnostics.append("App-managed runtime not ready: \(report.missingRuntimeIDs.joined(separator: ", "))")
         }
         if diagnostics.isEmpty {
             diagnostics.append("媒体处理未生成 transcript artifact")
         }
-        let userFacing = "Connor 正在准备内置媒体转写能力，或当前网页没有可获取的字幕/音频。请稍后重试；如果持续失败，请在设置中更新媒体运行时。"
+        let userFacing = diagnostics.joined(separator: "；")
         return (userFacing, diagnostics.joined(separator: "；"))
+    }
+
+    private func recentProcessFailureDiagnostics(for job: BrowserMediaTranscriptionJob) -> [String] {
+        guard let events = try? store.loadEvents(sessionID: job.ownerSessionID, jobID: job.id) else { return [] }
+        return events.compactMap { event in
+            guard event.message.contains("exited with"), !event.message.hasSuffix("exited with 0") else { return nil }
+            guard let stderr = event.metadata["stderr"]?.trimmingCharacters(in: .whitespacesAndNewlines), !stderr.isEmpty else { return nil }
+            let firstLine = stderr.split(whereSeparator: \.isNewline).first.map(String.init) ?? stderr
+            let clipped = String(firstLine.prefix(500))
+            if event.message.contains("yt-dlp audio") {
+                return "音频下载失败：\(clipped)"
+            }
+            if event.message.contains("yt-dlp subtitle") {
+                return "平台字幕获取失败：\(clipped)"
+            }
+            if event.message.contains("ffmpeg") {
+                return "音频规范化失败：\(clipped)"
+            }
+            return "媒体处理失败：\(clipped)"
+        }
     }
 
     private func transition(_ job: BrowserMediaTranscriptionJob, to state: MediaTranscriptionJobState, message: String, at date: Date) throws -> BrowserMediaTranscriptionJob {
