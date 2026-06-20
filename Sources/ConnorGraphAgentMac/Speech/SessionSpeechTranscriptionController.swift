@@ -1,52 +1,16 @@
 @preconcurrency import AVFoundation
 import Foundation
 import Speech
-import ConnorGraphAppSupport
-import ConnorGraphCore
-import WhisperKit
 
-private final class WhisperKitSpeechFinalTranscriber: @unchecked Sendable {
-    private let sidecarsDirectory: URL
-    private let bundledRuntimeDirectory: URL?
-    private var cachedModelFolder: String?
-    private var cachedWhisperKit: WhisperKit?
+private final class SpeechAudioSampleBufferForwarder: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
+    var onSampleBuffer: ((CMSampleBuffer) -> Void)?
 
-    init(sidecarsDirectory: URL, bundledRuntimeDirectory: URL? = MediaRuntimeSupervisor.defaultBundledRuntimeDirectory()) {
-        self.sidecarsDirectory = sidecarsDirectory
-        self.bundledRuntimeDirectory = bundledRuntimeDirectory
-    }
-
-    func transcribe(audioURL: URL, policy: SpeechInputModelPolicy = .automaticRecommended) async throws -> String? {
-        let provider = SharedWhisperKitRuntimeProvider(sidecarsDirectory: sidecarsDirectory, bundledRuntimeDirectory: bundledRuntimeDirectory)
-        let modelID = await provider.preferredModel(for: policy) ?? WhisperKitModelInventory.defaultModel
-        guard let modelFolder = resolveModelFolder(modelID: modelID) else { return nil }
-        let modelFolderPath = modelFolder.path
-        let pipe: WhisperKit
-        if cachedModelFolder == modelFolderPath, let cachedWhisperKit {
-            pipe = cachedWhisperKit
-        } else {
-            cachedWhisperKit = nil
-            cachedModelFolder = nil
-            pipe = try await WhisperKit(WhisperKitConfig(model: modelID, modelFolder: modelFolderPath, verbose: false, download: false))
-            cachedWhisperKit = pipe
-            cachedModelFolder = modelFolderPath
-        }
-        let results = try await pipe.transcribe(audioPath: audioURL.path)
-        let text = results.map(\.text).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-        return text.isEmpty ? nil : text
-    }
-
-    func cancel() {
-        // WhisperKit transcribe observes Task cancellation; no extra mutable state is needed here.
-    }
-
-    private func resolveModelFolder(modelID: String) -> URL? {
-        let candidates = [
-            bundledRuntimeDirectory,
-            Optional(sidecarsDirectory)
-        ].compactMap { $0 }
-            .map { $0.appendingPathComponent("whisperkit/models/\(modelID)", isDirectory: true) }
-        return candidates.first { WhisperKitModelInventory.isModelUsable($0) }
+    func captureOutput(
+        _ output: AVCaptureOutput,
+        didOutput sampleBuffer: CMSampleBuffer,
+        from connection: AVCaptureConnection
+    ) {
+        onSampleBuffer?(sampleBuffer)
     }
 }
 
@@ -55,11 +19,11 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
     private(set) var runningSessionID: String?
 
     private let localeIdentifier: String?
-    private let finalTranscriber: WhisperKitSpeechFinalTranscriber?
+    private let captureQueue = DispatchQueue(label: "com.shiwen.connor.speech.capture")
 
-    private var audioEngine: AVAudioEngine?
-    private var audioFile: AVAudioFile?
-    private var recordingURL: URL?
+    private var captureSession: AVCaptureSession?
+    private var audioOutput: AVCaptureAudioDataOutput?
+    private var sampleBufferForwarder: SpeechAudioSampleBufferForwarder?
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
     private var speechRecognizer: SFSpeechRecognizer?
@@ -67,11 +31,9 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
     private var isStopping = false
     private var latestPartialTranscript: String = ""
     private var onFinalTranscript: (@MainActor @Sendable (String) -> Void)?
-    private var finalTranscriptionTask: Task<Void, Never>?
 
-    init(localeIdentifier: String? = "zh-CN", sidecarsDirectory: URL? = nil) {
+    init(localeIdentifier: String? = "zh-CN") {
         self.localeIdentifier = localeIdentifier
-        self.finalTranscriber = sidecarsDirectory.map { WhisperKitSpeechFinalTranscriber(sidecarsDirectory: $0) }
     }
 
     func start(
@@ -109,52 +71,30 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
     }
 
     func stop(reason: SessionSpeechTranscriptionStopReason) {
-        guard runningSessionID != nil || audioEngine != nil || recognitionRequest != nil || recognitionTask != nil || finalTranscriptionTask != nil else { return }
+        guard runningSessionID != nil || captureSession != nil || recognitionRequest != nil || recognitionTask != nil else { return }
         isStopping = true
         let finalTranscript = latestPartialTranscript
         let finalCallback = onFinalTranscript
-        let audioURL = recordingURL
-        let finalTranscriber = finalTranscriber
         recognitionGeneration = UUID()
         runningSessionID = nil
 
-        audioEngine?.inputNode.removeTap(onBus: 0)
-        audioEngine?.stop()
-        audioFile = nil
-        recognitionRequest?.endAudio()
-        recognitionTask?.cancel()
-        recognitionTask = nil
-        recognitionRequest = nil
-        speechRecognizer = nil
-        audioEngine = nil
+        audioOutput?.setSampleBufferDelegate(nil, queue: nil)
+        sampleBufferForwarder?.onSampleBuffer = nil
 
-        finalTranscriptionTask?.cancel()
-        finalTranscriptionTask = nil
-
-        if reason == .manual {
-            if let audioURL, let finalTranscriber {
-                finalTranscriptionTask = Task { [finalTranscript, finalCallback] in
-                    do {
-                        let whisperText = try await finalTranscriber.transcribe(audioURL: audioURL)
-                        try? FileManager.default.removeItem(at: audioURL)
-                        guard !Task.isCancelled else { return }
-                        await MainActor.run { finalCallback?(whisperText ?? finalTranscript) }
-                    } catch {
-                        try? FileManager.default.removeItem(at: audioURL)
-                        guard !Task.isCancelled else { return }
-                        await MainActor.run { finalCallback?(finalTranscript) }
-                    }
-                }
-            } else {
-                finalCallback?(finalTranscript)
+        let sessionToStop = captureSession
+        captureQueue.async {
+            if sessionToStop?.isRunning == true {
+                sessionToStop?.stopRunning()
             }
-        } else if let audioURL {
-            try? FileManager.default.removeItem(at: audioURL)
         }
 
-        latestPartialTranscript = ""
-        onFinalTranscript = nil
-        isStopping = false
+        recognitionRequest?.endAudio()
+        recognitionTask?.cancel()
+
+        cleanup()
+        if reason == .manual {
+            finalCallback?(finalTranscript)
+        }
     }
 
     private func requestMicrophoneAccessIfNeeded(completion: @escaping @Sendable (Bool) -> Void) {
@@ -179,11 +119,12 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
     ) {
         let currentStatus = SFSpeechRecognizer.authorizationStatus()
         guard currentStatus == .notDetermined else {
-            startAudioCapture(
+            handleSpeechAuthorizationStatus(
+                currentStatus,
                 sessionID: sessionID,
                 generation: generation,
-                shouldUseApplePartial: currentStatus == .authorized,
                 onPartial: onPartial,
+                onFinal: onFinal,
                 onError: onError
             )
             return
@@ -191,82 +132,128 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
 
         SFSpeechRecognizer.requestAuthorization { [weak self] authorizationStatus in
             Task { @MainActor in
-                self?.startAudioCapture(
+                self?.handleSpeechAuthorizationStatus(
+                    authorizationStatus,
                     sessionID: sessionID,
                     generation: generation,
-                    shouldUseApplePartial: authorizationStatus == .authorized,
                     onPartial: onPartial,
+                    onFinal: onFinal,
                     onError: onError
                 )
             }
         }
     }
 
-    private func startAudioCapture(
+    private func handleSpeechAuthorizationStatus(
+        _ authorizationStatus: SFSpeechRecognizerAuthorizationStatus,
         sessionID: String,
         generation: UUID,
-        shouldUseApplePartial: Bool,
         onPartial: @escaping @MainActor @Sendable (String) -> Void,
+        onFinal: @escaping @MainActor @Sendable (String) -> Void,
         onError: @escaping @MainActor @Sendable (String) -> Void
     ) {
         guard runningSessionID == sessionID, recognitionGeneration == generation else { return }
+        guard authorizationStatus == .authorized else {
+            cleanupAfterFailure()
+            onError(authorizationMessage(for: authorizationStatus))
+            return
+        }
+        startAuthorizedRecognition(sessionID: sessionID, generation: generation, onPartial: onPartial, onFinal: onFinal, onError: onError)
+    }
 
-        let engine = AVAudioEngine()
-        let inputNode = engine.inputNode
-        let format = inputNode.outputFormat(forBus: 0)
-        let recordingURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("connor-speech-\(generation.uuidString)")
-            .appendingPathExtension("wav")
+    private func startAuthorizedRecognition(
+        sessionID: String,
+        generation: UUID,
+        onPartial: @escaping @MainActor @Sendable (String) -> Void,
+        onFinal: @escaping @MainActor @Sendable (String) -> Void,
+        onError: @escaping @MainActor @Sendable (String) -> Void
+    ) {
+        let recognizer = makeSpeechRecognizer()
+
+        guard let recognizer, recognizer.isAvailable else {
+            cleanupAfterFailure()
+            onError("中文语音识别当前不可用，请确认系统语音识别已启用，或稍后再试。")
+            return
+        }
+
+        guard let audioDevice = AVCaptureDevice.default(for: .audio) else {
+            cleanupAfterFailure()
+            onError("没有可用的麦克风输入设备，请连接或启用系统输入设备后再试。")
+            return
+        }
+
+        let request = SFSpeechAudioBufferRecognitionRequest()
+        request.shouldReportPartialResults = true
+        request.taskHint = .dictation
+
+        let captureSession = AVCaptureSession()
+        captureSession.beginConfiguration()
 
         do {
-            let file = try AVAudioFile(forWriting: recordingURL, settings: format.settings)
-            var request: SFSpeechAudioBufferRecognitionRequest?
-            if shouldUseApplePartial, let recognizer = makeSpeechRecognizer(), recognizer.isAvailable {
-                let speechRequest = SFSpeechAudioBufferRecognitionRequest()
-                speechRequest.shouldReportPartialResults = true
-                speechRequest.taskHint = .dictation
-                request = speechRequest
-                self.recognitionRequest = speechRequest
-                self.speechRecognizer = recognizer
-                recognitionTask = recognizer.recognitionTask(with: speechRequest) { [weak self] result, error in
-                    Task { @MainActor in
-                        guard let self,
-                              self.runningSessionID == sessionID,
-                              self.recognitionGeneration == generation else { return }
-                        if let result {
-                            let transcript = result.bestTranscription.formattedString
-                            self.latestPartialTranscript = transcript
-                            onPartial(transcript)
-                        }
-                        if let error, !self.isStopping {
-                            // Keep recording for WhisperKit final even if Apple partial fails.
-                            self.latestPartialTranscript = self.latestPartialTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
-                            if self.latestPartialTranscript.isEmpty {
-                                onPartial("")
-                            }
-                            print("Apple Speech partial failed: \(error.localizedDescription)")
-                        }
-                    }
-                }
+            let audioInput = try AVCaptureDeviceInput(device: audioDevice)
+            guard captureSession.canAddInput(audioInput) else {
+                captureSession.commitConfiguration()
+                cleanupAfterFailure()
+                onError("无法添加麦克风输入，请检查系统输入设备。")
+                return
             }
-
-            inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
-                request?.append(buffer)
-                do {
-                    try file.write(from: buffer)
-                } catch {
-                    // Keep the audio tap alive; final pass will fall back to latest partial if the file is unusable.
-                }
-            }
-
-            self.audioEngine = engine
-            self.audioFile = file
-            self.recordingURL = recordingURL
-            isStopping = false
-            try engine.start()
+            captureSession.addInput(audioInput)
         } catch {
+            captureSession.commitConfiguration()
             cleanupAfterFailure()
             onError(error.localizedDescription)
+            return
+        }
+
+        let audioOutput = AVCaptureAudioDataOutput()
+        guard captureSession.canAddOutput(audioOutput) else {
+            captureSession.commitConfiguration()
+            cleanupAfterFailure()
+            onError("无法添加麦克风音频输出，请检查系统输入设备。")
+            return
+        }
+
+        let forwarder = SpeechAudioSampleBufferForwarder()
+        forwarder.onSampleBuffer = { [weak request] sampleBuffer in
+            request?.appendAudioSampleBuffer(sampleBuffer)
+        }
+        audioOutput.setSampleBufferDelegate(forwarder, queue: captureQueue)
+        captureSession.addOutput(audioOutput)
+        captureSession.commitConfiguration()
+
+        self.captureSession = captureSession
+        self.audioOutput = audioOutput
+        self.sampleBufferForwarder = forwarder
+        self.recognitionRequest = request
+        self.speechRecognizer = recognizer
+        isStopping = false
+
+        recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
+            Task { @MainActor in
+                guard let self,
+                      self.runningSessionID == sessionID,
+                      self.recognitionGeneration == generation else { return }
+                if let result {
+                    let transcript = result.bestTranscription.formattedString
+                    self.latestPartialTranscript = transcript
+                    onPartial(transcript)
+                    if result.isFinal {
+                        onFinal(transcript)
+                    }
+                }
+                if let error, !self.isStopping {
+                    self.cleanupAfterFailure()
+                    onError(error.localizedDescription)
+                    return
+                }
+                // Keep session-level dictation running until the user stops,
+                // leaves/deletes the session, or Speech reports an actual error.
+                // Do not stop just because one interim/final hypothesis arrived.
+            }
+        }
+
+        captureQueue.async { [weak captureSession] in
+            captureSession?.startRunning()
         }
     }
 
@@ -283,7 +270,35 @@ final class SessionSpeechTranscriptionController: SessionSpeechTranscribing {
         return SFSpeechRecognizer()
     }
 
+    private func authorizationMessage(for status: SFSpeechRecognizerAuthorizationStatus) -> String {
+        switch status {
+        case .denied:
+            "语音识别权限已被拒绝，请在系统设置中允许康纳同学使用语音识别。"
+        case .restricted:
+            "当前设备或系统策略限制了语音识别。"
+        case .notDetermined:
+            "语音识别尚未授权。"
+        case .authorized:
+            "语音识别已授权。"
+        @unknown default:
+            "语音识别授权状态未知。"
+        }
+    }
+
     private func cleanupAfterFailure() {
         stop(reason: .appLifecycle)
+    }
+
+    private func cleanup() {
+        captureSession = nil
+        audioOutput = nil
+        sampleBufferForwarder = nil
+        runningSessionID = nil
+        recognitionTask = nil
+        recognitionRequest = nil
+        speechRecognizer = nil
+        latestPartialTranscript = ""
+        onFinalTranscript = nil
+        isStopping = false
     }
 }
