@@ -15,7 +15,7 @@ struct AgentChatComposerView: View {
     @State private var isSkillPickerPresented: Bool = false
     @State private var slashSkillPickerAnchorRect: CGRect?
     @State private var slashSkillPickerTriggerRange: NSRange?
-    @State private var composerSelectedRange: NSRange?
+    @State private var composerSelectionTracker = ComposerTextSelectionTracker()
     @State private var skillPickerSelectionIndex: Int = 0
     @State private var speechKeyboardMonitor: SpeechInputKeyboardMonitor?
 
@@ -226,7 +226,7 @@ struct AgentChatComposerView: View {
         guard speechKeyboardMonitor == nil else { return }
         let monitor = SpeechInputKeyboardMonitor(
             spaceHoldEnabled: false,
-            onBegin: { sendComposerAction(.beginSpeechTranscription(composerSelectedRange)) },
+            onBegin: { sendComposerAction(.beginSpeechTranscription(composerSelectionTracker.selectedRange)) },
             onEnd: { sendComposerAction(.finishSpeechTranscription) }
         )
         monitor.start()
@@ -247,7 +247,7 @@ struct AgentChatComposerView: View {
         ZStack(alignment: .topLeading) {
             SafeChatComposerTextView(
                 text: localChatInputBinding,
-                selectedRange: $composerSelectedRange,
+                selectionTracker: composerSelectionTracker,
                 placeholder: composerPlaceholder,
                 isSpellCheckEnabled: viewModel.spellCheckEnabled,
                 sendShortcut: viewModel.composerSendShortcut,
@@ -585,7 +585,7 @@ struct AgentChatComposerView: View {
             composerState: composerState,
             governanceConfig: viewModel.governanceConfig,
             hasRunningBackgroundTask: viewModel.hasRunningActiveSessionBackgroundTask,
-            currentTextSelectionRange: composerSelectedRange,
+            currentTextSelectionRange: { composerSelectionTracker.selectedRange },
             isSessionInfoPresented: $isSessionInfoPresented,
             onAction: sendComposerAction
         )
