@@ -39,12 +39,28 @@ public struct AgentModelMessageContentPart: Codable, Sendable, Equatable {
 public struct AgentModelProviderMetadata: Codable, Sendable, Equatable {
     public var providerID: String
     public var rawAssistantContentJSON: String?
+    public var rawOutputItemsJSON: String?
+    public var rawContentBlocksJSON: String?
     public var stopReason: String?
+    public var responseID: String?
+    public var reasoningEncryptedContentPresent: Bool
 
-    public init(providerID: String, rawAssistantContentJSON: String? = nil, stopReason: String? = nil) {
+    public init(
+        providerID: String,
+        rawAssistantContentJSON: String? = nil,
+        rawOutputItemsJSON: String? = nil,
+        rawContentBlocksJSON: String? = nil,
+        stopReason: String? = nil,
+        responseID: String? = nil,
+        reasoningEncryptedContentPresent: Bool = false
+    ) {
         self.providerID = providerID
         self.rawAssistantContentJSON = rawAssistantContentJSON
+        self.rawOutputItemsJSON = rawOutputItemsJSON
+        self.rawContentBlocksJSON = rawContentBlocksJSON
         self.stopReason = stopReason
+        self.responseID = responseID
+        self.reasoningEncryptedContentPresent = reasoningEncryptedContentPresent
     }
 }
 
