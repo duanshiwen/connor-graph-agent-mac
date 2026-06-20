@@ -2017,6 +2017,8 @@ struct AIConnectionEntryRow: View {
         switch connection.providerMode {
         case .openAICompatible:
             return "Craft Agents Backend Compatible"
+        case .anthropicMessages:
+            return "Anthropic Messages"
         case .governedClaudeSidecar:
             return "Claude"
         }
@@ -2024,7 +2026,7 @@ struct AIConnectionEntryRow: View {
 
     private var endpointDisplayName: String {
         switch connection.providerMode {
-        case .openAICompatible:
+        case .openAICompatible, .anthropicMessages:
             return host(from: connection.baseURLString)
         case .governedClaudeSidecar:
             let arguments = connection.sidecarArguments.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2037,6 +2039,8 @@ struct AIConnectionEntryRow: View {
         switch connection.providerMode {
         case .openAICompatible:
             return "sparkles"
+        case .anthropicMessages:
+            return "sparkles.rectangle.stack"
         case .governedClaudeSidecar:
             return "terminal"
         }
@@ -2046,6 +2050,8 @@ struct AIConnectionEntryRow: View {
         switch connection.providerMode {
         case .openAICompatible:
             return .primary
+        case .anthropicMessages:
+            return .purple
         case .governedClaudeSidecar:
             return .purple
         }

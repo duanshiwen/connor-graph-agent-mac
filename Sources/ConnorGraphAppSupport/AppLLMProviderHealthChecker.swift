@@ -47,6 +47,11 @@ public struct AppLLMProviderHealthChecker: Sendable {
                     return AppLLMProviderHealthCheckResult(status: .failed, message: "Claude 连接不允许 allowAll 权限模式。")
                 }
                 return AppLLMProviderHealthCheckResult(status: .success, message: "Claude 连接配置可用；实际 SDK 登录和依赖由 sidecar 运行时验证。")
+            case .anthropicMessages:
+                guard try settingsRepository.anthropicCompatibleConfig(connectionID: connection.id) != nil else {
+                    return AppLLMProviderHealthCheckResult(status: .notConfigured, message: "Anthropic Messages 连接缺少 API Key。")
+                }
+                return AppLLMProviderHealthCheckResult(status: .success, message: "Anthropic Messages 连接配置可用。")
             case .openAICompatible:
                 guard let config = try settingsRepository.openAICompatibleConfig(connectionID: connection.id) else {
                     return AppLLMProviderHealthCheckResult(status: .notConfigured, message: "OpenAI Compatible 连接缺少 API Key。")
