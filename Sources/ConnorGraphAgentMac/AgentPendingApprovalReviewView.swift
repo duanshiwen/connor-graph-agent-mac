@@ -24,7 +24,7 @@ struct AgentPendingApprovalReviewView: View {
             }
 
             if viewModel.pendingApprovals.isEmpty {
-                Text("暂无待审批权限请求。Sidecar 只能请求权限，康纳同学负责审批、审计和 timeline。")
+                Text("暂无待审批权限请求。模型管线只能请求工具权限，康纳同学负责审批、审计和 timeline。")
                     .foregroundStyle(.secondary)
                 Spacer()
             } else {

@@ -3,7 +3,7 @@
 文档更新时间：2026-06-21 00:17 GMT+8  
 当前分支目标：收紧代码质量、简化文档、保持 Connor 的原生 Agent OS 边界，并为内置浏览器媒体本地转写系统建立可恢复、可治理的地基。
 
-Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package。它的目标不是做“图谱编辑器”或“Claude SDK 外壳”，而是构建一个本地优先的 **graph-memory-native Agent OS**：以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI、Task Management Stack 和 Attachment Store 共同组成可治理的本地智能工作台。
+Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package。它的目标不是做“图谱编辑器”或“LLM SDK 外壳”，而是构建一个本地优先的 **graph-memory-native Agent OS**：以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI、Task Management Stack 和 Attachment Store 共同组成可治理的本地智能工作台。
 
 核心判断：**图谱是后台记忆基础设施，不是普通用户的前台主导航概念。** 普通用户面对的是会话、数据源、技能、自动化、浏览器、附件、任务和设置；Graph Memory 在后台提供连续性、精确性、可追溯性与治理证据。
 
@@ -14,7 +14,7 @@ Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package
 Connor 当前坚持以下主权边界：
 
 - **Session sovereignty belongs to Connor Session OS**：会话、run、journal、pending approval、branch、restore snapshot 和 Session Capsule 由 Connor 持久化与恢复。
-- **Permission sovereignty belongs to Connor Policy Engine**：Claude SDK sidecar、MCP server、local tools 和 native runtimes 都不能绕过 Connor 审批、审计和执行门禁。
+- **Permission sovereignty belongs to Connor Policy Engine**：OpenAI / Anthropic 模型提供方、MCP server、local tools 和 native runtimes 都不能绕过 Connor 审批、审计和执行门禁。
 - **Memory sovereignty belongs to Connor Graph Memory**：LLM 不直接写图谱；图谱写入走 staging、distillation、candidate review、admission policy 与 SQLite temporal graph。
 - **Source sovereignty belongs to Connor Source Platform**：MCP servers 是能力提供者，不拥有 Connor source registry、permission policy、audit、readiness state 或 graph ingestion policy。
 - **UI sovereignty belongs to Swift Native Shell**：不引入 Electron/Web UI，不 fork Craft UI。文件预览、设置、菜单、快捷键、选择器等优先使用 macOS / SwiftUI / AppKit 原生语义。
@@ -33,7 +33,7 @@ Electron/Web UI
 Craft-style multi-workspace
 CLI/API direct graph write
 MCP server owning product state
-Claude SDK owning Connor session state
+External model provider owning Connor session state
 Direct LLM access to IMAP / SMTP / OAuth / Contacts credentials
 Unapproved email sending
 Auto-writing external-source facts into Graph Memory
@@ -94,7 +94,7 @@ ConnorGraphAppSupport
   ↓
 Session OS / Source Platform / Skill Runtime / Task Surface / Readiness Gate
   ↓
-ConnorGraphAgent + Model Providers + Claude SDK Sidecar Boundary
+ConnorGraphAgent + Native Model Providers（OpenAI Responses / Anthropic Messages）
   ↓
 Graph Memory Runtime Contract
   ↓
@@ -327,22 +327,20 @@ API keys and provider credentials must not be stored in JSON settings files. The
 - Session-scoped primary root and additional allowed roots
 - Hidden app-support root for Connor configuration/skills/source management
 - Local workspace policy checks before file/shell operations
-- Claude Sidecar uses the primary root as single cwd; Connor native tools can use multiple allowed roots
+- Connor native tools can use session-scoped primary roots plus additional allowed roots; model providers do not own workspace cwd policy
 
-### 5.3 Model Providers and Sidecar Boundary
+### 5.3 Native Model Providers
 
-- OpenAI-compatible provider path
-- Anthropic-compatible provider path
-- OpenAI-compatible and Anthropic-compatible agent completions support SSE streaming through Connor's model-provider abstraction
-- OpenAI-compatible chat completion requests use an explicit 180-second default request timeout instead of relying on `URLSession.shared` defaults
-- Anthropic-compatible Messages API requests use the same explicit 180-second default request timeout for streaming, non-streaming and health-check paths
+- OpenAI Responses-native provider path for official OpenAI `/v1/responses`
+- OpenAI-compatible Chat Completions path remains available for compatible endpoints that do not support Responses
+- Anthropic / Claude native Messages API provider path
+- OpenAI Responses and Anthropic Messages streaming use typed provider events through Connor's model-provider abstraction
+- OpenAI Responses supports typed output items, function_call / function_call_output continuation, `store: false`, reasoning effort, and typed SSE events
+- Anthropic Messages supports tool_use / tool_result blocks, thinking metadata, beta headers, and fine-grained tool input streaming
 - Non-streaming completion and provider health-check paths remain available as fallbacks
-- Claude SDK sidecar boundary
-- Persistent Claude SDK sidecar sessions stream stdout JSONL events and use Connor-owned cancel commands for session shutdown
-- Non-persistent Claude SDK sidecar process transport uses a 300-second watchdog timeout to prevent stuck child processes from blocking indefinitely
 - Per-connection settings and per-session model override
 - Provider health checks and credential boundary
-- Guardrails to avoid routing governed sidecar mode through legacy direct provider paths
+- Connor owns sessions, tool execution, pending approvals, audit events and graph-memory writes; model providers never own Connor product state
 
 ### 5.4 MCP Source Platform
 

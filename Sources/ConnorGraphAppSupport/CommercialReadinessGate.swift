@@ -4,7 +4,7 @@ import ConnorGraphAgent
 
 public enum CommercialReadinessPhase: String, Codable, Sendable, Equatable, Hashable, Identifiable, CaseIterable {
     case sessionGovernance
-    case claudeSDKSidecar
+    case nativeModelProviders
     case sourcesSkillsAutomations
     case graphMemoryLoop
     case nativeCommercialUI
@@ -16,7 +16,7 @@ public enum CommercialReadinessPhase: String, Codable, Sendable, Equatable, Hash
     public var title: String {
         switch self {
         case .sessionGovernance: "Phase 1 · Session Governance"
-        case .claudeSDKSidecar: "Phase 2 · Claude SDK Sidecar"
+        case .nativeModelProviders: "Phase 2 · Native Model Providers"
         case .sourcesSkillsAutomations: "Phase 3 · Sources / Skills / Automations"
         case .graphMemoryLoop: "Phase 4 · Graph Memory Loop"
         case .nativeCommercialUI: "Phase 5 · Native Commercial UI"
@@ -28,7 +28,7 @@ public enum CommercialReadinessPhase: String, Codable, Sendable, Equatable, Hash
     public var target: ConnorNativeShellItem {
         switch self {
         case .sessionGovernance: .agentChat
-        case .claudeSDKSidecar: .settings
+        case .nativeModelProviders: .settings
         case .sourcesSkillsAutomations: .sources
         case .graphMemoryLoop: .graphMemory
         case .nativeCommercialUI: .settings
@@ -58,19 +58,15 @@ public enum CommercialSessionGovernanceReadiness: Codable, Sendable, Equatable {
     case missing(String)
 }
 
-public enum CommercialClaudeSidecarReadiness: Codable, Sendable, Equatable {
+public enum CommercialModelProviderReadiness: Codable, Sendable, Equatable {
     case ready(
-        runtimeStatus: ClaudeSDKSidecarRuntimeStatus,
-        sdkSessionID: String?,
+        providerMode: AppLLMProviderMode,
+        connectionKind: AppLLMConnectionKind,
+        modelID: String,
         healthStatus: String,
-        protocolVersion: Int = 2,
-        sdkCWD: String? = nil,
-        hasHeartbeat: Bool = false,
-        lastDiagnosticMessage: String? = nil,
-        failureCode: ClaudeSDKSidecarFailureCode? = nil,
-        recoverability: ClaudeSDKSidecarRecoverability? = nil,
-        ownsProductState: Bool = false,
-        governedPermissionMode: Bool = true
+        supportsToolCalling: Bool = true,
+        supportsStreaming: Bool = true,
+        nativeRuntime: Bool = true
     )
     case missing(String)
 }
@@ -150,7 +146,7 @@ public enum CommercialNativeMailSystemReadiness: Codable, Sendable, Equatable {
 
 public struct CommercialReadinessInput: Codable, Sendable, Equatable {
     public var sessionGovernance: CommercialSessionGovernanceReadiness
-    public var claudeSidecar: CommercialClaudeSidecarReadiness
+    public var modelProvider: CommercialModelProviderReadiness
     public var extensionRuntime: CommercialExtensionRuntimeReadiness
     public var graphMemory: CommercialGraphMemoryReadiness
     public var nativeUI: CommercialNativeUIReadiness
@@ -159,7 +155,7 @@ public struct CommercialReadinessInput: Codable, Sendable, Equatable {
 
     public init(
         sessionGovernance: CommercialSessionGovernanceReadiness,
-        claudeSidecar: CommercialClaudeSidecarReadiness,
+        modelProvider: CommercialModelProviderReadiness,
         extensionRuntime: CommercialExtensionRuntimeReadiness,
         graphMemory: CommercialGraphMemoryReadiness,
         nativeUI: CommercialNativeUIReadiness,
@@ -185,7 +181,7 @@ public struct CommercialReadinessInput: Codable, Sendable, Equatable {
         )
     ) {
         self.sessionGovernance = sessionGovernance
-        self.claudeSidecar = claudeSidecar
+        self.modelProvider = modelProvider
         self.extensionRuntime = extensionRuntime
         self.graphMemory = graphMemory
         self.nativeUI = nativeUI
@@ -245,7 +241,7 @@ public struct CommercialReadinessGate: Sendable, Equatable {
     public func evaluate(_ input: CommercialReadinessInput) -> CommercialReadinessDashboard {
         CommercialReadinessDashboard(cards: [
             sessionGovernanceCard(input.sessionGovernance),
-            claudeSidecarCard(input.claudeSidecar),
+            modelProviderCard(input.modelProvider),
             extensionRuntimeCard(input.extensionRuntime),
             graphMemoryCard(input.graphMemory),
             nativeUICard(input.nativeUI),
@@ -292,47 +288,39 @@ public struct CommercialReadinessGate: Sendable, Equatable {
         }
     }
 
-    private func claudeSidecarCard(_ readiness: CommercialClaudeSidecarReadiness) -> CommercialReadinessCard {
+    private func modelProviderCard(_ readiness: CommercialModelProviderReadiness) -> CommercialReadinessCard {
         switch readiness {
         case .ready(
-            let runtimeStatus,
-            let sdkSessionID,
+            let providerMode,
+            let connectionKind,
+            let modelID,
             let healthStatus,
-            let protocolVersion,
-            let sdkCWD,
-            let hasHeartbeat,
-            let lastDiagnosticMessage,
-            let failureCode,
-            let recoverability,
-            let ownsProductState,
-            let governedPermissionMode
+            let supportsToolCalling,
+            let supportsStreaming,
+            let nativeRuntime
         ):
             let blockedReasons = [
-                ownsProductState ? "Claude SDK sidecar must not own Connor product state" : nil,
-                governedPermissionMode ? nil : "Claude SDK sidecar is not governed by Connor permission mode",
-                protocolVersion >= 2 ? nil : "Claude SDK sidecar protocol v2 is required for production diagnostics"
+                nativeRuntime ? nil : "Model provider must run through Connor-native runtime",
+                supportsToolCalling ? nil : "Model provider must support Connor tool calling",
+                supportsStreaming ? nil : "Model provider should support streaming events"
             ].compactMap { $0 }
             return CommercialReadinessCard(
-                phase: .claudeSDKSidecar,
+                phase: .nativeModelProviders,
                 status: blockedReasons.isEmpty ? .ready : .blocked,
-                evidence: "runtime \(runtimeStatus.rawValue) · health \(healthStatus) · protocol v\(protocolVersion) · sdk session \(sdkSessionID ?? "not yet established") · cwd \(sdkCWD ?? "unknown") · heartbeat \(hasHeartbeat ? "seen" : "not seen") · sovereignty \(ownsProductState ? "violated" : "Connor-owned")",
+                evidence: "provider \(providerMode.rawValue) · connection \(connectionKind.rawValue) · model \(modelID) · health \(healthStatus) · native \(nativeRuntime ? "yes" : "no")",
                 metrics: [
-                    "runtime": runtimeStatus.rawValue,
+                    "providerMode": providerMode.rawValue,
+                    "connectionKind": connectionKind.rawValue,
+                    "model": modelID,
                     "health": healthStatus,
-                    "protocol": "v\(protocolVersion)",
-                    "sdkSession": sdkSessionID ?? "not-established",
-                    "sdkCWD": sdkCWD ?? "unknown",
-                    "heartbeat": hasHeartbeat ? "seen" : "missing",
-                    "diagnostic": lastDiagnosticMessage ?? "none",
-                    "failureCode": failureCode?.rawValue ?? "none",
-                    "recoverability": recoverability?.rawValue ?? "unknown",
-                    "productState": ownsProductState ? "sdk-owned" : "Connor-owned",
-                    "permission": governedPermissionMode ? "Connor-governed" : "unsafe"
+                    "toolCalling": supportsToolCalling ? "supported" : "missing",
+                    "streaming": supportsStreaming ? "supported" : "missing",
+                    "runtime": nativeRuntime ? "Connor-native" : "external"
                 ],
                 blockingReasons: blockedReasons
             )
         case .missing(let reason):
-            return blockedCard(phase: .claudeSDKSidecar, reason: reason)
+            return blockedCard(phase: .nativeModelProviders, reason: reason)
         }
     }
 

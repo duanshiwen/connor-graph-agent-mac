@@ -24,7 +24,6 @@ struct ProductOSRegistryView: View {
                     Button("重新加载") {
                         viewModel.reloadProductOSRegistry()
                         viewModel.reloadAutomationConfig()
-                        viewModel.reloadSidecarRuntimeDiagnostics()
                     }
                 }
 
