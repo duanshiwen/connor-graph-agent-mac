@@ -7,6 +7,7 @@ protocol SessionSpeechTranscribing: AnyObject {
     func start(
         sessionID: String,
         onPartial: @escaping @MainActor @Sendable (String) -> Void,
+        onFinal: @escaping @MainActor @Sendable (String) -> Void,
         onError: @escaping @MainActor @Sendable (String) -> Void
     )
 
@@ -22,21 +23,36 @@ enum SessionSpeechTranscriptionStopReason: Equatable, Sendable {
 
 enum SessionSpeechTranscriptionStatus: Equatable, Sendable {
     case idle
-    case running(sessionID: String, taskID: String)
+    case recording(sessionID: String, taskID: String)
+    case finalizing(sessionID: String, taskID: String)
     case failed(message: String)
 
     var runningSessionID: String? {
-        guard case .running(let sessionID, _) = self else { return nil }
-        return sessionID
+        switch self {
+        case .recording(let sessionID, _), .finalizing(let sessionID, _): sessionID
+        case .idle, .failed: nil
+        }
     }
 
     var runningTaskID: String? {
-        guard case .running(_, let taskID) = self else { return nil }
-        return taskID
+        switch self {
+        case .recording(_, let taskID), .finalizing(_, let taskID): taskID
+        case .idle, .failed: nil
+        }
     }
 
     var isRunning: Bool {
         runningSessionID != nil
+    }
+
+    var isRecording: Bool {
+        guard case .recording = self else { return false }
+        return true
+    }
+
+    var isFinalizing: Bool {
+        guard case .finalizing = self else { return false }
+        return true
     }
 }
 
@@ -67,7 +83,9 @@ final class SessionSpeechTranscriptionCoordinator {
     private var liveSpeechText: String = ""
     private var userEditedSpeechText: String?
     private var lastGeneratedDraft: String = ""
+    private var provisionalSpeechText: String = ""
     private var setDraft: ((String, String) -> Void)?
+    private var setProvisionalTranscript: ((String, String?) -> Void)?
 
     init(transcriber: SessionSpeechTranscribing) {
         self.transcriber = transcriber
@@ -86,26 +104,44 @@ final class SessionSpeechTranscriptionCoordinator {
     ) -> AppSessionBackgroundTask? {
         guard let selectedSessionID else { return nil }
         if isRunning(sessionID: selectedSessionID) {
-            return stop(reason: .manual)
+            return finishHoldToTalk(reason: .manual)
         }
+        return beginHoldToTalk(selectedSessionID: selectedSessionID, currentDraft: currentDraft, setDraft: setDraft)
+    }
+
+    @discardableResult
+    func beginHoldToTalk(
+        selectedSessionID: String?,
+        currentDraft: String,
+        setDraft: @escaping (String, String) -> Void,
+        setProvisionalTranscript: ((String, String?) -> Void)? = nil
+    ) -> AppSessionBackgroundTask? {
+        guard let selectedSessionID else { return nil }
+        if isRunning(sessionID: selectedSessionID) { return nil }
         if status.isRunning {
             _ = stop(reason: .leavingSession)
         }
-        return start(sessionID: selectedSessionID, currentDraft: currentDraft, setDraft: setDraft)
+        return start(
+            sessionID: selectedSessionID,
+            currentDraft: currentDraft,
+            setDraft: setDraft,
+            setProvisionalTranscript: setProvisionalTranscript
+        )
     }
 
     @discardableResult
     func start(
         sessionID: String,
         currentDraft: String,
-        setDraft: @escaping (String, String) -> Void
+        setDraft: @escaping (String, String) -> Void,
+        setProvisionalTranscript: ((String, String?) -> Void)? = nil
     ) -> AppSessionBackgroundTask {
         let runID = UUID()
         let task = AppSessionBackgroundTask(
             sessionID: sessionID,
             kind: Self.backgroundTaskKind,
-            title: "实时语音转文字",
-            detail: "正在把麦克风语音实时写入当前会话输入框",
+            title: "按住说话",
+            detail: "正在听写语音，松开后会优化最终识别结果",
             status: .running,
             payloadJSON: "{\"runID\":\"\(runID.uuidString)\"}"
         )
@@ -116,13 +152,18 @@ final class SessionSpeechTranscriptionCoordinator {
         liveSpeechText = ""
         userEditedSpeechText = nil
         lastGeneratedDraft = currentDraft
+        provisionalSpeechText = ""
         self.setDraft = setDraft
-        status = .running(sessionID: sessionID, taskID: task.id)
+        self.setProvisionalTranscript = setProvisionalTranscript
+        status = .recording(sessionID: sessionID, taskID: task.id)
 
         transcriber.start(
             sessionID: sessionID,
             onPartial: { [weak self] text in
                 self?.applyPartial(text, sessionID: sessionID, runID: runID)
+            },
+            onFinal: { [weak self] text in
+                self?.applyFinal(text, sessionID: sessionID, runID: runID)
             },
             onError: { [weak self] message in
                 self?.fail(message: message, sessionID: sessionID, runID: runID)
@@ -164,6 +205,21 @@ final class SessionSpeechTranscriptionCoordinator {
     }
 
     @discardableResult
+    func finishHoldToTalk(reason: SessionSpeechTranscriptionStopReason = .manual) -> AppSessionBackgroundTask? {
+        guard reason == .manual else { return stop(reason: reason) }
+        guard var task = activeTask, let sessionID = status.runningSessionID else {
+            status = .idle
+            return nil
+        }
+        transcriber.stop(reason: reason)
+        task.detail = "正在优化语音识别结果"
+        task.updatedAt = Date()
+        activeTask = task
+        status = .finalizing(sessionID: sessionID, taskID: task.id)
+        return task
+    }
+
+    @discardableResult
     func stop(reason: SessionSpeechTranscriptionStopReason) -> AppSessionBackgroundTask? {
         guard var task = activeTask else {
             status = .idle
@@ -184,9 +240,27 @@ final class SessionSpeechTranscriptionCoordinator {
         let hypothesis = partialText.trimmingCharacters(in: .whitespacesAndNewlines)
         liveSpeechText = mergedLiveSpeechText(for: hypothesis)
         lastSpeechHypothesis = hypothesis
-        let nextDraft = renderDraft(withLiveSpeechText: liveSpeechText)
+        provisionalSpeechText = liveSpeechText
+        setProvisionalTranscript?(sessionID, liveSpeechText)
+    }
+
+    private func applyFinal(_ finalText: String, sessionID: String, runID: UUID) {
+        guard activeRunID == runID, status.runningSessionID == sessionID else { return }
+        let finalSpeechText = finalText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let committedSpeechText = finalSpeechText.isEmpty ? provisionalSpeechText : finalSpeechText
+        let nextDraft = renderDraft(withLiveSpeechText: committedSpeechText)
         lastGeneratedDraft = nextDraft
         setDraft?(sessionID, nextDraft)
+        setProvisionalTranscript?(sessionID, nil)
+
+        var completedTask = activeTask
+        completedTask?.status = .succeeded
+        completedTask?.detail = "语音输入已完成"
+        completedTask?.updatedAt = Date()
+        reset()
+        if let completedTask {
+            onTaskUpdate?(completedTask)
+        }
     }
 
     private func mergedLiveSpeechText(for hypothesis: String) -> String {
@@ -245,7 +319,9 @@ final class SessionSpeechTranscriptionCoordinator {
         liveSpeechText = ""
         userEditedSpeechText = nil
         lastGeneratedDraft = ""
+        provisionalSpeechText = ""
         setDraft = nil
+        setProvisionalTranscript = nil
         status = .idle
     }
 
