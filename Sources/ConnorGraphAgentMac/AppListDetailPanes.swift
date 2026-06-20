@@ -2489,10 +2489,12 @@ struct CraftSessionRow: View {
         }
             .onAppear {
                 titleDraft = row.title
-                updateAttentionPulseAnimation()
             }
-            .onChange(of: attentionLevel) { _, _ in
-                updateAttentionPulseAnimation()
+            .task(id: attentionPulseTaskID) {
+                await runAttentionPulseLoop()
+            }
+            .onDisappear {
+                resetAttentionPulse()
             }
             .confirmationDialog("删除这个会话？", isPresented: $isDeleteConfirmationPresented, titleVisibility: .visible) {
             Button("删除", role: .destructive, action: onDelete)
@@ -2736,24 +2738,42 @@ struct CraftSessionRow: View {
         attentionLevel >= .emphasized
     }
 
-    private func updateAttentionPulseAnimation() {
-        guard shouldPulseAttention else {
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                isAttentionPulseOn = false
-            }
-            return
-        }
-        var resetTransaction = Transaction()
-        resetTransaction.disablesAnimations = true
-        withTransaction(resetTransaction) {
+    private var attentionPulseTaskID: String {
+        shouldPulseAttention ? "\(row.id)-\(attentionLevel.rawValue)" : "\(row.id)-none"
+    }
+
+    @MainActor
+    private func resetAttentionPulse() {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
             isAttentionPulseOn = false
         }
-        DispatchQueue.main.async {
-            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
-                isAttentionPulseOn = true
+    }
+
+    @MainActor
+    private func runAttentionPulseLoop() async {
+        guard shouldPulseAttention else {
+            resetAttentionPulse()
+            return
+        }
+
+        resetAttentionPulse()
+
+        while !Task.isCancelled && shouldPulseAttention {
+            withAnimation(.easeInOut(duration: 0.9)) {
+                isAttentionPulseOn.toggle()
             }
+
+            do {
+                try await Task.sleep(for: .milliseconds(900))
+            } catch {
+                break
+            }
+        }
+
+        if !shouldPulseAttention || Task.isCancelled {
+            resetAttentionPulse()
         }
     }
 
