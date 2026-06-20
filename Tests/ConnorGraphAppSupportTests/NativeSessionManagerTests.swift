@@ -3,6 +3,7 @@ import Testing
 import ConnorGraphAgent
 import ConnorGraphAppSupport
 import ConnorGraphCore
+import ConnorGraphSearch
 import ConnorGraphStore
 
 private actor NativeSessionFinalAnswerProvider: AgentModelProvider {
@@ -62,6 +63,23 @@ private actor NativeSessionScriptedProvider: AgentModelProvider {
     }
 }
 
+private actor NativeSessionRecordingLLMProvider: LLMProvider {
+    private var promptCount = 0
+
+    func complete(prompt: String, context: AgentContext) async throws -> LLMResponse {
+        promptCount += 1
+        return LLMResponse(text: """
+        INTENT: Preserve prior session context.
+        DECISIONS: NONE
+        CHANGES: NONE
+        PENDING: NONE
+        DETAILS: compressed
+        """, citations: [])
+    }
+
+    func count() -> Int { promptCount }
+}
+
 private func temporaryNativeSessionManagerDatabaseURL(_ name: String = UUID().uuidString) -> URL {
     FileManager.default.temporaryDirectory.appendingPathComponent("\(name).sqlite")
 }
@@ -70,6 +88,47 @@ private func makeNativeSessionStore() throws -> SQLiteGraphKernelStore {
     let store = try SQLiteGraphKernelStore(path: temporaryNativeSessionManagerDatabaseURL().path)
     try store.migrate()
     return store
+}
+
+@Test func nativeSessionManagerRunsMainAgentPromptAssemblyBeforeMaintenanceCompression() async throws {
+    let store = try makeNativeSessionStore()
+    let repository = AppChatSessionRepository(store: store)
+    let longMessage = String(repeating: "historical context requiring compression ", count: 120)
+    let historicalMessages = (0..<10).map { index in
+        AgentMessage(
+            id: "history-\(index)",
+            role: index.isMultiple(of: 2) ? .user : .assistant,
+            content: "\(index): \(longMessage)",
+            createdAt: Date(timeIntervalSince1970: Double(index))
+        )
+    }
+    let session = AgentSession(
+        id: "native-session-compression-order",
+        title: "Compression Order",
+        messages: historicalMessages,
+        createdAt: Date(timeIntervalSince1970: 1_000)
+    )
+    try repository.saveSession(session)
+    let compressionProvider = NativeSessionRecordingLLMProvider()
+    let loop = AgentLoopController(modelProvider: NativeSessionFinalAnswerProvider(), toolRegistry: AgentToolRegistry())
+    var manager = NativeSessionManager(
+        backend: AgentLoopBackend(loopController: loop),
+        sessionRepository: repository,
+        session: session,
+        compressionProvider: AnyLLMProvider(compressionProvider),
+        contextWindowSize: 100
+    )
+
+    let response = try await manager.submit("Handle the current request")
+    let eventKinds: [AgentEventKind] = response.events.map(\.kind)
+    let promptAssembledIndex = try #require(eventKinds.firstIndex(of: AgentEventKind.promptAssembled))
+    let textCompleteIndex = try #require(eventKinds.firstIndex(of: AgentEventKind.textComplete))
+
+    #expect(promptAssembledIndex < textCompleteIndex)
+    #expect(response.assistantMessage?.content == "Connor-owned assistant response")
+    #expect(await compressionProvider.count() == 1)
+    #expect(manager.session.messages.last?.role == .assistant)
+    #expect(manager.session.messages.last?.content == "Connor-owned assistant response")
 }
 
 @Test func nativeSessionManagerPersistsUserMessageBeforeBackendCompletes() async throws {
