@@ -100,15 +100,33 @@ public struct AgentRuntimeInputSettings: Codable, Sendable, Equatable {
     public var composerSendShortcut: String
     public var spellCheckEnabled: Bool
     public var autoSaveDraftsEnabled: Bool
+    public var sessionSpeechTranscriptionEnabled: Bool
 
     public init(
         composerSendShortcut: String = "return",
         spellCheckEnabled: Bool = true,
-        autoSaveDraftsEnabled: Bool = true
+        autoSaveDraftsEnabled: Bool = true,
+        sessionSpeechTranscriptionEnabled: Bool = true
     ) {
         self.composerSendShortcut = composerSendShortcut
         self.spellCheckEnabled = spellCheckEnabled
         self.autoSaveDraftsEnabled = autoSaveDraftsEnabled
+        self.sessionSpeechTranscriptionEnabled = sessionSpeechTranscriptionEnabled
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case composerSendShortcut
+        case spellCheckEnabled
+        case autoSaveDraftsEnabled
+        case sessionSpeechTranscriptionEnabled
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        composerSendShortcut = try container.decodeIfPresent(String.self, forKey: .composerSendShortcut) ?? "return"
+        spellCheckEnabled = try container.decodeIfPresent(Bool.self, forKey: .spellCheckEnabled) ?? true
+        autoSaveDraftsEnabled = try container.decodeIfPresent(Bool.self, forKey: .autoSaveDraftsEnabled) ?? true
+        sessionSpeechTranscriptionEnabled = try container.decodeIfPresent(Bool.self, forKey: .sessionSpeechTranscriptionEnabled) ?? true
     }
 }
 

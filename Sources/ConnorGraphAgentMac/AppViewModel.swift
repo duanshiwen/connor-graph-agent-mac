@@ -466,6 +466,12 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var composerSendShortcut: String = "return"
     @Published var spellCheckEnabled: Bool = true
     @Published var autoSaveDraftsEnabled: Bool = true
+    @Published var sessionSpeechTranscriptionEnabled: Bool = true {
+        didSet {
+            guard oldValue != sessionSpeechTranscriptionEnabled, !sessionSpeechTranscriptionEnabled else { return }
+            stopSpeechTranscriptionForDisabledSetting()
+        }
+    }
     @Published var shortcutSettings: AgentRuntimeShortcutSettings = AgentRuntimeShortcutSettings()
     @Published var recordingShortcutAction: AgentRuntimeShortcutAction?
     @Published var focusTopSearchRequestID: UUID?
@@ -568,6 +574,7 @@ final class AppViewModel: NSObject, ObservableObject {
             composerSendShortcut,
             spellCheckEnabled.description,
             autoSaveDraftsEnabled.description,
+            sessionSpeechTranscriptionEnabled.description,
             shortcutSettings.bindings.sorted { $0.key.rawValue < $1.key.rawValue }.map { "\($0.key.rawValue)=\($0.value.displayText)" }.joined(separator: ","),
             defaultPermissionMode.rawValue,
             requireApprovalForNetwork.description,
@@ -3345,6 +3352,7 @@ final class AppViewModel: NSObject, ObservableObject {
             appearanceMode = ConnorAppearanceMode(rawValue: settings.appearance.mode) ?? .system
             spellCheckEnabled = settings.input.spellCheckEnabled
             autoSaveDraftsEnabled = settings.input.autoSaveDraftsEnabled
+            sessionSpeechTranscriptionEnabled = settings.input.sessionSpeechTranscriptionEnabled
             composerSendShortcut = settings.input.composerSendShortcut
             shortcutSettings = settings.shortcuts
             requireApprovalForNetwork = settings.permissions.requireApprovalForNetwork
@@ -3386,6 +3394,7 @@ final class AppViewModel: NSObject, ObservableObject {
             settings.appearance.mode = appearanceMode.rawValue
             settings.input.spellCheckEnabled = spellCheckEnabled
             settings.input.autoSaveDraftsEnabled = autoSaveDraftsEnabled
+            settings.input.sessionSpeechTranscriptionEnabled = sessionSpeechTranscriptionEnabled
             settings.input.composerSendShortcut = composerSendShortcut
             settings.shortcuts = shortcutSettings
             settings.permissions.requireApprovalForNetwork = requireApprovalForNetwork
@@ -4064,6 +4073,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func beginSpeechTranscriptionForSelectedSession(speechInsertionRange: NSRange? = nil) {
+        guard sessionSpeechTranscriptionEnabled else { return }
         let task = speechTranscriptionCoordinator.beginHoldToTalk(
             selectedSessionID: selectedChatSessionID,
             currentDraft: currentSelectedChatInputDraftForSpeech(),
@@ -4101,6 +4111,14 @@ final class AppViewModel: NSObject, ObservableObject {
         syncSpeechTranscriptionState()
         upsertSpeechTranscriptionBackgroundTask(task)
         return task
+    }
+
+    private func stopSpeechTranscriptionForDisabledSetting() {
+        guard speechTranscriptionStatus.isRunning else { return }
+        let task = speechTranscriptionCoordinator.stop(reason: .appLifecycle)
+        speechProvisionalTranscript = nil
+        syncSpeechTranscriptionState()
+        upsertSpeechTranscriptionBackgroundTask(task)
     }
 
     private func setSpeechTranscriptionDraft(_ draft: String, for sessionID: String) {
