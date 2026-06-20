@@ -398,6 +398,7 @@ public struct MediaTranscriptionTaskHandler: Sendable {
         if job.request.shouldDownloadAudio || job.request.shouldRunLocalTranscription {
             diagnostics.append("未获取到可转写音频或本地转写产物")
         }
+        diagnostics.append(contentsOf: recentProcessFailureDiagnostics(for: job))
         if !report.missingRuntimeIDs.isEmpty {
             diagnostics.append("App-managed runtime not ready: \(report.missingRuntimeIDs.joined(separator: ", "))")
         }
@@ -406,6 +407,26 @@ public struct MediaTranscriptionTaskHandler: Sendable {
         }
         let userFacing = diagnostics.joined(separator: "；")
         return (userFacing, diagnostics.joined(separator: "；"))
+    }
+
+    private func recentProcessFailureDiagnostics(for job: BrowserMediaTranscriptionJob) -> [String] {
+        guard let events = try? store.loadEvents(sessionID: job.ownerSessionID, jobID: job.id) else { return [] }
+        return events.compactMap { event in
+            guard event.message.contains("exited with"), !event.message.hasSuffix("exited with 0") else { return nil }
+            guard let stderr = event.metadata["stderr"]?.trimmingCharacters(in: .whitespacesAndNewlines), !stderr.isEmpty else { return nil }
+            let firstLine = stderr.split(whereSeparator: \.isNewline).first.map(String.init) ?? stderr
+            let clipped = String(firstLine.prefix(500))
+            if event.message.contains("yt-dlp audio") {
+                return "音频下载失败：\(clipped)"
+            }
+            if event.message.contains("yt-dlp subtitle") {
+                return "平台字幕获取失败：\(clipped)"
+            }
+            if event.message.contains("ffmpeg") {
+                return "音频规范化失败：\(clipped)"
+            }
+            return "媒体处理失败：\(clipped)"
+        }
     }
 
     private func transition(_ job: BrowserMediaTranscriptionJob, to state: MediaTranscriptionJobState, message: String, at date: Date) throws -> BrowserMediaTranscriptionJob {
