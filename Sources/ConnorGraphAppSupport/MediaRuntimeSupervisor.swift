@@ -81,7 +81,8 @@ public struct MediaRuntimeSupervisor: MediaRuntimeSupervising, Sendable {
         let ffmpeg = component(id: "ffmpeg", defaultExecutable: "ffmpeg/runtime/ffmpeg")
         let whisperKit = component(id: "whisperkit", defaultExecutable: nil)
         let components = [python, ytdlp, ffmpeg, whisperKit]
-        let missing = components.filter { !$0.isAvailable }.map(\.id)
+        let requiredComponents = [ytdlp, ffmpeg, whisperKit]
+        let missing = requiredComponents.filter { !$0.isAvailable }.map(\.id)
         let diagnostics = components.compactMap(\.diagnostics)
         return MediaRuntimeHealthReport(
             snapshot: MediaRuntimeSnapshot(python: python, ytDLP: ytdlp, ffmpeg: ffmpeg, whisperKit: whisperKit, capturedAt: now),

@@ -30,6 +30,28 @@ struct MediaRuntimeSupervisorTests {
         #expect(report.snapshot.whisperKit.isAvailable)
     }
 
+    @Test func supervisorDoesNotRequirePythonWhenStandaloneToolsAreAvailable() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sidecars = root.appendingPathComponent("Sidecars", isDirectory: true)
+        try FileManager.default.createDirectory(at: sidecars.appendingPathComponent("yt-dlp/runtime", isDirectory: true), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: sidecars.appendingPathComponent("ffmpeg/runtime", isDirectory: true), withIntermediateDirectories: true)
+        try createUsableWhisperKitModel(named: "openai_whisper-small", in: sidecars)
+        try createUsableWhisperKitModel(named: "openai_whisper-medium", in: sidecars)
+        try "#!/bin/sh\n".write(to: sidecars.appendingPathComponent("yt-dlp/runtime/yt-dlp.sh"), atomically: true, encoding: .utf8)
+        try "binary".write(to: sidecars.appendingPathComponent("ffmpeg/runtime/ffmpeg"), atomically: true, encoding: .utf8)
+
+        let supervisor = MediaRuntimeSupervisor(sidecarsDirectory: sidecars, bundledRuntimeDirectory: nil)
+        let report = await supervisor.healthCheck(now: Date(timeIntervalSince1970: 0))
+
+        #expect(report.isHealthy)
+        #expect(report.missingRuntimeIDs.isEmpty)
+        #expect(!report.snapshot.python.isAvailable)
+        #expect(report.snapshot.ytDLP.isAvailable)
+        #expect(report.snapshot.ffmpeg.isAvailable)
+        #expect(report.snapshot.whisperKit.isAvailable)
+    }
+
     @Test func supervisorRequiresBothSmallAndMediumWhisperKitModels() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }

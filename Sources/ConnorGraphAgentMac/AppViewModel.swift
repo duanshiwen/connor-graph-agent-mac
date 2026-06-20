@@ -1432,7 +1432,7 @@ final class AppViewModel: NSObject, ObservableObject {
         reloadSchemaHealthReport()
         reloadGraphExtractionTraces()
         reloadMemoryChangeLog()
-        Task { await ensureWhisperKitBaselineModelsOnLaunch() }
+        Task { await ensureMediaTranscriptionRuntimeOnLaunch() }
     }
 
     private func apply(snapshot: GraphStoreSnapshot) {
@@ -1679,10 +1679,12 @@ final class AppViewModel: NSObject, ObservableObject {
 
     private func performMediaTranscriptionTask(_ request: MediaTranscriptionTaskRequest) async throws -> String {
         guard let storagePaths else { throw TaskTargetRunnerError.unsupportedTarget("media.transcription storage unavailable") }
+        _ = try await MediaRuntimeBootstrapService(sidecarsDirectory: storagePaths.sidecarsDirectory).ensureBaselineTools()
+        _ = try await WhisperKitModelBootstrapService(sidecarsDirectory: storagePaths.sidecarsDirectory).ensureRequiredBundledModels()
         let handler = MediaTranscriptionTaskHandler(
             store: MediaTranscriptionJobStore(paths: storagePaths),
             runtimeSupervisor: MediaRuntimeSupervisor(sidecarsDirectory: storagePaths.sidecarsDirectory),
-            requireHealthyRuntime: false
+            requireHealthyRuntime: true
         )
         return try await handler.run(request)
     }
@@ -3970,45 +3972,50 @@ final class AppViewModel: NSObject, ObservableObject {
     private static let mediaTranscriptionBackgroundTaskKind = "media_transcription"
     private static let mediaRuntimeBootstrapBackgroundTaskKind = "media_runtime_bootstrap"
 
-    private func ensureWhisperKitBaselineModelsOnLaunch() async {
+    private func ensureMediaTranscriptionRuntimeOnLaunch() async {
         guard mediaRuntimeBootstrapTask == nil else { return }
         guard let storagePaths else { return }
         let report = await MediaRuntimeSupervisor(sidecarsDirectory: storagePaths.sidecarsDirectory).healthCheck()
-        guard !report.snapshot.whisperKit.isAvailable else { return }
+        guard !report.isHealthy else { return }
         let sessionID = selectedChatSessionID ?? activeChatSession.id
         let task = enqueueBackgroundTask(
             sessionID: sessionID,
-            title: "准备媒体转写模型",
-            detail: "正在检查并下载 Connor 内置 WhisperKit small + medium 模型。",
+            title: "准备媒体转写运行时",
+            detail: "正在检查并下载 Connor 内置 yt-dlp、ffmpeg 与 WhisperKit small + medium 模型。",
             kind: Self.mediaRuntimeBootstrapBackgroundTaskKind
         )
         isBackgroundTasksPresented = true
         mediaRuntimeBootstrapTask = Task { [weak self] in
             guard let self else { return }
-            let service = WhisperKitModelBootstrapService(sidecarsDirectory: storagePaths.sidecarsDirectory)
+            let toolService = MediaRuntimeBootstrapService(sidecarsDirectory: storagePaths.sidecarsDirectory)
+            let modelService = WhisperKitModelBootstrapService(sidecarsDirectory: storagePaths.sidecarsDirectory)
             do {
-                updateBackgroundTask(sessionID: sessionID, taskID: task.id, status: .running, detail: "正在准备 WhisperKit small + medium 基线模型。")
-                _ = try await service.ensureRequiredBundledModels { [weak self] progress in
+                updateBackgroundTask(sessionID: sessionID, taskID: task.id, status: .running, detail: "正在准备媒体获取与转码组件。")
+                _ = try await toolService.ensureBaselineTools { [weak self] progress in
                     Task { @MainActor in
                         guard let self else { return }
                         let percent = progress.totalBytes > 0 ? Int(progress.fractionCompleted * 100) : 0
                         let suffix = progress.totalBytes > 0 ? "（\(percent)%）" : ""
-                        self.updateBackgroundTask(
-                            sessionID: sessionID,
-                            taskID: task.id,
-                            status: .running,
-                            detail: "\(progress.message)\(suffix)"
-                        )
+                        self.updateBackgroundTask(sessionID: sessionID, taskID: task.id, status: .running, detail: "\(progress.message)\(suffix)")
+                    }
+                }
+                updateBackgroundTask(sessionID: sessionID, taskID: task.id, status: .running, detail: "正在准备 WhisperKit small + medium 基线模型。")
+                _ = try await modelService.ensureRequiredBundledModels { [weak self] progress in
+                    Task { @MainActor in
+                        guard let self else { return }
+                        let percent = progress.totalBytes > 0 ? Int(progress.fractionCompleted * 100) : 0
+                        let suffix = progress.totalBytes > 0 ? "（\(percent)%）" : ""
+                        self.updateBackgroundTask(sessionID: sessionID, taskID: task.id, status: .running, detail: "\(progress.message)\(suffix)")
                     }
                 }
                 await MainActor.run {
-                    self.updateBackgroundTask(sessionID: sessionID, taskID: task.id, status: .succeeded, detail: "WhisperKit small + medium 模型已就绪，媒体转写可离线使用。")
-                    self.showAttachmentToast(title: "媒体转写模型已就绪", message: "Connor 已准备好 WhisperKit small + medium 基线模型。", systemImage: "checkmark.seal.fill")
+                    self.updateBackgroundTask(sessionID: sessionID, taskID: task.id, status: .succeeded, detail: "媒体转写运行时已就绪：yt-dlp、ffmpeg、WhisperKit small + medium 可用。")
+                    self.showAttachmentToast(title: "媒体转写运行时已就绪", message: "Connor 已准备好媒体获取、转码和 WhisperKit 基线模型。", systemImage: "checkmark.seal.fill")
                     self.mediaRuntimeBootstrapTask = nil
                 }
             } catch {
                 await MainActor.run {
-                    self.updateBackgroundTask(sessionID: sessionID, taskID: task.id, status: .failed, detail: "模型准备失败", errorMessage: "模型下载未完成，Connor 会在下次启动或重试时继续断点续传。")
+                    self.updateBackgroundTask(sessionID: sessionID, taskID: task.id, status: .failed, detail: "媒体转写运行时准备失败", errorMessage: String(describing: error))
                     self.mediaRuntimeBootstrapTask = nil
                 }
             }
