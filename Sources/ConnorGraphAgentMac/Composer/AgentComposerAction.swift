@@ -16,5 +16,7 @@ enum AgentComposerAction {
     case setSessionStatus(AgentSessionStatus)
     case toggleBrowserWorkspaceVisibility
     case toggleSpeechTranscription
+    case beginSpeechTranscription
+    case finishSpeechTranscription
     case showBackgroundTasks
 }

@@ -16,6 +16,7 @@ struct AgentChatComposerView: View {
     @State private var slashSkillPickerAnchorRect: CGRect?
     @State private var slashSkillPickerTriggerRange: NSRange?
     @State private var skillPickerSelectionIndex: Int = 0
+    @State private var speechKeyboardMonitor: SpeechInputKeyboardMonitor?
 
     private let workspaceMenuItemMaxWidth: CGFloat = 320
     private let supportedAttachmentContentTypes: [UTType] = [
@@ -86,6 +87,8 @@ struct AgentChatComposerView: View {
                         }
 
                         composerTextEditor
+
+                        SpeechInputProvisionalTranscriptView(transcript: composerState.speechProvisionalTranscript)
                     }
                     .padding(.horizontal, AgentChatLayout.spaceL)
                     .padding(.top, composerState.pendingAttachments.isEmpty ? AgentChatLayout.spaceM : AgentChatLayout.spaceXS)
@@ -174,6 +177,11 @@ struct AgentChatComposerView: View {
         .background(Color.clear)
         .onAppear {
             localChatInput = viewModel.chatInput
+            installSpeechKeyboardMonitorIfNeeded()
+        }
+        .onDisappear {
+            speechKeyboardMonitor?.stop()
+            speechKeyboardMonitor = nil
         }
         .onChange(of: viewModel.selectedChatSessionID) { _, _ in
             localChatInput = viewModel.chatInput
@@ -211,6 +219,17 @@ struct AgentChatComposerView: View {
 
     private func sendComposerAction(_ action: AgentComposerAction) {
         composerStore.send(action)
+    }
+
+    private func installSpeechKeyboardMonitorIfNeeded() {
+        guard speechKeyboardMonitor == nil else { return }
+        let monitor = SpeechInputKeyboardMonitor(
+            spaceHoldEnabled: false,
+            onBegin: { sendComposerAction(.beginSpeechTranscription) },
+            onEnd: { sendComposerAction(.finishSpeechTranscription) }
+        )
+        monitor.start()
+        speechKeyboardMonitor = monitor
     }
 
     private var localChatInputBinding: Binding<String> {
