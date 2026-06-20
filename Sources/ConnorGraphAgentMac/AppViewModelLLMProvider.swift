@@ -9,10 +9,6 @@ static func makeLLMProvider(settingsRepository: AppLLMSettingsRepository) -> Any
         let settings = try settingsRepository.loadSettings()
         let connection = settings.defaultConnection
         switch connection.providerMode {
-        case .governedClaudeSidecar:
-            return AnyLLMProvider { _, _ in
-                throw AppGraphAgentRuntimeFactoryError.sidecarRequiresSessionManager
-            }
         case .openAIResponses:
             guard let config = try settingsRepository.openAIResponsesConfig(connectionID: connection.id) else {
                 return AnyLLMProvider { _, _ in

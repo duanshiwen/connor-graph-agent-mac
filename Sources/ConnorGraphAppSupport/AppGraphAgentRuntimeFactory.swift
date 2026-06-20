@@ -3,23 +3,6 @@ import ConnorGraphAgent
 import ConnorGraphCore
 import ConnorGraphStore
 
-public enum AppGraphAgentRuntimeFactoryError: Error, Sendable, Equatable, LocalizedError {
-    case unsafeSidecarPermissionMode(AgentPermissionMode)
-    case missingSidecarExecutablePath
-    case sidecarRequiresSessionManager
-
-    public var errorDescription: String? {
-        switch self {
-        case .unsafeSidecarPermissionMode(let mode):
-            return "Governed Claude SDK sidecar path does not allow unsafe permission mode: \(mode.rawValue)."
-        case .missingSidecarExecutablePath:
-            return "Governed Claude SDK sidecar path requires a sidecar executable path."
-        case .sidecarRequiresSessionManager:
-            return "Governed Claude SDK sidecar must run through NativeSessionManager/ClaudeSDKSidecarBackend, not the legacy direct model provider path."
-        }
-    }
-}
-
 public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     public var store: SQLiteGraphKernelStore
     public var settingsRepository: AppLLMSettingsRepository
@@ -195,10 +178,6 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                 effectiveConnectionID = connection.id
             }
             switch effectiveProviderMode {
-            case .governedClaudeSidecar:
-                return AnyAgentModelProvider(modelID: "governed-claude-sidecar-requires-session-manager") { _ in
-                    throw AppGraphAgentRuntimeFactoryError.sidecarRequiresSessionManager
-                }
             case .openAIResponses:
                 guard let config = try openAIResponsesConfigWithOverride(connectionID: effectiveConnectionID, model: effectiveModel, baseURLOverride: effectiveBaseURL, thinkingLevel: effectiveThinkingLevel) else {
                     return AnyAgentModelProvider(modelID: "missing-openai-responses-config") { _ in
@@ -295,10 +274,6 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             let settings = try settingsRepository.loadSettings()
             let connection = settings.defaultConnection
             switch connection.providerMode {
-            case .governedClaudeSidecar:
-                return AnyLLMProvider { _, _ in
-                    throw AppGraphAgentRuntimeFactoryError.sidecarRequiresSessionManager
-                }
             case .openAIResponses:
                 guard let config = try settingsRepository.openAIResponsesConfig(connectionID: connection.id) else {
                     return AnyLLMProvider { _, _ in
@@ -362,12 +337,6 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         let visiblePaths = Set(visibleDirectories.map { AppProjectWorkingDirectoryResolver.normalizedDirectoryPath($0) })
         guard !visiblePaths.contains(hiddenPath) else { return visibleDirectories }
         return visibleDirectories + [hiddenDirectory]
-    }
-
-    private static func splitSidecarArguments(_ arguments: String) -> [String] {
-        arguments
-            .split(separator: " ", omittingEmptySubsequences: true)
-            .map(String.init)
     }
 
 }
