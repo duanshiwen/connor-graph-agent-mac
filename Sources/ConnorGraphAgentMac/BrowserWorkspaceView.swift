@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import WebKit
+import ConnorGraphCore
 import ConnorGraphAppSupport
 
 typealias BrowserWorkspaceSnapshot = AppBrowserStateSnapshot
@@ -58,6 +59,9 @@ struct BrowserWorkspaceView: View {
                                     },
                                     onSelectionChanged: { selection in
                                         showSelectionPopover(selection, tabID: tab.id)
+                                    },
+                                    onMediaSnapshotChanged: { snapshot in
+                                        updateMediaSnapshot(snapshot, for: tab.id)
                                     }
                                 )
                                 .opacity(tab.id == activeSelectedTabID ? 1 : 0)
@@ -277,6 +281,19 @@ struct BrowserWorkspaceView: View {
             .help(activeURLIsBookmarked ? "当前页已收藏，打开收藏夹" : "打开收藏夹")
             .accessibilityLabel("收藏夹")
 
+            if let mediaSnapshot = activeTab?.mediaSnapshot, mediaSnapshot.hasDetectedMedia {
+                Button(action: {}) {
+                    BrowserToolbarIconButtonLabel(
+                        systemImage: "waveform.badge.magnifyingglass",
+                        isActive: true,
+                        iconFont: .system(size: 16, weight: .semibold)
+                    )
+                }
+                .buttonStyle(.plain)
+                .help("检测到 \(mediaSnapshot.mediaElements.count + mediaSnapshot.openGraphMedia.count) 个媒体来源；转写入口将在媒体任务面板中启用")
+                .accessibilityLabel("检测到网页媒体")
+            }
+
             Button(action: { viewModel.toggleBrowserHistoryPanel() }) {
                 BrowserToolbarIconButtonLabel(
                     systemImage: viewModel.isBrowserHistoryPanelVisible ? "clock.arrow.circlepath" : "clock",
@@ -377,6 +394,13 @@ struct BrowserWorkspaceView: View {
             session.webViewsByTabID[tabID] = webView
             if session.tabs.indices.contains(index) { session.tabs[index].webView = webView }
             if session.selectedTabID == nil { session.selectedTabID = tabID }
+        }
+    }
+
+    private func updateMediaSnapshot(_ snapshot: BrowserMediaSourceSnapshot, for tabID: BrowserTabState.ID) {
+        mutateActiveSession { session in
+            guard let index = session.tabs.firstIndex(where: { $0.id == tabID }) else { return }
+            session.tabs[index].mediaSnapshot = snapshot
         }
     }
 

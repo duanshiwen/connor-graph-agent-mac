@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import WebKit
+import ConnorGraphCore
 import ConnorGraphAppSupport
 
 struct EmbeddedWebView: NSViewRepresentable {
@@ -9,12 +10,14 @@ struct EmbeddedWebView: NSViewRepresentable {
     var onNavigationStateChanged: (WebNavigationState) -> Void
     var onOpenInNewTab: (URL) -> Void
     var onSelectionChanged: (BrowserSelectionPayload) -> Void
+    var onMediaSnapshotChanged: (BrowserMediaSourceSnapshot) -> Void = { _ in }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
             onNavigationStateChanged: onNavigationStateChanged,
             onOpenInNewTab: onOpenInNewTab,
-            onSelectionChanged: onSelectionChanged
+            onSelectionChanged: onSelectionChanged,
+            onMediaSnapshotChanged: onMediaSnapshotChanged
         )
     }
 
@@ -22,7 +25,9 @@ struct EmbeddedWebView: NSViewRepresentable {
         let configuration = WKWebViewConfiguration()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         configuration.userContentController.addUserScript(WKUserScript(source: Self.selectionObserverScript, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
+        configuration.userContentController.addUserScript(WKUserScript(source: Self.mediaObserverScript, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
         configuration.userContentController.add(context.coordinator, name: Coordinator.selectionMessageName)
+        configuration.userContentController.add(context.coordinator, name: Coordinator.mediaMessageName)
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
@@ -40,7 +45,73 @@ struct EmbeddedWebView: NSViewRepresentable {
         context.coordinator.onNavigationStateChanged = onNavigationStateChanged
         context.coordinator.onOpenInNewTab = onOpenInNewTab
         context.coordinator.onSelectionChanged = onSelectionChanged
+        context.coordinator.onMediaSnapshotChanged = onMediaSnapshotChanged
     }
+
+    static let mediaObserverScript = """
+    (function() {
+      if (window.__connorMediaObserverInstalled) { return; }
+      window.__connorMediaObserverInstalled = true;
+
+      function attr(selector, name) {
+        var element = document.querySelector(selector);
+        return element ? (element.getAttribute(name) || '') : '';
+      }
+
+      function mediaElements() {
+        return Array.prototype.slice.call(document.querySelectorAll('video,audio')).map(function(element, index) {
+          var current = element.currentSrc || element.src || '';
+          if (!current && element.querySelector('source')) { current = element.querySelector('source').src || ''; }
+          return {
+            id: (element.id || element.getAttribute('data-connor-media-id') || (element.tagName.toLowerCase() + '-' + index)),
+            kind: element.tagName.toLowerCase(),
+            sourceURLString: current || null,
+            durationSeconds: isFinite(element.duration) ? element.duration : null,
+            isPaused: !!element.paused,
+            isMuted: !!element.muted,
+            readyState: element.readyState
+          };
+        });
+      }
+
+      function openGraphMedia() {
+        var candidates = [];
+        var ogVideo = attr('meta[property="og:video"]', 'content') || attr('meta[property="og:video:url"]', 'content');
+        var ogAudio = attr('meta[property="og:audio"]', 'content') || attr('meta[property="og:audio:url"]', 'content');
+        var twitterPlayer = attr('meta[name="twitter:player"]', 'content');
+        [ogVideo, ogAudio, twitterPlayer].forEach(function(value, index) {
+          if (value) { candidates.push({ id: 'meta-' + index, sourceURLString: value, type: index === 1 ? 'audio' : 'video' }); }
+        });
+        return candidates;
+      }
+
+      var lastPayload = '';
+      function reportMedia() {
+        try {
+          var payload = {
+            pageURLString: location.href || '',
+            pageTitle: document.title || '',
+            detectedAt: new Date().toISOString(),
+            mediaElements: mediaElements(),
+            openGraphMedia: openGraphMedia(),
+            canonicalURLString: attr('link[rel="canonical"]', 'href') || null,
+            userVisibleSelection: null
+          };
+          var encoded = JSON.stringify(payload);
+          if (encoded === lastPayload) { return; }
+          lastPayload = encoded;
+          window.webkit.messageHandlers.connorMedia.postMessage(encoded);
+        } catch (error) {}
+      }
+
+      reportMedia();
+      document.addEventListener('play', reportMedia, true);
+      document.addEventListener('pause', reportMedia, true);
+      document.addEventListener('loadedmetadata', reportMedia, true);
+      setTimeout(reportMedia, 500);
+      setTimeout(reportMedia, 2000);
+    })();
+    """
 
     static let selectionObserverScript = """
     (function() {
@@ -91,28 +162,41 @@ struct EmbeddedWebView: NSViewRepresentable {
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
         static let selectionMessageName = "connorSelection"
+        static let mediaMessageName = "connorMedia"
         weak var webView: WKWebView?
         var onNavigationStateChanged: (WebNavigationState) -> Void
         var onOpenInNewTab: (URL) -> Void
         var onSelectionChanged: (BrowserSelectionPayload) -> Void
+        var onMediaSnapshotChanged: (BrowserMediaSourceSnapshot) -> Void
 
         init(
             onNavigationStateChanged: @escaping (WebNavigationState) -> Void,
             onOpenInNewTab: @escaping (URL) -> Void,
-            onSelectionChanged: @escaping (BrowserSelectionPayload) -> Void
+            onSelectionChanged: @escaping (BrowserSelectionPayload) -> Void,
+            onMediaSnapshotChanged: @escaping (BrowserMediaSourceSnapshot) -> Void
         ) {
             self.onNavigationStateChanged = onNavigationStateChanged
             self.onOpenInNewTab = onOpenInNewTab
             self.onSelectionChanged = onSelectionChanged
+            self.onMediaSnapshotChanged = onMediaSnapshotChanged
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-            guard message.name == Self.selectionMessageName,
-                  let json = message.body as? String,
-                  let data = json.data(using: .utf8),
-                  let payload = try? JSONDecoder().decode(BrowserSelectionPayload.self, from: data)
+            guard let json = message.body as? String,
+                  let data = json.data(using: .utf8)
             else { return }
-            DispatchQueue.main.async { self.onSelectionChanged(payload) }
+            if message.name == Self.selectionMessageName,
+               let payload = try? JSONDecoder().decode(BrowserSelectionPayload.self, from: data) {
+                DispatchQueue.main.async { self.onSelectionChanged(payload) }
+                return
+            }
+            if message.name == Self.mediaMessageName {
+                let decoder = JSONDecoder()
+                decoder.dateDecodingStrategy = .iso8601
+                if let payload = try? decoder.decode(BrowserMediaSourceSnapshot.self, from: data) {
+                    DispatchQueue.main.async { self.onMediaSnapshotChanged(payload) }
+                }
+            }
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { publishNavigationState(webView) }
