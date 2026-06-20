@@ -1,7 +1,7 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-19 19:14 GMT+8  
-当前分支目标：收紧代码质量、简化文档、保持 Connor 的原生 Agent OS 边界。
+文档更新时间：2026-06-20 11:02 GMT+8  
+当前分支目标：收紧代码质量、简化文档、保持 Connor 的原生 Agent OS 边界，并为内置浏览器媒体本地转写系统建立可恢复、可治理的地基。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package。它的目标不是做“图谱编辑器”或“Claude SDK 外壳”，而是构建一个本地优先的 **graph-memory-native Agent OS**：以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI、Task Management Stack 和 Attachment Store 共同组成可治理的本地智能工作台。
 
@@ -18,8 +18,8 @@ Connor 当前坚持以下主权边界：
 - **Memory sovereignty belongs to Connor Graph Memory**：LLM 不直接写图谱；图谱写入走 staging、distillation、candidate review、admission policy 与 SQLite temporal graph。
 - **Source sovereignty belongs to Connor Source Platform**：MCP servers 是能力提供者，不拥有 Connor source registry、permission policy、audit、readiness state 或 graph ingestion policy。
 - **UI sovereignty belongs to Swift Native Shell**：不引入 Electron/Web UI，不 fork Craft UI。文件预览、设置、菜单、快捷键、选择器等优先使用 macOS / SwiftUI / AppKit 原生语义。
-- **Task sovereignty belongs to Connor Task Management Stack**：任务栈负责统一生命周期、运行历史、恢复意图和本地 CLI/API 管理面；不承载具体 runtime 实现，也不承担审批 gate。
-- **Attachment sovereignty belongs to Connor Session OS / Attachment Store**：用户文件先进入本地 Session Capsule；原文件、manifest、派生抽取文本、message refs 和治理证据由 Connor 管理。
+- **Task sovereignty belongs to Connor Task Management Stack**：任务栈负责统一生命周期、运行历史、恢复意图和本地 CLI/API 管理面；不承载具体 runtime 实现，也不承担审批 gate。浏览器媒体转写也是 `media.transcription.run` target，不建立第二套媒体专用全局队列。
+- **Attachment sovereignty belongs to Connor Session OS / Attachment Store**：用户文件先进入本地 Session Capsule；原文件、manifest、派生抽取文本、message refs 和治理证据由 Connor 管理。媒体转写全文作为附件/derivative 写入 Session Capsule，不塞进 chat body。
 - **Mail/RSS/Contacts/Calendar sovereignty belongs to Connor native runtimes**：账号、凭据边界、同步游标、source cache、草稿/读取状态、审计和 Graph evidence policy 由 Connor 拥有。
 
 明确不做：
@@ -165,7 +165,45 @@ Application service layer. It contains repositories, adapters and native runtime
 - Browser bookmarks/history/context builders
 - Skills, automation, task management and product readiness
 
-### 3.7 ConnorGraphAgentMac
+### 3.7 Browser Media Transcription Foundation
+
+Connor 的内置浏览器媒体本地转写系统遵守“browser detects, task stack executes, attachment store owns output”的边界：
+
+```text
+WKWebView Browser Media Detection
+  ↓
+BrowserMediaSourceSnapshot
+  ↓
+MediaTranscriptionTaskCreationService
+  ↓
+Connor Task Management Stack target: media.transcription.run
+  ↓
+MediaTranscriptionTaskHandler + MediaRuntimeSupervisor
+  ↓
+Session-owned media job manifest / events / progress / diagnostics / checkpoints
+  ↓
+MediaTranscriptionAttachmentWriter
+  ↓
+Session Attachment Store + follow-up prompt
+```
+
+当前代码层已建立：
+
+- `BrowserMediaTranscriptionDomain.swift`：job、state machine、runtime snapshot、progress、artifact refs。
+- `MediaTranscriptionJobStore.swift`：`sessions/{sessionID}/data/media-jobs/{jobID}/` 下的 durable manifest、event log、progress、diagnostics 与 checkpoints。
+- `MediaRuntimeSupervisor.swift`：Python / yt-dlp / FFmpeg / WhisperKit sidecar health snapshot；真实 runtime 必须通过 checksum、license manifest 与 Application Support sidecar 目录治理。
+- `MediaTranscriptionTaskHandler.swift`：复用现有 `TaskTargetRunner` 的 `media.transcription.run` 分支；不新增独立 queue。
+- `MediaTranscriptionAttachmentWriter.swift`：将 transcript/segments/diagnostics 写入 Session Attachment Store derivatives。
+- `BrowserWebViewRepresentable.swift`：注入媒体检测 JS，识别 `<video>` / `<audio>` / OpenGraph media，不 hook DRM、不抓 cookie、不绕过站点权限。
+
+Runtime 合规边界：
+
+- yt-dlp：采用受治理 Python source/wheelhouse 路线，不使用官方 PyInstaller binary 作为默认分发物；禁止 `--update`、`--exec`、任意 cookie、任意外部 downloader 和未确认 playlist 批量处理。
+- FFmpeg：只允许 LGPL build；不得启用 GPL/nonfree parts；必须记录 configure flags、checksum、source offer / license notice。
+- WhisperKit / SpeakerKit / models：必须记录 SDK 与模型 license、version、checksum；模型按需下载或受治理物化。
+- Python runtime：只作为 yt-dlp sidecar 能力，不作为通用 Python 执行器暴露。
+
+### 3.8 ConnorGraphAgentMac
 
 SwiftUI macOS application target. It owns：
 
