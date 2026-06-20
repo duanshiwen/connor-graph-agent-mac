@@ -10,13 +10,13 @@ struct TaskSchedulerRunnerServiceTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let repository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
         for var defaultTask in ConnorTaskDefinition.systemDefaults(now: Date(timeIntervalSince1970: 0)) {
+            defaultTask.lifecycle.status = .stopped
             defaultTask.lifecycle.lastFinishedAt = Date(timeIntervalSince1970: 0)
-            if defaultTask.id != "system.rss.check-every-30-minutes" {
-                defaultTask.lifecycle.status = .stopped
-            }
             try repository.saveTask(defaultTask)
         }
-        let task = try #require(try repository.loadTask(id: "system.rss.check-every-30-minutes"))
+        var task = makeRSSRefreshTask(sourceID: "feed-a", intervalSeconds: 1_800, now: Date(timeIntervalSince1970: 0))
+        task.lifecycle.lastFinishedAt = Date(timeIntervalSince1970: 0)
+        try repository.saveTask(task)
         let calls = RefreshCallCounter()
         let runner = TaskTargetRunner(mailRefresher: { _ in "mail" }, calendarRefresher: { _ in "calendar" }, rssRefresher: calls.refresh, sessionMessenger: { _ in "session" })
         let service = TaskSchedulerRunnerService(repository: repository, scheduler: TaskSchedulerService(), runner: runner)
@@ -52,12 +52,12 @@ struct TaskSchedulerRunnerServiceTests {
 
         let outcomes = try await service.runDueTasks(now: Date(timeIntervalSince1970: 2_000))
         let failedMail = try #require(try repository.loadTask(id: "system.mail.check-every-10-minutes"))
-        let rss = try #require(try repository.loadTask(id: "system.rss.check-every-30-minutes"))
+        let calendar = try #require(try repository.loadTask(id: "system.calendar.check-every-10-minutes"))
 
-        #expect(outcomes.count == 3)
-        #expect(outcomes.filter(\.succeeded).count == 2)
+        #expect(outcomes.count == 2)
+        #expect(outcomes.filter(\.succeeded).count == 1)
         #expect(failedMail.lifecycle.status == .failed)
-        #expect(rss.lifecycle.status == .active)
+        #expect(calendar.lifecycle.status == .active)
     }
 
     @Test func serviceRunsMissedDailyTaskOnNextSchedulerPassAndPreservesAnchor() async throws {
@@ -109,12 +109,33 @@ struct TaskSchedulerRunnerServiceTests {
         #expect(reloaded.lifecycle.status == .active)
         #expect(reloaded.lifecycle.nextRunAt == expectedNextRun)
     }
+
+    private func makeRSSRefreshTask(sourceID: String, intervalSeconds: TimeInterval, now: Date) -> ConnorTaskDefinition {
+        ConnorTaskDefinition(
+            id: "system.rss.source.\(sourceID).refresh",
+            name: "检查 RSS：\(sourceID)",
+            origin: .system,
+            trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: intervalSeconds, recurrence: .interval),
+            target: ConnorTaskTarget(
+                targetKind: "source.runtime",
+                targetID: "rss",
+                operationName: "refresh",
+                parameters: ["sourceKind": "rss", "sourceInstanceID": sourceID]
+            ),
+            lifecycle: ConnorTaskLifecycle(status: .active),
+            metadata: .protectedSystem,
+            createdAt: now,
+            updatedAt: now
+        )
+    }
 }
 
 private actor RefreshCallCounter {
     var count = 0
-    func refresh(_ runID: String?) async throws -> String {
+    var requests: [SourceRefreshTaskRequest] = []
+    func refresh(_ request: SourceRefreshTaskRequest) async throws -> String {
         count += 1
+        requests.append(request)
         return "rss refreshed"
     }
 }

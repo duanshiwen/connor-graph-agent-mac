@@ -95,6 +95,16 @@ public struct AppTaskManagementRepository: Sendable {
         try write(tasks: tasks)
     }
 
+    public func purgeTaskDefinition(id: String, reason: String? = nil) throws {
+        try validateID(id)
+        var tasks = try loadTasks(includeDeleted: true)
+        let originalCount = tasks.count
+        tasks.removeAll { $0.id == id }
+        guard tasks.count != originalCount else { return }
+        try write(tasks: tasks)
+        try appendEventLine(["event": "task.definition.purged", "taskID": id, "reason": reason ?? ""])
+    }
+
     @discardableResult
     public func stopTask(id: String, reason: String? = nil) throws -> ConnorTaskDefinition {
         try mutateTask(id: id) { task in

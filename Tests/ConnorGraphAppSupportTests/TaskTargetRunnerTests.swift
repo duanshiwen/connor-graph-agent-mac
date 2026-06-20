@@ -18,7 +18,30 @@ struct TaskTargetRunnerTests {
 
         #expect(await mail.count == 1)
         #expect(await calendar.count == 1)
-        #expect(await rss.count == 1)
+        #expect(await rss.count == 0)
+    }
+
+    @Test func runnerPassesSourceInstanceIDToRSSRefreshHandler() async throws {
+        let rss = RSSRefreshSpy()
+        let runner = TaskTargetRunner(
+            mailRefresher: { _ in "mail" },
+            calendarRefresher: { _ in "calendar" },
+            rssRefresher: rss.refresh,
+            sessionMessenger: { _ in "session" }
+        )
+        let task = ConnorTaskDefinition(
+            id: "system.rss.source.feed-a.refresh",
+            name: "检查 RSS：Feed A",
+            origin: .system,
+            trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 900, recurrence: .interval),
+            target: ConnorTaskTarget(targetKind: "source.runtime", targetID: "rss", operationName: "refresh", parameters: ["sourceInstanceID": "feed-a"]),
+            lifecycle: ConnorTaskLifecycle(status: .active),
+            metadata: .protectedSystem
+        )
+
+        _ = try await runner.run(task: task, runID: "run-1")
+
+        #expect(await rss.requests == [SourceRefreshTaskRequest(sourceKind: "rss", sourceInstanceID: "feed-a", runID: "run-1")])
     }
 
     @Test func runnerDispatchesMediaTranscriptionTargets() async throws {
@@ -80,9 +103,9 @@ struct TaskTargetRunnerTests {
     }
 }
 
-private actor MailRefreshSpy { var count = 0; func refresh(_ runID: String?) async throws -> String { count += 1; return "mail refreshed" } }
-private actor CalendarRefreshSpy { var count = 0; func refresh(_ runID: String?) async throws -> String { count += 1; return "calendar refreshed" } }
-private actor RSSRefreshSpy { var count = 0; func refresh(_ runID: String?) async throws -> String { count += 1; return "rss refreshed" } }
+private actor MailRefreshSpy { var count = 0; func refresh(_ request: SourceRefreshTaskRequest) async throws -> String { count += 1; return "mail refreshed" } }
+private actor CalendarRefreshSpy { var count = 0; func refresh(_ request: SourceRefreshTaskRequest) async throws -> String { count += 1; return "calendar refreshed" } }
+private actor RSSRefreshSpy { var count = 0; private(set) var requests: [SourceRefreshTaskRequest] = []; func refresh(_ request: SourceRefreshTaskRequest) async throws -> String { count += 1; requests.append(request); return "rss refreshed" } }
 
 private actor MediaTranscriptionSpy {
     var calls: [MediaTranscriptionTaskRequest] = []

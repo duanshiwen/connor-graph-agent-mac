@@ -1422,6 +1422,14 @@ final class AppViewModel: NSObject, ObservableObject {
         reloadAutomationConfig()
         reloadAutomationExecutionHistory()
         reloadTaskManagementPresentation()
+        Task { @MainActor in
+            do {
+                try await reconcileRSSSourceRefreshTasks()
+                reloadTaskManagementPresentation()
+            } catch {
+                errorMessage = String(describing: error)
+            }
+        }
         reloadSourceRuntimeConfigurations()
         reloadSkillRuntimeDefinitions()
         reloadSidecarRuntimeDiagnostics()
@@ -1629,17 +1637,17 @@ final class AppViewModel: NSObject, ObservableObject {
         isRunningScheduledTasks = true
         defer { isRunningScheduledTasks = false }
         let runner = TaskTargetRunner.appRuntime(
-            mailRefresh: { [weak self] runID in
+            mailRefresh: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("mail") }
-                return try await self.refreshMailForScheduledTask(runID: runID)
+                return try await self.refreshMailForScheduledTask(runID: request.runID)
             },
-            calendarRefresh: { [weak self] runID in
+            calendarRefresh: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("calendar") }
-                return await self.refreshCalendarForScheduledTask(runID: runID)
+                return await self.refreshCalendarForScheduledTask(runID: request.runID)
             },
-            rssRefresh: { [weak self] runID in
+            rssRefresh: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("rss") }
-                return try await self.refreshRSSForScheduledTask(runID: runID)
+                return try await self.refreshRSSForScheduledTask(sourceInstanceID: request.sourceInstanceID, runID: request.runID)
             },
             sessionMessage: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("session.ai") }
@@ -1651,6 +1659,7 @@ final class AppViewModel: NSObject, ObservableObject {
             }
         )
         do {
+            try await reconcileRSSSourceRefreshTasks()
             let scheduler = TaskSchedulerService()
             let dueTasks = scheduler.dueTasks(try taskManagementRepository.loadOrCreateDefault(), now: Date())
             for task in dueTasks where task.target.targetKind == "media.transcription" {
@@ -1719,6 +1728,12 @@ final class AppViewModel: NSObject, ObservableObject {
         _ = await submitChat(prompt: prompt, clearComposer: false, attachments: [manifest.messageRef])
     }
 
+    private func reconcileRSSSourceRefreshTasks(now: Date = Date()) async throws {
+        guard let taskManagementRepository else { return }
+        let materializer = SourceRefreshTaskMaterializer(taskRepository: taskManagementRepository, rssSourceRepository: rssRuntime.repository)
+        _ = try await materializer.reconcileRSSSourceRefreshTasks(now: now)
+    }
+
     private func refreshMailForScheduledTask(runID: String?) async throws -> String {
         guard let mailStore else { return "Mail store unavailable" }
         let runtime = MailRuntime(repository: mailStore, cache: mailStore)
@@ -1732,7 +1747,14 @@ final class AppViewModel: NSObject, ObservableObject {
         return succeeded ? (calendarSyncMessage ?? "Calendar refreshed") : (calendarSyncMessage ?? "Calendar refresh failed")
     }
 
-    private func refreshRSSForScheduledTask(runID: String?) async throws -> String {
+    private func refreshRSSForScheduledTask(sourceInstanceID: String?, runID: String?) async throws -> String {
+        if let sourceInstanceID, !sourceInstanceID.isEmpty {
+            let sourceID = RSSSourceID(rawValue: sourceInstanceID)
+            let result = try await rssRuntime.syncSource(sourceID: sourceID, runID: runID, sessionID: selectedChatSessionID)
+            await reloadRSSBrowserPresentation()
+            return "RSS refreshed source \(sourceInstanceID); inserted \(result.insertedCount), duplicates \(result.duplicateCount)"
+        }
+
         let sources = try await rssRuntime.listSources(runID: runID, sessionID: selectedChatSessionID)
         var inserted = 0
         var duplicates = 0
@@ -2215,6 +2237,8 @@ final class AppViewModel: NSObject, ObservableObject {
         } catch {
             errorMessage = "RSS 订阅源已添加，但首次抓取失败：\(error.localizedDescription)"
         }
+        try await reconcileRSSSourceRefreshTasks()
+        reloadTaskManagementPresentation()
         await reloadRSSBrowserPresentation()
     }
 
@@ -2226,6 +2250,8 @@ final class AppViewModel: NSObject, ObservableObject {
            source.feedURL == feedURL {
             self.selectedRSSItemID = selectedRSSItemID
         }
+        try await reconcileRSSSourceRefreshTasks()
+        reloadTaskManagementPresentation()
         errorMessage = nil
         await reloadRSSBrowserPresentation()
     }
@@ -2239,6 +2265,8 @@ final class AppViewModel: NSObject, ObservableObject {
                    rssBrowserPresentation.item(id: selectedRSSItemID)?.sourceID == source.id {
                     self.selectedRSSItemID = nil
                 }
+                try await reconcileRSSSourceRefreshTasks()
+                reloadTaskManagementPresentation()
                 pendingRSSSourceDeletion = nil
                 errorMessage = nil
                 await reloadRSSBrowserPresentation()
@@ -4790,17 +4818,17 @@ final class AppViewModel: NSObject, ObservableObject {
     private func dispatchTaskSessionStatusChanged(sessionID: String, fromStatus: String?, toStatus: String) {
         guard let taskManagementRepository else { return }
         let runner = TaskTargetRunner.appRuntime(
-            mailRefresh: { [weak self] runID in
+            mailRefresh: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("mail") }
-                return try await self.refreshMailForScheduledTask(runID: runID)
+                return try await self.refreshMailForScheduledTask(runID: request.runID)
             },
-            calendarRefresh: { [weak self] runID in
+            calendarRefresh: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("calendar") }
-                return await self.refreshCalendarForScheduledTask(runID: runID)
+                return await self.refreshCalendarForScheduledTask(runID: request.runID)
             },
-            rssRefresh: { [weak self] runID in
+            rssRefresh: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("rss") }
-                return try await self.refreshRSSForScheduledTask(runID: runID)
+                return try await self.refreshRSSForScheduledTask(sourceInstanceID: request.sourceInstanceID, runID: request.runID)
             },
             sessionMessage: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("session.ai") }

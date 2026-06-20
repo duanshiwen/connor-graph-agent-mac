@@ -20,7 +20,7 @@ struct TaskManagementPresentationTests {
         )
         let presentation = TaskManagementUIPresentation.build(tasks: ConnorTaskDefinition.systemDefaults(now: now) + [eventTask], runHistory: [])
 
-        #expect(presentation.scheduledTasks.count == 3)
+        #expect(presentation.scheduledTasks.count == 2)
         #expect(presentation.eventTriggeredTasks.map(\.id) == ["ai.watch-keyword"])
         #expect(presentation.summary.manualTaskCount == 0)
         #expect(presentation.summary.reviewControlCount == 0)
@@ -52,19 +52,19 @@ struct TaskManagementPresentationTests {
 
         #expect(!presentation.cards.contains { $0.id == mediaTask.id })
         #expect(!presentation.scheduledTasks.contains { $0.id == mediaTask.id })
-        #expect(presentation.scheduledTasks.count == 3)
-        #expect(presentation.summary.scheduledTaskCount == 3)
-        #expect(presentation.summary.totalTaskCount == 3)
+        #expect(presentation.scheduledTasks.count == 2)
+        #expect(presentation.summary.scheduledTaskCount == 2)
+        #expect(presentation.summary.totalTaskCount == 2)
     }
 
     @Test func systemTaskCardDisablesDeleteAndExposesOpaqueTarget() throws {
-        let task = try #require(ConnorTaskDefinition.systemDefaults(now: Date(timeIntervalSince1970: 0)).first { $0.id == "system.rss.check-every-30-minutes" })
+        let task = try #require(ConnorTaskDefinition.systemDefaults(now: Date(timeIntervalSince1970: 0)).first { $0.id == "system.calendar.check-every-10-minutes" })
         let presentation = TaskManagementUIPresentation.build(tasks: [task], runHistory: [])
         let card = try #require(presentation.cards.first)
 
         #expect(card.originBadge == "系统")
         #expect(card.triggerLabel == "定时")
-        #expect(card.targetLabel == "source.runtime:rss.refresh")
+        #expect(card.targetLabel == "source.runtime:calendar.refresh")
         #expect(card.canDelete == false)
         #expect(card.deleteDisabledReason == "系统任务受保护")
         #expect(card.hasReviewControls == false)

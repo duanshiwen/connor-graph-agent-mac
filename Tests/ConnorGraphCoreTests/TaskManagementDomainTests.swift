@@ -8,12 +8,11 @@ struct TaskManagementDomainTests {
         #expect(ConnorTaskTriggerKind.allCases == [.scheduled, .eventTriggered])
     }
 
-    @Test func defaultSystemTasksDescribeMailCalendarAndRSSRefreshes() {
+    @Test func defaultSystemTasksDescribeMailAndCalendarRefreshes() {
         let defaults = ConnorTaskDefinition.systemDefaults(now: Date(timeIntervalSince1970: 0))
 
         let mail = defaults.first { $0.id == "system.mail.check-every-10-minutes" }
         let calendar = defaults.first { $0.id == "system.calendar.check-every-10-minutes" }
-        let rss = defaults.first { $0.id == "system.rss.check-every-30-minutes" }
 
         #expect(mail?.origin == .system)
         #expect(mail?.trigger.kind == .scheduled)
@@ -32,11 +31,7 @@ struct TaskManagementDomainTests {
         #expect(calendar?.target == ConnorTaskTarget.sourceRuntimeRefresh(sourceID: "calendar"))
         #expect(calendar?.metadata.isProtectedSystemTask == true)
 
-        #expect(rss?.origin == .system)
-        #expect(rss?.trigger.intervalSeconds == 1_800)
-        #expect(rss?.trigger.recurrence == .interval)
-        #expect(rss?.target == ConnorTaskTarget.sourceRuntimeRefresh(sourceID: "rss"))
-        #expect(rss?.metadata.isProtectedSystemTask == true)
+        #expect(defaults.contains { $0.target.targetID == "rss" } == false)
     }
 
     @Test func taskRecurrenceAndAllowedTemplatesAreExplicit() throws {
