@@ -29,15 +29,71 @@ public struct MediaTranscriptionTaskRequest: Sendable, Equatable {
     }
 }
 
+public struct MediaProcessInvocation: Sendable, Equatable {
+    public var executable: URL
+    public var arguments: [String]
+
+    public init(executable: URL, arguments: [String]) {
+        self.executable = executable
+        self.arguments = arguments
+    }
+}
+
+public struct MediaProcessResult: Sendable, Equatable {
+    public var exitCode: Int32
+    public var stdout: String
+    public var stderr: String
+
+    public init(exitCode: Int32, stdout: String, stderr: String) {
+        self.exitCode = exitCode
+        self.stdout = stdout
+        self.stderr = stderr
+    }
+}
+
+public protocol MediaProcessRunning: Sendable {
+    func run(_ invocation: MediaProcessInvocation) -> MediaProcessResult
+}
+
+public struct DefaultMediaProcessRunner: MediaProcessRunning, Sendable {
+    public init() {}
+
+    public func run(_ invocation: MediaProcessInvocation) -> MediaProcessResult {
+        let process = Process()
+        process.executableURL = invocation.executable
+        process.arguments = invocation.arguments
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return MediaProcessResult(exitCode: -1, stdout: "", stderr: String(describing: error))
+        }
+        let stdoutText = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let stderrText = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        return MediaProcessResult(exitCode: process.terminationStatus, stdout: stdoutText, stderr: stderrText)
+    }
+}
+
 public struct MediaTranscriptionTaskHandler: Sendable {
     public var store: MediaTranscriptionJobStore
     public var runtimeSupervisor: any MediaRuntimeSupervising
     public var requireHealthyRuntime: Bool
+    public var processRunner: any MediaProcessRunning
 
-    public init(store: MediaTranscriptionJobStore, runtimeSupervisor: any MediaRuntimeSupervising, requireHealthyRuntime: Bool = false) {
+    public init(
+        store: MediaTranscriptionJobStore,
+        runtimeSupervisor: any MediaRuntimeSupervising,
+        requireHealthyRuntime: Bool = false,
+        processRunner: any MediaProcessRunning = DefaultMediaProcessRunner()
+    ) {
         self.store = store
         self.runtimeSupervisor = runtimeSupervisor
         self.requireHealthyRuntime = requireHealthyRuntime
+        self.processRunner = processRunner
     }
 
     public func run(_ request: MediaTranscriptionTaskRequest, now: Date = Date()) async throws -> String {
@@ -132,9 +188,10 @@ public struct MediaTranscriptionTaskHandler: Sendable {
         let outputTemplate = subtitleDirectory.appendingPathComponent("%(id)s.%(ext)s").path
         let result = runProcess(
             executable: ytDLP,
-            arguments: ["--skip-download", "--write-subs", "--write-auto-subs", "--sub-langs", "all", "--sub-format", "vtt/srt/best", "-o", outputTemplate, url]
+            arguments: ytDLPBaseArguments(jobDirectory: jobDirectory)
+                + ["--skip-download", "--write-subs", "--write-auto-subs", "--sub-langs", "all", "--sub-format", "vtt/srt/best", "-o", outputTemplate, url]
         )
-        try store.appendEvent(MediaTranscriptionJobEvent(jobID: job.id, state: .acquiringSubtitles, message: "yt-dlp subtitle acquisition exited with \(result.exitCode)", createdAt: now, metadata: ["stderr": String(result.stderr.prefix(2000))]), sessionID: job.ownerSessionID)
+        try store.appendEvent(MediaTranscriptionJobEvent(jobID: job.id, state: .acquiringSubtitles, message: "yt-dlp subtitle acquisition exited with \(result.exitCode)", createdAt: now, metadata: ["stderr": String(result.stderr.prefix(2000)), "stdout": String(result.stdout.prefix(2000))]), sessionID: job.ownerSessionID)
         guard result.exitCode == 0 else { return job }
         let subtitleFiles = try FileManager.default.contentsOfDirectory(at: subtitleDirectory, includingPropertiesForKeys: [.fileSizeKey])
             .filter { ["vtt", "srt"].contains($0.pathExtension.lowercased()) }
@@ -167,8 +224,8 @@ public struct MediaTranscriptionTaskHandler: Sendable {
         try FileManager.default.createDirectory(at: audioDirectory, withIntermediateDirectories: true)
         let ytDLP = store.paths.sidecarsDirectory.appendingPathComponent("yt-dlp/runtime/yt-dlp.sh")
         let outputTemplate = audioDirectory.appendingPathComponent("%(id)s.%(ext)s").path
-        let result = runProcess(executable: ytDLP, arguments: ["-x", "--audio-format", "m4a", "-o", outputTemplate, url])
-        try store.appendEvent(MediaTranscriptionJobEvent(jobID: job.id, state: .acquiringAudio, message: "yt-dlp audio acquisition exited with \(result.exitCode)", createdAt: now, metadata: ["stderr": String(result.stderr.prefix(2000))]), sessionID: job.ownerSessionID)
+        let result = runProcess(executable: ytDLP, arguments: ytDLPBaseArguments(jobDirectory: jobDirectory) + ["-x", "--audio-format", "m4a", "-o", outputTemplate, url])
+        try store.appendEvent(MediaTranscriptionJobEvent(jobID: job.id, state: .acquiringAudio, message: "yt-dlp audio acquisition exited with \(result.exitCode)", createdAt: now, metadata: ["stderr": String(result.stderr.prefix(2000)), "stdout": String(result.stdout.prefix(2000))]), sessionID: job.ownerSessionID)
         guard result.exitCode == 0 else { return job }
         let audioFiles = try FileManager.default.contentsOfDirectory(at: audioDirectory, includingPropertiesForKeys: [.fileSizeKey])
             .filter { !["part", "ytdl"].contains($0.pathExtension.lowercased()) }
@@ -208,23 +265,17 @@ public struct MediaTranscriptionTaskHandler: Sendable {
         }
     }
 
-    private func runProcess(executable: URL, arguments: [String]) -> (exitCode: Int32, stdout: String, stderr: String) {
-        let process = Process()
-        process.executableURL = executable
-        process.arguments = arguments
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            return (-1, "", String(describing: error))
-        }
-        let stdoutText = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let stderrText = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        return (process.terminationStatus, stdoutText, stderrText)
+    private func ytDLPBaseArguments(jobDirectory: URL) -> [String] {
+        let tempDirectory = jobDirectory.appendingPathComponent("tmp", isDirectory: true)
+        try? FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        return [
+            "--ffmpeg-location", store.paths.sidecarsDirectory.appendingPathComponent("ffmpeg/runtime").path,
+            "--paths", "temp:\(tempDirectory.path)"
+        ]
+    }
+
+    private func runProcess(executable: URL, arguments: [String]) -> MediaProcessResult {
+        processRunner.run(MediaProcessInvocation(executable: executable, arguments: arguments))
     }
 
     private func artifactRef(kind: String, fileURL: URL, relativeTo root: URL, at now: Date) -> MediaTranscriptionArtifactRef {
