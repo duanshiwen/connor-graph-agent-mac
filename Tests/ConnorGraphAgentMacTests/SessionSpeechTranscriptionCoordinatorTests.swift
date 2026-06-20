@@ -78,10 +78,10 @@ struct SessionSpeechTranscriptionCoordinatorTests {
         #expect(updatedTasks.last?.detail == "语音输入已完成")
     }
 
-    @Test func lateFinalResultIsIgnoredAfterImmediatePartialCommit() {
+    @Test func latePartialResultIsIgnoredAfterImmediateCommit() {
         var draftBySession: [String: String] = ["session-1": ""]
         var provisionalBySession: [String: String] = [:]
-        let transcriber = FakeSessionSpeechTranscriber(emitFinalOnStop: false)
+        let transcriber = FakeSessionSpeechTranscriber()
         let coordinator = SessionSpeechTranscriptionCoordinator(transcriber: transcriber)
         _ = coordinator.beginHoldToTalk(
             selectedSessionID: "session-1",
@@ -94,16 +94,14 @@ struct SessionSpeechTranscriptionCoordinatorTests {
 
         transcriber.emitPartial("临时 结果")
         _ = coordinator.finishHoldToTalk()
-        transcriber.emitFinal("最终结果更准确")
-
         #expect(draftBySession["session-1"] == "临时 结果")
         #expect(provisionalBySession["session-1"] == nil)
         #expect(coordinator.status == .idle)
     }
 
-    @Test func finalFailurePathKeepsPartialWhenFinalTextIsEmpty() {
+    @Test func immediateCommitKeepsLatestPartial() {
         var draftBySession: [String: String] = ["session-1": ""]
-        let transcriber = FakeSessionSpeechTranscriber(emitFinalOnStop: false)
+        let transcriber = FakeSessionSpeechTranscriber()
         let coordinator = SessionSpeechTranscriptionCoordinator(transcriber: transcriber)
         _ = coordinator.beginHoldToTalk(
             selectedSessionID: "session-1",
@@ -113,8 +111,6 @@ struct SessionSpeechTranscriptionCoordinatorTests {
 
         transcriber.emitPartial("可用的 partial")
         _ = coordinator.finishHoldToTalk()
-        transcriber.emitFinal("")
-
         #expect(draftBySession["session-1"] == "可用的 partial")
     }
 
@@ -179,50 +175,79 @@ struct SessionSpeechTranscriptionCoordinatorTests {
         #expect(updatedTasks.last?.errorMessage == "麦克风不可用")
         #expect(transcriber.stopReasons == [.appLifecycle])
     }
+
+    @Test func eachHoldToTalkRunStartsWithFreshSpeechCache() {
+        var draftBySession: [String: String] = ["session-1": ""]
+        var provisionalBySession: [String: String] = [:]
+        let transcriber = FakeSessionSpeechTranscriber()
+        let coordinator = SessionSpeechTranscriptionCoordinator(transcriber: transcriber)
+
+        _ = coordinator.beginHoldToTalk(
+            selectedSessionID: "session-1",
+            currentDraft: "",
+            setDraft: { sessionID, draft in draftBySession[sessionID] = draft },
+            setProvisionalTranscript: { sessionID, text in
+                if let text { provisionalBySession[sessionID] = text } else { provisionalBySession.removeValue(forKey: sessionID) }
+            }
+        )
+        transcriber.emitPartial("第一轮")
+        _ = coordinator.finishHoldToTalk()
+
+        transcriber.emitPartial("第一轮迟到 partial")
+        #expect(draftBySession["session-1"] == "第一轮")
+        #expect(provisionalBySession["session-1"] == nil)
+        #expect(transcriber.hasActiveCallbacks == false)
+
+        _ = coordinator.beginHoldToTalk(
+            selectedSessionID: "session-1",
+            currentDraft: draftBySession["session-1", default: ""],
+            setDraft: { sessionID, draft in draftBySession[sessionID] = draft },
+            setProvisionalTranscript: { sessionID, text in
+                if let text { provisionalBySession[sessionID] = text } else { provisionalBySession.removeValue(forKey: sessionID) }
+            }
+        )
+        transcriber.emitPartial("第二轮")
+        _ = coordinator.finishHoldToTalk()
+
+        #expect(draftBySession["session-1"] == "第一轮\n\n第二轮")
+        #expect(provisionalBySession["session-1"] == nil)
+        #expect(transcriber.startCount == 2)
+    }
 }
 
 private final class FakeSessionSpeechTranscriber: SessionSpeechTranscribing {
     private(set) var runningSessionID: String?
     private(set) var stopReasons: [SessionSpeechTranscriptionStopReason] = []
     private(set) var startCount = 0
-    private let emitFinalOnStop: Bool
     private var latestPartial = ""
+    var hasActiveCallbacks: Bool { onPartial != nil || onError != nil }
     private var onPartial: (@MainActor @Sendable (String) -> Void)?
-    private var onFinal: (@MainActor @Sendable (String) -> Void)?
     private var onError: (@MainActor @Sendable (String) -> Void)?
-
-    init(emitFinalOnStop: Bool = true) {
-        self.emitFinalOnStop = emitFinalOnStop
-    }
 
     func start(
         sessionID: String,
         onPartial: @escaping @MainActor @Sendable (String) -> Void,
-        onFinal: @escaping @MainActor @Sendable (String) -> Void,
         onError: @escaping @MainActor @Sendable (String) -> Void
     ) {
         startCount += 1
         runningSessionID = sessionID
+        latestPartial = ""
         self.onPartial = onPartial
-        self.onFinal = onFinal
         self.onError = onError
     }
 
     func stop(reason: SessionSpeechTranscriptionStopReason) {
         stopReasons.append(reason)
         runningSessionID = nil
-        if reason == .manual, emitFinalOnStop {
-            onFinal?(latestPartial)
-        }
+        latestPartial = ""
+        onPartial = nil
+        onError = nil
     }
 
     func emitPartial(_ text: String) {
+        guard onPartial != nil else { return }
         latestPartial = text
         onPartial?(text)
-    }
-
-    func emitFinal(_ text: String) {
-        onFinal?(text)
     }
 
     func emitError(_ message: String) {
