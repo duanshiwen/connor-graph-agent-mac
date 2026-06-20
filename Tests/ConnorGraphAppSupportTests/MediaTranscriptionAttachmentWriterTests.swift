@@ -49,4 +49,35 @@ struct MediaTranscriptionAttachmentWriterTests {
         #expect(prompt.contains("请不要臆测附件之外的信息"))
         #expect(!prompt.contains("# Transcript"))
     }
+
+    @Test func promptBuilderHonorsTranscribeOnlyMode() {
+        let job = BrowserMediaTranscriptionJob(
+            id: "job-1",
+            ownerSessionID: "session-1",
+            source: BrowserMediaSourceSnapshot(pageURLString: "https://example.com/video", pageTitle: "Video"),
+            request: MediaTranscriptionRequest(shouldGenerateChapters: false, outputPurpose: .discussion)
+        )
+        let builder = MediaTranscriptionPromptBuilder()
+
+        let completion = builder.completionMessage(job: job, attachmentID: "attachment-1")
+        let prompt = builder.analysisPrompt(job: job, attachmentID: "attachment-1")
+
+        #expect(completion.contains("只转写"))
+        #expect(prompt.contains("不要求自动提炼"))
+        #expect(prompt.contains("不要主动总结全文"))
+    }
+
+    @Test func promptBuilderAddsChapterTaskWhenRequested() {
+        let job = BrowserMediaTranscriptionJob(
+            id: "job-1",
+            ownerSessionID: "session-1",
+            source: BrowserMediaSourceSnapshot(pageURLString: "https://example.com/video", pageTitle: "Video"),
+            request: MediaTranscriptionRequest(shouldGenerateChapters: true, outputPurpose: .summary)
+        )
+
+        let prompt = MediaTranscriptionPromptBuilder().analysisPrompt(job: job, attachmentID: "attachment-1")
+
+        #expect(prompt.contains("生成章节、主题段落或时间线"))
+        #expect(prompt.contains("不要编造时间点"))
+    }
 }
