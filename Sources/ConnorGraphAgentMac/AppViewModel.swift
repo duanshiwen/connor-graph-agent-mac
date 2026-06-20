@@ -339,17 +339,14 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var llmConnectionConfigs: [AppLLMConnectionConfig] = AppLLMSettings.default.connections
     @Published var llmDefaultConnectionID: String = AppLLMSettings.default.defaultConnectionID
     @Published var llmConnectionName: String = AppLLMSettings.default.defaultConnection.name
-    @Published var llmProviderMode: AppLLMProviderMode = .openAICompatible
+    @Published var llmProviderMode: AppLLMProviderMode = AppLLMSettings.default.providerMode
     @Published var llmBaseURLString: String = AppLLMSettings.default.baseURLString
     @Published var llmModel: String = AppLLMSettings.default.model
     @Published var llmSelectedModel: String = AppLLMSettings.default.effectiveModel
     @Published var llmThinkingLevel: AppLLMThinkingLevel = AppLLMSettings.default.defaultThinkingLevel
     @Published var llmAPIKeyInput: String = ""
     @Published var llmHasAPIKey: Bool = false
-    @Published var sidecarExecutablePath: String = ""
-    @Published var sidecarArguments: String = ""
-    @Published var sidecarWorkingDirectoryPath: String = ""
-    @Published var sidecarPermissionMode: AgentPermissionMode = .readOnly
+    @Published var agentPermissionMode: AgentPermissionMode = .readOnly
     @Published var llmSettingsMessage: String?
     @Published var llmHealthCheckMessage: String?
     @Published var isTestingLLMConnection: Bool = false
@@ -433,7 +430,6 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var pendingSkillDeletionCard: SkillManagerCard?
     @Published var activeSkillSlug: String?
     @Published var activeSkillDisplayName: String?
-    @Published var sidecarRuntimeDiagnostics: [ClaudeSDKSidecarRuntimeDiagnostics] = []
     @Published var commercialReleaseGateResult: CommercialReadinessReleaseGateResult?
     @Published var productOSRegistryMessage: String?
     @Published var selectedSessionArtifactDirectories: AgentSessionArtifactDirectories?
@@ -628,9 +624,9 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
-    func setSidecarPermissionMode(_ mode: AgentPermissionMode) {
+    func setAgentPermissionMode(_ mode: AgentPermissionMode) {
         guard mode != .allowAll else { return }
-        sidecarPermissionMode = mode
+        agentPermissionMode = mode
         nativeSessionManager?.permissionMode = mode
         persistLLMSettings(rebuildRuntime: submittingChatSessionIDs.isEmpty)
         autoApproveCurrentPolicyPendingApprovals()
@@ -638,7 +634,7 @@ final class AppViewModel: NSObject, ObservableObject {
 
     private func shouldAutoApprovePendingApproval(_ approval: AgentPendingApproval) -> Bool {
         guard approval.status == .pending else { return false }
-        switch sidecarPermissionMode {
+        switch agentPermissionMode {
         case .trustedWrite:
             switch approval.capability {
             case .readGraph, .readSession, .modelCall, .proposeGraphWrite, .commitGraphWrite, .externalNetwork, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .writeWorkspaceFile, .editWorkspaceFile, .computeScientific, .runReadOnlyShellCommand, .runWorkspaceShellCommand, .readMail, .readMailBody, .readContacts, .readCalendar, .mutateMailState, .createMailDraft, .importMailAttachment, .readRSS, .readRSSContent, .mutateRSSState, .syncRSSSources, .exportRSSOPML:
@@ -660,7 +656,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 await resolvePendingApproval(
                     approval,
                     status: .approved,
-                    reason: "Automatically approved by current \(sidecarPermissionMode.displayName) policy",
+                    reason: "Automatically approved by current \(agentPermissionMode.displayName) policy",
                     actor: "policy-auto-approver"
                 )
             }
@@ -1276,7 +1272,6 @@ final class AppViewModel: NSObject, ObservableObject {
             activeChatSession: activeChatSession,
             governanceConfig: governanceConfig,
             artifactDirectoriesReady: storagePaths != nil,
-            selectedSidecarRuntimeDiagnostics: selectedSidecarRuntimeDiagnostics,
             sourceRuntimeConfigurations: sourceRuntimeConfigurations,
             skillRuntimeDefinitions: skillRuntimeDefinitions,
             automationConfig: automationConfig,
@@ -1284,10 +1279,6 @@ final class AppViewModel: NSObject, ObservableObject {
         )
     }
 
-    private var selectedSidecarRuntimeDiagnostics: ClaudeSDKSidecarRuntimeDiagnostics? {
-        let activeID = activeChatSession.id
-        return sidecarRuntimeDiagnostics.first { $0.record.connorSessionID == activeID } ?? sidecarRuntimeDiagnostics.first
-    }
 
     private var graphMemoryDashboardPresentation: GraphMemoryDashboard {
         AppGraphMemoryDashboardBuilder().build(
@@ -1432,7 +1423,6 @@ final class AppViewModel: NSObject, ObservableObject {
         }
         reloadSourceRuntimeConfigurations()
         reloadSkillRuntimeDefinitions()
-        reloadSidecarRuntimeDiagnostics()
         Task { await reloadRSSBrowserPresentation() }
         Task { await reloadMailBrowserPresentation() }
         Task { await reloadCalendarContactsFromStorage() }
@@ -2804,22 +2794,7 @@ final class AppViewModel: NSObject, ObservableObject {
         return SkillCommercialUIPresentationBuilder().build(snapshot: snapshot)
     }
 
-    func reloadSidecarRuntimeDiagnostics() {
-        do {
-            if let storagePaths {
-                sidecarRuntimeDiagnostics = try AppClaudeSDKSidecarRuntimeStore(configDirectory: storagePaths.configDirectory).loadDiagnostics()
-            } else {
-                sidecarRuntimeDiagnostics = []
-            }
-            errorMessage = nil
-        } catch {
-            sidecarRuntimeDiagnostics = []
-            errorMessage = String(describing: error)
-        }
-    }
-
     func runCommercialReadinessReleaseGate() {
-        reloadSidecarRuntimeDiagnostics()
         let result = CommercialReadinessReleaseGate().evaluate(commercialReadinessDashboard)
         commercialReleaseGateResult = result
         productOSRegistryMessage = result.summary
@@ -2910,10 +2885,6 @@ final class AppViewModel: NSObject, ObservableObject {
             llmThinkingLevel = settings.defaultThinkingLevel
             llmHasAPIKey = connection.hasAPIKey
             llmAPIKeyInput = ""
-            sidecarExecutablePath = connection.sidecarExecutablePath
-            sidecarArguments = connection.sidecarArguments
-            sidecarWorkingDirectoryPath = connection.sidecarWorkingDirectoryPath
-            sidecarPermissionMode = connection.sidecarPermissionMode
             llmSettingsMessage = nil
             llmHealthCheckMessage = nil
         } catch {
@@ -2966,10 +2937,6 @@ final class AppViewModel: NSObject, ObservableObject {
         llmSelectedModel = connection.effectiveModel
         llmHasAPIKey = connection.hasAPIKey
         llmAPIKeyInput = ""
-        sidecarExecutablePath = connection.sidecarExecutablePath
-        sidecarArguments = connection.sidecarArguments
-        sidecarWorkingDirectoryPath = connection.sidecarWorkingDirectoryPath
-        sidecarPermissionMode = connection.sidecarPermissionMode
         persistLLMSettings(rebuildRuntime: true)
     }
 
@@ -3161,11 +3128,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 baseURLString: llmBaseURLString.trimmingCharacters(in: .whitespacesAndNewlines),
                 model: llmModel.trimmingCharacters(in: .whitespacesAndNewlines),
                 selectedModel: llmSelectedModel.trimmingCharacters(in: .whitespacesAndNewlines),
-                hasAPIKey: llmHasAPIKey,
-                sidecarExecutablePath: sidecarExecutablePath.trimmingCharacters(in: .whitespacesAndNewlines),
-                sidecarArguments: sidecarArguments.trimmingCharacters(in: .whitespacesAndNewlines),
-                sidecarWorkingDirectoryPath: sidecarWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines),
-                sidecarPermissionMode: sidecarPermissionMode
+                hasAPIKey: llmHasAPIKey
             )
             if let index = connections.firstIndex(where: { $0.id == targetID }) {
                 connections[index] = updatedConnection
@@ -3183,7 +3146,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 fallbackChatSession = session
                 nativeSessionManager = makeNativeSessionManager(for: session)
             } else {
-                nativeSessionManager?.permissionMode = sidecarPermissionMode
+                nativeSessionManager?.permissionMode = agentPermissionMode
             }
             llmSettingsMessage = "模型设置已保存。"
             llmHealthCheckMessage = nil
@@ -4974,7 +4937,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func alwaysAllowPendingApproval(_ approval: AgentPendingApproval) {
-        sidecarPermissionMode = .trustedWrite
+        agentPermissionMode = .trustedWrite
         saveLLMSettings()
         Task { await resolvePendingApproval(approval, status: .approved, reason: "Always allowed by reviewer for this trusted session", actor: "human-reviewer") }
     }
@@ -5003,15 +4966,15 @@ final class AppViewModel: NSObject, ObservableObject {
             switch status {
             case .approved:
                 lastPendingApprovalResultSummary = didSendToLiveBackend
-                    ? "已批准权限请求 \(approval.requestID)，并写入审计、timeline，且已向当前运行中的 sidecar/run 发送 resume。"
+                    ? "已批准权限请求 \(approval.requestID)，并写入审计、timeline，且已向当前运行中的 agent run 发送 resume。"
                     : "已批准权限请求 \(approval.requestID)，并写入审计、timeline；但当前未找到仍在线等待的 run，未发送 resume。请重试该会话请求。"
             case .denied:
                 lastPendingApprovalResultSummary = didSendToLiveBackend
-                    ? "已拒绝权限请求 \(approval.requestID)，并写入审计、timeline，且已向当前运行中的 sidecar/run 发送 deny。"
+                    ? "已拒绝权限请求 \(approval.requestID)，并写入审计、timeline，且已向当前运行中的 agent run 发送 deny。"
                     : "已拒绝权限请求 \(approval.requestID)，并写入审计、timeline；但当前未找到仍在线等待的 run。"
             case .cancelled:
                 lastPendingApprovalResultSummary = didSendToLiveBackend
-                    ? "已取消权限请求 \(approval.requestID)，并写入审计、timeline，且已向当前运行中的 sidecar/run 发送 cancel/deny。"
+                    ? "已取消权限请求 \(approval.requestID)，并写入审计、timeline，且已向当前运行中的 agent run 发送 cancel/deny。"
                     : "已取消权限请求 \(approval.requestID)，并写入审计、timeline；但当前未找到仍在线等待的 run。"
             case .pending:
                 lastPendingApprovalResultSummary = "权限请求 \(approval.requestID) 仍为 pending。"

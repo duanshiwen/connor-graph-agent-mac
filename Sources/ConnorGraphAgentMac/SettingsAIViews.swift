@@ -10,38 +10,28 @@ struct LLMSettingsView: View {
     var body: some View {
         Form {
             Picker("模型提供方", selection: $viewModel.llmProviderMode) {
+                Text("OpenAI Responses").tag(AppLLMProviderMode.openAIResponses)
                 Text("OpenAI 兼容").tag(AppLLMProviderMode.openAICompatible)
-                Text("Claude Sidecar").tag(AppLLMProviderMode.governedClaudeSidecar)
+                Text("Anthropic / Claude").tag(AppLLMProviderMode.anthropicMessages)
             }
             .pickerStyle(.segmented)
 
-            if viewModel.llmProviderMode == .governedClaudeSidecar {
-                GroupBox("Governed Claude SDK Sidecar") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        TextField("Sidecar executable path，例如 /usr/local/bin/node", text: $viewModel.sidecarExecutablePath)
-                            .textFieldStyle(.roundedBorder)
-                        TextField("Sidecar arguments，例如 sidecars/claude-agent-engine/claude-sidecar.mjs", text: $viewModel.sidecarArguments)
-                            .textFieldStyle(.roundedBorder)
-                        TextField("Working directory", text: $viewModel.sidecarWorkingDirectoryPath)
-                            .textFieldStyle(.roundedBorder)
-                        Picker("康纳同学权限模式", selection: $viewModel.sidecarPermissionMode) {
-                            Text("只读").tag(AgentPermissionMode.readOnly)
-                            Text("询问").tag(AgentPermissionMode.askToWrite)
-                            Text("执行").tag(AgentPermissionMode.trustedWrite)
-                        }
-                        .pickerStyle(.segmented)
-                        Text("安全边界：SDK permissionMode 固定为 bypassPermissions；康纳同学保留 session、pending approval、audit、graph memory 和 product state 主权。Sidecar 模式不允许 allowAll。")
-                            .font(SettingsListTypography.rowCaption)
-                            .foregroundStyle(.secondary)
-                    }
+            TextField("Base URL", text: $viewModel.llmBaseURLString)
+                .textFieldStyle(.roundedBorder)
+            TextField("模型列表（逗号分隔）", text: $viewModel.llmModel)
+                .textFieldStyle(.roundedBorder)
+            SecureField("API Key", text: $viewModel.llmAPIKeyInput)
+                .textFieldStyle(.roundedBorder)
+
+            GroupBox {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("原生模型管线", systemImage: "sparkles.rectangle.stack")
+                        .font(SettingsListTypography.rowCaptionEmphasized)
+                    Text("OpenAI 官方连接通过 Connor 原生 Responses API 管线执行；Claude/Anthropic 通过 Connor 原生 Swift Messages API 管线执行。Session、工具、权限审批、审计和 Graph Memory 均由 Connor 自己持有。")
                 }
-            } else {
-                TextField("Base URL", text: $viewModel.llmBaseURLString)
-                    .textFieldStyle(.roundedBorder)
-                TextField("模型列表（逗号分隔）", text: $viewModel.llmModel)
-                    .textFieldStyle(.roundedBorder)
-                SecureField("API Key", text: $viewModel.llmAPIKeyInput)
-                    .textFieldStyle(.roundedBorder)
+                .font(SettingsListTypography.rowCaption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             HStack {

@@ -68,7 +68,7 @@ struct CommercialTrain6LocalAPICLIAutomationSurfaceTests {
     @Test func commercialReadinessGateIncludesTrain6LocalAutomationSurfacePhase() {
         let input = CommercialReadinessInput(
             sessionGovernance: .ready(sessionCount: 1, statusDefinitionCount: 5, labelDefinitionCount: 5, artifactDirectoriesReady: true),
-            claudeSidecar: .ready(runtimeStatus: .ready, sdkSessionID: "sdk-1", healthStatus: "ok"),
+            modelProvider: .ready(providerMode: .anthropicMessages, connectionKind: .anthropicCompatible, modelID: "claude-sonnet-4-5", healthStatus: "ready"),
             extensionRuntime: .ready(enabledSourceCount: 1, loadedSkillCount: 1, enabledAutomationRuleCount: 2),
             graphMemory: .ready(pendingCandidateCount: 0, openHoldCount: 0, recentChangeCount: 1, contextReady: true, ingestionReady: true, distillationReady: true),
             nativeUI: .ready(shellItemCount: 12, commandCount: 11, settingsPanelsReady: true, homeSurfaceReady: true, readinessDashboardLinked: true, primaryActionCount: 6, emptyStateCount: 4, keyboardShortcutCount: 10, settingsSectionCount: 7),
@@ -86,7 +86,7 @@ struct CommercialTrain6LocalAPICLIAutomationSurfaceTests {
     @Test func localAutomationSurfaceBlocksReadinessWhenExecutionGateIsUnsafe() {
         let input = CommercialReadinessInput(
             sessionGovernance: .ready(sessionCount: 1, statusDefinitionCount: 5, labelDefinitionCount: 5, artifactDirectoriesReady: true),
-            claudeSidecar: .ready(runtimeStatus: .ready, sdkSessionID: nil, healthStatus: "ok"),
+            modelProvider: .ready(providerMode: .anthropicMessages, connectionKind: .anthropicCompatible, modelID: "claude-sonnet-4-5", healthStatus: "ready"),
             extensionRuntime: .ready(enabledSourceCount: 1, loadedSkillCount: 1, enabledAutomationRuleCount: 1),
             graphMemory: .ready(pendingCandidateCount: 0, openHoldCount: 0, recentChangeCount: 0, contextReady: true, ingestionReady: true, distillationReady: true),
             nativeUI: .ready(shellItemCount: 12, commandCount: 11, settingsPanelsReady: true, homeSurfaceReady: true, readinessDashboardLinked: true, primaryActionCount: 6, emptyStateCount: 4, keyboardShortcutCount: 10, settingsSectionCount: 7),

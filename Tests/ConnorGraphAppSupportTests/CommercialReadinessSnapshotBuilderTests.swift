@@ -8,12 +8,6 @@ import ConnorGraphAppSupport
 struct CommercialReadinessSnapshotBuilderTests {
     @Test func snapshotBuilderAggregatesExistingRuntimeObjectsIntoReadinessInput() {
         let session = AgentSession(id: "session-1", title: "Commercial Session")
-        let sidecarRecord = ClaudeSDKSidecarRuntimeRecord(
-            connorSessionID: "session-1",
-            groupID: "default",
-            sdkSessionID: "sdk-session-1",
-            status: .ready
-        )
         let source = MCPSourceRuntimeConfiguration(
             sourceID: "linear",
             displayName: "Linear",
@@ -52,8 +46,12 @@ struct CommercialReadinessSnapshotBuilderTests {
             sessions: [session],
             governanceConfig: .default,
             artifactDirectoriesReady: true,
-            sidecarRecord: sidecarRecord,
-            sidecarHealthStatus: "ok",
+            modelProvider: .ready(
+                providerMode: .anthropicMessages,
+                connectionKind: .anthropicCompatible,
+                modelID: "claude-sonnet-4-5",
+                healthStatus: "ok"
+            ),
             sources: [source],
             skills: [skill],
             automationConfig: automation,
@@ -65,7 +63,8 @@ struct CommercialReadinessSnapshotBuilderTests {
 
         #expect(dashboard.overallStatus == .ready)
         #expect(dashboard.cards[0].metrics["sessions"] == "1")
-        #expect(dashboard.cards[1].evidence.contains("sdk-session-1"))
+        #expect(dashboard.cards[1].evidence.contains("anthropic_messages"))
+        #expect(dashboard.cards[1].evidence.contains("claude-sonnet-4-5"))
         #expect(dashboard.cards[2].metrics == ["sources": "1", "skills": "1", "automations": "1"])
         #expect(dashboard.cards[3].metrics == ["candidates": "2", "holds": "1", "changes": "3"])
         #expect(dashboard.cards[4].metrics["settings"] == "ready")
@@ -76,8 +75,7 @@ struct CommercialReadinessSnapshotBuilderTests {
             sessions: [],
             governanceConfig: .default,
             artifactDirectoriesReady: false,
-            sidecarRecord: nil,
-            sidecarHealthStatus: nil,
+            modelProvider: .missing("Native model provider has not been configured"),
             sources: [],
             skills: [],
             automationConfig: ProductOSAutomationConfig(rules: []),
@@ -88,9 +86,10 @@ struct CommercialReadinessSnapshotBuilderTests {
         let dashboard = CommercialReadinessGate().evaluate(input)
 
         #expect(dashboard.overallStatus == .blocked)
-        #expect(dashboard.cards.filter { $0.status == .blocked }.map(\.phase) == [
+        let blockedPhases = dashboard.cards.filter { $0.status == .blocked }.map(\.phase)
+        #expect(blockedPhases == [
             .sessionGovernance,
-            .claudeSDKSidecar,
+            .nativeModelProviders,
             .sourcesSkillsAutomations,
             .graphMemoryLoop,
             .nativeCommercialUI
