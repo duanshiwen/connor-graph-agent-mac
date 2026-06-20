@@ -184,6 +184,22 @@ struct SettingsShortcutsSection: View {
                 }
             }
 
+            SettingsGroup(title: "语音输入") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("按住说话 · 鼠标按住或按住 Option", systemImage: "mic")
+                        .font(SettingsListTypography.rowTitleSelected)
+                    Text("Composer 的语音输入与浏览器媒体转写共用本地 WhisperKit runtime：Medium 是默认质量模型，Small 是低资源 fallback。录音中显示实时 partial 结果，松开后会用完整音频再识别一遍，提高最终准确度。")
+                        .font(SettingsListTypography.rowCaption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("长按空格可以作为未来高级选项，但默认关闭；只有在能够消费 Space keyDown、避免向文本框输入重复空格时才应启用。")
+                        .font(SettingsListTypography.rowCaption)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.vertical, 2)
+            }
+
             Text("修改后会写入 runtime-settings.json,并由菜单命令或 Browser Workspace 局部 key monitor 真实生效。Governance / Source / Skill 等低频入口不在此页暴露快捷键,避免占用过多 ⌘ 数字键。")
                 .font(SettingsListTypography.rowCaption)
                 .foregroundStyle(.secondary)
