@@ -21,6 +21,29 @@ struct TaskTargetRunnerTests {
         #expect(await rss.count == 1)
     }
 
+    @Test func runnerPassesSourceInstanceIDToRSSRefreshHandler() async throws {
+        let rss = RSSRefreshSpy()
+        let runner = TaskTargetRunner(
+            mailRefresher: { _ in "mail" },
+            calendarRefresher: { _ in "calendar" },
+            rssRefresher: rss.refresh,
+            sessionMessenger: { _ in "session" }
+        )
+        let task = ConnorTaskDefinition(
+            id: "system.rss.source.feed-a.refresh",
+            name: "检查 RSS：Feed A",
+            origin: .system,
+            trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 900, recurrence: .interval),
+            target: ConnorTaskTarget(targetKind: "source.runtime", targetID: "rss", operationName: "refresh", parameters: ["sourceInstanceID": "feed-a"]),
+            lifecycle: ConnorTaskLifecycle(status: .active),
+            metadata: .protectedSystem
+        )
+
+        _ = try await runner.run(task: task, runID: "run-1")
+
+        #expect(await rss.requests == [SourceRefreshTaskRequest(sourceKind: "rss", sourceInstanceID: "feed-a", runID: "run-1")])
+    }
+
     @Test func runnerDispatchesMediaTranscriptionTargets() async throws {
         let media = MediaTranscriptionSpy()
         let runner = TaskTargetRunner(
