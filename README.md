@@ -189,11 +189,13 @@ Session Attachment Store + follow-up prompt
 
 当前代码层已建立：
 
-- `BrowserMediaTranscriptionDomain.swift`：job、state machine、runtime snapshot、progress、artifact refs。
+- `BrowserMediaTranscriptionDomain.swift`：job、state machine、runtime snapshot、progress、artifact refs；多段媒体选择会先拆成多个单源 snapshot，确保每个 `media.transcription.run` job 只对应一个媒体源。
 - `MediaTranscriptionJobStore.swift`：`sessions/{sessionID}/data/media-jobs/{jobID}/` 下的 durable manifest、event log、progress、diagnostics 与 checkpoints。
 - `MediaRuntimeSupervisor.swift`：Python / yt-dlp / FFmpeg / WhisperKit sidecar health snapshot；真实 runtime 必须通过 checksum、license manifest 与 Application Support sidecar 目录治理。
+- `WhisperKitMediaLocalTranscriber.swift`：默认本地 ASR provider，使用 Argmax `WhisperKit` Swift SDK 加载 app-managed `openai_whisper-medium`（balanced/default）模型；媒体转写不使用 macOS Speech 作为默认路径。
 - `MediaTranscriptionTaskHandler.swift`：复用现有 `TaskTargetRunner` 的 `media.transcription.run` 分支；不新增独立 queue。
-- `MediaTranscriptionAttachmentWriter.swift`：将 transcript/segments/diagnostics 写入 Session Attachment Store derivatives。
+- `TaskManagementUIPresentation.swift`：浏览器媒体转写属于可恢复后台任务，不进入系统定时任务列表；用户在会话 background task surface 中查看进度。
+- `MediaTranscriptionAttachmentWriter.swift`：将 transcript/segments/diagnostics 写入 Session Attachment Store derivatives；完成后的 follow-up message 必须携带当前 job 最新 transcript attachment ref，让模型通过附件上下文读取全文，而不是只在 prompt 中写附件 ID。
 - `BrowserWebViewRepresentable.swift`：注入媒体检测 JS，识别 `<video>` / `<audio>` / OpenGraph media，不 hook DRM、不抓 cookie、不绕过站点权限。
 
 Runtime 合规边界：
@@ -402,7 +404,8 @@ API keys and provider credentials must not be stored in JSON settings files. The
   - `tasks_list`
   - `tasks_create_scheduled_session_message`
   - `tasks_create_session_status_message`
-- Task runtime execution：`TaskSchedulerService` 计算 due tasks，`TaskSchedulerRunnerService` 记录 run history 并调用 `TaskTargetRunner`，真实分发到 Native Mail / Calendar / RSS runtimes 或 Session OS message flow
+- Task runtime execution：`TaskSchedulerService` 计算 due tasks，`TaskSchedulerRunnerService` 记录 run history 并调用 `TaskTargetRunner`，真实分发到 Native Mail / Calendar / RSS runtimes、Session OS message flow 或浏览器媒体转写 handler
+- 浏览器媒体转写任务使用 Task Stack 获得 recoverable run/history 能力，但不作为“系统定时任务”卡片显示；它的用户可见面在对应会话的 background task surface。若用户一次选择多段媒体，App 会拆成多个单源 job/task；每个完成后的 follow-up chat 只携带该 job 最新 transcript 附件 ref，避免跨视频提交错附件。
 - Session-scoped background task adapter remains for recoverable per-session runtime intents
 
 ---

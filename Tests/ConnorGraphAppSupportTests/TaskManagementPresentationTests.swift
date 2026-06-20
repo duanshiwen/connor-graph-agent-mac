@@ -26,6 +26,37 @@ struct TaskManagementPresentationTests {
         #expect(presentation.summary.reviewControlCount == 0)
     }
 
+    @Test func presentationHidesMediaTranscriptionBackgroundTasksFromScheduledList() {
+        let now = Date(timeIntervalSince1970: 0)
+        let mediaTask = ConnorTaskDefinition(
+            id: "media.transcription.media-job-1",
+            name: "转写媒体：Example",
+            origin: .ai,
+            trigger: ConnorTaskTrigger(kind: .scheduled, runAt: now, recurrence: .once),
+            target: .mediaTranscriptionRun(jobID: "media-job-1", ownerSessionID: "session-1"),
+            lifecycle: ConnorTaskLifecycle(status: .active, nextRunAt: now),
+            metadata: ConnorTaskMetadata(
+                createdBySessionID: "session-1",
+                rationale: "Transcribe browser media into a session-owned attachment",
+                tags: ["media", "transcription", "browser"],
+                scope: .global,
+                ownerSessionID: "session-1",
+                isRecoverable: true,
+                recoveryPolicy: .restoreIfQueuedOrRunning
+            ),
+            createdAt: now,
+            updatedAt: now
+        )
+
+        let presentation = TaskManagementUIPresentation.build(tasks: ConnorTaskDefinition.systemDefaults(now: now) + [mediaTask], runHistory: [])
+
+        #expect(!presentation.cards.contains { $0.id == mediaTask.id })
+        #expect(!presentation.scheduledTasks.contains { $0.id == mediaTask.id })
+        #expect(presentation.scheduledTasks.count == 3)
+        #expect(presentation.summary.scheduledTaskCount == 3)
+        #expect(presentation.summary.totalTaskCount == 3)
+    }
+
     @Test func systemTaskCardDisablesDeleteAndExposesOpaqueTarget() throws {
         let task = try #require(ConnorTaskDefinition.systemDefaults(now: Date(timeIntervalSince1970: 0)).first { $0.id == "system.rss.check-every-30-minutes" })
         let presentation = TaskManagementUIPresentation.build(tasks: [task], runHistory: [])

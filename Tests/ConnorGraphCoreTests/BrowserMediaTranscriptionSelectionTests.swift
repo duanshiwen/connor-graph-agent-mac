@@ -66,6 +66,32 @@ struct BrowserMediaTranscriptionSelectionTests {
         #expect(selection.options.shouldGenerateChapters)
     }
 
+    @Test func selectionSplitsMultipleSourcesIntoSingleSourceSnapshots() {
+        let snapshot = BrowserMediaSourceSnapshot(
+            pageURLString: "https://example.com/watch",
+            mediaElements: [
+                BrowserDetectedMediaElement(id: "video-0", kind: "video", sourceURLString: "https://cdn.example.com/video-0.mp4"),
+                BrowserDetectedMediaElement(id: "video-1", kind: "video", sourceURLString: "https://cdn.example.com/video-1.mp4")
+            ],
+            openGraphMedia: [
+                BrowserDetectedMediaCandidate(id: "og-video", sourceURLString: "https://example.com/og.mp4", type: "video")
+            ]
+        )
+        let selection = BrowserMediaTranscriptionSelection(
+            snapshot: snapshot,
+            selectedSourceIDs: ["media-element:video-1", "open-graph:og-video"],
+            mode: .transcribeAndSummarize
+        )
+
+        let snapshots = selection.selectedSingleSourceSnapshots
+
+        #expect(snapshots.count == 2)
+        #expect(snapshots[0].mediaElements.map(\.id) == ["video-1"])
+        #expect(snapshots[0].openGraphMedia.isEmpty)
+        #expect(snapshots[1].mediaElements.isEmpty)
+        #expect(snapshots[1].openGraphMedia.map(\.id) == ["og-video"])
+    }
+
     @Test func modesMapToExpectedRequestOptions() {
         let transcribeOnly = BrowserMediaTranscriptionOptions.defaults(for: .transcribeOnly).mediaTranscriptionRequest()
         let summarize = BrowserMediaTranscriptionOptions.defaults(for: .transcribeAndSummarize).mediaTranscriptionRequest()
