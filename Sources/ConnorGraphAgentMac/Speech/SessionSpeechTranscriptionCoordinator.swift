@@ -141,7 +141,7 @@ final class SessionSpeechTranscriptionCoordinator {
             sessionID: sessionID,
             kind: Self.backgroundTaskKind,
             title: "按住说话",
-            detail: "正在听写语音，松开后会优化最终识别结果",
+            detail: "正在听写语音，松开即提交当前识别结果",
             status: .running,
             payloadJSON: "{\"runID\":\"\(runID.uuidString)\"}"
         )
@@ -211,11 +211,20 @@ final class SessionSpeechTranscriptionCoordinator {
             status = .idle
             return nil
         }
-        transcriber.stop(reason: reason)
-        task.detail = "正在优化语音识别结果"
+
+        let committedSpeechText = provisionalSpeechText
+        let nextDraft = renderDraft(withLiveSpeechText: committedSpeechText)
+        lastGeneratedDraft = nextDraft
+        setDraft?(sessionID, nextDraft)
+        setProvisionalTranscript?(sessionID, nil)
+
+        task.status = .succeeded
+        task.detail = "语音输入已完成"
         task.updatedAt = Date()
-        activeTask = task
-        status = .finalizing(sessionID: sessionID, taskID: task.id)
+
+        reset()
+        transcriber.stop(reason: reason)
+        onTaskUpdate?(task)
         return task
     }
 

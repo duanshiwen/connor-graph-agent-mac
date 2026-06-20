@@ -202,16 +202,12 @@ struct SpeechInputHoldToTalkButton: View {
                 .font(.system(size: AgentChatTypography.smallIconSize, weight: .semibold))
                 .symbolRenderingMode(.hierarchical)
             Text(title)
-                .font(AgentChatTypography.meta.weight(.medium))
+                .font(AgentChatTypography.micro.weight(.medium))
                 .lineLimit(1)
-            if status.isFinalizing {
-                ProgressView()
-                    .controlSize(.small)
-            }
         }
         .foregroundStyle(foreground)
-        .padding(.horizontal, AgentChatLayout.spaceM)
-        .frame(minWidth: 190, minHeight: AgentChatLayout.hitTargetSize)
+        .padding(.horizontal, AgentChatLayout.spaceS)
+        .frame(minWidth: 104, minHeight: AgentChatLayout.iconButtonSize)
         .background(background, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous)
@@ -224,7 +220,7 @@ struct SpeechInputHoldToTalkButton: View {
                 .onEnded { _ in endIfNeeded() }
         )
         .opacity(isEnabled ? 1 : 0.45)
-        .allowsHitTesting(isEnabled && !status.isFinalizing)
+        .allowsHitTesting(isEnabled)
         .help(helpText)
         .accessibilityLabel(title)
     }
@@ -232,13 +228,13 @@ struct SpeechInputHoldToTalkButton: View {
     private var title: String {
         switch status {
         case .recording:
-            "正在听… 松开结束"
+            "松开结束"
         case .finalizing:
-            "正在优化识别结果…"
+            "按住说话"
         case .failed:
-            "语音输入失败"
+            "语音失败"
         case .idle:
-            "按住说话 · 鼠标按住或按住 Option"
+            "按住说话"
         }
     }
 
@@ -278,7 +274,7 @@ struct SpeechInputHoldToTalkButton: View {
 
     private var helpText: String {
         guard isEnabled else { return "请选择一个会话后再开始语音输入" }
-        return "鼠标按住开始录音，松开后 Connor 会用完整音频再识别一遍以提高准确度。键盘可按住 Option。长按空格可在设置中开启，但默认关闭。"
+        return "鼠标按住开始录音，松开即提交当前识别结果；也可以按住 Option 开始，松开 Option 结束。"
     }
 
     private func beginIfNeeded() {
