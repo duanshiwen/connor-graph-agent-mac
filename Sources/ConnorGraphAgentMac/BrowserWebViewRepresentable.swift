@@ -108,8 +108,16 @@ struct EmbeddedWebView: NSViewRepresentable {
       document.addEventListener('play', reportMedia, true);
       document.addEventListener('pause', reportMedia, true);
       document.addEventListener('loadedmetadata', reportMedia, true);
+      document.addEventListener('durationchange', reportMedia, true);
+      document.addEventListener('loadeddata', reportMedia, true);
+      if (window.MutationObserver && document.documentElement) {
+        var observer = new MutationObserver(function() { reportMedia(); });
+        observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'poster'] });
+      }
       setTimeout(reportMedia, 500);
       setTimeout(reportMedia, 2000);
+      setTimeout(reportMedia, 5000);
+      setInterval(reportMedia, 5000);
     })();
     """
 
@@ -190,12 +198,9 @@ struct EmbeddedWebView: NSViewRepresentable {
                 DispatchQueue.main.async { self.onSelectionChanged(payload) }
                 return
             }
-            if message.name == Self.mediaMessageName {
-                let decoder = JSONDecoder()
-                decoder.dateDecodingStrategy = .iso8601
-                if let payload = try? decoder.decode(BrowserMediaSourceSnapshot.self, from: data) {
-                    DispatchQueue.main.async { self.onMediaSnapshotChanged(payload) }
-                }
+            if message.name == Self.mediaMessageName,
+               let payload = BrowserMediaSnapshotDecoder.decode(from: data) {
+                DispatchQueue.main.async { self.onMediaSnapshotChanged(payload) }
             }
         }
 
