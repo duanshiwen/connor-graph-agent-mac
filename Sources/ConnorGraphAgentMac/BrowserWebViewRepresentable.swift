@@ -53,40 +53,115 @@ struct EmbeddedWebView: NSViewRepresentable {
       if (window.__connorMediaObserverInstalled) { return; }
       window.__connorMediaObserverInstalled = true;
 
+      var lastPayloadSignature = '';
+      var pendingReportTimer = null;
+      var observedMediaElements = [];
+
       function attr(selector, name) {
         var element = document.querySelector(selector);
         return element ? (element.getAttribute(name) || '') : '';
       }
 
+      function collectMediaElements(root, output, visitedRoots) {
+        if (!root || visitedRoots.indexOf(root) >= 0) { return; }
+        visitedRoots.push(root);
+        try {
+          if (root.querySelectorAll) {
+            Array.prototype.forEach.call(root.querySelectorAll('video,audio'), function(element) {
+              if (output.indexOf(element) < 0) { output.push(element); }
+            });
+            Array.prototype.forEach.call(root.querySelectorAll('*'), function(element) {
+              if (element.shadowRoot) { collectMediaElements(element.shadowRoot, output, visitedRoots); }
+            });
+          }
+        } catch (error) {}
+      }
+
+      function sourceFor(element) {
+        var current = element.currentSrc || element.src || '';
+        if (!current && element.querySelector) {
+          var source = element.querySelector('source');
+          if (source) { current = source.src || source.getAttribute('src') || ''; }
+        }
+        return current || null;
+      }
+
+      function stableIDFor(element, index) {
+        if (element.id) { return element.id; }
+        var explicit = element.getAttribute && (element.getAttribute('data-connor-media-id') || element.getAttribute('aria-label'));
+        if (explicit) { return explicit; }
+        var tag = element.tagName ? element.tagName.toLowerCase() : 'media';
+        var src = sourceFor(element) || '';
+        var rect = element.getBoundingClientRect ? element.getBoundingClientRect() : { x: 0, y: 0, width: 0, height: 0 };
+        return tag + '-' + index + '-' + Math.round(rect.x) + '-' + Math.round(rect.y) + '-' + Math.round(rect.width) + '-' + Math.round(rect.height) + '-' + src.slice(0, 80);
+      }
+
       function mediaElements() {
-        return Array.prototype.slice.call(document.querySelectorAll('video,audio')).map(function(element, index) {
-          var current = element.currentSrc || element.src || '';
-          if (!current && element.querySelector('source')) { current = element.querySelector('source').src || ''; }
+        var elements = [];
+        collectMediaElements(document, elements, []);
+        observedMediaElements = elements;
+        return elements.map(function(element, index) {
+          var current = sourceFor(element);
           return {
-            id: (element.id || element.getAttribute('data-connor-media-id') || (element.tagName.toLowerCase() + '-' + index)),
-            kind: element.tagName.toLowerCase(),
-            sourceURLString: current || null,
+            id: stableIDFor(element, index),
+            kind: element.tagName ? element.tagName.toLowerCase() : 'media',
+            sourceURLString: current,
             durationSeconds: isFinite(element.duration) ? element.duration : null,
+            currentTimeSeconds: isFinite(element.currentTime) ? element.currentTime : null,
             isPaused: !!element.paused,
             isMuted: !!element.muted,
-            readyState: element.readyState
+            readyState: typeof element.readyState === 'number' ? element.readyState : null
           };
         });
       }
 
       function openGraphMedia() {
         var candidates = [];
-        var ogVideo = attr('meta[property="og:video"]', 'content') || attr('meta[property="og:video:url"]', 'content');
-        var ogAudio = attr('meta[property="og:audio"]', 'content') || attr('meta[property="og:audio:url"]', 'content');
-        var twitterPlayer = attr('meta[name="twitter:player"]', 'content');
-        [ogVideo, ogAudio, twitterPlayer].forEach(function(value, index) {
-          if (value) { candidates.push({ id: 'meta-' + index, sourceURLString: value, type: index === 1 ? 'audio' : 'video' }); }
+        var values = [
+          { value: attr('meta[property="og:video"]', 'content') || attr('meta[property="og:video:url"]', 'content') || attr('meta[property="og:video:secure_url"]', 'content'), type: 'video' },
+          { value: attr('meta[property="og:audio"]', 'content') || attr('meta[property="og:audio:url"]', 'content') || attr('meta[property="og:audio:secure_url"]', 'content'), type: 'audio' },
+          { value: attr('meta[name="twitter:player"]', 'content'), type: 'video' },
+          { value: attr('meta[name="twitter:player:stream"]', 'content'), type: 'video' }
+        ];
+        values.forEach(function(item, index) {
+          if (item.value) { candidates.push({ id: 'meta-' + index, sourceURLString: item.value, type: item.type }); }
         });
         return candidates;
       }
 
-      var lastPayload = '';
-      function reportMedia() {
+      function mediaSessionSelection() {
+        try {
+          if (!navigator.mediaSession || !navigator.mediaSession.metadata) { return null; }
+          var metadata = navigator.mediaSession.metadata;
+          var parts = [metadata.title, metadata.artist, metadata.album].filter(Boolean);
+          return parts.length ? parts.join(' — ') : null;
+        } catch (error) {
+          return null;
+        }
+      }
+
+      function payloadSignature(payload) {
+        return JSON.stringify({
+          pageURLString: payload.pageURLString,
+          pageTitle: payload.pageTitle,
+          mediaElements: payload.mediaElements.map(function(item) {
+            return {
+              id: item.id,
+              kind: item.kind,
+              sourceURLString: item.sourceURLString,
+              durationSeconds: item.durationSeconds,
+              isPaused: item.isPaused,
+              isMuted: item.isMuted,
+              readyState: item.readyState
+            };
+          }),
+          openGraphMedia: payload.openGraphMedia,
+          canonicalURLString: payload.canonicalURLString,
+          userVisibleSelection: payload.userVisibleSelection
+        });
+      }
+
+      function reportMediaNow() {
         try {
           var payload = {
             pageURLString: location.href || '',
@@ -95,29 +170,73 @@ struct EmbeddedWebView: NSViewRepresentable {
             mediaElements: mediaElements(),
             openGraphMedia: openGraphMedia(),
             canonicalURLString: attr('link[rel="canonical"]', 'href') || null,
-            userVisibleSelection: null
+            userVisibleSelection: mediaSessionSelection()
           };
-          var encoded = JSON.stringify(payload);
-          if (encoded === lastPayload) { return; }
-          lastPayload = encoded;
-          window.webkit.messageHandlers.connorMedia.postMessage(encoded);
+          var signature = payloadSignature(payload);
+          if (signature === lastPayloadSignature) { return; }
+          lastPayloadSignature = signature;
+          window.webkit.messageHandlers.connorMedia.postMessage(JSON.stringify(payload));
         } catch (error) {}
       }
 
-      reportMedia();
-      document.addEventListener('play', reportMedia, true);
-      document.addEventListener('pause', reportMedia, true);
-      document.addEventListener('loadedmetadata', reportMedia, true);
-      document.addEventListener('durationchange', reportMedia, true);
-      document.addEventListener('loadeddata', reportMedia, true);
-      if (window.MutationObserver && document.documentElement) {
-        var observer = new MutationObserver(function() { reportMedia(); });
-        observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'poster'] });
+      function scheduleReport(delay) {
+        if (pendingReportTimer) { clearTimeout(pendingReportTimer); }
+        pendingReportTimer = setTimeout(function() {
+          pendingReportTimer = null;
+          reportMediaNow();
+        }, delay || 150);
       }
-      setTimeout(reportMedia, 500);
-      setTimeout(reportMedia, 2000);
-      setTimeout(reportMedia, 5000);
-      setInterval(reportMedia, 5000);
+
+      function attachMediaEventListeners(element) {
+        if (!element || element.__connorMediaListenersInstalled) { return; }
+        element.__connorMediaListenersInstalled = true;
+        ['loadstart', 'loadedmetadata', 'loadeddata', 'durationchange', 'play', 'playing', 'pause', 'timeupdate', 'volumechange', 'encrypted', 'waitingforkey', 'error'].forEach(function(eventName) {
+          element.addEventListener(eventName, function() { scheduleReport(100); }, true);
+        });
+      }
+
+      function refreshObservedMediaListeners() {
+        mediaElements();
+        observedMediaElements.forEach(attachMediaEventListeners);
+      }
+
+      function instrumentHistory(methodName) {
+        var original = history[methodName];
+        if (typeof original !== 'function') { return; }
+        history[methodName] = function() {
+          var result = original.apply(this, arguments);
+          setTimeout(function() { refreshObservedMediaListeners(); reportMediaNow(); }, 0);
+          setTimeout(function() { refreshObservedMediaListeners(); reportMediaNow(); }, 1000);
+          return result;
+        };
+      }
+
+      refreshObservedMediaListeners();
+      reportMediaNow();
+      ['play', 'playing', 'pause', 'loadedmetadata', 'durationchange', 'loadeddata'].forEach(function(eventName) {
+        document.addEventListener(eventName, function() { refreshObservedMediaListeners(); scheduleReport(100); }, true);
+      });
+      window.addEventListener('popstate', function() { refreshObservedMediaListeners(); scheduleReport(100); });
+      instrumentHistory('pushState');
+      instrumentHistory('replaceState');
+
+      if (window.MutationObserver && document.documentElement) {
+        var observer = new MutationObserver(function(mutations) {
+          var relevant = mutations.some(function(mutation) {
+            return mutation.type === 'childList' || mutation.type === 'attributes';
+          });
+          if (relevant) {
+            refreshObservedMediaListeners();
+            scheduleReport(250);
+          }
+        });
+        observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'poster', 'aria-label', 'title'] });
+      }
+
+      setTimeout(function() { refreshObservedMediaListeners(); reportMediaNow(); }, 500);
+      setTimeout(function() { refreshObservedMediaListeners(); reportMediaNow(); }, 2000);
+      setTimeout(function() { refreshObservedMediaListeners(); reportMediaNow(); }, 5000);
+      setInterval(function() { refreshObservedMediaListeners(); reportMediaNow(); }, 5000);
     })();
     """
 
