@@ -208,7 +208,7 @@ struct SpeechInputHoldToTalkButton: View {
         }
         .foregroundStyle(foreground)
         .padding(.horizontal, AgentChatLayout.spaceS)
-        .frame(minWidth: 148, minHeight: AgentChatLayout.iconButtonSize)
+        .frame(minWidth: 176, minHeight: AgentChatLayout.iconButtonSize)
         .background(background, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous)
@@ -233,7 +233,7 @@ struct SpeechInputHoldToTalkButton: View {
         case .failed:
             "语音失败"
         case .idle:
-            "按住 ⌥ 说话"
+            "按住（Option ⌥）说话"
         }
     }
 
