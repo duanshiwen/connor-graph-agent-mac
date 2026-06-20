@@ -3,6 +3,7 @@ import ConnorGraphAgent
 
 public typealias AppLLMConnectionSidecarValidator = @Sendable (AppLLMConnectionConfig) async throws -> LLMProviderHealthCheckResult
 public typealias AppLLMCodexAPIKeyExchange = @Sendable (String) async throws -> String
+public typealias OpenAIResponsesHealthCheck = @Sendable (OpenAIResponsesConfig) async throws -> LLMProviderHealthCheckResult
 public typealias AnthropicCompatibleHealthCheck = @Sendable (AnthropicCompatibleConfig) async throws -> LLMProviderHealthCheckResult
 
 public struct AppLLMConnectionSetupInput: Sendable, Equatable {
@@ -107,6 +108,7 @@ public enum AppLLMConnectionSetupError: Error, Sendable, Equatable, LocalizedErr
 
 public struct AppLLMConnectionSetupService: Sendable {
     public var settingsRepository: AppLLMSettingsRepository
+    public var openAIResponsesHealthCheck: OpenAIResponsesHealthCheck
     public var openAICompatibleHealthCheck: OpenAICompatibleHealthCheck
     public var anthropicCompatibleHealthCheck: AnthropicCompatibleHealthCheck
     public var sidecarValidator: AppLLMConnectionSidecarValidator
@@ -114,6 +116,9 @@ public struct AppLLMConnectionSetupService: Sendable {
 
     public init(
         settingsRepository: AppLLMSettingsRepository = AppLLMSettingsRepository(),
+        openAIResponsesHealthCheck: @escaping OpenAIResponsesHealthCheck = { config in
+            try await OpenAIResponsesProvider(config: config).healthCheck()
+        },
         openAICompatibleHealthCheck: @escaping OpenAICompatibleHealthCheck = { config in
             try await OpenAICompatibleProvider(config: config).healthCheck()
         },
@@ -128,6 +133,7 @@ public struct AppLLMConnectionSetupService: Sendable {
         }
     ) {
         self.settingsRepository = settingsRepository
+        self.openAIResponsesHealthCheck = openAIResponsesHealthCheck
         self.openAICompatibleHealthCheck = openAICompatibleHealthCheck
         self.anthropicCompatibleHealthCheck = anthropicCompatibleHealthCheck
         self.sidecarValidator = sidecarValidator
@@ -139,6 +145,8 @@ public struct AppLLMConnectionSetupService: Sendable {
         guard !name.isEmpty else { throw AppLLMConnectionSetupError.missingName }
 
         switch input.kind {
+        case .openAIResponses:
+            return try await setupOpenAIResponses(input, name: name)
         case .openAICompatible:
             return try await setupOpenAICompatible(input, name: name)
         case .claudeSidecar:
@@ -150,6 +158,33 @@ public struct AppLLMConnectionSetupService: Sendable {
         case .anthropicCompatible:
             return try await setupAnthropicCompatible(input, name: name)
         }
+    }
+
+    private func setupOpenAIResponses(_ input: AppLLMConnectionSetupInput, name: String) async throws -> AppLLMConnectionSetupResult {
+        let baseURLString = input.baseURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let baseURL = URL(string: baseURLString), !baseURLString.isEmpty else { throw AppLLMConnectionSetupError.invalidBaseURL(baseURLString) }
+        let model = normalizedModel(input.model)
+        guard !model.isEmpty else { throw AppLLMConnectionSetupError.missingModel }
+        let suppliedAPIKey = input.apiKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !suppliedAPIKey.isEmpty else { throw AppLLMConnectionSetupError.missingAPIKey }
+
+        let config = OpenAIResponsesConfig(baseURL: baseURL, apiKey: suppliedAPIKey, model: model, apiKeyHeaderKind: input.openAIAPIKeyHeaderKind)
+        let health = try await openAIResponsesHealthCheck(config)
+        guard health.ok else { throw AppLLMConnectionSetupError.healthCheckFailed(health.message) }
+
+        let connection = AppLLMConnectionConfig(
+            id: normalizedID(input.id, fallbackPrefix: "openai-responses"),
+            name: name,
+            providerMode: .openAIResponses,
+            connectionKind: .openAIResponses,
+            baseURLString: baseURLString,
+            model: model,
+            selectedModel: normalizedSelectedModel(input.selectedModel, model: model),
+            hasAPIKey: true,
+            extraHTTPHeaders: openAICompatibleMetadataHeaders(for: input.openAIAPIKeyHeaderKind)
+        )
+        try settingsRepository.saveConnection(connection, apiKey: suppliedAPIKey, oauthTokens: input.oauthTokens, makeDefault: input.makeDefault)
+        return AppLLMConnectionSetupResult(connection: connection, message: "OpenAI Responses 连接验证成功：\(health.model)")
     }
 
     private func setupOpenAICompatible(_ input: AppLLMConnectionSetupInput, name: String) async throws -> AppLLMConnectionSetupResult {

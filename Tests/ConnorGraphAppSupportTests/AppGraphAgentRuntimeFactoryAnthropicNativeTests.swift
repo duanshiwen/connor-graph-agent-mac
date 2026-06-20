@@ -31,7 +31,9 @@ private func anthropicNativeTemporaryDatabaseURL(_ name: String = UUID().uuidStr
     FileManager.default.temporaryDirectory.appendingPathComponent("\(name).sqlite")
 }
 
-@Test func appLLMProviderModeIncludesAnthropicMessagesNativePipeline() throws {
+@Test func appLLMProviderModeIncludesNativePipelines() throws {
+    #expect(AppLLMProviderMode.allCases.contains(.openAIResponses))
+    #expect(AppLLMProviderMode.openAIResponses.displayName == "OpenAI Responses")
     #expect(AppLLMProviderMode.allCases.contains(.anthropicMessages))
     #expect(AppLLMProviderMode.anthropicMessages.displayName == "Anthropic Messages")
 }
@@ -69,6 +71,58 @@ private func anthropicNativeTemporaryDatabaseURL(_ name: String = UUID().uuidStr
     #expect(config.baseURL.absoluteString == "https://api.anthropic.com/v1")
     #expect(config.apiKey == "anthropic-key")
     #expect(config.model == "claude-sonnet-4-5")
+}
+
+@Test func runtimeFactoryRoutesOpenAIResponsesThroughNativeResponsesProvider() throws {
+    let store = try SQLiteGraphKernelStore(path: anthropicNativeTemporaryDatabaseURL().path)
+    try store.migrate()
+    let settingsRepository = AppLLMSettingsRepository(
+        settingsStore: AnthropicNativeSettingsStore(),
+        credentialStore: AnthropicNativeCredentialStore()
+    )
+    let connection = AppLLMConnectionConfig(
+        id: "openai-responses",
+        name: "OpenAI Responses",
+        providerMode: .openAIResponses,
+        connectionKind: .openAIResponses,
+        baseURLString: "https://api.openai.com/v1",
+        model: "gpt-4.1",
+        selectedModel: "gpt-4.1"
+    )
+    try settingsRepository.save(settings: AppLLMSettings(connections: [connection], defaultConnectionID: "openai-responses"), apiKey: "openai-key")
+    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: settingsRepository)
+
+    let provider = factory.makeAgentModelProvider()
+
+    #expect(provider.modelID == "gpt-4.1")
+    #expect(provider.capabilities.supportsParallelToolCalls == true)
+    #expect(provider.capabilities.supportsStructuredOutput == true)
+}
+
+@Test func runtimeFactoryRoutesOpenAICompatibleConnectionThroughChatCompletionsCompatibilityProvider() throws {
+    let store = try SQLiteGraphKernelStore(path: anthropicNativeTemporaryDatabaseURL().path)
+    try store.migrate()
+    let settingsRepository = AppLLMSettingsRepository(
+        settingsStore: AnthropicNativeSettingsStore(),
+        credentialStore: AnthropicNativeCredentialStore()
+    )
+    let connection = AppLLMConnectionConfig(
+        id: "third-party-compatible",
+        name: "OpenAI Compatible",
+        providerMode: .openAICompatible,
+        connectionKind: .openAICompatible,
+        baseURLString: "https://example.test/v1",
+        model: "compatible-model",
+        selectedModel: "compatible-model"
+    )
+    try settingsRepository.save(settings: AppLLMSettings(connections: [connection], defaultConnectionID: "third-party-compatible"), apiKey: "compatible-key")
+    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: settingsRepository)
+
+    let provider = factory.makeAgentModelProvider()
+
+    #expect(provider.modelID == "compatible-model")
+    #expect(provider.capabilities.supportsParallelToolCalls == false)
+    #expect(provider.capabilities.supportsStructuredOutput == false)
 }
 
 @Test func runtimeFactoryRoutesAnthropicMessagesThroughNativeProvider() throws {

@@ -113,10 +113,10 @@ public struct AppGraphBackgroundJobRunner: @unchecked Sendable {
         settingsRepository: AppLLMSettingsRepository
     ) -> AppMemoryDistillationWorker {
         do {
-            guard let config = try settingsRepository.openAICompatibleConfig() else {
+            guard let configuredProvider = try makeConfiguredAgentModelProvider(settingsRepository: settingsRepository) else {
                 return AppMemoryDistillationWorker(store: store, graphID: graphID)
             }
-            let provider = AnyAgentModelProvider(OpenAICompatibleProvider(config: config))
+            let provider = configuredProvider.provider
             let client = AppLLMMemoryDistillationClient(provider: provider)
             let distiller = AppLLMMemoryDistiller(client: client)
             return AppMemoryDistillationWorker(store: store, graphID: graphID) { buffer, date, triggerReasons in
@@ -129,18 +129,40 @@ public struct AppGraphBackgroundJobRunner: @unchecked Sendable {
 
     private static func makeExtractor(settingsRepository: AppLLMSettingsRepository) -> AnyGraphExtractorProvider {
         do {
-            guard let config = try settingsRepository.openAICompatibleConfig() else {
+            guard let configuredProvider = try makeConfiguredAgentModelProvider(settingsRepository: settingsRepository) else {
                 return AnyGraphExtractorProvider(UnavailableGraphExtractor())
             }
-            let provider = AnyAgentModelProvider(OpenAICompatibleProvider(config: config))
+            let provider = configuredProvider.provider
             let client = AppLLMGraphExtractionClient(
                 provider: provider,
-                providerName: "openai-compatible",
+                providerName: configuredProvider.providerName,
                 promptVersion: GraphExtractionPromptBuilder.defaultPromptVersion
             )
             return AnyGraphExtractorProvider(LLMGraphExtractor(client: client))
         } catch {
             return AnyGraphExtractorProvider(UnavailableGraphExtractor(error: .invalidLLMConfiguration(String(describing: error))))
+        }
+    }
+
+    private static func makeConfiguredAgentModelProvider(settingsRepository: AppLLMSettingsRepository) throws -> (provider: AnyAgentModelProvider, providerName: String)? {
+        let settings = try settingsRepository.loadSettings()
+        let connection = settings.defaultConnection
+        switch connection.providerMode {
+        case .openAIResponses:
+            guard let config = try settingsRepository.openAIResponsesConfig(connectionID: connection.id) else { return nil }
+            return (AnyAgentModelProvider(OpenAIResponsesProvider(config: config)), "openai-responses")
+        case .anthropicMessages:
+            guard let config = try settingsRepository.anthropicCompatibleConfig(connectionID: connection.id) else { return nil }
+            return (AnyAgentModelProvider(AnthropicCompatibleProvider(config: config)), "anthropic-messages")
+        case .openAICompatible:
+            if connection.connectionKind == .anthropicCompatible {
+                guard let config = try settingsRepository.anthropicCompatibleConfig(connectionID: connection.id) else { return nil }
+                return (AnyAgentModelProvider(AnthropicCompatibleProvider(config: config)), "anthropic-compatible")
+            }
+            guard let config = try settingsRepository.openAICompatibleConfig(connectionID: connection.id) else { return nil }
+            return (AnyAgentModelProvider(OpenAICompatibleProvider(config: config)), "openai-compatible")
+        case .governedClaudeSidecar:
+            return nil
         }
     }
 }
