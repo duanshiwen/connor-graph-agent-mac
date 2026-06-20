@@ -101,12 +101,12 @@ struct SessionSpeechTranscriptionCoordinatorTests {
         #expect(coordinator.status == .idle)
     }
 
-    @Test func finalizationTimeoutKeepsPartialWhenFinalDoesNotArrive() async throws {
+    @Test func finalizationTimeoutKeepsPartialWhenFinalDoesNotArrive() {
         var draftBySession: [String: String] = ["session-1": ""]
         var updatedTasks: [AppSessionBackgroundTask] = []
         var statuses: [SessionSpeechTranscriptionStatus] = []
         let transcriber = FakeSessionSpeechTranscriber(emitFinalOnStop: false)
-        let coordinator = SessionSpeechTranscriptionCoordinator(transcriber: transcriber, finalizationTimeoutNanoseconds: 1_000_000)
+        let coordinator = SessionSpeechTranscriptionCoordinator(transcriber: transcriber)
         coordinator.onTaskUpdate = { updatedTasks.append($0) }
         coordinator.onStatusChange = { statuses.append($0) }
         _ = coordinator.beginHoldToTalk(
@@ -119,7 +119,7 @@ struct SessionSpeechTranscriptionCoordinatorTests {
         _ = coordinator.finishHoldToTalk()
 
         #expect(coordinator.status.isFinalizing)
-        try await Task.sleep(nanoseconds: 20_000_000)
+        coordinator.forceFinalizationTimeoutForTesting()
 
         #expect(draftBySession["session-1"] == "可用的 partial")
         #expect(coordinator.status == .idle)
