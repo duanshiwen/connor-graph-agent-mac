@@ -77,6 +77,149 @@ public enum MediaTranscriptionQualityProfile: String, Codable, Sendable, Equatab
     case highAccuracy
 }
 
+public enum BrowserMediaTranscriptionMode: String, Codable, Sendable, Equatable, CaseIterable, Identifiable {
+    case transcribeOnly
+    case transcribeAndSummarize
+    case transcribeSummarizeAndChapters
+
+    public var id: String { rawValue }
+
+    public var displayTitle: String {
+        switch self {
+        case .transcribeOnly: "只转写"
+        case .transcribeAndSummarize: "转写并提炼"
+        case .transcribeSummarizeAndChapters: "转写 + 提炼 + 章节"
+        }
+    }
+}
+
+public enum BrowserMediaTranscriptionSourceKind: String, Codable, Sendable, Equatable {
+    case mediaElement
+    case openGraph
+}
+
+public struct BrowserMediaTranscriptionSourceOption: Codable, Sendable, Equatable, Identifiable {
+    public var id: String
+    public var kind: BrowserMediaTranscriptionSourceKind
+    public var mediaKind: String
+    public var title: String
+    public var sourceURLString: String?
+    public var durationSeconds: TimeInterval?
+    public var isPaused: Bool?
+    public var isMuted: Bool?
+    public var readyState: Int?
+
+    public init(
+        id: String,
+        kind: BrowserMediaTranscriptionSourceKind,
+        mediaKind: String,
+        title: String,
+        sourceURLString: String? = nil,
+        durationSeconds: TimeInterval? = nil,
+        isPaused: Bool? = nil,
+        isMuted: Bool? = nil,
+        readyState: Int? = nil
+    ) {
+        self.id = id
+        self.kind = kind
+        self.mediaKind = mediaKind
+        self.title = title
+        self.sourceURLString = sourceURLString
+        self.durationSeconds = durationSeconds
+        self.isPaused = isPaused
+        self.isMuted = isMuted
+        self.readyState = readyState
+    }
+}
+
+public struct BrowserMediaTranscriptionOptions: Codable, Sendable, Equatable {
+    public var shouldPreferPlatformSubtitles: Bool
+    public var shouldDownloadAudio: Bool
+    public var shouldRunLocalTranscription: Bool
+    public var shouldRunSpeakerDiarization: Bool
+    public var shouldGenerateChapters: Bool
+    public var shouldGenerateSummary: Bool
+
+    public init(
+        shouldPreferPlatformSubtitles: Bool = true,
+        shouldDownloadAudio: Bool = true,
+        shouldRunLocalTranscription: Bool = true,
+        shouldRunSpeakerDiarization: Bool = false,
+        shouldGenerateChapters: Bool = true,
+        shouldGenerateSummary: Bool = true
+    ) {
+        self.shouldPreferPlatformSubtitles = shouldPreferPlatformSubtitles
+        self.shouldDownloadAudio = shouldDownloadAudio
+        self.shouldRunLocalTranscription = shouldRunLocalTranscription
+        self.shouldRunSpeakerDiarization = shouldRunSpeakerDiarization
+        self.shouldGenerateChapters = shouldGenerateChapters
+        self.shouldGenerateSummary = shouldGenerateSummary
+    }
+
+    public static func defaults(for mode: BrowserMediaTranscriptionMode) -> BrowserMediaTranscriptionOptions {
+        switch mode {
+        case .transcribeOnly:
+            BrowserMediaTranscriptionOptions(shouldGenerateChapters: false, shouldGenerateSummary: false)
+        case .transcribeAndSummarize:
+            BrowserMediaTranscriptionOptions(shouldGenerateChapters: false, shouldGenerateSummary: true)
+        case .transcribeSummarizeAndChapters:
+            BrowserMediaTranscriptionOptions(shouldGenerateChapters: true, shouldGenerateSummary: true)
+        }
+    }
+
+    public func mediaTranscriptionRequest(qualityProfile: MediaTranscriptionQualityProfile = .balanced) -> MediaTranscriptionRequest {
+        MediaTranscriptionRequest(
+            shouldPreferPlatformSubtitles: shouldPreferPlatformSubtitles,
+            shouldDownloadAudio: shouldDownloadAudio,
+            shouldRunLocalTranscription: shouldRunLocalTranscription,
+            shouldRunSpeakerDiarization: shouldRunSpeakerDiarization,
+            shouldGenerateChapters: shouldGenerateChapters,
+            qualityProfile: qualityProfile,
+            outputPurpose: shouldGenerateSummary ? .summary : .discussion
+        )
+    }
+}
+
+public struct BrowserMediaTranscriptionSelection: Codable, Sendable, Equatable {
+    public var snapshot: BrowserMediaSourceSnapshot
+    public var selectedSourceIDs: [String]
+    public var mode: BrowserMediaTranscriptionMode
+    public var options: BrowserMediaTranscriptionOptions
+
+    public init(
+        snapshot: BrowserMediaSourceSnapshot,
+        selectedSourceIDs: [String],
+        mode: BrowserMediaTranscriptionMode = .transcribeSummarizeAndChapters,
+        options: BrowserMediaTranscriptionOptions? = nil
+    ) {
+        self.snapshot = snapshot
+        self.selectedSourceIDs = selectedSourceIDs
+        self.mode = mode
+        self.options = options ?? BrowserMediaTranscriptionOptions.defaults(for: mode)
+    }
+
+    public static func defaultAllSources(from snapshot: BrowserMediaSourceSnapshot, mode: BrowserMediaTranscriptionMode = .transcribeSummarizeAndChapters) -> BrowserMediaTranscriptionSelection {
+        BrowserMediaTranscriptionSelection(
+            snapshot: snapshot,
+            selectedSourceIDs: snapshot.transcriptionSourceOptions.map(\.id),
+            mode: mode
+        )
+    }
+
+    public var selectedSnapshot: BrowserMediaSourceSnapshot {
+        guard !selectedSourceIDs.isEmpty else { return snapshot }
+        let selected = Set(selectedSourceIDs)
+        var copy = snapshot
+        copy.mediaElements = snapshot.mediaElements.filter { selected.contains(BrowserMediaSourceSnapshot.transcriptionSourceID(forMediaElement: $0)) }
+        copy.openGraphMedia = snapshot.openGraphMedia.filter { selected.contains(BrowserMediaSourceSnapshot.transcriptionSourceID(forOpenGraphMedia: $0)) }
+        return copy
+    }
+
+    public var mediaTranscriptionRequest: MediaTranscriptionRequest {
+        options.mediaTranscriptionRequest()
+    }
+}
+
 public struct BrowserDetectedMediaElement: Codable, Sendable, Equatable, Identifiable {
     public var id: String
     public var kind: String
@@ -145,6 +288,53 @@ public struct BrowserMediaSourceSnapshot: Codable, Sendable, Equatable {
     }
 
     public var hasDetectedMedia: Bool { !mediaElements.isEmpty || !openGraphMedia.isEmpty }
+
+    public var transcriptionSourceOptions: [BrowserMediaTranscriptionSourceOption] {
+        let elementOptions = mediaElements.enumerated().map { index, element in
+            BrowserMediaTranscriptionSourceOption(
+                id: Self.transcriptionSourceID(forMediaElement: element),
+                kind: .mediaElement,
+                mediaKind: element.kind,
+                title: Self.mediaElementTitle(element, index: index),
+                sourceURLString: element.sourceURLString,
+                durationSeconds: element.durationSeconds,
+                isPaused: element.isPaused,
+                isMuted: element.isMuted,
+                readyState: element.readyState
+            )
+        }
+        let openGraphOptions = openGraphMedia.enumerated().map { index, candidate in
+            BrowserMediaTranscriptionSourceOption(
+                id: Self.transcriptionSourceID(forOpenGraphMedia: candidate),
+                kind: .openGraph,
+                mediaKind: candidate.type ?? "metadata",
+                title: Self.openGraphTitle(candidate, index: index),
+                sourceURLString: candidate.sourceURLString
+            )
+        }
+        return elementOptions + openGraphOptions
+    }
+
+    public static func transcriptionSourceID(forMediaElement element: BrowserDetectedMediaElement) -> String {
+        "media-element:\(element.id)"
+    }
+
+    public static func transcriptionSourceID(forOpenGraphMedia candidate: BrowserDetectedMediaCandidate) -> String {
+        "open-graph:\(candidate.id)"
+    }
+
+    private static func mediaElementTitle(_ element: BrowserDetectedMediaElement, index: Int) -> String {
+        let kind = element.kind.trimmingCharacters(in: .whitespacesAndNewlines)
+        if kind.isEmpty { return "网页媒体 #\(index + 1)" }
+        return "\(kind.capitalized) #\(index + 1)"
+    }
+
+    private static func openGraphTitle(_ candidate: BrowserDetectedMediaCandidate, index: Int) -> String {
+        if let type = candidate.type?.trimmingCharacters(in: .whitespacesAndNewlines), !type.isEmpty {
+            return "Metadata \(type) #\(index + 1)"
+        }
+        return "Open Graph 媒体 #\(index + 1)"
+    }
 }
 
 public struct MediaTranscriptionRequest: Codable, Sendable, Equatable {
