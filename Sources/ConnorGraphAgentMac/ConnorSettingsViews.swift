@@ -612,6 +612,8 @@ struct SettingsAISection: View {
     @ObservedObject var viewModel: AppViewModel
     @State private var isShowingAddConnectionGuide = false
     @State private var setupOption: AIConnectionOnboardingOption?
+    @State private var renamingConnection: AppLLMConnectionConfig?
+    @State private var renameDraft = ""
 
     var body: some View {
         Group {
@@ -635,6 +637,19 @@ struct SettingsAISection: View {
                 connectionList
             }
         }
+        .alert("更改连接名称", isPresented: renameAlertBinding) {
+            TextField("连接名称", text: $renameDraft)
+            Button("取消", role: .cancel) {
+                renamingConnection = nil
+                renameDraft = ""
+            }
+            Button("保存") {
+                commitConnectionRename()
+            }
+            .disabled(renameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        } message: {
+            Text("只会更改连接在列表中显示的名称，不会读取或修改已保存的 API Key。")
+        }
     }
 
     private var connectionList: some View {
@@ -655,6 +670,7 @@ struct SettingsAISection: View {
                         canDelete: viewModel.llmConnectionConfigs.count > 1,
                         select: { viewModel.selectDefaultLLMConnection(connection.id) },
                         makeDefault: { viewModel.selectDefaultLLMConnection(connection.id) },
+                        rename: { beginConnectionRename(connection) },
                         delete: {
                             viewModel.selectDefaultLLMConnection(connection.id)
                             viewModel.deleteSelectedLLMConnection()
@@ -675,16 +691,48 @@ struct SettingsAISection: View {
             )
             .shadow(color: Color.black.opacity(0.04), radius: 2, x: 0, y: 1)
 
-            Button(action: { isShowingAddConnectionGuide = true }) {
-                Label("添加连接", systemImage: "plus")
-                    .font(SettingsListTypography.actionTitle)
+            VStack(alignment: .leading, spacing: SettingsListLayout.spaceS) {
+                Button(action: { isShowingAddConnectionGuide = true }) {
+                    Label("添加连接", systemImage: "plus")
+                        .font(SettingsListTypography.actionTitle)
+                        .labelStyle(.titleAndIcon)
+                        .padding(.horizontal, SettingsListLayout.spaceM)
+                        .padding(.vertical, SettingsListLayout.spaceXS)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+
+                Label("为保护 API Key 安全，我们暂时不支持编辑一个连接；如需更改，请删除后重建。", systemImage: "lock.shield")
+                    .font(SettingsListTypography.rowCaption)
+                    .foregroundStyle(.secondary)
                     .labelStyle(.titleAndIcon)
-                    .padding(.horizontal, SettingsListLayout.spaceM)
-                    .padding(.vertical, SettingsListLayout.spaceXS)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
         }
+    }
+
+    private var renameAlertBinding: Binding<Bool> {
+        Binding(
+            get: { renamingConnection != nil },
+            set: { isPresented in
+                if !isPresented {
+                    renamingConnection = nil
+                    renameDraft = ""
+                }
+            }
+        )
+    }
+
+    private func beginConnectionRename(_ connection: AppLLMConnectionConfig) {
+        renamingConnection = connection
+        renameDraft = connection.name
+    }
+
+    private func commitConnectionRename() {
+        guard let connection = renamingConnection else { return }
+        viewModel.renameLLMConnection(connection.id, name: renameDraft)
+        renamingConnection = nil
+        renameDraft = ""
     }
 
     private func beginConnectionSetup(from option: AIConnectionOnboardingOption) {
@@ -1897,6 +1945,7 @@ struct AIConnectionEntryRow: View {
     var canDelete: Bool
     var select: () -> Void
     var makeDefault: () -> Void
+    var rename: () -> Void
     var delete: () -> Void
 
     var body: some View {
@@ -1932,11 +1981,16 @@ struct AIConnectionEntryRow: View {
                 Spacer(minLength: 16)
 
                 Menu {
-                    Button("设为默认", action: makeDefault)
-                        .disabled(isDefault)
+                    Button(action: makeDefault) {
+                        Label("设为默认", systemImage: "checkmark.circle")
+                    }
+                    .disabled(isDefault)
+                    Button(action: rename) {
+                        Label("更改名称", systemImage: "pencil")
+                    }
                     Divider()
                     Button(role: .destructive, action: delete) {
-                        Text("删除连接")
+                        Label("删除连接", systemImage: "trash")
                     }
                     .disabled(!canDelete)
                 } label: {
