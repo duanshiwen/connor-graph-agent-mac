@@ -8,7 +8,7 @@ struct AgentComposerOptionBar: View {
     var composerState: AgentComposerState
     var governanceConfig: AppSessionGovernanceConfig
     var hasRunningBackgroundTask: Bool
-    var currentTextSelectionRange: NSRange?
+    var currentTextSelectionRange: () -> NSRange?
     @Binding var isSessionInfoPresented: Bool
     var onAction: (AgentComposerAction) -> Void
 
@@ -51,7 +51,7 @@ struct AgentComposerOptionBar: View {
         SpeechInputHoldToTalkButton(
             isEnabled: selectedSession != nil,
             status: composerState.speechTranscriptionStatus,
-            onBegin: { onAction(.beginSpeechTranscription(currentTextSelectionRange)) },
+            onBegin: { onAction(.beginSpeechTranscription(currentTextSelectionRange())) },
             onEnd: { onAction(.finishSpeechTranscription) }
         )
     }

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 @testable import ConnorGraphAgentMac
@@ -263,6 +264,27 @@ struct SessionSpeechTranscriptionCoordinatorTests {
         #expect(draftBySession["session-1"] == "第一轮\n\n第二轮")
         #expect(provisionalBySession["session-1"] == nil)
         #expect(transcriber.startCount == 2)
+    }
+}
+
+@MainActor
+@Suite("Composer Text Selection Tracker Tests")
+struct ComposerTextSelectionTrackerTests {
+    @Test func selectionChangesUpdateTrackerWithoutMutatingBindingState() {
+        var text = "你好世界"
+        let tracker = ComposerTextSelectionTracker()
+        let coordinator = SafeChatComposerTextView.Coordinator(
+            text: .init(get: { text }, set: { text = $0 }),
+            selectionTracker: tracker
+        )
+        let textView = NSTextView()
+        textView.string = text
+        textView.setSelectedRange(NSRange(location: 2, length: 0))
+
+        coordinator.textViewDidChangeSelection(Notification(name: NSTextView.didChangeSelectionNotification, object: textView))
+
+        #expect(tracker.selectedRange == NSRange(location: 2, length: 0))
+        #expect(text == "你好世界")
     }
 }
 
