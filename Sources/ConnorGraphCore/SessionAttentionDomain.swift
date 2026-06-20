@@ -32,92 +32,19 @@ public enum SessionAttentionLevel: Int, Codable, Sendable, Comparable, CaseItera
         case .unread: "只记录未读,不改变卡片强调样式。"
         case .emphasized: "显示未读,并突出聊天列表卡片。"
         case .actionable: "发送 macOS 通知,突出聊天列表,并计入 Dock badge。"
-        case .interruptive: "用于失败、阻塞、需要立即处理的高优先级提醒。"
+        case .interruptive: "适合需要你尽快处理的会话消息，例如确认请求、权限审批、补充资料、任务失败或流程阻塞。"
         }
     }
 }
 
-public enum SessionAttentionMessageType: String, Codable, Sendable, CaseIterable, Identifiable {
-    case assistantReply
-    case taskCompleted
-    case taskFailed
-    case userActionRequired
-    case permissionApprovalRequired
-    case backgroundTaskCompleted
-    case backgroundTaskFailed
-    case proactiveBriefing
-    case systemNotice
-    case governanceChange
+public struct SessionNotificationSettings: Codable, Equatable, Sendable {
+    public var newMessageLevel: SessionAttentionLevel
 
-    public var id: String { rawValue }
-
-    public var displayName: String {
-        switch self {
-        case .assistantReply: "普通助理回复"
-        case .taskCompleted: "会话任务完成"
-        case .taskFailed: "会话任务失败"
-        case .userActionRequired: "需要用户操作"
-        case .permissionApprovalRequired: "权限审批请求"
-        case .backgroundTaskCompleted: "后台任务完成"
-        case .backgroundTaskFailed: "后台任务失败"
-        case .proactiveBriefing: "主动简报"
-        case .systemNotice: "系统提醒"
-        case .governanceChange: "状态/治理变化"
-        }
+    public init(newMessageLevel: SessionAttentionLevel = .actionable) {
+        self.newMessageLevel = newMessageLevel
     }
 
-    public var detail: String {
-        switch self {
-        case .assistantReply: "普通 assistant 消息或非阻塞回复。"
-        case .taskCompleted: "用户发起的会话运行完成。"
-        case .taskFailed: "用户发起的会话运行失败或异常退出。"
-        case .userActionRequired: "需要用户输入、确认、补充资料或下一步决策。"
-        case .permissionApprovalRequired: "工具调用、文件写入、网络访问等需要审批。"
-        case .backgroundTaskCompleted: "标题生成、摘要、索引、同步等后台任务完成。"
-        case .backgroundTaskFailed: "后台任务失败,但不一定阻塞当前会话。"
-        case .proactiveBriefing: "Connor 主动创建或更新的信息综合简报会话。"
-        case .systemNotice: "系统级状态、权限、连接、同步或环境提醒。"
-        case .governanceChange: "会话状态、标签、归档、工作流状态等变化。"
-        }
-    }
-
-    public var defaultAttentionLevel: SessionAttentionLevel {
-        switch self {
-        case .assistantReply: .unread
-        case .taskCompleted: .actionable
-        case .taskFailed: .interruptive
-        case .userActionRequired: .actionable
-        case .permissionApprovalRequired: .interruptive
-        case .backgroundTaskCompleted: .emphasized
-        case .backgroundTaskFailed: .actionable
-        case .proactiveBriefing: .emphasized
-        case .systemNotice: .emphasized
-        case .governanceChange: .unread
-        }
-    }
-}
-
-public struct SessionNotificationPolicy: Codable, Equatable, Sendable {
-    public var minimumLevel: SessionAttentionLevel
-    public var levelsByMessageType: [SessionAttentionMessageType: SessionAttentionLevel]
-
-    public init(
-        minimumLevel: SessionAttentionLevel = .unread,
-        levelsByMessageType: [SessionAttentionMessageType: SessionAttentionLevel] = [:]
-    ) {
-        self.minimumLevel = minimumLevel
-        self.levelsByMessageType = levelsByMessageType
-    }
-
-    public static let `default` = SessionNotificationPolicy()
-
-    public func configuredLevel(for messageType: SessionAttentionMessageType) -> SessionAttentionLevel {
-        levelsByMessageType[messageType] ?? messageType.defaultAttentionLevel
-    }
-
-    public func effectiveLevel(for messageType: SessionAttentionMessageType) -> SessionAttentionLevel {
-        max(configuredLevel(for: messageType), minimumLevel)
-    }
+    public static let `default` = SessionNotificationSettings()
 }
 
 public struct SessionReadState: Codable, Equatable, Sendable {
