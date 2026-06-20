@@ -59,6 +59,56 @@ struct TaskSchedulerRunnerServiceTests {
         #expect(failedMail.lifecycle.status == .failed)
         #expect(rss.lifecycle.status == .active)
     }
+
+    @Test func serviceRunsMissedDailyTaskOnNextSchedulerPassAndPreservesAnchor() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
+        for var defaultTask in ConnorTaskDefinition.systemDefaults(now: Date(timeIntervalSince1970: 0)) {
+            defaultTask.lifecycle.status = .stopped
+            try repository.saveTask(defaultTask)
+        }
+        let start = Date(timeIntervalSince1970: 1_000)
+        let now = start.addingTimeInterval(3 * 24 * 60 * 60 + 3_600)
+        let expectedNextRun = start.addingTimeInterval(4 * 24 * 60 * 60)
+        let task = ConnorTaskDefinition(
+            id: "user.daily.catch-up",
+            name: "Daily catch-up",
+            origin: .user,
+            trigger: ConnorTaskTrigger(kind: .scheduled, runAt: start, recurrence: .daily),
+            target: .createSessionAndSendMessage(message: "Daily check-in", title: "Daily"),
+            lifecycle: ConnorTaskLifecycle(
+                status: .active,
+                nextRunAt: start.addingTimeInterval(10 * 24 * 60 * 60),
+                lastFinishedAt: start
+            ),
+            metadata: ConnorTaskMetadata(tags: ["user", "scheduled-session-message"]),
+            createdAt: start,
+            updatedAt: start
+        )
+        try repository.saveTask(task)
+        let calls = SessionMessageCallCounter()
+        let runner = TaskTargetRunner(
+            mailRefresher: { _ in "mail" },
+            calendarRefresher: { _ in "calendar" },
+            rssRefresher: { _ in "rss" },
+            sessionMessenger: calls.send
+        )
+        let service = TaskSchedulerRunnerService(
+            repository: repository,
+            scheduler: TaskSchedulerService(calendar: Calendar(identifier: .gregorian)),
+            runner: runner
+        )
+
+        let outcomes = try await service.runDueTasks(now: now)
+        let reloaded = try #require(try repository.loadTask(id: task.id))
+
+        #expect(outcomes.map(\.taskID) == [task.id])
+        #expect(await calls.count == 1)
+        #expect(await calls.messages == ["Daily check-in"])
+        #expect(reloaded.lifecycle.status == .active)
+        #expect(reloaded.lifecycle.nextRunAt == expectedNextRun)
+    }
 }
 
 private actor RefreshCallCounter {
@@ -66,5 +116,16 @@ private actor RefreshCallCounter {
     func refresh(_ runID: String?) async throws -> String {
         count += 1
         return "rss refreshed"
+    }
+}
+
+private actor SessionMessageCallCounter {
+    var count = 0
+    var messages: [String] = []
+
+    func send(_ request: TaskSessionMessageRequest) async throws -> String {
+        count += 1
+        messages.append(request.message)
+        return "session message sent"
     }
 }

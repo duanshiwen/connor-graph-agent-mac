@@ -1,6 +1,6 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-20 11:02 GMT+8  
+文档更新时间：2026-06-20 22:55 GMT+8  
 当前分支目标：收紧代码质量、简化文档、保持 Connor 的原生 Agent OS 边界，并为内置浏览器媒体本地转写系统建立可恢复、可治理的地基。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package。它的目标不是做“图谱编辑器”或“Claude SDK 外壳”，而是构建一个本地优先的 **graph-memory-native Agent OS**：以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI、Task Management Stack 和 Attachment Store 共同组成可治理的本地智能工作台。
@@ -405,6 +405,7 @@ API keys and provider credentials must not be stored in JSON settings files. The
   - `tasks_create_scheduled_session_message`
   - `tasks_create_session_status_message`
 - Task runtime execution：`TaskSchedulerService` 计算 due tasks，`TaskSchedulerRunnerService` 记录 run history 并调用 `TaskTargetRunner`，真实分发到 Native Mail / Calendar / RSS runtimes、Session OS message flow 或浏览器媒体转写 handler
+- Missed recurring schedule semantics：应用启动和 60 秒轮询都会扫描 due tasks；如果每日/每周/每月重复任务在应用未运行期间错过至少一次，Connor 下次启动/轮询时会立即补执行一次，并把 `nextRunAt` 推进到原始 `runAt` 锚点之后的下一个未来计划点；不会对错过的每一个周期批量补跑，避免会话消息或 source refresh 噪音。
 - 浏览器媒体转写任务使用 Task Stack 获得 recoverable run/history 能力，但不作为“系统定时任务”卡片显示；它的用户可见面在对应会话的 background task surface。若用户一次选择多段媒体，App 会拆成多个单源 job/task；每个完成后的 follow-up chat 只携带该 job 最新 transcript 附件 ref，避免跨视频提交错附件。
 - Session-scoped background task adapter remains for recoverable per-session runtime intents
 
