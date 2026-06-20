@@ -140,29 +140,46 @@ private func phaseAStore() throws -> SQLiteGraphKernelStore {
     #expect(loaded.ui.textDeltaFlushCharacterThreshold == 120)
 }
 
-@Test func runtimeSettingsRepositoryPersistsSessionNotificationPolicy() throws {
+@Test func runtimeSettingsRepositoryPersistsSessionNotificationSettings() throws {
     let root = phaseATemporaryRoot()
     let paths = AppStoragePaths(applicationSupportDirectory: root)
     try paths.ensureDirectoryHierarchy()
     let repository = AppRuntimeSettingsRepository(configDirectory: paths.configDirectory)
 
     var settings = AgentRuntimeSettings.default
-    settings.app.sessionNotificationPolicy = SessionNotificationPolicy(
-        minimumLevel: .actionable,
-        levelsByMessageType: [
-            .assistantReply: .emphasized,
-            .taskFailed: .interruptive,
-            .proactiveBriefing: .unread
-        ]
-    )
+    settings.app.sessionNotificationSettings = SessionNotificationSettings(newMessageLevel: .interruptive)
 
     try repository.save(settings)
     let loaded = try repository.loadOrCreateDefault()
 
-    #expect(loaded.app.sessionNotificationPolicy.minimumLevel == .actionable)
-    #expect(loaded.app.sessionNotificationPolicy.configuredLevel(for: .assistantReply) == .emphasized)
-    #expect(loaded.app.sessionNotificationPolicy.configuredLevel(for: .taskFailed) == .interruptive)
-    #expect(loaded.app.sessionNotificationPolicy.effectiveLevel(for: .proactiveBriefing) == .actionable)
+    #expect(loaded.app.sessionNotificationSettings.newMessageLevel == .interruptive)
+}
+
+@Test func runtimeSettingsRepositoryMigratesLegacySessionNotificationPolicyMinimumLevel() throws {
+    let root = phaseATemporaryRoot()
+    let paths = AppStoragePaths(applicationSupportDirectory: root)
+    try paths.ensureDirectoryHierarchy()
+    let repository = AppRuntimeSettingsRepository(configDirectory: paths.configDirectory)
+    let legacyJSON = """
+    {
+      "schemaVersion": 4,
+      "app": {
+        "desktopNotificationsEnabled": true,
+        "sessionNotificationPolicy": {
+          "minimumLevel": 3,
+          "levelsByMessageType": {
+            "assistantReply": 2,
+            "taskFailed": 4
+          }
+        }
+      }
+    }
+    """
+    try legacyJSON.data(using: .utf8)!.write(to: paths.configDirectory.appendingPathComponent("runtime-settings.json"), options: .atomic)
+
+    let loaded = try repository.loadOrCreateDefault()
+
+    #expect(loaded.app.sessionNotificationSettings.newMessageLevel == .actionable)
 }
 
 @Test func runtimeSettingsRepositoryPersistsWorkspaceDefaults() throws {
