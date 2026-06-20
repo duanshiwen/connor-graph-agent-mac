@@ -10,6 +10,7 @@ struct LLMSettingsView: View {
     var body: some View {
         Form {
             Picker("模型提供方", selection: $viewModel.llmProviderMode) {
+                Text("OpenAI Responses").tag(AppLLMProviderMode.openAIResponses)
                 Text("OpenAI 兼容").tag(AppLLMProviderMode.openAICompatible)
                 Text("Anthropic / Claude").tag(AppLLMProviderMode.anthropicMessages)
             }
@@ -26,7 +27,7 @@ struct LLMSettingsView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Label("原生模型管线", systemImage: "sparkles.rectangle.stack")
                         .font(SettingsListTypography.rowCaptionEmphasized)
-                    Text("Claude/Anthropic 现在通过 Connor 原生 Swift Messages API 管线执行；Session、工具、权限审批、审计和 Graph Memory 均由 Connor 自己持有，不再依赖 Claude SDK Sidecar。")
+                    Text("OpenAI 官方连接通过 Connor 原生 Responses API 管线执行；Claude/Anthropic 通过 Connor 原生 Swift Messages API 管线执行。Session、工具、权限审批、审计和 Graph Memory 均由 Connor 自己持有。")
                 }
                 .font(SettingsListTypography.rowCaption)
                 .foregroundStyle(.secondary)

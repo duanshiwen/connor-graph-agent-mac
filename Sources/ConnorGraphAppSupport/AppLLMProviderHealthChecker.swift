@@ -21,15 +21,20 @@ public typealias OpenAICompatibleHealthCheck = @Sendable (OpenAICompatibleConfig
 
 public struct AppLLMProviderHealthChecker: Sendable {
     public var settingsRepository: AppLLMSettingsRepository
+    public var openAIResponsesHealthCheck: OpenAIResponsesHealthCheck
     public var openAICompatibleHealthCheck: OpenAICompatibleHealthCheck
 
     public init(
         settingsRepository: AppLLMSettingsRepository = AppLLMSettingsRepository(),
+        openAIResponsesHealthCheck: @escaping OpenAIResponsesHealthCheck = { config in
+            try await OpenAIResponsesProvider(config: config).healthCheck()
+        },
         openAICompatibleHealthCheck: @escaping OpenAICompatibleHealthCheck = { config in
             try await OpenAICompatibleProvider(config: config).healthCheck()
         }
     ) {
         self.settingsRepository = settingsRepository
+        self.openAIResponsesHealthCheck = openAIResponsesHealthCheck
         self.openAICompatibleHealthCheck = openAICompatibleHealthCheck
     }
 
@@ -47,6 +52,15 @@ public struct AppLLMProviderHealthChecker: Sendable {
                     return AppLLMProviderHealthCheckResult(status: .failed, message: "Claude 连接不允许 allowAll 权限模式。")
                 }
                 return AppLLMProviderHealthCheckResult(status: .success, message: "Claude 连接配置可用；实际 SDK 登录和依赖由 sidecar 运行时验证。")
+            case .openAIResponses:
+                guard let config = try settingsRepository.openAIResponsesConfig(connectionID: connection.id) else {
+                    return AppLLMProviderHealthCheckResult(status: .notConfigured, message: "OpenAI Responses 连接缺少 API Key。")
+                }
+                let result = try await openAIResponsesHealthCheck(config)
+                return AppLLMProviderHealthCheckResult(
+                    status: result.ok ? .success : .failed,
+                    message: result.message
+                )
             case .anthropicMessages:
                 guard try settingsRepository.anthropicCompatibleConfig(connectionID: connection.id) != nil else {
                     return AppLLMProviderHealthCheckResult(status: .notConfigured, message: "Anthropic Messages 连接缺少 API Key。")

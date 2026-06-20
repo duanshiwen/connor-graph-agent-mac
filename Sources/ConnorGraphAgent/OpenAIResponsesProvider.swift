@@ -1,4 +1,5 @@
 import Foundation
+import ConnorGraphSearch
 
 public struct OpenAIResponsesConfig: Sendable, Equatable {
     public var baseURL: URL
@@ -38,7 +39,7 @@ public struct OpenAIResponsesConfig: Sendable, Equatable {
     }
 }
 
-public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvider, StreamingAgentModelProvider, Sendable {
+public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvider, StreamingAgentModelProvider, LLMProvider, Sendable {
     public var config: OpenAIResponsesConfig
     public var httpClient: Client
     public var sseClient: (any AgentSSEHTTPClient)?
@@ -58,6 +59,25 @@ public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvid
         self.config = config
         self.httpClient = httpClient
         self.sseClient = sseClient
+    }
+
+    public func complete(prompt: String, context: AgentContext) async throws -> LLMResponse {
+        let response = try await complete(AgentModelRequest(messages: [
+            AgentModelMessage(role: .system, content: "You are Connor, a concise and helpful graph-memory-native assistant."),
+            AgentModelMessage(role: .user, content: "Question:\n\(prompt)\n\nGraph Context:\n\(context.renderedText)")
+        ]))
+        guard let text = response.text, !text.isEmpty else { throw OpenAICompatibleProviderError.missingAssistantMessage }
+        return LLMResponse(text: text, citations: [])
+    }
+
+    public func healthCheck() async throws -> LLMProviderHealthCheckResult {
+        let context = AgentContext(query: "provider-health-check", items: [])
+        let response = try await complete(prompt: "Reply with exactly: OK", context: context)
+        return LLMProviderHealthCheckResult(
+            ok: !response.text.isEmpty,
+            model: config.requestModel,
+            message: response.text
+        )
     }
 
     public func complete(_ request: AgentModelRequest) async throws -> AgentModelResponse {

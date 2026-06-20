@@ -846,6 +846,24 @@ struct AIConnectionOnboardingOption: Identifiable, Equatable {
 
     static let all: [AIConnectionOnboardingOption] = [
         AIConnectionOnboardingOption(
+            id: "openai-responses-api",
+            title: "OpenAI API",
+            subtitle: "使用 OpenAI API Key 通过 Connor 原生 Responses 管线驱动康纳同学。",
+            systemImage: "sparkles",
+            tint: .primary,
+            providerMode: .openAIResponses,
+            connectionName: "OpenAI Responses",
+            baseURLString: "https://api.openai.com/v1",
+            model: "gpt-4.1",
+            selectedModel: "gpt-4.1",
+            setupTitle: "连接 OpenAI API",
+            setupSubtitle: "使用 API Key 连接 OpenAI Responses API。",
+            setupInstruction: "填写 OpenAI API Key、Base URL 和模型名称。康纳同学会通过原生 Swift Responses API 管线运行模型。",
+            loginButtonTitle: "验证并添加连接",
+            authURLString: "https://platform.openai.com/api-keys",
+            authenticationKind: .direct
+        ),
+        AIConnectionOnboardingOption(
             id: "anthropic-claude-api",
             title: "Anthropic / Claude API",
             subtitle: "使用 Anthropic API Key 通过 Connor 原生 Messages 管线驱动康纳同学。",
@@ -1656,7 +1674,7 @@ struct AIConnectionSetupView: View {
         Task {
             do {
                 let usesProviderPreset = option.id == "other-provider" || option.id == "china-provider"
-                let connectionKind: AppLLMConnectionKind = option.providerMode == .anthropicMessages || (usesProviderPreset && customProtocol == .anthropicCompatible) ? .anthropicCompatible : .openAICompatible
+                let connectionKind: AppLLMConnectionKind = option.providerMode == .openAIResponses ? .openAIResponses : (option.providerMode == .anthropicMessages || (usesProviderPreset && customProtocol == .anthropicCompatible) ? .anthropicCompatible : .openAICompatible)
                 let submittedModelList = effectiveModelListForSubmit()
                 let submittedSelectedModel = selectedModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? submittedModelList : selectedModel
                 let input = AppLLMConnectionSetupInput(
@@ -2015,8 +2033,10 @@ struct AIConnectionEntryRow: View {
 
     private var providerDisplayName: String {
         switch connection.providerMode {
+        case .openAIResponses:
+            return "OpenAI Responses"
         case .openAICompatible:
-            return "Craft Agents Backend Compatible"
+            return "OpenAI Compatible"
         case .anthropicMessages:
             return "Anthropic Messages"
         case .governedClaudeSidecar:
@@ -2026,7 +2046,7 @@ struct AIConnectionEntryRow: View {
 
     private var endpointDisplayName: String {
         switch connection.providerMode {
-        case .openAICompatible, .anthropicMessages:
+        case .openAIResponses, .openAICompatible, .anthropicMessages:
             return host(from: connection.baseURLString)
         case .governedClaudeSidecar:
             let arguments = connection.sidecarArguments.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2037,6 +2057,8 @@ struct AIConnectionEntryRow: View {
 
     private var providerSystemImage: String {
         switch connection.providerMode {
+        case .openAIResponses:
+            return "sparkles"
         case .openAICompatible:
             return "sparkles"
         case .anthropicMessages:
@@ -2048,6 +2070,8 @@ struct AIConnectionEntryRow: View {
 
     private var providerTint: Color {
         switch connection.providerMode {
+        case .openAIResponses:
+            return .primary
         case .openAICompatible:
             return .primary
         case .anthropicMessages:
