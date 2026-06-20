@@ -18,6 +18,13 @@ struct BrowserWorkspaceView: View {
     @State private var focusAddressRequestID = UUID()
     @State private var questionText = ""
     @State private var browserKeyMonitor: Any?
+    @State private var isMediaTranscriptionPopoverPresented = false
+    @State private var mediaTranscriptionSnapshot: BrowserMediaSourceSnapshot?
+    @State private var selectedMediaSourceIDs: Set<String> = []
+    @State private var mediaTranscriptionMode: BrowserMediaTranscriptionMode = .transcribeSummarizeAndChapters
+    @State private var mediaTranscriptionOptions: BrowserMediaTranscriptionOptions = .defaults(for: .transcribeSummarizeAndChapters)
+    @State private var isScanningMediaForPopover = false
+    @State private var mediaTranscriptionScanError: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -146,10 +153,12 @@ struct BrowserWorkspaceView: View {
             ensureInitialTab()
             syncAddressTextWithActiveTab()
             questionText = ""
+            closeMediaTranscriptionPopover()
         }
         .onChange(of: activeSelectedTabID) { _, _ in
             syncAddressTextWithActiveTab()
             questionText = ""
+            closeMediaTranscriptionPopover()
         }
     }
 
@@ -288,7 +297,18 @@ struct BrowserWorkspaceView: View {
             .help(activeURLIsBookmarked ? "当前页已收藏，打开收藏夹" : "打开收藏夹")
             .accessibilityLabel("收藏夹")
 
-            Button(action: requestMediaTranscriptionForActiveTab) {
+            Button(action: { viewModel.toggleBrowserHistoryPanel() }) {
+                BrowserToolbarIconButtonLabel(
+                    systemImage: viewModel.isBrowserHistoryPanelVisible ? "clock.arrow.circlepath" : "clock",
+                    isActive: viewModel.isBrowserHistoryPanelVisible,
+                    iconFont: .system(size: 16, weight: .semibold)
+                )
+            }
+            .buttonStyle(.plain)
+            .help("浏览历史")
+            .accessibilityLabel("历史")
+
+            Button(action: presentMediaTranscriptionPopoverForActiveTab) {
                 SidebarActionButtonLabel(
                     title: "转写/提炼",
                     systemImage: activeTab?.mediaSnapshot?.hasDetectedMedia == true ? "waveform.badge.magnifyingglass" : "waveform.badge.plus",
@@ -302,17 +322,19 @@ struct BrowserWorkspaceView: View {
             .opacity(activeWebView == nil || activeTab?.navigationState.isLoading == true ? 0.48 : 1)
             .help(mediaTranscriptionButtonHelp)
             .accessibilityLabel("转写并提炼网页媒体")
-
-            Button(action: { viewModel.toggleBrowserHistoryPanel() }) {
-                BrowserToolbarIconButtonLabel(
-                    systemImage: viewModel.isBrowserHistoryPanelVisible ? "clock.arrow.circlepath" : "clock",
-                    isActive: viewModel.isBrowserHistoryPanelVisible,
-                    iconFont: .system(size: 16, weight: .semibold)
+            .popover(isPresented: $isMediaTranscriptionPopoverPresented, arrowEdge: .bottom) {
+                BrowserMediaTranscriptionPopoverView(
+                    snapshot: mediaTranscriptionSnapshot,
+                    isScanning: isScanningMediaForPopover,
+                    errorMessage: mediaTranscriptionScanError,
+                    selectedSourceIDs: $selectedMediaSourceIDs,
+                    mode: $mediaTranscriptionMode,
+                    options: $mediaTranscriptionOptions,
+                    onRescan: scanMediaForPopover,
+                    onCancel: closeMediaTranscriptionPopover,
+                    onSubmit: submitMediaTranscriptionSelection
                 )
             }
-            .buttonStyle(.plain)
-            .help("浏览历史")
-            .accessibilityLabel("历史")
 
             Button(action: showPageQuestionPopover) {
                 BrowserAskAIButtonLabel()
@@ -413,16 +435,30 @@ struct BrowserWorkspaceView: View {
         }
     }
 
-    private func requestMediaTranscriptionForActiveTab() {
+    private func presentMediaTranscriptionPopoverForActiveTab() {
+        mediaTranscriptionSnapshot = activeTab?.mediaSnapshot
+        selectedMediaSourceIDs = Set(mediaTranscriptionSnapshot?.transcriptionSourceOptions.map(\.id) ?? [])
+        mediaTranscriptionMode = .transcribeSummarizeAndChapters
+        mediaTranscriptionOptions = .defaults(for: mediaTranscriptionMode)
+        mediaTranscriptionScanError = nil
+        isMediaTranscriptionPopoverPresented = true
+        scanMediaForPopover()
+    }
+
+    private func scanMediaForPopover() {
         guard let webView = activeWebView, let selectedTabID = activeSelectedTabID else {
-            viewModel.showAttachmentToast(title: "无法扫描媒体", message: "当前没有可用网页。", systemImage: "exclamationmark.triangle")
+            mediaTranscriptionScanError = "当前没有可用网页。"
+            isScanningMediaForPopover = false
             return
         }
 
+        isScanningMediaForPopover = true
+        mediaTranscriptionScanError = nil
         webView.evaluateJavaScript("window.__connorCollectMediaSnapshot ? window.__connorCollectMediaSnapshot() : null") { result, error in
             DispatchQueue.main.async {
+                isScanningMediaForPopover = false
                 if let error {
-                    viewModel.showAttachmentToast(title: "媒体扫描失败", message: error.localizedDescription, systemImage: "exclamationmark.triangle")
+                    mediaTranscriptionScanError = error.localizedDescription
                     return
                 }
 
@@ -434,29 +470,44 @@ struct BrowserWorkspaceView: View {
                 }
 
                 guard let snapshot else {
-                    viewModel.showAttachmentToast(title: "未启用媒体扫描", message: "当前页面还没有完成媒体检测脚本初始化，请稍等片刻后重试。", systemImage: "waveform.badge.exclamationmark")
+                    mediaTranscriptionScanError = "当前页面还没有完成媒体检测脚本初始化，请稍等片刻后重试。"
                     return
                 }
 
                 updateMediaSnapshot(snapshot, for: selectedTabID)
-                guard snapshot.hasDetectedMedia else {
-                    viewModel.showAttachmentToast(title: "未检测到网页媒体", message: "当前页面暂未发现 video/audio 或公开媒体 metadata。若视频仍在加载，请播放几秒后再点一次。", systemImage: "waveform.badge.exclamationmark")
-                    return
-                }
-
-                createMediaTranscriptionTask(from: snapshot)
+                mediaTranscriptionSnapshot = snapshot
+                selectedMediaSourceIDs = Set(snapshot.transcriptionSourceOptions.map(\.id))
             }
         }
     }
 
-    private func createMediaTranscriptionTask(from snapshot: BrowserMediaSourceSnapshot) {
-        do {
-            _ = try viewModel.requestBrowserMediaTranscription(source: snapshot)
-            Task { await viewModel.runScheduledTasksNow() }
-        } catch {
-            viewModel.errorMessage = String(describing: error)
-            viewModel.showAttachmentToast(title: "无法创建媒体转写任务", message: String(describing: error), systemImage: "exclamationmark.triangle")
+    private func submitMediaTranscriptionSelection() {
+        guard let snapshot = mediaTranscriptionSnapshot else {
+            mediaTranscriptionScanError = "请先扫描当前网页媒体。"
+            return
         }
+        let selection = BrowserMediaTranscriptionSelection(
+            snapshot: snapshot,
+            selectedSourceIDs: Array(selectedMediaSourceIDs),
+            mode: mediaTranscriptionMode,
+            options: mediaTranscriptionOptions
+        )
+        do {
+            _ = try viewModel.requestBrowserMediaTranscription(selection: selection)
+            Task { await viewModel.runScheduledTasksNow() }
+            isMediaTranscriptionPopoverPresented = false
+        } catch {
+            let message = String(describing: error)
+            mediaTranscriptionScanError = message
+            viewModel.errorMessage = message
+            viewModel.showAttachmentToast(title: "无法创建媒体转写任务", message: message, systemImage: "exclamationmark.triangle")
+        }
+    }
+
+    private func closeMediaTranscriptionPopover() {
+        isMediaTranscriptionPopoverPresented = false
+        isScanningMediaForPopover = false
+        mediaTranscriptionScanError = nil
     }
 
     private func updateNavigationState(_ state: WebNavigationState, for tabID: BrowserTabState.ID) {
