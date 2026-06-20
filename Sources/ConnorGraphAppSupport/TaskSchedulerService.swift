@@ -14,11 +14,11 @@ public struct TaskSchedulerService: Sendable {
                 guard task.trigger.kind == .scheduled else { return false }
                 guard task.lifecycle.status == .active || task.lifecycle.status == .failed || task.lifecycle.status == .succeeded else { return false }
                 guard task.lifecycle.status != .running && task.lifecycle.status != .stopped && task.lifecycle.status != .deleted else { return false }
-                return nextDueDate(for: task) <= now
+                return effectiveDueDate(for: task, now: now) <= now
             }
             .sorted { lhs, rhs in
-                let left = nextDueDate(for: lhs)
-                let right = nextDueDate(for: rhs)
+                let left = effectiveDueDate(for: lhs, now: now)
+                let right = effectiveDueDate(for: rhs, now: now)
                 if left != right { return left < right }
                 return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
             }
@@ -75,11 +75,25 @@ public struct TaskSchedulerService: Sendable {
         return updated
     }
 
+    private func effectiveDueDate(for task: ConnorTaskDefinition, now: Date) -> Date {
+        let scheduled = nextDueDate(for: task)
+        guard let missedInterval = missedIntervalDueDate(for: task, now: now) else { return scheduled }
+        return min(scheduled, missedInterval)
+    }
+
     private func nextDueDate(for task: ConnorTaskDefinition) -> Date {
         if let nextRunAt = task.lifecycle.nextRunAt { return nextRunAt }
         if let runAt = task.trigger.runAt { return runAt }
         if let lastFinishedAt = task.lifecycle.lastFinishedAt, let next = computeNextRunAt(task: task, after: lastFinishedAt) { return next }
         if let lastRunAt = task.lifecycle.lastRunAt, let next = computeNextRunAt(task: task, after: lastRunAt) { return next }
         return task.createdAt
+    }
+
+    private func missedIntervalDueDate(for task: ConnorTaskDefinition, now: Date) -> Date? {
+        let recurrence = task.trigger.recurrence ?? (task.trigger.intervalSeconds == nil ? .once : .interval)
+        guard recurrence == .interval, let seconds = task.trigger.intervalSeconds else { return nil }
+        let anchor = task.lifecycle.lastFinishedAt ?? task.lifecycle.lastRunAt ?? task.trigger.runAt ?? task.createdAt
+        let expected = anchor.addingTimeInterval(seconds)
+        return expected <= now ? expected : nil
     }
 }
