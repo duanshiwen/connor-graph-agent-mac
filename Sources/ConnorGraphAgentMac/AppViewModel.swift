@@ -1667,7 +1667,7 @@ final class AppViewModel: NSObject, ObservableObject {
                     }
                 } else {
                     let task = dueTasks.first(where: { $0.id == outcome.taskID })
-                    let userFacingError = mediaTranscriptionUserFacingError(for: task) ?? outcome.errorMessage
+                    let userFacingError = mediaTranscriptionUserFacingError(for: task) ?? sanitizedMediaTranscriptionError(outcome.errorMessage)
                     updateMediaTranscriptionBackgroundTask(taskID: outcome.taskID, status: .failed, detail: outcome.summary, errorMessage: userFacingError)
                 }
             }
@@ -1692,7 +1692,18 @@ final class AppViewModel: NSObject, ObservableObject {
         let jobID = task.target.parameters["jobID"] ?? task.target.targetID
         let ownerSessionID = task.target.parameters["ownerSessionID"] ?? task.metadata.ownerSessionID
         guard let ownerSessionID, !ownerSessionID.isEmpty else { return nil }
-        return (try? MediaTranscriptionJobStore(paths: storagePaths).load(sessionID: ownerSessionID, jobID: jobID))?.lastErrorMessage
+        let message = (try? MediaTranscriptionJobStore(paths: storagePaths).load(sessionID: ownerSessionID, jobID: jobID))?.lastErrorMessage
+        return sanitizedMediaTranscriptionError(message)
+    }
+
+    private func sanitizedMediaTranscriptionError(_ message: String?) -> String? {
+        guard let message, !message.isEmpty else { return nil }
+        let lowercased = message.lowercased()
+        let leakedRuntimeDiagnostics = ["python", "yt-dlp", "ffmpeg", "whisperkit", "未获取到平台字幕产物", "未获取到可转写音频", "app-managed runtime", "missingruntimeids"]
+        if leakedRuntimeDiagnostics.contains(where: { lowercased.contains($0) }) {
+            return "Connor 正在准备内置媒体转写能力，或当前网页没有可获取的字幕/音频。请稍后重试；如果持续失败，请在设置中更新媒体运行时。"
+        }
+        return message
     }
 
     private func sendMediaTranscriptionFollowUpIfPossible(for task: ConnorTaskDefinition) async {
@@ -4018,6 +4029,12 @@ final class AppViewModel: NSObject, ObservableObject {
     func backgroundTasks(for sessionID: String?) -> [AppSessionBackgroundTask] {
         guard let sessionID else { return [] }
         return backgroundTasksBySessionID[sessionID, default: []]
+            .map { task in
+                guard task.kind == Self.mediaTranscriptionBackgroundTaskKind else { return task }
+                var sanitized = task
+                sanitized.errorMessage = sanitizedMediaTranscriptionError(task.errorMessage)
+                return sanitized
+            }
             .sorted { $0.createdAt > $1.createdAt }
     }
 
@@ -4123,6 +4140,16 @@ final class AppViewModel: NSObject, ObservableObject {
         var tasks = try chatSessionRepository.loadBackgroundTasks(sessionID: sessionID)
             .map(AppSessionBackgroundTask.init(persisted:))
         var didInterruptActiveTasks = false
+        var didSanitizePersistedMediaErrors = false
+        for index in tasks.indices where tasks[index].kind == Self.mediaTranscriptionBackgroundTaskKind {
+            let sanitized = sanitizedMediaTranscriptionError(tasks[index].errorMessage)
+            if sanitized != tasks[index].errorMessage {
+                tasks[index].errorMessage = sanitized
+                tasks[index].updatedAt = Date()
+                didSanitizePersistedMediaErrors = true
+                try chatSessionRepository.saveBackgroundTask(tasks[index].persisted)
+            }
+        }
         for index in tasks.indices where (tasks[index].status == .queued || tasks[index].status == .running) && !activeInMemoryTaskIDs.contains(tasks[index].id) {
             tasks[index].status = .interrupted
             tasks[index].updatedAt = Date()
@@ -4131,6 +4158,9 @@ final class AppViewModel: NSObject, ObservableObject {
             try chatSessionRepository.saveBackgroundTask(tasks[index].persisted)
         }
         backgroundTasksBySessionID[sessionID] = tasks
+        if didSanitizePersistedMediaErrors {
+            backgroundTasksBySessionID[sessionID] = tasks
+        }
         if didInterruptActiveTasks || !hasRunningTitleTask(sessionID: sessionID) {
             regeneratingTitleSessionIDs.remove(sessionID)
         }
