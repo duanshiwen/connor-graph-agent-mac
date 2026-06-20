@@ -3477,7 +3477,6 @@ final class AppViewModel: NSObject, ObservableObject {
         sessionID: String,
         messageID: String?,
         preview: String?,
-        notificationTitle: String,
         notificationBody: String
     ) {
         let level = sessionNewMessageNotificationLevel
@@ -3489,7 +3488,7 @@ final class AppViewModel: NSObject, ObservableObject {
         }
         let unreadMessageID = messageID ?? "attention-event-\(UUID().uuidString)"
         markSessionUnread(sessionID: sessionID, messageID: unreadMessageID, preview: preview, level: level)
-        postSessionNotificationIfNeeded(sessionID: sessionID, title: notificationTitle, body: notificationBody, level: level)
+        postSessionNotificationIfNeeded(sessionID: sessionID, body: notificationBody, level: level)
     }
 
     private func notificationPreview(from content: String) -> String {
@@ -3506,7 +3505,6 @@ final class AppViewModel: NSObject, ObservableObject {
 
     private func postSessionNotificationIfNeeded(
         sessionID: String,
-        title: String,
         body: String,
         level: SessionAttentionLevel
     ) {
@@ -3519,9 +3517,13 @@ final class AppViewModel: NSObject, ObservableObject {
         }
         lastSessionNotificationAt[sessionID] = now
         let content = UNMutableNotificationContent()
-        content.title = title
+        content.title = "康纳同学：主人，有新消息需要你关注"
         content.body = body
         content.sound = .default
+        if level == .interruptive {
+            content.interruptionLevel = .timeSensitive
+            content.relevanceScore = 1.0
+        }
         content.userInfo = [
             "sessionID": sessionID,
             "attentionLevel": level.rawValue,
@@ -5436,8 +5438,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 sessionID: response.session.id,
                 messageID: latestAssistantMessage?.id,
                 preview: latestAssistantMessage.map { notificationPreview(from: $0.content) },
-                notificationTitle: "康纳同学完成了工作",
-                notificationBody: response.session.title
+                notificationBody: latestAssistantMessage.map { notificationPreview(from: $0.content) } ?? response.session.title
             )
             Task { await runBackgroundJobs() }
             return latestAssistantMessage?.content
@@ -5459,7 +5460,6 @@ final class AppViewModel: NSObject, ObservableObject {
                     sessionID: submittingSessionID,
                     messageID: nil,
                     preview: errorDescription,
-                    notificationTitle: "康纳同学遇到错误",
                     notificationBody: errorDescription
                 )
             }
