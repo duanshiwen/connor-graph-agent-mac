@@ -3097,6 +3097,28 @@ final class AppViewModel: NSObject, ObservableObject {
         selectDefaultLLMConnection(llmDefaultConnectionID)
     }
 
+    func renameLLMConnection(_ connectionID: String, name: String) {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty,
+              let index = llmConnectionConfigs.firstIndex(where: { $0.id == connectionID }) else { return }
+
+        var renamedConnection = llmConnectionConfigs[index]
+        guard renamedConnection.name != trimmedName else { return }
+        renamedConnection.name = trimmedName
+
+        do {
+            try llmSettingsRepository.updateConnection(renamedConnection)
+            loadLLMSettings()
+            rebuildNativeSessionManagerForActiveSession()
+            Task { await reloadLLMModelConnections() }
+            llmSettingsMessage = "连接名称已更新。"
+            llmHealthCheckMessage = nil
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
     private func persistLLMSettings(rebuildRuntime: Bool) {
         do {
             let existing = (try? llmSettingsRepository.loadSettings()) ?? .default
