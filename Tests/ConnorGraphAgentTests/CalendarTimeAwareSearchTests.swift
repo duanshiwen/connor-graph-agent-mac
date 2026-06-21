@@ -44,6 +44,7 @@ struct CalendarTimeAwareSearchTests {
         #expect(properties.keys.contains("timePreset"))
         #expect(properties.keys.contains("timeFilterMode"))
         #expect(properties.keys.contains("timeSort"))
+        #expect(properties.keys.contains("limit"))
         #expect(tool.description.localizedCaseInsensitiveContains("time-aware"))
     }
 }

@@ -22,7 +22,7 @@ public struct MailRuntimeSearchRequestBridge: Sendable, Equatable {
     public init(query: String, accountID: MailAccountID? = nil, limit: Int = 20, startDate: Date? = nil, endDate: Date? = nil, timePreset: String? = nil, timeSort: String? = nil) {
         self.query = query
         self.accountID = accountID
-        self.limit = limit
+        self.limit = NativeSearchLimitPolicy.clampSearchLimit(limit)
         self.startDate = startDate
         self.endDate = endDate
         self.timePreset = timePreset
@@ -94,7 +94,7 @@ public struct MailSearchMessagesTool: AgentTool {
         let request = MailRuntimeSearchRequestBridge(
             query: arguments.string("query") ?? "",
             accountID: arguments.string("accountID").map(MailAccountID.init(rawValue:)),
-            limit: arguments.int("limit") ?? 20,
+            limit: NativeSearchLimitPolicy.clampSearchLimit(arguments.int("limit") ?? NativeSearchLimitPolicy.defaultSearchLimit),
             startDate: arguments.string("startDate").flatMap { formatter.date(from: $0) },
             endDate: arguments.string("endDate").flatMap { formatter.date(from: $0) },
             timePreset: arguments.string("timePreset"),

@@ -244,6 +244,26 @@ public struct NativeSearchDocument: Codable, Sendable, Equatable, Hashable, Iden
     }
 }
 
+public enum NativeSearchLimitPolicy {
+    public static let defaultSearchLimit = 20
+    public static let maxSearchLimit = 100
+    public static let defaultListLimit = 50
+    public static let maxListLimit = 200
+
+    public static func clampSearchLimit(_ value: Int, default defaultValue: Int = defaultSearchLimit) -> Int {
+        clamp(value, default: defaultValue, max: maxSearchLimit)
+    }
+
+    public static func clampListLimit(_ value: Int, default defaultValue: Int = defaultListLimit) -> Int {
+        clamp(value, default: defaultValue, max: maxListLimit)
+    }
+
+    private static func clamp(_ value: Int, default defaultValue: Int, max upperBound: Int) -> Int {
+        guard value > 0 else { return defaultValue }
+        return Swift.min(value, upperBound)
+    }
+}
+
 public struct NativeSearchQuery: Codable, Sendable, Equatable {
     public var text: String
     public var sourceKinds: Set<NativeSearchSourceKind>?
@@ -273,7 +293,7 @@ public struct NativeSearchQuery: Codable, Sendable, Equatable {
         self.sourceInstanceIDs = sourceInstanceIDs
         self.temporalFilter = temporalFilter
         self.temporalSort = temporalSort
-        self.limit = limit
+        self.limit = NativeSearchLimitPolicy.clampSearchLimit(limit)
         self.includeHidden = includeHidden
         self.includeArchived = includeArchived
         self.includeBodySnippets = includeBodySnippets
