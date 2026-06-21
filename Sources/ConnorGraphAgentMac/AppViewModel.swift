@@ -644,7 +644,7 @@ final class AppViewModel: NSObject, ObservableObject {
         switch agentPermissionMode {
         case .trustedWrite:
             switch approval.capability {
-            case .readGraph, .readSession, .modelCall, .proposeGraphWrite, .commitGraphWrite, .externalNetwork, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .writeWorkspaceFile, .editWorkspaceFile, .computeScientific, .runReadOnlyShellCommand, .runWorkspaceShellCommand, .readMail, .readMailBody, .readContacts, .readCalendar, .mutateMailState, .createMailDraft, .importMailAttachment, .readRSS, .readRSSContent, .mutateRSSState, .syncRSSSources, .exportRSSOPML:
+            case .readGraph, .readSession, .mutateSessionStatus, .modelCall, .proposeGraphWrite, .commitGraphWrite, .externalNetwork, .readWorkspaceFile, .listWorkspaceFiles, .searchWorkspaceFiles, .writeWorkspaceFile, .editWorkspaceFile, .computeScientific, .runReadOnlyShellCommand, .runWorkspaceShellCommand, .readMail, .readMailBody, .readContacts, .readCalendar, .mutateMailState, .createMailDraft, .importMailAttachment, .readRSS, .readRSSContent, .mutateRSSState, .syncRSSSources, .exportRSSOPML:
                 return true
             case .invalidateGraphStatement, .deleteGraphObject, .costlyModelCall, .deleteWorkspaceFile, .runNetworkShellCommand, .runDestructiveShellCommand, .manageMailboxes, .sendMail, .mutateContacts, .mutateCalendar, .manageRSSSources, .importRSSOPML:
                 return false
