@@ -26,7 +26,7 @@ struct NativeSourceSearchToolGovernanceTests {
         #expect(registry.definition(named: "same_tool")?.description == "second")
     }
 
-    @Test func nativeSearchToolsExposeTemporalFiltersWithoutDuplicateSearchTools() {
+    @Test func nativeSearchMethodsRemainInternalAndAreNotAgentCallable() {
         var registry = AgentToolRegistry()
         registry.registerNativeMailTools(runtime: MailRuntimeSearchFixture())
         registry.registerNativeRSSTools(runtime: RSSRuntimeSearchFixture())
@@ -35,19 +35,18 @@ struct NativeSourceSearchToolGovernanceTests {
         let names = registry.definitions.map(\.name)
         #expect(Set(names).count == names.count)
         #expect(registry.duplicateRegistrations.isEmpty)
-        #expect(names.contains("mail_search_messages"))
-        #expect(names.contains("rss_search_items"))
+        #expect(!names.contains("mail_search_messages"))
+        #expect(!names.contains("rss_search_items"))
         #expect(names.contains("calendar_read"))
         #expect(!names.contains("mail_index_search"))
         #expect(!names.contains("rss_index_search"))
         #expect(!names.contains("calendar_index_search"))
 
-        let mailSchema = registry.definition(named: "mail_search_messages")?.inputSchema
-        let rssSchema = registry.definition(named: "rss_search_items")?.inputSchema
         let calendarSchema = registry.definition(named: "calendar_read")?.inputSchema
-        #expect(schema(mailSchema, contains: "startDate"))
-        #expect(schema(rssSchema, contains: "timePreset"))
-        #expect(schema(calendarSchema, contains: "timeFilterMode"))
+        #expect(!schema(calendarSchema, contains: "query"))
+        #expect(!schema(calendarSchema, contains: "startDate"))
+        #expect(!schema(calendarSchema, contains: "timePreset"))
+        #expect(!schema(calendarSchema, contains: "timeFilterMode"))
     }
 
     @Test func systemPromptDoesNotExposeInternalNativeSearchMethods() {
