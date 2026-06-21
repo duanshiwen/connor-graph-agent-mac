@@ -4,7 +4,7 @@ import ConnorGraphCore
 public protocol AgentCalendarRuntime: Sendable {
     func listCalendars(runID: String?, sessionID: String?) async throws -> [CalendarCollection]
     func listEvents(calendarID: CalendarID?, runID: String?, sessionID: String?) async throws -> [CalendarEvent]
-    func searchEvents(query: String, startDate: Date?, endDate: Date?, timePreset: String?, timeFilterMode: String?, timeSort: String?, runID: String?, sessionID: String?) async throws -> [CalendarEvent]
+    func searchEvents(query: String, startDate: Date?, endDate: Date?, timePreset: String?, timeFilterMode: String?, timeSort: String?, limit: Int, runID: String?, sessionID: String?) async throws -> [CalendarEvent]
     func getEvent(id: CalendarEventID, runID: String?, sessionID: String?) async throws -> CalendarEvent?
     func createEvent(calendarID: CalendarID, title: String, start: Date, end: Date, approved: Bool, runID: String?, sessionID: String?) async throws -> CalendarWriteReceipt
 }
@@ -27,7 +27,7 @@ public actor InMemoryAgentCalendarRuntime: AgentCalendarRuntime {
         return filtered.sorted { $0.start.date < $1.start.date }
     }
 
-    public func searchEvents(query: String, startDate: Date?, endDate: Date?, timePreset: String?, timeFilterMode: String?, timeSort: String?, runID: String?, sessionID: String?) async throws -> [CalendarEvent] {
+    public func searchEvents(query: String, startDate: Date?, endDate: Date?, timePreset: String?, timeFilterMode: String?, timeSort: String?, limit: Int = NativeSearchLimitPolicy.defaultSearchLimit, runID: String?, sessionID: String?) async throws -> [CalendarEvent] {
         let normalized = query.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         let formatter = ISO8601DateFormatter()
         var temporalFilter: NativeSearchTemporalFilter?
@@ -49,7 +49,8 @@ public actor InMemoryAgentCalendarRuntime: AgentCalendarRuntime {
                 || event.attendees.contains { ($0.name?.lowercased().contains(normalized) ?? false) || ($0.email?.lowercased().contains(normalized) ?? false) }
         }
         let ascending = timeSort == "timeAscThenRelevance" || timeSort == "relevanceThenTimeAsc" || timeSort == nil
-        return filtered.sorted { ascending ? $0.start.date < $1.start.date : $0.start.date > $1.start.date }
+        let requestedLimit = NativeSearchLimitPolicy.clampSearchLimit(limit)
+        return Array(filtered.sorted { ascending ? $0.start.date < $1.start.date : $0.start.date > $1.start.date }.prefix(requestedLimit))
     }
 
     public func getEvent(id: CalendarEventID, runID: String?, sessionID: String?) async throws -> CalendarEvent? {
@@ -85,7 +86,8 @@ public struct CalendarReadTool: AgentTool {
             "endDate": .string(description: "Optional ISO-8601 exclusive end timestamp for event interval filtering"),
             "timePreset": .string(description: "Optional time preset such as today, tomorrow, next7Days, thisWeek"),
             "timeFilterMode": .string(description: "Optional mode: intervalOverlapsRange, startsWithinRange, endsWithinRange, updatedWithinRange, indexedWithinRange. Defaults to intervalOverlapsRange for calendar."),
-            "timeSort": .string(description: "Optional sort: timeAscThenRelevance, timeDescThenRelevance, relevanceThenTimeDesc, relevanceThenTimeAsc")
+            "timeSort": .string(description: "Optional sort: timeAscThenRelevance, timeDescThenRelevance, relevanceThenTimeDesc, relevanceThenTimeAsc"),
+            "limit": .integer(description: "Maximum events to return")
         ], required: ["operation"])
     }
 
@@ -109,6 +111,7 @@ public struct CalendarReadTool: AgentTool {
                 timePreset: arguments.string("timePreset"),
                 timeFilterMode: arguments.string("timeFilterMode"),
                 timeSort: arguments.string("timeSort"),
+                limit: NativeSearchLimitPolicy.clampSearchLimit(arguments.int("limit") ?? NativeSearchLimitPolicy.defaultSearchLimit),
                 runID: context.runID,
                 sessionID: context.sessionID
             )

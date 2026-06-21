@@ -64,6 +64,7 @@ public actor FileBackedRSSSourceCache: TimeAwareRSSSourceCache {
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
     private let searchService: NativeSourceSearchService?
+    private var hasPrimedSearchIndex: Bool
 
     public init(storageDirectory: URL, fileManager: FileManager = .default, searchService: NativeSourceSearchService? = nil) {
         self.storageURL = storageDirectory.appendingPathComponent("items.json")
@@ -71,6 +72,7 @@ public actor FileBackedRSSSourceCache: TimeAwareRSSSourceCache {
         self.encoder = rssStorageJSONEncoder()
         self.decoder = rssStorageJSONDecoder()
         self.searchService = searchService
+        self.hasPrimedSearchIndex = false
     }
 
     public init(storagePaths: AppStoragePaths, fileManager: FileManager = .default, searchService: NativeSourceSearchService? = nil) {
@@ -79,6 +81,7 @@ public actor FileBackedRSSSourceCache: TimeAwareRSSSourceCache {
         self.encoder = rssStorageJSONEncoder()
         self.decoder = rssStorageJSONDecoder()
         self.searchService = searchService
+        self.hasPrimedSearchIndex = false
     }
 
     public func listItems(sourceID: RSSSourceID? = nil, includeHidden: Bool = false) async throws -> [RSSItemSummary] {
@@ -90,9 +93,10 @@ public actor FileBackedRSSSourceCache: TimeAwareRSSSourceCache {
     }
 
     public func searchItems(query: String, sourceID: RSSSourceID? = nil, includeHidden: Bool = false, temporalFilter: NativeSearchTemporalFilter?, temporalSort: NativeSearchTemporalSort, limit: Int) async throws -> [RSSItemSummary] {
+        let limit = NativeSearchLimitPolicy.clampSearchLimit(limit)
         let items = try loadItems()
         if let searchService {
-            try await searchService.upsert(items.map(NativeSourceSearchAdapters.rssDocument(from:)))
+            try await primeSearchIndexIfNeeded(items: items)
             let results = try await searchService.search(NativeSearchQuery(text: query, sourceKinds: [.rss], sourceInstanceIDs: sourceID.map { Set([$0.rawValue]) }, temporalFilter: temporalFilter, temporalSort: temporalSort, limit: limit, includeHidden: includeHidden, rankingProfile: .recentFirst))
             let byID = Dictionary(uniqueKeysWithValues: items.map { ($0.id.rawValue, $0.summary) })
             return results.compactMap { byID[$0.externalID] }
@@ -161,6 +165,12 @@ public actor FileBackedRSSSourceCache: TimeAwareRSSSourceCache {
             try saveItems(filteredItems)
             try await searchService?.deleteBySource(kind: .rss, sourceInstanceID: sourceID.rawValue)
         }
+    }
+
+    private func primeSearchIndexIfNeeded(items: [RSSItemDetail]) async throws {
+        guard let searchService, !hasPrimedSearchIndex else { return }
+        try await searchService.rebuildSource(kind: .rss, documents: items.map(NativeSourceSearchAdapters.rssDocument(from:)))
+        hasPrimedSearchIndex = true
     }
 
     private func filtered(sourceID: RSSSourceID?, includeHidden: Bool) throws -> [RSSItemSummary] {

@@ -30,7 +30,7 @@ public struct RSSRuntimeSearchRequestBridge: Sendable, Equatable {
         self.query = query
         self.sourceID = sourceID
         self.includeHidden = includeHidden
-        self.limit = limit
+        self.limit = NativeSearchLimitPolicy.clampSearchLimit(limit)
         self.startDate = startDate
         self.endDate = endDate
         self.timePreset = timePreset
@@ -96,7 +96,7 @@ public struct RSSListItemsTool: AgentTool {
     public var inputSchema: AgentToolInputSchema { .object(properties: ["sourceID": .string(description: "Optional RSS source ID"), "includeHidden": .boolean(description: "Include hidden items"), "limit": .integer(description: "Maximum items")], required: []) }
     public init(runtime: any AgentRSSRuntime) { self.runtime = runtime }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        let items = try await runtime.listItems(sourceID: arguments.string("sourceID").map(RSSSourceID.init(rawValue:)), includeHidden: arguments.bool("includeHidden") ?? false, limit: arguments.int("limit") ?? 50, runID: context.runID, sessionID: context.sessionID)
+        let items = try await runtime.listItems(sourceID: arguments.string("sourceID").map(RSSSourceID.init(rawValue:)), includeHidden: arguments.bool("includeHidden") ?? false, limit: NativeSearchLimitPolicy.clampListLimit(arguments.int("limit") ?? NativeSearchLimitPolicy.defaultListLimit), runID: context.runID, sessionID: context.sessionID)
         return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Listed \(items.count) RSS item summaries", contentJSON: try RSSJSON.encode(items))
     }
 }
@@ -114,7 +114,7 @@ public struct RSSSearchItemsTool: AgentTool {
             query: arguments.string("query") ?? "",
             sourceID: arguments.string("sourceID").map(RSSSourceID.init(rawValue:)),
             includeHidden: arguments.bool("includeHidden") ?? false,
-            limit: arguments.int("limit") ?? 50,
+            limit: NativeSearchLimitPolicy.clampSearchLimit(arguments.int("limit") ?? NativeSearchLimitPolicy.defaultListLimit),
             startDate: arguments.string("startDate").flatMap { formatter.date(from: $0) },
             endDate: arguments.string("endDate").flatMap { formatter.date(from: $0) },
             timePreset: arguments.string("timePreset"),

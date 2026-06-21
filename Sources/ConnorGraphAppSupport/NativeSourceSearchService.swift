@@ -84,45 +84,61 @@ public actor NativeSourceSearchService {
 
     public func upsert(_ newDocuments: [NativeSearchDocument]) async throws {
         guard !newDocuments.isEmpty else { return }
+        var didChange = false
         for document in newDocuments {
-            if let existing = documents[document.id],
-               existing.contentHash == document.contentHash,
-               existing.schemaVersion == document.schemaVersion,
-               existing.state == document.state,
-               existing.visibility == document.visibility,
-               existing.temporal == document.temporal {
-                continue
-            }
             var indexed = document
             var temporal = indexed.temporal
-            if temporal.indexedAt == nil { temporal.indexedAt = Date() }
+            if temporal.indexedAt == nil { temporal.indexedAt = documents[document.id]?.temporal.indexedAt ?? Date() }
             if temporal.primaryTime == nil {
                 temporal.primaryTime = Self.defaultPrimaryTime(for: indexed.sourceKind, temporal: temporal)
                 temporal.primaryTimeKind = Self.defaultPrimaryTimeKind(for: indexed.sourceKind, temporal: temporal)
             }
             indexed.temporal = temporal
+            if documents[indexed.id] == indexed { continue }
             documents[indexed.id] = indexed
+            didChange = true
         }
-        try persist()
+        if didChange { try persist() }
     }
 
     public func delete(documentIDs: [String]) async throws {
-        for id in documentIDs { documents.removeValue(forKey: id) }
-        try persist()
+        var didChange = false
+        for id in documentIDs {
+            if documents.removeValue(forKey: id) != nil { didChange = true }
+        }
+        if didChange { try persist() }
     }
 
     public func deleteBySource(kind: NativeSearchSourceKind, sourceInstanceID: String? = nil) async throws {
+        let originalCount = documents.count
         documents = documents.filter { _, document in
             guard document.sourceKind == kind else { return true }
             if let sourceInstanceID { return document.sourceInstanceID != sourceInstanceID }
             return false
         }
-        try persist()
+        if documents.count != originalCount { try persist() }
     }
 
     public func rebuildSource(kind: NativeSearchSourceKind, sourceInstanceID: String? = nil, documents newDocuments: [NativeSearchDocument]) async throws {
-        try await deleteBySource(kind: kind, sourceInstanceID: sourceInstanceID)
-        try await upsert(newDocuments)
+        var nextDocuments = documents.filter { _, document in
+            guard document.sourceKind == kind else { return true }
+            if let sourceInstanceID { return document.sourceInstanceID != sourceInstanceID }
+            return false
+        }
+        for document in newDocuments {
+            var indexed = document
+            var temporal = indexed.temporal
+            if temporal.indexedAt == nil { temporal.indexedAt = documents[document.id]?.temporal.indexedAt ?? Date() }
+            if temporal.primaryTime == nil {
+                temporal.primaryTime = Self.defaultPrimaryTime(for: indexed.sourceKind, temporal: temporal)
+                temporal.primaryTimeKind = Self.defaultPrimaryTimeKind(for: indexed.sourceKind, temporal: temporal)
+            }
+            indexed.temporal = temporal
+            nextDocuments[indexed.id] = indexed
+        }
+        guard nextDocuments != documents else { return }
+        documents = nextDocuments
+        try persist()
     }
 
     public func search(_ query: NativeSearchQuery) async throws -> [NativeSearchResult] {

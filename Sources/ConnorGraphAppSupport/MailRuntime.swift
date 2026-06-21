@@ -13,7 +13,7 @@ public struct MailRuntimeSearchRequest: Sendable, Equatable {
     public init(query: String, accountID: MailAccountID? = nil, limit: Int = 20, startDate: Date? = nil, endDate: Date? = nil, timePreset: NativeSearchTimePreset? = nil, timeSort: NativeSearchTemporalSort = .relevanceThenTimeDesc) {
         self.query = query
         self.accountID = accountID
-        self.limit = limit
+        self.limit = NativeSearchLimitPolicy.clampSearchLimit(limit)
         self.startDate = startDate
         self.endDate = endDate
         self.timePreset = timePreset
@@ -101,8 +101,9 @@ public struct MailRuntime: Sendable {
             } } ?? all
             messages = filtered.sorted { lhs, rhs in request.timeSort == .timeAscThenRelevance || request.timeSort == .relevanceThenTimeAsc ? lhs.date < rhs.date : lhs.date > rhs.date }
         }
-        try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: request.accountID, kind: .messageSearched, riskClass: .read, redactedSummary: "Searched mail messages; returned \(min(messages.count, request.limit)) summaries"))
-        return Array(messages.prefix(request.limit))
+        let limit = NativeSearchLimitPolicy.clampSearchLimit(request.limit)
+        try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: request.accountID, kind: .messageSearched, riskClass: .read, redactedSummary: "Searched mail messages; returned \(min(messages.count, limit)) summaries"))
+        return Array(messages.prefix(limit))
     }
 
     public func getMessage(id: MailMessageID, includeBody: Bool = false, runID: String? = nil, sessionID: String? = nil) async throws -> MailMessageDetail {

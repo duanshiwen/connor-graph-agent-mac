@@ -15,6 +15,7 @@ public actor FileBackedMailSourceStore: MailSourceRepository, TimeAwareMailSourc
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
     private let searchService: NativeSourceSearchService?
+    private var hasPrimedSearchIndex: Bool
 
     public init(storagePaths: AppStoragePaths, fileManager: FileManager = .default, searchService: NativeSourceSearchService? = nil) {
         self.storeURL = storagePaths.applicationSupportDirectory
@@ -27,6 +28,7 @@ public actor FileBackedMailSourceStore: MailSourceRepository, TimeAwareMailSourc
         self.decoder = JSONDecoder()
         self.decoder.dateDecodingStrategy = .iso8601
         self.searchService = searchService
+        self.hasPrimedSearchIndex = false
     }
 
     public init(storeURL: URL, fileManager: FileManager = .default, searchService: NativeSourceSearchService? = nil) {
@@ -38,6 +40,7 @@ public actor FileBackedMailSourceStore: MailSourceRepository, TimeAwareMailSourc
         self.decoder = JSONDecoder()
         self.decoder.dateDecodingStrategy = .iso8601
         self.searchService = searchService
+        self.hasPrimedSearchIndex = false
     }
 
     public func listAccounts() async throws -> [MailAccount] {
@@ -81,9 +84,10 @@ public actor FileBackedMailSourceStore: MailSourceRepository, TimeAwareMailSourc
     }
 
     public func searchMessages(query: String, accountID: MailAccountID?, temporalFilter: NativeSearchTemporalFilter?, temporalSort: NativeSearchTemporalSort, limit: Int) async throws -> [MailMessageSummary] {
+        let limit = NativeSearchLimitPolicy.clampSearchLimit(limit)
         let snapshot = try load()
         if let searchService {
-            try await searchService.upsert(snapshot.messages.map(NativeSourceSearchAdapters.mailDocument(from:)))
+            try await primeSearchIndexIfNeeded(snapshot: snapshot)
             let results = try await searchService.search(NativeSearchQuery(text: query, sourceKinds: [.mail], sourceInstanceIDs: accountID.map { Set([$0.rawValue]) }, temporalFilter: temporalFilter, temporalSort: temporalSort, limit: limit, rankingProfile: .recentFirst))
             let byID = Dictionary(uniqueKeysWithValues: snapshot.messages.map { ($0.id.rawValue, $0.summary) })
             return results.compactMap { byID[$0.externalID] }
@@ -127,6 +131,12 @@ public actor FileBackedMailSourceStore: MailSourceRepository, TimeAwareMailSourc
             mailboxes: snapshot.mailboxes.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending },
             messages: snapshot.messages.map(\.summary).sorted { $0.date > $1.date }
         )
+    }
+
+    private func primeSearchIndexIfNeeded(snapshot: Snapshot) async throws {
+        guard let searchService, !hasPrimedSearchIndex else { return }
+        try await searchService.rebuildSource(kind: .mail, documents: snapshot.messages.map(NativeSourceSearchAdapters.mailDocument(from:)))
+        hasPrimedSearchIndex = true
     }
 
     private func load() throws -> Snapshot {
