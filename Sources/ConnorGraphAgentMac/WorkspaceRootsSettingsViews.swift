@@ -267,6 +267,8 @@ struct SettingsPreferencesSection: View {
                 Divider()
                 SettingsTextFieldRow(title: "语言偏好", subtitle: "未设置时自动读取系统语言；康纳同学会优先按此语言回复。", text: $viewModel.userPreferredLanguage)
                 Divider()
+                SettingsTextFieldRow(title: "出生日期", subtitle: "可选。建议使用 YYYY-MM-DD，用于年龄、人生阶段和长期个性化上下文。", text: $viewModel.userBirthDate)
+                Divider()
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("系统默认")
