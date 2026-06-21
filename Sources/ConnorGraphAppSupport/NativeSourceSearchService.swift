@@ -161,6 +161,8 @@ public actor NativeSourceSearchService {
             let scored = Self.score(document: document, tokens: tokens, phrase: normalizedQuery.normalizedText, now: now, rankingProfile: query.rankingProfile)
             let matchedTerms = Self.matchedTerms(for: document, tokens: tokens)
             let snippet = query.includeBodySnippets ? Self.bestSnippet(for: document, tokens: matchedTerms.isEmpty ? tokens : matchedTerms) : document.summary
+            let rankReason = "lexical=\(Self.rounded(scored.lexicalScore)); freshness=\(Self.rounded(scored.freshnessScore)); fields=\(scored.matchedFields.joined(separator: ","))"
+            let timeReason = Self.timeReason(for: document, temporalFilter: query.temporalFilter)
             return NativeSearchResult(
                 id: document.id,
                 sourceKind: document.sourceKind,
@@ -179,7 +181,11 @@ public actor NativeSourceSearchService {
                     matchedFields: scored.matchedFields,
                     indexedAt: document.temporal.indexedAt,
                     queryTokens: allQueryTokens,
-                    softStopWords: softStopWords
+                    softStopWords: softStopWords,
+                    matchedTerms: matchedTerms,
+                    matchedFieldScores: scored.matchedFieldScores,
+                    rankReason: rankReason,
+                    timeReason: timeReason
                 )
             )
         }
@@ -246,14 +252,15 @@ public actor NativeSourceSearchService {
         return .unknown
     }
 
-    private static func score(document: NativeSearchDocument, tokens: [String], phrase: String, now: Date, rankingProfile: NativeSearchRankingProfile) -> (total: Double, lexicalScore: Double, freshnessScore: Double, fieldScore: Double, matchedFields: [String]) {
+    private static func score(document: NativeSearchDocument, tokens: [String], phrase: String, now: Date, rankingProfile: NativeSearchRankingProfile) -> (total: Double, lexicalScore: Double, freshnessScore: Double, fieldScore: Double, matchedFields: [String], matchedFieldScores: [String: Double]) {
         guard !tokens.isEmpty else {
             let freshness = freshnessScore(for: document, now: now, rankingProfile: rankingProfile)
-            return (freshness, 0, freshness, 0, [])
+            return (freshness, 0, freshness, 0, [], [:])
         }
         var lexical = 0.0
         var field = 0.0
         var matched: Set<String> = []
+        var matchedFieldScores: [String: Double] = [:]
         var coveredTokens: Set<String> = []
         let uniqueTokens = Array(Set(tokens))
         let fields: [(String, String, Double, Double)] = [
@@ -274,6 +281,7 @@ public actor NativeSourceSearchService {
                 lexical += contribution
                 field += contribution
                 matched.insert(name)
+                matchedFieldScores[name, default: 0] += contribution
                 coveredTokens.insert(token)
             }
         }
@@ -290,13 +298,14 @@ public actor NativeSourceSearchService {
                     lexical += weight * 3.0
                     field += weight * 3.0
                     matched.insert(name)
+                    matchedFieldScores[name, default: 0] += weight * 3.0
                 }
             }
         }
 
         let freshness = freshnessScore(for: document, now: now, rankingProfile: rankingProfile)
         let total = lexical + freshness
-        return (total, lexical, freshness, field, Array(matched).sorted())
+        return (total, lexical, freshness, field, Array(matched).sorted(), matchedFieldScores)
     }
 
     private static func occurrenceCount(of needle: String, in haystack: String) -> Int {
@@ -367,6 +376,17 @@ public actor NativeSourceSearchService {
         let startIndex = text.index(text.startIndex, offsetBy: snippetStart)
         let endIndex = text.index(text.startIndex, offsetBy: snippetEnd)
         return String(text[startIndex..<endIndex])
+    }
+
+    private static func rounded(_ value: Double) -> String {
+        String(format: "%.2f", value)
+    }
+
+    private static func timeReason(for document: NativeSearchDocument, temporalFilter: NativeSearchTemporalFilter?) -> String {
+        guard let temporalFilter else {
+            return "primaryTime=\(document.temporal.primaryTimeKind.rawValue)"
+        }
+        return "\(temporalFilter.mode.rawValue) on \(document.temporal.primaryTimeKind.rawValue)"
     }
 
     private static func resultTimeLabel(for kind: NativeSearchTimeKind, sourceKind: NativeSearchSourceKind) -> String {
