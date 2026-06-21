@@ -40,7 +40,12 @@ let package = Package(
                 "ConnorGraphAgent",
                 .product(name: "WhisperKit", package: "argmax-oss-swift")
             ],
-            linkerSettings: [.linkedFramework("Security"), .linkedFramework("EventKit"), .linkedFramework("Contacts")]
+            linkerSettings: [
+                .linkedFramework("Security"),
+                .linkedFramework("EventKit"),
+                .linkedFramework("Contacts"),
+                .linkedLibrary("sqlite3")
+            ]
         ),
         .executableTarget(
             name: "ConnorGraphAgentMac",

@@ -239,6 +239,8 @@ Connor/
 ├── labels/
 ├── statuses/
 ├── artifacts/
+├── search/
+│   └── native-source-index.json
 ├── graph/
 │   ├── connor.sqlite
 │   ├── indexes/
@@ -376,6 +378,11 @@ API keys and provider credentials must not be stored in JSON settings files. The
 - RSS feed registry/cache/read-state boundaries
 - Contacts and Calendar system adapter seams
 - Credential and permission boundaries separate from LLM/provider access
+- Native Source Indexed Retrieval for Mail/RSS/Calendar through a unified time-aware search domain and service
+- Incremental index maintenance on source cache mutations such as mail message save/read-state updates and RSS item upsert/state/delete paths
+- Time-aware search filters using structured `startDate` / `endDate` / `timePreset` arguments rather than vague text-only freshness assumptions
+- Search results preserve source time information: Mail sent/received time, RSS published/fetched time, and Calendar event start/end/timezone/all-day fields
+- Agent-callable search remains concise: `mail_search_messages`, `rss_search_items`, and `calendar_read` with operation `search_events`; duplicate semantic search tools are intentionally avoided
 
 ### 5.8 Graph Memory
 
@@ -465,6 +472,10 @@ Before claiming a change is complete：
 - Keep credentials out of JSON config files.
 - Keep Graph Memory writes staged and reviewable.
 - Keep attachment source of truth in Session Capsule / Attachment Store.
+- Any native source mutation must update, invalidate, or explicitly fallback around the Native Source Search index.
+- Any Mail/RSS/Calendar search result must preserve temporal metadata; time-sensitive queries should use structured `timePreset` or `startDate`/`endDate` filters.
+- Calendar time filtering should use event interval overlap by default so cross-day and all-day events are not omitted.
+- Keep Agent tool names unique and avoid duplicate semantic search tools when an existing native source search tool covers the task.
 - Add accessibility labels for pure icon controls.
 - Prefer structured errors over force unwraps or force casts.
 - Keep README as architecture documentation, not a chronological changelog.

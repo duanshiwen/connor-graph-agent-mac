@@ -280,15 +280,32 @@ public enum AgentToolError: Error, Equatable, Sendable, CustomStringConvertible 
     }
 }
 
+public struct AgentToolDuplicateRegistration: Sendable, Equatable {
+    public var name: String
+    public var replacedDescription: String
+    public var replacementDescription: String
+
+    public init(name: String, replacedDescription: String, replacementDescription: String) {
+        self.name = name
+        self.replacedDescription = replacedDescription
+        self.replacementDescription = replacementDescription
+    }
+}
+
 public struct AgentToolRegistry: Sendable {
     private var tools: [String: any AgentTool]
+    public private(set) var duplicateRegistrations: [AgentToolDuplicateRegistration]
 
     public init(tools: [any AgentTool] = []) {
         self.tools = [:]
-        for tool in tools { self.tools[tool.name] = tool }
+        self.duplicateRegistrations = []
+        for tool in tools { register(tool) }
     }
 
     public mutating func register(_ tool: any AgentTool) {
+        if let existing = tools[tool.name] {
+            duplicateRegistrations.append(AgentToolDuplicateRegistration(name: tool.name, replacedDescription: existing.description, replacementDescription: tool.description))
+        }
         tools[tool.name] = tool
     }
 

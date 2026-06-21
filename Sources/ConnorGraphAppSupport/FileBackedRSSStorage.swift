@@ -58,24 +58,30 @@ public actor FileBackedRSSSourceRepository: RSSSourceRepository {
     }
 }
 
-public actor FileBackedRSSSourceCache: RSSSourceCache {
+public actor FileBackedRSSSourceCache: TimeAwareRSSSourceCache {
     private let storageURL: URL
     private let fileManager: FileManager
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
+    private let searchService: NativeSourceSearchService?
+    private var hasPrimedSearchIndex: Bool
 
-    public init(storageDirectory: URL, fileManager: FileManager = .default) {
+    public init(storageDirectory: URL, fileManager: FileManager = .default, searchService: NativeSourceSearchService? = nil) {
         self.storageURL = storageDirectory.appendingPathComponent("items.json")
         self.fileManager = fileManager
         self.encoder = rssStorageJSONEncoder()
         self.decoder = rssStorageJSONDecoder()
+        self.searchService = searchService
+        self.hasPrimedSearchIndex = false
     }
 
-    public init(storagePaths: AppStoragePaths, fileManager: FileManager = .default) {
+    public init(storagePaths: AppStoragePaths, fileManager: FileManager = .default, searchService: NativeSourceSearchService? = nil) {
         self.storageURL = storagePaths.sourcesDirectory.appendingPathComponent("rss", isDirectory: true).appendingPathComponent("items.json")
         self.fileManager = fileManager
         self.encoder = rssStorageJSONEncoder()
         self.decoder = rssStorageJSONDecoder()
+        self.searchService = searchService
+        self.hasPrimedSearchIndex = false
     }
 
     public func listItems(sourceID: RSSSourceID? = nil, includeHidden: Bool = false) async throws -> [RSSItemSummary] {
@@ -83,13 +89,34 @@ public actor FileBackedRSSSourceCache: RSSSourceCache {
     }
 
     public func searchItems(query: String, sourceID: RSSSourceID? = nil, includeHidden: Bool = false) async throws -> [RSSItemSummary] {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return try filtered(sourceID: sourceID, includeHidden: includeHidden) }
-        return try filtered(sourceID: sourceID, includeHidden: includeHidden).filter { item in
-            item.title.localizedCaseInsensitiveContains(trimmed)
-            || item.snippet.localizedCaseInsensitiveContains(trimmed)
-            || (item.author?.localizedCaseInsensitiveContains(trimmed) == true)
+        try await searchItems(query: query, sourceID: sourceID, includeHidden: includeHidden, temporalFilter: nil, temporalSort: .relevanceThenTimeDesc, limit: Int.max)
+    }
+
+    public func searchItems(query: String, sourceID: RSSSourceID? = nil, includeHidden: Bool = false, temporalFilter: NativeSearchTemporalFilter?, temporalSort: NativeSearchTemporalSort, limit: Int) async throws -> [RSSItemSummary] {
+        let limit = NativeSearchLimitPolicy.clampSearchLimit(limit)
+        let items = try loadItems()
+        if let searchService {
+            try await primeSearchIndexIfNeeded(items: items)
+            let results = try await searchService.search(NativeSearchQuery(text: query, sourceKinds: [.rss], sourceInstanceIDs: sourceID.map { Set([$0.rawValue]) }, temporalFilter: temporalFilter, temporalSort: temporalSort, limit: limit, includeHidden: includeHidden, rankingProfile: .recentFirst))
+            let byID = Dictionary(uniqueKeysWithValues: items.map { ($0.id.rawValue, $0.summary) })
+            return results.compactMap { byID[$0.externalID] }
         }
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let filteredItems = items.map(\.summary)
+            .filter { sourceID == nil || $0.sourceID == sourceID }
+            .filter { includeHidden || !$0.state.isHidden }
+            .filter { item in
+                guard let temporalFilter else { return true }
+                return temporalFilter.contains(NativeSearchTemporalMetadata(primaryTime: item.publishedAt, primaryTimeKind: .publishedAt, publishedAt: item.publishedAt, fetchedAt: item.fetchedAt), sourceKind: .rss)
+            }
+            .filter { item in
+                guard !trimmed.isEmpty else { return true }
+                return item.title.localizedCaseInsensitiveContains(trimmed)
+                    || item.snippet.localizedCaseInsensitiveContains(trimmed)
+                    || (item.author?.localizedCaseInsensitiveContains(trimmed) == true)
+            }
+        let sorted = filteredItems.sorted { lhs, rhs in temporalSort == .timeAscThenRelevance || temporalSort == .relevanceThenTimeAsc ? lhs.publishedAt < rhs.publishedAt : lhs.publishedAt > rhs.publishedAt }
+        return Array(sorted.prefix(limit))
     }
 
     public func item(id: RSSItemID) async throws -> RSSItemDetail? {
@@ -110,6 +137,8 @@ public actor FileBackedRSSSourceCache: RSSSourceCache {
             }
         }
         try saveItems(items)
+        let insertedItems = newItems.filter { candidate in items.contains { $0.id == candidate.id } }
+        try await searchService?.upsert(insertedItems.map(NativeSourceSearchAdapters.rssDocument(from:)))
         return (inserted, duplicates)
     }
 
@@ -122,13 +151,26 @@ public actor FileBackedRSSSourceCache: RSSSourceCache {
             items[index].summary.state = transform(items[index].summary.state)
             didChange = true
         }
-        if didChange { try saveItems(items) }
+        if didChange {
+            try saveItems(items)
+            let changed = items.filter { targetIDs.contains($0.id) }
+            try await searchService?.upsert(changed.map(NativeSourceSearchAdapters.rssDocument(from:)))
+        }
     }
 
     public func deleteItems(sourceID: RSSSourceID) async throws {
         let items = try loadItems()
         let filteredItems = items.filter { $0.summary.sourceID != sourceID }
-        if filteredItems.count != items.count { try saveItems(filteredItems) }
+        if filteredItems.count != items.count {
+            try saveItems(filteredItems)
+            try await searchService?.deleteBySource(kind: .rss, sourceInstanceID: sourceID.rawValue)
+        }
+    }
+
+    private func primeSearchIndexIfNeeded(items: [RSSItemDetail]) async throws {
+        guard let searchService, !hasPrimedSearchIndex else { return }
+        try await searchService.rebuildSource(kind: .rss, documents: items.map(NativeSourceSearchAdapters.rssDocument(from:)))
+        hasPrimedSearchIndex = true
     }
 
     private func filtered(sourceID: RSSSourceID?, includeHidden: Bool) throws -> [RSSItemSummary] {

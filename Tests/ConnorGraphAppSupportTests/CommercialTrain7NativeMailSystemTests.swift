@@ -8,7 +8,7 @@ import ConnorGraphAppSupport
 struct CommercialTrain7NativeMailSystemTests {
     @Test func permissionPolicyAllowsBuiltInReadsButRequiresSendApproval() async {
         let readOnly = AgentPolicyEngine(permissionMode: .readOnly)
-        let readMail = await readOnly.evaluate(capability: .readMail, runID: "run", sessionID: "session", toolName: "mail_search_messages")
+        let readMail = await readOnly.evaluate(capability: .readMail, runID: "run", sessionID: "session", toolName: "mail_list_accounts")
         let readBody = await readOnly.evaluate(capability: .readMailBody, runID: "run", sessionID: "session", toolName: "mail_get_message")
         let send = await AgentPolicyEngine(permissionMode: .allowAll).evaluate(capability: .sendMail, runID: "run", sessionID: "session", toolName: "mail_send_draft")
         let contactWrite = await AgentPolicyEngine(permissionMode: .allowAll).evaluate(capability: .mutateContacts, runID: "run", sessionID: "session", toolName: "contact_commit_draft")
@@ -77,7 +77,7 @@ struct CommercialTrain7NativeMailSystemTests {
         var registry = AgentToolRegistry()
         registry.registerNativeMailTools(runtime: runtime)
 
-        #expect(registry.definitions.map(\.name).contains("mail_search_messages"))
+        #expect(!registry.definitions.map(\.name).contains("mail_search_messages"))
         #expect(registry.definitions.map(\.name).contains("mail_send_draft"))
         #expect(registry.permission(named: "mail_send_draft") == .sendMail)
 
