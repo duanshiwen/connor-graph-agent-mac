@@ -4,13 +4,13 @@ import Testing
 
 @Suite("Agent Runtime Preference Settings Tests")
 struct AgentRuntimePreferenceSettingsTests {
-    @Test func inputSettingsDefaultSessionSpeechTranscriptionEnabled() {
+    @Test func inputSettingsDefaultSessionSpeechTranscriptionDisabled() {
         let input = AgentRuntimeInputSettings()
 
-        #expect(input.sessionSpeechTranscriptionEnabled)
+        #expect(!input.sessionSpeechTranscriptionEnabled)
     }
 
-    @Test func decodesLegacyInputSettingsWithSessionSpeechTranscriptionEnabledByDefault() throws {
+    @Test func decodesLegacyInputSettingsWithSessionSpeechTranscriptionDisabledByDefault() throws {
         let data = Data("""
         {
           "composerSendShortcut": "cmd-return",
@@ -24,7 +24,7 @@ struct AgentRuntimePreferenceSettingsTests {
         #expect(input.composerSendShortcut == "cmd-return")
         #expect(!input.spellCheckEnabled)
         #expect(!input.autoSaveDraftsEnabled)
-        #expect(input.sessionSpeechTranscriptionEnabled)
+        #expect(!input.sessionSpeechTranscriptionEnabled)
     }
 
     @Test func decodesExplicitlyDisabledSessionSpeechTranscription() throws {

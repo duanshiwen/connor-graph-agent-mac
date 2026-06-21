@@ -282,7 +282,7 @@ struct SpeechInputHoldToTalkButton: View {
             case .noSelectedSession:
                 return "请选择一个会话后再开始语音输入"
             case .disabledInSettings:
-                return "已在设置中关闭会话页语音转文字"
+                return "会话页语音转文字默认关闭，可前往设置页面开启"
             }
         }
         return "鼠标按住开始录音，松开即提交当前识别结果；也可以按住 Option 开始，松开 Option 结束。"

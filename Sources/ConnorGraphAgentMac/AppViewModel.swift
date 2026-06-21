@@ -466,7 +466,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var composerSendShortcut: String = "return"
     @Published var spellCheckEnabled: Bool = true
     @Published var autoSaveDraftsEnabled: Bool = true
-    @Published var sessionSpeechTranscriptionEnabled: Bool = true {
+    @Published var sessionSpeechTranscriptionEnabled: Bool = false {
         didSet {
             guard oldValue != sessionSpeechTranscriptionEnabled, !sessionSpeechTranscriptionEnabled else { return }
             stopSpeechTranscriptionForDisabledSetting()
