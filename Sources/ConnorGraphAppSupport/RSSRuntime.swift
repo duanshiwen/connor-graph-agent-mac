@@ -377,7 +377,7 @@ public struct RSSRuntimeSearchRequest: Sendable, Equatable {
         self.query = query
         self.sourceID = sourceID
         self.includeHidden = includeHidden
-        self.limit = limit
+        self.limit = NativeSearchLimitPolicy.clampSearchLimit(limit)
         self.startDate = startDate
         self.endDate = endDate
         self.timePreset = timePreset
@@ -499,14 +499,16 @@ public struct RSSRuntime: Sendable {
             } } ?? all
             items = filtered.sorted { lhs, rhs in request.timeSort == .timeAscThenRelevance || request.timeSort == .relevanceThenTimeAsc ? lhs.publishedAt < rhs.publishedAt : lhs.publishedAt > rhs.publishedAt }
         }
-        try await auditLog.record(RSSAuditRecord(runID: runID, sessionID: sessionID, sourceID: request.sourceID, kind: .itemSearched, riskClass: .read, redactedSummary: "Searched RSS items; returned \(min(items.count, request.limit)) summaries"))
-        return Array(items.prefix(request.limit))
+        let limit = NativeSearchLimitPolicy.clampSearchLimit(request.limit)
+        try await auditLog.record(RSSAuditRecord(runID: runID, sessionID: sessionID, sourceID: request.sourceID, kind: .itemSearched, riskClass: .read, redactedSummary: "Searched RSS items; returned \(min(items.count, limit)) summaries"))
+        return Array(items.prefix(limit))
     }
 
     public func listItems(sourceID: RSSSourceID? = nil, includeHidden: Bool = false, limit: Int = 50, runID: String? = nil, sessionID: String? = nil) async throws -> [RSSItemSummary] {
+        let requestedLimit = NativeSearchLimitPolicy.clampListLimit(limit)
         let items = try await cache.listItems(sourceID: sourceID, includeHidden: includeHidden)
-        try await auditLog.record(RSSAuditRecord(runID: runID, sessionID: sessionID, sourceID: sourceID, kind: .itemListed, riskClass: .read, redactedSummary: "Listed RSS items; returned \(min(items.count, limit)) summaries"))
-        return Array(items.prefix(limit))
+        try await auditLog.record(RSSAuditRecord(runID: runID, sessionID: sessionID, sourceID: sourceID, kind: .itemListed, riskClass: .read, redactedSummary: "Listed RSS items; returned \(min(items.count, requestedLimit)) summaries"))
+        return Array(items.prefix(requestedLimit))
     }
 
     public func getItem(id: RSSItemID, includeContent: Bool = false, runID: String? = nil, sessionID: String? = nil) async throws -> RSSItemDetail {

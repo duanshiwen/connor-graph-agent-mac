@@ -77,7 +77,12 @@ public enum NativeSourceSearchAdapters {
     }
 
     public static func stableHash(_ value: String) -> String {
-        String(value.hashValue)
+        var hash: UInt64 = 0xcbf29ce484222325
+        for byte in value.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x100000001b3
+        }
+        return String(format: "%016llx", hash)
     }
 }
 
