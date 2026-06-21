@@ -33,18 +33,20 @@ struct CalendarTimeAwareSearchTests {
         #expect(results.first?.end.date == ISO8601DateFormatter().date(from: "2026-06-21T02:00:00Z")!)
     }
 
-    @Test func calendarReadToolSchemaExposesTemporalFilters() {
+    @Test func calendarReadToolSchemaDoesNotExposeInternalSearchOperation() {
         let tool = CalendarReadTool(runtime: InMemoryAgentCalendarRuntime())
         guard case .object(let properties, _) = tool.inputSchema else {
             Issue.record("calendar_read schema should be an object")
             return
         }
-        #expect(properties.keys.contains("startDate"))
-        #expect(properties.keys.contains("endDate"))
-        #expect(properties.keys.contains("timePreset"))
-        #expect(properties.keys.contains("timeFilterMode"))
-        #expect(properties.keys.contains("timeSort"))
-        #expect(properties.keys.contains("limit"))
-        #expect(tool.description.localizedCaseInsensitiveContains("time-aware"))
+        #expect(!tool.description.contains("search_events"))
+        #expect(!tool.description.localizedCaseInsensitiveContains("time-aware"))
+        #expect(!properties.keys.contains("query"))
+        #expect(!properties.keys.contains("startDate"))
+        #expect(!properties.keys.contains("endDate"))
+        #expect(!properties.keys.contains("timePreset"))
+        #expect(!properties.keys.contains("timeFilterMode"))
+        #expect(!properties.keys.contains("timeSort"))
+        #expect(!properties.keys.contains("limit"))
     }
 }

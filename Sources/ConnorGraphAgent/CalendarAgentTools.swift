@@ -74,20 +74,13 @@ public actor InMemoryAgentCalendarRuntime: AgentCalendarRuntime {
 public struct CalendarReadTool: AgentTool {
     public let runtime: any AgentCalendarRuntime
     public var name: String { "calendar_read" }
-    public var description: String { "Read Connor-owned calendar data using operations: list_calendars, list_events, search_events, get_event, get_agenda, get_free_busy. search_events is time-aware and returns event start/end/timezone fields." }
+    public var description: String { "Read Connor-owned calendar data using operations: list_calendars, list_events, get_event, get_agenda, get_free_busy." }
     public var permission: AgentPermissionCapability { .readCalendar }
     public var inputSchema: AgentToolInputSchema {
         .object(properties: [
-            "operation": .string(description: "list_calendars | list_events | search_events | get_event | get_agenda | get_free_busy"),
+            "operation": .string(description: "list_calendars | list_events | get_event | get_agenda | get_free_busy"),
             "calendarID": .string(description: "Optional calendar ID"),
-            "eventID": .string(description: "Optional event ID"),
-            "query": .string(description: "Search query"),
-            "startDate": .string(description: "Optional ISO-8601 inclusive start timestamp for event interval filtering"),
-            "endDate": .string(description: "Optional ISO-8601 exclusive end timestamp for event interval filtering"),
-            "timePreset": .string(description: "Optional time preset such as today, tomorrow, next7Days, thisWeek"),
-            "timeFilterMode": .string(description: "Optional mode: intervalOverlapsRange, startsWithinRange, endsWithinRange, updatedWithinRange, indexedWithinRange. Defaults to intervalOverlapsRange for calendar."),
-            "timeSort": .string(description: "Optional sort: timeAscThenRelevance, timeDescThenRelevance, relevanceThenTimeDesc, relevanceThenTimeAsc"),
-            "limit": .integer(description: "Maximum events to return")
+            "eventID": .string(description: "Optional event ID")
         ], required: ["operation"])
     }
 
@@ -102,20 +95,6 @@ public struct CalendarReadTool: AgentTool {
         case "list_events", "get_agenda":
             let events = try await runtime.listEvents(calendarID: arguments.string("calendarID").map(CalendarID.init(rawValue:)), runID: context.runID, sessionID: context.sessionID)
             return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Listed \(events.count) calendar events", contentJSON: try MailJSON.encode(events))
-        case "search_events":
-            let formatter = ISO8601DateFormatter()
-            let events = try await runtime.searchEvents(
-                query: arguments.string("query") ?? "",
-                startDate: arguments.string("startDate").flatMap { formatter.date(from: $0) },
-                endDate: arguments.string("endDate").flatMap { formatter.date(from: $0) },
-                timePreset: arguments.string("timePreset"),
-                timeFilterMode: arguments.string("timeFilterMode"),
-                timeSort: arguments.string("timeSort"),
-                limit: NativeSearchLimitPolicy.clampSearchLimit(arguments.int("limit") ?? NativeSearchLimitPolicy.defaultSearchLimit),
-                runID: context.runID,
-                sessionID: context.sessionID
-            )
-            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(events.count) calendar events", contentJSON: try MailJSON.encode(events))
         case "get_event":
             guard let eventID = arguments.string("eventID") else { throw AgentToolError.invalidArguments("eventID is required") }
             let event = try await runtime.getEvent(id: CalendarEventID(rawValue: eventID), runID: context.runID, sessionID: context.sessionID)
