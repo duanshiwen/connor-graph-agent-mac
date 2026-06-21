@@ -3,6 +3,7 @@ import Foundation
 public enum AgentPermissionCapability: String, Codable, Sendable, Equatable, Hashable {
     case readGraph
     case readSession
+    case mutateSessionStatus
     case proposeGraphWrite
     case commitGraphWrite
     case invalidateGraphStatement
