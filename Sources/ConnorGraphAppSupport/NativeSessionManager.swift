@@ -467,7 +467,11 @@ public struct NativeSessionManager: Sendable {
         return snapshot
     }
 
-    private func persistSession() throws {
+    private mutating func persistSession() throws {
+        if let persisted = try sessionRepository.loadSession(id: session.id) {
+            session.governance = persisted.governance
+            session.readState = persisted.readState
+        }
         try sessionRepository.saveSession(session)
     }
 

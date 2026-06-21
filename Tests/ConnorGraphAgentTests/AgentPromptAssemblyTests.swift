@@ -13,6 +13,8 @@ import ConnorGraphAgent
     #expect(assembly.instruction.text.contains("Graph memory is background evidence"))
     #expect(assembly.instruction.text.contains("Follow the latest user request"))
     #expect(assembly.instruction.text.contains("get_current_time"))
+    #expect(assembly.instruction.text.contains("session_get_status"))
+    #expect(assembly.instruction.text.contains("session_set_status"))
     #expect(!assembly.instruction.text.contains("specialized AI assistant for knowledge graph operations"))
 }
 
