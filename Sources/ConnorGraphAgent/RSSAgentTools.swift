@@ -21,11 +21,20 @@ public struct RSSRuntimeSearchRequestBridge: Sendable, Equatable {
     public var sourceID: RSSSourceID?
     public var includeHidden: Bool
     public var limit: Int
-    public init(query: String, sourceID: RSSSourceID? = nil, includeHidden: Bool = false, limit: Int = 50) {
+    public var startDate: Date?
+    public var endDate: Date?
+    public var timePreset: String?
+    public var timeSort: String?
+
+    public init(query: String, sourceID: RSSSourceID? = nil, includeHidden: Bool = false, limit: Int = 50, startDate: Date? = nil, endDate: Date? = nil, timePreset: String? = nil, timeSort: String? = nil) {
         self.query = query
         self.sourceID = sourceID
         self.includeHidden = includeHidden
         self.limit = limit
+        self.startDate = startDate
+        self.endDate = endDate
+        self.timePreset = timePreset
+        self.timeSort = timeSort
     }
 }
 
@@ -95,12 +104,22 @@ public struct RSSListItemsTool: AgentTool {
 public struct RSSSearchItemsTool: AgentTool {
     public let runtime: any AgentRSSRuntime
     public var name: String { "rss_search_items" }
-    public var description: String { "Search RSS item summaries by title, snippet, author, or source." }
+    public var description: String { "Search Connor-owned RSS item summaries using indexed, time-aware retrieval by title, snippet, author, content, or source. Supports optional ISO-8601 startDate/endDate or timePreset; results include published/fetched time." }
     public var permission: AgentPermissionCapability { .readRSS }
-    public var inputSchema: AgentToolInputSchema { .object(properties: ["query": .string(description: "Search query"), "sourceID": .string(description: "Optional RSS source ID"), "includeHidden": .boolean(description: "Include hidden"), "limit": .integer(description: "Maximum summaries")], required: ["query"]) }
+    public var inputSchema: AgentToolInputSchema { .object(properties: ["query": .string(description: "Search query"), "sourceID": .string(description: "Optional RSS source ID"), "includeHidden": .boolean(description: "Include hidden"), "limit": .integer(description: "Maximum summaries"), "startDate": .string(description: "Optional ISO-8601 inclusive start timestamp for published/fetched time filtering"), "endDate": .string(description: "Optional ISO-8601 exclusive end timestamp for published/fetched time filtering"), "timePreset": .string(description: "Optional time preset such as today, last7Days, last30Days, thisWeek, lastMonth"), "timeSort": .string(description: "Optional sort: relevanceThenTimeDesc, relevanceThenTimeAsc, timeDescThenRelevance, timeAscThenRelevance")], required: ["query"]) }
     public init(runtime: any AgentRSSRuntime) { self.runtime = runtime }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        let request = RSSRuntimeSearchRequestBridge(query: arguments.string("query") ?? "", sourceID: arguments.string("sourceID").map(RSSSourceID.init(rawValue:)), includeHidden: arguments.bool("includeHidden") ?? false, limit: arguments.int("limit") ?? 50)
+        let formatter = ISO8601DateFormatter()
+        let request = RSSRuntimeSearchRequestBridge(
+            query: arguments.string("query") ?? "",
+            sourceID: arguments.string("sourceID").map(RSSSourceID.init(rawValue:)),
+            includeHidden: arguments.bool("includeHidden") ?? false,
+            limit: arguments.int("limit") ?? 50,
+            startDate: arguments.string("startDate").flatMap { formatter.date(from: $0) },
+            endDate: arguments.string("endDate").flatMap { formatter.date(from: $0) },
+            timePreset: arguments.string("timePreset"),
+            timeSort: arguments.string("timeSort")
+        )
         let items = try await runtime.searchItems(request, runID: context.runID, sessionID: context.sessionID)
         return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(items.count) RSS item summaries", contentJSON: try RSSJSON.encode(items))
     }
