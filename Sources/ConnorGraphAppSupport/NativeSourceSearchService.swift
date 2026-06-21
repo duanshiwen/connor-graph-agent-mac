@@ -175,7 +175,7 @@ public actor NativeSourceSearchService {
             let scored = Self.score(document: document, tokens: tokens, phrase: normalizedQuery.normalizedText, now: now, rankingProfile: query.rankingProfile, corpusStatistics: corpusStatistics)
             let matchedTerms = Self.matchedTerms(for: document, tokens: tokens)
             let snippet = query.includeBodySnippets ? Self.bestSnippet(for: document, tokens: matchedTerms.isEmpty ? tokens : matchedTerms) : document.summary
-            let rankReason = "bm25=\(Self.rounded(scored.lexicalScore)); idf=\(Self.idfReason(tokens: tokens, statistics: corpusStatistics)); freshness=\(Self.rounded(scored.freshnessScore)); fields=\(scored.matchedFields.joined(separator: ","))"
+            let rankReason = "lexical=\(Self.rounded(scored.lexicalScore)); bm25=\(Self.rounded(scored.lexicalScore)); idf=\(Self.idfReason(tokens: tokens, statistics: corpusStatistics)); freshness=\(Self.rounded(scored.freshnessScore)); fields=\(scored.matchedFields.joined(separator: ","))"
             let timeReason = Self.timeReason(for: document, temporalFilter: query.temporalFilter)
             return NativeSearchResult(
                 id: document.id,
