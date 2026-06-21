@@ -12,6 +12,7 @@ public struct UserBasicInfoPromptBuilder: Sendable, Equatable {
             ("称呼", preferences.displayName),
             ("时区", preferences.timezone),
             ("语言偏好", preferences.preferredLanguage),
+            ("出生日期", preferences.birthDate),
             ("城市", preferences.city),
             ("国家/地区", preferences.country),
             ("备注", preferences.notes)
