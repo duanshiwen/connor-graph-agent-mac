@@ -13,6 +13,11 @@ import ConnorGraphAgent
     #expect(assembly.instruction.text.contains("Graph memory is background evidence"))
     #expect(assembly.instruction.text.contains("Follow the latest user request"))
     #expect(assembly.instruction.text.contains("get_current_time"))
+    #expect(assembly.instruction.text.contains("Strict time rule"))
+    #expect(assembly.instruction.text.contains("call the system-provided `get_current_time` tool first"))
+    #expect(assembly.instruction.text.contains("Do not infer, calculate, or reuse current time from memory"))
+    #expect(assembly.instruction.text.contains("If `get_current_time` is unavailable or fails, do not guess"))
+    #expect(assembly.instruction.text.contains("ISO-8601 timestamps"))
     #expect(assembly.instruction.text.contains("session_get_status"))
     #expect(assembly.instruction.text.contains("session_set_status"))
     #expect(!assembly.instruction.text.contains("specialized AI assistant for knowledge graph operations"))
@@ -87,7 +92,7 @@ import ConnorGraphAgent
 }
 
 @Test func agentPromptBudgetTransformerTrimsOldRecentMessagesBeforeCurrentRequest() async throws {
-    let oldRecent = String(repeating: "old context ", count: 600)
+    let oldRecent = String(repeating: "old context ", count: 300)
     let request = AgentChatRequest(
         sessionID: "session-prompt",
         userMessage: "Do not trim me",
@@ -98,7 +103,7 @@ import ConnorGraphAgent
     )
     let assembly = AgentPromptAssembler().assemble(request: request, memoryContract: nil)
 
-    let transformed = try await AgentPromptBudgetTransformer(maxEstimatedTokens: 950).transform(
+    let transformed = try await AgentPromptBudgetTransformer(maxEstimatedTokens: 1700).transform(
         assembly,
         projectionMode: .structuredContextMessages
     )
