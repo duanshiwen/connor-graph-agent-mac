@@ -3502,7 +3502,7 @@ final class AppViewModel: NSObject, ObservableObject {
         notificationBody: String
     ) {
         let level = sessionNewMessageNotificationLevel
-        if isSessionCurrentlyVisible(sessionID) {
+        if shouldTreatSessionUpdateAsRead(sessionID: sessionID) {
             var state = sessionReadStates[sessionID] ?? .initial()
             state.markRead(messageID: messageID ?? latestMessageID(for: sessionID), at: Date())
             applySessionReadState(state, sessionID: sessionID, persist: true)
@@ -3521,8 +3521,8 @@ final class AppViewModel: NSObject, ObservableObject {
         return String(collapsed.prefix(140)) + "…"
     }
 
-    private func isSessionCurrentlyVisible(_ sessionID: String) -> Bool {
-        NSApp.isActive && selection == .agentChat && selectedChatSessionID == sessionID
+    func shouldTreatSessionUpdateAsRead(sessionID: String) -> Bool {
+        selection == .agentChat && selectedChatSessionID == sessionID
     }
 
     private func postSessionNotificationIfNeeded(
@@ -3532,7 +3532,7 @@ final class AppViewModel: NSObject, ObservableObject {
     ) {
         guard desktopNotificationsEnabled, canUseUserNotifications else { return }
         guard level.shouldRequestSystemNotification else { return }
-        guard !isSessionCurrentlyVisible(sessionID) else { return }
+        guard !shouldTreatSessionUpdateAsRead(sessionID: sessionID) else { return }
         let now = Date()
         if let last = lastSessionNotificationAt[sessionID], now.timeIntervalSince(last) < sameSessionNotificationCooldown {
             return
