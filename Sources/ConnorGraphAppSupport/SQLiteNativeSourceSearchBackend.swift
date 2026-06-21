@@ -90,6 +90,7 @@ public actor SQLiteNativeSourceSearchBackend: NativeSourceSearchBackend {
         let allQueryTokens = normalizedQuery.tokens.map(\.value)
         let softStopWords = normalizedQuery.softStopTokenValues
         let candidateDocuments = try loadCandidates(query: query, tokens: tokens)
+        let corpusStatistics = NativeSourceSearchService.corpusStatistics(for: candidateDocuments, tokens: tokens)
         let now = Date()
         let results = candidateDocuments.compactMap { document -> NativeSearchResult? in
             if let kinds = query.sourceKinds, !kinds.contains(document.sourceKind) { return nil }
@@ -98,11 +99,11 @@ public actor SQLiteNativeSourceSearchBackend: NativeSourceSearchBackend {
             if !query.includeArchived, document.state["isArchived"] == "true" { return nil }
             if let temporalFilter = query.temporalFilter, !temporalFilter.contains(document.temporal, sourceKind: document.sourceKind) { return nil }
             if !NativeSourceSearchService.matchesFieldConstraints(query.fieldConstraints, document: document) { return nil }
-            let scored = NativeSourceSearchService.score(document: document, tokens: tokens, phrase: normalizedQuery.normalizedText, now: now, rankingProfile: query.rankingProfile)
+            let scored = NativeSourceSearchService.score(document: document, tokens: tokens, phrase: normalizedQuery.normalizedText, now: now, rankingProfile: query.rankingProfile, corpusStatistics: corpusStatistics)
             if !tokens.isEmpty, scored.lexicalScore <= 0 { return nil }
             let matchedTerms = NativeSourceSearchService.matchedTerms(for: document, tokens: tokens)
             let snippet = query.includeBodySnippets ? NativeSourceSearchService.bestSnippet(for: document, tokens: matchedTerms.isEmpty ? tokens : matchedTerms) : document.summary
-            let rankReason = "backend=sqlite-fts5; lexical=\(NativeSourceSearchService.rounded(scored.lexicalScore)); freshness=\(NativeSourceSearchService.rounded(scored.freshnessScore)); fields=\(scored.matchedFields.joined(separator: ","))"
+            let rankReason = "backend=sqlite-fts5; bm25=\(NativeSourceSearchService.rounded(scored.lexicalScore)); idf=\(NativeSourceSearchService.idfReason(tokens: tokens, statistics: corpusStatistics)); freshness=\(NativeSourceSearchService.rounded(scored.freshnessScore)); fields=\(scored.matchedFields.joined(separator: ","))"
             let timeReason = NativeSourceSearchService.timeReason(for: document, temporalFilter: query.temporalFilter)
             return NativeSearchResult(
                 id: document.id,
