@@ -14,6 +14,7 @@ struct AgentComposerState {
     var sessionHasLLMOverride: Bool
     var permissionMode: AgentPermissionMode
     var selectedSessionStatus: AgentSessionStatus?
+    var isSpeechTranscriptionEnabled: Bool
     var isSpeechTranscriptionRunning: Bool
     var speechTranscriptionStatus: SessionSpeechTranscriptionStatus
     var speechProvisionalTranscript: String?
@@ -29,6 +30,7 @@ struct AgentComposerState {
         sessionHasLLMOverride: Bool,
         permissionMode: AgentPermissionMode,
         selectedSessionStatus: AgentSessionStatus?,
+        isSpeechTranscriptionEnabled: Bool,
         isSpeechTranscriptionRunning: Bool,
         speechTranscriptionStatus: SessionSpeechTranscriptionStatus,
         speechProvisionalTranscript: String?
@@ -43,6 +45,7 @@ struct AgentComposerState {
         self.sessionHasLLMOverride = sessionHasLLMOverride
         self.permissionMode = permissionMode
         self.selectedSessionStatus = selectedSessionStatus
+        self.isSpeechTranscriptionEnabled = isSpeechTranscriptionEnabled
         self.isSpeechTranscriptionRunning = isSpeechTranscriptionRunning
         self.speechTranscriptionStatus = speechTranscriptionStatus
         self.speechProvisionalTranscript = speechProvisionalTranscript

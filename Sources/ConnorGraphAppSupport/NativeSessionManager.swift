@@ -157,10 +157,6 @@ public struct NativeSessionManager: Sendable {
         onRunStarted: (@MainActor @Sendable (String) -> Void)? = nil,
         onEventPresentation: (@MainActor @Sendable (AgentEventPresentation) -> Void)? = nil
     ) async throws -> AgentLoopChatResponse {
-        // MARK: - Context Compression Check
-        // Check if cumulative tokens exceed the percentage-based threshold.\        // If so, compress older messages into the anchor state.
-        try await maybeCompressContext()
-
         let recentMessages = Array(session.messages.suffix(max(0, recentMessageLimit)))
         let activeSkillContextSnapshot: String? = {
             let displayName = activeSkillDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -356,6 +352,9 @@ public struct NativeSessionManager: Sendable {
                     message: runFailure == nil ? "Session run completed" : (runFailure?.message ?? "Session run failed")
                 )
         }
+            if runFailure == nil {
+                try await maybeCompressContext()
+            }
             return AgentLoopChatResponse(
                 session: session,
                 events: collectedEvents,
@@ -475,7 +474,13 @@ public struct NativeSessionManager: Sendable {
     // MARK: - Context Compression
 
     /// Check if context compression should be triggered.
-    /// If so, compress older messages into the anchor state.
+    /// If so, compress older messages into the anchor state for future turns.
+    ///
+    /// This intentionally runs after the primary AgentLoop turn completes. The
+    /// user-facing model call must always flow through AgentLoopController prompt
+    /// assembly first, so maintenance LLM calls such as compression cannot race
+    /// ahead of the main system prompt or produce a visible refusal before the
+    /// assembled prompt exists.
     private mutating func maybeCompressContext() async throws {
         guard let provider = compressionProvider else { return }
 

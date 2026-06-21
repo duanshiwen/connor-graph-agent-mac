@@ -191,6 +191,14 @@ struct AgentChatComposerView: View {
             guard newValue != localChatInput else { return }
             localChatInput = newValue
         }
+        .onChange(of: viewModel.sessionSpeechTranscriptionEnabled) { _, isEnabled in
+            if isEnabled {
+                installSpeechKeyboardMonitorIfNeeded()
+            } else {
+                speechKeyboardMonitor?.stop()
+                speechKeyboardMonitor = nil
+            }
+        }
         .task {
             viewModel.deferViewUpdate {
                 viewModel.reloadSkillRuntimeDefinitions()
@@ -223,6 +231,7 @@ struct AgentChatComposerView: View {
     }
 
     private func installSpeechKeyboardMonitorIfNeeded() {
+        guard viewModel.sessionSpeechTranscriptionEnabled else { return }
         guard speechKeyboardMonitor == nil else { return }
         let monitor = SpeechInputKeyboardMonitor(
             spaceHoldEnabled: false,
