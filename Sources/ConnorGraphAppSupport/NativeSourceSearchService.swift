@@ -154,11 +154,11 @@ public actor NativeSourceSearchService {
             if !query.includeArchived, document.state["isArchived"] == "true" { return false }
             if let temporalFilter = query.temporalFilter, !temporalFilter.contains(document.temporal, sourceKind: document.sourceKind) { return false }
             if tokens.isEmpty { return true }
-            return Self.score(document: document, tokens: tokens, now: now, rankingProfile: query.rankingProfile).lexicalScore > 0
+            return Self.score(document: document, tokens: tokens, phrase: normalizedQuery.normalizedText, now: now, rankingProfile: query.rankingProfile).lexicalScore > 0
         }
 
         let results = candidates.map { document -> NativeSearchResult in
-            let scored = Self.score(document: document, tokens: tokens, now: now, rankingProfile: query.rankingProfile)
+            let scored = Self.score(document: document, tokens: tokens, phrase: normalizedQuery.normalizedText, now: now, rankingProfile: query.rankingProfile)
             let snippet = query.includeBodySnippets ? Self.bestSnippet(for: document, tokens: tokens) : document.summary
             return NativeSearchResult(
                 id: document.id,
@@ -245,7 +245,7 @@ public actor NativeSourceSearchService {
         return .unknown
     }
 
-    private static func score(document: NativeSearchDocument, tokens: [String], now: Date, rankingProfile: NativeSearchRankingProfile) -> (total: Double, lexicalScore: Double, freshnessScore: Double, fieldScore: Double, matchedFields: [String]) {
+    private static func score(document: NativeSearchDocument, tokens: [String], phrase: String, now: Date, rankingProfile: NativeSearchRankingProfile) -> (total: Double, lexicalScore: Double, freshnessScore: Double, fieldScore: Double, matchedFields: [String]) {
         guard !tokens.isEmpty else {
             let freshness = freshnessScore(for: document, now: now, rankingProfile: rankingProfile)
             return (freshness, 0, freshness, 0, [])
@@ -253,26 +253,60 @@ public actor NativeSourceSearchService {
         var lexical = 0.0
         var field = 0.0
         var matched: Set<String> = []
-        let fields: [(String, String, Double)] = [
-            ("title", document.title, 8),
-            ("participants", document.participants.joined(separator: " "), 5),
-            ("summary", document.summary, 4),
-            ("location", document.location ?? "", 3),
-            ("body", document.body ?? "", 2)
+        var coveredTokens: Set<String> = []
+        let uniqueTokens = Array(Set(tokens))
+        let fields: [(String, String, Double, Double)] = [
+            ("title", document.title, 8, 0.15),
+            ("participants", document.participants.joined(separator: " "), 5, 0.10),
+            ("summary", document.summary, 4, 0.08),
+            ("location", document.location ?? "", 3, 0.10),
+            ("body", document.body ?? "", 2, 0.03)
         ]
-        for token in tokens {
-            for (name, value, weight) in fields {
+        for token in uniqueTokens {
+            for (name, value, weight, lengthPenalty) in fields {
                 let lower = value.lowercased()
-                if lower.contains(token) {
-                    lexical += weight
-                    field += weight
+                guard lower.contains(token) else { continue }
+                let occurrences = occurrenceCount(of: token, in: lower)
+                let cappedFrequency = min(Double(occurrences), 3.0)
+                let dampening = 1.0 / (1.0 + max(0, Double(lower.count - 80)) * lengthPenalty / 100.0)
+                let contribution = weight * (1.0 + log(cappedFrequency)) * dampening
+                lexical += contribution
+                field += contribution
+                matched.insert(name)
+                coveredTokens.insert(token)
+            }
+        }
+
+        if uniqueTokens.count > 1 {
+            let coverage = Double(coveredTokens.count) / Double(uniqueTokens.count)
+            lexical *= 0.75 + coverage
+        }
+
+        if phrase.split(separator: " ").count > 1 {
+            for (name, value, weight, _) in fields {
+                let lower = value.lowercased()
+                if lower.contains(phrase) {
+                    lexical += weight * 3.0
+                    field += weight * 3.0
                     matched.insert(name)
                 }
             }
         }
+
         let freshness = freshnessScore(for: document, now: now, rankingProfile: rankingProfile)
         let total = lexical + freshness
         return (total, lexical, freshness, field, Array(matched).sorted())
+    }
+
+    private static func occurrenceCount(of needle: String, in haystack: String) -> Int {
+        guard !needle.isEmpty else { return 0 }
+        var count = 0
+        var searchRange = haystack.startIndex..<haystack.endIndex
+        while let range = haystack.range(of: needle, options: [], range: searchRange) {
+            count += 1
+            searchRange = range.upperBound..<haystack.endIndex
+        }
+        return count
     }
 
     private static func freshnessScore(for document: NativeSearchDocument, now: Date, rankingProfile: NativeSearchRankingProfile) -> Double {
