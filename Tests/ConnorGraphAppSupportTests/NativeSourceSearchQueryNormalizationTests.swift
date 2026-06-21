@@ -49,4 +49,41 @@ struct NativeSourceSearchQueryNormalizationTests {
         #expect(results.first?.diagnostics?.queryTokens == ["the"])
         #expect(results.first?.diagnostics?.softStopWords == ["the"])
     }
+
+    @Test func cjkQueryGeneratesSearchableBigrams() {
+        let normalized = NativeSearchQueryNormalizer.normalize("搜索性能优化")
+
+        #expect(normalized.strongTokenValues.contains("搜索性能优化"))
+        #expect(normalized.strongTokenValues.contains("搜索"))
+        #expect(normalized.strongTokenValues.contains("性能"))
+        #expect(normalized.strongTokenValues.contains("优化"))
+    }
+
+    @Test func chineseMailSearchMatchesBodyWithoutSpaces() async throws {
+        let service = NativeSourceSearchService()
+        let document = NativeSearchDocument(
+            id: "mail-cn",
+            sourceKind: .mail,
+            externalID: "mail-cn",
+            title: "中文邮件",
+            summary: "搜索优化摘要",
+            body: "这是关于搜索性能优化的邮件，里面没有任何空格。",
+            temporal: NativeSearchTemporalMetadata(sentAt: Date(timeIntervalSince1970: 2_000)),
+            contentHash: "hash-cn"
+        )
+        try await service.upsert([document])
+
+        let results = try await service.search(NativeSearchQuery(text: "搜索性能", includeBodySnippets: true))
+
+        #expect(results.map(\.id) == ["mail-cn"])
+        #expect(results.first?.snippet.contains("搜索性能优化") == true)
+    }
+
+    @Test func mixedEnglishChineseQueryPreservesBothTokenFamilies() {
+        let normalized = NativeSearchQueryNormalizer.normalize("RSS 搜索优化")
+
+        #expect(normalized.strongTokenValues.contains("rss"))
+        #expect(normalized.strongTokenValues.contains("搜索"))
+        #expect(normalized.strongTokenValues.contains("优化"))
+    }
 }
