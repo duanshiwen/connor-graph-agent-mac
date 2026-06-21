@@ -77,6 +77,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     ) -> AgentLoopController<AnyAgentModelProvider> {
         let searchService = SQLiteGraphHybridSearchService(store: store)
         var registry = AgentToolRegistry()
+        registry.registerSessionStatusTools(repository: AppChatSessionRepository(store: store, storagePaths: storagePaths))
         registry.register(GraphSearchTool(searchService: searchService))
         registry.register(GraphIngestEpisodeTool(repository: store))
         registry.register(GraphProposeWriteTool(repository: store))

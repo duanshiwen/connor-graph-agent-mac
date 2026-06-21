@@ -131,6 +131,43 @@ private func makeNativeSessionStore() throws -> SQLiteGraphKernelStore {
     #expect(manager.session.messages.last?.content == "Connor-owned assistant response")
 }
 
+@Test func nativeSessionManagerPreservesSessionStatusChangedByAgentTool() async throws {
+    let store = try makeNativeSessionStore()
+    let repository = AppChatSessionRepository(store: store)
+    let session = AgentSession(id: "native-session-status-tool", title: "Status Tool", createdAt: Date(timeIntervalSince1970: 1_000))
+    try repository.saveSession(session)
+    var registry = AgentToolRegistry()
+    registry.registerSessionStatusTools(repository: repository)
+    let loop = AgentLoopController(
+        modelProvider: NativeSessionScriptedProvider(responses: [
+            AgentModelResponse(
+                text: nil,
+                toolCalls: [AgentToolCall(id: "set-status-call", name: "session_set_status", argumentsJSON: #"{"status":"done","reason":"The user asked to mark this session done."}"#)],
+                usage: AgentModelUsage(promptTokens: 10, completionTokens: 3),
+                finishReason: .toolCalls
+            ),
+            AgentModelResponse(
+                text: "已将当前会话标记为已完成。",
+                toolCalls: [],
+                usage: AgentModelUsage(promptTokens: 20, completionTokens: 5),
+                finishReason: .stop
+            )
+        ]),
+        toolRegistry: registry,
+        configuration: AgentLoopConfiguration(permissionMode: .allowAll)
+    )
+    var manager = NativeSessionManager(loopController: loop, sessionRepository: repository, session: session)
+
+    let response = try await manager.submit("把当前会话标记为完成")
+    let loaded = try #require(try repository.loadSession(id: session.id))
+
+    #expect(response.session.governance.status == .done)
+    #expect(manager.session.governance.status == .done)
+    #expect(loaded.governance.status == .done)
+    #expect(loaded.messages.last?.role == .assistant)
+    #expect(loaded.messages.last?.content == "已将当前会话标记为已完成。")
+}
+
 @Test func nativeSessionManagerPersistsUserMessageBeforeBackendCompletes() async throws {
     let store = try makeNativeSessionStore()
     let repository = AppChatSessionRepository(store: store)
