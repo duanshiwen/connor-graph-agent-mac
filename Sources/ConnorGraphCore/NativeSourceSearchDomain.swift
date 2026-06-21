@@ -306,17 +306,29 @@ public struct NativeSearchResultDiagnostics: Codable, Sendable, Equatable, Hasha
     public var indexedAt: Date?
     public var queryTokens: [String]
     public var softStopWords: [String]
+    public var matchedTerms: [String]
+    public var matchedFieldScores: [String: Double]
+    public var rankReason: String
+    public var timeReason: String
 
     public init(
         matchedFields: [String] = [],
         indexedAt: Date? = nil,
         queryTokens: [String] = [],
-        softStopWords: [String] = []
+        softStopWords: [String] = [],
+        matchedTerms: [String] = [],
+        matchedFieldScores: [String: Double] = [:],
+        rankReason: String = "",
+        timeReason: String = ""
     ) {
         self.matchedFields = matchedFields
         self.indexedAt = indexedAt
         self.queryTokens = queryTokens
         self.softStopWords = softStopWords
+        self.matchedTerms = matchedTerms
+        self.matchedFieldScores = matchedFieldScores
+        self.rankReason = rankReason
+        self.timeReason = timeReason
     }
 }
 
