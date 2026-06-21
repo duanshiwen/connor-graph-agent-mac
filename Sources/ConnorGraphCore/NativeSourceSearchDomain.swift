@@ -304,10 +304,19 @@ public struct NativeSearchQuery: Codable, Sendable, Equatable {
 public struct NativeSearchResultDiagnostics: Codable, Sendable, Equatable, Hashable {
     public var matchedFields: [String]
     public var indexedAt: Date?
+    public var queryTokens: [String]
+    public var softStopWords: [String]
 
-    public init(matchedFields: [String] = [], indexedAt: Date? = nil) {
+    public init(
+        matchedFields: [String] = [],
+        indexedAt: Date? = nil,
+        queryTokens: [String] = [],
+        softStopWords: [String] = []
+    ) {
         self.matchedFields = matchedFields
         self.indexedAt = indexedAt
+        self.queryTokens = queryTokens
+        self.softStopWords = softStopWords
     }
 }
 
