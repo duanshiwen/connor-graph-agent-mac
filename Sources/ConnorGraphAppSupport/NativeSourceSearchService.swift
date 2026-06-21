@@ -142,7 +142,10 @@ public actor NativeSourceSearchService {
     }
 
     public func search(_ query: NativeSearchQuery) async throws -> [NativeSearchResult] {
-        let tokens = Self.tokens(query.text)
+        let normalizedQuery = NativeSearchQueryNormalizer.normalize(query.text)
+        let tokens = normalizedQuery.scoringTokens.map(\.value)
+        let allQueryTokens = normalizedQuery.tokens.map(\.value)
+        let softStopWords = normalizedQuery.softStopTokenValues
         let now = Date()
         let candidates = documents.values.filter { document in
             if let kinds = query.sourceKinds, !kinds.contains(document.sourceKind) { return false }
@@ -171,7 +174,12 @@ public actor NativeSourceSearchService {
                 fieldScore: scored.fieldScore,
                 temporal: document.temporal,
                 resultTimeLabel: Self.resultTimeLabel(for: document.temporal.primaryTimeKind, sourceKind: document.sourceKind),
-                diagnostics: NativeSearchResultDiagnostics(matchedFields: scored.matchedFields, indexedAt: document.temporal.indexedAt)
+                diagnostics: NativeSearchResultDiagnostics(
+                    matchedFields: scored.matchedFields,
+                    indexedAt: document.temporal.indexedAt,
+                    queryTokens: allQueryTokens,
+                    softStopWords: softStopWords
+                )
             )
         }
         return Array(results.sorted { lhs, rhs in
@@ -235,13 +243,6 @@ public actor NativeSourceSearchService {
         if temporal.createdAt != nil { return .createdAt }
         if temporal.indexedAt != nil { return .indexedAt }
         return .unknown
-    }
-
-    private static func tokens(_ text: String) -> [String] {
-        text.lowercased()
-            .split { !$0.isLetter && !$0.isNumber }
-            .map(String.init)
-            .filter { !$0.isEmpty }
     }
 
     private static func score(document: NativeSearchDocument, tokens: [String], now: Date, rankingProfile: NativeSearchRankingProfile) -> (total: Double, lexicalScore: Double, freshnessScore: Double, fieldScore: Double, matchedFields: [String]) {
