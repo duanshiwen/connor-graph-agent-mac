@@ -185,7 +185,6 @@ public struct MailSendDraftTool: AgentTool {
 public extension AgentToolRegistry {
     mutating func registerNativeMailTools(runtime: any AgentMailRuntime) {
         register(MailListAccountsTool(runtime: runtime))
-        register(MailSearchMessagesTool(runtime: runtime))
         register(MailGetMessageTool(runtime: runtime))
         register(MailSetReadStateTool(runtime: runtime))
         register(MailCreateDraftTool(runtime: runtime))

@@ -228,7 +228,6 @@ public extension AgentToolRegistry {
         register(RSSAddSourceTool(runtime: runtime))
         register(RSSSyncSourceTool(runtime: runtime))
         register(RSSListItemsTool(runtime: runtime))
-        register(RSSSearchItemsTool(runtime: runtime))
         register(RSSGetItemTool(runtime: runtime))
         register(RSSSetReadStateTool(runtime: runtime))
         register(RSSSetStarStateTool(runtime: runtime))
