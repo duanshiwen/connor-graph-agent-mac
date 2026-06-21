@@ -29,6 +29,18 @@ public struct NativeSourceSearchHealthSnapshot: Codable, Sendable, Equatable {
     }
 }
 
+struct NativeSearchCorpusStatistics {
+    var documentCount: Int
+    var documentFrequencyByToken: [String: Int]
+    var averageFieldLength: [String: Double]
+
+    func idf(for token: String) -> Double {
+        guard documentCount > 0 else { return 0 }
+        let df = Double(documentFrequencyByToken[token] ?? 0)
+        return log((Double(documentCount) - df + 0.5) / (df + 0.5) + 1.0)
+    }
+}
+
 public actor NativeSourceSearchService {
     public static let currentSchemaVersion = 1
 
@@ -158,11 +170,12 @@ public actor NativeSourceSearchService {
             return Self.score(document: document, tokens: tokens, phrase: normalizedQuery.normalizedText, now: now, rankingProfile: query.rankingProfile).lexicalScore > 0
         }
 
+        let corpusStatistics = Self.corpusStatistics(for: Array(documents.values), tokens: tokens)
         let results = candidates.map { document -> NativeSearchResult in
-            let scored = Self.score(document: document, tokens: tokens, phrase: normalizedQuery.normalizedText, now: now, rankingProfile: query.rankingProfile)
+            let scored = Self.score(document: document, tokens: tokens, phrase: normalizedQuery.normalizedText, now: now, rankingProfile: query.rankingProfile, corpusStatistics: corpusStatistics)
             let matchedTerms = Self.matchedTerms(for: document, tokens: tokens)
             let snippet = query.includeBodySnippets ? Self.bestSnippet(for: document, tokens: matchedTerms.isEmpty ? tokens : matchedTerms) : document.summary
-            let rankReason = "lexical=\(Self.rounded(scored.lexicalScore)); freshness=\(Self.rounded(scored.freshnessScore)); fields=\(scored.matchedFields.joined(separator: ","))"
+            let rankReason = "bm25=\(Self.rounded(scored.lexicalScore)); idf=\(Self.idfReason(tokens: tokens, statistics: corpusStatistics)); freshness=\(Self.rounded(scored.freshnessScore)); fields=\(scored.matchedFields.joined(separator: ","))"
             let timeReason = Self.timeReason(for: document, temporalFilter: query.temporalFilter)
             return NativeSearchResult(
                 id: document.id,
@@ -254,7 +267,39 @@ public actor NativeSourceSearchService {
         return .unknown
     }
 
-    static func score(document: NativeSearchDocument, tokens: [String], phrase: String, now: Date, rankingProfile: NativeSearchRankingProfile) -> (total: Double, lexicalScore: Double, freshnessScore: Double, fieldScore: Double, matchedFields: [String], matchedFieldScores: [String: Double]) {
+    static func corpusStatistics(for documents: [NativeSearchDocument], tokens: [String]) -> NativeSearchCorpusStatistics {
+        let fields: [(String, (NativeSearchDocument) -> String)] = [
+            ("title", { $0.title }),
+            ("participants", { $0.participants.joined(separator: " ") }),
+            ("summary", { $0.summary }),
+            ("location", { $0.location ?? "" }),
+            ("body", { $0.body ?? "" })
+        ]
+        var df: [String: Int] = [:]
+        var fieldLengths: [String: Double] = [:]
+        let uniqueTokens = Set(tokens)
+        for document in documents {
+            var documentTerms: Set<String> = []
+            for (fieldName, fieldValue) in fields {
+                let normalized = NativeSearchQueryNormalizer.normalize(fieldValue(document)).scoringTokens.map(\.value)
+                fieldLengths[fieldName, default: 0] += Double(max(normalized.count, 1))
+                let tokenSet = Set(normalized)
+                for token in uniqueTokens where tokenSet.contains(token) || fieldValue(document).lowercased().contains(token) {
+                    documentTerms.insert(token)
+                }
+            }
+            for token in documentTerms { df[token, default: 0] += 1 }
+        }
+        let divisor = max(Double(documents.count), 1)
+        let averages = fieldLengths.mapValues { max(1, $0 / divisor) }
+        return NativeSearchCorpusStatistics(documentCount: documents.count, documentFrequencyByToken: df, averageFieldLength: averages)
+    }
+
+    static func idfReason(tokens: [String], statistics: NativeSearchCorpusStatistics) -> String {
+        tokens.map { "\($0):\(rounded(statistics.idf(for: $0)))" }.joined(separator: ",")
+    }
+
+    static func score(document: NativeSearchDocument, tokens: [String], phrase: String, now: Date, rankingProfile: NativeSearchRankingProfile, corpusStatistics: NativeSearchCorpusStatistics? = nil) -> (total: Double, lexicalScore: Double, freshnessScore: Double, fieldScore: Double, matchedFields: [String], matchedFieldScores: [String: Double]) {
         guard !tokens.isEmpty else {
             let freshness = freshnessScore(for: document, now: now, rankingProfile: rankingProfile)
             return (freshness, 0, freshness, 0, [], [:])
@@ -277,9 +322,21 @@ public actor NativeSourceSearchService {
                 let lower = value.lowercased()
                 guard lower.contains(token) else { continue }
                 let occurrences = occurrenceCount(of: token, in: lower)
-                let cappedFrequency = min(Double(occurrences), 3.0)
-                let dampening = 1.0 / (1.0 + max(0, Double(lower.count - 80)) * lengthPenalty / 100.0)
-                let contribution = weight * (1.0 + log(cappedFrequency)) * dampening
+                let contribution: Double
+                if let corpusStatistics {
+                    let fieldLength = Double(NativeSearchQueryNormalizer.normalize(value).scoringTokens.count)
+                    let averageLength = max(1, corpusStatistics.averageFieldLength[name] ?? fieldLength)
+                    let tf = Double(occurrences)
+                    let k1 = 1.2
+                    let b = 0.75
+                    let denominator = tf + k1 * (1 - b + b * fieldLength / averageLength)
+                    let bm25 = denominator > 0 ? corpusStatistics.idf(for: token) * (tf * (k1 + 1)) / denominator : 0
+                    contribution = weight * bm25
+                } else {
+                    let cappedFrequency = min(Double(occurrences), 3.0)
+                    let dampening = 1.0 / (1.0 + max(0, Double(lower.count - 80)) * lengthPenalty / 100.0)
+                    contribution = weight * (1.0 + log(cappedFrequency)) * dampening
+                }
                 lexical += contribution
                 field += contribution
                 matched.insert(name)
