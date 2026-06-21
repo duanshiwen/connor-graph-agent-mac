@@ -8,7 +8,7 @@ import ConnorGraphAppSupport
 struct NativeRSSSystemTests {
     @Test func permissionPolicyAllowsReadsAndProtectsMutations() async {
         let readOnly = AgentPolicyEngine(permissionMode: .readOnly)
-        let read = await readOnly.evaluate(capability: .readRSS, runID: "run", sessionID: "session", toolName: "rss_search_items")
+        let read = await readOnly.evaluate(capability: .readRSS, runID: "run", sessionID: "session", toolName: "rss_list_items")
         let content = await readOnly.evaluate(capability: .readRSSContent, runID: "run", sessionID: "session", toolName: "rss_get_item")
         let mutate = await readOnly.evaluate(capability: .mutateRSSState, runID: "run", sessionID: "session", toolName: "rss_set_read_state")
         let manage = await AgentPolicyEngine(permissionMode: .trustedWrite).evaluate(capability: .manageRSSSources, runID: "run", sessionID: "session", toolName: "rss_add_source")
@@ -39,14 +39,14 @@ struct NativeRSSSystemTests {
         registry.registerNativeRSSTools(runtime: runtime)
 
         let toolNames = registry.definitions.map(\.name)
-        #expect(toolNames.contains("rss_search_items"))
+        #expect(!toolNames.contains("rss_search_items"))
         #expect(!toolNames.contains("rss_import_opml"))
         #expect(!toolNames.contains("rss_export_opml"))
         #expect(registry.permission(named: "rss_get_item") == .readRSSContent)
         #expect(registry.permission(named: "rss_add_source") == .manageRSSSources)
 
         let context = AgentToolExecutionContext(runID: "run", sessionID: "session", groupID: "group", userPrompt: "rss", toolCallID: "call", policyEngine: AgentPolicyEngine(permissionMode: .readOnly))
-        let call = AgentToolCall(id: "call", runID: "run", sessionID: "session", name: "rss_search_items", argumentsJSON: "{\"query\":\"native\"}")
+        let call = AgentToolCall(id: "call", runID: "run", sessionID: "session", name: "rss_list_items", argumentsJSON: "{\"limit\":1}")
         let result = try await registry.execute(call, context: context)
         #expect(result.contentText.contains("RSS item"))
     }

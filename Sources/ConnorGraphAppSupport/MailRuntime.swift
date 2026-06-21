@@ -5,11 +5,28 @@ public struct MailRuntimeSearchRequest: Sendable, Equatable {
     public var query: String
     public var accountID: MailAccountID?
     public var limit: Int
+    public var startDate: Date?
+    public var endDate: Date?
+    public var timePreset: NativeSearchTimePreset?
+    public var timeSort: NativeSearchTemporalSort
 
-    public init(query: String, accountID: MailAccountID? = nil, limit: Int = 20) {
+    public init(query: String, accountID: MailAccountID? = nil, limit: Int = 20, startDate: Date? = nil, endDate: Date? = nil, timePreset: NativeSearchTimePreset? = nil, timeSort: NativeSearchTemporalSort = .relevanceThenTimeDesc) {
         self.query = query
         self.accountID = accountID
-        self.limit = limit
+        self.limit = NativeSearchLimitPolicy.clampSearchLimit(limit)
+        self.startDate = startDate
+        self.endDate = endDate
+        self.timePreset = timePreset
+        self.timeSort = timeSort
+    }
+
+    public var temporalFilter: NativeSearchTemporalFilter? {
+        if let timePreset {
+            var filter = NativeSearchTimePresetResolver.resolve(timePreset)
+            filter.timeFieldPreference = [.sentAt, .receivedAt]
+            return filter
+        }
+        return .sourceDefault(start: startDate, end: endDate, sourceKind: .mail)
     }
 }
 
@@ -74,9 +91,19 @@ public struct MailRuntime: Sendable {
     }
 
     public func searchMessages(_ request: MailRuntimeSearchRequest, runID: String? = nil, sessionID: String? = nil) async throws -> [MailMessageSummary] {
-        let messages = try await cache.searchMessages(query: request.query, accountID: request.accountID)
-        try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: request.accountID, kind: .messageSearched, riskClass: .read, redactedSummary: "Searched mail messages; returned \(min(messages.count, request.limit)) summaries"))
-        return Array(messages.prefix(request.limit))
+        let messages: [MailMessageSummary]
+        if let timeAwareCache = cache as? any TimeAwareMailSourceCache {
+            messages = try await timeAwareCache.searchMessages(query: request.query, accountID: request.accountID, temporalFilter: request.temporalFilter, temporalSort: request.timeSort, limit: request.limit)
+        } else {
+            let all = try await cache.searchMessages(query: request.query, accountID: request.accountID)
+            let filtered = request.temporalFilter.map { filter in all.filter { summary in
+                filter.contains(NativeSearchTemporalMetadata(primaryTime: summary.date, primaryTimeKind: .sentAt, sentAt: summary.date), sourceKind: .mail)
+            } } ?? all
+            messages = filtered.sorted { lhs, rhs in request.timeSort == .timeAscThenRelevance || request.timeSort == .relevanceThenTimeAsc ? lhs.date < rhs.date : lhs.date > rhs.date }
+        }
+        let limit = NativeSearchLimitPolicy.clampSearchLimit(request.limit)
+        try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: request.accountID, kind: .messageSearched, riskClass: .read, redactedSummary: "Searched mail messages; returned \(min(messages.count, limit)) summaries"))
+        return Array(messages.prefix(limit))
     }
 
     public func getMessage(id: MailMessageID, includeBody: Bool = false, runID: String? = nil, sessionID: String? = nil) async throws -> MailMessageDetail {
