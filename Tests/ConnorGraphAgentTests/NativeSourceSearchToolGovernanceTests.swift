@@ -50,14 +50,14 @@ struct NativeSourceSearchToolGovernanceTests {
         #expect(schema(calendarSchema, contains: "timeFilterMode"))
     }
 
-    @Test func systemPromptRequiresTimeAwareNativeSourceSearch() {
+    @Test func systemPromptDoesNotExposeInternalNativeSearchMethods() {
         let prompt = AgentInstructionSection.defaultConnorInstruction
-        #expect(prompt.contains("mail_search_messages"))
-        #expect(prompt.contains("rss_search_items"))
-        #expect(prompt.contains("calendar_read"))
-        #expect(prompt.localizedCaseInsensitiveContains("timePreset"))
-        #expect(prompt.localizedCaseInsensitiveContains("startDate"))
-        #expect(prompt.localizedCaseInsensitiveContains("time information"))
+        #expect(!prompt.contains("mail_search_messages"))
+        #expect(!prompt.contains("rss_search_items"))
+        #expect(!prompt.contains("search_events"))
+        #expect(!prompt.localizedCaseInsensitiveContains("timePreset"))
+        #expect(!prompt.localizedCaseInsensitiveContains("startDate"))
+        #expect(!prompt.localizedCaseInsensitiveContains("Native Source Search"))
     }
 
     private func schema(_ schema: AgentToolInputSchema?, contains key: String) -> Bool {
