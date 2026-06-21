@@ -485,6 +485,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var userDisplayName: String = ""
     @Published var userTimezone: String = ""
     @Published var userPreferredLanguage: String = ""
+    @Published var userBirthDate: String = ""
     @Published var userCity: String = ""
     @Published var userCountry: String = ""
     @Published var userPreferenceNotes: String = ""
@@ -582,6 +583,7 @@ final class AppViewModel: NSObject, ObservableObject {
             userDisplayName,
             userTimezone,
             userPreferredLanguage,
+            userBirthDate,
             userCity,
             userCountry,
             userPreferenceNotes
@@ -3368,6 +3370,7 @@ final class AppViewModel: NSObject, ObservableObject {
             userDisplayName = settings.preferences.displayName
             userTimezone = settings.preferences.timezone
             userPreferredLanguage = settings.preferences.preferredLanguage
+            userBirthDate = settings.preferences.birthDate
             userCity = settings.preferences.city
             userCountry = settings.preferences.country
             userPreferenceNotes = settings.preferences.notes
@@ -3405,6 +3408,7 @@ final class AppViewModel: NSObject, ObservableObject {
             settings.preferences.displayName = userDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.timezone = userTimezone.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.preferredLanguage = userPreferredLanguage.trimmingCharacters(in: .whitespacesAndNewlines)
+            settings.preferences.birthDate = userBirthDate.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.city = userCity.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.country = userCountry.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.notes = userPreferenceNotes.trimmingCharacters(in: .whitespacesAndNewlines)
