@@ -153,6 +153,7 @@ public actor NativeSourceSearchService {
             if !query.includeHidden, document.state["isHidden"] == "true" { return false }
             if !query.includeArchived, document.state["isArchived"] == "true" { return false }
             if let temporalFilter = query.temporalFilter, !temporalFilter.contains(document.temporal, sourceKind: document.sourceKind) { return false }
+            if !Self.matchesFieldConstraints(query.fieldConstraints, document: document) { return false }
             if tokens.isEmpty { return true }
             return Self.score(document: document, tokens: tokens, phrase: normalizedQuery.normalizedText, now: now, rankingProfile: query.rankingProfile).lexicalScore > 0
         }
@@ -184,6 +185,7 @@ public actor NativeSourceSearchService {
                     softStopWords: softStopWords,
                     matchedTerms: matchedTerms,
                     matchedFieldScores: scored.matchedFieldScores,
+                    fieldConstraints: query.fieldConstraints.mapKeys(\.rawValue),
                     rankReason: rankReason,
                     timeReason: timeReason
                 )
@@ -336,6 +338,31 @@ public actor NativeSourceSearchService {
         }
     }
 
+    static func matchesFieldConstraints(_ constraints: [NativeSearchFieldConstraintKey: [String]], document: NativeSearchDocument) -> Bool {
+        guard !constraints.isEmpty else { return true }
+        for (key, values) in constraints {
+            let haystack: String
+            switch key {
+            case .sender, .recipient:
+                haystack = document.participants.joined(separator: " ").lowercased()
+            case .feed, .source:
+                haystack = [
+                    document.sourceInstanceID ?? "",
+                    document.metadata["feedTitle"] ?? "",
+                    document.metadata["sourceTitle"] ?? "",
+                    document.metadata["feedURL"] ?? "",
+                    document.metadata["source"] ?? ""
+                ].joined(separator: " ").lowercased()
+            case .location:
+                haystack = (document.location ?? "").lowercased()
+            case .title:
+                haystack = document.title.lowercased()
+            }
+            guard values.allSatisfy({ haystack.contains($0.lowercased()) }) else { return false }
+        }
+        return true
+    }
+
     static func matchedTerms(for document: NativeSearchDocument, tokens: [String]) -> [String] {
         let searchable = [
             document.title,
@@ -428,5 +455,11 @@ public actor NativeSourceSearchService {
             if lt != rt { return lt < rt }
             return lhs.score > rhs.score
         }
+    }
+}
+
+extension Dictionary where Key == NativeSearchFieldConstraintKey, Value == [String] {
+    func mapKeys<T: Hashable>(_ transform: (Key) -> T) -> [T: Value] {
+        Dictionary<T, Value>(uniqueKeysWithValues: map { (transform($0.key), $0.value) })
     }
 }
