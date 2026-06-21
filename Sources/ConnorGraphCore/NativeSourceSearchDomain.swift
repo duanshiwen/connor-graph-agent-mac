@@ -275,6 +275,7 @@ public struct NativeSearchQuery: Codable, Sendable, Equatable {
     public var includeArchived: Bool
     public var includeBodySnippets: Bool
     public var rankingProfile: NativeSearchRankingProfile
+    public var fieldConstraints: [NativeSearchFieldConstraintKey: [String]]
 
     public init(
         text: String,
@@ -286,7 +287,8 @@ public struct NativeSearchQuery: Codable, Sendable, Equatable {
         includeHidden: Bool = false,
         includeArchived: Bool = false,
         includeBodySnippets: Bool = false,
-        rankingProfile: NativeSearchRankingProfile = .general
+        rankingProfile: NativeSearchRankingProfile = .general,
+        fieldConstraints: [NativeSearchFieldConstraintKey: [String]] = [:]
     ) {
         self.text = text
         self.sourceKinds = sourceKinds
@@ -298,6 +300,7 @@ public struct NativeSearchQuery: Codable, Sendable, Equatable {
         self.includeArchived = includeArchived
         self.includeBodySnippets = includeBodySnippets
         self.rankingProfile = rankingProfile
+        self.fieldConstraints = fieldConstraints
     }
 }
 
@@ -308,6 +311,7 @@ public struct NativeSearchResultDiagnostics: Codable, Sendable, Equatable, Hasha
     public var softStopWords: [String]
     public var matchedTerms: [String]
     public var matchedFieldScores: [String: Double]
+    public var fieldConstraints: [String: [String]]
     public var rankReason: String
     public var timeReason: String
 
@@ -318,6 +322,7 @@ public struct NativeSearchResultDiagnostics: Codable, Sendable, Equatable, Hasha
         softStopWords: [String] = [],
         matchedTerms: [String] = [],
         matchedFieldScores: [String: Double] = [:],
+        fieldConstraints: [String: [String]] = [:],
         rankReason: String = "",
         timeReason: String = ""
     ) {
@@ -327,6 +332,7 @@ public struct NativeSearchResultDiagnostics: Codable, Sendable, Equatable, Hasha
         self.softStopWords = softStopWords
         self.matchedTerms = matchedTerms
         self.matchedFieldScores = matchedFieldScores
+        self.fieldConstraints = fieldConstraints
         self.rankReason = rankReason
         self.timeReason = timeReason
     }
