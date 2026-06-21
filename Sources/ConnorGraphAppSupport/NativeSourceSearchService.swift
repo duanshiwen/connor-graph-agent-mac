@@ -159,7 +159,8 @@ public actor NativeSourceSearchService {
 
         let results = candidates.map { document -> NativeSearchResult in
             let scored = Self.score(document: document, tokens: tokens, phrase: normalizedQuery.normalizedText, now: now, rankingProfile: query.rankingProfile)
-            let snippet = query.includeBodySnippets ? Self.bestSnippet(for: document, tokens: tokens) : document.summary
+            let matchedTerms = Self.matchedTerms(for: document, tokens: tokens)
+            let snippet = query.includeBodySnippets ? Self.bestSnippet(for: document, tokens: matchedTerms.isEmpty ? tokens : matchedTerms) : document.summary
             return NativeSearchResult(
                 id: document.id,
                 sourceKind: document.sourceKind,
@@ -167,7 +168,7 @@ public actor NativeSourceSearchService {
                 sourceInstanceID: document.sourceInstanceID,
                 title: document.title,
                 snippet: snippet,
-                highlights: tokens,
+                highlights: matchedTerms,
                 score: scored.total,
                 lexicalScore: scored.lexicalScore,
                 freshnessScore: scored.freshnessScore,
@@ -326,17 +327,46 @@ public actor NativeSourceSearchService {
         }
     }
 
+    private static func matchedTerms(for document: NativeSearchDocument, tokens: [String]) -> [String] {
+        let searchable = [
+            document.title,
+            document.participants.joined(separator: " "),
+            document.summary,
+            document.location ?? "",
+            document.body ?? ""
+        ].joined(separator: " ").lowercased()
+        return tokens.filter { searchable.contains($0) }
+    }
+
     private static func bestSnippet(for document: NativeSearchDocument, tokens: [String]) -> String {
-        guard let body = document.body, !body.isEmpty else { return document.summary }
-        guard let token = tokens.first(where: { body.lowercased().contains($0) }) else { return document.summary }
-        let lower = body.lowercased()
-        guard let range = lower.range(of: token) else { return String(body.prefix(240)) }
-        let start = body.distance(from: body.startIndex, to: range.lowerBound)
-        let snippetStart = max(0, start - 80)
-        let snippetEnd = min(body.count, start + 160)
-        let startIndex = body.index(body.startIndex, offsetBy: snippetStart)
-        let endIndex = body.index(body.startIndex, offsetBy: snippetEnd)
-        return String(body[startIndex..<endIndex])
+        let fields: [(String, String, Int)] = [
+            ("title", document.title, 40),
+            ("summary", document.summary, 120),
+            ("participants", document.participants.joined(separator: " "), 80),
+            ("location", document.location ?? "", 80),
+            ("body", document.body ?? "", 240)
+        ]
+        guard let match = fields.compactMap({ field -> (String, String, Int, String)? in
+            let lower = field.1.lowercased()
+            guard let token = tokens.first(where: { lower.contains($0) }) else { return nil }
+            return (field.0, field.1, field.2, token)
+        }).first else {
+            return document.summary.isEmpty ? String((document.body ?? document.title).prefix(240)) : document.summary
+        }
+        return snippetWindow(text: match.1, token: match.3, maxLength: match.2)
+    }
+
+    private static func snippetWindow(text: String, token: String, maxLength: Int) -> String {
+        guard !text.isEmpty else { return "" }
+        let lower = text.lowercased()
+        guard let range = lower.range(of: token) else { return String(text.prefix(maxLength)) }
+        let start = text.distance(from: text.startIndex, to: range.lowerBound)
+        let contextBefore = min(80, maxLength / 3)
+        let snippetStart = max(0, start - contextBefore)
+        let snippetEnd = min(text.count, snippetStart + maxLength)
+        let startIndex = text.index(text.startIndex, offsetBy: snippetStart)
+        let endIndex = text.index(text.startIndex, offsetBy: snippetEnd)
+        return String(text[startIndex..<endIndex])
     }
 
     private static func resultTimeLabel(for kind: NativeSearchTimeKind, sourceKind: NativeSearchSourceKind) -> String {
