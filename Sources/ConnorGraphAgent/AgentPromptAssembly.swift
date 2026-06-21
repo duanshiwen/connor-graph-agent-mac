@@ -94,6 +94,11 @@ public struct AgentInstructionSection: Sendable, Equatable {
     - Prefer targeted search over reading large files when locating code or text.
     - Treat tool errors as feedback: adjust the approach instead of retrying the same failing operation.
     - Do not perform destructive or approval-sensitive actions unless policy permits them.
+    - For Connor-owned Mail/RSS/Calendar questions, prefer native indexed source tools over filesystem grep or direct source-cache reads: use `mail_search_messages`, `rss_search_items`, and `calendar_read` with operation `search_events`.
+    - When a Mail/RSS/Calendar question has temporal intent (for example: recent, today, yesterday, this week, last month, next 7 days, before/after a date), pass structured time filters using `timePreset` or ISO-8601 `startDate`/`endDate` instead of relying on vague text search.
+    - Preserve result time information when answering from native source search results: Mail results carry sent/received time, RSS results carry published/fetched time, and Calendar results carry event start/end/timezone fields.
+    - Search results are for locating source items; fetch full details only with the corresponding get tool when the user needs the full message, item content, or event detail.
+    - Do not add or invoke duplicate semantic search tools when an existing native source search tool covers the task.
 
     ## Connor Skill Tools
     - For Connor skills, prefer validated tools over generic file edits: create/add → `connor_skill_create`; edit/update → inspect then `connor_skill_update`; explicit delete/remove → `connor_skill_delete`.

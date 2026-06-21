@@ -87,7 +87,7 @@ import ConnorGraphAgent
 }
 
 @Test func agentPromptBudgetTransformerTrimsOldRecentMessagesBeforeCurrentRequest() async throws {
-    let oldRecent = String(repeating: "old context ", count: 600)
+    let oldRecent = String(repeating: "old context ", count: 300)
     let request = AgentChatRequest(
         sessionID: "session-prompt",
         userMessage: "Do not trim me",
@@ -98,7 +98,7 @@ import ConnorGraphAgent
     )
     let assembly = AgentPromptAssembler().assemble(request: request, memoryContract: nil)
 
-    let transformed = try await AgentPromptBudgetTransformer(maxEstimatedTokens: 950).transform(
+    let transformed = try await AgentPromptBudgetTransformer(maxEstimatedTokens: 1700).transform(
         assembly,
         projectionMode: .structuredContextMessages
     )
