@@ -45,14 +45,14 @@ public struct AppChatSessionRepository: Sendable {
         try store.session(id: id)
     }
 
-    public func makeNewSession(title: String = "New Chat", now: Date = Date()) throws -> AgentSession {
+    public func makeNewSession(title: String = "新对话", now: Date = Date()) throws -> AgentSession {
         let session = AgentSession(id: UUID().uuidString, title: title, messages: [], createdAt: now, updatedAt: now, governance: .default)
         try store.upsertSession(session)
         _ = try storagePaths?.ensureSessionArtifactDirectories(sessionID: session.id)
         return session
     }
 
-    public func createSession(title: String = "New Chat", now: Date = Date()) throws -> AgentSession {
+    public func createSession(title: String = "新对话", now: Date = Date()) throws -> AgentSession {
         try makeNewSession(title: title, now: now)
     }
 

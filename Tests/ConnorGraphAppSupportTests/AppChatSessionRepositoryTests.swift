@@ -184,7 +184,7 @@ private func temporaryAppChatStoragePaths(_ name: String = UUID().uuidString) ->
     let session = try repository.createSession(now: now)
     let loaded = try #require(try repository.loadSession(id: session.id))
 
-    #expect(loaded.title == "New Chat")
+    #expect(loaded.title == "新对话")
     #expect(loaded.createdAt == now)
     #expect(loaded.updatedAt == now)
 }

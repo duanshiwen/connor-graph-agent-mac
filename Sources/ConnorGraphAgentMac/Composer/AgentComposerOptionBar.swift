@@ -49,7 +49,8 @@ struct AgentComposerOptionBar: View {
 
     private var speechTranscriptionButton: some View {
         SpeechInputHoldToTalkButton(
-            isEnabled: selectedSession != nil,
+            isEnabled: selectedSession != nil && composerState.isSpeechTranscriptionEnabled,
+            disabledReason: composerState.isSpeechTranscriptionEnabled ? .noSelectedSession : .disabledInSettings,
             status: composerState.speechTranscriptionStatus,
             onBegin: { onAction(.beginSpeechTranscription(currentTextSelectionRange())) },
             onEnd: { onAction(.finishSpeechTranscription) }
@@ -190,7 +191,13 @@ struct AgentComposerOptionBar: View {
 // MARK: - Speech Input Controls
 
 struct SpeechInputHoldToTalkButton: View {
+    enum DisabledReason {
+        case noSelectedSession
+        case disabledInSettings
+    }
+
     var isEnabled: Bool
+    var disabledReason: DisabledReason = .noSelectedSession
     var status: SessionSpeechTranscriptionStatus
     var onBegin: () -> Void
     var onEnd: () -> Void
@@ -208,7 +215,7 @@ struct SpeechInputHoldToTalkButton: View {
         }
         .foregroundStyle(foreground)
         .padding(.horizontal, AgentChatLayout.spaceS)
-        .frame(minWidth: 176, minHeight: AgentChatLayout.iconButtonSize)
+        .frame(minWidth: 176, maxWidth: isEnabled ? 176 : 232, minHeight: AgentChatLayout.iconButtonSize)
         .background(background, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous)
@@ -227,7 +234,16 @@ struct SpeechInputHoldToTalkButton: View {
     }
 
     private var title: String {
-        switch status {
+        guard isEnabled else {
+            switch disabledReason {
+            case .noSelectedSession:
+                return "请选择会话后语音输入"
+            case .disabledInSettings:
+                return "语音输入已关闭，可在设置中开启"
+            }
+        }
+
+        return switch status {
         case .recording:
             "松开结束"
         case .failed:
@@ -270,7 +286,14 @@ struct SpeechInputHoldToTalkButton: View {
     }
 
     private var helpText: String {
-        guard isEnabled else { return "请选择一个会话后再开始语音输入" }
+        guard isEnabled else {
+            switch disabledReason {
+            case .noSelectedSession:
+                return "请选择一个会话后再开始语音输入"
+            case .disabledInSettings:
+                return "会话页语音转文字默认关闭，可前往设置页面开启"
+            }
+        }
         return "鼠标按住开始录音，松开即提交当前识别结果；也可以按住 Option 开始，松开 Option 结束。"
     }
 

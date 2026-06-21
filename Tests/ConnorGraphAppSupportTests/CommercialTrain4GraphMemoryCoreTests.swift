@@ -61,7 +61,7 @@ private actor Train4CapturingProvider: AgentModelProvider {
     let request = try #require(await provider.lastRequest)
     let systemMessage = try #require(request.messages.first(where: { $0.role == .system }))
     #expect(events.map(\.kind).contains(.textComplete))
-    #expect(systemMessage.content.contains("You are Connor, a general-purpose local AI assistant."))
+    #expect(systemMessage.content.contains("You are 康纳同学 (Connor), a personal AI assistant for everyday work and life."))
     #expect(systemMessage.content.contains("## 用户基本信息"))
     #expect(systemMessage.content.contains("- 称呼：段诗闻"))
     #expect(systemMessage.content.contains("- 备注：我喜欢橙色"))

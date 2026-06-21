@@ -280,6 +280,13 @@ struct SettingsAppSection: View {
             SettingsGroup(title: "电源") {
                 SettingsToggleRow(title: "保持屏幕常亮", subtitle: "会话运行时防止屏幕关闭。", isOn: $viewModel.keepScreenAwake)
             }
+            SettingsGroup(title: "输入") {
+                SettingsToggleRow(
+                    title: "会话页语音转文字",
+                    subtitle: "在会话输入栏启用按住说话；关闭后置灰快捷录音入口并停止监听 Option 语音输入。",
+                    isOn: $viewModel.sessionSpeechTranscriptionEnabled
+                )
+            }
             SettingsGroup(title: "页面显示主题") {
                 SettingsAppearanceModeRow(selection: $viewModel.appearanceMode)
             }

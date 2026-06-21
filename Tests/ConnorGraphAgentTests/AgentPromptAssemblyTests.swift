@@ -8,9 +8,11 @@ import ConnorGraphAgent
         memoryContract: nil
     )
 
-    #expect(assembly.instruction.text.contains("general-purpose local AI assistant"))
+    #expect(assembly.instruction.text.contains("康纳同学 (Connor)"))
+    #expect(assembly.instruction.text.contains("personal AI assistant"))
     #expect(assembly.instruction.text.contains("Graph memory is background evidence"))
     #expect(assembly.instruction.text.contains("Follow the latest user request"))
+    #expect(assembly.instruction.text.contains("get_current_time"))
     #expect(!assembly.instruction.text.contains("specialized AI assistant for knowledge graph operations"))
 }
 
@@ -94,14 +96,14 @@ import ConnorGraphAgent
     )
     let assembly = AgentPromptAssembler().assemble(request: request, memoryContract: nil)
 
-    let transformed = try await AgentPromptBudgetTransformer(maxEstimatedTokens: 700).transform(
+    let transformed = try await AgentPromptBudgetTransformer(maxEstimatedTokens: 950).transform(
         assembly,
         projectionMode: .structuredContextMessages
     )
 
     #expect(transformed.conversation.recentMessages.map(\.id) == ["message-2"])
     #expect(transformed.userRequest.text == "Do not trim me")
-    #expect(transformed.instruction.text.contains("general-purpose local AI assistant"))
+    #expect(transformed.instruction.text.contains("康纳同学 (Connor)"))
     #expect(transformed.diagnostics.appliedTransformers.contains("budget"))
     #expect(transformed.diagnostics.sections.first(where: { $0.id == "conversation" })?.wasTrimmed == true)
 }

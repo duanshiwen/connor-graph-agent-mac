@@ -62,6 +62,33 @@ private struct EchoTool: AgentTool {
     #expect(await audit.events.count == 1)
 }
 
+@Test func getCurrentTimeToolReturnsDeterministicTimeForRequestedTimeZone() async throws {
+    let fixedDate = Date(timeIntervalSince1970: 1_781_976_000)
+    let tool = GetCurrentTimeTool(now: fixedDate, defaultTimeZone: TimeZone(identifier: "UTC")!)
+    let context = AgentToolExecutionContext(
+        runID: "run-time",
+        sessionID: "session-time",
+        groupID: "default",
+        userPrompt: "what time is it",
+        toolCallID: "tool-call-time",
+        policyEngine: AgentPolicyEngine(permissionMode: .readOnly)
+    )
+
+    let result = try await tool.execute(
+        arguments: try AgentToolArguments(json: #"{"time_zone":"Asia/Shanghai"}"#),
+        context: context
+    )
+
+    let contentJSON = try #require(result.contentJSON)
+    let data = Data(contentJSON.utf8)
+    let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+    #expect(result.toolName == "get_current_time")
+    #expect(result.contentText.contains("Current time:"))
+    #expect(object["time_zone"] as? String == "Asia/Shanghai")
+    #expect(object["unix_timestamp"] as? Double == 1_781_976_000)
+}
+
 @Test func graphSearchToolReturnsStructuredHitsWithCitations() async throws {
     let search = TestHybridSearchService(hits: [
         GraphSearchHit(ownerType: .entity, ownerID: "node-memory", title: "Memory", text: "Graph memory", score: 1.0, retrievalMethod: "test")
