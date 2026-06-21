@@ -97,6 +97,7 @@ public actor SQLiteNativeSourceSearchBackend: NativeSourceSearchBackend {
             if !query.includeHidden, document.state["isHidden"] == "true" { return nil }
             if !query.includeArchived, document.state["isArchived"] == "true" { return nil }
             if let temporalFilter = query.temporalFilter, !temporalFilter.contains(document.temporal, sourceKind: document.sourceKind) { return nil }
+            if !NativeSourceSearchService.matchesFieldConstraints(query.fieldConstraints, document: document) { return nil }
             let scored = NativeSourceSearchService.score(document: document, tokens: tokens, phrase: normalizedQuery.normalizedText, now: now, rankingProfile: query.rankingProfile)
             if !tokens.isEmpty, scored.lexicalScore <= 0 { return nil }
             let matchedTerms = NativeSourceSearchService.matchedTerms(for: document, tokens: tokens)
@@ -124,6 +125,7 @@ public actor SQLiteNativeSourceSearchBackend: NativeSourceSearchBackend {
                     softStopWords: softStopWords,
                     matchedTerms: matchedTerms,
                     matchedFieldScores: scored.matchedFieldScores,
+                    fieldConstraints: query.fieldConstraints.mapKeys(\.rawValue),
                     rankReason: rankReason,
                     timeReason: timeReason
                 )
