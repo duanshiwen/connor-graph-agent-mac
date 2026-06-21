@@ -215,7 +215,7 @@ struct SpeechInputHoldToTalkButton: View {
         }
         .foregroundStyle(foreground)
         .padding(.horizontal, AgentChatLayout.spaceS)
-        .frame(minWidth: 176, minHeight: AgentChatLayout.iconButtonSize)
+        .frame(minWidth: 176, maxWidth: isEnabled ? 176 : 232, minHeight: AgentChatLayout.iconButtonSize)
         .background(background, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: AgentChatLayout.radiusM, style: .continuous)
@@ -234,7 +234,16 @@ struct SpeechInputHoldToTalkButton: View {
     }
 
     private var title: String {
-        switch status {
+        guard isEnabled else {
+            switch disabledReason {
+            case .noSelectedSession:
+                return "请选择会话后语音输入"
+            case .disabledInSettings:
+                return "语音输入已关闭，可在设置中开启"
+            }
+        }
+
+        return switch status {
         case .recording:
             "松开结束"
         case .failed:
