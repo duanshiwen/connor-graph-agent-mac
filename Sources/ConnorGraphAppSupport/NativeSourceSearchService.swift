@@ -348,21 +348,24 @@ public actor NativeSourceSearchService {
     }
 
     private static func bestSnippet(for document: NativeSearchDocument, tokens: [String]) -> String {
-        let fields: [(String, String, Int)] = [
-            ("title", document.title, 40),
-            ("summary", document.summary, 120),
-            ("participants", document.participants.joined(separator: " "), 80),
-            ("location", document.location ?? "", 80),
-            ("body", document.body ?? "", 240)
+        let fields: [(String, String, Int, Double)] = [
+            ("title", document.title, 40, 8),
+            ("summary", document.summary, 120, 4),
+            ("participants", document.participants.joined(separator: " "), 80, 5),
+            ("location", document.location ?? "", 80, 3),
+            ("body", document.body ?? "", 240, 2)
         ]
-        guard let match = fields.compactMap({ field -> (String, String, Int, String)? in
+        let matches = fields.compactMap { field -> (text: String, maxLength: Int, token: String, score: Double)? in
             let lower = field.1.lowercased()
-            guard let token = tokens.first(where: { lower.contains($0) }) else { return nil }
-            return (field.0, field.1, field.2, token)
-        }).first else {
+            let matchedTokens = tokens.filter { lower.contains($0) }
+            guard let token = matchedTokens.first else { return nil }
+            let score = Double(matchedTokens.count) * 10 + field.3
+            return (field.1, field.2, token, score)
+        }
+        guard let match = matches.sorted(by: { $0.score > $1.score }).first else {
             return document.summary.isEmpty ? String((document.body ?? document.title).prefix(240)) : document.summary
         }
-        return snippetWindow(text: match.1, token: match.3, maxLength: match.2)
+        return snippetWindow(text: match.text, token: match.token, maxLength: match.maxLength)
     }
 
     private static func snippetWindow(text: String, token: String, maxLength: Int) -> String {
