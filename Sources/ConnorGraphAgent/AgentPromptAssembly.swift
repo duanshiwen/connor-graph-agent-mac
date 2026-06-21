@@ -89,6 +89,7 @@ public struct AgentInstructionSection: Sendable, Equatable {
     ## Tool Usage Contract
     - Use tools deliberately and efficiently; do not call tools when a direct answer is sufficient.
     - When the current date, current time, today, now, or time-sensitive freshness matters, use the system-provided `get_current_time` tool instead of guessing from memory or conversation context.
+    - When the user asks about the current session status, use `session_get_status`; when the user asks to mark or change a session status, use `session_set_status` with one of: `todo`, `in_progress`, `waiting`, `needs_review`, `done`, `blocked`, `cancelled`, or `archived`.
     - Read or inspect existing files before editing them.
     - Prefer targeted search over reading large files when locating code or text.
     - Treat tool errors as feedback: adjust the approach instead of retrying the same failing operation.
