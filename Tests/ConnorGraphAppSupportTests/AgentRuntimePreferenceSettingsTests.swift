@@ -4,6 +4,44 @@ import Testing
 
 @Suite("Agent Runtime Preference Settings Tests")
 struct AgentRuntimePreferenceSettingsTests {
+    @Test func inputSettingsDefaultSessionSpeechTranscriptionDisabled() {
+        let input = AgentRuntimeInputSettings()
+
+        #expect(!input.sessionSpeechTranscriptionEnabled)
+    }
+
+    @Test func decodesLegacyInputSettingsWithSessionSpeechTranscriptionDisabledByDefault() throws {
+        let data = Data("""
+        {
+          "composerSendShortcut": "cmd-return",
+          "spellCheckEnabled": false,
+          "autoSaveDraftsEnabled": false
+        }
+        """.utf8)
+
+        let input = try JSONDecoder().decode(AgentRuntimeInputSettings.self, from: data)
+
+        #expect(input.composerSendShortcut == "cmd-return")
+        #expect(!input.spellCheckEnabled)
+        #expect(!input.autoSaveDraftsEnabled)
+        #expect(!input.sessionSpeechTranscriptionEnabled)
+    }
+
+    @Test func decodesExplicitlyDisabledSessionSpeechTranscription() throws {
+        let data = Data("""
+        {
+          "composerSendShortcut": "return",
+          "spellCheckEnabled": true,
+          "autoSaveDraftsEnabled": true,
+          "sessionSpeechTranscriptionEnabled": false
+        }
+        """.utf8)
+
+        let input = try JSONDecoder().decode(AgentRuntimeInputSettings.self, from: data)
+
+        #expect(!input.sessionSpeechTranscriptionEnabled)
+    }
+
     @Test func defaultsAreEmptyUntilSystemOrUserFillsThem() {
         let preferences = AgentRuntimePreferenceSettings()
 

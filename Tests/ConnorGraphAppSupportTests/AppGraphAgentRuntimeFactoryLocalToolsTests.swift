@@ -32,6 +32,26 @@ import ConnorGraphStore
     #expect(names.contains("Bash"))
 }
 
+@Test func agentLoopRuntimeFactoryRegistersCurrentTimeTool() throws {
+    let storeURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("connor-factory-current-time-tool-")
+        .appendingPathComponent(UUID().uuidString)
+        .appendingPathExtension("sqlite")
+    try FileManager.default.createDirectory(at: storeURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    let store = try SQLiteGraphKernelStore(path: storeURL.path)
+    try store.migrate()
+    let settings = AppLLMSettingsRepository(
+        settingsStore: LocalToolsSettingsStore(),
+        credentialStore: LocalToolsCredentialStore()
+    )
+    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: settings)
+
+    let controller = factory.makeAgentLoopController(permissionMode: .readOnly)
+    let names = controller.toolRegistry.definitions.map(\.name)
+
+    #expect(names.contains("get_current_time"))
+}
+
 @Test func agentLoopRuntimeFactoryRegistersScientificComputingTools() throws {
     let storeURL = FileManager.default.temporaryDirectory
         .appendingPathComponent("connor-factory-science-tools-")
