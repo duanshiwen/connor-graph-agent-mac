@@ -368,11 +368,29 @@ public struct RSSRuntimeSearchRequest: Sendable, Equatable {
     public var sourceID: RSSSourceID?
     public var includeHidden: Bool
     public var limit: Int
-    public init(query: String, sourceID: RSSSourceID? = nil, includeHidden: Bool = false, limit: Int = 50) {
+    public var startDate: Date?
+    public var endDate: Date?
+    public var timePreset: NativeSearchTimePreset?
+    public var timeSort: NativeSearchTemporalSort
+
+    public init(query: String, sourceID: RSSSourceID? = nil, includeHidden: Bool = false, limit: Int = 50, startDate: Date? = nil, endDate: Date? = nil, timePreset: NativeSearchTimePreset? = nil, timeSort: NativeSearchTemporalSort = .relevanceThenTimeDesc) {
         self.query = query
         self.sourceID = sourceID
         self.includeHidden = includeHidden
         self.limit = limit
+        self.startDate = startDate
+        self.endDate = endDate
+        self.timePreset = timePreset
+        self.timeSort = timeSort
+    }
+
+    public var temporalFilter: NativeSearchTemporalFilter? {
+        if let timePreset {
+            var filter = NativeSearchTimePresetResolver.resolve(timePreset)
+            filter.timeFieldPreference = [.publishedAt, .fetchedAt]
+            return filter
+        }
+        return .sourceDefault(start: startDate, end: endDate, sourceKind: .rss)
     }
 }
 
@@ -471,7 +489,16 @@ public struct RSSRuntime: Sendable {
     }
 
     public func searchItems(_ request: RSSRuntimeSearchRequest, runID: String? = nil, sessionID: String? = nil) async throws -> [RSSItemSummary] {
-        let items = try await cache.searchItems(query: request.query, sourceID: request.sourceID, includeHidden: request.includeHidden)
+        let items: [RSSItemSummary]
+        if let timeAwareCache = cache as? any TimeAwareRSSSourceCache {
+            items = try await timeAwareCache.searchItems(query: request.query, sourceID: request.sourceID, includeHidden: request.includeHidden, temporalFilter: request.temporalFilter, temporalSort: request.timeSort, limit: request.limit)
+        } else {
+            let all = try await cache.searchItems(query: request.query, sourceID: request.sourceID, includeHidden: request.includeHidden)
+            let filtered = request.temporalFilter.map { filter in all.filter { item in
+                filter.contains(NativeSearchTemporalMetadata(primaryTime: item.publishedAt, primaryTimeKind: .publishedAt, publishedAt: item.publishedAt, fetchedAt: item.fetchedAt), sourceKind: .rss)
+            } } ?? all
+            items = filtered.sorted { lhs, rhs in request.timeSort == .timeAscThenRelevance || request.timeSort == .relevanceThenTimeAsc ? lhs.publishedAt < rhs.publishedAt : lhs.publishedAt > rhs.publishedAt }
+        }
         try await auditLog.record(RSSAuditRecord(runID: runID, sessionID: sessionID, sourceID: request.sourceID, kind: .itemSearched, riskClass: .read, redactedSummary: "Searched RSS items; returned \(min(items.count, request.limit)) summaries"))
         return Array(items.prefix(request.limit))
     }
