@@ -227,7 +227,7 @@ public actor NativeSourceSearchService {
         }
     }
 
-    private static func defaultPrimaryTime(for sourceKind: NativeSearchSourceKind, temporal: NativeSearchTemporalMetadata) -> Date? {
+    static func defaultPrimaryTime(for sourceKind: NativeSearchSourceKind, temporal: NativeSearchTemporalMetadata) -> Date? {
         switch sourceKind {
         case .mail: temporal.sentAt ?? temporal.receivedAt ?? temporal.updatedAt ?? temporal.createdAt ?? temporal.indexedAt
         case .rss: temporal.publishedAt ?? temporal.fetchedAt ?? temporal.updatedAt ?? temporal.indexedAt
@@ -235,7 +235,7 @@ public actor NativeSourceSearchService {
         }
     }
 
-    private static func defaultPrimaryTimeKind(for sourceKind: NativeSearchSourceKind, temporal: NativeSearchTemporalMetadata) -> NativeSearchTimeKind {
+    static func defaultPrimaryTimeKind(for sourceKind: NativeSearchSourceKind, temporal: NativeSearchTemporalMetadata) -> NativeSearchTimeKind {
         switch sourceKind {
         case .mail:
             if temporal.sentAt != nil { return .sentAt }
@@ -252,7 +252,7 @@ public actor NativeSourceSearchService {
         return .unknown
     }
 
-    private static func score(document: NativeSearchDocument, tokens: [String], phrase: String, now: Date, rankingProfile: NativeSearchRankingProfile) -> (total: Double, lexicalScore: Double, freshnessScore: Double, fieldScore: Double, matchedFields: [String], matchedFieldScores: [String: Double]) {
+    static func score(document: NativeSearchDocument, tokens: [String], phrase: String, now: Date, rankingProfile: NativeSearchRankingProfile) -> (total: Double, lexicalScore: Double, freshnessScore: Double, fieldScore: Double, matchedFields: [String], matchedFieldScores: [String: Double]) {
         guard !tokens.isEmpty else {
             let freshness = freshnessScore(for: document, now: now, rankingProfile: rankingProfile)
             return (freshness, 0, freshness, 0, [], [:])
@@ -308,7 +308,7 @@ public actor NativeSourceSearchService {
         return (total, lexical, freshness, field, Array(matched).sorted(), matchedFieldScores)
     }
 
-    private static func occurrenceCount(of needle: String, in haystack: String) -> Int {
+    static func occurrenceCount(of needle: String, in haystack: String) -> Int {
         guard !needle.isEmpty else { return 0 }
         var count = 0
         var searchRange = haystack.startIndex..<haystack.endIndex
@@ -319,7 +319,7 @@ public actor NativeSourceSearchService {
         return count
     }
 
-    private static func freshnessScore(for document: NativeSearchDocument, now: Date, rankingProfile: NativeSearchRankingProfile) -> Double {
+    static func freshnessScore(for document: NativeSearchDocument, now: Date, rankingProfile: NativeSearchRankingProfile) -> Double {
         guard let time = document.temporal.primaryTime else { return 0 }
         let age = abs(now.timeIntervalSince(time))
         let day = 86_400.0
@@ -336,7 +336,7 @@ public actor NativeSourceSearchService {
         }
     }
 
-    private static func matchedTerms(for document: NativeSearchDocument, tokens: [String]) -> [String] {
+    static func matchedTerms(for document: NativeSearchDocument, tokens: [String]) -> [String] {
         let searchable = [
             document.title,
             document.participants.joined(separator: " "),
@@ -347,7 +347,7 @@ public actor NativeSourceSearchService {
         return tokens.filter { searchable.contains($0) }
     }
 
-    private static func bestSnippet(for document: NativeSearchDocument, tokens: [String]) -> String {
+    static func bestSnippet(for document: NativeSearchDocument, tokens: [String]) -> String {
         let fields: [(String, String, Int, Double)] = [
             ("title", document.title, 40, 8),
             ("summary", document.summary, 120, 4),
@@ -381,18 +381,18 @@ public actor NativeSourceSearchService {
         return String(text[startIndex..<endIndex])
     }
 
-    private static func rounded(_ value: Double) -> String {
+    static func rounded(_ value: Double) -> String {
         String(format: "%.2f", value)
     }
 
-    private static func timeReason(for document: NativeSearchDocument, temporalFilter: NativeSearchTemporalFilter?) -> String {
+    static func timeReason(for document: NativeSearchDocument, temporalFilter: NativeSearchTemporalFilter?) -> String {
         guard let temporalFilter else {
             return "primaryTime=\(document.temporal.primaryTimeKind.rawValue)"
         }
         return "\(temporalFilter.mode.rawValue) on \(document.temporal.primaryTimeKind.rawValue)"
     }
 
-    private static func resultTimeLabel(for kind: NativeSearchTimeKind, sourceKind: NativeSearchSourceKind) -> String {
+    static func resultTimeLabel(for kind: NativeSearchTimeKind, sourceKind: NativeSearchSourceKind) -> String {
         switch kind {
         case .sentAt: "Sent"
         case .receivedAt: "Received"
@@ -411,7 +411,7 @@ public actor NativeSourceSearchService {
         }
     }
 
-    private static func compare(_ lhs: NativeSearchResult, _ rhs: NativeSearchResult, sort: NativeSearchTemporalSort) -> Bool {
+    static func compare(_ lhs: NativeSearchResult, _ rhs: NativeSearchResult, sort: NativeSearchTemporalSort) -> Bool {
         let lt = lhs.temporal.primaryTime ?? .distantPast
         let rt = rhs.temporal.primaryTime ?? .distantPast
         switch sort {
