@@ -334,6 +334,8 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
                     let result = try MemoryOSBackgroundJobWorker(executor: executor).run(draft)
                     let summary = try projectAndRecordLLMArtifact(rawContent: result.rawArtifactJSON, modelID: result.metadata["model_id"] ?? workerID, queueItem: leased, processingRunID: result.jobID, artifactType: result.artifactType, schemaName: result.schemaName, now: now)
                     if summary.accepted {
+                        let statementIDs = try l2StatementIDs(sourceArtifactID: summary.artifactID)
+                        try markL2ProcessingStatesPending(statementIDs: statementIDs, sourceArtifactID: summary.artifactID, now: now)
                         try deleteL1CaptureEvents(ids: draft.captureEventIDs)
                         try saveBackgroundJobAudit(eventType: "memory_os.background_job.projected", subjectID: leased.id, payload: ["artifact_id": summary.artifactID], now: now)
                     } else {
@@ -395,6 +397,27 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         guard !ids.isEmpty else { return }
         let quoted = ids.map { store.quote($0) }.joined(separator: ",")
         try store.execute("DELETE FROM memory_l1_capture_events WHERE id IN (\(quoted));")
+    }
+
+    private func l2StatementIDs(sourceArtifactID: String) throws -> [String] {
+        try store.queryStrings(sql: """
+        SELECT id
+        FROM memory_l2_statements
+        WHERE source_artifact_id = \(store.quote(sourceArtifactID))
+        ORDER BY committed_at ASC, id ASC
+        """)
+    }
+
+    private func markL2ProcessingStatesPending(statementIDs: [String], sourceArtifactID: String, now: Date) throws {
+        for statementID in statementIDs {
+            try store.upsert(l2ProcessingState: MemoryOSL2StatementProcessingState(
+                statementID: statementID,
+                processingKind: .knowledgeSynthesis,
+                status: .pending,
+                sourceArtifactID: sourceArtifactID,
+                metadata: ["created_by": "l1_to_l2_projection", "source_artifact_id": sourceArtifactID]
+            ))
+        }
     }
 
     private func markL2ProcessingStatesSucceeded(statementIDs: [String], artifactID: String, now: Date) throws {
