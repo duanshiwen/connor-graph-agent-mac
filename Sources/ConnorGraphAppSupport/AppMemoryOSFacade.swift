@@ -302,6 +302,9 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
                     let summary = try projectAndRecordLLMArtifact(rawContent: result.rawArtifactJSON, modelID: result.metadata["model_id"] ?? workerID, queueItem: leased, processingRunID: result.jobID, artifactType: result.artifactType, schemaName: result.schemaName, now: now)
                     if summary.accepted {
                         try deleteL1CaptureEvents(ids: draft.captureEventIDs)
+                        try saveBackgroundJobAudit(eventType: "memory_os.background_job.projected", subjectID: leased.id, payload: ["artifact_id": summary.artifactID], now: now)
+                    } else {
+                        try saveBackgroundJobAudit(eventType: "memory_os.background_job.artifact_rejected", subjectID: leased.id, payload: ["artifact_id": summary.artifactID, "issue_count": String(summary.issues.count)], now: now)
                     }
                     summaries.append(summary)
                 case MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue:
@@ -310,6 +313,10 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
                     let summary = try projectAndRecordLLMArtifact(rawContent: result.rawArtifactJSON, modelID: result.metadata["model_id"] ?? workerID, queueItem: leased, processingRunID: result.jobID, artifactType: result.artifactType, schemaName: result.schemaName, now: now)
                     if summary.accepted {
                         try markL2ProcessingStatesSucceeded(statementIDs: draft.statementIDs, artifactID: summary.artifactID, now: now)
+                        try saveBackgroundJobAudit(eventType: "memory_os.background_job.projected", subjectID: leased.id, payload: ["artifact_id": summary.artifactID], now: now)
+                    } else {
+                        try markL2ProcessingStatesFailed(statementIDs: draft.statementIDs, errorCode: "projection_validation_failed", errorMessage: summary.issues.map(\.message).joined(separator: "; "), now: now)
+                        try saveBackgroundJobAudit(eventType: "memory_os.background_job.artifact_rejected", subjectID: leased.id, payload: ["artifact_id": summary.artifactID, "issue_count": String(summary.issues.count)], now: now)
                     }
                     summaries.append(summary)
                 default:
@@ -318,6 +325,10 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
                 }
             } catch {
                 let failed = try recordQueueFailure(leased, errorCode: "background_ai_job_failed", errorMessage: String(describing: error), now: now)
+                try saveBackgroundJobAudit(eventType: "memory_os.background_job.model_failed", subjectID: leased.id, payload: ["error_code": failed.errorCode ?? "background_ai_job_failed", "status": failed.status.rawValue], now: now)
+                if failed.status == .deadLetter {
+                    try saveBackgroundJobAudit(eventType: "memory_os.background_job.dead_lettered", subjectID: leased.id, payload: ["error_code": failed.errorCode ?? "background_ai_job_failed"], now: now)
+                }
                 summaries.append(MemoryOSProjectionRunSummary(artifactID: leased.id, accepted: false, issues: [MemoryOSValidationIssue(code: failed.errorCode ?? "background_ai_job_failed", message: failed.errorMessage ?? String(describing: error))]))
             }
         }
@@ -364,6 +375,22 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
                 metadata: ["processed_by_artifact_id": artifactID]
             ))
         }
+    }
+
+    private func markL2ProcessingStatesFailed(statementIDs: [String], errorCode: String, errorMessage: String, now: Date) throws {
+        for statementID in statementIDs {
+            try store.upsert(l2ProcessingState: MemoryOSL2StatementProcessingState(
+                statementID: statementID,
+                processingKind: .knowledgeSynthesis,
+                status: .failed,
+                lastAttemptAt: now,
+                metadata: ["error_code": errorCode, "error_message": errorMessage]
+            ))
+        }
+    }
+
+    private func saveBackgroundJobAudit(eventType: String, subjectID: String, payload: [String: String], now: Date) throws {
+        try store.save(audit: MemoryOSAuditEvent(eventType: eventType, actor: "memory-os", subjectID: subjectID, payload: payload, createdAt: now))
     }
 
     private func pendingCaptureEvents(limit: Int) throws -> [MemoryOSCaptureEvent] {
