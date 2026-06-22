@@ -72,4 +72,21 @@ struct MemoryOSBackgroundPromptContractTests {
         #expect(prompt.contains("Do not create L3 knowledge records"))
         #expect(prompt.contains("Do not produce theories, frameworks, broad conclusions, or unsupported guesses"))
     }
+
+    @Test func l2KnowledgePromptDefinesConservativeFourFilterReview() {
+        let statement = MemoryOSStatement(id: "stmt-1", subjectID: "node-1", predicate: "prefers", text: "User prefers conservative L3 promotion.", confidence: 0.97, evidenceSpanIDs: ["span-1"])
+
+        let prompt = MemoryOSL2ToKnowledgePromptBuilder().prompt(for: [statement])
+
+        #expect(prompt.contains("Most L2 facts should not become L3 knowledge"))
+        #expect(prompt.contains("High confidence alone is insufficient"))
+        #expect(prompt.contains("All four filters must pass"))
+        #expect(prompt.contains("signal_quality"))
+        #expect(prompt.contains("reuse_scope"))
+        #expect(prompt.contains("novelty"))
+        #expect(prompt.contains("structurability"))
+        #expect(prompt.contains("If any dimension fails, do not create L3"))
+        #expect(prompt.contains("If existing L3 already covers the idea, output no new L3 candidate"))
+        #expect(prompt.contains("If existing L4 already contains the concept, reuse it rather than creating a duplicate"))
+    }
 }
