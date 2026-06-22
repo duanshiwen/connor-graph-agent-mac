@@ -47,6 +47,39 @@ private func encodedProjectionFixture(confidence: Double = 0.94, includeEvidence
     #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_audit_events WHERE event_type = 'memory_os.queue.succeeded';").first?.first == "1")
 }
 
+@Test func appMemoryOSFacadeProjectsKnowledgeArtifactWithExplicitSchema() throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSProjectionDatabaseURL().path)
+    try store.migrate()
+    let facade = AppMemoryOSFacade(store: store)
+    let output = MemoryOSKnowledgeExtractionOutput(
+        knowledgeCandidates: [
+            MemoryOSKnowledgeCandidate(
+                id: "candidate-1",
+                title: "供需弹性知识",
+                claim: "供需弹性可用于分析价格变化下的需求响应。",
+                category: "economics",
+                knowledgeType: "theory",
+                scope: "general",
+                domain: "economics",
+                signalAssessment: MemoryOSKnowledgeSignalAssessment(signalQualityAccepted: true, reuseScopeAccepted: true, noveltyAccepted: true, structurabilityAccepted: true),
+                confidence: 0.84,
+                evidenceStatementIDs: ["stmt-1"],
+                relatedEntityIDs: ["concept-elasticity"]
+            )
+        ],
+        conceptEntities: [MemoryOSExtractedConceptEntity(localID: "concept-elasticity", name: "供需弹性", conceptType: "concept", domain: "economics")]
+    )
+    let raw = String(data: try JSONEncoder().encode(output), encoding: .utf8)!
+
+    let summary = try facade.projectAndRecordLLMArtifact(rawContent: raw, modelID: "test-model", artifactType: "memory_os_knowledge_extraction", schemaName: "MemoryOSKnowledgeExtractionOutput")
+
+    #expect(summary.accepted)
+    #expect(summary.beliefCount == 1)
+    #expect(summary.entityCount == 1)
+    #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l3_beliefs;").first?.first == "1")
+    #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l4_entities;").first?.first == "1")
+}
+
 @Test func appMemoryOSFacadeRejectsInvalidProjectionArtifactAndRetriesQueue() throws {
     let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSProjectionDatabaseURL().path)
     try store.migrate()

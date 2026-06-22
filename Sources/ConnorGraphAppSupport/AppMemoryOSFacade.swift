@@ -159,9 +159,11 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         modelID: String,
         queueItem: MemoryOSQueueItem? = nil,
         processingRunID: String? = nil,
+        artifactType: String = "graph_structured_extraction",
+        schemaName: String = "GraphStructuredExtractionOutput",
         now: Date = Date()
     ) throws -> MemoryOSProjectionRunSummary {
-        let envelope = MemoryOSArtifactEnvelopeService().envelope(rawContent: rawContent, modelID: modelID, queueItemID: queueItem?.id, processingRunID: processingRunID, now: now)
+        let envelope = MemoryOSArtifactEnvelopeService().envelope(rawContent: rawContent, artifactType: artifactType, schemaName: schemaName, modelID: modelID, queueItemID: queueItem?.id, processingRunID: processingRunID, now: now)
         try store.save(artifact: envelope)
         let validation = MemoryOSLLMArtifactValidator().validateStructuredExtractionArtifact(envelope)
         let build = MemoryOSProjectionService().projectionBatch(from: envelope, validation: validation, now: now)

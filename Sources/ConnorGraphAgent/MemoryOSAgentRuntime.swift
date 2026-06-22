@@ -4,6 +4,7 @@ import ConnorGraphCore
 public enum MemoryOSContextRole: String, Codable, Sendable, Equatable, CaseIterable {
     case operational
     case belief
+    case knowledge
     case entity
     case evidence
     case conflict
@@ -55,7 +56,7 @@ public struct MemoryOSContextCompiler: Sendable {
             MemoryOSContextItem(id: statement.id, role: .operational, content: statement.text, evidenceIDs: statement.evidenceSpanIDs, score: statement.confidence)
         }
         items += beliefs.map { belief in
-            MemoryOSContextItem(id: belief.id, role: .belief, content: belief.statement, evidenceIDs: belief.evidenceStatementIDs, score: belief.confidence)
+            MemoryOSContextItem(id: belief.id, role: .knowledge, content: belief.statement, evidenceIDs: belief.evidenceStatementIDs, score: belief.confidence)
         }
         items += entities.map { entity in
             MemoryOSContextItem(id: entity.id, role: .entity, content: "\(entity.name): \(entity.summary)", score: entity.confidence)
@@ -90,6 +91,6 @@ public struct MemoryOSWriteTools: Sendable {
     }
 
     public func proposeBelief(topic: String, statement: String, evidenceStatementIDs: [String] = [], now: Date = Date()) -> MemoryOSBelief {
-        MemoryOSBelief(topic: topic, statement: statement, projectionKind: .summarized, confidence: 0.5, evidenceStatementIDs: evidenceStatementIDs, validAt: now, projectedAt: now)
+        MemoryOSBelief(topic: topic, statement: statement, projectionKind: .summarized, confidence: 0.5, evidenceStatementIDs: evidenceStatementIDs, validAt: now, projectedAt: now, metadata: ["semantic_role": "knowledge"])
     }
 }

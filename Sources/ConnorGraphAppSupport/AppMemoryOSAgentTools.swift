@@ -27,7 +27,7 @@ public struct MemoryOSDashboardSummaryTool: AgentTool {
             "l1ExpiredLeaseCount": snapshot.l1ExpiredLeaseCount,
             "l2StatementCount": snapshot.l2StatementCount,
             "l2DiagnosticCount": snapshot.l2DiagnosticCount,
-            "l3BeliefCount": snapshot.l3BeliefCount,
+            "l3KnowledgeRecordCount": snapshot.l3BeliefCount,
             "l4EntityCount": snapshot.l4EntityCount,
             "expiredLeaseCount": summary.expiredLeaseCount
         ]
@@ -35,7 +35,7 @@ public struct MemoryOSDashboardSummaryTool: AgentTool {
         return AgentToolResult(
             toolCallID: context.toolCallID,
             toolName: name,
-            contentText: "Memory OS health: \(snapshot.healthStatus.rawValue). L0 objects: \(snapshot.l0ProvenanceObjectCount), L1 pending: \(snapshot.l1PendingCaptureCount), L2 statements: \(snapshot.l2StatementCount), L3 beliefs: \(snapshot.l3BeliefCount), L4 entities: \(snapshot.l4EntityCount).",
+            contentText: "Memory OS health: \(snapshot.healthStatus.rawValue). L0 objects: \(snapshot.l0ProvenanceObjectCount), L1 pending: \(snapshot.l1PendingCaptureCount), L2 statements: \(snapshot.l2StatementCount), L3 knowledge records: \(snapshot.l3BeliefCount), L4 entities: \(snapshot.l4EntityCount).",
             contentJSON: json,
             citations: []
         )
@@ -113,11 +113,13 @@ public struct MemoryOSIngestObservationTool: AgentTool {
 
 public struct MemoryOSProjectStructuredArtifactTool: AgentTool {
     public let name = "memory_os_project_structured_artifact"
-    public let description = "Validate and project a GraphStructuredExtractionOutput JSON artifact into Connor Memory OS L2/L3/L4. The artifact is persisted and audited before projection; rejected artifacts do not write projections."
+    public let description = "Validate and project a Memory OS structured artifact. GraphStructuredExtractionOutput projects operational facts into L2/L4; MemoryOSKnowledgeExtractionOutput projects reusable knowledge into L3 and concept entities/relations into L4. The artifact is persisted and audited before projection."
     public let permission: AgentPermissionCapability = .proposeGraphWrite
     public let inputSchema = AgentToolInputSchema.object(properties: [
-        "rawContent": .string(description: "Raw GraphStructuredExtractionOutput JSON to validate and project."),
+        "rawContent": .string(description: "Raw structured artifact JSON to validate and project."),
         "modelID": .string(description: "Model identifier that produced the artifact."),
+        "schemaName": .string(description: "Artifact schema. Defaults to GraphStructuredExtractionOutput. Use MemoryOSKnowledgeExtractionOutput for L3 knowledge candidates."),
+        "artifactType": .string(description: "Optional artifact type. Defaults to graph_structured_extraction."),
         "processingRunID": .string(description: "Optional processing run id for audit correlation.")
     ], required: ["rawContent", "modelID"])
 
@@ -133,7 +135,9 @@ public struct MemoryOSProjectStructuredArtifactTool: AgentTool {
             throw AgentToolError.invalidArguments("modelID is required")
         }
         let runID = arguments.string("processingRunID") ?? context.runID
-        let summary = try facade.projectAndRecordLLMArtifact(rawContent: rawContent, modelID: modelID, processingRunID: runID)
+        let schemaName = arguments.string("schemaName") ?? "GraphStructuredExtractionOutput"
+        let artifactType = arguments.string("artifactType") ?? (schemaName == "MemoryOSKnowledgeExtractionOutput" ? "memory_os_knowledge_extraction" : "graph_structured_extraction")
+        let summary = try facade.projectAndRecordLLMArtifact(rawContent: rawContent, modelID: modelID, processingRunID: runID, artifactType: artifactType, schemaName: schemaName)
         let payload: [String: Any] = [
             "artifactID": summary.artifactID,
             "accepted": summary.accepted,
@@ -141,14 +145,14 @@ public struct MemoryOSProjectStructuredArtifactTool: AgentTool {
             "statementCount": summary.statementCount,
             "entityCount": summary.entityCount,
             "entityStatementCount": summary.entityStatementCount,
-            "beliefCount": summary.beliefCount,
+            "knowledgeRecordCount": summary.beliefCount,
             "issueCount": summary.issues.count
         ]
         let json = try Self.renderJSON(payload)
         return AgentToolResult(
             toolCallID: context.toolCallID,
             toolName: name,
-            contentText: summary.accepted ? "Memory OS projected artifact \(summary.artifactID): \(summary.statementCount) statements, \(summary.entityCount) entities, \(summary.beliefCount) beliefs." : "Memory OS rejected artifact \(summary.artifactID): \(summary.issues.count) validation issue(s).",
+            contentText: summary.accepted ? "Memory OS projected artifact \(summary.artifactID): \(summary.statementCount) L2 statements, \(summary.entityCount) L4 entities, \(summary.beliefCount) L3 knowledge records." : "Memory OS rejected artifact \(summary.artifactID): \(summary.issues.count) validation issue(s).",
             contentJSON: json,
             citations: [summary.artifactID]
         )
