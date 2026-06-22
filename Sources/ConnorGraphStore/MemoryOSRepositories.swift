@@ -22,6 +22,7 @@ public struct MemoryOSOperationalRepository: Sendable {
     public init(store: SQLiteMemoryOSStore) { self.store = store }
     public func save(_ node: MemoryOSNode) throws { try store.upsert(node: node) }
     public func save(_ statement: MemoryOSStatement) throws { try store.upsert(statement: statement) }
+    public func save(_ batch: MemoryOSProjectionBatch) throws { try store.saveProjectionBatch(batch) }
 }
 
 public struct MemoryOSBeliefRepository: Sendable {
@@ -34,6 +35,7 @@ public struct MemoryOSEntityRepository: Sendable {
     public var store: SQLiteMemoryOSStore
     public init(store: SQLiteMemoryOSStore) { self.store = store }
     public func save(_ entity: MemoryOSEntity) throws { try store.upsert(entity: entity) }
+    public func save(_ statement: MemoryOSEntityStatement) throws { try store.upsert(entityStatement: statement) }
     public func entity(id: String) throws -> MemoryOSEntity? { try store.entity(id: id) }
 }
 
