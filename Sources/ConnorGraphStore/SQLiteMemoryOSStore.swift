@@ -214,8 +214,34 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         (id, subject_id, predicate, object_id, text, status, confidence, valid_at, invalid_at, committed_at, evidence_span_ids_json, metadata_json)
         VALUES (\(quote(statement.id)), \(quote(statement.subjectID)), \(quote(statement.predicate)), \(quote(statement.objectID)), \(quote(statement.text)), \(quote(statement.status.rawValue)), \(statement.confidence), \(quote(iso(statement.validAt))), \(quote(statement.invalidAt.map(iso))), \(quote(iso(statement.committedAt))), \(quote(json(statement.evidenceSpanIDs))), \(quote(json(statement.metadata))))
         """)
+        try execute("DELETE FROM memory_l2_statement_evidence WHERE statement_id = \(quote(statement.id));")
+        for spanID in statement.evidenceSpanIDs {
+            try execute("""
+            INSERT INTO memory_l2_statement_evidence(statement_id, span_id, strength)
+            SELECT \(quote(statement.id)), \(quote(spanID)), 1.0
+            WHERE EXISTS (SELECT 1 FROM memory_l0_provenance_spans WHERE id = \(quote(spanID)))
+            """)
+        }
         try execute("DELETE FROM memory_l2_statements_fts WHERE statement_id = \(quote(statement.id));")
         try execute("INSERT INTO memory_l2_statements_fts(statement_id, predicate, text) VALUES (\(quote(statement.id)), \(quote(statement.predicate)), \(quote(statement.text)))")
+    }
+
+    public func saveProjectionBatch(_ batch: MemoryOSProjectionBatch) throws {
+        for node in batch.nodes { try upsert(node: node) }
+        for statement in batch.statements { try upsert(statement: statement) }
+        for entity in batch.entities { try upsert(entity: entity) }
+        for entityStatement in batch.entityStatements { try upsert(entityStatement: entityStatement) }
+        for belief in batch.beliefs { try upsert(belief: belief) }
+        try execute("""
+        INSERT OR REPLACE INTO memory_l2_projections(id, projection_key, title, content, refreshed_at, metadata_json)
+        VALUES (\(quote("projection:\(batch.artifactID)")), \(quote("artifact:\(batch.artifactID)")), 'Artifact projection', \(quote(json(batch))), \(quote(iso(Date()))), \(quote(json([
+            "artifact_id": batch.artifactID,
+            "node_count": String(batch.nodes.count),
+            "statement_count": String(batch.statements.count),
+            "entity_count": String(batch.entities.count),
+            "belief_count": String(batch.beliefs.count)
+        ]))))
+        """)
     }
 
     public func searchStatementsFTS(query: String, limit: Int = 20) throws -> [String] {
@@ -257,6 +283,24 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         SELECT id, stable_key, entity_type, name, aliases_json, summary, confidence, status, created_at, updated_at, valid_from, valid_until, metadata_json
         FROM memory_l4_entities WHERE id = \(quote(id)) LIMIT 1
         """).map(decodeEntity).first
+    }
+
+    public func upsert(entityStatement statement: MemoryOSEntityStatement) throws {
+        try execute("""
+        INSERT OR REPLACE INTO memory_l4_entity_statements
+        (id, entity_id, predicate, object_entity_id, text, status, confidence, valid_at, invalid_at, committed_at, evidence_span_ids_json, metadata_json)
+        VALUES (\(quote(statement.id)), \(quote(statement.entityID)), \(quote(statement.predicate)), \(quote(statement.objectEntityID)), \(quote(statement.text)), \(quote(statement.status.rawValue)), \(statement.confidence), \(quote(iso(statement.validAt))), \(quote(statement.invalidAt.map(iso))), \(quote(iso(statement.committedAt))), \(quote(json(statement.evidenceSpanIDs))), \(quote(json(statement.metadata))))
+        """)
+        try execute("DELETE FROM memory_l4_entity_statement_evidence WHERE statement_id = \(quote(statement.id));")
+        for spanID in statement.evidenceSpanIDs {
+            try execute("""
+            INSERT INTO memory_l4_entity_statement_evidence(statement_id, span_id, strength)
+            SELECT \(quote(statement.id)), \(quote(spanID)), 1.0
+            WHERE EXISTS (SELECT 1 FROM memory_l0_provenance_spans WHERE id = \(quote(spanID)))
+            """)
+        }
+        try execute("DELETE FROM memory_l4_statements_fts WHERE statement_id = \(quote(statement.id));")
+        try execute("INSERT INTO memory_l4_statements_fts(statement_id, predicate, text) VALUES (\(quote(statement.id)), \(quote(statement.predicate)), \(quote(statement.text)))")
     }
 
     public func searchEntitiesFTS(query: String, limit: Int = 20) throws -> [String] {
