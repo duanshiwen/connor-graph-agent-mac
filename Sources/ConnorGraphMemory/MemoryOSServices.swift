@@ -109,6 +109,72 @@ public struct MemoryOSTimeBlockBuilder: Sendable {
     }
 }
 
+public struct MemoryOSArtifactEnvelopeService: Sendable {
+    public init() {}
+
+    public func envelope(rawContent: String, artifactType: String = "graph_structured_extraction", schemaName: String = "GraphStructuredExtractionOutput", schemaVersion: Int = 1, modelID: String, queueItemID: String? = nil, processingRunID: String? = nil, metadata: [String: String] = [:], now: Date = Date()) -> MemoryOSLLMArtifactEnvelope {
+        let hash = SHA256.hash(data: Data(rawContent.utf8)).map { String(format: "%02x", $0) }.joined()
+        return MemoryOSLLMArtifactEnvelope(queueItemID: queueItemID, processingRunID: processingRunID, artifactType: artifactType, schemaName: schemaName, schemaVersion: schemaVersion, modelID: modelID, rawContent: rawContent, contentHash: hash, createdAt: now, metadata: metadata)
+    }
+}
+
+public struct MemoryOSLLMArtifactValidator: Sendable {
+    public init() {}
+
+    public func validateStructuredExtractionArtifact(_ artifact: MemoryOSLLMArtifactEnvelope) -> MemoryOSArtifactValidationResult {
+        guard artifact.schemaName == "GraphStructuredExtractionOutput" else {
+            return MemoryOSArtifactValidationResult(artifactID: artifact.id, accepted: false, issues: [MemoryOSValidationIssue(code: "unsupported_schema", message: "Unsupported artifact schema: \(artifact.schemaName).")])
+        }
+        guard let data = artifact.rawContent.data(using: .utf8) else {
+            return MemoryOSArtifactValidationResult(artifactID: artifact.id, accepted: false, issues: [MemoryOSValidationIssue(code: "invalid_utf8", message: "Artifact content is not valid UTF-8.")])
+        }
+        do {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let output = try decoder.decode(GraphStructuredExtractionOutput.self, from: data)
+            try output.validate(requireStatementEvidence: true)
+            return MemoryOSArtifactValidationResult(artifactID: artifact.id, accepted: true, normalizedRecordCount: output.entities.count + output.statements.count)
+        } catch let error as GraphStructuredExtractionValidationError {
+            return MemoryOSArtifactValidationResult(artifactID: artifact.id, accepted: false, issues: [MemoryOSValidationIssue(code: "schema_validation_failed", message: error.description)])
+        } catch {
+            return MemoryOSArtifactValidationResult(artifactID: artifact.id, accepted: false, issues: [MemoryOSValidationIssue(code: "json_decode_failed", message: String(describing: error))])
+        }
+    }
+}
+
+public struct MemoryOSQueueTransitionService: Sendable {
+    public init() {}
+
+    public func markFailed(_ item: MemoryOSQueueItem, errorCode: String, errorMessage: String, now: Date = Date(), recovery: MemoryOSRecoveryService = MemoryOSRecoveryService()) -> MemoryOSQueueItem {
+        var next = item
+        next.attemptCount += 1
+        next.errorCode = errorCode
+        next.errorMessage = errorMessage
+        next.lockedAt = nil
+        next.lockedBy = nil
+        next.leaseExpiresAt = nil
+        next.updatedAt = now
+        if next.attemptCount >= next.maxAttempts {
+            next.status = .deadLetter
+            next.nextRunAt = now
+        } else {
+            next.status = .retryScheduled
+            next.nextRunAt = now.addingTimeInterval(recovery.nextRetryDelay(attemptCount: next.attemptCount))
+        }
+        return next
+    }
+
+    public func markSucceeded(_ item: MemoryOSQueueItem, now: Date = Date()) -> MemoryOSQueueItem {
+        var next = item
+        next.status = .succeeded
+        next.lockedAt = nil
+        next.lockedBy = nil
+        next.leaseExpiresAt = nil
+        next.updatedAt = now
+        return next
+    }
+}
+
 public struct MemoryOSStatementValidator: Sendable {
     public init() {}
 
