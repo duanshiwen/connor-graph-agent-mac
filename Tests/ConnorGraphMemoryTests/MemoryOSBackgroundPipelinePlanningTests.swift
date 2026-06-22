@@ -46,6 +46,41 @@ import ConnorGraphMemory
     #expect(jobs.isEmpty)
 }
 
+@Test func l1ToL2PlannerDoesNotTriggerBeforeDefault24HourAgeThreshold() throws {
+    let occurredAt = Date(timeIntervalSince1970: 2_000)
+    let event = MemoryOSCaptureEvent(
+        id: "capture-1",
+        provenanceObjectID: "object-1",
+        eventType: MemoryOSSourceType.chatMessage.rawValue,
+        occurredAt: occurredAt,
+        tokenEstimate: 100,
+        processingState: .pending,
+        metadata: ["span_id": "span-1"]
+    )
+
+    let jobs = MemoryOSL1ToL2JobPlanner().planJobs(from: [event], now: occurredAt.addingTimeInterval((24 * 60 * 60) - 1))
+
+    #expect(jobs.isEmpty)
+}
+
+@Test func l1ToL2PlannerTriggersAtDefault24HourAgeThreshold() throws {
+    let occurredAt = Date(timeIntervalSince1970: 2_000)
+    let event = MemoryOSCaptureEvent(
+        id: "capture-1",
+        provenanceObjectID: "object-1",
+        eventType: MemoryOSSourceType.chatMessage.rawValue,
+        occurredAt: occurredAt,
+        tokenEstimate: 100,
+        processingState: .pending,
+        metadata: ["span_id": "span-1"]
+    )
+
+    let jobs = MemoryOSL1ToL2JobPlanner().planJobs(from: [event], now: occurredAt.addingTimeInterval(24 * 60 * 60))
+
+    #expect(jobs.count == 1)
+    #expect(jobs.first?.captureEventIDs == ["capture-1"])
+}
+
 @Test func l2ToKnowledgePlannerCreatesKnowledgeSynthesisJobForUnorganizedStatements() throws {
     let now = Date(timeIntervalSince1970: 3_000)
     let statements = (0..<4).map { index in
@@ -73,4 +108,45 @@ import ConnorGraphMemory
     #expect(jobs.first?.prompt.contains("four knowledge filters") == true)
     #expect(jobs.first?.prompt.contains("search L2, L3 and L4") == true)
     #expect(jobs.first?.prompt.contains("refined L2 facts") == true)
+}
+
+@Test func l2ToKnowledgePlannerDoesNotTriggerBeforeDefault24HourAgeThreshold() throws {
+    let now = Date(timeIntervalSince1970: 100_000)
+    let statement = MemoryOSStatement(
+        id: "statement-1",
+        subjectID: "node-1",
+        predicate: "observed",
+        text: "事实 1",
+        assertionKind: .observed,
+        confidence: 0.8,
+        validAt: now.addingTimeInterval(-(24 * 60 * 60) + 1),
+        committedAt: now.addingTimeInterval(-(24 * 60 * 60) + 1),
+        evidenceSpanIDs: ["span-1"],
+        metadata: ["processing_state": "pending_knowledge_synthesis"]
+    )
+
+    let jobs = MemoryOSL2ToKnowledgeJobPlanner().planJobs(from: [statement], now: now)
+
+    #expect(jobs.isEmpty)
+}
+
+@Test func l2ToKnowledgePlannerTriggersAtDefault24HourAgeThreshold() throws {
+    let now = Date(timeIntervalSince1970: 100_000)
+    let statement = MemoryOSStatement(
+        id: "statement-1",
+        subjectID: "node-1",
+        predicate: "observed",
+        text: "事实 1",
+        assertionKind: .observed,
+        confidence: 0.8,
+        validAt: now.addingTimeInterval(-24 * 60 * 60),
+        committedAt: now.addingTimeInterval(-24 * 60 * 60),
+        evidenceSpanIDs: ["span-1"],
+        metadata: ["processing_state": "pending_knowledge_synthesis"]
+    )
+
+    let jobs = MemoryOSL2ToKnowledgeJobPlanner().planJobs(from: [statement], now: now)
+
+    #expect(jobs.count == 1)
+    #expect(jobs.first?.statementIDs == ["statement-1"])
 }
