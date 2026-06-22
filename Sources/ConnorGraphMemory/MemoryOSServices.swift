@@ -206,6 +206,139 @@ public struct MemoryOSProjectionService: Sendable {
         }
     }
 
+    public func projectionBatch(from artifact: MemoryOSLLMArtifactEnvelope, validation: MemoryOSArtifactValidationResult, now: Date = Date()) -> MemoryOSProjectionBuildResult {
+        guard validation.accepted else { return MemoryOSProjectionBuildResult(accepted: false, validation: validation) }
+        guard let data = artifact.rawContent.data(using: .utf8) else {
+            let rejected = MemoryOSArtifactValidationResult(artifactID: artifact.id, accepted: false, issues: [MemoryOSValidationIssue(code: "invalid_utf8", message: "Artifact content is not valid UTF-8.")])
+            return MemoryOSProjectionBuildResult(accepted: false, validation: rejected)
+        }
+        do {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let output = try decoder.decode(GraphStructuredExtractionOutput.self, from: data)
+            try output.validate(requireStatementEvidence: true)
+            let batch = projectionBatch(from: output, artifactID: artifact.id, now: now)
+            return MemoryOSProjectionBuildResult(accepted: true, batch: batch, validation: validation)
+        } catch let error as GraphStructuredExtractionValidationError {
+            let rejected = MemoryOSArtifactValidationResult(artifactID: artifact.id, accepted: false, issues: [MemoryOSValidationIssue(code: "schema_validation_failed", message: error.description)])
+            return MemoryOSProjectionBuildResult(accepted: false, validation: rejected)
+        } catch {
+            let rejected = MemoryOSArtifactValidationResult(artifactID: artifact.id, accepted: false, issues: [MemoryOSValidationIssue(code: "json_decode_failed", message: String(describing: error))])
+            return MemoryOSProjectionBuildResult(accepted: false, validation: rejected)
+        }
+    }
+
+    public func projectionBatch(from output: GraphStructuredExtractionOutput, artifactID: String, now: Date = Date()) -> MemoryOSProjectionBatch {
+        let nodeByLocalID = Dictionary(uniqueKeysWithValues: output.entities.map { entity in
+            let scope = entity.scope.rawValue
+            let stableKey = MemoryOSStableKeyBuilder.stableKey(type: entity.entityKind.rawValue, name: entity.name, scope: scope)
+            let id = "l2-node:\(stableKey)"
+            let node = MemoryOSNode(
+                id: id,
+                stableKey: stableKey,
+                nodeType: entity.entityKind.rawValue,
+                name: entity.name,
+                summary: entity.summary,
+                status: .active,
+                createdAt: now,
+                updatedAt: now,
+                metadata: entity.metadata.merging([
+                    "artifact_id": artifactID,
+                    "local_id": entity.localID,
+                    "scope": scope,
+                    "confidence": String(entity.confidence)
+                ]) { _, new in new }
+            )
+            return (entity.localID, node)
+        })
+        let entityByLocalID = Dictionary(uniqueKeysWithValues: output.entities.map { entity in
+            let scope = entity.scope.rawValue
+            let stableKey = MemoryOSStableKeyBuilder.stableKey(type: entity.entityKind.rawValue, name: entity.name, scope: scope)
+            let stableEntity = MemoryOSEntity(
+                id: "l4-entity:\(stableKey)",
+                stableKey: stableKey,
+                entityType: entity.entityKind.rawValue,
+                name: entity.name,
+                aliases: entity.aliases,
+                summary: entity.summary,
+                confidence: entity.confidence,
+                status: .active,
+                createdAt: now,
+                updatedAt: now,
+                validFrom: now,
+                metadata: entity.metadata.merging([
+                    "artifact_id": artifactID,
+                    "local_id": entity.localID,
+                    "scope": scope
+                ]) { _, new in new }
+            )
+            return (entity.localID, stableEntity)
+        })
+        let statements = output.statements.compactMap { statement -> MemoryOSStatement? in
+            guard let subject = nodeByLocalID[statement.subjectLocalID] else { return nil }
+            let object = nodeByLocalID[statement.objectLocalID]
+            return MemoryOSStatement(
+                id: "l2-statement:\(artifactID):\(statement.id)",
+                subjectID: subject.id,
+                predicate: statement.predicate.rawValue,
+                objectID: object?.id,
+                text: statement.statementText,
+                status: statement.confidence >= 0.85 ? .observed : .candidate,
+                confidence: statement.confidence,
+                validAt: statement.validAt ?? statement.referenceTime ?? now,
+                committedAt: now,
+                evidenceSpanIDs: statement.evidenceSpanIDs,
+                metadata: statement.metadata.merging([
+                    "artifact_id": artifactID,
+                    "source_statement_id": statement.id,
+                    "subject_local_id": statement.subjectLocalID,
+                    "object_local_id": statement.objectLocalID
+                ]) { _, new in new }
+            )
+        }
+        let entityStatements = output.statements.compactMap { statement -> MemoryOSEntityStatement? in
+            guard let subject = entityByLocalID[statement.subjectLocalID] else { return nil }
+            let object = entityByLocalID[statement.objectLocalID]
+            return MemoryOSEntityStatement(
+                id: "l4-statement:\(artifactID):\(statement.id)",
+                entityID: subject.id,
+                predicate: statement.predicate.rawValue,
+                objectEntityID: object?.id,
+                text: statement.statementText,
+                status: statement.confidence >= 0.85 ? .observed : .candidate,
+                confidence: statement.confidence,
+                validAt: statement.validAt ?? statement.referenceTime ?? now,
+                committedAt: now,
+                evidenceSpanIDs: statement.evidenceSpanIDs,
+                metadata: statement.metadata.merging([
+                    "artifact_id": artifactID,
+                    "source_statement_id": statement.id
+                ]) { _, new in new }
+            )
+        }
+        let beliefs = statements.filter { $0.confidence >= 0.92 }.map { statement in
+            MemoryOSBelief(
+                id: "l3-belief:\(artifactID):\(statement.id)",
+                topic: statement.predicate,
+                statement: statement.text,
+                status: .observed,
+                confidence: statement.confidence,
+                evidenceStatementIDs: [statement.id],
+                createdAt: now,
+                updatedAt: now,
+                metadata: ["artifact_id": artifactID, "promotion_reason": "high_confidence_evidence_backed_statement"]
+            )
+        }
+        return MemoryOSProjectionBatch(
+            artifactID: artifactID,
+            nodes: Array(nodeByLocalID.values).sorted { $0.id < $1.id },
+            statements: statements,
+            entities: Array(entityByLocalID.values).sorted { $0.id < $1.id },
+            entityStatements: entityStatements,
+            beliefs: beliefs
+        )
+    }
+
     private func rank(_ status: MemoryOSStatementStatus) -> Int {
         switch status { case .confirmed: 3; case .observed: 2; case .candidate: 1; case .rejected, .invalidated, .superseded: 0 }
     }

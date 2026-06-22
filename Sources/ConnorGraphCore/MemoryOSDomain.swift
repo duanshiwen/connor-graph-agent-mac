@@ -320,6 +320,63 @@ public struct MemoryOSEntity: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
+public struct MemoryOSEntityStatement: Codable, Sendable, Equatable, Identifiable {
+    public var id: String
+    public var entityID: String
+    public var predicate: String
+    public var objectEntityID: String?
+    public var text: String
+    public var status: MemoryOSStatementStatus
+    public var confidence: Double
+    public var validAt: Date
+    public var invalidAt: Date?
+    public var committedAt: Date
+    public var evidenceSpanIDs: [String]
+    public var metadata: [String: String]
+
+    public init(id: String = UUID().uuidString, entityID: String, predicate: String, objectEntityID: String? = nil, text: String, status: MemoryOSStatementStatus = .observed, confidence: Double = 0.5, validAt: Date = Date(), invalidAt: Date? = nil, committedAt: Date = Date(), evidenceSpanIDs: [String] = [], metadata: [String: String] = [:]) {
+        self.id = id; self.entityID = entityID; self.predicate = predicate; self.objectEntityID = objectEntityID; self.text = text; self.status = status; self.confidence = confidence; self.validAt = validAt; self.invalidAt = invalidAt; self.committedAt = committedAt; self.evidenceSpanIDs = evidenceSpanIDs; self.metadata = metadata
+    }
+}
+
+public struct MemoryOSProjectionBatch: Codable, Sendable, Equatable {
+    public var artifactID: String
+    public var nodes: [MemoryOSNode]
+    public var statements: [MemoryOSStatement]
+    public var entities: [MemoryOSEntity]
+    public var entityStatements: [MemoryOSEntityStatement]
+    public var beliefs: [MemoryOSBelief]
+
+    public init(artifactID: String, nodes: [MemoryOSNode] = [], statements: [MemoryOSStatement] = [], entities: [MemoryOSEntity] = [], entityStatements: [MemoryOSEntityStatement] = [], beliefs: [MemoryOSBelief] = []) {
+        self.artifactID = artifactID; self.nodes = nodes; self.statements = statements; self.entities = entities; self.entityStatements = entityStatements; self.beliefs = beliefs
+    }
+}
+
+public struct MemoryOSProjectionBuildResult: Codable, Sendable, Equatable {
+    public var accepted: Bool
+    public var batch: MemoryOSProjectionBatch?
+    public var validation: MemoryOSArtifactValidationResult
+
+    public init(accepted: Bool, batch: MemoryOSProjectionBatch? = nil, validation: MemoryOSArtifactValidationResult) {
+        self.accepted = accepted; self.batch = batch; self.validation = validation
+    }
+}
+
+public struct MemoryOSProjectionRunSummary: Codable, Sendable, Equatable {
+    public var artifactID: String
+    public var accepted: Bool
+    public var nodeCount: Int
+    public var statementCount: Int
+    public var entityCount: Int
+    public var entityStatementCount: Int
+    public var beliefCount: Int
+    public var issues: [MemoryOSValidationIssue]
+
+    public init(artifactID: String, accepted: Bool, nodeCount: Int = 0, statementCount: Int = 0, entityCount: Int = 0, entityStatementCount: Int = 0, beliefCount: Int = 0, issues: [MemoryOSValidationIssue] = []) {
+        self.artifactID = artifactID; self.accepted = accepted; self.nodeCount = nodeCount; self.statementCount = statementCount; self.entityCount = entityCount; self.entityStatementCount = entityStatementCount; self.beliefCount = beliefCount; self.issues = issues
+    }
+}
+
 public enum MemoryOSStableKeyBuilder {
     public static func stableKey(type: String, name: String, scope: String = "default") -> String {
         let normalized = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().replacingOccurrences(of: #"\s+"#, with: "-", options: .regularExpression)
