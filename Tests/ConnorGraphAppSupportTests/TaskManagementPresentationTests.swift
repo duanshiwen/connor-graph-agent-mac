@@ -20,7 +20,7 @@ struct TaskManagementPresentationTests {
         )
         let presentation = TaskManagementUIPresentation.build(tasks: ConnorTaskDefinition.systemDefaults(now: now) + [eventTask], runHistory: [])
 
-        #expect(presentation.scheduledTasks.count == 2)
+        #expect(presentation.scheduledTasks.count == 1)
         #expect(presentation.eventTriggeredTasks.map(\.id) == ["ai.watch-keyword"])
         #expect(presentation.summary.manualTaskCount == 0)
         #expect(presentation.summary.reviewControlCount == 0)
@@ -52,9 +52,9 @@ struct TaskManagementPresentationTests {
 
         #expect(!presentation.cards.contains { $0.id == mediaTask.id })
         #expect(!presentation.scheduledTasks.contains { $0.id == mediaTask.id })
-        #expect(presentation.scheduledTasks.count == 2)
-        #expect(presentation.summary.scheduledTaskCount == 2)
-        #expect(presentation.summary.totalTaskCount == 2)
+        #expect(presentation.scheduledTasks.count == 1)
+        #expect(presentation.summary.scheduledTaskCount == 1)
+        #expect(presentation.summary.totalTaskCount == 1)
     }
 
     @Test func systemTaskCardDisablesDeleteAndExposesOpaqueTarget() throws {
