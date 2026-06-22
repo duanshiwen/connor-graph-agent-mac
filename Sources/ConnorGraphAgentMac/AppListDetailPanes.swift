@@ -1591,14 +1591,8 @@ struct CraftDetailPaneView: View {
                 MemoryOSDashboardView(presentation: viewModel.memoryOSDashboardPresentation) {
                     viewModel.reloadMemoryOSDashboard()
                 }
-            case .graphWriteCandidates:
-                GraphWriteCandidateReviewView(viewModel: viewModel)
             case .pendingApprovals:
                 AgentPendingApprovalReviewView(viewModel: viewModel)
-            case .memoryChangeLog:
-                MemoryChangeLogView(viewModel: viewModel)
-            case .extractionDiagnostics:
-                GraphExtractionDiagnosticsView(viewModel: viewModel)
             case .automation, .scheduledTasks:
                 TaskAutomationDetailPane(viewModel: viewModel, kind: .scheduled)
             case .eventTriggeredTasks:

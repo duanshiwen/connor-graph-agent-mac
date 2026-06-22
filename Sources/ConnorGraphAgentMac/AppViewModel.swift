@@ -1293,11 +1293,7 @@ final class AppViewModel: NSObject, ObservableObject {
 
 
     private var graphMemoryDashboardPresentation: GraphMemoryDashboard {
-        AppGraphMemoryDashboardBuilder().build(
-            graphWriteCandidates: graphWriteCandidates,
-            admissionHoldQueueItems: admissionHoldQueueItems,
-            memoryChangeLogEntries: memoryChangeLogEntries
-        )
+        GraphMemoryDashboard(summary: GraphMemoryDashboardSummary(pendingCandidateCount: 0, openHoldCount: 0, recentChangeCount: 0), cards: [])
     }
 
     private var chatSummaryPresentation: AppChatSummaryPresentation {
