@@ -1,6 +1,7 @@
 import Foundation
 import ConnorGraphAgent
 import ConnorGraphCore
+import ConnorGraphStore
 
 public struct MemoryOSDashboardSummaryTool: AgentTool {
     public let name = "memory_os_dashboard_summary"
@@ -164,10 +165,111 @@ public struct MemoryOSProjectStructuredArtifactTool: AgentTool {
     }
 }
 
+public struct MemoryOSSearchTool: AgentTool {
+    public let name = "memory_os_search"
+    public let description = "Search Connor Memory OS across L0/L1/L2/L3/L4. Returns ranked summaries and references only; retrieval hits are context, not memory truth. Use memory_os_expand_l4 for depth-limited entity/concept expansion."
+    public let permission: AgentPermissionCapability = .readGraph
+    public let inputSchema = AgentToolInputSchema.object(properties: [
+        "query": .string(description: "Search query text."),
+        "layers": .array(items: .string(description: "Layer name: L0, L1, L2, L3 or L4."), description: "Optional Memory OS layers to search. Defaults to all layers."),
+        "limit": .number(description: "Maximum number of hits. Defaults to 10."),
+        "depth": .number(description: "Optional depth hint. Search returns summaries; use memory_os_expand_l4 for explicit depth expansion.")
+    ], required: ["query"])
+
+    private let facade: AppMemoryOSFacade
+
+    public init(facade: AppMemoryOSFacade) { self.facade = facade }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        guard let queryText = arguments.string("query"), !queryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw AgentToolError.invalidArguments("query is required")
+        }
+        let layers = parseLayers(arguments.array("layers"))
+        let limit = max(1, min(arguments.int("limit") ?? 10, 50))
+        let depth = max(0, min(arguments.int("depth") ?? 0, 5))
+        let hits = try facade.searchMemoryOS(MemoryOSRetrievalQuery(text: queryText, layers: layers, limit: limit, depth: depth))
+        let rows = hits.map { hit -> [String: Any] in
+            [
+                "layer": hit.layer.rawValue,
+                "recordID": hit.recordID,
+                "title": hit.title,
+                "summary": hit.summary,
+                "matchedText": hit.matchedText,
+                "score": hit.score,
+                "evidenceRefs": hit.evidenceRefs,
+                "provenanceRefs": hit.provenanceRefs,
+                "entityRefs": hit.entityRefs,
+                "canReadRaw": hit.canReadRaw,
+                "canExpandDepth": hit.canExpandDepth,
+                "metadata": hit.metadata
+            ]
+        }
+        let payload: [String: Any] = ["query": queryText, "hitCount": hits.count, "hits": rows]
+        let json = try Self.renderJSON(payload)
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Memory OS search returned \(hits.count) hit(s) across \(layers.map(\.rawValue).joined(separator: ",")).", contentJSON: json, citations: hits.map(\.recordID))
+    }
+
+    private func parseLayers(_ values: [SendableJSONValue]?) -> [MemoryOSRetrievalLayer] {
+        guard let values else { return MemoryOSRetrievalLayer.allCases }
+        let parsed = values.compactMap { $0.stringValue }.compactMap(MemoryOSRetrievalLayer.init(rawValue:))
+        return parsed.isEmpty ? MemoryOSRetrievalLayer.allCases : parsed
+    }
+
+    private static func renderJSON(_ object: [String: Any]) throws -> String {
+        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        return String(data: data, encoding: .utf8) ?? "{}"
+    }
+}
+
+public struct MemoryOSExpandL4Tool: AgentTool {
+    public let name = "memory_os_expand_l4"
+    public let description = "Expand a Memory OS L4 entity/concept by depth-limited traversal. Use this for multi-hop context; expansion hits are context and do not replace evidence validation."
+    public let permission: AgentPermissionCapability = .readGraph
+    public let inputSchema = AgentToolInputSchema.object(properties: [
+        "entityID": .string(description: "L4 entity id to expand from."),
+        "depth": .number(description: "Traversal depth. Defaults to 1, capped at 5."),
+        "limit": .number(description: "Maximum expansion hits. Defaults to 20.")
+    ], required: ["entityID"])
+
+    private let facade: AppMemoryOSFacade
+
+    public init(facade: AppMemoryOSFacade) { self.facade = facade }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        guard let entityID = arguments.string("entityID"), !entityID.isEmpty else {
+            throw AgentToolError.invalidArguments("entityID is required")
+        }
+        let depth = max(1, min(arguments.int("depth") ?? 1, 5))
+        let limit = max(1, min(arguments.int("limit") ?? 20, 100))
+        let hits = try facade.expandMemoryOSL4(entityID: entityID, depth: depth, limit: limit)
+        let rows = hits.map { hit -> [String: Any] in
+            [
+                "recordID": hit.recordID,
+                "sourceEntityID": hit.sourceEntityID,
+                "relatedEntityID": hit.relatedEntityID ?? "",
+                "predicate": hit.predicate,
+                "text": hit.text,
+                "depth": hit.depth,
+                "score": hit.score
+            ]
+        }
+        let payload: [String: Any] = ["entityID": entityID, "depth": depth, "hitCount": hits.count, "hits": rows]
+        let json = try Self.renderJSON(payload)
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "L4 expansion returned \(hits.count) hit(s) from \(entityID) at depth \(depth).", contentJSON: json, citations: hits.map(\.recordID))
+    }
+
+    private static func renderJSON(_ object: [String: Any]) throws -> String {
+        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        return String(data: data, encoding: .utf8) ?? "{}"
+    }
+}
+
 public extension AgentToolRegistry {
     mutating func registerMemoryOSTools(facade: AppMemoryOSFacade) {
         register(MemoryOSDashboardSummaryTool(facade: facade))
         register(MemoryOSIngestObservationTool(facade: facade))
         register(MemoryOSProjectStructuredArtifactTool(facade: facade))
+        register(MemoryOSSearchTool(facade: facade))
+        register(MemoryOSExpandL4Tool(facade: facade))
     }
 }
