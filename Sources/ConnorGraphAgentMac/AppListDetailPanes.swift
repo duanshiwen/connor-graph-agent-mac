@@ -1587,6 +1587,10 @@ struct CraftDetailPaneView: View {
                 AgentChatView(viewModel: viewModel)
             case .promotionQueue:
                 PromotionQueueView(viewModel: viewModel)
+            case .memoryOS:
+                MemoryOSDashboardView(presentation: viewModel.memoryOSDashboardPresentation) {
+                    viewModel.reloadMemoryOSDashboard()
+                }
             case .graphWriteCandidates:
                 GraphWriteCandidateReviewView(viewModel: viewModel)
             case .pendingApprovals:
