@@ -81,12 +81,99 @@ struct SourceRefreshTaskMaterializerTests {
         #expect(tasks.contains { $0.id == "system.rss.source.feed-a.refresh" })
     }
 
+    @Test func materializerCreatesOneMailRefreshTaskPerAccount() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let taskRepository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
+        let mailRepository = InMemoryMailSourceRepository(accounts: [
+            makeMailAccount(id: "mail-a", displayName: "Mail A"),
+            makeMailAccount(id: "mail-b", displayName: "Mail B")
+        ])
+        let materializer = MailRefreshTaskMaterializer(taskRepository: taskRepository, mailSourceRepository: mailRepository)
+
+        let tasks = try await materializer.reconcileMailAccountRefreshTasks(now: Date(timeIntervalSince1970: 10))
+        let mailA = try #require(tasks.first { $0.id == "system.mail.account.mail-a.refresh" })
+        let mailB = try #require(tasks.first { $0.id == "system.mail.account.mail-b.refresh" })
+
+        #expect(mailA.name == "检查邮件：Mail A")
+        #expect(mailA.trigger.intervalSeconds == 600)
+        #expect(mailA.target.targetKind == "source.runtime")
+        #expect(mailA.target.targetID == "mail")
+        #expect(mailA.target.operationName == "refresh")
+        #expect(mailA.target.parameters["sourceKind"] == "mail")
+        #expect(mailA.target.parameters["sourceInstanceID"] == "mail-a")
+        #expect(mailA.metadata.isProtectedSystemTask)
+        #expect(mailA.metadata.tags.contains("source-instance"))
+        #expect(mailB.target.parameters["sourceInstanceID"] == "mail-b")
+        #expect(tasks.contains { $0.id == "system.mail.check-every-10-minutes" } == false)
+    }
+
+    @Test func materializerPurgesOrphanedMailRefreshTasksWhenAccountIsRemoved() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let taskRepository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
+        let mailRepository = InMemoryMailSourceRepository(accounts: [makeMailAccount(id: "mail-a", displayName: "Mail A")])
+        let materializer = MailRefreshTaskMaterializer(taskRepository: taskRepository, mailSourceRepository: mailRepository)
+        _ = try await materializer.reconcileMailAccountRefreshTasks(now: Date(timeIntervalSince1970: 10))
+
+        let emptyMailRepository = InMemoryMailSourceRepository(accounts: [])
+        let emptyMaterializer = MailRefreshTaskMaterializer(taskRepository: taskRepository, mailSourceRepository: emptyMailRepository)
+        let tasks = try await emptyMaterializer.reconcileMailAccountRefreshTasks(now: Date(timeIntervalSince1970: 20))
+
+        #expect(tasks.contains { $0.id == "system.mail.account.mail-a.refresh" } == false)
+    }
+
+    @Test func materializerPurgesLegacyGlobalMailTask() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let taskRepository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
+        let mailRepository = InMemoryMailSourceRepository(accounts: [makeMailAccount(id: "mail-a", displayName: "Mail A")])
+        let materializer = MailRefreshTaskMaterializer(taskRepository: taskRepository, mailSourceRepository: mailRepository)
+        try taskRepository.saveTask(ConnorTaskDefinition(
+            id: "system.mail.check-every-10-minutes",
+            name: "检查邮件",
+            origin: .system,
+            trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 600, recurrence: .interval),
+            target: .sourceRuntimeRefresh(sourceID: "mail"),
+            lifecycle: ConnorTaskLifecycle(status: .active),
+            metadata: .protectedSystem,
+            createdAt: Date(timeIntervalSince1970: 0),
+            updatedAt: Date(timeIntervalSince1970: 0)
+        ))
+
+        let tasks = try await materializer.reconcileMailAccountRefreshTasks(now: Date(timeIntervalSince1970: 10))
+
+        #expect(tasks.contains { $0.id == "system.mail.check-every-10-minutes" } == false)
+        #expect(tasks.contains { $0.id == "system.mail.account.mail-a.refresh" })
+    }
+
     private func makeSource(id: String, name: String, intervalMinutes: Int) -> RSSSource {
         RSSSource(
             id: RSSSourceID(rawValue: id),
             feedURL: URL(string: "https://example.com/\(id).xml")!,
             displayName: name,
             fetchPolicy: RSSSourceFetchPolicy(intervalMinutes: intervalMinutes)
+        )
+    }
+
+    private func makeMailAccount(id: String, displayName: String) -> MailAccount {
+        let now = Date(timeIntervalSince1970: 0)
+        return MailAccount(
+            id: MailAccountID(rawValue: id),
+            provider: .genericIMAPSMTP,
+            displayName: displayName,
+            identities: [
+                MailIdentity(
+                    id: MailIdentityID(rawValue: "identity-\(id)"),
+                    displayName: displayName,
+                    address: MailAddress(name: displayName, email: "\(id)@example.com")
+                )
+            ],
+            incoming: MailServerEndpoint(host: "imap.example.com", port: 993, security: .tls, protocolKind: .imap),
+            outgoing: MailServerEndpoint(host: "smtp.example.com", port: 587, security: .startTLS, protocolKind: .smtp),
+            health: MailAccountHealth(status: .ready, checkedAt: now, summary: "Ready"),
+            createdAt: now,
+            updatedAt: now
         )
     }
 }
