@@ -10,9 +10,6 @@ public enum MemoryOSConfidentiality: String, Codable, Sendable, Equatable, CaseI
 
 public enum MemoryOSRecordStatus: String, Codable, Sendable, Equatable, CaseIterable {
     case active
-    case proposed
-    case deprecated
-    case invalidated
     case archived
     case failed
 }
