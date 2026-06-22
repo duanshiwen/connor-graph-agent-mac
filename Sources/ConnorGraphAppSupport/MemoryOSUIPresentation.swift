@@ -93,7 +93,7 @@ public struct MemoryOSDashboardPresentationBuilder: Sendable {
                 MemoryOSDashboardLayerRow(id: "l0", label: "L0 Provenance Vault", primaryMetric: "\(snapshot.l0ProvenanceObjectCount)", detail: "Evidence objects"),
                 MemoryOSDashboardLayerRow(id: "l1", label: "L1 Capture Ledger", primaryMetric: "\(snapshot.l1PendingCaptureCount)", detail: "Pending captures; queue \(snapshot.l1PendingQueueCount); retry \(snapshot.l1RetryScheduledCount); expired leases \(snapshot.l1ExpiredLeaseCount)"),
                 MemoryOSDashboardLayerRow(id: "l2", label: "L2 Operational Memory", primaryMetric: "\(snapshot.l2StatementCount)", detail: "Temporal statements; diagnostics \(snapshot.l2DiagnosticCount)"),
-                MemoryOSDashboardLayerRow(id: "l3", label: "L3 Belief Layer", primaryMetric: "\(snapshot.l3BeliefCount)", detail: "Beliefs"),
+                MemoryOSDashboardLayerRow(id: "l3", label: "L3 Knowledge Layer", primaryMetric: "\(snapshot.l3BeliefCount)", detail: "Reusable knowledge records"),
                 MemoryOSDashboardLayerRow(id: "l4", label: "L4 Stable Entity Layer", primaryMetric: "\(snapshot.l4EntityCount)", detail: "Stable entities")
             ],
             operationalWarnings: warnings
