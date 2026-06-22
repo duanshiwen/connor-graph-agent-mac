@@ -37,6 +37,24 @@ private actor MemoryOSFinalAnswerProvider: AgentModelProvider {
     #expect(Set(captureRows.map { $0[0] }) == Set(["chat_message", "assistant_message"]))
 }
 
+@Test func loopChatControllerCanPersistMessagesThroughMemoryOSFacade() async throws {
+    let store = try SQLiteMemoryOSStore(path: ":memory:")
+    try store.migrate()
+    let facade = AppMemoryOSFacade(store: store)
+    let loop = AgentLoopController(modelProvider: MemoryOSFinalAnswerProvider(), toolRegistry: AgentToolRegistry())
+    var controller = AgentLoopChatController(
+        loopController: loop,
+        session: AgentSession(id: "session-memory-os-facade"),
+        memoryOSFacade: facade
+    )
+
+    _ = try await controller.submit("请记住：Memory OS facade 是 App 层唯一新入口")
+
+    let summary = try facade.operationalSummary()
+    #expect(summary.dashboardSnapshot.l0ProvenanceObjectCount == 2)
+    #expect(summary.dashboardSnapshot.l1PendingCaptureCount == 2)
+}
+
 @Test func appMemoryOSBackgroundJobRunnerDetectsExpiredQueueLeases() {
     let runner = AppMemoryOSBackgroundJobRunner()
     let now = Date(timeIntervalSince1970: 1_000)

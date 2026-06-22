@@ -31,6 +31,7 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
     private let memoryStagingRepository: AppMemoryStagingBufferRepository?
     private let memoryOSRepository: AppMemoryOSRepository?
     private let memoryOSIngestionService: MemoryOSIngestionService
+    private let memoryOSFacade: AppMemoryOSFacade?
 
     public init(
         loopController: AgentLoopController<Provider>,
@@ -40,7 +41,8 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
         memoryStagingRepository: AppMemoryStagingBufferRepository? = nil,
         memoryIngestionService: MemoryIngestionService = MemoryIngestionService(),
         memoryOSRepository: AppMemoryOSRepository? = nil,
-        memoryOSIngestionService: MemoryOSIngestionService = MemoryOSIngestionService()
+        memoryOSIngestionService: MemoryOSIngestionService = MemoryOSIngestionService(),
+        memoryOSFacade: AppMemoryOSFacade? = nil
     ) {
         self.loopController = loopController
         self.session = session
@@ -54,6 +56,7 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
         self.memoryIngestionService = memoryIngestionService
         self.memoryOSRepository = memoryOSRepository
         self.memoryOSIngestionService = memoryOSIngestionService
+        self.memoryOSFacade = memoryOSFacade
     }
 
     @discardableResult
@@ -111,6 +114,16 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
     }
 
     private func persistMemoryOSAfterUserMessage(_ message: AgentMessage) throws {
+        if let memoryOSFacade {
+            _ = try memoryOSFacade.ingestChatMessage(
+                messageID: message.id,
+                sessionID: session.id,
+                role: "user",
+                content: message.content,
+                occurredAt: message.createdAt
+            )
+            return
+        }
         guard let memoryOSRepository else { return }
         let result = memoryOSIngestionService.ingest(MemoryOSIngestionInput(
             sourceType: .chatMessage,
@@ -124,6 +137,16 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
     }
 
     private func persistMemoryOSAfterAssistantMessage(_ message: AgentMessage) throws {
+        if let memoryOSFacade {
+            _ = try memoryOSFacade.ingestChatMessage(
+                messageID: message.id,
+                sessionID: session.id,
+                role: "assistant",
+                content: message.content,
+                occurredAt: message.createdAt
+            )
+            return
+        }
         guard let memoryOSRepository else { return }
         let result = memoryOSIngestionService.ingest(MemoryOSIngestionInput(
             sourceType: .assistantMessage,
