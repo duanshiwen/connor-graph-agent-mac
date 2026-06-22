@@ -35,9 +35,5 @@ import ConnorGraphAppSupport
         storagePaths: paths
     )
 
-    #expect(viewModel.graphWriteCandidates.isEmpty)
-    #expect(viewModel.graphExtractionTraces.isEmpty)
-    #expect(viewModel.admissionHoldQueueItems.isEmpty)
-    #expect(viewModel.memoryChangeLogEntries.isEmpty)
     #expect(viewModel.memoryOSDashboardPresentation.layerRows.contains { $0.id == "l0" })
 }

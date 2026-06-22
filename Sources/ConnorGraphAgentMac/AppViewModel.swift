@@ -326,17 +326,10 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var databasePath: String?
     @Published var schemaHealthReport: GraphSchemaHealthReport?
     @Published var promotionCandidates: [ObserveLogEntry] = []
-    @Published var graphWriteCandidates: [GraphWriteCandidate] = []
-    @Published var graphWriteCandidateAudits: [String: [GraphWriteCandidateAuditPresentation]] = [:]
     @Published var pendingApprovals: [AgentPendingApproval] = []
-    @Published var graphExtractionTraces: [AppGraphExtractionTracePresentation] = []
-    @Published var admissionHoldQueueItems: [AppGraphAdmissionHoldQueuePresentation] = []
-    @Published var memoryChangeLogEntries: [AppGraphMemoryChangeLogPresentation] = []
     @Published var memoryOSDashboardPresentation: MemoryOSDashboardPresentation = MemoryOSDashboardPresentationBuilder().presentation(for: MemoryOSDashboardSnapshot(healthStatus: .migrationRequired))
     @Published var lastPromotionResultSummary: String?
-    @Published var lastGraphWriteCandidateResultSummary: String?
     @Published var lastPendingApprovalResultSummary: String?
-    @Published var lastAdmissionHoldQueueActionSummary: String?
     @Published var llmConnectionConfigs: [AppLLMConnectionConfig] = AppLLMSettings.default.connections
     @Published var llmDefaultConnectionID: String = AppLLMSettings.default.defaultConnectionID
     @Published var llmConnectionName: String = AppLLMSettings.default.defaultConnection.name
@@ -497,11 +490,7 @@ final class AppViewModel: NSObject, ObservableObject {
 
     private var repository: AppGraphRepository?
     private var promotionRepository: AppPromotionQueueRepository?
-    private var graphWriteCandidateRepository: AppGraphWriteCandidateRepository?
     private var pendingApprovalRepository: AppAgentPendingApprovalRepository?
-    private var graphExtractionTraceRepository: AppGraphExtractionTraceRepository?
-    private var admissionHoldQueueRepository: AppGraphAdmissionHoldQueueRepository?
-    private var memoryChangeLogRepository: AppGraphMemoryChangeLogRepository?
     private var memoryOSStore: SQLiteMemoryOSStore?
     private var memoryOSFacade: AppMemoryOSFacade?
     private var chatSessionRepository: AppChatSessionRepository?
@@ -4919,17 +4908,6 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
-    func reloadGraphWriteCandidates() {
-        do {
-            let candidates = try graphWriteCandidateRepository?.loadCandidates() ?? []
-            graphWriteCandidates = candidates
-            graphWriteCandidateAudits = try graphWriteCandidateRepository?.loadAuditTimelines(for: candidates) ?? [:]
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
     func reloadPendingApprovals() {
         do {
             pendingApprovals = try pendingApprovalRepository?.loadPending() ?? []
@@ -5023,132 +5001,12 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
-    func reloadGraphExtractionTraces() {
-        do {
-            graphExtractionTraces = try graphExtractionTraceRepository?.loadRecentTraces() ?? []
-            admissionHoldQueueItems = try admissionHoldQueueRepository?.loadOpenItems() ?? []
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
     func reloadMemoryOSDashboard() {
         do {
             if let memoryOSFacade {
                 memoryOSDashboardPresentation = try memoryOSFacade.dashboardPresentation()
                 errorMessage = nil
             }
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func reloadMemoryChangeLog() {
-        do {
-            memoryChangeLogEntries = try memoryChangeLogRepository?.loadRecentEntries() ?? []
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func approveAdmissionHoldQueueItem(_ item: AppGraphAdmissionHoldQueuePresentation) {
-        guard let admissionHoldQueueRepository, let repository else {
-            errorMessage = "准入诊断队列不可用。"
-            return
-        }
-        do {
-            let result = try admissionHoldQueueRepository.approveAndCommit(item.id)
-            let snapshot = try repository.loadSnapshot()
-            apply(snapshot: snapshot)
-            reloadGraphExtractionTraces()
-            reloadMemoryChangeLog()
-            lastAdmissionHoldQueueActionSummary = "已批准并提交 hold item \(item.id)：实体 +\(result.committedEntityIDs.count)，陈述 +\(result.committedStatementIDs.count)"
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func rejectAdmissionHoldQueueItem(_ item: AppGraphAdmissionHoldQueuePresentation) {
-        do {
-            try admissionHoldQueueRepository?.reject(item.id)
-            reloadGraphExtractionTraces()
-            lastAdmissionHoldQueueActionSummary = "已 dismiss hold item \(item.id)"
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func rerunAdmissionHoldQueueItem(_ item: AppGraphAdmissionHoldQueuePresentation) {
-        do {
-            guard let result = try admissionHoldQueueRepository?.rerunExtraction(item.id) else { return }
-            reloadGraphExtractionTraces()
-            lastAdmissionHoldQueueActionSummary = "已重新排队 extraction job \(result.jobID)：\(result.status.rawValue)"
-            errorMessage = nil
-            Task { await runBackgroundJobs() }
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func inspectAdmissionHoldQueueItemEvidence(_ item: AppGraphAdmissionHoldQueuePresentation) {
-        do {
-            guard let inspection = try admissionHoldQueueRepository?.inspectEvidence(item.id) else { return }
-            lastAdmissionHoldQueueActionSummary = inspection.summary
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func validateGraphWriteCandidate(_ candidate: GraphWriteCandidate) async {
-        do {
-            guard let result = try await graphWriteCandidateRepository?.validateGoverned(candidate) else { return }
-            reloadGraphWriteCandidates()
-            lastGraphWriteCandidateResultSummary = result.validation.isValid ? "候选 \(candidate.id) 验证通过，进入待审阅" : "候选 \(candidate.id) 验证失败：\(result.validation.errors.joined(separator: "; "))"
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func approveGraphWriteCandidate(_ candidate: GraphWriteCandidate) async {
-        do {
-            _ = try await graphWriteCandidateRepository?.approveGoverned(candidate)
-            reloadGraphWriteCandidates()
-            lastGraphWriteCandidateResultSummary = "已批准候选 \(candidate.id)，并写入审计日志"
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func rejectGraphWriteCandidate(_ candidate: GraphWriteCandidate) async {
-        do {
-            _ = try await graphWriteCandidateRepository?.rejectGoverned(candidate, reason: "Rejected by reviewer")
-            reloadGraphWriteCandidates()
-            lastGraphWriteCandidateResultSummary = "已拒绝候选 \(candidate.id)，并写入审计日志"
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func commitGraphWriteCandidate(_ candidate: GraphWriteCandidate) async {
-        guard let graphWriteCandidateRepository, let repository else {
-            errorMessage = "写入候选仓储不可用。"
-            return
-        }
-        do {
-            let result = try await graphWriteCandidateRepository.commitGoverned(candidate)
-            let snapshot = try repository.loadSnapshot()
-            apply(snapshot: snapshot)
-            reloadGraphWriteCandidates()
-            lastGraphWriteCandidateResultSummary = "已通过权限治理提交候选 \(candidate.id)：实体 +\(result.createdEntityIDs.count)，陈述 +\(result.createdStatementIDs.count)，更新陈述 \(result.updatedStatementIDs.count)，附加证据 \(result.attachedEvidenceStatementIDs.count)"
-            errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
         }
