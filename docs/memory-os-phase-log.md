@@ -201,6 +201,7 @@ Commits:
 - `d67609e feat: add Memory OS temporal current view`
 - `2ab1c61 refactor: simplify Memory OS record status`
 - `d554cc1 refactor: remove Memory OS semantic conflict schema`
+- `a60af84 refactor: show Memory OS diagnostics instead of conflicts`
 
 Artifacts:
 
@@ -216,6 +217,7 @@ Artifacts:
   - `projected_at`
   - `source_artifact_id`
 - L2/L3 semantic conflict tables were removed from fresh Memory OS schema.
+- Memory OS dashboard/tool output now shows temporal diagnostics rather than conflict counts.
 
 Validation evidence:
 
@@ -225,3 +227,4 @@ Validation evidence:
 - `swift test --filter MemoryOSCurrent` passed.
 - `swift test --filter MemoryOSSchemaMigration` passed.
 - `swift test --filter MemoryOS` passed with 69 MemoryOS tests.
+- `swift test --filter AgentLoopChatControllerMemoryOS`, `swift test --filter NativeSessionManagerMemoryOS`, and `swift test --filter MemoryOSDashboard` passed after removing conflict table queries.
