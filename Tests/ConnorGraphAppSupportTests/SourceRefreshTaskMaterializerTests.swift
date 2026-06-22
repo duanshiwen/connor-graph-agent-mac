@@ -147,12 +147,91 @@ struct SourceRefreshTaskMaterializerTests {
         #expect(tasks.contains { $0.id == "system.mail.account.mail-a.refresh" })
     }
 
+    @Test func materializerCreatesOneCalendarRefreshTaskPerAccount() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let taskRepository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
+        let calendarRepository = InMemoryCalendarSourceRepository(accounts: [
+            makeCalendarAccount(id: "calendar-account-a", displayName: "Calendar A"),
+            makeCalendarAccount(id: "calendar-account-b", displayName: "Calendar B")
+        ])
+        let materializer = CalendarRefreshTaskMaterializer(taskRepository: taskRepository, calendarSourceRepository: calendarRepository)
+
+        let tasks = try await materializer.reconcileCalendarAccountRefreshTasks(now: Date(timeIntervalSince1970: 10))
+        let calendarA = try #require(tasks.first { $0.id == "system.calendar.account.calendar-account-a.refresh" })
+        let calendarB = try #require(tasks.first { $0.id == "system.calendar.account.calendar-account-b.refresh" })
+
+        #expect(calendarA.name == "检查日历：Calendar A")
+        #expect(calendarA.trigger.intervalSeconds == 600)
+        #expect(calendarA.target.targetKind == "source.runtime")
+        #expect(calendarA.target.targetID == "calendar")
+        #expect(calendarA.target.operationName == "refresh")
+        #expect(calendarA.target.parameters["sourceKind"] == "calendar")
+        #expect(calendarA.target.parameters["sourceInstanceID"] == "calendar-account-a")
+        #expect(calendarA.metadata.isProtectedSystemTask)
+        #expect(calendarA.metadata.tags.contains("source-instance"))
+        #expect(calendarB.target.parameters["sourceInstanceID"] == "calendar-account-b")
+        #expect(tasks.contains { $0.id == "system.calendar.check-every-10-minutes" } == false)
+    }
+
+    @Test func materializerPurgesOrphanedCalendarRefreshTasksWhenAccountIsRemoved() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let taskRepository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
+        let calendarRepository = InMemoryCalendarSourceRepository(accounts: [makeCalendarAccount(id: "calendar-account-a", displayName: "Calendar A")])
+        let materializer = CalendarRefreshTaskMaterializer(taskRepository: taskRepository, calendarSourceRepository: calendarRepository)
+        _ = try await materializer.reconcileCalendarAccountRefreshTasks(now: Date(timeIntervalSince1970: 10))
+
+        let emptyCalendarRepository = InMemoryCalendarSourceRepository(accounts: [])
+        let emptyMaterializer = CalendarRefreshTaskMaterializer(taskRepository: taskRepository, calendarSourceRepository: emptyCalendarRepository)
+        let tasks = try await emptyMaterializer.reconcileCalendarAccountRefreshTasks(now: Date(timeIntervalSince1970: 20))
+
+        #expect(tasks.contains { $0.id == "system.calendar.account.calendar-account-a.refresh" } == false)
+    }
+
+    @Test func materializerPurgesLegacyGlobalCalendarTask() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let taskRepository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
+        let calendarRepository = InMemoryCalendarSourceRepository(accounts: [makeCalendarAccount(id: "calendar-account-a", displayName: "Calendar A")])
+        let materializer = CalendarRefreshTaskMaterializer(taskRepository: taskRepository, calendarSourceRepository: calendarRepository)
+        try taskRepository.saveTask(ConnorTaskDefinition(
+            id: "system.calendar.check-every-10-minutes",
+            name: "检查日历",
+            origin: .system,
+            trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 600, recurrence: .interval),
+            target: .sourceRuntimeRefresh(sourceID: "calendar"),
+            lifecycle: ConnorTaskLifecycle(status: .active),
+            metadata: .protectedSystem,
+            createdAt: Date(timeIntervalSince1970: 0),
+            updatedAt: Date(timeIntervalSince1970: 0)
+        ))
+
+        let tasks = try await materializer.reconcileCalendarAccountRefreshTasks(now: Date(timeIntervalSince1970: 10))
+
+        #expect(tasks.contains { $0.id == "system.calendar.check-every-10-minutes" } == false)
+        #expect(tasks.contains { $0.id == "system.calendar.account.calendar-account-a.refresh" })
+    }
+
     private func makeSource(id: String, name: String, intervalMinutes: Int) -> RSSSource {
         RSSSource(
             id: RSSSourceID(rawValue: id),
             feedURL: URL(string: "https://example.com/\(id).xml")!,
             displayName: name,
             fetchPolicy: RSSSourceFetchPolicy(intervalMinutes: intervalMinutes)
+        )
+    }
+
+
+    private func makeCalendarAccount(id: String, displayName: String) -> CalendarAccount {
+        let now = Date(timeIntervalSince1970: 0)
+        return CalendarAccount(
+            id: CalendarAccountID(rawValue: id),
+            provider: .genericCalDAVCardDAV,
+            displayName: displayName,
+            health: CalendarAccountHealth(status: .ready, checkedAt: now, summary: "Ready"),
+            createdAt: now,
+            updatedAt: now
         )
     }
 
@@ -175,5 +254,18 @@ struct SourceRefreshTaskMaterializerTests {
             createdAt: now,
             updatedAt: now
         )
+    }
+}
+
+
+private actor InMemoryCalendarSourceRepository: CalendarSourceRepository {
+    private var accounts: [CalendarAccountID: CalendarAccount]
+
+    init(accounts: [CalendarAccount] = []) {
+        self.accounts = Dictionary(uniqueKeysWithValues: accounts.map { ($0.id, $0) })
+    }
+
+    func listAccounts() async throws -> [CalendarAccount] {
+        accounts.values.sorted { $0.displayName < $1.displayName }
     }
 }

@@ -8,24 +8,13 @@ struct TaskManagementDomainTests {
         #expect(ConnorTaskTriggerKind.allCases == [.scheduled, .eventTriggered])
     }
 
-    @Test func defaultSystemTasksDescribeCalendarRefreshOnly() {
+    @Test func defaultSystemTasksDoNotCreateSourceRefreshTasksWithoutAccounts() {
         let defaults = ConnorTaskDefinition.systemDefaults(now: Date(timeIntervalSince1970: 0))
 
-        let calendar = defaults.first { $0.id == "system.calendar.check-every-10-minutes" }
-
         #expect(defaults.contains { $0.id == "system.mail.check-every-10-minutes" } == false)
-        #expect(calendar?.origin == .system)
-        #expect(calendar?.trigger.kind == .scheduled)
-        #expect(calendar?.trigger.intervalSeconds == 600)
-        #expect(calendar?.trigger.recurrence == .interval)
-        #expect(calendar?.target == ConnorTaskTarget.sourceRuntimeRefresh(sourceID: "calendar"))
-        #expect(calendar?.metadata.isProtectedSystemTask == true)
-        #expect(calendar?.metadata.scope == .global)
-        #expect(calendar?.metadata.ownerSessionID == nil)
-        #expect(calendar?.metadata.isRecoverable == false)
-        #expect(calendar?.metadata.recoveryPolicy == ConnorTaskRecoveryPolicy.none)
-
+        #expect(defaults.contains { $0.id == "system.calendar.check-every-10-minutes" } == false)
         #expect(defaults.contains { $0.target.targetID == "mail" } == false)
+        #expect(defaults.contains { $0.target.targetID == "calendar" } == false)
         #expect(defaults.contains { $0.target.targetID == "rss" } == false)
     }
 
