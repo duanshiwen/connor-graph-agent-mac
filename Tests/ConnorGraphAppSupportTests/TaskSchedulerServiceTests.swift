@@ -8,7 +8,7 @@ struct TaskSchedulerServiceTests {
     @Test func intervalTaskBecomesDueAndSkipsRunningTasks() throws {
         let scheduler = TaskSchedulerService()
         let now = Date(timeIntervalSince1970: 1_000)
-        var task = try #require(ConnorTaskDefinition.systemDefaults(now: Date(timeIntervalSince1970: 0)).first { $0.id == "system.mail.check-every-10-minutes" })
+        var task = try #require(ConnorTaskDefinition.systemDefaults(now: Date(timeIntervalSince1970: 0)).first { $0.id == "system.calendar.check-every-10-minutes" })
         task.lifecycle.status = .active
         task.lifecycle.lastFinishedAt = Date(timeIntervalSince1970: 300)
 
