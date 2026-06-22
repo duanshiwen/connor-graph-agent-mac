@@ -6,7 +6,7 @@ import ConnorGraphAppSupport
 @testable import ConnorGraphAgentMac
 
 @MainActor
-@Test func appViewModelUsesMemoryOSDashboardOnMemoryOSPath() throws {
+@Test func appViewModelInitializesMemoryOSBackendWithoutDashboardRoute() throws {
     _ = NSApplication.shared
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("connor-app-vm-memory-os-cutover-\(UUID().uuidString)", isDirectory: true)
@@ -24,6 +24,6 @@ import ConnorGraphAppSupport
         storagePaths: paths
     )
 
-    #expect(viewModel.memoryOSDashboardPresentation.layerRows.contains { $0.id == "l0" })
-    #expect(viewModel.memoryOSDashboardPresentation.layerRows.contains { $0.id == "l4" })
+    #expect(viewModel.hasMemoryOSBackendForTests)
+    #expect(!SidebarItem.allCases.map(\.rawValue).contains("Memory OS"))
 }
