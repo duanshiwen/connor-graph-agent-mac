@@ -222,7 +222,7 @@ SwiftUI macOS application target. It owns：
 - Attachment preview and inspector UI
 - Settings center
 - Mail/RSS/Calendar/Contacts native surfaces
-- Graph candidate review and diagnostics views
+- Memory OS dashboard, health and provenance surfaces
 
 `AppViewModel` remains the main in-target state object for the macOS app. UI files are split by feature area, but product state ownership stays in Connor-owned services and repositories.
 
@@ -391,13 +391,13 @@ API keys and provider credentials must not be stored in JSON settings files. The
 - Search results preserve source time information: Mail sent/received time, RSS published/fetched time, and Calendar event start/end/timezone/all-day fields
 - Agent-callable search remains concise: `mail_search_messages`, `rss_search_items`, and `calendar_read` with operation `search_events`; duplicate semantic search tools are intentionally avoided
 
-### 5.8 Graph Memory
+### 5.8 Memory OS / Temporal Graph Kernel
 
-- Staging, distillation, candidate review and admission policy
-- SQLite temporal graph storage
-- Graph extraction traces and replay support
-- Grounding checks, hold queues and self-healing services
-- Hybrid retrieval and retrieval evaluation
+- Memory OS L0-L4 production storage, ingestion, queue, health and dashboard paths
+- SQLite temporal graph kernel retained only as storage/search infrastructure
+- Browser, chat and native-session evidence ingestion route through `AppMemoryOSFacade`
+- Old staging, distillation, GraphExtraction, admission hold, candidate review, change-log and self-healing workflows have been physically removed from production sources
+- Hybrid retrieval and retrieval evaluation remain available over retained graph/search infrastructure
 
 ### 5.9 Skills, Tasks and Automation
 

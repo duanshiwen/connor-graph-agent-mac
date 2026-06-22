@@ -25,7 +25,7 @@ The new primary store is `SQLiteMemoryOSStore`, not `SQLiteGraphKernelStore`.
 
 ## What is removed
 
-The following legacy concepts must not survive as production paths:
+H-2 completed the physical deletion/isolation pass. The following legacy concepts no longer survive as production paths:
 
 - memory staging buffers
 - memory distillation
