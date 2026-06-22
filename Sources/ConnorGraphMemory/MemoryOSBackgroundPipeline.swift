@@ -192,11 +192,25 @@ public struct MemoryOSL2ToKnowledgePromptBuilder: Sendable {
         - L3 is reusable knowledge: theories, frameworks, standards, processes, decision bases and durable cognitive structures.
         - L4 is stable entities, concept entities and concept relations.
 
+        Conservative review policy:
+        - Most L2 facts should not become L3 knowledge.
+        - High confidence alone is insufficient for L3 promotion.
+        - All four filters must pass before creating an L3 knowledge candidate.
+        - If any dimension fails, do not create L3.
+        - If existing L3 already covers the idea, output no new L3 candidate.
+        - If existing L4 already contains the concept, reuse it rather than creating a duplicate.
+
         Use the four knowledge filters:
         1. signal quality: is this knowledge rather than noise?
         2. reuse scope: will this be reusable in the future?
         3. novelty: is this new or a material enrichment?
         4. structurability: can it be mapped to category, knowledge type, scope, domain, work object/person and concept entities?
+
+        Accepted knowledge candidates must include explicit AI judgment fields equivalent to:
+        - signal_quality: pass/fail plus reason
+        - reuse_scope: pass/fail plus reason
+        - novelty: pass/fail plus reason
+        - structurability: pass/fail plus reason
 
         You may search L2, L3 and L4 before deciding whether to produce knowledge candidates, concept entities, concept relations or refined L2 facts.
         Do not promote ordinary personal or operational facts into L3. If a fact should be more accurate, propose refined L2 facts as append-only follow-up material rather than overwriting history.
