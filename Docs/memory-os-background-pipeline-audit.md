@@ -1,6 +1,6 @@
 # Memory OS Background Pipeline Audit
 
-Updated: 2026-06-22 21:07 GMT+8
+Updated: 2026-06-22 21:22 GMT+8
 Branch: `feature/memory-os-l0-l4-production-refactor`
 
 This document audits the current Connor Memory OS implementation against the intended two-stage AI background memory pipeline:
@@ -58,12 +58,12 @@ L1 capture events already contain:
 | User chat messages | Connected | `NativeSessionManager.persistMemoryOSAfterUserMessage`, `AgentLoopChatController.persistMemoryOSAfterUserMessage` |
 | Assistant chat messages | Connected | `NativeSessionManager.persistMemoryOSAfterAssistantMessage`, `AgentLoopChatController.persistMemoryOSAfterAssistantMessage` |
 | Browser selection / webpage evidence | Connected for explicit save action | `AppViewModel.saveBrowserSelectionAsEpisode` → `ingestWebPageEvidence` |
-| Mail | Not yet connected to Memory OS L0/L1 | Mail runtime exists, but no `memoryOSFacade` ingestion calls in mail paths |
-| Calendar | Not yet connected to Memory OS L0/L1 | Calendar runtime exists, but no `memoryOSFacade` ingestion calls in calendar paths |
-| RSS | Not yet connected to Memory OS L0/L1 | RSS refresh/materializer exists, but no `memoryOSFacade` ingestion calls in RSS paths |
-| Browser history | Not yet connected to Memory OS L0/L1 | Browser history store exists separately |
-| Attachments / extracted text | Not directly connected to Memory OS L0/L1 | Attachment store/search/evidence candidate path exists separately |
-| Media transcription | Stored as session attachment/background output; not directly Memory OS L0/L1 | Media transcription task path exists separately |
+| Mail | Adapter entry exists; runtime call sites still need wiring | `AppMemoryOSFacade.ingestSourceEvent(sourceKind: "mail", ...)` now writes source events into L0/L1 |
+| Calendar | Adapter entry exists; runtime call sites still need wiring | `ingestSourceEvent(sourceKind: "calendar", ...)` can be used by calendar runtime |
+| RSS | Adapter entry exists; runtime call sites still need wiring | `ingestSourceEvent(sourceKind: "rss", ...)` can be used by RSS refresh runtime |
+| Browser history | Adapter entry exists; history call sites still need wiring | `ingestSourceEvent(sourceKind: "browser_history", ...)` can be used by browser history store |
+| Attachments / extracted text | Adapter entry exists; attachment call sites still need wiring | `ingestSourceEvent(sourceKind: "attachment", ...)` can ingest extracted text summaries |
+| Media transcription | Adapter entry exists; transcription call sites still need wiring | `ingestSourceEvent(sourceKind: "media_transcription", ...)` can ingest transcript summaries |
 
 ## 2. Current L1 threshold and queue mechanism
 
@@ -76,18 +76,14 @@ L1 capture events already contain:
 
 ### What is missing
 
-Current implementation does **not** yet include a full automatic threshold worker that:
+Current implementation now includes the first orchestration layer:
 
-1. Reads pending L1 capture events.
-2. Applies count / token / age thresholds.
-3. Creates 20–30 item processing blocks.
-4. Builds an LLM prompt.
-5. Lets the LLM choose retrieval.
-6. Receives a `GraphStructuredExtractionOutput`.
-7. Projects into L2/L4.
-8. Marks L1 capture events as processed by that artifact.
+1. `MemoryOSL1ProcessingTriggerPolicy` applies count / token / age thresholds.
+2. `MemoryOSL1ToL2JobPlanner` creates 20–30 item style processing blocks.
+3. `MemoryOSL1ToL2PromptBuilder` builds the prompt contract for L1→L2 fact extraction.
+4. `AppMemoryOSFacade.enqueueL1ToL2BackgroundJobs(...)` writes queue items of kind `memory.l1.process_block_to_l2`.
 
-Today, `runProjectionQueueOnce` only leases queue items of kind `project_artifact`; those items already contain raw artifact JSON. It does not call an LLM to produce the artifact.
+Still missing: the model-execution worker that leases these jobs, calls the configured LLM, receives `GraphStructuredExtractionOutput`, and then enqueues or directly runs artifact projection. Today, `runProjectionQueueOnce` still handles only `project_artifact` jobs where raw artifact JSON already exists.
 
 ## 3. Current artifact validation and projection mechanism
 
@@ -157,16 +153,16 @@ L2 projections and projection items tables exist.
 
 ### What is missing
 
-There is no dedicated L2 statement processing state table yet for:
+A dedicated L2 statement processing state table now exists:
 
-- pending knowledge synthesis
-- processing
-- succeeded
-- failed
-- ignored
-- processed-by artifact ID
+- `memory_l2_statement_processing_state`
+- `MemoryOSL2StatementProcessingState`
+- `SQLiteMemoryOSStore.upsert(l2ProcessingState:)`
+- `SQLiteMemoryOSStore.l2ProcessingStates(...)`
 
-There is also no current first-class refinement relation for:
+It supports pending / processing / succeeded / failed style statuses, processing kind, source artifact ID, processed-by artifact ID, last attempt time and metadata.
+
+There is still no current first-class refinement relation for:
 
 ```text
 old L2 statement → refined L2 statement
@@ -189,15 +185,14 @@ MemoryOSKnowledgeExtractionOutput
 
 ### What is missing
 
-There is no automatic worker that:
+Current implementation now includes the first orchestration layer:
 
-1. Selects unorganized L2 statements.
-2. Blocks them by topic / entity / time / token budget.
-3. Builds a knowledge synthesis prompt.
-4. Lets the LLM retrieve L2/L3/L4 context.
-5. Receives a `MemoryOSKnowledgeExtractionOutput`.
-6. Projects accepted candidates into L3/L4.
-7. Records which L2 statements were consumed or synthesized.
+1. `MemoryOSL2KnowledgeSynthesisTriggerPolicy` selects pending L2 statements.
+2. `MemoryOSL2ToKnowledgeJobPlanner` blocks them by count / token budget.
+3. `MemoryOSL2ToKnowledgePromptBuilder` builds the knowledge synthesis prompt.
+4. `AppMemoryOSFacade.enqueueL2ToKnowledgeBackgroundJobs(...)` writes queue items of kind `memory.l2.synthesize_knowledge`.
+
+Still missing: the model-execution worker that leases these jobs, gives the LLM unified retrieval tools, receives `MemoryOSKnowledgeExtractionOutput`, projects accepted candidates into L3/L4, and marks the L2 processing states as succeeded/failed.
 
 ## 6. Current retrieval and depth mechanism
 
@@ -212,19 +207,15 @@ There is no automatic worker that:
 
 ### What is missing
 
-There is no first-class `MemoryOSUnifiedRetrievalService` yet that searches L1/L2/L3/L4 together and returns a unified hit type with:
+A first-class SQLite retrieval surface now exists:
 
-- layer
-- record ID
-- title
-- summary/snippet
-- score
-- evidence refs
-- provenance refs
-- full-record read capability
-- L4 depth expansion capability
+- `MemoryOSRetrievalLayer`
+- `MemoryOSRetrievalQuery`
+- `MemoryOSRetrievalHit`
+- `SQLiteMemoryOSUnifiedRetrievalService.search(...)`
+- `SQLiteMemoryOSUnifiedRetrievalService.expandL4(entityID:depth:limit:)`
 
-There is also no Memory OS-native L4 traversal service yet. The old traversal pattern can be reused, but it is not exposed as a Memory OS read surface.
+It searches L0/L1/L2/L3/L4, returns layer-aware hits with evidence/provenance/entity refs, and supports L4 depth expansion over entity statements.
 
 ## 7. Recommendation
 
@@ -240,12 +231,12 @@ The user’s target architecture maps well onto the current Memory OS direction.
 - L4 entity/concept schema
 - FTS tables
 
-The missing product mechanism is the orchestration layer:
+The remaining missing product mechanism is the model-execution layer:
 
-1. L1 block planner and L1→L2 AI job type.
-2. L2 statement processing state and L2→L3/L4 AI job type.
-3. Unified Memory OS retrieval and L4 depth expansion.
-4. Prompt contracts that let AI do the semantic judgment, while program code only validates structure/evidence/references.
+1. Worker for `memory.l1.process_block_to_l2` that calls the configured LLM and produces `GraphStructuredExtractionOutput`.
+2. Worker for `memory.l2.synthesize_knowledge` that calls the configured LLM with retrieval access and produces `MemoryOSKnowledgeExtractionOutput`.
+3. Runtime wiring from Mail / Calendar / RSS / browser history / attachment extraction / media transcription into `ingestSourceEvent(...)`.
+4. Marking L1 capture events and L2 processing states as succeeded / failed / ignored after artifact projection.
 
 ## 8. Implementation principle
 
