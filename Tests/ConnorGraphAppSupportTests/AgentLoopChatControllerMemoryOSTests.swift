@@ -63,6 +63,32 @@ private actor MemoryOSFinalAnswerProvider: AgentModelProvider {
     #expect(!runner.shouldRecover(queueStatus: .leased, leaseExpiresAt: now.addingTimeInterval(10), now: now))
 }
 
+@Test func appMemoryOSBackgroundJobRunnerRunsProjectionQueueThroughFacade() throws {
+    let store = try SQLiteMemoryOSStore(path: ":memory:")
+    try store.migrate()
+    let facade = AppMemoryOSFacade(store: store)
+    let now = Date(timeIntervalSince1970: 1_000)
+    let output = GraphStructuredExtractionOutput(
+        entities: [
+            GraphStructuredExtractedEntity(localID: "a", name: "诗闻", evidenceSpanIDs: ["span-1"]),
+            GraphStructuredExtractedEntity(localID: "b", name: "Connor Memory OS", evidenceSpanIDs: ["span-1"])
+        ],
+        statements: [
+            GraphStructuredExtractedStatement(subjectLocalID: "a", predicate: .relatedTo, objectLocalID: "b", statementText: "Background runner projects Memory OS jobs.", confidence: 0.94, evidenceSpanIDs: ["span-1"])
+        ],
+        evidenceSpans: [GraphStructuredEvidenceSpan(id: "span-1", text: "Background runner projects Memory OS jobs.")]
+    )
+    let raw = String(data: try JSONEncoder().encode(output), encoding: .utf8)!
+    let payload = MemoryOSProjectionQueuePayload(rawContent: raw, modelID: "test-model")
+    try store.enqueue(MemoryOSQueueItem(id: "background-projection", kind: "project_artifact", payloadJSON: store.json(payload), nextRunAt: now, idempotencyKey: "background-projection-key"))
+
+    let summary = try AppMemoryOSBackgroundJobRunner().runOnce(facade: facade, now: now)
+
+    #expect(summary.projectionRunCount == 1)
+    #expect(try store.queueItem(id: "background-projection")?.status == .succeeded)
+    #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l2_statements;").first?.first == "1")
+}
+
 @Test func appMemoryOSBackgroundJobRunnerRunsThroughFacade() throws {
     let store = try SQLiteMemoryOSStore(path: ":memory:")
     try store.migrate()
