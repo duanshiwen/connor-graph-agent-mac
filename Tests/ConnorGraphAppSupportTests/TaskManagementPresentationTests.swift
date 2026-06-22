@@ -20,7 +20,7 @@ struct TaskManagementPresentationTests {
         )
         let presentation = TaskManagementUIPresentation.build(tasks: ConnorTaskDefinition.systemDefaults(now: now) + [eventTask], runHistory: [])
 
-        #expect(presentation.scheduledTasks.count == 1)
+        #expect(presentation.scheduledTasks.count == 0)
         #expect(presentation.eventTriggeredTasks.map(\.id) == ["ai.watch-keyword"])
         #expect(presentation.summary.manualTaskCount == 0)
         #expect(presentation.summary.reviewControlCount == 0)
@@ -52,13 +52,13 @@ struct TaskManagementPresentationTests {
 
         #expect(!presentation.cards.contains { $0.id == mediaTask.id })
         #expect(!presentation.scheduledTasks.contains { $0.id == mediaTask.id })
-        #expect(presentation.scheduledTasks.count == 1)
-        #expect(presentation.summary.scheduledTaskCount == 1)
-        #expect(presentation.summary.totalTaskCount == 1)
+        #expect(presentation.scheduledTasks.count == 0)
+        #expect(presentation.summary.scheduledTaskCount == 0)
+        #expect(presentation.summary.totalTaskCount == 0)
     }
 
     @Test func systemTaskCardDisablesDeleteAndExposesOpaqueTarget() throws {
-        let task = try #require(ConnorTaskDefinition.systemDefaults(now: Date(timeIntervalSince1970: 0)).first { $0.id == "system.calendar.check-every-10-minutes" })
+        let task = makeProtectedCalendarRefreshTask(accountID: "calendar-account-a")
         let presentation = TaskManagementUIPresentation.build(tasks: [task], runHistory: [])
         let card = try #require(presentation.cards.first)
 
@@ -92,5 +92,17 @@ struct TaskManagementPresentationTests {
         #expect(card.lastErrorLabel == "external runtime failed")
         #expect(card.rationaleLabel == "Daily summary")
         #expect(card.severity == .error)
+    }
+
+    private func makeProtectedCalendarRefreshTask(accountID: String) -> ConnorTaskDefinition {
+        ConnorTaskDefinition(
+            id: "system.calendar.account.\(accountID).refresh",
+            name: "检查日历：Calendar A",
+            origin: .system,
+            trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 600, recurrence: .interval),
+            target: ConnorTaskTarget(targetKind: "source.runtime", targetID: "calendar", operationName: "refresh", parameters: ["sourceKind": "calendar", "sourceInstanceID": accountID]),
+            lifecycle: ConnorTaskLifecycle(status: .active),
+            metadata: .protectedSystem
+        )
     }
 }

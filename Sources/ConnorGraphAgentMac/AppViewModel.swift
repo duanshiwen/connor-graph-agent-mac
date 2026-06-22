@@ -1621,7 +1621,7 @@ final class AppViewModel: NSObject, ObservableObject {
             },
             calendarRefresh: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("calendar") }
-                return await self.refreshCalendarForScheduledTask(runID: request.runID)
+                return await self.refreshCalendarForScheduledTask(sourceInstanceID: request.sourceInstanceID, runID: request.runID)
             },
             rssRefresh: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("rss") }
@@ -1713,6 +1713,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private func reconcileSourceRefreshTasks(now: Date = Date()) async throws {
         try await reconcileRSSSourceRefreshTasks(now: now)
         try await reconcileMailAccountRefreshTasks(now: now)
+        try await reconcileCalendarAccountRefreshTasks(now: now)
     }
 
     private func reconcileRSSSourceRefreshTasks(now: Date = Date()) async throws {
@@ -1725,6 +1726,15 @@ final class AppViewModel: NSObject, ObservableObject {
         guard let taskManagementRepository, let mailStore else { return }
         let materializer = MailRefreshTaskMaterializer(taskRepository: taskManagementRepository, mailSourceRepository: mailStore)
         _ = try await materializer.reconcileMailAccountRefreshTasks(now: now)
+    }
+
+    private func reconcileCalendarAccountRefreshTasks(now: Date = Date()) async throws {
+        guard let taskManagementRepository else { return }
+        let materializer = CalendarRefreshTaskMaterializer(
+            taskRepository: taskManagementRepository,
+            calendarSourceRepository: CalendarAccountSnapshotRepository(accounts: calendarAccounts)
+        )
+        _ = try await materializer.reconcileCalendarAccountRefreshTasks(now: now)
     }
 
     private func refreshMailForScheduledTask(sourceInstanceID: String?, runID: String?) async throws -> String {
@@ -1761,7 +1771,14 @@ final class AppViewModel: NSObject, ObservableObject {
         return "Mail refreshed \(accounts.count) accounts; fetched \(syncedMessageCount) messages"
     }
 
-    private func refreshCalendarForScheduledTask(runID: String?) async -> String {
+    private func refreshCalendarForScheduledTask(sourceInstanceID: String?, runID: String?) async -> String {
+        if let sourceInstanceID, !sourceInstanceID.isEmpty,
+           sourceInstanceID != CalendarEventKitAdapter.systemAccountID.rawValue {
+            guard calendarAccounts.contains(where: { $0.id.rawValue == sourceInstanceID }) else {
+                return "Calendar account not found: \(sourceInstanceID)"
+            }
+            return "Calendar refreshed account \(sourceInstanceID); remote sync adapter unavailable"
+        }
         let succeeded = await syncSystemCalendarNow()
         return succeeded ? (calendarSyncMessage ?? "Calendar refreshed") : (calendarSyncMessage ?? "Calendar refresh failed")
     }
@@ -2078,6 +2095,8 @@ final class AppViewModel: NSObject, ObservableObject {
             let snapshot = try await CalendarEventKitAdapter.fetchSystemSnapshot()
             upsertSystemCalendarSnapshot(snapshot)
             await persistCalendarSnapshot()
+            try await reconcileCalendarAccountRefreshTasks()
+            reloadTaskManagementPresentation()
             calendarSyncMessage = "已同步本机日历：\(snapshot.collections.count) 个日历，\(snapshot.events.count) 个日程"
             appSettingsMessage = calendarSyncMessage
             errorMessage = nil
@@ -2178,7 +2197,15 @@ final class AppViewModel: NSObject, ObservableObject {
         reloadCalendarBrowserPresentation()
         calendarSyncMessage = "已添加日历源：\(resolvedDisplayName)"
         appSettingsMessage = calendarSyncMessage
-        Task { await persistCalendarSnapshot() }
+        Task { @MainActor in
+            await persistCalendarSnapshot()
+            do {
+                try await reconcileCalendarAccountRefreshTasks(now: now)
+                reloadTaskManagementPresentation()
+            } catch {
+                errorMessage = String(describing: error)
+            }
+        }
     }
 
     func deleteCalendarSource(_ account: CalendarAccount) {
@@ -2196,7 +2223,15 @@ final class AppViewModel: NSObject, ObservableObject {
         reloadCalendarBrowserPresentation()
         calendarSyncMessage = "已移除日历源：\(account.displayName)"
         appSettingsMessage = calendarSyncMessage
-        Task { await persistCalendarSnapshot() }
+        Task { @MainActor in
+            await persistCalendarSnapshot()
+            do {
+                try await reconcileCalendarAccountRefreshTasks()
+                reloadTaskManagementPresentation()
+            } catch {
+                errorMessage = String(describing: error)
+            }
+        }
     }
 
     private func calendarProviderDisplayName(_ provider: ConnectedAccountProviderKind) -> String {
@@ -4845,7 +4880,7 @@ final class AppViewModel: NSObject, ObservableObject {
             },
             calendarRefresh: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("calendar") }
-                return await self.refreshCalendarForScheduledTask(runID: request.runID)
+                return await self.refreshCalendarForScheduledTask(sourceInstanceID: request.sourceInstanceID, runID: request.runID)
             },
             rssRefresh: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("rss") }

@@ -1,7 +1,23 @@
 import Foundation
 import ConnorGraphCore
 
-public actor FileBackedCalendarSourceStore {
+public protocol CalendarSourceRepository: Sendable {
+    func listAccounts() async throws -> [CalendarAccount]
+}
+
+public struct CalendarAccountSnapshotRepository: CalendarSourceRepository {
+    public var accounts: [CalendarAccount]
+
+    public init(accounts: [CalendarAccount]) {
+        self.accounts = accounts
+    }
+
+    public func listAccounts() async throws -> [CalendarAccount] {
+        accounts.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+    }
+}
+
+public actor FileBackedCalendarSourceStore: CalendarSourceRepository {
     public struct Snapshot: Codable, Sendable, Equatable {
         public var accounts: [CalendarAccount]
         public var collections: [CalendarCollection]
@@ -41,6 +57,10 @@ public actor FileBackedCalendarSourceStore {
         self.encoder.dateEncodingStrategy = .iso8601
         self.decoder = JSONDecoder()
         self.decoder.dateDecodingStrategy = .iso8601
+    }
+
+    public func listAccounts() async throws -> [CalendarAccount] {
+        try loadSnapshot().accounts
     }
 
     public func loadSnapshot() throws -> Snapshot {

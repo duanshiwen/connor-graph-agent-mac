@@ -10,10 +10,11 @@ struct TaskManagementStackTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let repository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
         let stack = TaskManagementStack(repository: repository)
-        _ = try repository.loadOrCreateDefault(now: Date(timeIntervalSince1970: 0))
+        let calendar = makeProtectedCalendarRefreshTask(accountID: "calendar-account-a")
+        try repository.saveTask(calendar)
 
-        let stopped = try stack.stopTask(id: "system.calendar.check-every-10-minutes", reason: "network constrained")
-        let restored = try stack.restoreTask(id: "system.calendar.check-every-10-minutes")
+        let stopped = try stack.stopTask(id: calendar.id, reason: "network constrained")
+        let restored = try stack.restoreTask(id: calendar.id)
 
         #expect(stopped.lifecycle.status == .stopped)
         #expect(restored.lifecycle.status == .active)
@@ -25,10 +26,11 @@ struct TaskManagementStackTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let repository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
         let stack = TaskManagementStack(repository: repository)
-        _ = try repository.loadOrCreateDefault(now: Date(timeIntervalSince1970: 0))
+        let calendar = makeProtectedCalendarRefreshTask(accountID: "calendar-account-a")
+        try repository.saveTask(calendar)
 
         #expect(throws: AppTaskManagementError.self) {
-            try stack.deleteTask(id: "system.calendar.check-every-10-minutes", reason: "remove")
+            try stack.deleteTask(id: calendar.id, reason: "remove")
         }
 
         let aiTask = ConnorTaskDefinition(
@@ -51,18 +53,31 @@ struct TaskManagementStackTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let repository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
         let stack = TaskManagementStack(repository: repository)
-        _ = try repository.loadOrCreateDefault(now: Date(timeIntervalSince1970: 0))
+        let calendar = makeProtectedCalendarRefreshTask(accountID: "calendar-account-a")
+        try repository.saveTask(calendar)
 
-        let running = ConnorTaskRunRecord(id: "run-running", taskID: "system.calendar.check-every-10-minutes", status: .running, startedAt: Date(timeIntervalSince1970: 1), outputSummary: "started")
-        let succeeded = ConnorTaskRunRecord(id: "run-success", taskID: "system.calendar.check-every-10-minutes", status: .succeeded, startedAt: Date(timeIntervalSince1970: 1), finishedAt: Date(timeIntervalSince1970: 2), outputSummary: "done")
+        let running = ConnorTaskRunRecord(id: "run-running", taskID: calendar.id, status: .running, startedAt: Date(timeIntervalSince1970: 1), outputSummary: "started")
+        let succeeded = ConnorTaskRunRecord(id: "run-success", taskID: calendar.id, status: .succeeded, startedAt: Date(timeIntervalSince1970: 1), finishedAt: Date(timeIntervalSince1970: 2), outputSummary: "done")
 
         try stack.recordRun(running)
         try stack.recordRun(succeeded)
-        let history = try stack.runHistory(taskID: "system.calendar.check-every-10-minutes", limit: 10)
-        let task = try repository.loadTask(id: "system.calendar.check-every-10-minutes")
+        let history = try stack.runHistory(taskID: calendar.id, limit: 10)
+        let task = try repository.loadTask(id: calendar.id)
 
         #expect(history.map(\.id) == ["run-success", "run-running"])
         #expect(task?.lifecycle.status == .succeeded)
         #expect(task?.lifecycle.lastFinishedAt == Date(timeIntervalSince1970: 2))
+    }
+
+    private func makeProtectedCalendarRefreshTask(accountID: String) -> ConnorTaskDefinition {
+        ConnorTaskDefinition(
+            id: "system.calendar.account.\(accountID).refresh",
+            name: "检查日历：Calendar A",
+            origin: .system,
+            trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 600, recurrence: .interval),
+            target: ConnorTaskTarget(targetKind: "source.runtime", targetID: "calendar", operationName: "refresh", parameters: ["sourceKind": "calendar", "sourceInstanceID": accountID]),
+            lifecycle: ConnorTaskLifecycle(status: .active),
+            metadata: .protectedSystem
+        )
     }
 }
