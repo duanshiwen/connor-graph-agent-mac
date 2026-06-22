@@ -182,3 +182,46 @@ Validation evidence:
 - `swift test --filter appMemoryOSBackgroundJobRunner` passed.
 - `swift test --filter agentLoopRuntimeFactoryRegistersMemoryOSToolsInsteadOfLegacyGraphWriteTools` passed.
 - `swift test --filter MemoryOS` passed with 66 MemoryOS tests.
+
+## Phase H-5 — temporal semantic memory refactor
+
+Completed on 2026-06-22 19:14 GMT+8.
+
+Core invariant:
+
+- L2, L3 and L4 semantic memory records are append-only temporal records.
+- Historical semantic records are not mutated to express currentness.
+- Current memory is derived by query/view logic using temporal ordering, confidence and evidence.
+- Ambiguity is diagnostic-only and does not block writes or mutate old records.
+- Operational statuses remain valid for queue, artifact validation and health reporting.
+
+Commits:
+
+- `d1bb728 refactor: make Memory OS semantic records temporal`
+- `d67609e feat: add Memory OS temporal current view`
+- `2ab1c61 refactor: simplify Memory OS record status`
+- `d554cc1 refactor: remove Memory OS semantic conflict schema`
+
+Artifacts:
+
+- `MemoryOSAssertionKind` replaces L2/L4 semantic lifecycle status.
+- `MemoryOSProjectionKind` replaces L3 belief lifecycle status.
+- `MemoryOSStatement`, `MemoryOSBelief` and `MemoryOSEntityStatement` now carry temporal/source fields rather than confirmed/conflicted/deprecated/superseded semantics.
+- `MemoryOSCurrentViewService` derives current L2/L3/L4 views from append-only records.
+- `MemoryOSCurrentViewDiagnostic` records ambiguity as non-blocking diagnostics.
+- `SQLiteMemoryOSStore` schema version advanced to v2 with temporal semantic columns:
+  - `assertion_kind`
+  - `projection_kind`
+  - `valid_at`
+  - `projected_at`
+  - `source_artifact_id`
+- L2/L3 semantic conflict tables were removed from fresh Memory OS schema.
+
+Validation evidence:
+
+- `swift test --filter MemoryOSDomain` passed.
+- `swift test --filter MemoryOSProjection` passed.
+- `swift test --filter MemoryOSProjectionStore` passed.
+- `swift test --filter MemoryOSCurrent` passed.
+- `swift test --filter MemoryOSSchemaMigration` passed.
+- `swift test --filter MemoryOS` passed with 69 MemoryOS tests.
