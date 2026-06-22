@@ -8,7 +8,6 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     case observeLog = "观察日志"
     case agentChat = "智能体聊天"
     case promotionQueue = "提升队列"
-    case memoryOS = "Memory OS"
     case pendingApprovals = "权限审批"
     case automation = "自动化"
     case scheduledTasks = "定时任务"
