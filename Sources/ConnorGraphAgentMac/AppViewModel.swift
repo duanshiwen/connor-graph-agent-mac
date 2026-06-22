@@ -1372,11 +1372,7 @@ final class AppViewModel: NSObject, ObservableObject {
         }
         if let repository {
             self.promotionRepository = AppPromotionQueueRepository(store: repository.store)
-            self.graphWriteCandidateRepository = AppGraphWriteCandidateRepository(store: repository.store)
             self.pendingApprovalRepository = AppAgentPendingApprovalRepository(store: repository.store)
-            self.graphExtractionTraceRepository = AppGraphExtractionTraceRepository(store: repository.store)
-            self.admissionHoldQueueRepository = AppGraphAdmissionHoldQueueRepository(store: repository.store)
-            self.memoryChangeLogRepository = AppGraphMemoryChangeLogRepository(store: repository.store)
             self.chatSessionRepository = AppChatSessionRepository(store: repository.store, storagePaths: storagePaths, governanceConfig: governanceConfig)
             if let storagePaths {
                 self.runtimeSettingsRepository = AppRuntimeSettingsRepository(configDirectory: storagePaths.configDirectory)
@@ -1452,8 +1448,6 @@ final class AppViewModel: NSObject, ObservableObject {
         loadBrowserHistory()
         reloadSchemaHealthReport()
         reloadMemoryOSDashboard()
-        reloadGraphExtractionTraces()
-        reloadMemoryChangeLog()
         Task { await ensureMediaTranscriptionRuntimeOnLaunch() }
     }
 
@@ -1467,7 +1461,6 @@ final class AppViewModel: NSObject, ObservableObject {
         nativeSessionManager = makeNativeSessionManager(for: session)
         Task { await runSearch() }
         reloadPromotionCandidates()
-        reloadGraphWriteCandidates()
         reloadPendingApprovals()
     }
 
@@ -1483,14 +1476,8 @@ final class AppViewModel: NSObject, ObservableObject {
             if let backgroundJobRunner, let repository {
                 _ = try await backgroundJobRunner.runAvailable(limit: 5)
                 let snapshot = try repository.loadSnapshot()
-                let traces = try graphExtractionTraceRepository?.loadRecentTraces() ?? []
-                let holdItems = try admissionHoldQueueRepository?.loadOpenItems() ?? []
-                let changeLog = try memoryChangeLogRepository?.loadRecentEntries() ?? []
                 await MainActor.run {
                     apply(snapshot: snapshot)
-                    graphExtractionTraces = traces
-                    admissionHoldQueueItems = holdItems
-                    memoryChangeLogEntries = changeLog
                 }
             }
             await MainActor.run {
