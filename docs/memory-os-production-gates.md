@@ -61,6 +61,7 @@ Status: passed.
 - Current L4 entity profile records are derived from temporal entity statements.
 - Historical records are not mutated to express currentness.
 - Ambiguous candidates produce diagnostic-only `MemoryOSCurrentViewDiagnostic` records.
+- Dashboard and agent tool output expose diagnostics rather than conflict counts.
 
 ## Gate 6 — Observability and recovery
 
