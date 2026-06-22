@@ -14,7 +14,7 @@ private func temporaryMemoryOSRepositoryDatabaseURL(_ name: String = UUID().uuid
     let object = MemoryOSProvenanceObject(id: "prov-repo", sourceType: .manual, title: "Evidence", content: "Entity statements need evidence.", occurredAt: now)
     let span = MemoryOSProvenanceSpan(id: "span-repo", provenanceObjectID: object.id, text: "need evidence")
     let node = MemoryOSNode(id: "node-repo", stableKey: "default:concept:evidence", nodeType: "concept", name: "Evidence")
-    let statement = MemoryOSStatement(id: "stmt-repo", subjectID: node.id, predicate: "requires", text: "Entity statements need evidence.", status: .confirmed, confidence: 0.9, validAt: now, committedAt: now, evidenceSpanIDs: [span.id])
+    let statement = MemoryOSStatement(id: "stmt-repo", subjectID: node.id, predicate: "requires", text: "Entity statements need evidence.", assertionKind: .observed, confidence: 0.9, validAt: now, committedAt: now, evidenceSpanIDs: [span.id])
 
     try store.upsert(provenance: object)
     try store.upsert(span: span)

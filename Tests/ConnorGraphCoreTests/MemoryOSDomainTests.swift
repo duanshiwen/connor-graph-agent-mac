@@ -66,5 +66,4 @@ import ConnorGraphCore
     #expect(entity.stableKey == "default:project:connor-memory-os")
     #expect(entity.aliases == ["Memory OS"])
     #expect(entity.validFrom != nil)
-    #expect(entity.validUntil == nil)
 }

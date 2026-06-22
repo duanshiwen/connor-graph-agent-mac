@@ -38,21 +38,16 @@ public enum MemoryOSQueueStatus: String, Codable, Sendable, Equatable, CaseItera
     case cancelled
 }
 
-public enum MemoryOSStatementStatus: String, Codable, Sendable, Equatable, CaseIterable {
-    case candidate
+public enum MemoryOSAssertionKind: String, Codable, Sendable, Equatable, CaseIterable {
     case observed
-    case confirmed
-    case rejected
-    case invalidated
-    case superseded
+    case inferred
+    case summarized
 }
 
-public enum MemoryOSBeliefStatus: String, Codable, Sendable, Equatable, CaseIterable {
-    case proposed
+public enum MemoryOSProjectionKind: String, Codable, Sendable, Equatable, CaseIterable {
     case observed
-    case userConfirmed = "user_confirmed"
-    case deprecated
-    case conflicted
+    case inferred
+    case summarized
 }
 
 public enum MemoryOSHealthStatus: String, Codable, Sendable, Equatable, CaseIterable {
@@ -266,13 +261,12 @@ public struct MemoryOSNode: Codable, Sendable, Equatable, Identifiable {
     public var nodeType: String
     public var name: String
     public var summary: String
-    public var status: MemoryOSRecordStatus
     public var createdAt: Date
     public var updatedAt: Date
     public var metadata: [String: String]
 
-    public init(id: String = UUID().uuidString, stableKey: String, nodeType: String, name: String, summary: String = "", status: MemoryOSRecordStatus = .active, createdAt: Date = Date(), updatedAt: Date = Date(), metadata: [String: String] = [:]) {
-        self.id = id; self.stableKey = stableKey; self.nodeType = nodeType; self.name = name; self.summary = summary; self.status = status; self.createdAt = createdAt; self.updatedAt = updatedAt; self.metadata = metadata
+    public init(id: String = UUID().uuidString, stableKey: String, nodeType: String, name: String, summary: String = "", createdAt: Date = Date(), updatedAt: Date = Date(), metadata: [String: String] = [:]) {
+        self.id = id; self.stableKey = stableKey; self.nodeType = nodeType; self.name = name; self.summary = summary; self.createdAt = createdAt; self.updatedAt = updatedAt; self.metadata = metadata
     }
 }
 
@@ -282,16 +276,16 @@ public struct MemoryOSStatement: Codable, Sendable, Equatable, Identifiable {
     public var predicate: String
     public var objectID: String?
     public var text: String
-    public var status: MemoryOSStatementStatus
+    public var assertionKind: MemoryOSAssertionKind
     public var confidence: Double
     public var validAt: Date
-    public var invalidAt: Date?
     public var committedAt: Date
     public var evidenceSpanIDs: [String]
+    public var sourceArtifactID: String?
     public var metadata: [String: String]
 
-    public init(id: String = UUID().uuidString, subjectID: String, predicate: String, objectID: String? = nil, text: String, status: MemoryOSStatementStatus = .observed, confidence: Double = 0.5, validAt: Date = Date(), invalidAt: Date? = nil, committedAt: Date = Date(), evidenceSpanIDs: [String] = [], metadata: [String: String] = [:]) {
-        self.id = id; self.subjectID = subjectID; self.predicate = predicate; self.objectID = objectID; self.text = text; self.status = status; self.confidence = confidence; self.validAt = validAt; self.invalidAt = invalidAt; self.committedAt = committedAt; self.evidenceSpanIDs = evidenceSpanIDs; self.metadata = metadata
+    public init(id: String = UUID().uuidString, subjectID: String, predicate: String, objectID: String? = nil, text: String, assertionKind: MemoryOSAssertionKind = .observed, confidence: Double = 0.5, validAt: Date = Date(), committedAt: Date = Date(), evidenceSpanIDs: [String] = [], sourceArtifactID: String? = nil, metadata: [String: String] = [:]) {
+        self.id = id; self.subjectID = subjectID; self.predicate = predicate; self.objectID = objectID; self.text = text; self.assertionKind = assertionKind; self.confidence = confidence; self.validAt = validAt; self.committedAt = committedAt; self.evidenceSpanIDs = evidenceSpanIDs; self.sourceArtifactID = sourceArtifactID; self.metadata = metadata
     }
 }
 
@@ -299,15 +293,16 @@ public struct MemoryOSBelief: Codable, Sendable, Equatable, Identifiable {
     public var id: String
     public var topic: String
     public var statement: String
-    public var status: MemoryOSBeliefStatus
+    public var projectionKind: MemoryOSProjectionKind
     public var confidence: Double
     public var evidenceStatementIDs: [String]
-    public var createdAt: Date
-    public var updatedAt: Date
+    public var validAt: Date
+    public var projectedAt: Date
+    public var sourceArtifactID: String?
     public var metadata: [String: String]
 
-    public init(id: String = UUID().uuidString, topic: String, statement: String, status: MemoryOSBeliefStatus = .proposed, confidence: Double = 0.5, evidenceStatementIDs: [String] = [], createdAt: Date = Date(), updatedAt: Date = Date(), metadata: [String: String] = [:]) {
-        self.id = id; self.topic = topic; self.statement = statement; self.status = status; self.confidence = confidence; self.evidenceStatementIDs = evidenceStatementIDs; self.createdAt = createdAt; self.updatedAt = updatedAt; self.metadata = metadata
+    public init(id: String = UUID().uuidString, topic: String, statement: String, projectionKind: MemoryOSProjectionKind = .observed, confidence: Double = 0.5, evidenceStatementIDs: [String] = [], validAt: Date = Date(), projectedAt: Date = Date(), sourceArtifactID: String? = nil, metadata: [String: String] = [:]) {
+        self.id = id; self.topic = topic; self.statement = statement; self.projectionKind = projectionKind; self.confidence = confidence; self.evidenceStatementIDs = evidenceStatementIDs; self.validAt = validAt; self.projectedAt = projectedAt; self.sourceArtifactID = sourceArtifactID; self.metadata = metadata
     }
 }
 
@@ -319,15 +314,13 @@ public struct MemoryOSEntity: Codable, Sendable, Equatable, Identifiable {
     public var aliases: [String]
     public var summary: String
     public var confidence: Double
-    public var status: MemoryOSRecordStatus
     public var createdAt: Date
     public var updatedAt: Date
     public var validFrom: Date?
-    public var validUntil: Date?
     public var metadata: [String: String]
 
-    public init(id: String = UUID().uuidString, stableKey: String, entityType: String, name: String, aliases: [String] = [], summary: String = "", confidence: Double = 0.5, status: MemoryOSRecordStatus = .active, createdAt: Date = Date(), updatedAt: Date = Date(), validFrom: Date? = nil, validUntil: Date? = nil, metadata: [String: String] = [:]) {
-        self.id = id; self.stableKey = stableKey; self.entityType = entityType; self.name = name; self.aliases = aliases; self.summary = summary; self.confidence = confidence; self.status = status; self.createdAt = createdAt; self.updatedAt = updatedAt; self.validFrom = validFrom; self.validUntil = validUntil; self.metadata = metadata
+    public init(id: String = UUID().uuidString, stableKey: String, entityType: String, name: String, aliases: [String] = [], summary: String = "", confidence: Double = 0.5, createdAt: Date = Date(), updatedAt: Date = Date(), validFrom: Date? = nil, metadata: [String: String] = [:]) {
+        self.id = id; self.stableKey = stableKey; self.entityType = entityType; self.name = name; self.aliases = aliases; self.summary = summary; self.confidence = confidence; self.createdAt = createdAt; self.updatedAt = updatedAt; self.validFrom = validFrom; self.metadata = metadata
     }
 }
 
@@ -337,16 +330,16 @@ public struct MemoryOSEntityStatement: Codable, Sendable, Equatable, Identifiabl
     public var predicate: String
     public var objectEntityID: String?
     public var text: String
-    public var status: MemoryOSStatementStatus
+    public var assertionKind: MemoryOSAssertionKind
     public var confidence: Double
     public var validAt: Date
-    public var invalidAt: Date?
     public var committedAt: Date
     public var evidenceSpanIDs: [String]
+    public var sourceArtifactID: String?
     public var metadata: [String: String]
 
-    public init(id: String = UUID().uuidString, entityID: String, predicate: String, objectEntityID: String? = nil, text: String, status: MemoryOSStatementStatus = .observed, confidence: Double = 0.5, validAt: Date = Date(), invalidAt: Date? = nil, committedAt: Date = Date(), evidenceSpanIDs: [String] = [], metadata: [String: String] = [:]) {
-        self.id = id; self.entityID = entityID; self.predicate = predicate; self.objectEntityID = objectEntityID; self.text = text; self.status = status; self.confidence = confidence; self.validAt = validAt; self.invalidAt = invalidAt; self.committedAt = committedAt; self.evidenceSpanIDs = evidenceSpanIDs; self.metadata = metadata
+    public init(id: String = UUID().uuidString, entityID: String, predicate: String, objectEntityID: String? = nil, text: String, assertionKind: MemoryOSAssertionKind = .observed, confidence: Double = 0.5, validAt: Date = Date(), committedAt: Date = Date(), evidenceSpanIDs: [String] = [], sourceArtifactID: String? = nil, metadata: [String: String] = [:]) {
+        self.id = id; self.entityID = entityID; self.predicate = predicate; self.objectEntityID = objectEntityID; self.text = text; self.assertionKind = assertionKind; self.confidence = confidence; self.validAt = validAt; self.committedAt = committedAt; self.evidenceSpanIDs = evidenceSpanIDs; self.sourceArtifactID = sourceArtifactID; self.metadata = metadata
     }
 }
 

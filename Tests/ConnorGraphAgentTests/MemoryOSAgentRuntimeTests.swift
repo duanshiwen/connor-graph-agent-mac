@@ -5,8 +5,8 @@ import ConnorGraphCore
 
 @Test func memoryOSContextCompilerRanksItemsAndRespectsBudget() {
     let now = Date(timeIntervalSince1970: 1_000)
-    let statement = MemoryOSStatement(id: "stmt", subjectID: "n", predicate: "requires", text: "Memory OS requires evidence-backed statements.", status: .confirmed, confidence: 0.9, validAt: now, committedAt: now, evidenceSpanIDs: ["span"])
-    let belief = MemoryOSBelief(id: "belief", topic: "memory", statement: "Production memory must be auditable.", status: .userConfirmed, confidence: 0.95, evidenceStatementIDs: ["stmt"], createdAt: now, updatedAt: now)
+    let statement = MemoryOSStatement(id: "stmt", subjectID: "n", predicate: "requires", text: "Memory OS requires evidence-backed statements.", assertionKind: .observed, confidence: 0.9, validAt: now, committedAt: now, evidenceSpanIDs: ["span"])
+    let belief = MemoryOSBelief(id: "belief", topic: "memory", statement: "Production memory must be auditable.", projectionKind: .observed, confidence: 0.95, evidenceStatementIDs: ["stmt"], validAt: now, projectedAt: now)
     let entity = MemoryOSEntity(id: "entity", stableKey: "default:project:memory-os", entityType: "project", name: "Memory OS", summary: "Production memory architecture", confidence: 0.8)
 
     let contract = MemoryOSContextCompiler(tokenBudget: 100).compile(query: "memory", statements: [statement], beliefs: [belief], entities: [entity], now: now)
@@ -29,7 +29,7 @@ import ConnorGraphCore
     let now = Date(timeIntervalSince1970: 1_000)
     let statement = MemoryOSWriteTools().makeObservation(subjectID: "node", predicate: "requires", text: "Evidence is required.", evidenceSpanIDs: ["span"], now: now)
 
-    #expect(statement.status == .observed)
+    #expect(statement.assertionKind == .observed)
     #expect(statement.evidenceSpanIDs == ["span"])
     #expect(statement.validAt == now)
 }
@@ -37,6 +37,6 @@ import ConnorGraphCore
 @Test func memoryOSWriteToolsCreateProposedBelief() {
     let belief = MemoryOSWriteTools().proposeBelief(topic: "memory", statement: "Memory needs governance.", evidenceStatementIDs: ["stmt"])
 
-    #expect(belief.status == .proposed)
+    #expect(belief.projectionKind == .summarized)
     #expect(belief.evidenceStatementIDs == ["stmt"])
 }

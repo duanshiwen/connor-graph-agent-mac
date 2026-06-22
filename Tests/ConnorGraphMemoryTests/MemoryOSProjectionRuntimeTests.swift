@@ -34,7 +34,8 @@ import ConnorGraphMemory
     #expect(batch.entityStatements.count == 1)
     #expect(batch.beliefs.count == 1)
     #expect(batch.statements.first?.evidenceSpanIDs == ["span-1"])
-    #expect(batch.beliefs.first?.status == .observed)
+    #expect(batch.beliefs.first?.projectionKind == .observed)
+    #expect(batch.statements.first?.sourceArtifactID == artifact.id)
     #expect(batch.entities.contains { $0.stableKey == "personal:person_object:诗闻" })
 }
 
