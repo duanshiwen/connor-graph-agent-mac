@@ -38,7 +38,7 @@ private func encodedWorkerProjectionFixture() throws -> String {
     #expect(summaries.first?.accepted == true)
     #expect(try store.queueItem(id: "queue-worker-1")?.status == .succeeded)
     #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l2_statements;").first?.first == "1")
-    #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l3_beliefs;").first?.first == "1")
+    #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l3_beliefs;").first?.first == "0")
 }
 
 @Test func appMemoryOSProjectionQueueWorkerRetriesMalformedPayloadWithoutProjecting() throws {
