@@ -196,6 +196,29 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         """).map(decodeQueueItem).first
     }
 
+    public func runnableQueueItems(kind: String? = nil, limit: Int = 10, now: Date = Date()) throws -> [MemoryOSQueueItem] {
+        let kindClause = kind.map { " AND kind = \(quote($0))" } ?? ""
+        return try query(sql: """
+        SELECT id, kind, status, priority, payload_json, attempt_count, max_attempts, next_run_at, locked_at, locked_by, lease_expires_at, idempotency_key, payload_hash, created_at, updated_at, error_code, error_message
+        FROM memory_l1_processing_queue
+        WHERE status IN ('pending', 'retry_scheduled') AND next_run_at <= \(quote(iso(now)))\(kindClause)
+        ORDER BY priority DESC, next_run_at ASC
+        LIMIT \(limit)
+        """).map(decodeQueueItem)
+    }
+
+    public func leaseQueueItem(id: String, workerID: String, now: Date = Date(), leaseDuration: TimeInterval = 300) throws -> MemoryOSQueueItem? {
+        guard var item = try queueItem(id: id) else { return nil }
+        guard [.pending, .retryScheduled].contains(item.status), item.nextRunAt <= now else { return nil }
+        item.status = .processing
+        item.lockedAt = now
+        item.lockedBy = workerID
+        item.leaseExpiresAt = now.addingTimeInterval(leaseDuration)
+        item.updatedAt = now
+        try enqueue(item)
+        return item
+    }
+
     // MARK: - L2
 
     public func upsert(node: MemoryOSNode) throws {
