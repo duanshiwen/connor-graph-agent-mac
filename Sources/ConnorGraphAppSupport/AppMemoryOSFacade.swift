@@ -282,6 +282,48 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         }
     }
 
+    public func runBackgroundAIQueueOnce<Executor: MemoryOSBackgroundModelExecutor>(executor: Executor, workerID: String = "memory-os-background-ai-worker", limit: Int = 5, now: Date = Date()) throws -> [MemoryOSProjectionRunSummary] {
+        let kinds = [MemoryOSBackgroundJobKind.l1ProcessBlockToL2.rawValue, MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue]
+        let candidates = try kinds.flatMap { kind in
+            try store.runnableQueueItems(kind: kind, limit: limit, now: now)
+        }.sorted { lhs, rhs in
+            if lhs.priority != rhs.priority { return lhs.priority > rhs.priority }
+            return lhs.createdAt < rhs.createdAt
+        }.prefix(limit)
+
+        var summaries: [MemoryOSProjectionRunSummary] = []
+        for candidate in candidates {
+            guard let leased = try store.leaseQueueItem(id: candidate.id, workerID: workerID, now: now) else { continue }
+            do {
+                switch leased.kind {
+                case MemoryOSBackgroundJobKind.l1ProcessBlockToL2.rawValue:
+                    let draft = try store.decode(MemoryOSL1ToL2JobDraft.self, leased.payloadJSON)
+                    let result = try MemoryOSBackgroundJobWorker(executor: executor).run(draft)
+                    let summary = try projectAndRecordLLMArtifact(rawContent: result.rawArtifactJSON, modelID: result.metadata["model_id"] ?? workerID, queueItem: leased, processingRunID: result.jobID, artifactType: result.artifactType, schemaName: result.schemaName, now: now)
+                    if summary.accepted {
+                        try deleteL1CaptureEvents(ids: draft.captureEventIDs)
+                    }
+                    summaries.append(summary)
+                case MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue:
+                    let draft = try store.decode(MemoryOSL2ToKnowledgeJobDraft.self, leased.payloadJSON)
+                    let result = try MemoryOSBackgroundJobWorker(executor: executor).run(draft)
+                    let summary = try projectAndRecordLLMArtifact(rawContent: result.rawArtifactJSON, modelID: result.metadata["model_id"] ?? workerID, queueItem: leased, processingRunID: result.jobID, artifactType: result.artifactType, schemaName: result.schemaName, now: now)
+                    if summary.accepted {
+                        try markL2ProcessingStatesSucceeded(statementIDs: draft.statementIDs, artifactID: summary.artifactID, now: now)
+                    }
+                    summaries.append(summary)
+                default:
+                    let failed = try recordQueueFailure(leased, errorCode: "unsupported_background_job_kind", errorMessage: "Unsupported Memory OS background job kind: \(leased.kind)", now: now)
+                    summaries.append(MemoryOSProjectionRunSummary(artifactID: leased.id, accepted: false, issues: [MemoryOSValidationIssue(code: failed.errorCode ?? "unsupported_background_job_kind", message: failed.errorMessage ?? leased.kind)]))
+                }
+            } catch {
+                let failed = try recordQueueFailure(leased, errorCode: "background_ai_job_failed", errorMessage: String(describing: error), now: now)
+                summaries.append(MemoryOSProjectionRunSummary(artifactID: leased.id, accepted: false, issues: [MemoryOSValidationIssue(code: failed.errorCode ?? "background_ai_job_failed", message: failed.errorMessage ?? String(describing: error))]))
+            }
+        }
+        return summaries
+    }
+
     public func recordQueueSuccess(_ item: MemoryOSQueueItem, now: Date = Date()) throws -> MemoryOSQueueItem {
         let transitioned = MemoryOSQueueTransitionService().markSucceeded(item, now: now)
         try store.enqueue(transitioned)
@@ -303,6 +345,25 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
 
     public func shouldRecover(queueItem: MemoryOSQueueItem, now: Date = Date()) -> Bool {
         backgroundRunner.shouldRecover(queueStatus: queueItem.status, leaseExpiresAt: queueItem.leaseExpiresAt, now: now)
+    }
+
+    private func deleteL1CaptureEvents(ids: [String]) throws {
+        guard !ids.isEmpty else { return }
+        let quoted = ids.map { store.quote($0) }.joined(separator: ",")
+        try store.execute("DELETE FROM memory_l1_capture_events WHERE id IN (\(quoted));")
+    }
+
+    private func markL2ProcessingStatesSucceeded(statementIDs: [String], artifactID: String, now: Date) throws {
+        for statementID in statementIDs {
+            try store.upsert(l2ProcessingState: MemoryOSL2StatementProcessingState(
+                statementID: statementID,
+                processingKind: .knowledgeSynthesis,
+                status: .succeeded,
+                processedByArtifactID: artifactID,
+                lastAttemptAt: now,
+                metadata: ["processed_by_artifact_id": artifactID]
+            ))
+        }
     }
 
     private func pendingCaptureEvents(limit: Int) throws -> [MemoryOSCaptureEvent] {
