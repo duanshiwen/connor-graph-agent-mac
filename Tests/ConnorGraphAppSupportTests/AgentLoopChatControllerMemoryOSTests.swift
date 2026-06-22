@@ -62,3 +62,16 @@ private actor MemoryOSFinalAnswerProvider: AgentModelProvider {
     #expect(runner.shouldRecover(queueStatus: .leased, leaseExpiresAt: now.addingTimeInterval(-10), now: now))
     #expect(!runner.shouldRecover(queueStatus: .leased, leaseExpiresAt: now.addingTimeInterval(10), now: now))
 }
+
+@Test func appMemoryOSBackgroundJobRunnerRunsThroughFacade() throws {
+    let store = try SQLiteMemoryOSStore(path: ":memory:")
+    try store.migrate()
+    let facade = AppMemoryOSFacade(store: store)
+    let now = Date(timeIntervalSince1970: 1_000)
+
+    let summary = try AppMemoryOSBackgroundJobRunner().runOnce(facade: facade, now: now)
+
+    #expect(summary.healthStatus == .healthy)
+    #expect(summary.expiredLeaseCount == 0)
+    #expect(summary.checkedAt == now)
+}
