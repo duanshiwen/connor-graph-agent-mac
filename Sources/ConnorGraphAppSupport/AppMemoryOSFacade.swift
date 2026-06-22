@@ -144,7 +144,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
             guard let leased = try store.leaseQueueItem(id: candidate.id, workerID: workerID, now: now) else { continue }
             do {
                 let payload = try store.decode(MemoryOSProjectionQueuePayload.self, leased.payloadJSON)
-                let summary = try projectAndRecordLLMArtifact(rawContent: payload.rawContent, modelID: payload.modelID, queueItem: leased, processingRunID: payload.processingRunID, now: now)
+                let summary = try projectAndRecordLLMArtifact(rawContent: payload.rawContent, modelID: payload.modelID, queueItem: leased, processingRunID: payload.processingRunID, artifactType: payload.artifactType, schemaName: payload.schemaName, now: now)
                 summaries.append(summary)
             } catch {
                 let failed = try recordQueueFailure(leased, errorCode: "projection_payload_decode_failed", errorMessage: String(describing: error), now: now)
@@ -210,6 +210,47 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         )
     }
 
+    public func enqueueL1ToL2BackgroundJobs(policy: MemoryOSL1ProcessingTriggerPolicy = MemoryOSL1ProcessingTriggerPolicy(), now: Date = Date()) throws -> [MemoryOSQueueItem] {
+        let events = try pendingCaptureEvents(limit: max(policy.minPendingCount * 2, policy.maxEventsPerBlock * 4))
+        let drafts = MemoryOSL1ToL2JobPlanner(policy: policy).planJobs(from: events, now: now)
+        return try drafts.map { draft in
+            let payload = store.json(draft)
+            let item = MemoryOSQueueItem(
+                kind: draft.kind,
+                priority: 10,
+                payloadJSON: payload,
+                nextRunAt: now,
+                idempotencyKey: "\(draft.kind):\(draft.captureEventIDs.joined(separator: ","))",
+                payloadHash: String(payload.hashValue),
+                createdAt: now,
+                updatedAt: now
+            )
+            try store.enqueue(item)
+            return item
+        }
+    }
+
+    public func enqueueL2ToKnowledgeBackgroundJobs(policy: MemoryOSL2KnowledgeSynthesisTriggerPolicy = MemoryOSL2KnowledgeSynthesisTriggerPolicy(), now: Date = Date()) throws -> [MemoryOSQueueItem] {
+        let states = try store.l2ProcessingStates(processingKind: .knowledgeSynthesis, status: .pending, limit: max(policy.minPendingStatementCount * 2, policy.maxStatementsPerBlock * 4))
+        let statements = try statements(for: states.map(\.statementID))
+        let drafts = MemoryOSL2ToKnowledgeJobPlanner(policy: policy).planJobs(from: statements, now: now)
+        return try drafts.map { draft in
+            let payload = store.json(draft)
+            let item = MemoryOSQueueItem(
+                kind: draft.kind,
+                priority: 5,
+                payloadJSON: payload,
+                nextRunAt: now,
+                idempotencyKey: "\(draft.kind):\(draft.statementIDs.joined(separator: ","))",
+                payloadHash: String(payload.hashValue),
+                createdAt: now,
+                updatedAt: now
+            )
+            try store.enqueue(item)
+            return item
+        }
+    }
+
     public func recordQueueSuccess(_ item: MemoryOSQueueItem, now: Date = Date()) throws -> MemoryOSQueueItem {
         let transitioned = MemoryOSQueueTransitionService().markSucceeded(item, now: now)
         try store.enqueue(transitioned)
@@ -231,6 +272,56 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
 
     public func shouldRecover(queueItem: MemoryOSQueueItem, now: Date = Date()) -> Bool {
         backgroundRunner.shouldRecover(queueStatus: queueItem.status, leaseExpiresAt: queueItem.leaseExpiresAt, now: now)
+    }
+
+    private func pendingCaptureEvents(limit: Int) throws -> [MemoryOSCaptureEvent] {
+        try store.query(sql: """
+        SELECT id, provenance_object_id, event_type, occurred_at, token_estimate, processing_state, metadata_json
+        FROM memory_l1_capture_events
+        WHERE processing_state = 'pending'
+        ORDER BY occurred_at ASC
+        LIMIT \(limit)
+        """).map { row in
+            MemoryOSCaptureEvent(
+                id: row[0],
+                provenanceObjectID: row[1],
+                eventType: row[2],
+                occurredAt: parseDate(row[3]),
+                tokenEstimate: Int(row[4]) ?? 0,
+                processingState: MemoryOSQueueStatus(rawValue: row[5]) ?? .pending,
+                metadata: (try? store.decode([String: String].self, row[6])) ?? [:]
+            )
+        }
+    }
+
+    private func statements(for ids: [String]) throws -> [MemoryOSStatement] {
+        guard !ids.isEmpty else { return [] }
+        let quoted = ids.map { store.quote($0) }.joined(separator: ",")
+        return try store.query(sql: """
+        SELECT id, subject_id, predicate, object_id, text, assertion_kind, confidence, valid_at, committed_at, evidence_span_ids_json, source_artifact_id, metadata_json
+        FROM memory_l2_statements
+        WHERE id IN (\(quoted))
+        ORDER BY committed_at ASC
+        """).map { row in
+            MemoryOSStatement(
+                id: row[0],
+                subjectID: row[1],
+                predicate: row[2],
+                objectID: row[3].isEmpty ? nil : row[3],
+                text: row[4],
+                assertionKind: MemoryOSAssertionKind(rawValue: row[5]) ?? .observed,
+                confidence: Double(row[6]) ?? 0,
+                validAt: parseDate(row[7]),
+                committedAt: parseDate(row[8]),
+                evidenceSpanIDs: (try? store.decode([String].self, row[9])) ?? [],
+                sourceArtifactID: row[10].isEmpty ? nil : row[10],
+                metadata: ((try? store.decode([String: String].self, row[11])) ?? [:]).merging(["processing_state": "pending_knowledge_synthesis"]) { current, _ in current }
+            )
+        }
+    }
+
+    private func parseDate(_ value: String) -> Date {
+        ISO8601DateFormatter().date(from: value) ?? Date(timeIntervalSince1970: 0)
     }
 
     private func count(_ table: String, where clause: String? = nil) throws -> Int {
