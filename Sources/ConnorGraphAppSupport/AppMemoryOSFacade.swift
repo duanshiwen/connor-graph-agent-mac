@@ -82,6 +82,26 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         return result
     }
 
+    public func ingestWebPageEvidence(
+        evidenceID: String,
+        title: String,
+        content: String,
+        occurredAt: Date,
+        sessionID: String? = nil,
+        metadata: [String: String] = [:]
+    ) throws -> MemoryOSIngestionResult {
+        let result = ingestionService.ingest(MemoryOSIngestionInput(
+            sourceType: .webPage,
+            sourceID: evidenceID,
+            title: title,
+            content: content,
+            occurredAt: occurredAt,
+            sessionID: sessionID
+        ))
+        try repository.save(result)
+        return result
+    }
+
     public func shouldRecover(queueItem: MemoryOSQueueItem, now: Date = Date()) -> Bool {
         backgroundRunner.shouldRecover(queueStatus: queueItem.status, leaseExpiresAt: queueItem.leaseExpiresAt, now: now)
     }
