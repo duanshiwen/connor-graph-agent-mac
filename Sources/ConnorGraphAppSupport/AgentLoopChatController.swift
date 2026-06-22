@@ -27,8 +27,6 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
     public var recentMessageLimit: Int
 
     private let presenter: AgentEventPresenter
-    private let memoryIngestionService: MemoryIngestionService
-    private let memoryStagingRepository: AppMemoryStagingBufferRepository?
     private let memoryOSRepository: AppMemoryOSRepository?
     private let memoryOSIngestionService: MemoryOSIngestionService
     private let memoryOSFacade: AppMemoryOSFacade?
@@ -38,8 +36,6 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
         session: AgentSession = AgentSession(),
         groupID: String = "default",
         recentMessageLimit: Int = 6,
-        memoryStagingRepository: AppMemoryStagingBufferRepository? = nil,
-        memoryIngestionService: MemoryIngestionService = MemoryIngestionService(),
         memoryOSRepository: AppMemoryOSRepository? = nil,
         memoryOSIngestionService: MemoryOSIngestionService = MemoryOSIngestionService(),
         memoryOSFacade: AppMemoryOSFacade? = nil
@@ -52,8 +48,6 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
         self.groupID = groupID
         self.recentMessageLimit = recentMessageLimit
         self.presenter = AgentEventPresenter()
-        self.memoryStagingRepository = memoryStagingRepository
-        self.memoryIngestionService = memoryIngestionService
         self.memoryOSRepository = memoryOSRepository
         self.memoryOSIngestionService = memoryOSIngestionService
         self.memoryOSFacade = memoryOSFacade
@@ -65,7 +59,6 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
         let userMessage = session.appendUserMessage(prompt)
         transcript = session.messages
         try persistMemoryOSAfterUserMessage(userMessage)
-        try persistMemoryStagingAfterUserMessage(userMessage)
         let request = AgentChatRequest(
             sessionID: session.id,
             groupID: groupID,
@@ -94,7 +87,6 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
                     transcript = session.messages
                     if let assistantMessage {
                         try persistMemoryOSAfterAssistantMessage(assistantMessage)
-                        try persistMemoryStagingAfterAssistantMessage(assistantMessage)
                     }
                 }
             }
@@ -157,27 +149,5 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
             sessionID: session.id
         ))
         try memoryOSRepository.save(result)
-    }
-
-    private func persistMemoryStagingAfterUserMessage(_ message: AgentMessage) throws {
-        guard let memoryStagingRepository else { return }
-        let existingBuffer = try memoryStagingRepository.loadBuffer(sessionID: session.id)
-        let result = memoryIngestionService.ingestUserMessage(
-            message,
-            sessionID: session.id,
-            into: existingBuffer
-        )
-        try memoryStagingRepository.saveBuffer(result.buffer)
-    }
-
-    private func persistMemoryStagingAfterAssistantMessage(_ message: AgentMessage) throws {
-        guard let memoryStagingRepository else { return }
-        let existingBuffer = try memoryStagingRepository.loadBuffer(sessionID: session.id)
-        let result = memoryIngestionService.ingestAssistantMessage(
-            message,
-            sessionID: session.id,
-            into: existingBuffer ?? MemoryStagingBuffer(sessionID: session.id)
-        )
-        try memoryStagingRepository.saveBuffer(result.buffer)
     }
 }
