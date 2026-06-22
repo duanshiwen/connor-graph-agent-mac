@@ -173,6 +173,22 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         """)
     }
 
+    public func saveQueueAttempt(queueItemID: String, attemptNumber: Int, status: MemoryOSQueueStatus, startedAt: Date, finishedAt: Date? = nil, errorCode: String? = nil, errorMessage: String? = nil, metadata: [String: String] = [:]) throws {
+        try execute("""
+        INSERT OR REPLACE INTO memory_l1_queue_attempts
+        (id, queue_item_id, attempt_number, status, started_at, finished_at, error_code, error_message, metadata_json)
+        VALUES (\(quote("\(queueItemID):attempt:\(attemptNumber)")), \(quote(queueItemID)), \(attemptNumber), \(quote(status.rawValue)), \(quote(iso(startedAt))), \(quote(finishedAt.map(iso))), \(quote(errorCode)), \(quote(errorMessage)), \(quote(json(metadata))))
+        """)
+    }
+
+    public func saveDeadLetter(queueItem item: MemoryOSQueueItem, now: Date = Date(), metadata: [String: String] = [:]) throws {
+        try execute("""
+        INSERT OR REPLACE INTO memory_l1_dead_letter_queue
+        (id, queue_item_id, failed_payload_json, error_code, error_message, created_at, metadata_json)
+        VALUES (\(quote("dead:\(item.id)")), \(quote(item.id)), \(quote(item.payloadJSON)), \(quote(item.errorCode ?? "unknown_error")), \(quote(item.errorMessage ?? "Unknown Memory OS processing error")), \(quote(iso(now))), \(quote(json(metadata))))
+        """)
+    }
+
     public func queueItem(id: String) throws -> MemoryOSQueueItem? {
         try query(sql: """
         SELECT id, kind, status, priority, payload_json, attempt_count, max_attempts, next_run_at, locked_at, locked_by, lease_expires_at, idempotency_key, payload_hash, created_at, updated_at, error_code, error_message
@@ -245,6 +261,55 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
 
     public func searchEntitiesFTS(query: String, limit: Int = 20) throws -> [String] {
         try queryStrings(sql: "SELECT entity_id FROM memory_l4_entities_fts WHERE memory_l4_entities_fts MATCH \(quote(query)) LIMIT \(limit)")
+    }
+
+    // MARK: - Production operations
+
+    public func save(artifact: MemoryOSLLMArtifactEnvelope) throws {
+        try execute("""
+        INSERT OR REPLACE INTO memory_l2_processing_artifacts
+        (id, processing_run_id, artifact_type, content, created_at, metadata_json)
+        VALUES (\(quote(artifact.id)), \(quote(artifact.processingRunID ?? artifact.queueItemID ?? "unassigned")), \(quote(artifact.artifactType)), \(quote(artifact.rawContent)), \(quote(iso(artifact.createdAt))), \(quote(json([
+            "schema_name": artifact.schemaName,
+            "schema_version": String(artifact.schemaVersion),
+            "model_id": artifact.modelID,
+            "content_hash": artifact.contentHash,
+            "queue_item_id": artifact.queueItemID ?? ""
+        ].merging(artifact.metadata) { _, new in new }))))
+        """)
+    }
+
+    public func save(audit event: MemoryOSAuditEvent) throws {
+        try execute("""
+        INSERT OR REPLACE INTO memory_audit_events
+        (id, event_type, actor, subject_id, payload_json, created_at)
+        VALUES (\(quote(event.id)), \(quote(event.eventType)), \(quote(event.actor)), \(quote(event.subjectID)), \(quote(json(event.payload))), \(quote(iso(event.createdAt))))
+        """)
+    }
+
+    public func save(metric: MemoryOSProcessingMetric) throws {
+        try execute("""
+        INSERT OR REPLACE INTO memory_processing_metrics
+        (id, metric_name, metric_value, dimensions_json, created_at)
+        VALUES (\(quote(metric.id)), \(quote(metric.name)), \(metric.value), \(quote(json(metric.dimensions))), \(quote(iso(metric.createdAt))))
+        """)
+    }
+
+    public func saveHealthReport(_ report: MemoryOSStoreHealthReport) throws {
+        try execute("""
+        INSERT OR REPLACE INTO memory_store_health_checks
+        (id, status, checked_at, report_json)
+        VALUES (\(quote("health:\(iso(report.checkedAt))")), \(quote(report.status.rawValue)), \(quote(iso(report.checkedAt))), \(quote(json(report))))
+        """)
+    }
+
+    public func queueOperationalSnapshot(now: Date = Date()) throws -> MemoryOSQueueOperationalSnapshot {
+        func count(status: MemoryOSQueueStatus) throws -> Int {
+            Int(try query(sql: "SELECT COUNT(*) FROM memory_l1_processing_queue WHERE status = \(quote(status.rawValue));").first?.first ?? "0") ?? 0
+        }
+        let isoNow = iso(now)
+        let expired = Int(try query(sql: "SELECT COUNT(*) FROM memory_l1_processing_queue WHERE status IN ('leased', 'processing') AND lease_expires_at IS NOT NULL AND lease_expires_at < \(quote(isoNow));").first?.first ?? "0") ?? 0
+        return MemoryOSQueueOperationalSnapshot(pending: try count(status: .pending), leased: try count(status: .leased), processing: try count(status: .processing), retryScheduled: try count(status: .retryScheduled), succeeded: try count(status: .succeeded), failed: try count(status: .failed), deadLetter: try count(status: .deadLetter), expiredLeases: expired, checkedAt: now)
     }
 
     // MARK: - Helpers exposed for repositories/tests

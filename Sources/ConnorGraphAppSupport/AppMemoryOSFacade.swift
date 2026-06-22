@@ -6,11 +6,13 @@ import ConnorGraphStore
 public struct AppMemoryOSOperationalSummary: Sendable, Equatable, Codable {
     public var dashboardSnapshot: MemoryOSDashboardSnapshot
     public var healthReport: MemoryOSStoreHealthReport
+    public var queueSnapshot: MemoryOSQueueOperationalSnapshot
     public var expiredLeaseCount: Int
 
-    public init(dashboardSnapshot: MemoryOSDashboardSnapshot, healthReport: MemoryOSStoreHealthReport, expiredLeaseCount: Int = 0) {
+    public init(dashboardSnapshot: MemoryOSDashboardSnapshot, healthReport: MemoryOSStoreHealthReport, queueSnapshot: MemoryOSQueueOperationalSnapshot = MemoryOSQueueOperationalSnapshot(), expiredLeaseCount: Int = 0) {
         self.dashboardSnapshot = dashboardSnapshot
         self.healthReport = healthReport
+        self.queueSnapshot = queueSnapshot
         self.expiredLeaseCount = expiredLeaseCount
     }
 }
@@ -50,10 +52,14 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
             l4EntityCount: try count("memory_l4_entities"),
             lastCheckedAt: now
         )
+        let queueSnapshot = try store.queueOperationalSnapshot(now: now)
+        try store.saveHealthReport(health)
+        try store.save(metric: MemoryOSProcessingMetric(name: "memory_os.queue.pending", value: Double(queueSnapshot.pending), createdAt: now))
         return AppMemoryOSOperationalSummary(
             dashboardSnapshot: snapshot,
             healthReport: health,
-            expiredLeaseCount: try expiredLeaseCount(now: now)
+            queueSnapshot: queueSnapshot,
+            expiredLeaseCount: queueSnapshot.expiredLeases
         )
     }
 
@@ -100,6 +106,44 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         ))
         try repository.save(result)
         return result
+    }
+
+    public func validateAndRecordLLMArtifact(
+        rawContent: String,
+        modelID: String,
+        queueItemID: String? = nil,
+        processingRunID: String? = nil,
+        now: Date = Date()
+    ) throws -> MemoryOSArtifactValidationResult {
+        let envelope = MemoryOSArtifactEnvelopeService().envelope(rawContent: rawContent, modelID: modelID, queueItemID: queueItemID, processingRunID: processingRunID, now: now)
+        try store.save(artifact: envelope)
+        let result = MemoryOSLLMArtifactValidator().validateStructuredExtractionArtifact(envelope)
+        try store.save(audit: MemoryOSAuditEvent(
+            eventType: result.accepted ? "memory_os.llm_artifact.accepted" : "memory_os.llm_artifact.rejected",
+            actor: "memory-os",
+            subjectID: envelope.id,
+            payload: [
+                "schema_name": envelope.schemaName,
+                "model_id": envelope.modelID,
+                "accepted": String(result.accepted),
+                "issue_count": String(result.issues.count),
+                "normalized_record_count": String(result.normalizedRecordCount)
+            ],
+            createdAt: now
+        ))
+        try store.save(metric: MemoryOSProcessingMetric(name: "memory_os.llm_artifact.accepted", value: result.accepted ? 1 : 0, dimensions: ["schema": envelope.schemaName], createdAt: now))
+        return result
+    }
+
+    public func recordQueueFailure(_ item: MemoryOSQueueItem, errorCode: String, errorMessage: String, now: Date = Date()) throws -> MemoryOSQueueItem {
+        let transitioned = MemoryOSQueueTransitionService().markFailed(item, errorCode: errorCode, errorMessage: errorMessage, now: now)
+        try store.enqueue(transitioned)
+        try store.saveQueueAttempt(queueItemID: item.id, attemptNumber: transitioned.attemptCount, status: transitioned.status, startedAt: item.lockedAt ?? now, finishedAt: now, errorCode: errorCode, errorMessage: errorMessage)
+        if transitioned.status == .deadLetter {
+            try store.saveDeadLetter(queueItem: transitioned, now: now)
+        }
+        try store.save(audit: MemoryOSAuditEvent(eventType: "memory_os.queue.failure", subjectID: item.id, payload: ["status": transitioned.status.rawValue, "error_code": errorCode], createdAt: now))
+        return transitioned
     }
 
     public func shouldRecover(queueItem: MemoryOSQueueItem, now: Date = Date()) -> Bool {
