@@ -1,67 +1,87 @@
 # Memory OS Legacy Deletion Checklist
 
-This checklist defines the legacy Graph Memory surface that must be removed after Memory OS production paths replace it.
+This checklist records the H-2 physical deletion of the old Graph Memory workflow after Memory OS production paths replaced it.
 
-Updated: 2026-06-22 13:08 GMT+8
+Updated: 2026-06-22 17:06 GMT+8
 
-Current H-1/H-2 status:
+## H-2 status
 
-- App shell primary route now points `graphMemory` to `memoryOS`.
-- Chat controller production Memory OS writes route through `AppMemoryOSFacade`.
-- Native session manager production Memory OS writes route through `AppMemoryOSFacade`.
-- App background jobs run Memory OS health/recovery summary before transitional legacy jobs.
-- Old staging/distillation/extraction/admission/candidate-review files remain only for migration compatibility and historical tests; they are no longer the new production memory entrypoint.
-- H-2 deletion gate is active: production route, dedicated Memory OS database path, fresh Memory OS schema, and App facade entrypoint are covered by `MemoryOSLegacyDeletionGateTests`.
+Completed:
 
-## Delete or replace source files
+- App shell primary route points `graphMemory` to `memoryOS`.
+- Chat controller production memory writes route through `AppMemoryOSFacade`.
+- Native session manager production memory writes route through `AppMemoryOSFacade`.
+- Browser web-page evidence ingestion routes through Memory OS L0/L1 instead of the old graph extraction queue.
+- App background jobs run Memory OS health/recovery only; the old graph memory background runner has been removed from the app path.
+- Agent memory tools use Memory OS tools; candidate-based graph write tools were removed.
+- Legacy staging/distillation services and AppSupport adapters were removed.
+- Legacy GraphExtraction / admission hold / self-healing / memory change log / graph write candidate workflow source files were removed.
+- Fresh `SQLiteGraphKernelStore` migration no longer creates the old workflow tables.
+- Fresh `SQLiteMemoryOSStore` migration has a negative gate proving old workflow tables are not created.
+
+## Removed old source surfaces
 
 ### ConnorGraphCore
 
+Removed:
+
 - `GraphExtractionDomain.swift`
 - `GraphExtractionDecoder.swift`
-- `GraphStructuredExtraction.swift`
-- `GraphOptimisticWriteDomain.swift`
-- `GraphSelfHealingDomain.swift`
 - `GraphWriteCandidate.swift`
 
-Keep only if a type is explicitly migrated into `MemoryOS*` domain files.
+Retained as reusable schema DTO only:
+
+- `GraphStructuredExtraction.swift` — now validates structured extraction output but no longer converts into the deleted GraphExtraction draft workflow.
 
 ### ConnorGraphMemory
 
-- `MemoryStaging*`
-- `MemoryDistillation*`
-- `LLMMemoryDistiller*`
-- `GraphOptimisticWriteService*`
-- `GraphConstraintValidator*` if still tied to old graph write semantics
-- `GraphContradictionDetector*` if still tied to old graph write semantics
+Removed:
+
+- `MemoryStaging.swift`
+- `MemoryIngestionService.swift`
+- `MemoryDistillation.swift`
+- `MemoryDistillationService.swift`
+- `LLMMemoryDistiller.swift`
+
+Retained graph validators are no longer production memory entrypoints.
 
 ### ConnorGraphStore
 
-- graph extraction worker
-- graph extraction prompt/replay services
-- graph write admission policy
-- graph self-healing service/store
-- graph entity resolver if tied to old graph schema rather than Memory OS L4
-- old graph job queue if not reused as Memory OS queue
+Removed:
 
-### ConnorGraphAppSupport
+- `AnyGraphExtractorProvider.swift`
+- `GraphBackgroundJobRunner.swift`
+- `GraphEntityResolutionPlan.swift`
+- `GraphExtractionConflictPreview.swift`
+- `GraphExtractionPromptBuilder.swift`
+- `GraphExtractionReplayService.swift`
+- `GraphExtractionTrace.swift`
+- `GraphExtractionTracePayload.swift`
+- `GraphExtractionWorker.swift`
+- `GraphAdmissionHoldQueue.swift`
+- `GraphMemoryChangeLog.swift`
+- `GraphSelfHealingService.swift`
+- `GraphWriteAdmissionPolicy.swift`
+- `LLMGraphExtractor.swift`
+- `UnavailableGraphExtractor.swift`
 
-- `AppMemoryStagingBufferRepository.swift`
-- `AppMemoryDistillationWorker.swift`
-- `AppLLMMemoryDistiller.swift`
-- `AppGraphExtractionTraceRepository.swift`
-- `AppGraphAdmissionHoldQueueRepository.swift`
-- `AppGraphMemoryChangeLogRepository.swift`
-- `AppGraphWriteCandidateRepository.swift`
+Retained:
 
-### ConnorGraphAgentMac
+- `SQLiteGraphKernelStore.swift` as temporal graph/session/kernel storage, with old workflow schema and CRUD removed.
 
-- `GraphExtractionDiagnosticsView.swift`
-- `GraphWriteCandidateReviewView.swift`
-- `MemoryChangeLogView.swift`
-- old memory panels in `AppGraphMemoryDashboardBuilder.swift`
+### ConnorGraphAppSupport / ConnorGraphAgentMac
 
-## Remove old schema creation from normal migration
+Removed:
+
+- old staging/distillation adapters
+- old graph extraction/admission/candidate/changelog repositories
+- old graph memory background runner
+- old candidate review / diagnostics / changelog views
+- old candidate-based agent graph write tools
+
+## Removed old schema creation from normal migration
+
+Fresh stores must not create:
 
 - `memory_staging_buffers`
 - `graph_extraction_traces`
@@ -70,30 +90,30 @@ Keep only if a type is explicitly migrated into `MemoryOS*` domain files.
 - `graph_memory_change_log`
 - `graph_write_candidates`
 
-Legacy tables may be read only by one-time import code. They must not be recreated for fresh Memory OS databases.
+Covered by:
 
-## Delete or rewrite tests
+- `SQLiteGraphStoreV2Tests.graphKernelStoreMigratesV3CoreTables`
+- `SQLiteMemoryOSStoreTests`
+- `MemoryOSLegacyDeletionGateTests`
 
-- `MemoryStagingTests`
-- `MemoryIngestionServiceTests` for legacy staging
-- `MemoryDistillationTests`
-- `MemoryDistillationServiceTests`
-- `LLMMemoryDistillerTests`
-- `GraphExtractionWorkerTests`
-- `GraphWriteAdmissionPolicyTests`
-- `GraphSelfHealingServiceTests`
-- `GraphAdmissionHoldQueueActionTests`
-- `GraphWriteCandidateReviewTests`
-- `MemoryStagingBufferStoreTests`
+## Deleted or rewritten tests
 
-Rewrite coverage under `MemoryOS*Tests`.
+Deleted old workflow tests for staging, distillation, extraction worker, LLM graph extractor, admission, self-healing, candidate review, and trace store.
+
+Rewritten coverage now lives under:
+
+- `MemoryOS*Tests`
+- `AppMemoryOSFacadeTests`
+- `AgentLoopChatControllerMemoryOSTests`
+- `NativeSessionManagerMemoryOSTests`
+- `MemoryOSLegacyDeletionGateTests`
 
 ## Final grep gate
 
-Before final merge, this command must show no production dependency on legacy pipeline names:
+Production sources should have no dependency on old workflow names:
 
 ```bash
-rg "MemoryStaging|MemoryDistillation|GraphExtractionWorker|GraphWriteAdmissionPolicy|GraphAdmissionHoldQueue|GraphWriteCandidateReview|GraphSelfHealing" Sources Tests README.md
+rg "GraphExtraction|GraphWriteCandidate|GraphSelfHealing|AdmissionHold|MemoryChangeLog|graph_write_candidates|graph_extraction|graph_admission|graph_memory_change_log|memory_staging_buffers" Sources Tests -g '*.swift'
 ```
 
-Remaining matches are allowed only inside migration/import documentation or this checklist.
+Allowed matches are only negative assertions inside deletion/schema gate tests.
