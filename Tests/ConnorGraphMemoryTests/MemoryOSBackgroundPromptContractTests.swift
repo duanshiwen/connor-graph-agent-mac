@@ -57,4 +57,19 @@ struct MemoryOSBackgroundPromptContractTests {
         #expect(prompt.contains("L1 is the active processing buffer"))
         #expect(prompt.contains("successful L1→L2 projection"))
     }
+
+    @Test func l1PromptDefinesDisciplinedFactExtractionWorkflow() {
+        let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
+
+        let prompt = MemoryOSL1ToL2PromptBuilder().prompt(for: [event])
+
+        #expect(prompt.contains("Read L1 events in chronological order"))
+        #expect(prompt.contains("Extract candidate facts per event"))
+        #expect(prompt.contains("Drop noise"))
+        #expect(prompt.contains("Consolidate duplicate facts"))
+        #expect(prompt.contains("Every emitted fact must cite at least one capture_event_id"))
+        #expect(prompt.contains("provenance_object_id or span_id"))
+        #expect(prompt.contains("Do not create L3 knowledge records"))
+        #expect(prompt.contains("Do not produce theories, frameworks, broad conclusions, or unsupported guesses"))
+    }
 }

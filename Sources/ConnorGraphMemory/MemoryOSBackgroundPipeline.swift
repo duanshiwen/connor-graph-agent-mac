@@ -133,6 +133,16 @@ public struct MemoryOSL1ToL2PromptBuilder: Sendable {
         - If raw L0 material is needed, request the referenced provenance object or span instead of guessing.
         - Output only GraphStructuredExtractionOutput JSON.
 
+        Workflow:
+        1. Read L1 events in chronological order.
+        2. Extract candidate facts per event.
+        3. Drop noise, transient wording, unsupported guesses and purely stylistic duplicates.
+        4. Consolidate duplicate facts across events while preserving all evidence references.
+        5. If a fact refines an existing L2 fact, emit append-only refinement material rather than overwriting history.
+        6. Every emitted fact must cite at least one capture_event_id and at least one provenance_object_id or span_id.
+        7. Do not create L3 knowledge records.
+        8. Do not produce theories, frameworks, broad conclusions, or unsupported guesses.
+
         L1 capture events are provided as an ordered JSON packet:
         \(Self.renderJSON(packet))
         """
