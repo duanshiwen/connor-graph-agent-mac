@@ -101,11 +101,30 @@ public struct MemoryOSL1ToL2PromptBuilder: Sendable {
     public init() {}
 
     public func prompt(for events: [MemoryOSCaptureEvent]) -> String {
-        let eventSummary = events.map { event in
-            "- capture_event_id=\(event.id), source=\(event.eventType), provenance_object_id=\(event.provenanceObjectID), span_id=\(event.metadata["span_id"] ?? "")"
-        }.joined(separator: "\n")
+        let packet: [String: Any] = [
+            "l1_capture_events": events.map { event in
+                [
+                    "capture_event_id": event.id,
+                    "event_type": event.eventType,
+                    "source_kind": event.metadata["source_kind"] ?? event.metadata["source"] ?? event.eventType,
+                    "occurred_at": Self.iso8601(event.occurredAt),
+                    "provenance_object_id": event.provenanceObjectID,
+                    "span_id": event.metadata["span_id"] ?? "",
+                    "title": event.metadata["title"] ?? "",
+                    "content_preview": event.metadata["content_preview"] ?? event.metadata["preview"] ?? "",
+                    "token_estimate": event.tokenEstimate,
+                    "metadata": event.metadata
+                ] as [String: Any]
+            }
+        ]
         return """
         You are processing Connor Memory OS L1 capture events into L2 operational facts.
+
+        Layer semantics:
+        - L0 is the durable provenance layer and source of raw evidence.
+        - L1 is the active processing buffer / ordered memory sequence.
+        - L2 is operational facts / working memory.
+        - A successful L1→L2 projection clears the processed L1 buffer only after artifact acceptance; failures preserve L1 for retry or dead-letter review.
 
         Goal:
         - Extract only evidence-backed L2 operational facts / working memory.
@@ -114,9 +133,22 @@ public struct MemoryOSL1ToL2PromptBuilder: Sendable {
         - If raw L0 material is needed, request the referenced provenance object or span instead of guessing.
         - Output only GraphStructuredExtractionOutput JSON.
 
-        L1 capture events:
-        \(eventSummary)
+        L1 capture events are provided as an ordered JSON packet:
+        \(Self.renderJSON(packet))
         """
+    }
+
+    private static func iso8601(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
+    }
+
+    private static func renderJSON(_ object: [String: Any]) -> String {
+        guard JSONSerialization.isValidJSONObject(object),
+              let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]),
+              let json = String(data: data, encoding: .utf8) else { return "{}" }
+        return json
     }
 }
 
@@ -124,11 +156,31 @@ public struct MemoryOSL2ToKnowledgePromptBuilder: Sendable {
     public init() {}
 
     public func prompt(for statements: [MemoryOSStatement]) -> String {
-        let statementSummary = statements.map { statement in
-            "- statement_id=\(statement.id), predicate=\(statement.predicate), text=\(statement.text), evidence=\(statement.evidenceSpanIDs.joined(separator: ","))"
-        }.joined(separator: "\n")
+        let packet: [String: Any] = [
+            "l2_statements": statements.map { statement in
+                [
+                    "statement_id": statement.id,
+                    "subject_id": statement.subjectID,
+                    "predicate": statement.predicate,
+                    "object_id": statement.objectID ?? "",
+                    "text": statement.text,
+                    "assertion_kind": statement.assertionKind.rawValue,
+                    "confidence": statement.confidence,
+                    "valid_at": Self.iso8601(statement.validAt),
+                    "committed_at": Self.iso8601(statement.committedAt),
+                    "evidence_span_ids": statement.evidenceSpanIDs,
+                    "source_artifact_id": statement.sourceArtifactID ?? "",
+                    "metadata": statement.metadata
+                ] as [String: Any]
+            }
+        ]
         return """
         You are synthesizing Connor Memory OS L2 operational facts into reusable L3 knowledge and L4 concept graph records.
+
+        Layer semantics:
+        - L2 is operational facts / working memory, not reusable knowledge by default.
+        - L3 is reusable knowledge: theories, frameworks, standards, processes, decision bases and durable cognitive structures.
+        - L4 is stable entities, concept entities and concept relations.
 
         Use the four knowledge filters:
         1. signal quality: is this knowledge rather than noise?
@@ -140,9 +192,22 @@ public struct MemoryOSL2ToKnowledgePromptBuilder: Sendable {
         Do not promote ordinary personal or operational facts into L3. If a fact should be more accurate, propose refined L2 facts as append-only follow-up material rather than overwriting history.
         Output only MemoryOSKnowledgeExtractionOutput JSON for accepted knowledge candidates and L4 concepts/relations.
 
-        L2 statements:
-        \(statementSummary)
+        L2 statements are provided as an ordered JSON packet:
+        \(Self.renderJSON(packet))
         """
+    }
+
+    private static func iso8601(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
+    }
+
+    private static func renderJSON(_ object: [String: Any]) -> String {
+        guard JSONSerialization.isValidJSONObject(object),
+              let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]),
+              let json = String(data: data, encoding: .utf8) else { return "{}" }
+        return json
     }
 }
 
