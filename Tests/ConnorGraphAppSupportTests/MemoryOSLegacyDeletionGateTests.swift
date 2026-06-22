@@ -41,7 +41,7 @@ import ConnorGraphStore
 
     let summary = try facade.operationalSummary()
 
-    #expect(summary.dashboardSnapshot.l0ProvenanceObjectCount == 0)
-    #expect(summary.dashboardSnapshot.l1PendingCaptureCount == 0)
+    #expect(summary.l0ProvenanceObjectCount == 0)
+    #expect(summary.l1PendingCaptureCount == 0)
     #expect(summary.healthReport.status == .healthy)
 }

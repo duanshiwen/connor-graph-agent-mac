@@ -51,8 +51,8 @@ private actor MemoryOSFinalAnswerProvider: AgentModelProvider {
     _ = try await controller.submit("请记住：Memory OS facade 是 App 层唯一新入口")
 
     let summary = try facade.operationalSummary()
-    #expect(summary.dashboardSnapshot.l0ProvenanceObjectCount == 2)
-    #expect(summary.dashboardSnapshot.l1PendingCaptureCount == 2)
+    #expect(summary.l0ProvenanceObjectCount == 2)
+    #expect(summary.l1PendingCaptureCount == 2)
 }
 
 @Test func appMemoryOSBackgroundJobRunnerDetectsExpiredQueueLeases() {

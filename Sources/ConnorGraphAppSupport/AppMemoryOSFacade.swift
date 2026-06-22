@@ -4,16 +4,51 @@ import ConnorGraphMemory
 import ConnorGraphStore
 
 public struct AppMemoryOSOperationalSummary: Sendable, Equatable, Codable {
-    public var dashboardSnapshot: MemoryOSDashboardSnapshot
     public var healthReport: MemoryOSStoreHealthReport
     public var queueSnapshot: MemoryOSQueueOperationalSnapshot
     public var expiredLeaseCount: Int
+    public var l0ProvenanceObjectCount: Int
+    public var l1PendingCaptureCount: Int
+    public var l1PendingQueueCount: Int
+    public var l1DeadLetterCount: Int
+    public var l1RetryScheduledCount: Int
+    public var l1ExpiredLeaseCount: Int
+    public var l2StatementCount: Int
+    public var l2DiagnosticCount: Int
+    public var l3KnowledgeRecordCount: Int
+    public var l4EntityCount: Int
+    public var checkedAt: Date
 
-    public init(dashboardSnapshot: MemoryOSDashboardSnapshot, healthReport: MemoryOSStoreHealthReport, queueSnapshot: MemoryOSQueueOperationalSnapshot = MemoryOSQueueOperationalSnapshot(), expiredLeaseCount: Int = 0) {
-        self.dashboardSnapshot = dashboardSnapshot
+    public init(
+        healthReport: MemoryOSStoreHealthReport,
+        queueSnapshot: MemoryOSQueueOperationalSnapshot = MemoryOSQueueOperationalSnapshot(),
+        expiredLeaseCount: Int = 0,
+        l0ProvenanceObjectCount: Int = 0,
+        l1PendingCaptureCount: Int = 0,
+        l1PendingQueueCount: Int = 0,
+        l1DeadLetterCount: Int = 0,
+        l1RetryScheduledCount: Int = 0,
+        l1ExpiredLeaseCount: Int = 0,
+        l2StatementCount: Int = 0,
+        l2DiagnosticCount: Int = 0,
+        l3KnowledgeRecordCount: Int = 0,
+        l4EntityCount: Int = 0,
+        checkedAt: Date = Date()
+    ) {
         self.healthReport = healthReport
         self.queueSnapshot = queueSnapshot
         self.expiredLeaseCount = expiredLeaseCount
+        self.l0ProvenanceObjectCount = l0ProvenanceObjectCount
+        self.l1PendingCaptureCount = l1PendingCaptureCount
+        self.l1PendingQueueCount = l1PendingQueueCount
+        self.l1DeadLetterCount = l1DeadLetterCount
+        self.l1RetryScheduledCount = l1RetryScheduledCount
+        self.l1ExpiredLeaseCount = l1ExpiredLeaseCount
+        self.l2StatementCount = l2StatementCount
+        self.l2DiagnosticCount = l2DiagnosticCount
+        self.l3KnowledgeRecordCount = l3KnowledgeRecordCount
+        self.l4EntityCount = l4EntityCount
+        self.checkedAt = checkedAt
     }
 }
 
@@ -21,52 +56,42 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
     public var store: SQLiteMemoryOSStore
     public var repository: AppMemoryOSRepository
     public var ingestionService: MemoryOSIngestionService
-    public var dashboardBuilder: MemoryOSDashboardPresentationBuilder
     public var backgroundRunner: AppMemoryOSBackgroundJobRunner
 
     public init(
         store: SQLiteMemoryOSStore,
         repository: AppMemoryOSRepository? = nil,
         ingestionService: MemoryOSIngestionService = MemoryOSIngestionService(),
-        dashboardBuilder: MemoryOSDashboardPresentationBuilder = MemoryOSDashboardPresentationBuilder(),
         backgroundRunner: AppMemoryOSBackgroundJobRunner = AppMemoryOSBackgroundJobRunner()
     ) {
         self.store = store
         self.repository = repository ?? AppMemoryOSRepository(store: store)
         self.ingestionService = ingestionService
-        self.dashboardBuilder = dashboardBuilder
         self.backgroundRunner = backgroundRunner
     }
 
     public func operationalSummary(now: Date = Date()) throws -> AppMemoryOSOperationalSummary {
         let health = try store.schemaHealthReport(now: now)
         let queueSnapshot = try store.queueOperationalSnapshot(now: now)
-        let snapshot = MemoryOSDashboardSnapshot(
-            healthStatus: health.status,
+        let l1PendingQueueCount = queueSnapshot.pending + queueSnapshot.leased + queueSnapshot.processing
+        try store.saveHealthReport(health)
+        try store.save(metric: MemoryOSProcessingMetric(name: "memory_os.queue.pending", value: Double(queueSnapshot.pending), createdAt: now))
+        return AppMemoryOSOperationalSummary(
+            healthReport: health,
+            queueSnapshot: queueSnapshot,
+            expiredLeaseCount: queueSnapshot.expiredLeases,
             l0ProvenanceObjectCount: try count("memory_l0_provenance_objects"),
             l1PendingCaptureCount: try count("memory_l1_capture_events", where: "processing_state IN ('pending', 'queued')"),
-            l1PendingQueueCount: queueSnapshot.pending + queueSnapshot.leased + queueSnapshot.processing,
+            l1PendingQueueCount: l1PendingQueueCount,
             l1DeadLetterCount: queueSnapshot.deadLetter,
             l1RetryScheduledCount: queueSnapshot.retryScheduled,
             l1ExpiredLeaseCount: queueSnapshot.expiredLeases,
             l2StatementCount: try count("memory_l2_statements"),
             l2DiagnosticCount: 0,
-            l3BeliefCount: try count("memory_l3_beliefs"),
+            l3KnowledgeRecordCount: try count("memory_l3_beliefs"),
             l4EntityCount: try count("memory_l4_entities"),
-            lastCheckedAt: now
+            checkedAt: now
         )
-        try store.saveHealthReport(health)
-        try store.save(metric: MemoryOSProcessingMetric(name: "memory_os.queue.pending", value: Double(queueSnapshot.pending), createdAt: now))
-        return AppMemoryOSOperationalSummary(
-            dashboardSnapshot: snapshot,
-            healthReport: health,
-            queueSnapshot: queueSnapshot,
-            expiredLeaseCount: queueSnapshot.expiredLeases
-        )
-    }
-
-    public func dashboardPresentation(now: Date = Date()) throws -> MemoryOSDashboardPresentation {
-        try dashboardBuilder.presentation(for: operationalSummary(now: now).dashboardSnapshot)
     }
 
     public func searchMemoryOS(_ query: MemoryOSRetrievalQuery) throws -> [MemoryOSRetrievalHit] {
