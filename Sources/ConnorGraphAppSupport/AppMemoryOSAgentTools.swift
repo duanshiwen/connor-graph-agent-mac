@@ -3,50 +3,6 @@ import ConnorGraphAgent
 import ConnorGraphCore
 import ConnorGraphStore
 
-public struct MemoryOSDashboardSummaryTool: AgentTool {
-    public let name = "memory_os_dashboard_summary"
-    public let description = "Read the production Connor Memory OS operational dashboard summary. This is the supported memory read surface for L0-L4 health and counts."
-    public let permission: AgentPermissionCapability = .readGraph
-    public let inputSchema = AgentToolInputSchema.object(properties: [:], required: [])
-
-    private let facade: AppMemoryOSFacade
-
-    public init(facade: AppMemoryOSFacade) {
-        self.facade = facade
-    }
-
-    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        let summary = try facade.operationalSummary()
-        let payload: [String: Any] = [
-            "healthStatus": summary.healthReport.status.rawValue,
-            "l0ProvenanceObjectCount": summary.l0ProvenanceObjectCount,
-            "l1PendingCaptureCount": summary.l1PendingCaptureCount,
-            "l1PendingQueueCount": summary.l1PendingQueueCount,
-            "l1DeadLetterCount": summary.l1DeadLetterCount,
-            "l1RetryScheduledCount": summary.l1RetryScheduledCount,
-            "l1ExpiredLeaseCount": summary.l1ExpiredLeaseCount,
-            "l2StatementCount": summary.l2StatementCount,
-            "l2DiagnosticCount": summary.l2DiagnosticCount,
-            "l3KnowledgeRecordCount": summary.l3KnowledgeRecordCount,
-            "l4EntityCount": summary.l4EntityCount,
-            "expiredLeaseCount": summary.expiredLeaseCount
-        ]
-        let json = try Self.renderJSON(payload)
-        return AgentToolResult(
-            toolCallID: context.toolCallID,
-            toolName: name,
-            contentText: "Memory OS health: \(summary.healthReport.status.rawValue). L0 objects: \(summary.l0ProvenanceObjectCount), L1 pending: \(summary.l1PendingCaptureCount), L2 statements: \(summary.l2StatementCount), L3 knowledge records: \(summary.l3KnowledgeRecordCount), L4 entities: \(summary.l4EntityCount).",
-            contentJSON: json,
-            citations: []
-        )
-    }
-
-    private static func renderJSON(_ object: [String: Any]) throws -> String {
-        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
-        return String(data: data, encoding: .utf8) ?? "{}"
-    }
-}
-
 public struct MemoryOSIngestObservationTool: AgentTool {
     public let name = "memory_os_ingest_observation"
     public let description = "Archive an evidence-backed observation into Connor Memory OS L0 provenance and L1 capture. This replaces legacy graph staging/candidate-write tools."
@@ -319,7 +275,6 @@ public struct MemoryOSReadProvenanceTool: AgentTool {
 
 public extension AgentToolRegistry {
     mutating func registerMemoryOSTools(facade: AppMemoryOSFacade) {
-        register(MemoryOSDashboardSummaryTool(facade: facade))
         register(MemoryOSIngestObservationTool(facade: facade))
         register(MemoryOSProjectStructuredArtifactTool(facade: facade))
         register(MemoryOSSearchTool(facade: facade))
