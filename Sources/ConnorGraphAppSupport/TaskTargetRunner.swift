@@ -25,6 +25,16 @@ public struct TaskTargetRunResult: Sendable, Equatable {
     }
 }
 
+public struct MemoryOSPipelineTaskRequest: Sendable, Equatable {
+    public var operationName: String
+    public var runID: String?
+
+    public init(operationName: String, runID: String? = nil) {
+        self.operationName = operationName
+        self.runID = runID
+    }
+}
+
 public struct SourceRefreshTaskRequest: Sendable, Equatable {
     public var sourceKind: String
     public var sourceInstanceID: String?
@@ -55,25 +65,29 @@ public struct TaskTargetRunner: Sendable {
     public typealias RefreshHandler = @Sendable (_ request: SourceRefreshTaskRequest) async throws -> String
     public typealias SessionMessageHandler = @Sendable (_ request: TaskSessionMessageRequest) async throws -> String
     public typealias MediaTranscriptionHandler = @Sendable (_ request: MediaTranscriptionTaskRequest) async throws -> String
+    public typealias MemoryOSPipelineHandler = @Sendable (_ request: MemoryOSPipelineTaskRequest) async throws -> String
 
     public var mailRefresher: RefreshHandler
     public var calendarRefresher: RefreshHandler
     public var rssRefresher: RefreshHandler
     public var sessionMessenger: SessionMessageHandler
     public var mediaTranscriptionRunner: MediaTranscriptionHandler?
+    public var memoryOSPipelineRunner: MemoryOSPipelineHandler?
 
     public init(
         mailRefresher: @escaping RefreshHandler,
         calendarRefresher: @escaping RefreshHandler,
         rssRefresher: @escaping RefreshHandler,
         sessionMessenger: @escaping SessionMessageHandler,
-        mediaTranscriptionRunner: MediaTranscriptionHandler? = nil
+        mediaTranscriptionRunner: MediaTranscriptionHandler? = nil,
+        memoryOSPipelineRunner: MemoryOSPipelineHandler? = nil
     ) {
         self.mailRefresher = mailRefresher
         self.calendarRefresher = calendarRefresher
         self.rssRefresher = rssRefresher
         self.sessionMessenger = sessionMessenger
         self.mediaTranscriptionRunner = mediaTranscriptionRunner
+        self.memoryOSPipelineRunner = memoryOSPipelineRunner
     }
 
 
@@ -91,6 +105,12 @@ public struct TaskTargetRunner: Sendable {
             case "rss": summary = try await rssRefresher(request)
             default: throw TaskTargetRunnerError.unsupportedTarget(targetDescription(task))
             }
+            return TaskTargetRunResult(summary: summary)
+        }
+
+        if task.target.targetKind == "memory_os.pipeline" {
+            guard let memoryOSPipelineRunner else { throw TaskTargetRunnerError.unsupportedTarget(targetDescription(task)) }
+            let summary = try await memoryOSPipelineRunner(MemoryOSPipelineTaskRequest(operationName: task.target.operationName, runID: runID))
             return TaskTargetRunResult(summary: summary)
         }
 
@@ -138,9 +158,10 @@ public extension TaskTargetRunner {
         calendarRefresh: @escaping RefreshHandler,
         rssRefresh: @escaping RefreshHandler,
         sessionMessage: @escaping SessionMessageHandler,
-        mediaTranscription: MediaTranscriptionHandler? = nil
+        mediaTranscription: MediaTranscriptionHandler? = nil,
+        memoryOSPipeline: MemoryOSPipelineHandler? = nil
     ) -> TaskTargetRunner {
-        TaskTargetRunner(mailRefresher: mailRefresh, calendarRefresher: calendarRefresh, rssRefresher: rssRefresh, sessionMessenger: sessionMessage, mediaTranscriptionRunner: mediaTranscription)
+        TaskTargetRunner(mailRefresher: mailRefresh, calendarRefresher: calendarRefresh, rssRefresher: rssRefresh, sessionMessenger: sessionMessage, mediaTranscriptionRunner: mediaTranscription, memoryOSPipelineRunner: memoryOSPipeline)
     }
 
 }
