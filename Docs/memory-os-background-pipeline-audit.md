@@ -1,6 +1,6 @@
 # Memory OS Background Pipeline Audit
 
-Updated: 2026-06-22 21:22 GMT+8
+Updated: 2026-06-22 21:58 GMT+8
 Branch: `feature/memory-os-l0-l4-production-refactor`
 
 This document audits the current Connor Memory OS implementation against the intended two-stage AI background memory pipeline:
@@ -83,7 +83,9 @@ Current implementation now includes the first orchestration layer:
 3. `MemoryOSL1ToL2PromptBuilder` builds the prompt contract for L1→L2 fact extraction.
 4. `AppMemoryOSFacade.enqueueL1ToL2BackgroundJobs(...)` writes queue items of kind `memory.l1.process_block_to_l2`.
 
-Still missing: the model-execution worker that leases these jobs, calls the configured LLM, receives `GraphStructuredExtractionOutput`, and then enqueues or directly runs artifact projection. Today, `runProjectionQueueOnce` still handles only `project_artifact` jobs where raw artifact JSON already exists.
+Implemented now: `MemoryOSBackgroundJobWorker` builds model requests through `MemoryOSBackgroundModelExecutor`, and `AppMemoryOSFacade.runBackgroundAIQueueOnce(...)` leases `memory.l1.process_block_to_l2` jobs, receives `GraphStructuredExtractionOutput`, and hands it to `projectAndRecordLLMArtifact(...)`. On accepted projection, processed L1 capture events are physically deleted because L0 keeps the durable raw provenance.
+
+Still deferred: a real provider-backed executor adapter. Tests use mock/static executors through the protocol boundary.
 
 ## 3. Current artifact validation and projection mechanism
 
@@ -192,7 +194,9 @@ Current implementation now includes the first orchestration layer:
 3. `MemoryOSL2ToKnowledgePromptBuilder` builds the knowledge synthesis prompt.
 4. `AppMemoryOSFacade.enqueueL2ToKnowledgeBackgroundJobs(...)` writes queue items of kind `memory.l2.synthesize_knowledge`.
 
-Still missing: the model-execution worker that leases these jobs, gives the LLM unified retrieval tools, receives `MemoryOSKnowledgeExtractionOutput`, projects accepted candidates into L3/L4, and marks the L2 processing states as succeeded/failed.
+Implemented now: `AppMemoryOSFacade.runBackgroundAIQueueOnce(...)` leases `memory.l2.synthesize_knowledge` jobs, executes them through `MemoryOSBackgroundModelExecutor`, receives `MemoryOSKnowledgeExtractionOutput`, projects accepted candidates into L3/L4, and marks `memory_l2_statement_processing_state` succeeded or failed.
+
+Still deferred: a real provider-backed executor adapter with live retrieval calls during the model turn. The retrieval tool surface exists and can be used by a future executor/agent loop.
 
 ## 6. Current retrieval and depth mechanism
 
@@ -231,12 +235,12 @@ The user’s target architecture maps well onto the current Memory OS direction.
 - L4 entity/concept schema
 - FTS tables
 
-The remaining missing product mechanism is the model-execution layer:
+The remaining missing product mechanism is now narrower:
 
-1. Worker for `memory.l1.process_block_to_l2` that calls the configured LLM and produces `GraphStructuredExtractionOutput`.
-2. Worker for `memory.l2.synthesize_knowledge` that calls the configured LLM with retrieval access and produces `MemoryOSKnowledgeExtractionOutput`.
-3. Runtime wiring from Mail / Calendar / RSS / browser history / attachment extraction / media transcription into `ingestSourceEvent(...)`.
-4. Marking L1 capture events and L2 processing states as succeeded / failed / ignored after artifact projection.
+1. Real provider-backed `MemoryOSBackgroundModelExecutor` adapter.
+2. Deep call-site wiring from every Mail / Calendar / RSS / browser history / attachment extraction / media transcription runtime path into `AppMemoryOSNativeSourceEventBridge`; the common bridge exists and is tested.
+3. Optional `memory_os_read_record` full-record read tool; search and L4 expansion already exist.
+4. Product policy for cleanup/quarantine of dead-lettered L1 buffers. Successful L1 processing already physically clears L1; failure paths keep L1 for retry.
 
 ## 8. Implementation principle
 
