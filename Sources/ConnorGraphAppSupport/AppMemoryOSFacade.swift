@@ -137,6 +137,23 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         return result
     }
 
+    public func runProjectionQueueOnce(workerID: String = "memory-os-projection-worker", limit: Int = 5, now: Date = Date()) throws -> [MemoryOSProjectionRunSummary] {
+        let candidates = try store.runnableQueueItems(kind: "project_artifact", limit: limit, now: now)
+        var summaries: [MemoryOSProjectionRunSummary] = []
+        for candidate in candidates {
+            guard let leased = try store.leaseQueueItem(id: candidate.id, workerID: workerID, now: now) else { continue }
+            do {
+                let payload = try store.decode(MemoryOSProjectionQueuePayload.self, leased.payloadJSON)
+                let summary = try projectAndRecordLLMArtifact(rawContent: payload.rawContent, modelID: payload.modelID, queueItem: leased, processingRunID: payload.processingRunID, now: now)
+                summaries.append(summary)
+            } catch {
+                let failed = try recordQueueFailure(leased, errorCode: "projection_payload_decode_failed", errorMessage: String(describing: error), now: now)
+                summaries.append(MemoryOSProjectionRunSummary(artifactID: leased.id, accepted: false, issues: [MemoryOSValidationIssue(code: failed.errorCode ?? "projection_payload_decode_failed", message: failed.errorMessage ?? String(describing: error))]))
+            }
+        }
+        return summaries
+    }
+
     public func projectAndRecordLLMArtifact(
         rawContent: String,
         modelID: String,
