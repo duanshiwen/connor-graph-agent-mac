@@ -84,7 +84,8 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
             title: "\(role) message",
             content: content,
             occurredAt: occurredAt,
-            sessionID: sessionID
+            sessionID: sessionID,
+            metadata: metadata
         ))
         try repository.save(result)
         return result
@@ -104,7 +105,37 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
             title: title,
             content: content,
             occurredAt: occurredAt,
-            sessionID: sessionID
+            sessionID: sessionID,
+            metadata: metadata
+        ))
+        try repository.save(result)
+        return result
+    }
+
+    public func ingestSourceEvent(
+        sourceID: String,
+        title: String,
+        content: String,
+        occurredAt: Date,
+        sourceKind: String,
+        accountID: String? = nil,
+        sessionID: String? = nil,
+        workObjectID: String? = nil,
+        metadata: [String: String] = [:]
+    ) throws -> MemoryOSIngestionResult {
+        let eventMetadata = metadata.merging([
+            "source_kind": sourceKind,
+            "account_id": accountID ?? ""
+        ]) { current, _ in current }
+        let result = ingestionService.ingest(MemoryOSIngestionInput(
+            sourceType: .sourceEvent,
+            sourceID: sourceID,
+            title: title,
+            content: content,
+            occurredAt: occurredAt,
+            sessionID: sessionID,
+            workObjectID: workObjectID,
+            metadata: eventMetadata
         ))
         try repository.save(result)
         return result
