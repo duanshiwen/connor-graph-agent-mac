@@ -137,6 +137,68 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         return result
     }
 
+    public func projectAndRecordLLMArtifact(
+        rawContent: String,
+        modelID: String,
+        queueItem: MemoryOSQueueItem? = nil,
+        processingRunID: String? = nil,
+        now: Date = Date()
+    ) throws -> MemoryOSProjectionRunSummary {
+        let envelope = MemoryOSArtifactEnvelopeService().envelope(rawContent: rawContent, modelID: modelID, queueItemID: queueItem?.id, processingRunID: processingRunID, now: now)
+        try store.save(artifact: envelope)
+        let validation = MemoryOSLLMArtifactValidator().validateStructuredExtractionArtifact(envelope)
+        let build = MemoryOSProjectionService().projectionBatch(from: envelope, validation: validation, now: now)
+        guard build.accepted, let batch = build.batch else {
+            try store.save(audit: MemoryOSAuditEvent(
+                eventType: "memory_os.projection.rejected",
+                actor: "memory-os",
+                subjectID: envelope.id,
+                payload: ["issue_count": String(build.validation.issues.count), "model_id": modelID],
+                createdAt: now
+            ))
+            try store.save(metric: MemoryOSProcessingMetric(name: "memory_os.projection.accepted", value: 0, dimensions: ["model_id": modelID], createdAt: now))
+            if let queueItem {
+                _ = try recordQueueFailure(queueItem, errorCode: "projection_validation_failed", errorMessage: build.validation.issues.map(\.message).joined(separator: "; "), now: now)
+            }
+            return MemoryOSProjectionRunSummary(artifactID: envelope.id, accepted: false, issues: build.validation.issues)
+        }
+        try store.saveProjectionBatch(batch)
+        if let queueItem {
+            _ = try recordQueueSuccess(queueItem, now: now)
+        }
+        try store.save(audit: MemoryOSAuditEvent(
+            eventType: "memory_os.projection.succeeded",
+            actor: "memory-os",
+            subjectID: envelope.id,
+            payload: [
+                "node_count": String(batch.nodes.count),
+                "statement_count": String(batch.statements.count),
+                "entity_count": String(batch.entities.count),
+                "entity_statement_count": String(batch.entityStatements.count),
+                "belief_count": String(batch.beliefs.count)
+            ],
+            createdAt: now
+        ))
+        try store.save(metric: MemoryOSProcessingMetric(name: "memory_os.projection.accepted", value: 1, dimensions: ["model_id": modelID], createdAt: now))
+        return MemoryOSProjectionRunSummary(
+            artifactID: envelope.id,
+            accepted: true,
+            nodeCount: batch.nodes.count,
+            statementCount: batch.statements.count,
+            entityCount: batch.entities.count,
+            entityStatementCount: batch.entityStatements.count,
+            beliefCount: batch.beliefs.count
+        )
+    }
+
+    public func recordQueueSuccess(_ item: MemoryOSQueueItem, now: Date = Date()) throws -> MemoryOSQueueItem {
+        let transitioned = MemoryOSQueueTransitionService().markSucceeded(item, now: now)
+        try store.enqueue(transitioned)
+        try store.saveQueueAttempt(queueItemID: item.id, attemptNumber: transitioned.attemptCount, status: transitioned.status, startedAt: item.lockedAt ?? now, finishedAt: now)
+        try store.save(audit: MemoryOSAuditEvent(eventType: "memory_os.queue.succeeded", subjectID: item.id, payload: ["status": transitioned.status.rawValue], createdAt: now))
+        return transitioned
+    }
+
     public func recordQueueFailure(_ item: MemoryOSQueueItem, errorCode: String, errorMessage: String, now: Date = Date()) throws -> MemoryOSQueueItem {
         let transitioned = MemoryOSQueueTransitionService().markFailed(item, errorCode: errorCode, errorMessage: errorMessage, now: now)
         try store.enqueue(transitioned)
