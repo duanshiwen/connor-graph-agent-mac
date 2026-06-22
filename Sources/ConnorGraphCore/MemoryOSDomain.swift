@@ -171,10 +171,17 @@ public struct MemoryOSProjectionQueuePayload: Codable, Sendable, Equatable {
     public var rawContent: String
     public var modelID: String
     public var processingRunID: String?
+    public var schemaName: String
+    public var artifactType: String
     public var metadata: [String: String]
 
-    public init(rawContent: String, modelID: String, processingRunID: String? = nil, metadata: [String: String] = [:]) {
-        self.rawContent = rawContent; self.modelID = modelID; self.processingRunID = processingRunID; self.metadata = metadata
+    public init(rawContent: String, modelID: String, processingRunID: String? = nil, schemaName: String = "GraphStructuredExtractionOutput", artifactType: String = "graph_structured_extraction", metadata: [String: String] = [:]) {
+        self.rawContent = rawContent
+        self.modelID = modelID
+        self.processingRunID = processingRunID
+        self.schemaName = schemaName
+        self.artifactType = artifactType
+        self.metadata = metadata
     }
 }
 
