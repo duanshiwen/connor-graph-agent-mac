@@ -37,11 +37,7 @@ struct TaskSchedulerRunnerServiceTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let repository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
         let now = Date(timeIntervalSince1970: 0)
-        var tasks = ConnorTaskDefinition.systemDefaults(now: now).map { task in
-            var copy = task
-            copy.lifecycle.lastFinishedAt = now
-            return copy
-        }
+        var tasks: [ConnorTaskDefinition] = []
         var explicitMailTask = ConnorTaskDefinition(
             id: "system.mail.check-every-10-minutes",
             name: "检查邮件",
@@ -55,6 +51,19 @@ struct TaskSchedulerRunnerServiceTests {
         )
         explicitMailTask.lifecycle.lastFinishedAt = now
         tasks.append(explicitMailTask)
+        var explicitCalendarTask = ConnorTaskDefinition(
+            id: "system.calendar.account.calendar-account-a.refresh",
+            name: "检查日历：Calendar A",
+            origin: .system,
+            trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 600, recurrence: .interval),
+            target: ConnorTaskTarget(targetKind: "source.runtime", targetID: "calendar", operationName: "refresh", parameters: ["sourceInstanceID": "calendar-account-a"]),
+            lifecycle: ConnorTaskLifecycle(status: .active, lastFinishedAt: now),
+            metadata: .protectedSystem,
+            createdAt: now,
+            updatedAt: now
+        )
+        explicitCalendarTask.lifecycle.lastFinishedAt = now
+        tasks.append(explicitCalendarTask)
         for task in tasks { try repository.saveTask(task) }
         let runner = TaskTargetRunner(
             mailRefresher: { _ in throw TaskTargetRunnerError.unsupportedTarget("mail") },
@@ -66,7 +75,7 @@ struct TaskSchedulerRunnerServiceTests {
 
         let outcomes = try await service.runDueTasks(now: Date(timeIntervalSince1970: 2_000))
         let failedMail = try #require(try repository.loadTask(id: "system.mail.check-every-10-minutes"))
-        let calendar = try #require(try repository.loadTask(id: "system.calendar.check-every-10-minutes"))
+        let calendar = try #require(try repository.loadTask(id: "system.calendar.account.calendar-account-a.refresh"))
 
         #expect(outcomes.count == 2)
         #expect(outcomes.filter(\.succeeded).count == 1)
