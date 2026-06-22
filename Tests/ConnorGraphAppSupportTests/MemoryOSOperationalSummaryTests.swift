@@ -4,7 +4,7 @@ import ConnorGraphAppSupport
 import ConnorGraphCore
 import ConnorGraphStore
 
-@Test func appMemoryOSFacadeBuildsOperationalSummaryFromStore() throws {
+@Test func memoryOSOperationalSummaryTracksLayerCountsWithoutUIPresentation() throws {
     let store = try SQLiteMemoryOSStore(path: ":memory:")
     try store.migrate()
     let facade = AppMemoryOSFacade(store: store)
@@ -14,7 +14,7 @@ import ConnorGraphStore
         messageID: "message-1",
         sessionID: "session-1",
         role: "user",
-        content: "Connor Memory OS should persist evidence before projection.",
+        content: "Memory OS should remain a hidden background substrate.",
         occurredAt: now
     )
 
@@ -23,15 +23,17 @@ import ConnorGraphStore
     #expect(summary.healthReport.status == .healthy)
     #expect(summary.l0ProvenanceObjectCount == 1)
     #expect(summary.l1PendingCaptureCount == 1)
-    #expect(summary.checkedAt == now)
+    #expect(summary.l2StatementCount == 0)
+    #expect(summary.l3KnowledgeRecordCount == 0)
+    #expect(summary.l4EntityCount == 0)
 }
 
-@Test func appMemoryOSFacadeDetectsExpiredQueueLeases() throws {
+@Test func memoryOSOperationalSummaryTracksQueueRecoveryMetricsWithoutUIPresentation() throws {
     let store = try SQLiteMemoryOSStore(path: ":memory:")
     try store.migrate()
     let facade = AppMemoryOSFacade(store: store)
     let now = Date(timeIntervalSince1970: 1_782_096_000)
-    let item = MemoryOSQueueItem(
+    try store.enqueue(MemoryOSQueueItem(
         id: "queue-1",
         kind: "projection",
         status: .leased,
@@ -45,11 +47,11 @@ import ConnorGraphStore
         payloadHash: "hash",
         createdAt: now.addingTimeInterval(-120),
         updatedAt: now.addingTimeInterval(-60)
-    )
-    try store.enqueue(item)
+    ))
 
     let summary = try facade.operationalSummary(now: now)
 
+    #expect(summary.l1PendingQueueCount == 1)
+    #expect(summary.l1ExpiredLeaseCount == 1)
     #expect(summary.expiredLeaseCount == 1)
-    #expect(facade.shouldRecover(queueItem: item, now: now))
 }

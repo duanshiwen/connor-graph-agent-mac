@@ -17,26 +17,25 @@ public struct MemoryOSDashboardSummaryTool: AgentTool {
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         let summary = try facade.operationalSummary()
-        let snapshot = summary.dashboardSnapshot
         let payload: [String: Any] = [
-            "healthStatus": snapshot.healthStatus.rawValue,
-            "l0ProvenanceObjectCount": snapshot.l0ProvenanceObjectCount,
-            "l1PendingCaptureCount": snapshot.l1PendingCaptureCount,
-            "l1PendingQueueCount": snapshot.l1PendingQueueCount,
-            "l1DeadLetterCount": snapshot.l1DeadLetterCount,
-            "l1RetryScheduledCount": snapshot.l1RetryScheduledCount,
-            "l1ExpiredLeaseCount": snapshot.l1ExpiredLeaseCount,
-            "l2StatementCount": snapshot.l2StatementCount,
-            "l2DiagnosticCount": snapshot.l2DiagnosticCount,
-            "l3KnowledgeRecordCount": snapshot.l3BeliefCount,
-            "l4EntityCount": snapshot.l4EntityCount,
+            "healthStatus": summary.healthReport.status.rawValue,
+            "l0ProvenanceObjectCount": summary.l0ProvenanceObjectCount,
+            "l1PendingCaptureCount": summary.l1PendingCaptureCount,
+            "l1PendingQueueCount": summary.l1PendingQueueCount,
+            "l1DeadLetterCount": summary.l1DeadLetterCount,
+            "l1RetryScheduledCount": summary.l1RetryScheduledCount,
+            "l1ExpiredLeaseCount": summary.l1ExpiredLeaseCount,
+            "l2StatementCount": summary.l2StatementCount,
+            "l2DiagnosticCount": summary.l2DiagnosticCount,
+            "l3KnowledgeRecordCount": summary.l3KnowledgeRecordCount,
+            "l4EntityCount": summary.l4EntityCount,
             "expiredLeaseCount": summary.expiredLeaseCount
         ]
         let json = try Self.renderJSON(payload)
         return AgentToolResult(
             toolCallID: context.toolCallID,
             toolName: name,
-            contentText: "Memory OS health: \(snapshot.healthStatus.rawValue). L0 objects: \(snapshot.l0ProvenanceObjectCount), L1 pending: \(snapshot.l1PendingCaptureCount), L2 statements: \(snapshot.l2StatementCount), L3 knowledge records: \(snapshot.l3BeliefCount), L4 entities: \(snapshot.l4EntityCount).",
+            contentText: "Memory OS health: \(summary.healthReport.status.rawValue). L0 objects: \(summary.l0ProvenanceObjectCount), L1 pending: \(summary.l1PendingCaptureCount), L2 statements: \(summary.l2StatementCount), L3 knowledge records: \(summary.l3KnowledgeRecordCount), L4 entities: \(summary.l4EntityCount).",
             contentJSON: json,
             citations: []
         )
