@@ -26,7 +26,7 @@ public struct MemoryOSDashboardSummaryTool: AgentTool {
             "l1RetryScheduledCount": snapshot.l1RetryScheduledCount,
             "l1ExpiredLeaseCount": snapshot.l1ExpiredLeaseCount,
             "l2StatementCount": snapshot.l2StatementCount,
-            "l2ConflictCount": snapshot.l2ConflictCount,
+            "l2DiagnosticCount": snapshot.l2DiagnosticCount,
             "l3BeliefCount": snapshot.l3BeliefCount,
             "l4EntityCount": snapshot.l4EntityCount,
             "expiredLeaseCount": summary.expiredLeaseCount

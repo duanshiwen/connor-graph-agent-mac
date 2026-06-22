@@ -10,7 +10,7 @@ public struct MemoryOSDashboardSnapshot: Sendable, Equatable, Codable {
     public var l1RetryScheduledCount: Int
     public var l1ExpiredLeaseCount: Int
     public var l2StatementCount: Int
-    public var l2ConflictCount: Int
+    public var l2DiagnosticCount: Int
     public var l3BeliefCount: Int
     public var l4EntityCount: Int
     public var lastCheckedAt: Date
@@ -24,7 +24,7 @@ public struct MemoryOSDashboardSnapshot: Sendable, Equatable, Codable {
         l1RetryScheduledCount: Int = 0,
         l1ExpiredLeaseCount: Int = 0,
         l2StatementCount: Int = 0,
-        l2ConflictCount: Int = 0,
+        l2DiagnosticCount: Int = 0,
         l3BeliefCount: Int = 0,
         l4EntityCount: Int = 0,
         lastCheckedAt: Date = Date()
@@ -37,7 +37,7 @@ public struct MemoryOSDashboardSnapshot: Sendable, Equatable, Codable {
         self.l1RetryScheduledCount = l1RetryScheduledCount
         self.l1ExpiredLeaseCount = l1ExpiredLeaseCount
         self.l2StatementCount = l2StatementCount
-        self.l2ConflictCount = l2ConflictCount
+        self.l2DiagnosticCount = l2DiagnosticCount
         self.l3BeliefCount = l3BeliefCount
         self.l4EntityCount = l4EntityCount
         self.lastCheckedAt = lastCheckedAt
@@ -92,7 +92,7 @@ public struct MemoryOSDashboardPresentationBuilder: Sendable {
             layerRows: [
                 MemoryOSDashboardLayerRow(id: "l0", label: "L0 Provenance Vault", primaryMetric: "\(snapshot.l0ProvenanceObjectCount)", detail: "Evidence objects"),
                 MemoryOSDashboardLayerRow(id: "l1", label: "L1 Capture Ledger", primaryMetric: "\(snapshot.l1PendingCaptureCount)", detail: "Pending captures; queue \(snapshot.l1PendingQueueCount); retry \(snapshot.l1RetryScheduledCount); expired leases \(snapshot.l1ExpiredLeaseCount)"),
-                MemoryOSDashboardLayerRow(id: "l2", label: "L2 Operational Memory", primaryMetric: "\(snapshot.l2StatementCount)", detail: "Statements; conflicts \(snapshot.l2ConflictCount)"),
+                MemoryOSDashboardLayerRow(id: "l2", label: "L2 Operational Memory", primaryMetric: "\(snapshot.l2StatementCount)", detail: "Temporal statements; diagnostics \(snapshot.l2DiagnosticCount)"),
                 MemoryOSDashboardLayerRow(id: "l3", label: "L3 Belief Layer", primaryMetric: "\(snapshot.l3BeliefCount)", detail: "Beliefs"),
                 MemoryOSDashboardLayerRow(id: "l4", label: "L4 Stable Entity Layer", primaryMetric: "\(snapshot.l4EntityCount)", detail: "Stable entities")
             ],
