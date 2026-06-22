@@ -1473,20 +1473,28 @@ final class AppViewModel: NSObject, ObservableObject {
 
     func runBackgroundJobs() async {
         guard !isRunningBackgroundJobs else { return }
-        guard let backgroundJobRunner, let repository else { return }
+        guard backgroundJobRunner != nil || memoryOSFacade != nil else { return }
         isRunningBackgroundJobs = true
         defer { isRunningBackgroundJobs = false }
         do {
-            _ = try await backgroundJobRunner.runAvailable(limit: 5)
-            let snapshot = try repository.loadSnapshot()
-            let traces = try graphExtractionTraceRepository?.loadRecentTraces() ?? []
-            let holdItems = try admissionHoldQueueRepository?.loadOpenItems() ?? []
-            let changeLog = try memoryChangeLogRepository?.loadRecentEntries() ?? []
+            if let memoryOSFacade {
+                _ = try AppMemoryOSBackgroundJobRunner().runOnce(facade: memoryOSFacade)
+            }
+            if let backgroundJobRunner, let repository {
+                _ = try await backgroundJobRunner.runAvailable(limit: 5)
+                let snapshot = try repository.loadSnapshot()
+                let traces = try graphExtractionTraceRepository?.loadRecentTraces() ?? []
+                let holdItems = try admissionHoldQueueRepository?.loadOpenItems() ?? []
+                let changeLog = try memoryChangeLogRepository?.loadRecentEntries() ?? []
+                await MainActor.run {
+                    apply(snapshot: snapshot)
+                    graphExtractionTraces = traces
+                    admissionHoldQueueItems = holdItems
+                    memoryChangeLogEntries = changeLog
+                }
+            }
             await MainActor.run {
-                apply(snapshot: snapshot)
-                graphExtractionTraces = traces
-                admissionHoldQueueItems = holdItems
-                memoryChangeLogEntries = changeLog
+                reloadMemoryOSDashboard()
             }
         } catch {
             await MainActor.run { errorMessage = String(describing: error) }
