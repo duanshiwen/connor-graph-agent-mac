@@ -52,7 +52,7 @@ struct PhaseGCraftGradeNativeUITests {
         let resolver = ConnorNativeShellRouteResolver()
 
         #expect(resolver.route(for: .agentChat).legacySidebarID == "agentChat")
-        #expect(resolver.route(for: .graphMemory).legacySidebarID == "graphWriteCandidates")
+        #expect(resolver.route(for: .graphMemory).legacySidebarID == "memoryOS")
         #expect(resolver.route(for: .approvals).legacySidebarID == "pendingApprovals")
         #expect(resolver.route(for: .settings).legacySidebarID == "llmSettings")
         #expect(resolver.route(for: .browserWorkspace).requiresBrowserVisible == true)
