@@ -1,11 +1,11 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-22 19:54 GMT+8  
+文档更新时间：2026-06-22 20:28 GMT+8  
 当前分支目标：将过旧 Graph Memory 主链路硬切换为商用稳定版 **Connor Memory OS L0-L4**；只移植旧 SQLite temporal graph kernel 的存储能力作为 L2/L4 底层 adapter，删除 staging / distillation / extraction / admission / candidate review / self-healing 等旧结构，避免长期技术债务。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package。它的目标不是做“图谱编辑器”或“LLM SDK 外壳”，而是构建一个本地优先的 **memory-os-native Agent OS**：以 Session OS、Policy Engine、Memory OS、Source/MCP Platform、Native UI、Task Management Stack 和 Attachment Store 共同组成可治理的本地智能工作台。
 
-核心判断：**记忆系统是后台认知基础设施，不是普通用户的前台图谱编辑器。** 普通用户面对的是会话、数据源、技能、自动化、浏览器、附件、任务和设置；Memory OS 在后台提供连续性、精确性、可追溯性、证据化时序陈述、时序信念投影和稳定实体知识。
+核心判断：**记忆系统是后台认知基础设施，不是普通用户的前台图谱编辑器。** 普通用户面对的是会话、数据源、技能、自动化、浏览器、附件、任务和设置；Memory OS 在后台提供连续性、精确性、可追溯性、证据化工作记忆、可复用知识层和稳定实体/概念图谱。
 
 ---
 
@@ -72,7 +72,7 @@ Main source targets：
 
 ```text
 Sources/ConnorGraphCore        Domain models and governance primitives
-Sources/ConnorGraphMemory      Memory OS ingestion, processing, validation, projection, belief/entity services
+Sources/ConnorGraphMemory      Memory OS ingestion, processing, validation, projection, knowledge/entity services
 Sources/ConnorGraphStore       SQLite Memory OS, session and audit persistence
 Sources/ConnorGraphSearch      Hybrid graph retrieval and evaluation
 Sources/ConnorGraphAgent       Agent loop, tools, model providers, policy boundary
@@ -98,14 +98,14 @@ ConnorGraphAgent + Native Model Providers（OpenAI Responses / Anthropic Message
   ↓
 Memory OS Runtime Contract
   ↓
-L0 Provenance + L1 Capture Queue + L2 Operational Memory + L3 Beliefs + L4 Stable Entities
+L0 Provenance + L1 Capture Queue + L2 Operational Facts + L3 Knowledge Records + L4 Stable Entities / Concepts
 ```
 
 ### 3.1 ConnorGraphCore
 
 Core domain target. It contains stable data structures and enums for：
 
-- Memory OS L0-L4 domain models：provenance, capture, operational statements, beliefs, stable entities, health and validation
+- Memory OS L0-L4 domain models：provenance, capture, operational fact statements, knowledge records, stable entities/concepts, health and validation
 - Temporal entity kernel primitives migrated into Memory OS semantics
 - Session OS state and attention models
 - Permission and policy domain
@@ -119,10 +119,10 @@ Memory OS service layer. It is responsible for：
 
 - Pre-ingestion filtering and L0/L1 ingestion decisions
 - Adaptive time block building and processing preparation
-- Statement, evidence and belief validators
-- L2 projection service
-- L3 belief validation / synthesis boundary
-- L4 entity disambiguation and archive boundary
+- Statement, evidence and knowledge validators
+- L2 fact projection service
+- L3 knowledge promotion policy and synthesis boundary
+- L4 entity/concept disambiguation and archive boundary
 - Queue recovery and production processing policy
 
 ### 3.3 ConnorGraphStore
@@ -133,7 +133,7 @@ SQLite-backed persistence layer. It owns：
 - L0 provenance vault repositories
 - L1 capture ledger and durable processing queue repositories
 - L2 operational memory repositories
-- L3 belief repositories
+- L3 knowledge repositories（currently persisted through the compatible `memory_l3_beliefs` tables）
 - L4 stable entity repositories and temporal entity kernel adapter
 - Legacy importer for existing `graph_entities`, `graph_statements` and `graph_episodes_v3`
 - Agent session/run/event/audit persistence
@@ -393,9 +393,28 @@ API keys and provider credentials must not be stored in JSON settings files. The
 
 ### 5.8 Memory OS / Temporal Graph Kernel
 
-Connor Memory OS is the production memory boundary for the app. It is not a graph editor and it is not a direct LLM-write surface. The system uses a five-layer architecture: **L0 Provenance Vault** stores raw evidence objects and evidence spans; **L1 Capture Ledger / Processing Queue** records durable capture events and operational queue state; **L2 Operational Memory** stores append-only temporal statements extracted from validated evidence; **L3 Belief Layer** stores append-only temporal belief projections synthesized from evidence-backed statements; **L4 Stable Entity Layer** stores stable entity anchors and append-only temporal entity statements. L2/L3/L4 records do not use semantic lifecycle states such as confirmed, conflicted, deprecated, superseded, or user-confirmed. Historical semantic records are never mutated to express currentness; new evidence appends new temporal records, and the current memory surface is derived by query/current-view logic using temporal ordering, confidence, provenance and evidence joins. Ambiguity is represented as diagnostic output, not as a persisted semantic conflict state.
+Connor Memory OS is the production memory boundary for the app. It is not a graph editor and it is not a direct LLM-write surface. The system uses a five-layer architecture with a strict semantic split:
 
-The write path is deliberately controlled: chat messages, browser selections and native-session evidence enter through `AppMemoryOSFacade`, are preserved as L0/L1 records, and only validated structured artifacts may project into L2/L3/L4. LLMs may propose structured extraction artifacts, but the repository only accepts them after durable artifact preservation, schema validation, evidence validation, audit logging and transactional projection. The projection queue can lease `project_artifact` jobs and append validated statements, beliefs and entity statements; rejected artifacts remain operational validation outcomes and never become memory truth records.
+- **L0 Provenance Vault** stores raw evidence objects and evidence spans.
+- **L1 Capture Ledger / Processing Queue** records durable capture events and operational queue state.
+- **L2 Operational Memory** stores append-only temporal **facts** extracted from validated evidence: preferences, project state, observed events, working context and other operational statements. High confidence alone never promotes an L2 fact to L3.
+- **L3 Knowledge Layer** stores reusable knowledge records: theories, claims, frameworks, patterns, standards, processes, SOPs and decision bases. L3 is not a high-confidence duplicate of L2; it is gated by knowledge promotion policy.
+- **L4 Stable Entity / Concept Layer** stores stable anchors for people, projects, organizations, work objects and concept entities such as theories, parameters, frameworks, standards, processes and metrics. L3 knowledge records link to L4 concepts and relations.
+
+L2/L3/L4 records do not use semantic lifecycle states such as confirmed, conflicted, deprecated, superseded, or user-confirmed. Historical semantic records are never mutated to express currentness; new evidence appends new temporal records, and the current memory surface is derived by query/current-view logic using temporal ordering, confidence, provenance and evidence joins. Ambiguity is represented as diagnostic output, not as a persisted semantic conflict state.
+
+The write path is deliberately controlled: chat messages, browser selections and native-session evidence enter through `AppMemoryOSFacade`, are preserved as L0/L1 records, and only validated structured artifacts may project into L2/L3/L4. LLMs may propose structured artifacts, but the repository only accepts them after durable artifact preservation, schema validation, evidence validation, audit logging and transactional projection. `GraphStructuredExtractionOutput` projects evidence-backed operational facts into L2 and stable entity facts into L4. `MemoryOSKnowledgeExtractionOutput` projects accepted knowledge candidates into L3 and concept entities/relations into L4. Rejected artifacts remain operational validation outcomes and never become memory truth records.
+
+L3 promotion is governed by four knowledge filters:
+
+| Filter | Question | Acceptance signal |
+|---|---|---|
+| Signal quality | Is this knowledge rather than noise? | Actionable insight, framework, pattern, standard, process or decision basis |
+| Reuse scope | Will this be reused? | General reuse, or reuse for a work object / internal process |
+| Novelty | Is it new or a material addition? | New record, or significant enrichment of an existing record |
+| Structurability | Can it live in the right structure? | Maps to category, knowledge type, scope, domain, work object/person and L4 concepts |
+
+Example boundary: “张三喜欢吃杨梅” is an L2 operational fact even at 0.99 confidence. It should not enter L3. A reusable economics claim such as “under specific constraints, supply-demand elasticity space varies with a parameter” can enter L3 as a knowledge record when it passes the four filters, and it should link to L4 concept entities such as “供需弹性” and the relevant parameter.
 
 The old Graph Memory workflow has been removed from production architecture: staging buffers, distillation jobs, GraphExtraction traces, admission-hold queues, graph-write candidates, change logs and self-healing workflows are not retained as parallel systems. The retained SQLite temporal graph kernel is infrastructure only: it provides durable storage/search/indexing capabilities and temporal entity kernel adaptation for L2/L4, while Memory OS owns the semantic contract. Hybrid retrieval and retrieval evaluation remain available over retained graph/search infrastructure, but all product-facing memory ingestion, dashboard, background jobs and agent tools route through Memory OS.
 
