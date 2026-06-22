@@ -1,6 +1,6 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-22 21:22 GMT+8  
+文档更新时间：2026-06-22 21:58 GMT+8  
 当前分支目标：将过旧 Graph Memory 主链路硬切换为商用稳定版 **Connor Memory OS L0-L4**；只移植旧 SQLite temporal graph kernel 的存储能力作为 L2/L4 底层 adapter，删除 staging / distillation / extraction / admission / candidate review / self-healing 等旧结构，避免长期技术债务。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package。它的目标不是做“图谱编辑器”或“LLM SDK 外壳”，而是构建一个本地优先的 **memory-os-native Agent OS**：以 Session OS、Policy Engine、Memory OS、Source/MCP Platform、Native UI、Task Management Stack 和 Attachment Store 共同组成可治理的本地智能工作台。
@@ -405,11 +405,15 @@ L2/L3/L4 records do not use semantic lifecycle states such as confirmed, conflic
 
 The write path is deliberately controlled: chat messages, browser selections and native-session evidence enter through `AppMemoryOSFacade`, are preserved as L0/L1 records, and only validated structured artifacts may project into L2/L3/L4. LLMs may propose structured artifacts, but the repository only accepts them after durable artifact preservation, schema validation, evidence validation, audit logging and transactional projection. `GraphStructuredExtractionOutput` projects evidence-backed operational facts into L2 and stable entity facts into L4. `MemoryOSKnowledgeExtractionOutput` projects accepted knowledge candidates into L3 and concept entities/relations into L4. Rejected artifacts remain operational validation outcomes and never become memory truth records.
 
-The background pipeline has two AI job types. `memory.l1.process_block_to_l2` is planned by `MemoryOSL1ToL2JobPlanner`: pending L1 captures are grouped by threshold/token policy, wrapped with a prompt contract, and queued for a future model-execution worker to produce `GraphStructuredExtractionOutput`. `memory.l2.synthesize_knowledge` is planned by `MemoryOSL2ToKnowledgeJobPlanner`: pending L2 statement processing states are grouped into synthesis blocks, wrapped with the four-filter knowledge prompt, and queued for a future model-execution worker to produce `MemoryOSKnowledgeExtractionOutput`. Program code plans jobs and validates artifacts; the LLM does the semantic judgment in prompt space.
+The background pipeline has two AI job types. `memory.l1.process_block_to_l2` is planned by `MemoryOSL1ToL2JobPlanner`: pending L1 captures are grouped by threshold/token policy, wrapped with a prompt contract, and queued to produce `GraphStructuredExtractionOutput`. `memory.l2.synthesize_knowledge` is planned by `MemoryOSL2ToKnowledgeJobPlanner`: pending L2 statement processing states are grouped into synthesis blocks, wrapped with the four-filter knowledge prompt, and queued to produce `MemoryOSKnowledgeExtractionOutput`. `MemoryOSBackgroundJobWorker` and `AppMemoryOSFacade.runBackgroundAIQueueOnce(...)` execute those jobs through a `MemoryOSBackgroundModelExecutor`, then hand the returned artifact JSON to the existing validation/projection gate. Program code plans jobs and validates artifacts; the LLM does the semantic judgment in prompt space.
 
-`SQLiteMemoryOSUnifiedRetrievalService` is the native retrieval surface for AI background jobs. It searches L0/L1/L2/L3/L4 and returns layer-aware hits with evidence, provenance and entity refs. L4 supports `depth` expansion through `expandL4(entityID:depth:limit:)`, so AI can request one-hop or multi-hop concept/entity context before deciding whether to write L2/L3/L4.
+L1 is an active memory sequence, not the durable source of truth. L0 keeps the raw provenance object/span. Therefore, after an accepted L1→L2 projection, Connor physically deletes the processed `memory_l1_capture_events`. If the executor fails, the artifact is rejected, or the job dead-letters, L1 remains available for retry.
+
+`SQLiteMemoryOSUnifiedRetrievalService` is the native retrieval surface for AI background jobs and agent tools. It searches L0/L1/L2/L3/L4 and returns layer-aware hits with evidence, provenance and entity refs. L4 supports `depth` expansion through `expandL4(entityID:depth:limit:)`, exposed to agents as `memory_os_expand_l4`. The general `memory_os_search` tool returns summaries first; hits are context, not truth.
 
 L2 organization state is tracked outside the immutable fact row through `memory_l2_statement_processing_state`. This lets Connor select unorganized L2 facts for knowledge synthesis without overwriting historical statements. Improvements to L2 should append refined statements and connect them through metadata/projection state rather than mutating old facts in place.
+
+Native source ingestion is normalized through `AppMemoryOSNativeSourceEventBridge`, which adapts Mail, Calendar, RSS, browser history, attachment text and media transcripts into `ingestSourceEvent(...)`. Task scheduling reaches the pipeline through `memory_os.pipeline` targets such as `plan_l1_to_l2_jobs` and `plan_l2_to_knowledge_jobs`.
 
 L3 promotion is governed by four knowledge filters:
 
