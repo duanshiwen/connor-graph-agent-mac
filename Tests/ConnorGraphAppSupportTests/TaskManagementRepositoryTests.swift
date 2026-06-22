@@ -12,7 +12,7 @@ struct TaskManagementRepositoryTests {
 
         let tasks = try repository.loadOrCreateDefault(now: Date(timeIntervalSince1970: 0))
 
-        #expect(tasks.contains { $0.id == "system.mail.check-every-10-minutes" })
+        #expect(tasks.contains { $0.id == "system.mail.check-every-10-minutes" } == false)
         #expect(tasks.contains { $0.id == "system.calendar.check-every-10-minutes" })
         #expect(tasks.contains { $0.target.targetID == "rss" } == false)
         #expect(FileManager.default.fileExists(atPath: repository.taskDefinitionsURL.path))
@@ -24,18 +24,19 @@ struct TaskManagementRepositoryTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let repository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
         let defaults = ConnorTaskDefinition.systemDefaults(now: Date(timeIntervalSince1970: 0))
-        var mail = try #require(defaults.first { $0.id == "system.mail.check-every-10-minutes" })
-        mail.lifecycle.status = .stopped
-        try repository.saveTask(mail)
+        var calendar = try #require(defaults.first { $0.id == "system.calendar.check-every-10-minutes" })
+        calendar.lifecycle.status = .stopped
+        try repository.saveTask(calendar)
 
         let tasks = try repository.loadOrCreateDefault(now: Date(timeIntervalSince1970: 10))
-        let reloadedMail = try #require(tasks.first { $0.id == mail.id })
+        let reloadedCalendar = try #require(tasks.first { $0.id == calendar.id })
 
+        #expect(tasks.contains { $0.id == "system.mail.check-every-10-minutes" } == false)
         #expect(tasks.contains { $0.id == "system.calendar.check-every-10-minutes" })
         #expect(tasks.contains { $0.target.targetID == "rss" } == false)
-        #expect(reloadedMail.lifecycle.status == .stopped)
-        #expect(reloadedMail.target == ConnorTaskTarget.sourceRuntimeRefresh(sourceID: "mail"))
-        #expect(FileManager.default.fileExists(atPath: repository.taskEventLogURL.path))
+        #expect(reloadedCalendar.lifecycle.status == .stopped)
+        #expect(reloadedCalendar.target == ConnorTaskTarget.sourceRuntimeRefresh(sourceID: "calendar"))
+        #expect(FileManager.default.fileExists(atPath: repository.taskDefinitionsURL.path))
     }
 
     @Test func repositoryStopsRestoresAndProtectsSystemTasks() throws {
@@ -44,14 +45,14 @@ struct TaskManagementRepositoryTests {
         let repository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
         _ = try repository.loadOrCreateDefault(now: Date(timeIntervalSince1970: 0))
 
-        let stopped = try repository.stopTask(id: "system.mail.check-every-10-minutes", reason: "quiet hours")
+        let stopped = try repository.stopTask(id: "system.calendar.check-every-10-minutes", reason: "quiet hours")
         #expect(stopped.lifecycle.status == .stopped)
 
-        let restored = try repository.restoreTask(id: "system.mail.check-every-10-minutes")
+        let restored = try repository.restoreTask(id: "system.calendar.check-every-10-minutes")
         #expect(restored.lifecycle.status == .active)
 
         #expect(throws: AppTaskManagementError.self) {
-            try repository.deleteTask(id: "system.mail.check-every-10-minutes", reason: "remove")
+            try repository.deleteTask(id: "system.calendar.check-every-10-minutes", reason: "remove")
         }
     }
 

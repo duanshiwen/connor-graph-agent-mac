@@ -12,8 +12,8 @@ struct TaskManagementStackTests {
         let stack = TaskManagementStack(repository: repository)
         _ = try repository.loadOrCreateDefault(now: Date(timeIntervalSince1970: 0))
 
-        let stopped = try stack.stopTask(id: "system.mail.check-every-10-minutes", reason: "network constrained")
-        let restored = try stack.restoreTask(id: "system.mail.check-every-10-minutes")
+        let stopped = try stack.stopTask(id: "system.calendar.check-every-10-minutes", reason: "network constrained")
+        let restored = try stack.restoreTask(id: "system.calendar.check-every-10-minutes")
 
         #expect(stopped.lifecycle.status == .stopped)
         #expect(restored.lifecycle.status == .active)
@@ -53,13 +53,13 @@ struct TaskManagementStackTests {
         let stack = TaskManagementStack(repository: repository)
         _ = try repository.loadOrCreateDefault(now: Date(timeIntervalSince1970: 0))
 
-        let running = ConnorTaskRunRecord(id: "run-running", taskID: "system.mail.check-every-10-minutes", status: .running, startedAt: Date(timeIntervalSince1970: 1), outputSummary: "started")
-        let succeeded = ConnorTaskRunRecord(id: "run-success", taskID: "system.mail.check-every-10-minutes", status: .succeeded, startedAt: Date(timeIntervalSince1970: 1), finishedAt: Date(timeIntervalSince1970: 2), outputSummary: "done")
+        let running = ConnorTaskRunRecord(id: "run-running", taskID: "system.calendar.check-every-10-minutes", status: .running, startedAt: Date(timeIntervalSince1970: 1), outputSummary: "started")
+        let succeeded = ConnorTaskRunRecord(id: "run-success", taskID: "system.calendar.check-every-10-minutes", status: .succeeded, startedAt: Date(timeIntervalSince1970: 1), finishedAt: Date(timeIntervalSince1970: 2), outputSummary: "done")
 
         try stack.recordRun(running)
         try stack.recordRun(succeeded)
-        let history = try stack.runHistory(taskID: "system.mail.check-every-10-minutes", limit: 10)
-        let task = try repository.loadTask(id: "system.mail.check-every-10-minutes")
+        let history = try stack.runHistory(taskID: "system.calendar.check-every-10-minutes", limit: 10)
+        let task = try repository.loadTask(id: "system.calendar.check-every-10-minutes")
 
         #expect(history.map(\.id) == ["run-success", "run-running"])
         #expect(task?.lifecycle.status == .succeeded)

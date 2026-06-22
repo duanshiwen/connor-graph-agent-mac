@@ -1416,7 +1416,7 @@ final class AppViewModel: NSObject, ObservableObject {
         reloadTaskManagementPresentation()
         Task { @MainActor in
             do {
-                try await reconcileRSSSourceRefreshTasks()
+                try await reconcileSourceRefreshTasks()
                 reloadTaskManagementPresentation()
             } catch {
                 errorMessage = String(describing: error)
@@ -1617,7 +1617,7 @@ final class AppViewModel: NSObject, ObservableObject {
         let runner = TaskTargetRunner.appRuntime(
             mailRefresh: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("mail") }
-                return try await self.refreshMailForScheduledTask(runID: request.runID)
+                return try await self.refreshMailForScheduledTask(sourceInstanceID: request.sourceInstanceID, runID: request.runID)
             },
             calendarRefresh: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("calendar") }
@@ -1641,7 +1641,7 @@ final class AppViewModel: NSObject, ObservableObject {
             }
         )
         do {
-            try await reconcileRSSSourceRefreshTasks()
+            try await reconcileSourceRefreshTasks()
             let scheduler = TaskSchedulerService()
             let dueTasks = scheduler.dueTasks(try taskManagementRepository.loadOrCreateDefault(), now: Date())
             for task in dueTasks where task.target.targetKind == "media.transcription" {
@@ -1710,18 +1710,55 @@ final class AppViewModel: NSObject, ObservableObject {
         _ = await submitChat(prompt: prompt, clearComposer: false, attachments: [manifest.messageRef])
     }
 
+    private func reconcileSourceRefreshTasks(now: Date = Date()) async throws {
+        try await reconcileRSSSourceRefreshTasks(now: now)
+        try await reconcileMailAccountRefreshTasks(now: now)
+    }
+
     private func reconcileRSSSourceRefreshTasks(now: Date = Date()) async throws {
         guard let taskManagementRepository else { return }
         let materializer = SourceRefreshTaskMaterializer(taskRepository: taskManagementRepository, rssSourceRepository: rssRuntime.repository)
         _ = try await materializer.reconcileRSSSourceRefreshTasks(now: now)
     }
 
-    private func refreshMailForScheduledTask(runID: String?) async throws -> String {
+    private func reconcileMailAccountRefreshTasks(now: Date = Date()) async throws {
+        guard let taskManagementRepository, let mailStore else { return }
+        let materializer = MailRefreshTaskMaterializer(taskRepository: taskManagementRepository, mailSourceRepository: mailStore)
+        _ = try await materializer.reconcileMailAccountRefreshTasks(now: now)
+    }
+
+    private func refreshMailForScheduledTask(sourceInstanceID: String?, runID: String?) async throws -> String {
         guard let mailStore else { return "Mail store unavailable" }
+        let syncService = MailIMAPInitialSyncService(credentialStore: mailCredentialStore, messageLimit: 25)
+        let accounts: [MailAccount]
+        if let sourceInstanceID, !sourceInstanceID.isEmpty {
+            guard let account = try await mailStore.account(id: MailAccountID(rawValue: sourceInstanceID)) else {
+                throw TaskTargetRunnerError.unsupportedTarget("mail account not found: \(sourceInstanceID)")
+            }
+            accounts = [account]
+        } else {
+            accounts = try await mailStore.listAccounts()
+        }
+
+        var syncedMessageCount = 0
+        for account in accounts {
+            let result = try await syncService.sync(account: account)
+            try await mailStore.saveAccount(result.account)
+            for mailbox in result.mailboxes {
+                try await mailStore.saveMailbox(mailbox)
+            }
+            for message in result.messages {
+                try await mailStore.saveMessage(message)
+            }
+            syncedMessageCount += result.messages.count
+        }
         let runtime = MailRuntime(repository: mailStore, cache: mailStore)
-        let accounts = try await runtime.listAccounts(runID: runID, sessionID: selectedChatSessionID)
-        await reloadMailBrowserPresentation()
-        return "Mail refreshed \(accounts.count) accounts"
+        _ = try await runtime.listAccounts(runID: runID, sessionID: selectedChatSessionID)
+        await reloadMailBrowserPresentation(preferredAccountID: accounts.first?.id)
+        if let sourceInstanceID, !sourceInstanceID.isEmpty {
+            return "Mail refreshed account \(sourceInstanceID); fetched \(syncedMessageCount) messages"
+        }
+        return "Mail refreshed \(accounts.count) accounts; fetched \(syncedMessageCount) messages"
     }
 
     private func refreshCalendarForScheduledTask(runID: String?) async -> String {
@@ -1907,6 +1944,8 @@ final class AppViewModel: NSObject, ObservableObject {
             try await mailStore?.saveMessage(message)
         }
 
+        try await reconcileMailAccountRefreshTasks(now: now)
+        reloadTaskManagementPresentation()
         await reloadMailBrowserPresentation(preferredAccountID: accountID, preferredMailboxID: syncedMailboxIDs.first ?? defaultMailboxes.first?.id)
         selectedMailMessageID = nil
         isPresentingAddMailAccountSheet = false
@@ -2261,7 +2300,7 @@ final class AppViewModel: NSObject, ObservableObject {
                    rssBrowserPresentation.item(id: selectedRSSItemID)?.sourceID == source.id {
                     self.selectedRSSItemID = nil
                 }
-                try await reconcileRSSSourceRefreshTasks()
+                try await reconcileSourceRefreshTasks()
                 reloadTaskManagementPresentation()
                 pendingRSSSourceDeletion = nil
                 errorMessage = nil
@@ -4802,7 +4841,7 @@ final class AppViewModel: NSObject, ObservableObject {
         let runner = TaskTargetRunner.appRuntime(
             mailRefresh: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("mail") }
-                return try await self.refreshMailForScheduledTask(runID: request.runID)
+                return try await self.refreshMailForScheduledTask(sourceInstanceID: request.sourceInstanceID, runID: request.runID)
             },
             calendarRefresh: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("calendar") }

@@ -122,3 +122,123 @@ public struct SourceRefreshTaskMaterializer: Sendable {
     }
 
 }
+
+public struct MailRefreshTaskMaterializer: Sendable {
+    public static let sourceInstanceIDParameter = SourceRefreshTaskMaterializer.sourceInstanceIDParameter
+    public static let sourceKindParameter = SourceRefreshTaskMaterializer.sourceKindParameter
+
+    public var taskRepository: AppTaskManagementRepository
+    public var mailSourceRepository: any MailSourceRepository
+
+    public init(taskRepository: AppTaskManagementRepository, mailSourceRepository: any MailSourceRepository) {
+        self.taskRepository = taskRepository
+        self.mailSourceRepository = mailSourceRepository
+    }
+
+    @discardableResult
+    public func reconcileMailAccountRefreshTasks(now: Date = Date()) async throws -> [ConnorTaskDefinition] {
+        _ = try taskRepository.loadOrCreateDefault(now: now)
+        let accounts = try await mailSourceRepository.listAccounts()
+        var tasks = try taskRepository.loadTasks(includeDeleted: true)
+        var tasksByID = Dictionary(uniqueKeysWithValues: tasks.map { ($0.id, $0) })
+        var desiredIDs = Set<String>()
+
+        for account in accounts {
+            let taskID = Self.mailRefreshTaskID(accountID: account.id)
+            desiredIDs.insert(taskID)
+            let desired = Self.makeMailRefreshTask(account: account, id: taskID, now: now)
+            var next = tasksByID[taskID] ?? desired
+            next.origin = .system
+            next.name = desired.name
+            next.trigger = desired.trigger
+            next.target = desired.target
+            next.metadata = desired.metadata
+            if next.lifecycle.status == .deleted || next.lifecycle.status == .stopped {
+                next.lifecycle.status = .active
+                next.lifecycle.lastErrorMessage = nil
+            }
+            next.updatedAt = tasksByID[taskID] == nil ? desired.updatedAt : now
+            if tasksByID[taskID] == nil {
+                next.createdAt = desired.createdAt
+            }
+            if tasksByID[taskID] != next {
+                try taskRepository.saveTask(next)
+                tasksByID[taskID] = next
+            }
+        }
+
+        tasks = try taskRepository.loadTasks(includeDeleted: true)
+        for task in tasks where Self.isMailAccountRefreshTask(task) && !desiredIDs.contains(task.id) {
+            try taskRepository.purgeTaskDefinition(id: task.id, reason: "Mail account no longer exists.")
+        }
+
+        for task in try taskRepository.loadTasks(includeDeleted: true) where Self.isMailGlobalRefreshTask(task) {
+            try taskRepository.purgeTaskDefinition(id: task.id, reason: "Mail refresh tasks are materialized per account.")
+        }
+
+        return try taskRepository.loadTasks(includeDeleted: true)
+    }
+
+    public static func mailRefreshTaskID(accountID: MailAccountID) -> String {
+        let raw = accountID.rawValue.lowercased()
+        let sanitized = raw
+            .map { character -> Character in
+                if character.isASCII && (character.isLetter || character.isNumber || character == "." || character == "-") { return character }
+                return "-"
+            }
+        let collapsed = String(sanitized)
+            .replacingOccurrences(of: #"[-.]{2,}"#, with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".-"))
+        let slug = collapsed.isEmpty ? String(RSSHash.sha256(accountID.rawValue).prefix(12)) : collapsed
+        let candidate = "system.mail.account.\(slug).refresh"
+        if candidate.count <= 128 { return candidate }
+        return "system.mail.account.\(RSSHash.sha256(accountID.rawValue).prefix(16)).refresh"
+    }
+
+    public static func makeMailRefreshTask(account: MailAccount, id: String? = nil, now: Date = Date()) -> ConnorTaskDefinition {
+        let taskID = id ?? mailRefreshTaskID(accountID: account.id)
+        return ConnorTaskDefinition(
+            id: taskID,
+            name: "检查邮件：\(account.displayName)",
+            origin: .system,
+            trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 600, recurrence: .interval),
+            target: ConnorTaskTarget(
+                targetKind: "source.runtime",
+                targetID: "mail",
+                operationName: "refresh",
+                parameters: [
+                    sourceKindParameter: "mail",
+                    sourceInstanceIDParameter: account.id.rawValue
+                ]
+            ),
+            lifecycle: ConnorTaskLifecycle(status: .active),
+            metadata: ConnorTaskMetadata(
+                rationale: "Materialized from configured mail account.",
+                tags: ["system", "protected", "mail", "source-instance"],
+                scope: .global,
+                isRecoverable: false,
+                recoveryPolicy: .none,
+                isProtectedSystemTask: true,
+                userEditableFields: [.name, .tags]
+            ),
+            createdAt: now,
+            updatedAt: now
+        )
+    }
+
+    public static func isMailAccountRefreshTask(_ task: ConnorTaskDefinition) -> Bool {
+        task.origin == .system
+        && task.target.targetKind == "source.runtime"
+        && task.target.targetID == "mail"
+        && task.target.operationName == "refresh"
+        && task.target.parameters[sourceInstanceIDParameter]?.isEmpty == false
+    }
+
+    public static func isMailGlobalRefreshTask(_ task: ConnorTaskDefinition) -> Bool {
+        task.origin == .system
+        && task.target.targetKind == "source.runtime"
+        && task.target.targetID == "mail"
+        && task.target.operationName == "refresh"
+        && (task.target.parameters[sourceInstanceIDParameter]?.isEmpty ?? true)
+    }
+}

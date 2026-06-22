@@ -36,11 +36,25 @@ struct TaskSchedulerRunnerServiceTests {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let repository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
-        let tasks = ConnorTaskDefinition.systemDefaults(now: Date(timeIntervalSince1970: 0)).map { task in
+        let now = Date(timeIntervalSince1970: 0)
+        var tasks = ConnorTaskDefinition.systemDefaults(now: now).map { task in
             var copy = task
-            copy.lifecycle.lastFinishedAt = Date(timeIntervalSince1970: 0)
+            copy.lifecycle.lastFinishedAt = now
             return copy
         }
+        var explicitMailTask = ConnorTaskDefinition(
+            id: "system.mail.check-every-10-minutes",
+            name: "检查邮件",
+            origin: .system,
+            trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 600, recurrence: .interval),
+            target: .sourceRuntimeRefresh(sourceID: "mail"),
+            lifecycle: ConnorTaskLifecycle(status: .active, lastFinishedAt: now),
+            metadata: .protectedSystem,
+            createdAt: now,
+            updatedAt: now
+        )
+        explicitMailTask.lifecycle.lastFinishedAt = now
+        tasks.append(explicitMailTask)
         for task in tasks { try repository.saveTask(task) }
         let runner = TaskTargetRunner(
             mailRefresher: { _ in throw TaskTargetRunnerError.unsupportedTarget("mail") },
