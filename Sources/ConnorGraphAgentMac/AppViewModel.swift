@@ -5028,8 +5028,8 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func saveBrowserSelectionAsEpisode(_ selection: BrowserSelectionContext) async {
-        guard let repository else {
-            errorMessage = "当前没有可用的图谱仓储，无法保存网页证据。"
+        guard let memoryOSFacade else {
+            errorMessage = "当前没有可用的 Memory OS，无法保存网页证据。"
             return
         }
         do {
@@ -5038,26 +5038,17 @@ final class AppViewModel: NSObject, ObservableObject {
                 groupID: "default",
                 sessionID: selectedChatSessionID
             )
-            try repository.store.upsert(episode: draft.episode)
-            let source = GraphExtractionSource(
-                id: draft.episode.id,
-                graphID: draft.episode.graphID,
-                sourceType: .webpage,
+            _ = try memoryOSFacade.ingestWebPageEvidence(
+                evidenceID: draft.episode.id,
                 title: draft.episode.title,
                 content: draft.episode.content,
                 occurredAt: draft.episode.occurredAt,
                 sessionID: draft.episode.sessionID,
-                workObjectID: draft.episode.workObjectID,
                 metadata: draft.episode.metadata
             )
-            try repository.store.enqueueExtractionJob(graphID: source.graphID, source: source)
-            let snapshot = try repository.loadSnapshot()
-            entities = snapshot.entities
-            statements = snapshot.statements
-            episodes = snapshot.episodes
-            observeLogEntries = snapshot.observeLogEntries
+            reloadMemoryOSDashboard()
             errorMessage = nil
-            lastPromotionResultSummary = "已保存网页证据：\(draft.episode.title)"
+            lastPromotionResultSummary = "已保存网页证据到 Memory OS：\(draft.episode.title)"
             Task { await runBackgroundJobs() }
         } catch {
             errorMessage = String(describing: error)
