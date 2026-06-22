@@ -282,7 +282,30 @@ public struct ConnorTaskDefinition: Codable, Sendable, Equatable, Identifiable {
     }
 
     public static func systemDefaults(now: Date = Date()) -> [ConnorTaskDefinition] {
-        []
+        [
+            ConnorTaskDefinition(
+                id: "system.memory-os.plan-l1-to-l2",
+                name: "Memory OS：计划 L1 到 L2",
+                origin: .system,
+                trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 300, recurrence: .interval),
+                target: ConnorTaskTarget(targetKind: "memory_os.pipeline", targetID: "default", operationName: "plan_l1_to_l2_jobs"),
+                lifecycle: ConnorTaskLifecycle(status: .active),
+                metadata: .protectedSystem,
+                createdAt: now,
+                updatedAt: now
+            ),
+            ConnorTaskDefinition(
+                id: "system.memory-os.plan-l2-to-knowledge",
+                name: "Memory OS：计划 L2 到 Knowledge",
+                origin: .system,
+                trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 600, recurrence: .interval),
+                target: ConnorTaskTarget(targetKind: "memory_os.pipeline", targetID: "default", operationName: "plan_l2_to_knowledge_jobs"),
+                lifecycle: ConnorTaskLifecycle(status: .active),
+                metadata: .protectedSystem,
+                createdAt: now,
+                updatedAt: now
+            )
+        ]
     }
 }
 
