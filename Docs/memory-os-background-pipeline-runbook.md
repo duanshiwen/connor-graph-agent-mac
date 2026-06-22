@@ -1,6 +1,6 @@
 # Memory OS Background Pipeline Runbook
 
-Updated: 2026-06-22 21:58 GMT+8
+Updated: 2026-06-22 23:12 GMT+8
 
 ## Purpose
 
@@ -50,6 +50,38 @@ This reads pending L1 capture events, applies threshold/token policy, builds `Me
 
 ```text
 memory.l1.process_block_to_l2
+```
+
+The model worker receives an ordered structured packet:
+
+```json
+{
+  "l1_capture_events": [
+    {
+      "capture_event_id": "...",
+      "event_type": "...",
+      "source_kind": "...",
+      "occurred_at": "...",
+      "provenance_object_id": "...",
+      "span_id": "...",
+      "title": "...",
+      "content_preview": "...",
+      "token_estimate": 0,
+      "metadata": {}
+    }
+  ]
+}
+```
+
+The Stage 1 prompt policy is:
+
+```text
+Read L1 events in chronological order.
+Extract candidate facts per event.
+Drop noise and unsupported guesses.
+Consolidate duplicate facts.
+Every emitted fact cites capture_event_id and provenance/span refs.
+Do not create L3 knowledge records.
 ```
 
 The model worker must output:
@@ -139,6 +171,36 @@ It creates `MemoryOSL2ToKnowledgeJobDraft` and enqueues:
 memory.l2.synthesize_knowledge
 ```
 
+The model worker receives an ordered structured packet:
+
+```json
+{
+  "l2_statements": [
+    {
+      "statement_id": "...",
+      "subject_id": "...",
+      "predicate": "...",
+      "text": "...",
+      "confidence": 0.0,
+      "committed_at": "...",
+      "evidence_span_ids": [],
+      "metadata": {}
+    }
+  ]
+}
+```
+
+The Stage 2 prompt policy is conservative:
+
+```text
+Most L2 facts should not become L3 knowledge.
+High confidence alone is insufficient.
+All four knowledge filters must pass.
+Accepted candidates must include signal_quality, reuse_scope, novelty and structurability judgment fields.
+If existing L3 covers the idea, output no new L3 candidate.
+If existing L4 has the concept, reuse it.
+```
+
 The model worker must output:
 
 ```text
@@ -165,18 +227,26 @@ L2 statements are not overwritten.
 
 ## Retrieval Tools
 
-Agent tools now expose Memory OS retrieval:
+Agent tools now expose Memory OS retrieval and read access:
 
 ```text
 memory_os_search
 memory_os_expand_l4
+memory_os_read_record
+memory_os_read_provenance
 ```
 
 `memory_os_search` searches L0/L1/L2/L3/L4 and returns ranked summaries/refs.
 
 `memory_os_expand_l4` expands one L4 entity/concept with depth-limited traversal.
 
-Search hits are context, not truth. Final memory truth still comes from accepted projected records and evidence refs.
+`memory_os_read_record` reads a full Memory OS record from L0/L1/L2/L3/L4 after a search hit or known record id.
+
+`memory_os_read_provenance` reads exact L0 provenance object/span content when raw evidence is required.
+
+Search hits and tool results are context, not truth. Final memory truth still comes from accepted projected records and evidence refs.
+
+Background `MemoryOSBackgroundModelRequest` also carries provider-agnostic `MemoryOSBackgroundToolDescriptor` values. Current executors may still be prompt-in / JSON-out. Future provider adapters can use those descriptors to run an internal tool-calling loop and return final artifact JSON plus tool trace metadata.
 
 ## Native Source Event Bridge
 
@@ -243,7 +313,9 @@ Implemented now:
 - AI worker contract and mock/testable executor interface.
 - App facade queue execution and artifact projection handoff.
 - Failure/retry/dead-letter/audit handling.
-- Unified retrieval tools and L4 depth expansion.
+- Unified retrieval/read tools and L4 depth expansion.
+- Structured L1/L2 prompt packets.
+- Background tool descriptors and tool trace boundary types.
 - Native source event bridge.
 - TaskTargetRunner scheduler target integration.
 

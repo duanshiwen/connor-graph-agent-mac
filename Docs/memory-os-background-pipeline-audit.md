@@ -1,6 +1,6 @@
 # Memory OS Background Pipeline Audit
 
-Updated: 2026-06-22 21:58 GMT+8
+Updated: 2026-06-22 23:12 GMT+8
 Branch: `feature/memory-os-l0-l4-production-refactor`
 
 This document audits the current Connor Memory OS implementation against the intended two-stage AI background memory pipeline:
@@ -80,12 +80,12 @@ Current implementation now includes the first orchestration layer:
 
 1. `MemoryOSL1ProcessingTriggerPolicy` applies count / token / age thresholds.
 2. `MemoryOSL1ToL2JobPlanner` creates 20–30 item style processing blocks.
-3. `MemoryOSL1ToL2PromptBuilder` builds the prompt contract for L1→L2 fact extraction.
+3. `MemoryOSL1ToL2PromptBuilder` builds the structured prompt contract for L1→L2 fact extraction, including ordered `l1_capture_events`, L0/L1/L2 layer semantics, evidence discipline, duplicate consolidation and the hard boundary against L3 creation.
 4. `AppMemoryOSFacade.enqueueL1ToL2BackgroundJobs(...)` writes queue items of kind `memory.l1.process_block_to_l2`.
 
 Implemented now: `MemoryOSBackgroundJobWorker` builds model requests through `MemoryOSBackgroundModelExecutor`, and `AppMemoryOSFacade.runBackgroundAIQueueOnce(...)` leases `memory.l1.process_block_to_l2` jobs, receives `GraphStructuredExtractionOutput`, and hands it to `projectAndRecordLLMArtifact(...)`. On accepted projection, processed L1 capture events are physically deleted because L0 keeps the durable raw provenance.
 
-Still deferred: a real provider-backed executor adapter. Tests use mock/static executors through the protocol boundary.
+Still deferred: a real provider-backed executor adapter. Tests use mock/static executors through the protocol boundary. Background requests now carry provider-agnostic tool descriptors, so a future adapter can run a tool-calling loop without changing the queue/projection boundary.
 
 ## 3. Current artifact validation and projection mechanism
 
@@ -191,12 +191,12 @@ Current implementation now includes the first orchestration layer:
 
 1. `MemoryOSL2KnowledgeSynthesisTriggerPolicy` selects pending L2 statements.
 2. `MemoryOSL2ToKnowledgeJobPlanner` blocks them by count / token budget.
-3. `MemoryOSL2ToKnowledgePromptBuilder` builds the knowledge synthesis prompt.
+3. `MemoryOSL2ToKnowledgePromptBuilder` builds the structured knowledge synthesis prompt, including ordered `l2_statements`, conservative L3 review policy, explicit four-filter judgment fields and L3/L4 no-duplicate rules.
 4. `AppMemoryOSFacade.enqueueL2ToKnowledgeBackgroundJobs(...)` writes queue items of kind `memory.l2.synthesize_knowledge`.
 
 Implemented now: `AppMemoryOSFacade.runBackgroundAIQueueOnce(...)` leases `memory.l2.synthesize_knowledge` jobs, executes them through `MemoryOSBackgroundModelExecutor`, receives `MemoryOSKnowledgeExtractionOutput`, projects accepted candidates into L3/L4, and marks `memory_l2_statement_processing_state` succeeded or failed.
 
-Still deferred: a real provider-backed executor adapter with live retrieval calls during the model turn. The retrieval tool surface exists and can be used by a future executor/agent loop.
+Still deferred: a real provider-backed executor adapter with live retrieval calls during the model turn. The retrieval/read tool surface exists and background requests carry descriptors for a future executor/agent loop.
 
 ## 6. Current retrieval and depth mechanism
 
@@ -237,10 +237,11 @@ The user’s target architecture maps well onto the current Memory OS direction.
 
 The remaining missing product mechanism is now narrower:
 
-1. Real provider-backed `MemoryOSBackgroundModelExecutor` adapter.
+1. Real provider-backed `MemoryOSBackgroundModelExecutor` adapter with live tool-calling loop support.
 2. Deep call-site wiring from every Mail / Calendar / RSS / browser history / attachment extraction / media transcription runtime path into `AppMemoryOSNativeSourceEventBridge`; the common bridge exists and is tested.
-3. Optional `memory_os_read_record` full-record read tool; search and L4 expansion already exist.
-4. Product policy for cleanup/quarantine of dead-lettered L1 buffers. Successful L1 processing already physically clears L1; failure paths keep L1 for retry.
+3. Product policy for cleanup/quarantine of dead-lettered L1 buffers. Successful L1 processing already physically clears L1; failure paths keep L1 for retry.
+
+Completed since the previous audit: `memory_os_read_record`, `memory_os_read_provenance`, structured L1/L2 prompt packets, `MemoryOSBackgroundToolDescriptor`, `MemoryOSBackgroundToolCall`, and `MemoryOSBackgroundToolResult`.
 
 ## 8. Implementation principle
 
