@@ -1,6 +1,6 @@
 # Memory OS Background Pipeline Runbook
 
-Updated: 2026-06-22 23:12 GMT+8
+Updated: 2026-06-22 23:54 GMT+8
 
 ## Purpose
 
@@ -18,6 +18,8 @@ L0 provenance
 ```
 
 LLMs do not directly write memory truth. They produce structured artifacts. Memory OS persists, validates, audits and projects those artifacts.
+
+Memory OS is a hidden background substrate. Connor does not expose a user-facing Memory OS sidebar route, dashboard pane, layer-count panel, provenance browser, or `memory_os_dashboard_summary` agent tool. Operational counts and queue health remain available internally through `AppMemoryOSFacade.operationalSummary(...)` for tests, health checks, retry/dead-letter recovery, and scheduler diagnostics.
 
 ## Layer Semantics
 
