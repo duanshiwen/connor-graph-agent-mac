@@ -938,7 +938,8 @@ final class AppViewModel: NSObject, ObservableObject {
         case .browserWorkspace:
             showBrowserWorkspace()
         case .graphMemory:
-            selection = .memoryOS
+            isBrowserVisible = false
+            selection = .agentChat
         case .search:
             selection = .search
         case .graphEntities:
@@ -5393,6 +5394,11 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 }
 
+extension AppViewModel {
+    var hasMemoryOSBackendForTests: Bool {
+        memoryOSFacade != nil
+    }
+}
 
 private final class UserLocationCoordinator: NSObject, CLLocationManagerDelegate {
     private let manager = CLLocationManager()
