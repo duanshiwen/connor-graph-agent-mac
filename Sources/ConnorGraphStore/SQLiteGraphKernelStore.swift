@@ -1077,47 +1077,6 @@ public final class SQLiteGraphKernelStore: @unchecked Sendable {
         return try decode(SessionReadState.self, trimmed)
     }
 
-    // MARK: - Memory Staging Buffers
-
-    public func upsertMemoryStagingBuffer(_ buffer: MemoryStagingBuffer, updatedAt: Date = Date()) throws {
-        try execute("""
-        INSERT OR REPLACE INTO memory_staging_buffers
-        (id, session_id, status, bundle_count, token_estimate, last_distilled_at, updated_at, buffer_json)
-        VALUES (\(quote(buffer.id)), \(quote(buffer.sessionID)), \(quote(buffer.status.rawValue)), \(buffer.bundleCount), \(buffer.tokenEstimate), \(quote(buffer.lastDistilledAt.map(iso))), \(quote(iso(updatedAt))), \(quote(json(buffer))))
-        """)
-    }
-
-    public func memoryStagingBuffer(id: String) throws -> MemoryStagingBuffer? {
-        try query(sql: "SELECT buffer_json FROM memory_staging_buffers WHERE id = \(quote(id)) LIMIT 1")
-            .compactMap { $0.first }
-            .map { try decode(MemoryStagingBuffer.self, $0) }
-            .first
-    }
-
-    public func memoryStagingBuffer(sessionID: String) throws -> MemoryStagingBuffer? {
-        try query(sql: "SELECT buffer_json FROM memory_staging_buffers WHERE session_id = \(quote(sessionID)) LIMIT 1")
-            .compactMap { $0.first }
-            .map { try decode(MemoryStagingBuffer.self, $0) }
-            .first
-    }
-
-    public func memoryStagingBuffers(status: MemoryStagingBufferStatus? = nil, limit: Int = 100) throws -> [MemoryStagingBuffer] {
-        var conditions: [String] = []
-        if let status { conditions.append("status = \(quote(status.rawValue))") }
-        let whereClause = conditions.isEmpty ? "" : "WHERE \(conditions.joined(separator: " AND "))"
-        return try query(sql: "SELECT buffer_json FROM memory_staging_buffers \(whereClause) ORDER BY updated_at DESC LIMIT \(limit)")
-            .compactMap { $0.first }
-            .map { try decode(MemoryStagingBuffer.self, $0) }
-    }
-
-    public func deleteMemoryStagingBuffer(sessionID: String) throws {
-        try execute("DELETE FROM memory_staging_buffers WHERE session_id = \(quote(sessionID));")
-    }
-
-    public func deleteMemoryStagingBuffer(id: String) throws {
-        try execute("DELETE FROM memory_staging_buffers WHERE id = \(quote(id));")
-    }
-
     // MARK: - Agent Runs & Events
 
     public func upsert(run: AgentRun) throws {
