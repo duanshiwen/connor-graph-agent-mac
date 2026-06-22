@@ -345,6 +345,34 @@ public struct MemoryOSBackgroundToolDescriptor: Sendable, Codable, Equatable, Id
     }
 }
 
+public struct MemoryOSBackgroundToolCall: Sendable, Codable, Equatable, Identifiable {
+    public var id: String
+    public var name: String
+    public var argumentsJSON: String
+
+    public init(id: String = UUID().uuidString, name: String, argumentsJSON: String) {
+        self.id = id
+        self.name = name
+        self.argumentsJSON = argumentsJSON
+    }
+}
+
+public struct MemoryOSBackgroundToolResult: Sendable, Codable, Equatable {
+    public var callID: String
+    public var name: String
+    public var contentJSON: String
+    public var contentText: String
+    public var citations: [String]
+
+    public init(callID: String, name: String, contentJSON: String, contentText: String = "", citations: [String] = []) {
+        self.callID = callID
+        self.name = name
+        self.contentJSON = contentJSON
+        self.contentText = contentText
+        self.citations = citations
+    }
+}
+
 public enum MemoryOSBackgroundToolCatalog {
     public static func l1ToL2Tools() -> [MemoryOSBackgroundToolDescriptor] {
         [searchTool(layers: ["L2", "L4"], usage: "Use memory_os_search before emitting facts likely to duplicate existing L2 or when resolving L4 entity identity."), readProvenanceTool(), expandL4Tool(usage: "Use memory_os_expand_l4 only when L4 entity identity or relation context is necessary for grounded L2 extraction.")]
