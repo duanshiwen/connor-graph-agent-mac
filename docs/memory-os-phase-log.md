@@ -121,3 +121,29 @@ Validation evidence:
 - `swift test --filter AppViewModelMemoryOSCutover && swift test --filter MemoryOS && swift test` after browser evidence cutover: 1001 tests / 115 suites passed.
 - `swift test --filter SQLiteGraphStoreV2 && swift test --filter MemoryOS && swift test` after old workflow physical deletion: 964 tests / 115 suites passed.
 - Final Swift grep gate leaves old workflow names only in negative schema/deletion assertions.
+
+## Phase H-3 — production hardening foundation
+
+Completed on 2026-06-22 17:42 GMT+8.
+
+Commits:
+
+- `f55af7e feat: harden Memory OS production pipeline`
+- `6152d7a feat: expose Memory OS queue observability`
+
+Artifacts:
+
+- `MemoryOSLLMArtifactEnvelope` records raw model output with schema name/version, model id, content hash, queue item id and processing run id.
+- `MemoryOSLLMArtifactValidator` validates structured extraction JSON, entity references and evidence before any projection/write path accepts the artifact.
+- `MemoryOSQueueTransitionService` implements retry-with-backoff and dead-letter transition semantics.
+- `SQLiteMemoryOSStore` persists LLM artifacts, queue attempts, dead letters, audit events, processing metrics and health reports.
+- `AppMemoryOSFacade` exposes validated artifact recording, queue failure recording, persisted health checks and operational queue snapshot.
+- Memory OS dashboard now surfaces retry scheduled counts and expired queue leases.
+
+Validation evidence:
+
+- `swift test --filter MemoryOSProductionHardening` passed.
+- `swift test --filter MemoryOSProductionOperations` passed.
+- `swift test --filter AppMemoryOSProductionHardening` passed.
+- `swift test --filter MemoryOSDashboard` passed.
+- `swift test --filter MemoryOS` passed with 58 MemoryOS tests.
