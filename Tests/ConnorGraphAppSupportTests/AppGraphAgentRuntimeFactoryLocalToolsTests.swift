@@ -339,9 +339,13 @@ private final class LocalToolsCredentialStore: CredentialStore, @unchecked Senda
     let controller = factory.makeAgentLoopController(permissionMode: .readOnly)
     let names = controller.toolRegistry.definitions.map(\.name)
 
-    #expect(names.contains("memory_os_dashboard_summary"))
+    #expect(!names.contains("memory_os_dashboard_summary"))
     #expect(names.contains("memory_os_ingest_observation"))
     #expect(names.contains("memory_os_project_structured_artifact"))
+    #expect(names.contains("memory_os_search"))
+    #expect(names.contains("memory_os_expand_l4"))
+    #expect(names.contains("memory_os_read_record"))
+    #expect(names.contains("memory_os_read_provenance"))
     #expect(!names.contains("graph_ingest_episode"))
     #expect(!names.contains("graph_propose_write"))
 }
