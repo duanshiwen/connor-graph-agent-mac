@@ -21,17 +21,17 @@ private func temporaryMemoryOSProjectionDatabaseURL(_ name: String = UUID().uuid
             MemoryOSNode(id: "node-project", stableKey: "project:work_object:connor-memory-os", nodeType: "work_object", name: "Connor Memory OS", createdAt: now, updatedAt: now)
         ],
         statements: [
-            MemoryOSStatement(id: "statement-1", subjectID: "node-person", predicate: "RELATED_TO", objectID: "node-project", text: "诗闻正在推进 Connor Memory OS H4。", status: .observed, confidence: 0.94, validAt: now, committedAt: now, evidenceSpanIDs: ["span-1"])
+            MemoryOSStatement(id: "statement-1", subjectID: "node-person", predicate: "RELATED_TO", objectID: "node-project", text: "诗闻正在推进 Connor Memory OS H4。", assertionKind: .observed, confidence: 0.94, validAt: now, committedAt: now, evidenceSpanIDs: ["span-1"], sourceArtifactID: "artifact-1")
         ],
         entities: [
             MemoryOSEntity(id: "entity-person", stableKey: "personal:person_object:诗闻", entityType: "person_object", name: "诗闻", aliases: ["Shiwen"], summary: "Current user", confidence: 0.95, createdAt: now, updatedAt: now),
             MemoryOSEntity(id: "entity-project", stableKey: "project:work_object:connor-memory-os", entityType: "work_object", name: "Connor Memory OS", summary: "Memory OS", confidence: 0.93, createdAt: now, updatedAt: now)
         ],
         entityStatements: [
-            MemoryOSEntityStatement(id: "entity-statement-1", entityID: "entity-person", predicate: "RELATED_TO", objectEntityID: "entity-project", text: "诗闻正在推进 Connor Memory OS H4。", status: .observed, confidence: 0.94, validAt: now, committedAt: now, evidenceSpanIDs: ["span-1"])
+            MemoryOSEntityStatement(id: "entity-statement-1", entityID: "entity-person", predicate: "RELATED_TO", objectEntityID: "entity-project", text: "诗闻正在推进 Connor Memory OS H4。", assertionKind: .observed, confidence: 0.94, validAt: now, committedAt: now, evidenceSpanIDs: ["span-1"], sourceArtifactID: "artifact-1")
         ],
         beliefs: [
-            MemoryOSBelief(id: "belief-1", topic: "RELATED_TO", statement: "诗闻正在推进 Connor Memory OS H4。", status: .observed, confidence: 0.94, evidenceStatementIDs: ["statement-1"], createdAt: now, updatedAt: now)
+            MemoryOSBelief(id: "belief-1", topic: "RELATED_TO", statement: "诗闻正在推进 Connor Memory OS H4。", projectionKind: .observed, confidence: 0.94, evidenceStatementIDs: ["statement-1"], validAt: now, projectedAt: now, sourceArtifactID: "artifact-1")
         ]
     )
 

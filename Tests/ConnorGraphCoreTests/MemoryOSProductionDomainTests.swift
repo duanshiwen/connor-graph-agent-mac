@@ -12,7 +12,7 @@ import ConnorGraphCore
 
     #expect(l0.sourceType == .manual)
     #expect(l1.processingState == .pending)
-    #expect(l2.status == .observed)
-    #expect(l3.status == .proposed)
-    #expect(l4.status == .active)
+    #expect(l2.assertionKind == .observed)
+    #expect(l3.projectionKind == .observed)
+    #expect(l4.stableKey == "default:concept:entity")
 }

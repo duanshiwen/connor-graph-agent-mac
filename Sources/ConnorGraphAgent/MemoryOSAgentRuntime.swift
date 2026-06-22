@@ -86,10 +86,10 @@ public struct MemoryOSWriteTools: Sendable {
     public init() {}
 
     public func makeObservation(subjectID: String, predicate: String, text: String, evidenceSpanIDs: [String], now: Date = Date()) -> MemoryOSStatement {
-        MemoryOSStatement(subjectID: subjectID, predicate: predicate, text: text, status: .observed, confidence: 0.7, validAt: now, committedAt: now, evidenceSpanIDs: evidenceSpanIDs)
+        MemoryOSStatement(subjectID: subjectID, predicate: predicate, text: text, assertionKind: .observed, confidence: 0.7, validAt: now, committedAt: now, evidenceSpanIDs: evidenceSpanIDs)
     }
 
     public func proposeBelief(topic: String, statement: String, evidenceStatementIDs: [String] = [], now: Date = Date()) -> MemoryOSBelief {
-        MemoryOSBelief(topic: topic, statement: statement, status: .proposed, confidence: 0.5, evidenceStatementIDs: evidenceStatementIDs, createdAt: now, updatedAt: now)
+        MemoryOSBelief(topic: topic, statement: statement, projectionKind: .summarized, confidence: 0.5, evidenceStatementIDs: evidenceStatementIDs, validAt: now, projectedAt: now)
     }
 }
