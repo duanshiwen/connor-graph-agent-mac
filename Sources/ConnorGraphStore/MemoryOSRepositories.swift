@@ -36,3 +36,13 @@ public struct MemoryOSEntityRepository: Sendable {
     public func save(_ entity: MemoryOSEntity) throws { try store.upsert(entity: entity) }
     public func entity(id: String) throws -> MemoryOSEntity? { try store.entity(id: id) }
 }
+
+public struct MemoryOSProductionOperationsRepository: Sendable {
+    public var store: SQLiteMemoryOSStore
+    public init(store: SQLiteMemoryOSStore) { self.store = store }
+    public func save(_ artifact: MemoryOSLLMArtifactEnvelope) throws { try store.save(artifact: artifact) }
+    public func save(_ auditEvent: MemoryOSAuditEvent) throws { try store.save(audit: auditEvent) }
+    public func save(_ metric: MemoryOSProcessingMetric) throws { try store.save(metric: metric) }
+    public func saveHealthReport(_ report: MemoryOSStoreHealthReport) throws { try store.saveHealthReport(report) }
+    public func queueSnapshot(now: Date = Date()) throws -> MemoryOSQueueOperationalSnapshot { try store.queueOperationalSnapshot(now: now) }
+}

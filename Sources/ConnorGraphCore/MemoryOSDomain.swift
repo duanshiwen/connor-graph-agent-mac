@@ -94,6 +94,76 @@ public struct MemoryOSStoreHealthReport: Codable, Sendable, Equatable {
     }
 }
 
+public struct MemoryOSLLMArtifactEnvelope: Codable, Sendable, Equatable, Identifiable {
+    public var id: String
+    public var queueItemID: String?
+    public var processingRunID: String?
+    public var artifactType: String
+    public var schemaName: String
+    public var schemaVersion: Int
+    public var modelID: String
+    public var rawContent: String
+    public var contentHash: String
+    public var createdAt: Date
+    public var metadata: [String: String]
+
+    public init(id: String = UUID().uuidString, queueItemID: String? = nil, processingRunID: String? = nil, artifactType: String, schemaName: String, schemaVersion: Int = 1, modelID: String, rawContent: String, contentHash: String = "", createdAt: Date = Date(), metadata: [String: String] = [:]) {
+        self.id = id; self.queueItemID = queueItemID; self.processingRunID = processingRunID; self.artifactType = artifactType; self.schemaName = schemaName; self.schemaVersion = schemaVersion; self.modelID = modelID; self.rawContent = rawContent; self.contentHash = contentHash; self.createdAt = createdAt; self.metadata = metadata
+    }
+}
+
+public struct MemoryOSArtifactValidationResult: Codable, Sendable, Equatable {
+    public var artifactID: String
+    public var accepted: Bool
+    public var issues: [MemoryOSValidationIssue]
+    public var normalizedRecordCount: Int
+
+    public init(artifactID: String, accepted: Bool, issues: [MemoryOSValidationIssue] = [], normalizedRecordCount: Int = 0) {
+        self.artifactID = artifactID; self.accepted = accepted; self.issues = issues; self.normalizedRecordCount = normalizedRecordCount
+    }
+}
+
+public struct MemoryOSAuditEvent: Codable, Sendable, Equatable, Identifiable {
+    public var id: String
+    public var eventType: String
+    public var actor: String
+    public var subjectID: String?
+    public var payload: [String: String]
+    public var createdAt: Date
+
+    public init(id: String = UUID().uuidString, eventType: String, actor: String = "memory-os", subjectID: String? = nil, payload: [String: String] = [:], createdAt: Date = Date()) {
+        self.id = id; self.eventType = eventType; self.actor = actor; self.subjectID = subjectID; self.payload = payload; self.createdAt = createdAt
+    }
+}
+
+public struct MemoryOSProcessingMetric: Codable, Sendable, Equatable, Identifiable {
+    public var id: String
+    public var name: String
+    public var value: Double
+    public var dimensions: [String: String]
+    public var createdAt: Date
+
+    public init(id: String = UUID().uuidString, name: String, value: Double, dimensions: [String: String] = [:], createdAt: Date = Date()) {
+        self.id = id; self.name = name; self.value = value; self.dimensions = dimensions; self.createdAt = createdAt
+    }
+}
+
+public struct MemoryOSQueueOperationalSnapshot: Codable, Sendable, Equatable {
+    public var pending: Int
+    public var leased: Int
+    public var processing: Int
+    public var retryScheduled: Int
+    public var succeeded: Int
+    public var failed: Int
+    public var deadLetter: Int
+    public var expiredLeases: Int
+    public var checkedAt: Date
+
+    public init(pending: Int = 0, leased: Int = 0, processing: Int = 0, retryScheduled: Int = 0, succeeded: Int = 0, failed: Int = 0, deadLetter: Int = 0, expiredLeases: Int = 0, checkedAt: Date = Date()) {
+        self.pending = pending; self.leased = leased; self.processing = processing; self.retryScheduled = retryScheduled; self.succeeded = succeeded; self.failed = failed; self.deadLetter = deadLetter; self.expiredLeases = expiredLeases; self.checkedAt = checkedAt
+    }
+}
+
 public struct MemoryOSProvenanceObject: Codable, Sendable, Equatable, Identifiable {
     public var id: String
     public var sourceType: MemoryOSSourceType
