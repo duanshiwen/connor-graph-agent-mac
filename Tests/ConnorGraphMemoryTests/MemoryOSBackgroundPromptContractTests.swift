@@ -89,4 +89,42 @@ struct MemoryOSBackgroundPromptContractTests {
         #expect(prompt.contains("If existing L3 already covers the idea, output no new L3 candidate"))
         #expect(prompt.contains("If existing L4 already contains the concept, reuse it rather than creating a duplicate"))
     }
+
+    @Test func l1PromptDeclaresAllAllowedL2PredicatesAndAssertionKinds() {
+        let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
+
+        let prompt = MemoryOSL1ToL2PromptBuilder().prompt(for: [event])
+
+        #expect(prompt.contains("Allowed L2 assertion_kind values"))
+        #expect(prompt.contains("observed"))
+        #expect(prompt.contains("inferred"))
+        #expect(prompt.contains("summarized"))
+        #expect(prompt.contains("Allowed L2 predicates / GraphPredicate raw values"))
+        for predicate in GraphPredicate.allCases {
+            #expect(prompt.contains(predicate.rawValue))
+        }
+    }
+
+    @Test func l1PromptDeclaresL2BusinessFactTaxonomyAndMetadataRequirement() {
+        let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
+
+        let prompt = MemoryOSL1ToL2PromptBuilder().prompt(for: [event])
+
+        #expect(prompt.contains("L2 fact taxonomy"))
+        #expect(prompt.contains("profile_preference"))
+        #expect(prompt.contains("project_state"))
+        #expect(prompt.contains("task_commitment"))
+        #expect(prompt.contains("calendar_time"))
+        #expect(prompt.contains("communication"))
+        #expect(prompt.contains("source_document"))
+        #expect(prompt.contains("decision"))
+        #expect(prompt.contains("implementation"))
+        #expect(prompt.contains("environment_config"))
+        #expect(prompt.contains("relationship"))
+        #expect(prompt.contains("other"))
+        #expect(prompt.contains("metadata.l2_fact_type"))
+        #expect(prompt.contains("metadata.capture_event_ids"))
+        #expect(prompt.contains("metadata.provenance_object_ids"))
+        #expect(prompt.contains("metadata.span_ids"))
+    }
 }
