@@ -133,6 +133,41 @@ public struct MemoryOSL1ToL2PromptBuilder: Sendable {
         - If raw L0 material is needed, request the referenced provenance object or span instead of guessing.
         - Output only GraphStructuredExtractionOutput JSON.
 
+        L2 output contract:
+        - Output schema is GraphStructuredExtractionOutput JSON with entities, statements, evidenceSpans, warnings, confidence and metadata.
+        - Each statement must use a predicate from the allowed GraphPredicate raw values below.
+        - Each statement should represent one atomic operational fact, not a broad interpretation.
+        - Use statement metadata to preserve extraction discipline and downstream routing.
+        - Required statement metadata keys when applicable: metadata.l2_fact_type, metadata.capture_event_ids, metadata.provenance_object_ids, metadata.span_ids.
+        - metadata.capture_event_ids, metadata.provenance_object_ids and metadata.span_ids should be comma-separated stable ids when multiple inputs support the same consolidated fact.
+
+        Allowed L2 assertion_kind values:
+        - observed: directly stated or directly observed in the L1 event / L0 evidence.
+        - inferred: a narrow operational inference that is strongly entailed by the evidence; use sparingly and explain in metadata.
+        - summarized: a compact operational summary of multiple evidence-backed facts; do not use for theories or reusable knowledge.
+
+        Allowed L2 predicates / GraphPredicate raw values:
+        \(Self.allowedPredicateGuide())
+
+        L2 fact taxonomy:
+        - profile_preference: user profile, preference, dislike, habit, goal, stable personal context, or personalized operating preference.
+        - project_state: current project/work-object state, milestone, scope, requirement, constraint, design direction, or active decision context.
+        - task_commitment: task, TODO, commitment, responsibility, due date, reminder, follow-up, assignment, completion or postponement.
+        - calendar_time: calendar event, schedule, time block, deadline, conflict, occurrence time, start/end time or temporal coordination fact.
+        - communication: mail/message/RSS/chat communication fact: sender, recipient, mention, request, reply, topic or communication-derived action.
+        - source_document: fact about an attachment, document, web page, source item, transcript, citation, answer, provenance relation or evidence source.
+        - decision: explicit decision, rationale, selected option, supersession, approval, rejection or decision owner.
+        - implementation: code, architecture, runtime behavior, dependency, module relation, test result, bug, fix, feature or implementation status.
+        - environment_config: local environment, branch, toolchain, credentials boundary, config, permission mode, workspace, OS/runtime version or deployment fact.
+        - relationship: relationship between people, projects, organizations, concepts, locations, artifacts or work objects.
+        - other: only when none of the above fit; explain why in metadata.
+
+        L2 taxonomy rules:
+        - Always set metadata.l2_fact_type to exactly one taxonomy value.
+        - Prefer the most specific taxonomy value over other.
+        - If a fact could fit multiple categories, choose the category that best describes why the fact will be retrieved later.
+        - The taxonomy is for L2 operational routing only; it is not a reason to promote a fact into L3.
+
         Workflow:
         1. Read L1 events in chronological order.
         2. Extract candidate facts per event.
@@ -140,12 +175,29 @@ public struct MemoryOSL1ToL2PromptBuilder: Sendable {
         4. Consolidate duplicate facts across events while preserving all evidence references.
         5. If a fact refines an existing L2 fact, emit append-only refinement material rather than overwriting history.
         6. Every emitted fact must cite at least one capture_event_id and at least one provenance_object_id or span_id.
-        7. Do not create L3 knowledge records.
-        8. Do not produce theories, frameworks, broad conclusions, or unsupported guesses.
+        7. Choose the most precise allowed predicate and the most appropriate metadata.l2_fact_type for every statement.
+        8. Do not create L3 knowledge records.
+        9. Do not produce theories, frameworks, broad conclusions, or unsupported guesses.
 
         L1 capture events are provided as an ordered JSON packet:
         \(Self.renderJSON(packet))
         """
+    }
+
+    private static func allowedPredicateGuide() -> String {
+        let grouped: [(String, [GraphPredicate])] = [
+            ("identity and taxonomy", [.subclassOf, .instanceOf, .aliasOf, .sameAs]),
+            ("structure and dependency", [.partOf, .hasPart, .dependsOn, .relatedTo]),
+            ("ownership and provenance", [.createdBy, .developedBy, .ownedBy, .locatedIn]),
+            ("time and scheduling", [.occurredAt, .scheduledAt, .startsAt, .endsAt]),
+            ("personal operating memory", [.prefers, .dislikes, .hasHabit, .hasGoal, .committedTo, .responsibleFor, .remindedAt, .livesAt, .knowsPerson, .familyOf]),
+            ("communication", [.sentBy, .sentTo, .ccTo, .receivedAt, .about, .mentions, .requestsAction, .repliesTo]),
+            ("calendar and tasks", [.attends, .organizerOf, .conflictsWith, .blocksTime, .dueAt, .assignedTo, .completedAt, .postponedTo]),
+            ("knowledge/evidence relations usable as L2 facts", [.answers, .answeredBy, .derivedFrom, .supportedBy, .implements, .appliesTo, .decidedBy, .supersedes])
+        ]
+        return grouped.map { group, predicates in
+            "- \(group): " + predicates.map(\.rawValue).joined(separator: ", ")
+        }.joined(separator: "\n")
     }
 
     private static func iso8601(_ date: Date) -> String {
