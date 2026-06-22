@@ -451,6 +451,112 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         ISO8601DateFormatter().date(from: value) ?? Date(timeIntervalSince1970: 0)
     }
 
+    public func readMemoryOSRecordJSON(layer: String, recordID: String) throws -> String {
+        let normalizedLayer = layer.uppercased()
+        let quotedID = store.quote(recordID)
+        let payload: [String: Any]
+        switch normalizedLayer {
+        case "L0":
+            guard let object = try store.provenanceObject(id: recordID) else { throw SQLiteMemoryOSStoreError.missingRecord("Missing L0 provenance object: \(recordID)") }
+            payload = [
+                "layer": "L0",
+                "recordID": object.id,
+                "record": [
+                    "id": object.id,
+                    "sourceType": object.sourceType.rawValue,
+                    "sourceID": object.sourceID ?? "",
+                    "title": object.title,
+                    "content": object.content,
+                    "contentHash": object.contentHash,
+                    "occurredAt": Self.iso8601(object.occurredAt),
+                    "ingestedAt": Self.iso8601(object.ingestedAt),
+                    "sessionID": object.sessionID ?? "",
+                    "workObjectID": object.workObjectID ?? "",
+                    "confidentiality": object.confidentiality.rawValue,
+                    "status": object.status.rawValue,
+                    "metadata": object.metadata
+                ],
+                "provenanceRefs": [object.id],
+                "evidenceRefs": [],
+                "entityRefs": []
+            ]
+        case "L1":
+            let rows = try store.query(sql: """
+            SELECT id, provenance_object_id, event_type, occurred_at, token_estimate, processing_state, metadata_json
+            FROM memory_l1_capture_events WHERE id = \(quotedID) LIMIT 1
+            """)
+            guard let row = rows.first else { throw SQLiteMemoryOSStoreError.missingRecord("Missing L1 capture event: \(recordID)") }
+            let metadata = (try? store.decode([String: String].self, row[6])) ?? [:]
+            payload = ["layer": "L1", "recordID": row[0], "record": ["id": row[0], "provenanceObjectID": row[1], "eventType": row[2], "occurredAt": row[3], "tokenEstimate": Int(row[4]) ?? 0, "processingState": row[5], "metadata": metadata], "provenanceRefs": [row[1]], "evidenceRefs": metadata["span_id"].map { [$0] } ?? [], "entityRefs": []]
+        case "L2":
+            let rows = try store.query(sql: """
+            SELECT id, subject_id, predicate, object_id, text, assertion_kind, confidence, valid_at, committed_at, evidence_span_ids_json, source_artifact_id, metadata_json
+            FROM memory_l2_statements WHERE id = \(quotedID) LIMIT 1
+            """)
+            guard let row = rows.first else { throw SQLiteMemoryOSStoreError.missingRecord("Missing L2 statement: \(recordID)") }
+            let evidence = (try? store.decode([String].self, row[9])) ?? []
+            let metadata = (try? store.decode([String: String].self, row[11])) ?? [:]
+            payload = ["layer": "L2", "recordID": row[0], "record": ["id": row[0], "subjectID": row[1], "predicate": row[2], "objectID": row[3], "text": row[4], "assertionKind": row[5], "confidence": Double(row[6]) ?? 0, "validAt": row[7], "committedAt": row[8], "evidenceSpanIDs": evidence, "sourceArtifactID": row[10], "metadata": metadata], "evidenceRefs": evidence, "provenanceRefs": [], "entityRefs": [row[1], row[3]].filter { !$0.isEmpty }]
+        case "L3":
+            let rows = try store.query(sql: """
+            SELECT id, topic, statement, projection_kind, confidence, evidence_statement_ids_json, valid_at, projected_at, source_artifact_id, metadata_json
+            FROM memory_l3_beliefs WHERE id = \(quotedID) LIMIT 1
+            """)
+            guard let row = rows.first else { throw SQLiteMemoryOSStoreError.missingRecord("Missing L3 knowledge record: \(recordID)") }
+            let evidence = (try? store.decode([String].self, row[5])) ?? []
+            let metadata = (try? store.decode([String: String].self, row[9])) ?? [:]
+            payload = ["layer": "L3", "recordID": row[0], "record": ["id": row[0], "topic": row[1], "statement": row[2], "projectionKind": row[3], "confidence": Double(row[4]) ?? 0, "evidenceStatementIDs": evidence, "validAt": row[6], "projectedAt": row[7], "sourceArtifactID": row[8], "metadata": metadata], "evidenceRefs": evidence, "provenanceRefs": [], "entityRefs": []]
+        case "L4":
+            if let entity = try store.entity(id: recordID) {
+                payload = ["layer": "L4", "recordID": entity.id, "record": ["id": entity.id, "stableKey": entity.stableKey, "entityType": entity.entityType, "name": entity.name, "aliases": entity.aliases, "summary": entity.summary, "confidence": entity.confidence, "createdAt": Self.iso8601(entity.createdAt), "updatedAt": Self.iso8601(entity.updatedAt), "validFrom": entity.validFrom.map(Self.iso8601) ?? "", "metadata": entity.metadata], "evidenceRefs": [], "provenanceRefs": [], "entityRefs": [entity.id]]
+            } else {
+                let rows = try store.query(sql: """
+                SELECT id, entity_id, predicate, object_entity_id, text, assertion_kind, confidence, valid_at, committed_at, evidence_span_ids_json, source_artifact_id, metadata_json
+                FROM memory_l4_entity_statements WHERE id = \(quotedID) LIMIT 1
+                """)
+                guard let row = rows.first else { throw SQLiteMemoryOSStoreError.missingRecord("Missing L4 record: \(recordID)") }
+                let evidence = (try? store.decode([String].self, row[9])) ?? []
+                let metadata = (try? store.decode([String: String].self, row[11])) ?? [:]
+                payload = ["layer": "L4", "recordID": row[0], "record": ["id": row[0], "entityID": row[1], "predicate": row[2], "objectEntityID": row[3], "text": row[4], "assertionKind": row[5], "confidence": Double(row[6]) ?? 0, "validAt": row[7], "committedAt": row[8], "evidenceSpanIDs": evidence, "sourceArtifactID": row[10], "metadata": metadata], "evidenceRefs": evidence, "provenanceRefs": [], "entityRefs": [row[1], row[3]].filter { !$0.isEmpty }]
+            }
+        default:
+            throw SQLiteMemoryOSStoreError.missingRecord("Unsupported Memory OS layer: \(layer)")
+        }
+        return try Self.renderJSON(payload)
+    }
+
+    public func readMemoryOSProvenanceJSON(provenanceObjectID: String, spanID: String? = nil) throws -> String {
+        guard let object = try store.provenanceObject(id: provenanceObjectID) else { throw SQLiteMemoryOSStoreError.missingRecord("Missing L0 provenance object: \(provenanceObjectID)") }
+        var spanPayload: [String: Any]? = nil
+        if let spanID, !spanID.isEmpty {
+            let rows = try store.query(sql: """
+            SELECT id, provenance_object_id, start_offset, end_offset, text, metadata_json
+            FROM memory_l0_provenance_spans WHERE id = \(store.quote(spanID)) LIMIT 1
+            """)
+            guard let row = rows.first else { throw SQLiteMemoryOSStoreError.missingRecord("Missing L0 provenance span: \(spanID)") }
+            spanPayload = ["id": row[0], "provenanceObjectID": row[1], "startOffset": Int(row[2]) ?? 0, "endOffset": Int(row[3]) ?? 0, "text": row[4], "metadata": (try? store.decode([String: String].self, row[5])) ?? [:]]
+        }
+        let payload: [String: Any] = [
+            "provenanceObjectID": object.id,
+            "spanID": spanID ?? "",
+            "title": object.title,
+            "content": object.content,
+            "metadata": object.metadata,
+            "span": spanPayload ?? [:],
+            "citations": [object.id, spanID ?? ""].filter { !$0.isEmpty }
+        ]
+        return try Self.renderJSON(payload)
+    }
+
+    private static func iso8601(_ date: Date) -> String {
+        ISO8601DateFormatter().string(from: date)
+    }
+
+    private static func renderJSON(_ object: [String: Any]) throws -> String {
+        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        return String(data: data, encoding: .utf8) ?? "{}"
+    }
+
     private func count(_ table: String, where clause: String? = nil) throws -> Int {
         let sql = "SELECT COUNT(*) FROM \(table)" + clause.map { " WHERE \($0)" }.orEmpty + ";"
         return Int(try store.query(sql: sql).first?.first ?? "0") ?? 0

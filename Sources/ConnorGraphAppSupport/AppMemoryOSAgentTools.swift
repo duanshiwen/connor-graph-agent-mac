@@ -264,6 +264,60 @@ public struct MemoryOSExpandL4Tool: AgentTool {
     }
 }
 
+public struct MemoryOSReadRecordTool: AgentTool {
+    public let name = "memory_os_read_record"
+    public let description = "Read a full Connor Memory OS record by layer and recordID after a search hit. Use when summary-level context is insufficient for evidence, novelty, or concept/entity identity checks."
+    public let permission: AgentPermissionCapability = .readGraph
+    public let inputSchema = AgentToolInputSchema.object(properties: [
+        "layer": .string(description: "Memory OS layer: L0, L1, L2, L3 or L4."),
+        "recordID": .string(description: "Record identifier returned by Memory OS search or known from a job packet.")
+    ], required: ["layer", "recordID"])
+
+    private let facade: AppMemoryOSFacade
+
+    public init(facade: AppMemoryOSFacade) { self.facade = facade }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        guard let layer = arguments.string("layer"), !layer.isEmpty else { throw AgentToolError.invalidArguments("layer is required") }
+        guard let recordID = arguments.string("recordID"), !recordID.isEmpty else { throw AgentToolError.invalidArguments("recordID is required") }
+        let json = try facade.readMemoryOSRecordJSON(layer: layer, recordID: recordID)
+        return AgentToolResult(
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: "Read Memory OS \(layer.uppercased()) record \(recordID).",
+            contentJSON: json,
+            citations: [recordID]
+        )
+    }
+}
+
+public struct MemoryOSReadProvenanceTool: AgentTool {
+    public let name = "memory_os_read_provenance"
+    public let description = "Read exact Connor Memory OS L0 provenance object/span content. Use when a prompt preview or search hit is insufficient and exact raw evidence is required."
+    public let permission: AgentPermissionCapability = .readGraph
+    public let inputSchema = AgentToolInputSchema.object(properties: [
+        "provenanceObjectID": .string(description: "L0 provenance object id."),
+        "spanID": .string(description: "Optional L0 provenance span id.")
+    ], required: ["provenanceObjectID"])
+
+    private let facade: AppMemoryOSFacade
+
+    public init(facade: AppMemoryOSFacade) { self.facade = facade }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        guard let provenanceObjectID = arguments.string("provenanceObjectID"), !provenanceObjectID.isEmpty else { throw AgentToolError.invalidArguments("provenanceObjectID is required") }
+        let spanID = arguments.string("spanID")
+        let json = try facade.readMemoryOSProvenanceJSON(provenanceObjectID: provenanceObjectID, spanID: spanID)
+        return AgentToolResult(
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: spanID?.isEmpty == false ? "Read Memory OS L0 provenance object \(provenanceObjectID) span \(spanID ?? "")." : "Read Memory OS L0 provenance object \(provenanceObjectID).",
+            contentJSON: json,
+            citations: [provenanceObjectID, spanID ?? ""].filter { !$0.isEmpty }
+        )
+    }
+}
+
 public extension AgentToolRegistry {
     mutating func registerMemoryOSTools(facade: AppMemoryOSFacade) {
         register(MemoryOSDashboardSummaryTool(facade: facade))
@@ -271,5 +325,7 @@ public extension AgentToolRegistry {
         register(MemoryOSProjectStructuredArtifactTool(facade: facade))
         register(MemoryOSSearchTool(facade: facade))
         register(MemoryOSExpandL4Tool(facade: facade))
+        register(MemoryOSReadRecordTool(facade: facade))
+        register(MemoryOSReadProvenanceTool(facade: facade))
     }
 }
