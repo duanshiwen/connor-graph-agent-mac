@@ -240,3 +240,128 @@ public struct MemoryOSL2ToKnowledgeJobPlanner: Sendable {
         return chunks
     }
 }
+
+public struct MemoryOSBackgroundModelRequest: Sendable, Codable, Equatable {
+    public var jobID: String
+    public var kind: String
+    public var schemaName: String
+    public var artifactType: String
+    public var prompt: String
+    public var sourceRecordIDs: [String]
+    public var evidenceSpanIDs: [String]
+    public var metadata: [String: String]
+
+    public init(jobID: String, kind: String, schemaName: String, artifactType: String, prompt: String, sourceRecordIDs: [String] = [], evidenceSpanIDs: [String] = [], metadata: [String: String] = [:]) {
+        self.jobID = jobID
+        self.kind = kind
+        self.schemaName = schemaName
+        self.artifactType = artifactType
+        self.prompt = prompt
+        self.sourceRecordIDs = sourceRecordIDs
+        self.evidenceSpanIDs = evidenceSpanIDs
+        self.metadata = metadata
+    }
+}
+
+public struct MemoryOSBackgroundModelResponse: Sendable, Codable, Equatable {
+    public var rawArtifactJSON: String
+    public var metadata: [String: String]
+
+    public init(rawArtifactJSON: String, metadata: [String: String] = [:]) {
+        self.rawArtifactJSON = rawArtifactJSON
+        self.metadata = metadata
+    }
+}
+
+public protocol MemoryOSBackgroundModelExecutor: Sendable {
+    func execute(_ request: MemoryOSBackgroundModelRequest) throws -> MemoryOSBackgroundModelResponse
+}
+
+public struct MemoryOSBackgroundJobExecutionResult: Sendable, Codable, Equatable {
+    public var jobID: String
+    public var kind: String
+    public var rawArtifactJSON: String
+    public var schemaName: String
+    public var artifactType: String
+    public var metadata: [String: String]
+
+    public init(jobID: String, kind: String, rawArtifactJSON: String, schemaName: String, artifactType: String, metadata: [String: String] = [:]) {
+        self.jobID = jobID
+        self.kind = kind
+        self.rawArtifactJSON = rawArtifactJSON
+        self.schemaName = schemaName
+        self.artifactType = artifactType
+        self.metadata = metadata
+    }
+}
+
+public struct MemoryOSBackgroundJobWorker<Executor: MemoryOSBackgroundModelExecutor>: Sendable {
+    public var executor: Executor
+
+    public init(executor: Executor) {
+        self.executor = executor
+    }
+
+    public func run(_ draft: MemoryOSL1ToL2JobDraft) throws -> MemoryOSBackgroundJobExecutionResult {
+        let artifactType = "graph_structured_extraction"
+        let prompt = enrichedL1Prompt(draft)
+        let request = MemoryOSBackgroundModelRequest(
+            jobID: draft.id,
+            kind: draft.kind,
+            schemaName: draft.schemaName,
+            artifactType: artifactType,
+            prompt: prompt,
+            sourceRecordIDs: draft.captureEventIDs,
+            evidenceSpanIDs: draft.sourceSpanIDs,
+            metadata: draft.metadata
+        )
+        let response = try executor.execute(request)
+        return MemoryOSBackgroundJobExecutionResult(jobID: draft.id, kind: draft.kind, rawArtifactJSON: response.rawArtifactJSON, schemaName: draft.schemaName, artifactType: artifactType, metadata: draft.metadata.merging(response.metadata) { _, new in new })
+    }
+
+    public func run(_ draft: MemoryOSL2ToKnowledgeJobDraft) throws -> MemoryOSBackgroundJobExecutionResult {
+        let artifactType = "memory_os_knowledge_extraction"
+        let prompt = enrichedKnowledgePrompt(draft)
+        let request = MemoryOSBackgroundModelRequest(
+            jobID: draft.id,
+            kind: draft.kind,
+            schemaName: draft.schemaName,
+            artifactType: artifactType,
+            prompt: prompt,
+            sourceRecordIDs: draft.statementIDs,
+            evidenceSpanIDs: draft.evidenceSpanIDs,
+            metadata: draft.metadata
+        )
+        let response = try executor.execute(request)
+        return MemoryOSBackgroundJobExecutionResult(jobID: draft.id, kind: draft.kind, rawArtifactJSON: response.rawArtifactJSON, schemaName: draft.schemaName, artifactType: artifactType, metadata: draft.metadata.merging(response.metadata) { _, new in new })
+    }
+
+    private func enrichedL1Prompt(_ draft: MemoryOSL1ToL2JobDraft) -> String {
+        """
+        \(draft.prompt)
+
+        Job contract:
+        - job_id: \(draft.id)
+        - capture_event_ids: \(draft.captureEventIDs.joined(separator: ","))
+        - provenance_object_ids: \(draft.provenanceObjectIDs.joined(separator: ","))
+        - source_span_ids: \(draft.sourceSpanIDs.joined(separator: ","))
+        - output_schema: \(draft.schemaName)
+        - semantic boundary: produce L2 operational facts only; do not create L3 knowledge records.
+        """
+    }
+
+    private func enrichedKnowledgePrompt(_ draft: MemoryOSL2ToKnowledgeJobDraft) -> String {
+        """
+        \(draft.prompt)
+
+        Job contract:
+        - job_id: \(draft.id)
+        - statement_ids: \(draft.statementIDs.joined(separator: ","))
+        - evidence_span_ids: \(draft.evidenceSpanIDs.joined(separator: ","))
+        - output_schema: \(draft.schemaName)
+        - retrieval: search L2/L3/L4 summaries first; request full records only when needed.
+        - L4 expansion: use depth-limited concept/entity traversal when relation context is needed.
+        - semantic boundary: use the four knowledge filters before proposing L3 knowledge.
+        """
+    }
+}
