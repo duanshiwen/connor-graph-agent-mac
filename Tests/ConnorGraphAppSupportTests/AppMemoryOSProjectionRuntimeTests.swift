@@ -39,7 +39,7 @@ private func encodedProjectionFixture(confidence: Double = 0.94, includeEvidence
     #expect(summary.statementCount == 1)
     #expect(summary.entityCount == 2)
     #expect(summary.entityStatementCount == 1)
-    #expect(summary.beliefCount == 1)
+    #expect(summary.beliefCount == 0)
     #expect(try store.queueItem(id: "queue-projection")?.status == .succeeded)
     #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l2_statements;").first?.first == "1")
     #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l4_entities;").first?.first == "2")

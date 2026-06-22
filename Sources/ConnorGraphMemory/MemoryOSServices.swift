@@ -315,20 +315,10 @@ public struct MemoryOSProjectionService: Sendable {
                 ]) { _, new in new }
             )
         }
-        let beliefs = statements.filter { $0.confidence >= 0.92 }.map { statement in
-            MemoryOSBelief(
-                id: "l3-belief:\(artifactID):\(statement.id)",
-                topic: statement.predicate,
-                statement: statement.text,
-                projectionKind: .observed,
-                confidence: statement.confidence,
-                evidenceStatementIDs: [statement.id],
-                validAt: statement.validAt,
-                projectedAt: now,
-                sourceArtifactID: artifactID,
-                metadata: ["artifact_id": artifactID, "projection_reason": "high_confidence_evidence_backed_statement"]
-            )
-        }
+        // L3 is reserved for reusable knowledge/theory records. High-confidence
+        // operational facts remain in L2/L4 and must not be promoted to L3 by
+        // confidence alone.
+        let beliefs: [MemoryOSBelief] = []
         return MemoryOSProjectionBatch(
             artifactID: artifactID,
             nodes: Array(nodeByLocalID.values).sorted { $0.id < $1.id },

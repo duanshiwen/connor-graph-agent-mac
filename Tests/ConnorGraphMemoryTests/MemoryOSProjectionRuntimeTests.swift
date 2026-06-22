@@ -3,7 +3,7 @@ import Testing
 import ConnorGraphCore
 import ConnorGraphMemory
 
-@Test func memoryOSProjectionServiceBuildsL2L3L4BatchFromAcceptedArtifact() throws {
+@Test func memoryOSProjectionServiceBuildsL2AndL4BatchFromAcceptedFactArtifactWithoutL3Promotion() throws {
     let now = Date(timeIntervalSince1970: 2_000)
     let output = GraphStructuredExtractionOutput(
         entities: [
@@ -32,9 +32,8 @@ import ConnorGraphMemory
     #expect(batch.statements.count == 1)
     #expect(batch.entities.count == 2)
     #expect(batch.entityStatements.count == 1)
-    #expect(batch.beliefs.count == 1)
+    #expect(batch.beliefs.isEmpty)
     #expect(batch.statements.first?.evidenceSpanIDs == ["span-1"])
-    #expect(batch.beliefs.first?.projectionKind == .observed)
     #expect(batch.statements.first?.sourceArtifactID == artifact.id)
     #expect(batch.entities.contains { $0.stableKey == "personal:person_object:诗闻" })
 }
