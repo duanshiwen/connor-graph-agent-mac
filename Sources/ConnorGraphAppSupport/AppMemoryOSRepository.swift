@@ -27,11 +27,13 @@ public struct AppMemoryOSRepository: Sendable {
 
 public struct AppMemoryOSBackgroundRunSummary: Sendable, Equatable, Codable {
     public var expiredLeaseCount: Int
+    public var projectionRunCount: Int
     public var healthStatus: MemoryOSHealthStatus
     public var checkedAt: Date
 
-    public init(expiredLeaseCount: Int, healthStatus: MemoryOSHealthStatus, checkedAt: Date = Date()) {
+    public init(expiredLeaseCount: Int, projectionRunCount: Int = 0, healthStatus: MemoryOSHealthStatus, checkedAt: Date = Date()) {
         self.expiredLeaseCount = expiredLeaseCount
+        self.projectionRunCount = projectionRunCount
         self.healthStatus = healthStatus
         self.checkedAt = checkedAt
     }
@@ -49,9 +51,11 @@ public struct AppMemoryOSBackgroundJobRunner: Sendable {
     }
 
     public func runOnce(facade: AppMemoryOSFacade, now: Date = Date()) throws -> AppMemoryOSBackgroundRunSummary {
+        let projectionRuns = try facade.runProjectionQueueOnce(now: now)
         let summary = try facade.operationalSummary(now: now)
         return AppMemoryOSBackgroundRunSummary(
             expiredLeaseCount: summary.expiredLeaseCount,
+            projectionRunCount: projectionRuns.count,
             healthStatus: summary.healthReport.status,
             checkedAt: now
         )
