@@ -18,6 +18,7 @@ import ConnorGraphAppSupport
     #expect(paths.browserHistoryURL.path == "/tmp/Application Support/Connor/browser/history.jsonl")
     #expect(paths.browserBookmarksURL.path == "/tmp/Application Support/Connor/browser/bookmarks.jsonl")
     #expect(paths.databaseURL.path == "/tmp/Application Support/Connor/graph/connor.sqlite")
+    #expect(paths.memoryOSDatabaseURL.path == "/tmp/Application Support/Connor/graph/memory-os.sqlite")
 
     #expect(!paths.applicationSupportDirectory.path.contains("workspaces"))
     #expect(!paths.applicationSupportDirectory.path.contains("ConnorGraphAgent"))

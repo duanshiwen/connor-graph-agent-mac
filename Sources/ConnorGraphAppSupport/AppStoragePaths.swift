@@ -22,6 +22,7 @@ public struct AppStoragePaths: Sendable, Equatable {
     public var sidecarsDirectory: URL
     public var browserDirectory: URL
     public var databaseURL: URL
+    public var memoryOSDatabaseURL: URL
 
     public init(
         applicationSupportDirectory: URL,
@@ -43,7 +44,8 @@ public struct AppStoragePaths: Sendable, Equatable {
         runtimeLogsDirectory: URL? = nil,
         sidecarsDirectory: URL? = nil,
         browserDirectory: URL? = nil,
-        databaseURL: URL? = nil
+        databaseURL: URL? = nil,
+        memoryOSDatabaseURL: URL? = nil
     ) {
         self.applicationSupportDirectory = applicationSupportDirectory
         let resolvedConfigDirectory = configDirectory ?? applicationSupportDirectory.appendingPathComponent("config", isDirectory: true)
@@ -72,6 +74,7 @@ public struct AppStoragePaths: Sendable, Equatable {
         self.sidecarsDirectory = sidecarsDirectory ?? applicationSupportDirectory.appendingPathComponent("sidecars", isDirectory: true)
         self.browserDirectory = browserDirectory ?? applicationSupportDirectory.appendingPathComponent("browser", isDirectory: true)
         self.databaseURL = databaseURL ?? resolvedGraphDirectory.appendingPathComponent("connor.sqlite")
+        self.memoryOSDatabaseURL = memoryOSDatabaseURL ?? resolvedGraphDirectory.appendingPathComponent("memory-os.sqlite")
     }
 
     public static func live(fileManager: FileManager = .default) throws -> AppStoragePaths {

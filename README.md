@@ -1,11 +1,11 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-21 00:17 GMT+8  
-当前分支目标：收紧代码质量、简化文档、保持 Connor 的原生 Agent OS 边界，并为内置浏览器媒体本地转写系统建立可恢复、可治理的地基。
+文档更新时间：2026-06-22 23:54 GMT+8  
+当前分支目标：将过旧 Graph Memory 主链路硬切换为商用稳定版 **Connor Memory OS L0-L4**；只移植旧 SQLite temporal graph kernel 的存储能力作为 L2/L4 底层 adapter，删除 staging / distillation / extraction / admission / candidate review / self-healing 等旧结构，避免长期技术债务。
 
-Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package。它的目标不是做“图谱编辑器”或“LLM SDK 外壳”，而是构建一个本地优先的 **graph-memory-native Agent OS**：以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI、Task Management Stack 和 Attachment Store 共同组成可治理的本地智能工作台。
+Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package。它的目标不是做“图谱编辑器”或“LLM SDK 外壳”，而是构建一个本地优先的 **memory-os-native Agent OS**：以 Session OS、Policy Engine、Memory OS、Source/MCP Platform、Native UI、Task Management Stack 和 Attachment Store 共同组成可治理的本地智能工作台。
 
-核心判断：**图谱是后台记忆基础设施，不是普通用户的前台主导航概念。** 普通用户面对的是会话、数据源、技能、自动化、浏览器、附件、任务和设置；Graph Memory 在后台提供连续性、精确性、可追溯性与治理证据。
+核心判断：**记忆系统是后台认知基础设施，不是普通用户的前台图谱编辑器。** 普通用户面对的是会话、数据源、技能、自动化、浏览器、附件、任务和设置；Memory OS 在后台提供连续性、精确性、可追溯性、证据化工作记忆、可复用知识层和稳定实体/概念图谱。
 
 ---
 
@@ -15,7 +15,7 @@ Connor 当前坚持以下主权边界：
 
 - **Session sovereignty belongs to Connor Session OS**：会话、run、journal、pending approval、branch、restore snapshot 和 Session Capsule 由 Connor 持久化与恢复。
 - **Permission sovereignty belongs to Connor Policy Engine**：OpenAI / Anthropic 模型提供方、MCP server、local tools 和 native runtimes 都不能绕过 Connor 审批、审计和执行门禁。
-- **Memory sovereignty belongs to Connor Graph Memory**：LLM 不直接写图谱；图谱写入走 staging、distillation、candidate review、admission policy 与 SQLite temporal graph。
+- **Memory sovereignty belongs to Connor Memory OS**：LLM 不直接写 L2/L3/L4；所有记忆写入必须经过 L0 provenance、L1 capture/queue、processing artifact、schema/evidence validators、temporal current-view derivation 与 SQLite Memory OS repository。旧 Graph Memory 主链路不再作为商用架构保留；只移植 SQLite temporal graph kernel 的存储能力到 L2/L4。Memory OS 是隐藏后台基础设施：主侧边栏、detail pane 和 agent tool registry 不暴露 `Memory OS` dashboard / `memory_os_dashboard_summary`。
 - **Source sovereignty belongs to Connor Source Platform**：MCP servers 是能力提供者，不拥有 Connor source registry、permission policy、audit、readiness state 或 graph ingestion policy。
 - **UI sovereignty belongs to Swift Native Shell**：不引入 Electron/Web UI，不 fork Craft UI。文件预览、设置、菜单、快捷键、选择器等优先使用 macOS / SwiftUI / AppKit 原生语义。
 - **Task sovereignty belongs to Connor Task Management Stack**：任务栈负责统一生命周期、运行历史、恢复意图和本地 CLI/API 管理面；不承载具体 runtime 实现，也不承担审批 gate。浏览器媒体转写也是 `media.transcription.run` target，不建立第二套媒体专用全局队列。
@@ -72,8 +72,8 @@ Main source targets：
 
 ```text
 Sources/ConnorGraphCore        Domain models and governance primitives
-Sources/ConnorGraphMemory      Memory staging, distillation, validation
-Sources/ConnorGraphStore       SQLite graph/session/audit persistence
+Sources/ConnorGraphMemory      Memory OS ingestion, processing, validation, projection, knowledge/entity services
+Sources/ConnorGraphStore       SQLite Memory OS, session and audit persistence
 Sources/ConnorGraphSearch      Hybrid graph retrieval and evaluation
 Sources/ConnorGraphAgent       Agent loop, tools, model providers, policy boundary
 Sources/ConnorGraphAppSupport  App services, repositories, native runtimes
@@ -96,40 +96,47 @@ Session OS / Source Platform / Skill Runtime / Task Surface / Readiness Gate
   ↓
 ConnorGraphAgent + Native Model Providers（OpenAI Responses / Anthropic Messages）
   ↓
-Graph Memory Runtime Contract
+Memory OS Runtime Contract
   ↓
-SQLite Temporal Graph + Hybrid Retrieval + Memory Governance
+L0 Provenance + L1 Capture Queue + L2 Operational Facts + L3 Knowledge Records + L4 Stable Entities / Concepts
 ```
 
 ### 3.1 ConnorGraphCore
 
 Core domain target. It contains stable data structures and enums for：
 
-- Temporal graph entities, edges, observations and evidence
+- Memory OS L0-L4 domain models：provenance, capture, operational fact statements, knowledge records, stable entities/concepts, health and validation
+- Temporal entity kernel primitives migrated into Memory OS semantics
 - Session OS state and attention models
 - Permission and policy domain
 - Attachment domain
 - Mail/RSS/Calendar/Contacts source domains
 - Skill, task, product registry and automation domains
-- Graph extraction, write candidates and governance states
 
 ### 3.2 ConnorGraphMemory
 
-Memory governance layer. It is responsible for：
+Memory OS service layer. It is responsible for：
 
-- Observe logs and staged memory records
-- LLM memory distillation contracts
-- Constraint validation and contradiction detection
-- Promotion/admission-oriented memory workflows
+- Pre-ingestion filtering and L0/L1 ingestion decisions
+- Adaptive time block building and processing preparation
+- Statement, evidence and knowledge validators
+- L2 fact projection service
+- L3 knowledge promotion policy and synthesis boundary
+- L4 entity/concept disambiguation and archive boundary
+- Queue recovery and production processing policy
 
 ### 3.3 ConnorGraphStore
 
 SQLite-backed persistence layer. It owns：
 
-- Temporal graph kernel store
-- Graph traversal and hybrid retrieval persistence
+- `SQLiteMemoryOSStore` production schema, PRAGMA configuration, health report and FTS tables
+- L0 provenance vault repositories
+- L1 capture ledger and durable processing queue repositories
+- L2 operational memory repositories
+- L3 knowledge repositories（currently persisted through the compatible `memory_l3_beliefs` tables）
+- L4 stable entity repositories and temporal entity kernel adapter
+- Legacy importer for existing `graph_entities`, `graph_statements` and `graph_episodes_v3`
 - Agent session/run/event/audit persistence
-- Graph extraction traces, hold queues, replay, grounding checks and self-healing support
 
 ### 3.4 ConnorGraphSearch
 
@@ -215,7 +222,8 @@ SwiftUI macOS application target. It owns：
 - Attachment preview and inspector UI
 - Settings center
 - Mail/RSS/Calendar/Contacts native surfaces
-- Graph candidate review and diagnostics views
+
+Memory OS 不属于 `ConnorGraphAgentMac` 的用户可见 navigation surface。SwiftUI shell 可以触发后台 ingestion、pipeline scheduling 和 agent tool execution，但不拥有 Memory OS dashboard、layer count panel 或 provenance browser。
 
 `AppViewModel` remains the main in-target state object for the macOS app. UI files are split by feature area, but product state ownership stays in Connor-owned services and repositories.
 
@@ -384,13 +392,44 @@ API keys and provider credentials must not be stored in JSON settings files. The
 - Search results preserve source time information: Mail sent/received time, RSS published/fetched time, and Calendar event start/end/timezone/all-day fields
 - Agent-callable search remains concise: `mail_search_messages`, `rss_search_items`, and `calendar_read` with operation `search_events`; duplicate semantic search tools are intentionally avoided
 
-### 5.8 Graph Memory
+### 5.8 Memory OS / Temporal Graph Kernel
 
-- Staging, distillation, candidate review and admission policy
-- SQLite temporal graph storage
-- Graph extraction traces and replay support
-- Grounding checks, hold queues and self-healing services
-- Hybrid retrieval and retrieval evaluation
+Connor Memory OS is the production memory boundary for the app. It is not a graph editor, not a user-facing dashboard, and not a direct LLM-write surface. The system uses a five-layer architecture with a strict semantic split:
+
+- **L0 Provenance Vault** stores raw evidence objects and evidence spans.
+- **L1 Capture Ledger / Processing Queue** records durable capture events and operational queue state.
+- **L2 Operational Memory** stores append-only temporal **facts** extracted from validated evidence: preferences, project state, observed events, working context and other operational statements. High confidence alone never promotes an L2 fact to L3.
+- **L3 Knowledge Layer** stores reusable knowledge records: theories, claims, frameworks, patterns, standards, processes, SOPs and decision bases. L3 is not a high-confidence duplicate of L2; it is gated by knowledge promotion policy.
+- **L4 Stable Entity / Concept Layer** stores stable anchors for people, projects, organizations, work objects and concept entities such as theories, parameters, frameworks, standards, processes and metrics. L3 knowledge records link to L4 concepts and relations.
+
+L2/L3/L4 records do not use semantic lifecycle states such as confirmed, conflicted, deprecated, superseded, or user-confirmed. Historical semantic records are never mutated to express currentness; new evidence appends new temporal records, and the current memory surface is derived by query/current-view logic using temporal ordering, confidence, provenance and evidence joins. Ambiguity is represented as diagnostic output, not as a persisted semantic conflict state.
+
+The write path is deliberately controlled: chat messages, browser selections and native-session evidence enter through `AppMemoryOSFacade`, are preserved as L0/L1 records, and only validated structured artifacts may project into L2/L3/L4. LLMs may propose structured artifacts, but the repository only accepts them after durable artifact preservation, schema validation, evidence validation, audit logging and transactional projection. `GraphStructuredExtractionOutput` projects evidence-backed operational facts into L2 and stable entity facts into L4. `MemoryOSKnowledgeExtractionOutput` projects accepted knowledge candidates into L3 and concept entities/relations into L4. Rejected artifacts remain operational validation outcomes and never become memory truth records.
+
+The background pipeline has two AI job types. `memory.l1.process_block_to_l2` is planned by `MemoryOSL1ToL2JobPlanner`: pending L1 captures are grouped by threshold/token policy, wrapped as an ordered JSON `l1_capture_events` packet, and queued to produce `GraphStructuredExtractionOutput`. `memory.l2.synthesize_knowledge` is planned by `MemoryOSL2ToKnowledgeJobPlanner`: pending L2 statement processing states are grouped into ordered JSON `l2_statements` synthesis packets, wrapped with the four-filter knowledge prompt, and queued to produce `MemoryOSKnowledgeExtractionOutput`. `MemoryOSBackgroundJobWorker` and `AppMemoryOSFacade.runBackgroundAIQueueOnce(...)` execute those jobs through a `MemoryOSBackgroundModelExecutor`, then hand the returned artifact JSON to the existing validation/projection gate. Program code plans jobs and validates artifacts; the LLM does the semantic judgment in prompt space.
+
+The background prompt contract is now explicit rather than a loose manifest. L1→L2 prompts identify L0 as durable evidence, L1 as the active ordered buffer, and L2 as operational facts; they require chronological per-event extraction, noise rejection, duplicate consolidation, evidence refs, and a hard ban on L3 knowledge creation. L2→Knowledge prompts are conservative reviewers: most L2 facts should not become L3, high confidence alone is insufficient, all four filters must pass, and accepted knowledge candidates must include explicit `signal_quality`, `reuse_scope`, `novelty`, and `structurability` AI judgment fields.
+
+L1 is an active memory sequence, not the durable source of truth. L0 keeps the raw provenance object/span. Therefore, after an accepted L1→L2 projection, Connor physically deletes the processed `memory_l1_capture_events`. If the executor fails, the artifact is rejected, or the job dead-letters, L1 remains available for retry.
+
+`SQLiteMemoryOSUnifiedRetrievalService` is the native retrieval surface for AI background jobs and agent tools. It searches L0/L1/L2/L3/L4 and returns layer-aware hits with evidence, provenance and entity refs. L4 supports `depth` expansion through `expandL4(entityID:depth:limit:)`, exposed to agents as `memory_os_expand_l4`. The general `memory_os_search` tool returns summaries first; hits are context, not truth. `memory_os_read_record` reads full L0/L1/L2/L3/L4 records after a search hit, and `memory_os_read_provenance` reads exact L0 provenance object/span content when raw evidence is required. Background model requests carry provider-agnostic tool descriptors for these tools; a future provider adapter may run a full tool-calling loop, while the current executor can still operate from the structured prompt packet. There is intentionally no `memory_os_dashboard_summary` agent tool; operational counts remain internal backend state exposed through `AppMemoryOSFacade.operationalSummary(...)` for tests, health checks and queue recovery logic, not for end-user UI.
+
+L2 organization state is tracked outside the immutable fact row through `memory_l2_statement_processing_state`. This lets Connor select unorganized L2 facts for knowledge synthesis without overwriting historical statements. Improvements to L2 should append refined statements and connect them through metadata/projection state rather than mutating old facts in place.
+
+Native source ingestion is normalized through `AppMemoryOSNativeSourceEventBridge`, which adapts Mail, Calendar, RSS, browser history, attachment text and media transcripts into `ingestSourceEvent(...)`. Task scheduling reaches the pipeline through `memory_os.pipeline` targets such as `plan_l1_to_l2_jobs` and `plan_l2_to_knowledge_jobs`.
+
+L3 promotion is governed by four knowledge filters:
+
+| Filter | Question | Acceptance signal |
+|---|---|---|
+| Signal quality | Is this knowledge rather than noise? | Actionable insight, framework, pattern, standard, process or decision basis |
+| Reuse scope | Will this be reused? | General reuse, or reuse for a work object / internal process |
+| Novelty | Is it new or a material addition? | New record, or significant enrichment of an existing record |
+| Structurability | Can it live in the right structure? | Maps to category, knowledge type, scope, domain, work object/person and L4 concepts |
+
+Example boundary: “张三喜欢吃杨梅” is an L2 operational fact even at 0.99 confidence. It should not enter L3. A reusable economics claim such as “under specific constraints, supply-demand elasticity space varies with a parameter” can enter L3 as a knowledge record when it passes the four filters, and it should link to L4 concept entities such as “供需弹性” and the relevant parameter.
+
+The old Graph Memory workflow has been removed from production architecture: staging buffers, distillation jobs, GraphExtraction traces, admission-hold queues, graph-write candidates, change logs and self-healing workflows are not retained as parallel systems. The retained SQLite temporal graph kernel is infrastructure only: it provides durable storage/search/indexing capabilities and temporal entity kernel adaptation for L2/L4, while Memory OS owns the semantic contract. Hybrid retrieval and retrieval evaluation remain available over retained graph/search infrastructure, but all product-facing memory ingestion, dashboard, background jobs and agent tools route through Memory OS.
 
 ### 5.9 Skills, Tasks and Automation
 

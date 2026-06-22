@@ -1587,14 +1587,8 @@ struct CraftDetailPaneView: View {
                 AgentChatView(viewModel: viewModel)
             case .promotionQueue:
                 PromotionQueueView(viewModel: viewModel)
-            case .graphWriteCandidates:
-                GraphWriteCandidateReviewView(viewModel: viewModel)
             case .pendingApprovals:
                 AgentPendingApprovalReviewView(viewModel: viewModel)
-            case .memoryChangeLog:
-                MemoryChangeLogView(viewModel: viewModel)
-            case .extractionDiagnostics:
-                GraphExtractionDiagnosticsView(viewModel: viewModel)
             case .automation, .scheduledTasks:
                 TaskAutomationDetailPane(viewModel: viewModel, kind: .scheduled)
             case .eventTriggeredTasks:

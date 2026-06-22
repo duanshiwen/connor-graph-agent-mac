@@ -326,16 +326,9 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var databasePath: String?
     @Published var schemaHealthReport: GraphSchemaHealthReport?
     @Published var promotionCandidates: [ObserveLogEntry] = []
-    @Published var graphWriteCandidates: [GraphWriteCandidate] = []
-    @Published var graphWriteCandidateAudits: [String: [GraphWriteCandidateAuditPresentation]] = [:]
     @Published var pendingApprovals: [AgentPendingApproval] = []
-    @Published var graphExtractionTraces: [AppGraphExtractionTracePresentation] = []
-    @Published var admissionHoldQueueItems: [AppGraphAdmissionHoldQueuePresentation] = []
-    @Published var memoryChangeLogEntries: [AppGraphMemoryChangeLogPresentation] = []
     @Published var lastPromotionResultSummary: String?
-    @Published var lastGraphWriteCandidateResultSummary: String?
     @Published var lastPendingApprovalResultSummary: String?
-    @Published var lastAdmissionHoldQueueActionSummary: String?
     @Published var llmConnectionConfigs: [AppLLMConnectionConfig] = AppLLMSettings.default.connections
     @Published var llmDefaultConnectionID: String = AppLLMSettings.default.defaultConnectionID
     @Published var llmConnectionName: String = AppLLMSettings.default.defaultConnection.name
@@ -496,11 +489,9 @@ final class AppViewModel: NSObject, ObservableObject {
 
     private var repository: AppGraphRepository?
     private var promotionRepository: AppPromotionQueueRepository?
-    private var graphWriteCandidateRepository: AppGraphWriteCandidateRepository?
     private var pendingApprovalRepository: AppAgentPendingApprovalRepository?
-    private var graphExtractionTraceRepository: AppGraphExtractionTraceRepository?
-    private var admissionHoldQueueRepository: AppGraphAdmissionHoldQueueRepository?
-    private var memoryChangeLogRepository: AppGraphMemoryChangeLogRepository?
+    private var memoryOSStore: SQLiteMemoryOSStore?
+    private var memoryOSFacade: AppMemoryOSFacade?
     private var chatSessionRepository: AppChatSessionRepository?
     private var governanceConfigRepository: AppSessionGovernanceConfigRepository?
     private var productOSRegistryRepository: AppProductOSRegistryRepository?
@@ -522,7 +513,6 @@ final class AppViewModel: NSObject, ObservableObject {
     private var mailCredentialStore = AppMailCredentialStore()
     private var agentRuntimeFactory: AppGraphAgentRuntimeFactory?
     private var hybridSearchService: (any GraphHybridSearchService)?
-    private var backgroundJobRunner: AppGraphBackgroundJobRunner?
     private var isRunningBackgroundJobs: Bool = false
     // Product chat path: NativeSessionManager owns Connor session state and talks to replaceable AgentBackend implementations.
     // fallbackChatSession is UI-only for demo/no-runtime states.
@@ -947,7 +937,8 @@ final class AppViewModel: NSObject, ObservableObject {
         case .browserWorkspace:
             showBrowserWorkspace()
         case .graphMemory:
-            selection = .graphWriteCandidates
+            isBrowserVisible = false
+            selection = .agentChat
         case .search:
             selection = .search
         case .graphEntities:
@@ -1290,11 +1281,7 @@ final class AppViewModel: NSObject, ObservableObject {
 
 
     private var graphMemoryDashboardPresentation: GraphMemoryDashboard {
-        AppGraphMemoryDashboardBuilder().build(
-            graphWriteCandidates: graphWriteCandidates,
-            admissionHoldQueueItems: admissionHoldQueueItems,
-            memoryChangeLogEntries: memoryChangeLogEntries
-        )
+        GraphMemoryDashboard(summary: GraphMemoryDashboardSummary(pendingCandidateCount: 0, openHoldCount: 0, recentChangeCount: 0), cards: [])
     }
 
     private var chatSummaryPresentation: AppChatSummaryPresentation {
@@ -1369,17 +1356,22 @@ final class AppViewModel: NSObject, ObservableObject {
         }
         if let repository {
             self.promotionRepository = AppPromotionQueueRepository(store: repository.store)
-            self.graphWriteCandidateRepository = AppGraphWriteCandidateRepository(store: repository.store)
             self.pendingApprovalRepository = AppAgentPendingApprovalRepository(store: repository.store)
-            self.graphExtractionTraceRepository = AppGraphExtractionTraceRepository(store: repository.store)
-            self.admissionHoldQueueRepository = AppGraphAdmissionHoldQueueRepository(store: repository.store)
-            self.memoryChangeLogRepository = AppGraphMemoryChangeLogRepository(store: repository.store)
             self.chatSessionRepository = AppChatSessionRepository(store: repository.store, storagePaths: storagePaths, governanceConfig: governanceConfig)
             if let storagePaths {
                 self.runtimeSettingsRepository = AppRuntimeSettingsRepository(configDirectory: storagePaths.configDirectory)
             }
             self.hybridSearchService = SQLiteGraphHybridSearchService(store: repository.store)
-            self.backgroundJobRunner = AppGraphBackgroundJobRunner(store: repository.store, settingsRepository: llmSettingsRepository)
+        }
+        if let storagePaths {
+            do {
+                let store = try SQLiteMemoryOSStore(path: storagePaths.memoryOSDatabaseURL.path)
+                try store.migrate()
+                self.memoryOSStore = store
+                self.memoryOSFacade = AppMemoryOSFacade(store: store)
+            } catch {
+                self.errorMessage = "Memory OS 初始化失败：\(error)"
+            }
         }
         self.databasePath = databasePath
         let initialSession = AgentSession(id: "app-session")
@@ -1438,8 +1430,6 @@ final class AppViewModel: NSObject, ObservableObject {
         reloadChatSessions()
         loadBrowserHistory()
         reloadSchemaHealthReport()
-        reloadGraphExtractionTraces()
-        reloadMemoryChangeLog()
         Task { await ensureMediaTranscriptionRuntimeOnLaunch() }
     }
 
@@ -1453,27 +1443,16 @@ final class AppViewModel: NSObject, ObservableObject {
         nativeSessionManager = makeNativeSessionManager(for: session)
         Task { await runSearch() }
         reloadPromotionCandidates()
-        reloadGraphWriteCandidates()
         reloadPendingApprovals()
     }
 
     func runBackgroundJobs() async {
         guard !isRunningBackgroundJobs else { return }
-        guard let backgroundJobRunner, let repository else { return }
+        guard let memoryOSFacade else { return }
         isRunningBackgroundJobs = true
         defer { isRunningBackgroundJobs = false }
         do {
-            _ = try await backgroundJobRunner.runAvailable(limit: 5)
-            let snapshot = try repository.loadSnapshot()
-            let traces = try graphExtractionTraceRepository?.loadRecentTraces() ?? []
-            let holdItems = try admissionHoldQueueRepository?.loadOpenItems() ?? []
-            let changeLog = try memoryChangeLogRepository?.loadRecentEntries() ?? []
-            await MainActor.run {
-                apply(snapshot: snapshot)
-                graphExtractionTraces = traces
-                admissionHoldQueueItems = holdItems
-                memoryChangeLogEntries = changeLog
-            }
+            _ = try AppMemoryOSBackgroundJobRunner().runOnce(facade: memoryOSFacade)
         } catch {
             await MainActor.run { errorMessage = String(describing: error) }
         }
@@ -1655,6 +1634,10 @@ final class AppViewModel: NSObject, ObservableObject {
             mediaTranscription: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("media.transcription") }
                 return try await self.performMediaTranscriptionTask(request)
+            },
+            memoryOSPipeline: { [weak self] request in
+                guard let self else { throw TaskTargetRunnerError.unsupportedTarget("memory_os.pipeline") }
+                return try await self.performMemoryOSPipelineTask(request)
             }
         )
         do {
@@ -1744,6 +1727,20 @@ final class AppViewModel: NSObject, ObservableObject {
     private func refreshCalendarForScheduledTask(runID: String?) async -> String {
         let succeeded = await syncSystemCalendarNow()
         return succeeded ? (calendarSyncMessage ?? "Calendar refreshed") : (calendarSyncMessage ?? "Calendar refresh failed")
+    }
+
+    private func performMemoryOSPipelineTask(_ request: MemoryOSPipelineTaskRequest) async throws -> String {
+        guard let memoryOSFacade else { throw TaskTargetRunnerError.unsupportedTarget("memory_os.pipeline") }
+        switch request.operationName {
+        case "plan_l1_to_l2_jobs":
+            let jobs = try memoryOSFacade.enqueueL1ToL2BackgroundJobs()
+            return "Memory OS planned \(jobs.count) L1→L2 job(s)"
+        case "plan_l2_to_knowledge_jobs":
+            let jobs = try memoryOSFacade.enqueueL2ToKnowledgeBackgroundJobs()
+            return "Memory OS planned \(jobs.count) L2→Knowledge job(s)"
+        default:
+            throw TaskTargetRunnerError.unsupportedTarget("memory_os.pipeline:\(request.operationName)")
+        }
     }
 
     private func refreshRSSForScheduledTask(sourceInstanceID: String?, runID: String?) async throws -> String {
@@ -4925,17 +4922,6 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
-    func reloadGraphWriteCandidates() {
-        do {
-            let candidates = try graphWriteCandidateRepository?.loadCandidates() ?? []
-            graphWriteCandidates = candidates
-            graphWriteCandidateAudits = try graphWriteCandidateRepository?.loadAuditTimelines(for: candidates) ?? [:]
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
     func reloadPendingApprovals() {
         do {
             pendingApprovals = try pendingApprovalRepository?.loadPending() ?? []
@@ -5029,126 +5015,6 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
-    func reloadGraphExtractionTraces() {
-        do {
-            graphExtractionTraces = try graphExtractionTraceRepository?.loadRecentTraces() ?? []
-            admissionHoldQueueItems = try admissionHoldQueueRepository?.loadOpenItems() ?? []
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func reloadMemoryChangeLog() {
-        do {
-            memoryChangeLogEntries = try memoryChangeLogRepository?.loadRecentEntries() ?? []
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func approveAdmissionHoldQueueItem(_ item: AppGraphAdmissionHoldQueuePresentation) {
-        guard let admissionHoldQueueRepository, let repository else {
-            errorMessage = "准入诊断队列不可用。"
-            return
-        }
-        do {
-            let result = try admissionHoldQueueRepository.approveAndCommit(item.id)
-            let snapshot = try repository.loadSnapshot()
-            apply(snapshot: snapshot)
-            reloadGraphExtractionTraces()
-            reloadMemoryChangeLog()
-            lastAdmissionHoldQueueActionSummary = "已批准并提交 hold item \(item.id)：实体 +\(result.committedEntityIDs.count)，陈述 +\(result.committedStatementIDs.count)"
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func rejectAdmissionHoldQueueItem(_ item: AppGraphAdmissionHoldQueuePresentation) {
-        do {
-            try admissionHoldQueueRepository?.reject(item.id)
-            reloadGraphExtractionTraces()
-            lastAdmissionHoldQueueActionSummary = "已 dismiss hold item \(item.id)"
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func rerunAdmissionHoldQueueItem(_ item: AppGraphAdmissionHoldQueuePresentation) {
-        do {
-            guard let result = try admissionHoldQueueRepository?.rerunExtraction(item.id) else { return }
-            reloadGraphExtractionTraces()
-            lastAdmissionHoldQueueActionSummary = "已重新排队 extraction job \(result.jobID)：\(result.status.rawValue)"
-            errorMessage = nil
-            Task { await runBackgroundJobs() }
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func inspectAdmissionHoldQueueItemEvidence(_ item: AppGraphAdmissionHoldQueuePresentation) {
-        do {
-            guard let inspection = try admissionHoldQueueRepository?.inspectEvidence(item.id) else { return }
-            lastAdmissionHoldQueueActionSummary = inspection.summary
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func validateGraphWriteCandidate(_ candidate: GraphWriteCandidate) async {
-        do {
-            guard let result = try await graphWriteCandidateRepository?.validateGoverned(candidate) else { return }
-            reloadGraphWriteCandidates()
-            lastGraphWriteCandidateResultSummary = result.validation.isValid ? "候选 \(candidate.id) 验证通过，进入待审阅" : "候选 \(candidate.id) 验证失败：\(result.validation.errors.joined(separator: "; "))"
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func approveGraphWriteCandidate(_ candidate: GraphWriteCandidate) async {
-        do {
-            _ = try await graphWriteCandidateRepository?.approveGoverned(candidate)
-            reloadGraphWriteCandidates()
-            lastGraphWriteCandidateResultSummary = "已批准候选 \(candidate.id)，并写入审计日志"
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func rejectGraphWriteCandidate(_ candidate: GraphWriteCandidate) async {
-        do {
-            _ = try await graphWriteCandidateRepository?.rejectGoverned(candidate, reason: "Rejected by reviewer")
-            reloadGraphWriteCandidates()
-            lastGraphWriteCandidateResultSummary = "已拒绝候选 \(candidate.id)，并写入审计日志"
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func commitGraphWriteCandidate(_ candidate: GraphWriteCandidate) async {
-        guard let graphWriteCandidateRepository, let repository else {
-            errorMessage = "写入候选仓储不可用。"
-            return
-        }
-        do {
-            let result = try await graphWriteCandidateRepository.commitGoverned(candidate)
-            let snapshot = try repository.loadSnapshot()
-            apply(snapshot: snapshot)
-            reloadGraphWriteCandidates()
-            lastGraphWriteCandidateResultSummary = "已通过权限治理提交候选 \(candidate.id)：实体 +\(result.createdEntityIDs.count)，陈述 +\(result.createdStatementIDs.count)，更新陈述 \(result.updatedStatementIDs.count)，附加证据 \(result.attachedEvidenceStatementIDs.count)"
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
     func runSearch() async {
         guard let hybridSearchService else {
             searchResults = []
@@ -5165,8 +5031,8 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func saveBrowserSelectionAsEpisode(_ selection: BrowserSelectionContext) async {
-        guard let repository else {
-            errorMessage = "当前没有可用的图谱仓储，无法保存网页证据。"
+        guard let memoryOSFacade else {
+            errorMessage = "当前没有可用的 Memory OS，无法保存网页证据。"
             return
         }
         do {
@@ -5175,26 +5041,16 @@ final class AppViewModel: NSObject, ObservableObject {
                 groupID: "default",
                 sessionID: selectedChatSessionID
             )
-            try repository.store.upsert(episode: draft.episode)
-            let source = GraphExtractionSource(
-                id: draft.episode.id,
-                graphID: draft.episode.graphID,
-                sourceType: .webpage,
+            _ = try memoryOSFacade.ingestWebPageEvidence(
+                evidenceID: draft.episode.id,
                 title: draft.episode.title,
                 content: draft.episode.content,
                 occurredAt: draft.episode.occurredAt,
                 sessionID: draft.episode.sessionID,
-                workObjectID: draft.episode.workObjectID,
                 metadata: draft.episode.metadata
             )
-            try repository.store.enqueueExtractionJob(graphID: source.graphID, source: source)
-            let snapshot = try repository.loadSnapshot()
-            entities = snapshot.entities
-            statements = snapshot.statements
-            episodes = snapshot.episodes
-            observeLogEntries = snapshot.observeLogEntries
             errorMessage = nil
-            lastPromotionResultSummary = "已保存网页证据：\(draft.episode.title)"
+            lastPromotionResultSummary = "已保存网页证据到 Memory OS：\(draft.episode.title)"
             Task { await runBackgroundJobs() }
         } catch {
             errorMessage = String(describing: error)
@@ -5519,6 +5375,11 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 }
 
+extension AppViewModel {
+    var hasMemoryOSBackendForTests: Bool {
+        memoryOSFacade != nil
+    }
+}
 
 private final class UserLocationCoordinator: NSObject, CLLocationManagerDelegate {
     private let manager = CLLocationManager()

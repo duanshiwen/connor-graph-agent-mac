@@ -169,7 +169,7 @@ public struct ConnorNativeShellRouteResolver: Sendable {
         case .browserWorkspace:
             ConnorNativeShellRoute(item: item, legacySidebarID: "agentChat", requiresBrowserVisible: true)
         case .graphMemory:
-            ConnorNativeShellRoute(item: item, legacySidebarID: "graphWriteCandidates")
+            ConnorNativeShellRoute(item: item, legacySidebarID: "memoryOS")
         case .search:
             ConnorNativeShellRoute(item: item, legacySidebarID: "search")
         case .graphEntities:

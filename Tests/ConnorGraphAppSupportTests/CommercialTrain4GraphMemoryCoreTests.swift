@@ -3,7 +3,6 @@ import Testing
 import ConnorGraphAgent
 import ConnorGraphAppSupport
 import ConnorGraphCore
-import ConnorGraphMemory
 import ConnorGraphSearch
 
 private struct Train4HybridSearchService: GraphHybridSearchService, Sendable {
@@ -83,55 +82,6 @@ private actor Train4CapturingProvider: AgentModelProvider {
     let request = await provider.lastRequest
     #expect(events.map(\.kind).contains(.textComplete))
     #expect(request?.messages.contains(where: { $0.content.contains("Relevant Graph Memory Context") }) == false)
-}
-
-@Test func commercialTrain4FeedbackSignalsAreDerivedFromMemoryIngestionTriggers() {
-    var buffer = MemoryStagingBuffer(sessionID: "session-1")
-    buffer.append(ConversationTurnBundle(
-        sessionID: "session-1",
-        userMessages: [ConversationTurnMessage(id: "u1", role: .user, content: "请记住我偏好结构化推进。")],
-        assistantMessage: ConversationTurnMessage(id: "a1", role: .assistant, content: "已记录。"),
-        status: .closed
-    ))
-    let result = MemoryIngestionResult(buffer: buffer, appendedBundleIDs: ["bundle-1"], triggerReasons: [.explicitRememberRequest, .highValueSignal])
-
-    let signals = AgentGraphMemoryFeedbackSignal.signals(from: result, runID: "run-1", sessionID: "session-1")
-
-    #expect(signals.map(\.trigger) == [.explicitRemember, .highValueSignal])
-    #expect(signals.first?.explicitRemember == true)
-    #expect(signals.last?.highValue == true)
-    #expect(signals.first?.importance == 0.95)
-}
-
-@Test func commercialTrain4GraphMemoryDashboardShowsCoreMemorySurface() async throws {
-    let context = AgentGraphMemoryContextContract(
-        query: "偏好",
-        sessionID: "session-1",
-        runID: "run-1",
-        groupID: "default",
-        items: [AgentGraphMemoryContextItem(sourceID: "episode:pref", kind: .observeLog, role: .preference, content: "诗闻偏好结构化推进。", reason: "matched via hybrid", scoreLabel: "93%")],
-        summary: "1 item"
-    )
-    let signal = AgentGraphMemoryFeedbackSignal(sessionID: "session-1", trigger: .explicitRemember, candidateKind: "preference", importance: 0.95, confidence: 0.8, rationale: "explicit remember")
-    var buffer = MemoryStagingBuffer(sessionID: "session-1")
-    buffer.append(ConversationTurnBundle(sessionID: "session-1", userMessages: [ConversationTurnMessage(role: .user, content: "请记住这个偏好")]))
-    let distillation = MemoryDistillationResult(
-        sessionID: "session-1",
-        sourceBufferID: buffer.id,
-        preferenceCandidates: [MemoryDistillationCandidate(kind: .preference, title: "Preference", content: "结构化推进", rationale: "preference", importance: 0.9, confidence: 0.8)]
-    )
-
-    let dashboard = GraphMemoryProductizationCenter.dashboard(contextContract: context, feedbackSignals: [signal], stagingBuffer: buffer, distillationResult: distillation)
-
-    #expect(dashboard.summary.contextReady == true)
-    #expect(dashboard.summary.ingestionReady == true)
-    #expect(dashboard.summary.distillationReady == true)
-    #expect(dashboard.summary.contextItemCount == 1)
-    #expect(dashboard.summary.feedbackSignalCount == 1)
-    #expect(dashboard.summary.distillationCandidateCount == 1)
-    #expect(dashboard.cards.map(\.kind).contains(.contextUse))
-    #expect(dashboard.cards.map(\.kind).contains(.feedbackSignal))
-    #expect(dashboard.cards.map(\.kind).contains(.distillationCandidate))
 }
 
 @Test func commercialTrain4ReadinessUsesCoreGraphMemoryEvidence() {
