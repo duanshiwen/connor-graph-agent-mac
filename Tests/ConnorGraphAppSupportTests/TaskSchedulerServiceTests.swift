@@ -8,7 +8,15 @@ struct TaskSchedulerServiceTests {
     @Test func intervalTaskBecomesDueAndSkipsRunningTasks() throws {
         let scheduler = TaskSchedulerService()
         let now = Date(timeIntervalSince1970: 1_000)
-        var task = try #require(ConnorTaskDefinition.systemDefaults(now: Date(timeIntervalSince1970: 0)).first { $0.id == "system.calendar.check-every-10-minutes" })
+        var task = ConnorTaskDefinition(
+            id: "system.calendar.account.calendar-account-a.refresh",
+            name: "检查日历：Calendar A",
+            origin: .system,
+            trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 600, recurrence: .interval),
+            target: ConnorTaskTarget(targetKind: "source.runtime", targetID: "calendar", operationName: "refresh", parameters: ["sourceInstanceID": "calendar-account-a"]),
+            lifecycle: ConnorTaskLifecycle(status: .active),
+            metadata: .protectedSystem
+        )
         task.lifecycle.status = .active
         task.lifecycle.lastFinishedAt = Date(timeIntervalSince1970: 300)
 

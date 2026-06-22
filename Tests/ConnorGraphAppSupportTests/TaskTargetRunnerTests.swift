@@ -10,14 +10,21 @@ struct TaskTargetRunnerTests {
         let calendar = CalendarRefreshSpy()
         let rss = RSSRefreshSpy()
         let runner = TaskTargetRunner(mailRefresher: mail.refresh, calendarRefresher: calendar.refresh, rssRefresher: rss.refresh, sessionMessenger: SessionMessageSpy().perform)
-        let tasks = ConnorTaskDefinition.systemDefaults(now: Date(timeIntervalSince1970: 0))
+        let task = ConnorTaskDefinition(
+            id: "system.calendar.account.calendar-account-a.refresh",
+            name: "检查日历：Calendar A",
+            origin: .system,
+            trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 600, recurrence: .interval),
+            target: ConnorTaskTarget(targetKind: "source.runtime", targetID: "calendar", operationName: "refresh", parameters: ["sourceInstanceID": "calendar-account-a"]),
+            lifecycle: ConnorTaskLifecycle(status: .active),
+            metadata: .protectedSystem
+        )
 
-        for task in tasks {
-            _ = try await runner.run(task: task, runID: "run-")
-        }
+        _ = try await runner.run(task: task, runID: "run-")
 
         #expect(await mail.count == 0)
         #expect(await calendar.count == 1)
+        #expect(await calendar.requests == [SourceRefreshTaskRequest(sourceKind: "calendar", sourceInstanceID: "calendar-account-a", runID: "run-")])
         #expect(await rss.count == 0)
     }
 
@@ -104,7 +111,7 @@ struct TaskTargetRunnerTests {
 }
 
 private actor MailRefreshSpy { var count = 0; func refresh(_ request: SourceRefreshTaskRequest) async throws -> String { count += 1; return "mail refreshed" } }
-private actor CalendarRefreshSpy { var count = 0; func refresh(_ request: SourceRefreshTaskRequest) async throws -> String { count += 1; return "calendar refreshed" } }
+private actor CalendarRefreshSpy { var count = 0; private(set) var requests: [SourceRefreshTaskRequest] = []; func refresh(_ request: SourceRefreshTaskRequest) async throws -> String { count += 1; requests.append(request); return "calendar refreshed" } }
 private actor RSSRefreshSpy { var count = 0; private(set) var requests: [SourceRefreshTaskRequest] = []; func refresh(_ request: SourceRefreshTaskRequest) async throws -> String { count += 1; requests.append(request); return "rss refreshed" } }
 
 private actor MediaTranscriptionSpy {
