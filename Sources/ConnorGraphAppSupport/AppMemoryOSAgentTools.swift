@@ -23,6 +23,8 @@ public struct MemoryOSDashboardSummaryTool: AgentTool {
             "l1PendingCaptureCount": snapshot.l1PendingCaptureCount,
             "l1PendingQueueCount": snapshot.l1PendingQueueCount,
             "l1DeadLetterCount": snapshot.l1DeadLetterCount,
+            "l1RetryScheduledCount": snapshot.l1RetryScheduledCount,
+            "l1ExpiredLeaseCount": snapshot.l1ExpiredLeaseCount,
             "l2StatementCount": snapshot.l2StatementCount,
             "l2ConflictCount": snapshot.l2ConflictCount,
             "l3BeliefCount": snapshot.l3BeliefCount,
@@ -109,9 +111,59 @@ public struct MemoryOSIngestObservationTool: AgentTool {
     }
 }
 
+public struct MemoryOSProjectStructuredArtifactTool: AgentTool {
+    public let name = "memory_os_project_structured_artifact"
+    public let description = "Validate and project a GraphStructuredExtractionOutput JSON artifact into Connor Memory OS L2/L3/L4. The artifact is persisted and audited before projection; rejected artifacts do not write projections."
+    public let permission: AgentPermissionCapability = .proposeGraphWrite
+    public let inputSchema = AgentToolInputSchema.object(properties: [
+        "rawContent": .string(description: "Raw GraphStructuredExtractionOutput JSON to validate and project."),
+        "modelID": .string(description: "Model identifier that produced the artifact."),
+        "processingRunID": .string(description: "Optional processing run id for audit correlation.")
+    ], required: ["rawContent", "modelID"])
+
+    private let facade: AppMemoryOSFacade
+
+    public init(facade: AppMemoryOSFacade) { self.facade = facade }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        guard let rawContent = arguments.string("rawContent"), !rawContent.isEmpty else {
+            throw AgentToolError.invalidArguments("rawContent is required")
+        }
+        guard let modelID = arguments.string("modelID"), !modelID.isEmpty else {
+            throw AgentToolError.invalidArguments("modelID is required")
+        }
+        let runID = arguments.string("processingRunID") ?? context.runID
+        let summary = try facade.projectAndRecordLLMArtifact(rawContent: rawContent, modelID: modelID, processingRunID: runID)
+        let payload: [String: Any] = [
+            "artifactID": summary.artifactID,
+            "accepted": summary.accepted,
+            "nodeCount": summary.nodeCount,
+            "statementCount": summary.statementCount,
+            "entityCount": summary.entityCount,
+            "entityStatementCount": summary.entityStatementCount,
+            "beliefCount": summary.beliefCount,
+            "issueCount": summary.issues.count
+        ]
+        let json = try Self.renderJSON(payload)
+        return AgentToolResult(
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: summary.accepted ? "Memory OS projected artifact \(summary.artifactID): \(summary.statementCount) statements, \(summary.entityCount) entities, \(summary.beliefCount) beliefs." : "Memory OS rejected artifact \(summary.artifactID): \(summary.issues.count) validation issue(s).",
+            contentJSON: json,
+            citations: [summary.artifactID]
+        )
+    }
+
+    private static func renderJSON(_ object: [String: Any]) throws -> String {
+        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        return String(data: data, encoding: .utf8) ?? "{}"
+    }
+}
+
 public extension AgentToolRegistry {
     mutating func registerMemoryOSTools(facade: AppMemoryOSFacade) {
         register(MemoryOSDashboardSummaryTool(facade: facade))
         register(MemoryOSIngestObservationTool(facade: facade))
+        register(MemoryOSProjectStructuredArtifactTool(facade: facade))
     }
 }
