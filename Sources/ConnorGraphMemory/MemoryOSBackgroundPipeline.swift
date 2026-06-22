@@ -12,7 +12,7 @@ public struct MemoryOSL1ProcessingTriggerPolicy: Sendable, Codable, Equatable {
     public var maxTokensPerBlock: Int
     public var maxPendingAge: TimeInterval?
 
-    public init(minPendingCount: Int = 100, maxEventsPerBlock: Int = 30, maxTokensPerBlock: Int = 12_000, maxPendingAge: TimeInterval? = 30 * 60) {
+    public init(minPendingCount: Int = 100, maxEventsPerBlock: Int = 30, maxTokensPerBlock: Int = 12_000, maxPendingAge: TimeInterval? = 24 * 60 * 60) {
         self.minPendingCount = minPendingCount
         self.maxEventsPerBlock = maxEventsPerBlock
         self.maxTokensPerBlock = maxTokensPerBlock
@@ -32,15 +32,21 @@ public struct MemoryOSL2KnowledgeSynthesisTriggerPolicy: Sendable, Codable, Equa
     public var minPendingStatementCount: Int
     public var maxStatementsPerBlock: Int
     public var maxTokensPerBlock: Int
+    public var maxPendingAge: TimeInterval?
 
-    public init(minPendingStatementCount: Int = 80, maxStatementsPerBlock: Int = 30, maxTokensPerBlock: Int = 12_000) {
+    public init(minPendingStatementCount: Int = 80, maxStatementsPerBlock: Int = 30, maxTokensPerBlock: Int = 12_000, maxPendingAge: TimeInterval? = 24 * 60 * 60) {
         self.minPendingStatementCount = minPendingStatementCount
         self.maxStatementsPerBlock = maxStatementsPerBlock
         self.maxTokensPerBlock = maxTokensPerBlock
+        self.maxPendingAge = maxPendingAge
     }
 
-    public func shouldTrigger(statements: [MemoryOSStatement]) -> Bool {
-        pendingStatements(from: statements).count >= minPendingStatementCount
+    public func shouldTrigger(statements: [MemoryOSStatement], now: Date = Date()) -> Bool {
+        let pending = pendingStatements(from: statements)
+        guard !pending.isEmpty else { return false }
+        if pending.count >= minPendingStatementCount { return true }
+        if let maxPendingAge, let oldest = pending.map(\.committedAt).min(), now.timeIntervalSince(oldest) >= maxPendingAge { return true }
+        return false
     }
 
     public func pendingStatements(from statements: [MemoryOSStatement]) -> [MemoryOSStatement] {
@@ -346,7 +352,7 @@ public struct MemoryOSL2ToKnowledgeJobPlanner: Sendable {
 
     public func planJobs(from statements: [MemoryOSStatement], now: Date = Date()) -> [MemoryOSL2ToKnowledgeJobDraft] {
         let pending = policy.pendingStatements(from: statements).sorted { $0.committedAt < $1.committedAt }
-        guard policy.shouldTrigger(statements: pending) else { return [] }
+        guard policy.shouldTrigger(statements: pending, now: now) else { return [] }
         return chunkStatements(pending).map { block in
             MemoryOSL2ToKnowledgeJobDraft(
                 statementIDs: block.map(\.id),
