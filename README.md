@@ -1,11 +1,11 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-21 00:17 GMT+8  
-当前分支目标：收紧代码质量、简化文档、保持 Connor 的原生 Agent OS 边界，并为内置浏览器媒体本地转写系统建立可恢复、可治理的地基。
+文档更新时间：2026-06-22 11:21 GMT+8  
+当前分支目标：将过旧 Graph Memory 主链路硬切换为商用稳定版 **Connor Memory OS L0-L4**；只移植旧 SQLite temporal graph kernel 的存储能力作为 L2/L4 底层 adapter，删除 staging / distillation / extraction / admission / candidate review / self-healing 等旧结构，避免长期技术债务。
 
-Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package。它的目标不是做“图谱编辑器”或“LLM SDK 外壳”，而是构建一个本地优先的 **graph-memory-native Agent OS**：以 Session OS、Policy Engine、Graph Memory、Source/MCP Platform、Native UI、Task Management Stack 和 Attachment Store 共同组成可治理的本地智能工作台。
+Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package。它的目标不是做“图谱编辑器”或“LLM SDK 外壳”，而是构建一个本地优先的 **memory-os-native Agent OS**：以 Session OS、Policy Engine、Memory OS、Source/MCP Platform、Native UI、Task Management Stack 和 Attachment Store 共同组成可治理的本地智能工作台。
 
-核心判断：**图谱是后台记忆基础设施，不是普通用户的前台主导航概念。** 普通用户面对的是会话、数据源、技能、自动化、浏览器、附件、任务和设置；Graph Memory 在后台提供连续性、精确性、可追溯性与治理证据。
+核心判断：**记忆系统是后台认知基础设施，不是普通用户的前台图谱编辑器。** 普通用户面对的是会话、数据源、技能、自动化、浏览器、附件、任务和设置；Memory OS 在后台提供连续性、精确性、可追溯性、信念治理和稳定实体知识。
 
 ---
 
@@ -15,7 +15,7 @@ Connor 当前坚持以下主权边界：
 
 - **Session sovereignty belongs to Connor Session OS**：会话、run、journal、pending approval、branch、restore snapshot 和 Session Capsule 由 Connor 持久化与恢复。
 - **Permission sovereignty belongs to Connor Policy Engine**：OpenAI / Anthropic 模型提供方、MCP server、local tools 和 native runtimes 都不能绕过 Connor 审批、审计和执行门禁。
-- **Memory sovereignty belongs to Connor Graph Memory**：LLM 不直接写图谱；图谱写入走 staging、distillation、candidate review、admission policy 与 SQLite temporal graph。
+- **Memory sovereignty belongs to Connor Memory OS**：LLM 不直接写 L2/L3/L4；所有记忆写入必须经过 L0 provenance、L1 capture/queue、processing artifact、schema/evidence validators、conflict policy 与 SQLite Memory OS repository。旧 Graph Memory 主链路不再作为商用架构保留；只移植 SQLite temporal graph kernel 的存储能力到 L2/L4。
 - **Source sovereignty belongs to Connor Source Platform**：MCP servers 是能力提供者，不拥有 Connor source registry、permission policy、audit、readiness state 或 graph ingestion policy。
 - **UI sovereignty belongs to Swift Native Shell**：不引入 Electron/Web UI，不 fork Craft UI。文件预览、设置、菜单、快捷键、选择器等优先使用 macOS / SwiftUI / AppKit 原生语义。
 - **Task sovereignty belongs to Connor Task Management Stack**：任务栈负责统一生命周期、运行历史、恢复意图和本地 CLI/API 管理面；不承载具体 runtime 实现，也不承担审批 gate。浏览器媒体转写也是 `media.transcription.run` target，不建立第二套媒体专用全局队列。
@@ -72,8 +72,8 @@ Main source targets：
 
 ```text
 Sources/ConnorGraphCore        Domain models and governance primitives
-Sources/ConnorGraphMemory      Memory staging, distillation, validation
-Sources/ConnorGraphStore       SQLite graph/session/audit persistence
+Sources/ConnorGraphMemory      Memory OS ingestion, processing, validation, projection, belief/entity services
+Sources/ConnorGraphStore       SQLite Memory OS, session and audit persistence
 Sources/ConnorGraphSearch      Hybrid graph retrieval and evaluation
 Sources/ConnorGraphAgent       Agent loop, tools, model providers, policy boundary
 Sources/ConnorGraphAppSupport  App services, repositories, native runtimes
@@ -96,40 +96,47 @@ Session OS / Source Platform / Skill Runtime / Task Surface / Readiness Gate
   ↓
 ConnorGraphAgent + Native Model Providers（OpenAI Responses / Anthropic Messages）
   ↓
-Graph Memory Runtime Contract
+Memory OS Runtime Contract
   ↓
-SQLite Temporal Graph + Hybrid Retrieval + Memory Governance
+L0 Provenance + L1 Capture Queue + L2 Operational Memory + L3 Beliefs + L4 Stable Entities
 ```
 
 ### 3.1 ConnorGraphCore
 
 Core domain target. It contains stable data structures and enums for：
 
-- Temporal graph entities, edges, observations and evidence
+- Memory OS L0-L4 domain models：provenance, capture, operational statements, beliefs, stable entities, health and validation
+- Temporal entity kernel primitives migrated into Memory OS semantics
 - Session OS state and attention models
 - Permission and policy domain
 - Attachment domain
 - Mail/RSS/Calendar/Contacts source domains
 - Skill, task, product registry and automation domains
-- Graph extraction, write candidates and governance states
 
 ### 3.2 ConnorGraphMemory
 
-Memory governance layer. It is responsible for：
+Memory OS service layer. It is responsible for：
 
-- Observe logs and staged memory records
-- LLM memory distillation contracts
-- Constraint validation and contradiction detection
-- Promotion/admission-oriented memory workflows
+- Pre-ingestion filtering and L0/L1 ingestion decisions
+- Adaptive time block building and processing preparation
+- Statement, evidence and belief validators
+- L2 projection service
+- L3 belief validation / synthesis boundary
+- L4 entity disambiguation and archive boundary
+- Queue recovery and production processing policy
 
 ### 3.3 ConnorGraphStore
 
 SQLite-backed persistence layer. It owns：
 
-- Temporal graph kernel store
-- Graph traversal and hybrid retrieval persistence
+- `SQLiteMemoryOSStore` production schema, PRAGMA configuration, health report and FTS tables
+- L0 provenance vault repositories
+- L1 capture ledger and durable processing queue repositories
+- L2 operational memory repositories
+- L3 belief repositories
+- L4 stable entity repositories and temporal entity kernel adapter
+- Legacy importer for existing `graph_entities`, `graph_statements` and `graph_episodes_v3`
 - Agent session/run/event/audit persistence
-- Graph extraction traces, hold queues, replay, grounding checks and self-healing support
 
 ### 3.4 ConnorGraphSearch
 
