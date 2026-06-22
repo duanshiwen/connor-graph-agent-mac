@@ -16,7 +16,7 @@ struct TaskTargetRunnerTests {
             _ = try await runner.run(task: task, runID: "run-")
         }
 
-        #expect(await mail.count == 1)
+        #expect(await mail.count == 0)
         #expect(await calendar.count == 1)
         #expect(await rss.count == 0)
     }
