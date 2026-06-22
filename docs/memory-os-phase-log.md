@@ -147,3 +147,38 @@ Validation evidence:
 - `swift test --filter AppMemoryOSProductionHardening` passed.
 - `swift test --filter MemoryOSDashboard` passed.
 - `swift test --filter MemoryOS` passed with 58 MemoryOS tests.
+
+## Phase H-4 — projection / promotion runtime
+
+Completed on 2026-06-22 17:58 GMT+8.
+
+Commits:
+
+- `df58154 feat: add Memory OS projection runtime mapping`
+- `cf36a58 feat: persist Memory OS projection batches`
+- `2d04800 feat: run Memory OS projections through facade`
+- `fd040a0 feat: add Memory OS projection queue worker`
+- `16b9081 feat: run Memory OS projections in background jobs`
+- `621e840 feat: expose Memory OS projection agent tool`
+- `a1c5f16 test: assert automatic Memory OS evidence joins`
+
+Artifacts:
+
+- `MemoryOSProjectionQueuePayload` defines durable queued projection work.
+- `MemoryOSProjectionBatch` and `MemoryOSProjectionRunSummary` define the L2/L3/L4 projection runtime contract.
+- `MemoryOSProjectionService` maps accepted structured extraction artifacts into L2 nodes/statements, L3 high-confidence observed beliefs, L4 stable entities and L4 entity statements.
+- `SQLiteMemoryOSStore.saveProjectionBatch` persists projection results across L2/L3/L4 tables, projection ledger, FTS and evidence joins.
+- `AppMemoryOSFacade.projectAndRecordLLMArtifact` runs artifact persistence, validation, projection, audit, metric and queue success/failure transitions as one application boundary.
+- `AppMemoryOSFacade.runProjectionQueueOnce` leases runnable `project_artifact` queue jobs and executes them through the production projection path.
+- `AppMemoryOSBackgroundJobRunner` now executes projection queue jobs before health/operational reporting.
+- `memory_os_project_structured_artifact` exposes the controlled agent tool surface for projection.
+
+Validation evidence:
+
+- `swift test --filter MemoryOSProjection` passed.
+- `swift test --filter MemoryOSProjectionStore` passed.
+- `swift test --filter AppMemoryOSProjectionRuntime` passed.
+- `swift test --filter AppMemoryOSProjectionQueueWorker` passed.
+- `swift test --filter appMemoryOSBackgroundJobRunner` passed.
+- `swift test --filter agentLoopRuntimeFactoryRegistersMemoryOSToolsInsteadOfLegacyGraphWriteTools` passed.
+- `swift test --filter MemoryOS` passed with 66 MemoryOS tests.
