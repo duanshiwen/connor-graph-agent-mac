@@ -525,7 +525,6 @@ final class AppViewModel: NSObject, ObservableObject {
     private var mailCredentialStore = AppMailCredentialStore()
     private var agentRuntimeFactory: AppGraphAgentRuntimeFactory?
     private var hybridSearchService: (any GraphHybridSearchService)?
-    private var backgroundJobRunner: AppGraphBackgroundJobRunner?
     private var isRunningBackgroundJobs: Bool = false
     // Product chat path: NativeSessionManager owns Connor session state and talks to replaceable AgentBackend implementations.
     // fallbackChatSession is UI-only for demo/no-runtime states.
@@ -1374,7 +1373,6 @@ final class AppViewModel: NSObject, ObservableObject {
                 self.runtimeSettingsRepository = AppRuntimeSettingsRepository(configDirectory: storagePaths.configDirectory)
             }
             self.hybridSearchService = SQLiteGraphHybridSearchService(store: repository.store)
-            self.backgroundJobRunner = AppGraphBackgroundJobRunner(store: repository.store, settingsRepository: llmSettingsRepository)
         }
         if let storagePaths {
             do {
@@ -1462,20 +1460,11 @@ final class AppViewModel: NSObject, ObservableObject {
 
     func runBackgroundJobs() async {
         guard !isRunningBackgroundJobs else { return }
-        guard backgroundJobRunner != nil || memoryOSFacade != nil else { return }
+        guard let memoryOSFacade else { return }
         isRunningBackgroundJobs = true
         defer { isRunningBackgroundJobs = false }
         do {
-            if let memoryOSFacade {
-                _ = try AppMemoryOSBackgroundJobRunner().runOnce(facade: memoryOSFacade)
-            }
-            if let backgroundJobRunner, let repository {
-                _ = try await backgroundJobRunner.runAvailable(limit: 5)
-                let snapshot = try repository.loadSnapshot()
-                await MainActor.run {
-                    apply(snapshot: snapshot)
-                }
-            }
+            _ = try AppMemoryOSBackgroundJobRunner().runOnce(facade: memoryOSFacade)
             await MainActor.run {
                 reloadMemoryOSDashboard()
             }
