@@ -1587,10 +1587,6 @@ struct CraftDetailPaneView: View {
                 AgentChatView(viewModel: viewModel)
             case .promotionQueue:
                 PromotionQueueView(viewModel: viewModel)
-            case .memoryOS:
-                MemoryOSDashboardView(presentation: viewModel.memoryOSDashboardPresentation) {
-                    viewModel.reloadMemoryOSDashboard()
-                }
             case .pendingApprovals:
                 AgentPendingApprovalReviewView(viewModel: viewModel)
             case .automation, .scheduledTasks:
