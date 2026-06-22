@@ -50,7 +50,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
             l1RetryScheduledCount: queueSnapshot.retryScheduled,
             l1ExpiredLeaseCount: queueSnapshot.expiredLeases,
             l2StatementCount: try count("memory_l2_statements"),
-            l2ConflictCount: try count("memory_l2_conflicts"),
+            l2DiagnosticCount: 0,
             l3BeliefCount: try count("memory_l3_beliefs"),
             l4EntityCount: try count("memory_l4_entities"),
             lastCheckedAt: now
