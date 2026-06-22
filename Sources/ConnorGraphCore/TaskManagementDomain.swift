@@ -282,19 +282,7 @@ public struct ConnorTaskDefinition: Codable, Sendable, Equatable, Identifiable {
     }
 
     public static func systemDefaults(now: Date = Date()) -> [ConnorTaskDefinition] {
-        [
-            ConnorTaskDefinition(
-                id: "system.calendar.check-every-10-minutes",
-                name: "检查日历",
-                origin: .system,
-                trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 600, recurrence: .interval),
-                target: .sourceRuntimeRefresh(sourceID: "calendar"),
-                lifecycle: ConnorTaskLifecycle(status: .active),
-                metadata: .protectedSystem,
-                createdAt: now,
-                updatedAt: now
-            )
-        ]
+        []
     }
 }
 
