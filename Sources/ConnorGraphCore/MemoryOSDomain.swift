@@ -286,6 +286,77 @@ public struct MemoryOSStatement: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
+public enum MemoryOSKnowledgeSignalDimension: String, Codable, Sendable, Equatable, CaseIterable {
+    case signalQuality = "signal_quality"
+    case reuseScope = "reuse_scope"
+    case novelty
+    case structurability
+}
+
+public struct MemoryOSKnowledgeSignalAssessment: Codable, Sendable, Equatable {
+    public var signalQualityAccepted: Bool
+    public var reuseScopeAccepted: Bool
+    public var noveltyAccepted: Bool
+    public var structurabilityAccepted: Bool
+    public var reasons: [String]
+
+    public init(signalQualityAccepted: Bool = false, reuseScopeAccepted: Bool = false, noveltyAccepted: Bool = false, structurabilityAccepted: Bool = false, reasons: [String] = []) {
+        self.signalQualityAccepted = signalQualityAccepted
+        self.reuseScopeAccepted = reuseScopeAccepted
+        self.noveltyAccepted = noveltyAccepted
+        self.structurabilityAccepted = structurabilityAccepted
+        self.reasons = reasons
+    }
+}
+
+public struct MemoryOSKnowledgeCandidate: Codable, Sendable, Equatable, Identifiable {
+    public var id: String
+    public var title: String
+    public var claim: String
+    public var category: String?
+    public var knowledgeType: String?
+    public var scope: String?
+    public var domain: String?
+    public var workObjectID: String?
+    public var signalAssessment: MemoryOSKnowledgeSignalAssessment
+    public var confidence: Double
+    public var evidenceStatementIDs: [String]
+    public var evidenceSpanIDs: [String]
+    public var relatedEntityIDs: [String]
+    public var metadata: [String: String]
+
+    public init(id: String = UUID().uuidString, title: String, claim: String, category: String? = nil, knowledgeType: String? = nil, scope: String? = nil, domain: String? = nil, workObjectID: String? = nil, signalAssessment: MemoryOSKnowledgeSignalAssessment = MemoryOSKnowledgeSignalAssessment(), confidence: Double = 0.5, evidenceStatementIDs: [String] = [], evidenceSpanIDs: [String] = [], relatedEntityIDs: [String] = [], metadata: [String: String] = [:]) {
+        self.id = id
+        self.title = title
+        self.claim = claim
+        self.category = category
+        self.knowledgeType = knowledgeType
+        self.scope = scope
+        self.domain = domain
+        self.workObjectID = workObjectID
+        self.signalAssessment = signalAssessment
+        self.confidence = confidence
+        self.evidenceStatementIDs = evidenceStatementIDs
+        self.evidenceSpanIDs = evidenceSpanIDs
+        self.relatedEntityIDs = relatedEntityIDs
+        self.metadata = metadata
+    }
+}
+
+public struct MemoryOSKnowledgePromotionDecision: Codable, Sendable, Equatable {
+    public var candidateID: String
+    public var accepted: Bool
+    public var rejectedDimensions: [MemoryOSKnowledgeSignalDimension]
+    public var reasons: [String]
+
+    public init(candidateID: String, accepted: Bool, rejectedDimensions: [MemoryOSKnowledgeSignalDimension] = [], reasons: [String] = []) {
+        self.candidateID = candidateID
+        self.accepted = accepted
+        self.rejectedDimensions = rejectedDimensions
+        self.reasons = reasons
+    }
+}
+
 public struct MemoryOSBelief: Codable, Sendable, Equatable, Identifiable {
     public var id: String
     public var topic: String
