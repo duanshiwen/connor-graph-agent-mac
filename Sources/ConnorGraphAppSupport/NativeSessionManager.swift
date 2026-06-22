@@ -83,6 +83,7 @@ public struct NativeSessionManager: Sendable {
     private let presenter: AgentEventPresenter
     private let memoryIngestionService: MemoryIngestionService
     private let memoryStagingRepository: AppMemoryStagingBufferRepository?
+    private let memoryOSFacade: AppMemoryOSFacade?
     private let eventRecorder: AgentEventRecorder?
     private let pendingApprovalRepository: (any AgentPendingApprovalRepository)?
 
@@ -95,6 +96,7 @@ public struct NativeSessionManager: Sendable {
         recentMessageLimit: Int = 6,
         memoryStagingRepository: AppMemoryStagingBufferRepository? = nil,
         memoryIngestionService: MemoryIngestionService = MemoryIngestionService(),
+        memoryOSFacade: AppMemoryOSFacade? = nil,
         eventRecorder: AgentEventRecorder? = nil,
         pendingApprovalRepository: (any AgentPendingApprovalRepository)? = nil,
         compressionProvider: AnyLLMProvider? = nil,
@@ -113,6 +115,7 @@ public struct NativeSessionManager: Sendable {
         self.presenter = AgentEventPresenter()
         self.memoryStagingRepository = memoryStagingRepository
         self.memoryIngestionService = memoryIngestionService
+        self.memoryOSFacade = memoryOSFacade
         self.eventRecorder = eventRecorder
         self.pendingApprovalRepository = pendingApprovalRepository
         self.compressionProvider = compressionProvider
@@ -126,7 +129,8 @@ public struct NativeSessionManager: Sendable {
         session: AgentSession = AgentSession(),
         groupID: String = "default",
         memoryStagingRepository: AppMemoryStagingBufferRepository? = nil,
-        memoryIngestionService: MemoryIngestionService = MemoryIngestionService()
+        memoryIngestionService: MemoryIngestionService = MemoryIngestionService(),
+        memoryOSFacade: AppMemoryOSFacade? = nil
     ) {
         self.init(
             backend: AgentLoopBackend(loopController: loopController),
@@ -135,7 +139,8 @@ public struct NativeSessionManager: Sendable {
             groupID: groupID,
             permissionMode: loopController.configuration.permissionMode,
             memoryStagingRepository: memoryStagingRepository,
-            memoryIngestionService: memoryIngestionService
+            memoryIngestionService: memoryIngestionService,
+            memoryOSFacade: memoryOSFacade
         )
     }
 
@@ -166,6 +171,7 @@ public struct NativeSessionManager: Sendable {
         }()
         let userMessage = session.appendUserMessage(displayPrompt ?? prompt, attachments: attachments, contextSnapshot: activeSkillContextSnapshot)
         try persistSession()
+        try persistMemoryOSAfterUserMessage(userMessage)
         try persistMemoryStagingAfterUserMessage(userMessage)
 
         let request = AgentChatRequest(
@@ -316,6 +322,7 @@ public struct NativeSessionManager: Sendable {
                     )
                     try persistSession()
                     if let assistantMessage {
+                        try persistMemoryOSAfterAssistantMessage(assistantMessage)
                         try persistMemoryStagingAfterAssistantMessage(assistantMessage, runID: run.id)
                     }
                 }
@@ -530,6 +537,7 @@ public struct NativeSessionManager: Sendable {
         }
         let message = session.appendAssistantMessage(content)
         try persistSession()
+        try persistMemoryOSAfterAssistantMessage(message)
         try persistMemoryStagingAfterAssistantMessage(message, runID: runID)
         return message
     }
@@ -564,6 +572,28 @@ public struct NativeSessionManager: Sendable {
         )
         try pendingApprovalRepository?.upsert(pendingApproval: approval)
         try sessionRepository.savePendingApproval(approval)
+    }
+
+    private func persistMemoryOSAfterUserMessage(_ message: AgentMessage) throws {
+        guard let memoryOSFacade else { return }
+        _ = try memoryOSFacade.ingestChatMessage(
+            messageID: message.id,
+            sessionID: session.id,
+            role: "user",
+            content: message.content,
+            occurredAt: message.createdAt
+        )
+    }
+
+    private func persistMemoryOSAfterAssistantMessage(_ message: AgentMessage) throws {
+        guard let memoryOSFacade else { return }
+        _ = try memoryOSFacade.ingestChatMessage(
+            messageID: message.id,
+            sessionID: session.id,
+            role: "assistant",
+            content: message.content,
+            occurredAt: message.createdAt
+        )
     }
 
     private func persistMemoryStagingAfterUserMessage(_ message: AgentMessage) throws {
