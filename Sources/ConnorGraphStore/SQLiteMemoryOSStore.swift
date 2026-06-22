@@ -31,8 +31,8 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         "memory_discard_events",
         "memory_l0_provenance_objects", "memory_l0_provenance_spans", "memory_l0_derivations", "memory_l0_content_hashes",
         "memory_l1_capture_events", "memory_l1_time_blocks", "memory_l1_time_block_events", "memory_l1_processing_queue", "memory_l1_queue_attempts", "memory_l1_dead_letter_queue",
-        "memory_l2_nodes", "memory_l2_edges", "memory_l2_statements", "memory_l2_statement_evidence", "memory_l2_episodes", "memory_l2_processing_runs", "memory_l2_processing_artifacts", "memory_l2_projections", "memory_l2_projection_items", "memory_l2_conflicts",
-        "memory_l3_beliefs", "memory_l3_belief_evidence", "memory_l3_belief_relations", "memory_l3_promotion_records", "memory_l3_conflicts",
+        "memory_l2_nodes", "memory_l2_edges", "memory_l2_statements", "memory_l2_statement_evidence", "memory_l2_episodes", "memory_l2_processing_runs", "memory_l2_processing_artifacts", "memory_l2_projections", "memory_l2_projection_items",
+        "memory_l3_beliefs", "memory_l3_belief_evidence", "memory_l3_belief_relations", "memory_l3_promotion_records",
         "memory_l4_entities", "memory_l4_entity_aliases", "memory_l4_entity_statements", "memory_l4_entity_statement_evidence", "memory_l4_archive_runs", "memory_l4_archive_statement_links", "memory_l4_merge_events", "memory_l4_split_events",
         "memory_l0_provenance_fts", "memory_l2_nodes_fts", "memory_l2_statements_fts", "memory_l3_beliefs_fts", "memory_l4_entities_fts", "memory_l4_statements_fts"
     ]
@@ -523,7 +523,6 @@ public extension SQLiteMemoryOSStore {
     CREATE TABLE IF NOT EXISTS memory_l2_processing_artifacts (id TEXT PRIMARY KEY, processing_run_id TEXT NOT NULL, artifact_type TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}');
     CREATE TABLE IF NOT EXISTS memory_l2_projections (id TEXT PRIMARY KEY, projection_key TEXT NOT NULL UNIQUE, title TEXT NOT NULL, content TEXT NOT NULL, refreshed_at TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}');
     CREATE TABLE IF NOT EXISTS memory_l2_projection_items (projection_id TEXT NOT NULL, statement_id TEXT NOT NULL, sequence INTEGER NOT NULL, PRIMARY KEY(projection_id, statement_id));
-    CREATE TABLE IF NOT EXISTS memory_l2_conflicts (id TEXT PRIMARY KEY, subject_id TEXT, conflict_type TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}');
     CREATE VIRTUAL TABLE IF NOT EXISTS memory_l2_nodes_fts USING fts5(node_id UNINDEXED, node_type UNINDEXED, name, summary, tokenize = 'unicode61 remove_diacritics 2');
     CREATE VIRTUAL TABLE IF NOT EXISTS memory_l2_statements_fts USING fts5(statement_id UNINDEXED, predicate UNINDEXED, text, tokenize = 'unicode61 remove_diacritics 2');
 
@@ -534,7 +533,6 @@ public extension SQLiteMemoryOSStore {
     CREATE INDEX IF NOT EXISTS idx_memory_l3_belief_evidence_belief ON memory_l3_belief_evidence(belief_id);
     CREATE TABLE IF NOT EXISTS memory_l3_belief_relations (id TEXT PRIMARY KEY, source_belief_id TEXT NOT NULL, target_belief_id TEXT NOT NULL, relation_type TEXT NOT NULL, created_at TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}');
     CREATE TABLE IF NOT EXISTS memory_l3_promotion_records (id TEXT PRIMARY KEY, source_record_id TEXT NOT NULL, target_belief_id TEXT NOT NULL, promotion_reason TEXT NOT NULL, created_at TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}');
-    CREATE TABLE IF NOT EXISTS memory_l3_conflicts (id TEXT PRIMARY KEY, belief_id TEXT NOT NULL, related_belief_id TEXT, status TEXT NOT NULL, created_at TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}');
     CREATE VIRTUAL TABLE IF NOT EXISTS memory_l3_beliefs_fts USING fts5(belief_id UNINDEXED, topic, statement, tokenize = 'unicode61 remove_diacritics 2');
 
     CREATE TABLE IF NOT EXISTS memory_l4_entities (id TEXT PRIMARY KEY, stable_key TEXT NOT NULL UNIQUE, entity_type TEXT NOT NULL, name TEXT NOT NULL, aliases_json TEXT NOT NULL DEFAULT '[]', summary TEXT NOT NULL DEFAULT '', confidence REAL NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, valid_from TEXT, metadata_json TEXT NOT NULL DEFAULT '{}');
