@@ -332,6 +332,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var graphExtractionTraces: [AppGraphExtractionTracePresentation] = []
     @Published var admissionHoldQueueItems: [AppGraphAdmissionHoldQueuePresentation] = []
     @Published var memoryChangeLogEntries: [AppGraphMemoryChangeLogPresentation] = []
+    @Published var memoryOSDashboardPresentation: MemoryOSDashboardPresentation = MemoryOSDashboardPresentationBuilder().presentation(for: MemoryOSDashboardSnapshot(healthStatus: .migrationRequired))
     @Published var lastPromotionResultSummary: String?
     @Published var lastGraphWriteCandidateResultSummary: String?
     @Published var lastPendingApprovalResultSummary: String?
@@ -501,6 +502,8 @@ final class AppViewModel: NSObject, ObservableObject {
     private var graphExtractionTraceRepository: AppGraphExtractionTraceRepository?
     private var admissionHoldQueueRepository: AppGraphAdmissionHoldQueueRepository?
     private var memoryChangeLogRepository: AppGraphMemoryChangeLogRepository?
+    private var memoryOSStore: SQLiteMemoryOSStore?
+    private var memoryOSFacade: AppMemoryOSFacade?
     private var chatSessionRepository: AppChatSessionRepository?
     private var governanceConfigRepository: AppSessionGovernanceConfigRepository?
     private var productOSRegistryRepository: AppProductOSRegistryRepository?
@@ -947,7 +950,7 @@ final class AppViewModel: NSObject, ObservableObject {
         case .browserWorkspace:
             showBrowserWorkspace()
         case .graphMemory:
-            selection = .graphWriteCandidates
+            selection = .memoryOS
         case .search:
             selection = .search
         case .graphEntities:
@@ -1381,6 +1384,16 @@ final class AppViewModel: NSObject, ObservableObject {
             self.hybridSearchService = SQLiteGraphHybridSearchService(store: repository.store)
             self.backgroundJobRunner = AppGraphBackgroundJobRunner(store: repository.store, settingsRepository: llmSettingsRepository)
         }
+        if let storagePaths {
+            do {
+                let store = try SQLiteMemoryOSStore(path: storagePaths.memoryOSDatabaseURL.path)
+                try store.migrate()
+                self.memoryOSStore = store
+                self.memoryOSFacade = AppMemoryOSFacade(store: store)
+            } catch {
+                self.errorMessage = "Memory OS 初始化失败：\(error)"
+            }
+        }
         self.databasePath = databasePath
         let initialSession = AgentSession(id: "app-session")
         self.fallbackChatSession = initialSession
@@ -1438,6 +1451,7 @@ final class AppViewModel: NSObject, ObservableObject {
         reloadChatSessions()
         loadBrowserHistory()
         reloadSchemaHealthReport()
+        reloadMemoryOSDashboard()
         reloadGraphExtractionTraces()
         reloadMemoryChangeLog()
         Task { await ensureMediaTranscriptionRuntimeOnLaunch() }
@@ -5034,6 +5048,17 @@ final class AppViewModel: NSObject, ObservableObject {
             graphExtractionTraces = try graphExtractionTraceRepository?.loadRecentTraces() ?? []
             admissionHoldQueueItems = try admissionHoldQueueRepository?.loadOpenItems() ?? []
             errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func reloadMemoryOSDashboard() {
+        do {
+            if let memoryOSFacade {
+                memoryOSDashboardPresentation = try memoryOSFacade.dashboardPresentation()
+                errorMessage = nil
+            }
         } catch {
             errorMessage = String(describing: error)
         }
