@@ -20,7 +20,6 @@ private func temporaryMemoryOSRepositoryDatabaseURL(_ name: String = UUID().uuid
     try store.upsert(span: span)
     try store.upsert(node: node)
     try store.upsert(statement: statement)
-    try store.execute("INSERT INTO memory_l2_statement_evidence(statement_id, span_id, strength) VALUES ('stmt-repo', 'span-repo', 1.0)")
 
     let evidenceRows = try store.query(sql: "SELECT statement_id, span_id FROM memory_l2_statement_evidence WHERE statement_id = 'stmt-repo'")
     #expect(evidenceRows == [["stmt-repo", "span-repo"]])
