@@ -22,6 +22,7 @@ public enum MemoryOSSourceType: String, Codable, Sendable, Equatable, CaseIterab
     case assistantMessage = "assistant_message"
     case attachment
     case sourceEvent = "source_event"
+    case webPage = "web_page"
     case legacyGraphEpisode = "legacy_graph_episode"
     case manual
 }
