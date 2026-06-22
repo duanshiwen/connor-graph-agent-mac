@@ -366,6 +366,48 @@ public struct MemoryOSProjectionBuildResult: Codable, Sendable, Equatable {
     }
 }
 
+public struct MemoryOSCurrentViewDiagnostic: Codable, Sendable, Equatable, Identifiable {
+    public var id: String
+    public var kind: String
+    public var severity: String
+    public var message: String
+    public var candidateRecordIDs: [String]
+    public var createdAt: Date
+
+    public init(id: String = UUID().uuidString, kind: String, severity: String = "info", message: String, candidateRecordIDs: [String] = [], createdAt: Date = Date()) {
+        self.id = id; self.kind = kind; self.severity = severity; self.message = message; self.candidateRecordIDs = candidateRecordIDs; self.createdAt = createdAt
+    }
+}
+
+public struct MemoryOSCurrentViewRecord: Codable, Sendable, Equatable, Identifiable {
+    public var id: String
+    public var layer: String
+    public var key: String
+    public var value: String
+    public var selectedRecordID: String
+    public var validAt: Date
+    public var confidence: Double
+    public var evidenceIDs: [String]
+    public var alternativeRecordIDs: [String]
+    public var diagnostics: [MemoryOSCurrentViewDiagnostic]
+
+    public init(id: String = UUID().uuidString, layer: String, key: String, value: String, selectedRecordID: String, validAt: Date, confidence: Double, evidenceIDs: [String] = [], alternativeRecordIDs: [String] = [], diagnostics: [MemoryOSCurrentViewDiagnostic] = []) {
+        self.id = id; self.layer = layer; self.key = key; self.value = value; self.selectedRecordID = selectedRecordID; self.validAt = validAt; self.confidence = confidence; self.evidenceIDs = evidenceIDs; self.alternativeRecordIDs = alternativeRecordIDs; self.diagnostics = diagnostics
+    }
+}
+
+public struct MemoryOSEntityCurrentProfile: Codable, Sendable, Equatable, Identifiable {
+    public var id: String
+    public var entityID: String
+    public var generatedAt: Date
+    public var records: [MemoryOSCurrentViewRecord]
+    public var diagnostics: [MemoryOSCurrentViewDiagnostic]
+
+    public init(id: String = UUID().uuidString, entityID: String, generatedAt: Date = Date(), records: [MemoryOSCurrentViewRecord] = [], diagnostics: [MemoryOSCurrentViewDiagnostic] = []) {
+        self.id = id; self.entityID = entityID; self.generatedAt = generatedAt; self.records = records; self.diagnostics = diagnostics
+    }
+}
+
 public struct MemoryOSProjectionRunSummary: Codable, Sendable, Equatable {
     public var artifactID: String
     public var accepted: Bool
