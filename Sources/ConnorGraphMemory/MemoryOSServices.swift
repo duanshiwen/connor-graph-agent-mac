@@ -351,6 +351,112 @@ public struct MemoryOSBeliefValidator: Sendable {
     }
 }
 
+public struct MemoryOSCurrentViewService: Sendable {
+    public init() {}
+
+    public func currentStatements(_ statements: [MemoryOSStatement], now: Date = Date()) -> [MemoryOSCurrentViewRecord] {
+        let groups = Dictionary(grouping: statements) { statement in
+            [statement.subjectID, statement.predicate, statement.objectID ?? ""].joined(separator: "|")
+        }
+        return groups.keys.sorted().compactMap { key in
+            guard let candidates = groups[key], let selected = bestStatement(from: candidates) else { return nil }
+            let alternatives = candidates.filter { $0.id != selected.id }.sorted { $0.validAt > $1.validAt }
+            let diagnostics = ambiguityDiagnostics(selectedID: selected.id, candidates: candidates.map { ($0.id, $0.validAt, $0.confidence) }, now: now)
+            return MemoryOSCurrentViewRecord(
+                layer: "L2",
+                key: key,
+                value: selected.text,
+                selectedRecordID: selected.id,
+                validAt: selected.validAt,
+                confidence: selected.confidence,
+                evidenceIDs: selected.evidenceSpanIDs,
+                alternativeRecordIDs: alternatives.map(\.id),
+                diagnostics: diagnostics
+            )
+        }
+    }
+
+    public func currentBeliefs(_ beliefs: [MemoryOSBelief], now: Date = Date()) -> [MemoryOSCurrentViewRecord] {
+        let groups = Dictionary(grouping: beliefs) { $0.topic }
+        return groups.keys.sorted().compactMap { topic in
+            guard let candidates = groups[topic], let selected = bestBelief(from: candidates) else { return nil }
+            let alternatives = candidates.filter { $0.id != selected.id }.sorted { $0.validAt > $1.validAt }
+            let diagnostics = ambiguityDiagnostics(selectedID: selected.id, candidates: candidates.map { ($0.id, $0.validAt, $0.confidence) }, now: now)
+            return MemoryOSCurrentViewRecord(
+                layer: "L3",
+                key: topic,
+                value: selected.statement,
+                selectedRecordID: selected.id,
+                validAt: selected.validAt,
+                confidence: selected.confidence,
+                evidenceIDs: selected.evidenceStatementIDs,
+                alternativeRecordIDs: alternatives.map(\.id),
+                diagnostics: diagnostics
+            )
+        }
+    }
+
+    public func currentEntityProfile(entityID: String, statements: [MemoryOSEntityStatement], now: Date = Date()) -> MemoryOSEntityCurrentProfile {
+        let records = currentEntityStatements(statements.filter { $0.entityID == entityID }, now: now)
+        return MemoryOSEntityCurrentProfile(entityID: entityID, generatedAt: now, records: records, diagnostics: records.flatMap(\.diagnostics))
+    }
+
+    public func currentEntityStatements(_ statements: [MemoryOSEntityStatement], now: Date = Date()) -> [MemoryOSCurrentViewRecord] {
+        let groups = Dictionary(grouping: statements) { statement in
+            [statement.entityID, statement.predicate, statement.objectEntityID ?? ""].joined(separator: "|")
+        }
+        return groups.keys.sorted().compactMap { key in
+            guard let candidates = groups[key], let selected = bestEntityStatement(from: candidates) else { return nil }
+            let alternatives = candidates.filter { $0.id != selected.id }.sorted { $0.validAt > $1.validAt }
+            let diagnostics = ambiguityDiagnostics(selectedID: selected.id, candidates: candidates.map { ($0.id, $0.validAt, $0.confidence) }, now: now)
+            return MemoryOSCurrentViewRecord(
+                layer: "L4",
+                key: key,
+                value: selected.text,
+                selectedRecordID: selected.id,
+                validAt: selected.validAt,
+                confidence: selected.confidence,
+                evidenceIDs: selected.evidenceSpanIDs,
+                alternativeRecordIDs: alternatives.map(\.id),
+                diagnostics: diagnostics
+            )
+        }
+    }
+
+    private func bestStatement(from candidates: [MemoryOSStatement]) -> MemoryOSStatement? {
+        candidates.sorted { lhs, rhs in
+            if lhs.validAt != rhs.validAt { return lhs.validAt > rhs.validAt }
+            if lhs.confidence != rhs.confidence { return lhs.confidence > rhs.confidence }
+            return lhs.committedAt > rhs.committedAt
+        }.first
+    }
+
+    private func bestBelief(from candidates: [MemoryOSBelief]) -> MemoryOSBelief? {
+        candidates.sorted { lhs, rhs in
+            if lhs.validAt != rhs.validAt { return lhs.validAt > rhs.validAt }
+            if lhs.confidence != rhs.confidence { return lhs.confidence > rhs.confidence }
+            return lhs.projectedAt > rhs.projectedAt
+        }.first
+    }
+
+    private func bestEntityStatement(from candidates: [MemoryOSEntityStatement]) -> MemoryOSEntityStatement? {
+        candidates.sorted { lhs, rhs in
+            if lhs.validAt != rhs.validAt { return lhs.validAt > rhs.validAt }
+            if lhs.confidence != rhs.confidence { return lhs.confidence > rhs.confidence }
+            return lhs.committedAt > rhs.committedAt
+        }.first
+    }
+
+    private func ambiguityDiagnostics(selectedID: String, candidates: [(id: String, validAt: Date, confidence: Double)], now: Date) -> [MemoryOSCurrentViewDiagnostic] {
+        guard let selected = candidates.first(where: { $0.id == selectedID }) else { return [] }
+        let close = candidates.filter { candidate in
+            candidate.id != selectedID && abs(candidate.validAt.timeIntervalSince(selected.validAt)) <= 86_400 && abs(candidate.confidence - selected.confidence) <= 0.1
+        }
+        guard !close.isEmpty else { return [] }
+        return [MemoryOSCurrentViewDiagnostic(kind: "ambiguous_current_value", severity: "info", message: "Multiple temporal records are close enough to be considered alternatives; currentness remains query-derived.", candidateRecordIDs: [selectedID] + close.map(\.id), createdAt: now)]
+    }
+}
+
 public struct MemoryOSEntityDisambiguationService: Sendable {
     public init() {}
 
