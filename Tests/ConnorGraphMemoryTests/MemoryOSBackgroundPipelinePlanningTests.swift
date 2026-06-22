@@ -46,6 +46,41 @@ import ConnorGraphMemory
     #expect(jobs.isEmpty)
 }
 
+@Test func l1ToL2PlannerDoesNotTriggerBeforeDefault24HourAgeThreshold() throws {
+    let occurredAt = Date(timeIntervalSince1970: 2_000)
+    let event = MemoryOSCaptureEvent(
+        id: "capture-1",
+        provenanceObjectID: "object-1",
+        eventType: MemoryOSSourceType.chatMessage.rawValue,
+        occurredAt: occurredAt,
+        tokenEstimate: 100,
+        processingState: .pending,
+        metadata: ["span_id": "span-1"]
+    )
+
+    let jobs = MemoryOSL1ToL2JobPlanner().planJobs(from: [event], now: occurredAt.addingTimeInterval((24 * 60 * 60) - 1))
+
+    #expect(jobs.isEmpty)
+}
+
+@Test func l1ToL2PlannerTriggersAtDefault24HourAgeThreshold() throws {
+    let occurredAt = Date(timeIntervalSince1970: 2_000)
+    let event = MemoryOSCaptureEvent(
+        id: "capture-1",
+        provenanceObjectID: "object-1",
+        eventType: MemoryOSSourceType.chatMessage.rawValue,
+        occurredAt: occurredAt,
+        tokenEstimate: 100,
+        processingState: .pending,
+        metadata: ["span_id": "span-1"]
+    )
+
+    let jobs = MemoryOSL1ToL2JobPlanner().planJobs(from: [event], now: occurredAt.addingTimeInterval(24 * 60 * 60))
+
+    #expect(jobs.count == 1)
+    #expect(jobs.first?.captureEventIDs == ["capture-1"])
+}
+
 @Test func l2ToKnowledgePlannerCreatesKnowledgeSynthesisJobForUnorganizedStatements() throws {
     let now = Date(timeIntervalSince1970: 3_000)
     let statements = (0..<4).map { index in

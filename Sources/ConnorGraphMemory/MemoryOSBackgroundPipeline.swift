@@ -12,7 +12,7 @@ public struct MemoryOSL1ProcessingTriggerPolicy: Sendable, Codable, Equatable {
     public var maxTokensPerBlock: Int
     public var maxPendingAge: TimeInterval?
 
-    public init(minPendingCount: Int = 100, maxEventsPerBlock: Int = 30, maxTokensPerBlock: Int = 12_000, maxPendingAge: TimeInterval? = 30 * 60) {
+    public init(minPendingCount: Int = 100, maxEventsPerBlock: Int = 30, maxTokensPerBlock: Int = 12_000, maxPendingAge: TimeInterval? = 24 * 60 * 60) {
         self.minPendingCount = minPendingCount
         self.maxEventsPerBlock = maxEventsPerBlock
         self.maxTokensPerBlock = maxTokensPerBlock
