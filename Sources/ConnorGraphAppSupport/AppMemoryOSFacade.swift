@@ -40,19 +40,21 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
 
     public func operationalSummary(now: Date = Date()) throws -> AppMemoryOSOperationalSummary {
         let health = try store.schemaHealthReport(now: now)
+        let queueSnapshot = try store.queueOperationalSnapshot(now: now)
         let snapshot = MemoryOSDashboardSnapshot(
             healthStatus: health.status,
             l0ProvenanceObjectCount: try count("memory_l0_provenance_objects"),
             l1PendingCaptureCount: try count("memory_l1_capture_events", where: "processing_state IN ('pending', 'queued')"),
-            l1PendingQueueCount: try count("memory_l1_processing_queue", where: "status IN ('pending', 'leased')"),
-            l1DeadLetterCount: try count("memory_l1_dead_letter_queue"),
+            l1PendingQueueCount: queueSnapshot.pending + queueSnapshot.leased + queueSnapshot.processing,
+            l1DeadLetterCount: queueSnapshot.deadLetter,
+            l1RetryScheduledCount: queueSnapshot.retryScheduled,
+            l1ExpiredLeaseCount: queueSnapshot.expiredLeases,
             l2StatementCount: try count("memory_l2_statements"),
             l2ConflictCount: try count("memory_l2_conflicts"),
             l3BeliefCount: try count("memory_l3_beliefs"),
             l4EntityCount: try count("memory_l4_entities"),
             lastCheckedAt: now
         )
-        let queueSnapshot = try store.queueOperationalSnapshot(now: now)
         try store.saveHealthReport(health)
         try store.save(metric: MemoryOSProcessingMetric(name: "memory_os.queue.pending", value: Double(queueSnapshot.pending), createdAt: now))
         return AppMemoryOSOperationalSummary(
