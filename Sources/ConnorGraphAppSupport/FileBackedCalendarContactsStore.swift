@@ -5,6 +5,18 @@ public protocol CalendarSourceRepository: Sendable {
     func listAccounts() async throws -> [CalendarAccount]
 }
 
+public struct CalendarAccountSnapshotRepository: CalendarSourceRepository {
+    public var accounts: [CalendarAccount]
+
+    public init(accounts: [CalendarAccount]) {
+        self.accounts = accounts
+    }
+
+    public func listAccounts() async throws -> [CalendarAccount] {
+        accounts.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+    }
+}
+
 public actor FileBackedCalendarSourceStore: CalendarSourceRepository {
     public struct Snapshot: Codable, Sendable, Equatable {
         public var accounts: [CalendarAccount]
