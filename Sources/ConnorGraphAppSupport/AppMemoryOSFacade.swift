@@ -69,6 +69,14 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         try dashboardBuilder.presentation(for: operationalSummary(now: now).dashboardSnapshot)
     }
 
+    public func searchMemoryOS(_ query: MemoryOSRetrievalQuery) throws -> [MemoryOSRetrievalHit] {
+        try SQLiteMemoryOSUnifiedRetrievalService(store: store).search(query)
+    }
+
+    public func expandMemoryOSL4(entityID: String, depth: Int = 1, limit: Int = 20) throws -> [MemoryOSL4ExpansionHit] {
+        try SQLiteMemoryOSUnifiedRetrievalService(store: store).expandL4(entityID: entityID, depth: depth, limit: limit)
+    }
+
     public func ingestChatMessage(
         messageID: String,
         sessionID: String,
