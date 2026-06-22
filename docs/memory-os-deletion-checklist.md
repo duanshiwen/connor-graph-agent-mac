@@ -2,15 +2,16 @@
 
 This checklist defines the legacy Graph Memory surface that must be removed after Memory OS production paths replace it.
 
-Updated: 2026-06-22 11:48 GMT+8
+Updated: 2026-06-22 13:08 GMT+8
 
-Current H-1 status:
+Current H-1/H-2 status:
 
 - App shell primary route now points `graphMemory` to `memoryOS`.
 - Chat controller production Memory OS writes route through `AppMemoryOSFacade`.
 - Native session manager production Memory OS writes route through `AppMemoryOSFacade`.
 - App background jobs run Memory OS health/recovery summary before transitional legacy jobs.
 - Old staging/distillation/extraction/admission/candidate-review files remain only for migration compatibility and historical tests; they are no longer the new production memory entrypoint.
+- H-2 deletion gate is active: production route, dedicated Memory OS database path, fresh Memory OS schema, and App facade entrypoint are covered by `MemoryOSLegacyDeletionGateTests`.
 
 ## Delete or replace source files
 
