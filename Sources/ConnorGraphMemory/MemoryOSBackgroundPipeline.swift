@@ -306,6 +306,92 @@ public struct MemoryOSL2ToKnowledgeJobPlanner: Sendable {
     }
 }
 
+public struct MemoryOSBackgroundToolDescriptor: Sendable, Codable, Equatable, Identifiable {
+    public var id: String { name }
+    public var name: String
+    public var description: String
+    public var inputSchemaJSON: String
+    public var usagePolicy: String
+
+    public init(name: String, description: String, inputSchemaJSON: String, usagePolicy: String) {
+        self.name = name
+        self.description = description
+        self.inputSchemaJSON = inputSchemaJSON
+        self.usagePolicy = usagePolicy
+    }
+}
+
+public enum MemoryOSBackgroundToolCatalog {
+    public static func l1ToL2Tools() -> [MemoryOSBackgroundToolDescriptor] {
+        [searchTool(layers: ["L2", "L4"], usage: "Use memory_os_search before emitting facts likely to duplicate existing L2 or when resolving L4 entity identity."), readProvenanceTool(), expandL4Tool(usage: "Use memory_os_expand_l4 only when L4 entity identity or relation context is necessary for grounded L2 extraction.")]
+    }
+
+    public static func l2ToKnowledgeTools() -> [MemoryOSBackgroundToolDescriptor] {
+        [searchTool(layers: ["L2", "L3", "L4"], usage: "Search L3 and L4 before creating L3 knowledge or L4 concepts; search L2 when related operational context is needed."), expandL4Tool(usage: "Use memory_os_expand_l4 before creating concept relations or when concept identity is ambiguous."), readRecordTool(), readProvenanceTool()]
+    }
+
+    public static func promptSection(for tools: [MemoryOSBackgroundToolDescriptor], stage: String) -> String {
+        let rendered = tools.map { tool in
+            """
+            - \(tool.name)
+              Purpose: \(tool.description)
+              Input schema: \(tool.inputSchemaJSON)
+              Usage policy: \(tool.usagePolicy)
+            """
+        }.joined(separator: "\n")
+        return """
+        Available tools for \(stage):
+        \(rendered)
+
+        Tool-use rules:
+        - Tool results are retrieval context, not final memory truth.
+        - Do not invent evidence if a tool does not return enough context.
+        - Do not output tool calls in the final artifact JSON.
+        """
+    }
+
+    private static func searchTool(layers: [String], usage: String) -> MemoryOSBackgroundToolDescriptor {
+        MemoryOSBackgroundToolDescriptor(
+            name: "memory_os_search",
+            description: "Search Connor Memory OS records across selected L0/L1/L2/L3/L4 layers and return ranked summaries, refs and expansion hints.",
+            inputSchemaJSON: "{\"query\":\"string\",\"layers\":\(jsonArray(layers)),\"limit\":\"number\"}",
+            usagePolicy: usage
+        )
+    }
+
+    private static func expandL4Tool(usage: String) -> MemoryOSBackgroundToolDescriptor {
+        MemoryOSBackgroundToolDescriptor(
+            name: "memory_os_expand_l4",
+            description: "Expand a Memory OS L4 stable entity or concept by depth-limited graph traversal.",
+            inputSchemaJSON: "{\"entityID\":\"string\",\"depth\":\"number\",\"limit\":\"number\"}",
+            usagePolicy: usage
+        )
+    }
+
+    private static func readRecordTool() -> MemoryOSBackgroundToolDescriptor {
+        MemoryOSBackgroundToolDescriptor(
+            name: "memory_os_read_record",
+            description: "Read a full Memory OS record from a search hit when summary-level context is insufficient.",
+            inputSchemaJSON: "{\"layer\":\"L0|L1|L2|L3|L4\",\"recordID\":\"string\"}",
+            usagePolicy: "Use only when summary-level context is insufficient for novelty, duplicate, grounding or concept identity decisions."
+        )
+    }
+
+    private static func readProvenanceTool() -> MemoryOSBackgroundToolDescriptor {
+        MemoryOSBackgroundToolDescriptor(
+            name: "memory_os_read_provenance",
+            description: "Read exact L0 provenance object or span content when raw evidence is required.",
+            inputSchemaJSON: "{\"provenanceObjectID\":\"string\",\"spanID\":\"string|null\"}",
+            usagePolicy: "Use when a prompt preview is insufficient, exact raw evidence is required, or an evidence citation needs validation."
+        )
+    }
+
+    private static func jsonArray(_ values: [String]) -> String {
+        let quoted = values.map { "\\\"\($0)\\\"" }.joined(separator: ",")
+        return "[\(quoted)]"
+    }
+}
+
 public struct MemoryOSBackgroundModelRequest: Sendable, Codable, Equatable {
     public var jobID: String
     public var kind: String
@@ -315,8 +401,9 @@ public struct MemoryOSBackgroundModelRequest: Sendable, Codable, Equatable {
     public var sourceRecordIDs: [String]
     public var evidenceSpanIDs: [String]
     public var metadata: [String: String]
+    public var availableTools: [MemoryOSBackgroundToolDescriptor]
 
-    public init(jobID: String, kind: String, schemaName: String, artifactType: String, prompt: String, sourceRecordIDs: [String] = [], evidenceSpanIDs: [String] = [], metadata: [String: String] = [:]) {
+    public init(jobID: String, kind: String, schemaName: String, artifactType: String, prompt: String, sourceRecordIDs: [String] = [], evidenceSpanIDs: [String] = [], metadata: [String: String] = [:], availableTools: [MemoryOSBackgroundToolDescriptor] = []) {
         self.jobID = jobID
         self.kind = kind
         self.schemaName = schemaName
@@ -325,6 +412,7 @@ public struct MemoryOSBackgroundModelRequest: Sendable, Codable, Equatable {
         self.sourceRecordIDs = sourceRecordIDs
         self.evidenceSpanIDs = evidenceSpanIDs
         self.metadata = metadata
+        self.availableTools = availableTools
     }
 }
 
@@ -369,7 +457,8 @@ public struct MemoryOSBackgroundJobWorker<Executor: MemoryOSBackgroundModelExecu
 
     public func run(_ draft: MemoryOSL1ToL2JobDraft) throws -> MemoryOSBackgroundJobExecutionResult {
         let artifactType = "graph_structured_extraction"
-        let prompt = enrichedL1Prompt(draft)
+        let tools = MemoryOSBackgroundToolCatalog.l1ToL2Tools()
+        let prompt = enrichedL1Prompt(draft, tools: tools)
         let request = MemoryOSBackgroundModelRequest(
             jobID: draft.id,
             kind: draft.kind,
@@ -378,7 +467,8 @@ public struct MemoryOSBackgroundJobWorker<Executor: MemoryOSBackgroundModelExecu
             prompt: prompt,
             sourceRecordIDs: draft.captureEventIDs,
             evidenceSpanIDs: draft.sourceSpanIDs,
-            metadata: draft.metadata
+            metadata: draft.metadata,
+            availableTools: tools
         )
         let response = try executor.execute(request)
         return MemoryOSBackgroundJobExecutionResult(jobID: draft.id, kind: draft.kind, rawArtifactJSON: response.rawArtifactJSON, schemaName: draft.schemaName, artifactType: artifactType, metadata: draft.metadata.merging(response.metadata) { _, new in new })
@@ -386,7 +476,8 @@ public struct MemoryOSBackgroundJobWorker<Executor: MemoryOSBackgroundModelExecu
 
     public func run(_ draft: MemoryOSL2ToKnowledgeJobDraft) throws -> MemoryOSBackgroundJobExecutionResult {
         let artifactType = "memory_os_knowledge_extraction"
-        let prompt = enrichedKnowledgePrompt(draft)
+        let tools = MemoryOSBackgroundToolCatalog.l2ToKnowledgeTools()
+        let prompt = enrichedKnowledgePrompt(draft, tools: tools)
         let request = MemoryOSBackgroundModelRequest(
             jobID: draft.id,
             kind: draft.kind,
@@ -395,15 +486,24 @@ public struct MemoryOSBackgroundJobWorker<Executor: MemoryOSBackgroundModelExecu
             prompt: prompt,
             sourceRecordIDs: draft.statementIDs,
             evidenceSpanIDs: draft.evidenceSpanIDs,
-            metadata: draft.metadata
+            metadata: draft.metadata,
+            availableTools: tools
         )
         let response = try executor.execute(request)
         return MemoryOSBackgroundJobExecutionResult(jobID: draft.id, kind: draft.kind, rawArtifactJSON: response.rawArtifactJSON, schemaName: draft.schemaName, artifactType: artifactType, metadata: draft.metadata.merging(response.metadata) { _, new in new })
     }
 
-    private func enrichedL1Prompt(_ draft: MemoryOSL1ToL2JobDraft) -> String {
+    private func enrichedL1Prompt(_ draft: MemoryOSL1ToL2JobDraft, tools: [MemoryOSBackgroundToolDescriptor]) -> String {
         """
         \(draft.prompt)
+
+        \(MemoryOSBackgroundToolCatalog.promptSection(for: tools, stage: "L1→L2 extraction"))
+
+        Stage-specific tool policy:
+        - Prefer the provided L1 packet first.
+        - Use memory_os_read_provenance when exact raw evidence is required.
+        - Use memory_os_search before emitting facts likely to duplicate existing L2.
+        - Use memory_os_expand_l4 only for entity identity ambiguity.
 
         Job contract:
         - job_id: \(draft.id)
@@ -415,9 +515,17 @@ public struct MemoryOSBackgroundJobWorker<Executor: MemoryOSBackgroundModelExecu
         """
     }
 
-    private func enrichedKnowledgePrompt(_ draft: MemoryOSL2ToKnowledgeJobDraft) -> String {
+    private func enrichedKnowledgePrompt(_ draft: MemoryOSL2ToKnowledgeJobDraft, tools: [MemoryOSBackgroundToolDescriptor]) -> String {
         """
         \(draft.prompt)
+
+        \(MemoryOSBackgroundToolCatalog.promptSection(for: tools, stage: "L2→Knowledge synthesis"))
+
+        Stage-specific tool policy:
+        - Search L3 and L4 before creating L3 knowledge or L4 concepts.
+        - Use memory_os_expand_l4 before adding concept relations.
+        - Use memory_os_read_record only when summary-level context is insufficient.
+        - Use memory_os_read_provenance when original evidence must be verified.
 
         Job contract:
         - job_id: \(draft.id)
