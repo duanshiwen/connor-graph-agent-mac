@@ -181,8 +181,7 @@ public struct MemoryOSStatementValidator: Sendable {
     public func validate(_ statement: MemoryOSStatement) -> [MemoryOSValidationIssue] {
         var issues: [MemoryOSValidationIssue] = []
         if statement.confidence < 0 || statement.confidence > 1 { issues.append(MemoryOSValidationIssue(code: "confidence_out_of_range", message: "Confidence must be between 0 and 1.")) }
-        if let invalidAt = statement.invalidAt, invalidAt < statement.validAt { issues.append(MemoryOSValidationIssue(code: "invalid_temporal_range", message: "invalidAt must not be earlier than validAt.")) }
-        if [.observed, .confirmed].contains(statement.status), statement.evidenceSpanIDs.isEmpty { issues.append(MemoryOSValidationIssue(code: "missing_evidence", message: "Observed or confirmed statements require evidence spans.")) }
+        if statement.evidenceSpanIDs.isEmpty { issues.append(MemoryOSValidationIssue(code: "missing_evidence", message: "Temporal semantic statements require evidence spans.")) }
         if statement.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { issues.append(MemoryOSValidationIssue(code: "empty_statement", message: "Statement text must not be empty.")) }
         return issues
     }
@@ -199,9 +198,9 @@ public struct MemoryOSProjectionService: Sendable {
     public init() {}
 
     public func currentProjection(statements: [MemoryOSStatement]) -> [MemoryOSStatement] {
-        let valid = statements.filter { ![.rejected, .invalidated, .superseded].contains($0.status) }
-        return valid.sorted {
-            if rank($0.status) != rank($1.status) { return rank($0.status) > rank($1.status) }
+        statements.sorted {
+            if $0.validAt != $1.validAt { return $0.validAt > $1.validAt }
+            if $0.confidence != $1.confidence { return $0.confidence > $1.confidence }
             return $0.committedAt > $1.committedAt
         }
     }
@@ -239,7 +238,6 @@ public struct MemoryOSProjectionService: Sendable {
                 nodeType: entity.entityKind.rawValue,
                 name: entity.name,
                 summary: entity.summary,
-                status: .active,
                 createdAt: now,
                 updatedAt: now,
                 metadata: entity.metadata.merging([
@@ -262,7 +260,6 @@ public struct MemoryOSProjectionService: Sendable {
                 aliases: entity.aliases,
                 summary: entity.summary,
                 confidence: entity.confidence,
-                status: .active,
                 createdAt: now,
                 updatedAt: now,
                 validFrom: now,
@@ -283,11 +280,12 @@ public struct MemoryOSProjectionService: Sendable {
                 predicate: statement.predicate.rawValue,
                 objectID: object?.id,
                 text: statement.statementText,
-                status: statement.confidence >= 0.85 ? .observed : .candidate,
+                assertionKind: .observed,
                 confidence: statement.confidence,
                 validAt: statement.validAt ?? statement.referenceTime ?? now,
                 committedAt: now,
                 evidenceSpanIDs: statement.evidenceSpanIDs,
+                sourceArtifactID: artifactID,
                 metadata: statement.metadata.merging([
                     "artifact_id": artifactID,
                     "source_statement_id": statement.id,
@@ -305,11 +303,12 @@ public struct MemoryOSProjectionService: Sendable {
                 predicate: statement.predicate.rawValue,
                 objectEntityID: object?.id,
                 text: statement.statementText,
-                status: statement.confidence >= 0.85 ? .observed : .candidate,
+                assertionKind: .observed,
                 confidence: statement.confidence,
                 validAt: statement.validAt ?? statement.referenceTime ?? now,
                 committedAt: now,
                 evidenceSpanIDs: statement.evidenceSpanIDs,
+                sourceArtifactID: artifactID,
                 metadata: statement.metadata.merging([
                     "artifact_id": artifactID,
                     "source_statement_id": statement.id
@@ -321,12 +320,13 @@ public struct MemoryOSProjectionService: Sendable {
                 id: "l3-belief:\(artifactID):\(statement.id)",
                 topic: statement.predicate,
                 statement: statement.text,
-                status: .observed,
+                projectionKind: .observed,
                 confidence: statement.confidence,
                 evidenceStatementIDs: [statement.id],
-                createdAt: now,
-                updatedAt: now,
-                metadata: ["artifact_id": artifactID, "promotion_reason": "high_confidence_evidence_backed_statement"]
+                validAt: statement.validAt,
+                projectedAt: now,
+                sourceArtifactID: artifactID,
+                metadata: ["artifact_id": artifactID, "projection_reason": "high_confidence_evidence_backed_statement"]
             )
         }
         return MemoryOSProjectionBatch(
@@ -338,10 +338,6 @@ public struct MemoryOSProjectionService: Sendable {
             beliefs: beliefs
         )
     }
-
-    private func rank(_ status: MemoryOSStatementStatus) -> Int {
-        switch status { case .confirmed: 3; case .observed: 2; case .candidate: 1; case .rejected, .invalidated, .superseded: 0 }
-    }
 }
 
 public struct MemoryOSBeliefValidator: Sendable {
@@ -350,7 +346,7 @@ public struct MemoryOSBeliefValidator: Sendable {
         var issues: [MemoryOSValidationIssue] = []
         if belief.statement.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { issues.append(MemoryOSValidationIssue(code: "empty_belief", message: "Belief statement must not be empty.")) }
         if belief.confidence < 0 || belief.confidence > 1 { issues.append(MemoryOSValidationIssue(code: "confidence_out_of_range", message: "Confidence must be between 0 and 1.")) }
-        if belief.status != .proposed && belief.evidenceStatementIDs.isEmpty { issues.append(MemoryOSValidationIssue(code: "missing_belief_evidence", message: "Non-proposed beliefs require evidence statements.")) }
+        if belief.evidenceStatementIDs.isEmpty { issues.append(MemoryOSValidationIssue(code: "missing_belief_evidence", message: "Temporal belief projections require evidence statements.")) }
         return issues
     }
 }

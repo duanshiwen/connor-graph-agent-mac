@@ -23,7 +23,7 @@ public enum SQLiteMemoryOSStoreError: Error, Sendable, Equatable, CustomStringCo
 }
 
 public final class SQLiteMemoryOSStore: @unchecked Sendable {
-    public static let currentSchemaVersion = 1
+    public static let currentSchemaVersion = 2
 
     public static let requiredSchemaTables: Set<String> = [
         "memory_schema_migrations", "memory_legacy_import_runs", "memory_store_health_checks",
@@ -40,8 +40,8 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
     public static let requiredSchemaIndexes: Set<String> = [
         "idx_memory_l0_provenance_source", "idx_memory_l0_provenance_time", "idx_memory_l0_spans_object",
         "idx_memory_l1_capture_state", "idx_memory_l1_time_blocks_status", "idx_memory_l1_queue_runnable", "idx_memory_l1_queue_idempotency",
-        "idx_memory_l2_nodes_key", "idx_memory_l2_statements_subject", "idx_memory_l2_statements_status", "idx_memory_l2_statement_evidence_statement",
-        "idx_memory_l3_beliefs_topic", "idx_memory_l3_belief_evidence_belief",
+        "idx_memory_l2_nodes_key", "idx_memory_l2_statements_subject", "idx_memory_l2_statements_temporal", "idx_memory_l2_statement_evidence_statement",
+        "idx_memory_l3_beliefs_topic", "idx_memory_l3_beliefs_temporal", "idx_memory_l3_belief_evidence_belief",
         "idx_memory_l4_entities_key", "idx_memory_l4_aliases_entity", "idx_memory_l4_statements_entity", "idx_memory_l4_statement_evidence_statement",
         "idx_memory_audit_events_time", "idx_memory_error_events_time"
     ]
@@ -80,7 +80,7 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         try execute("PRAGMA user_version = \(Self.currentSchemaVersion);")
         try execute("""
         INSERT OR REPLACE INTO memory_schema_migrations(version, name, applied_at, metadata_json)
-        VALUES (\(Self.currentSchemaVersion), 'memory_os_initial_schema', \(quote(iso(Date()))), '{}')
+        VALUES (\(Self.currentSchemaVersion), 'memory_os_temporal_semantic_schema', \(quote(iso(Date()))), '{}')
         """)
     }
 
@@ -224,8 +224,8 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
     public func upsert(node: MemoryOSNode) throws {
         try execute("""
         INSERT OR REPLACE INTO memory_l2_nodes
-        (id, stable_key, node_type, name, summary, status, created_at, updated_at, metadata_json)
-        VALUES (\(quote(node.id)), \(quote(node.stableKey)), \(quote(node.nodeType)), \(quote(node.name)), \(quote(node.summary)), \(quote(node.status.rawValue)), \(quote(iso(node.createdAt))), \(quote(iso(node.updatedAt))), \(quote(json(node.metadata))))
+        (id, stable_key, node_type, name, summary, created_at, updated_at, metadata_json)
+        VALUES (\(quote(node.id)), \(quote(node.stableKey)), \(quote(node.nodeType)), \(quote(node.name)), \(quote(node.summary)), \(quote(iso(node.createdAt))), \(quote(iso(node.updatedAt))), \(quote(json(node.metadata))))
         """)
         try execute("DELETE FROM memory_l2_nodes_fts WHERE node_id = \(quote(node.id));")
         try execute("INSERT INTO memory_l2_nodes_fts(node_id, node_type, name, summary) VALUES (\(quote(node.id)), \(quote(node.nodeType)), \(quote(node.name)), \(quote(node.summary)))")
@@ -234,8 +234,8 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
     public func upsert(statement: MemoryOSStatement) throws {
         try execute("""
         INSERT OR REPLACE INTO memory_l2_statements
-        (id, subject_id, predicate, object_id, text, status, confidence, valid_at, invalid_at, committed_at, evidence_span_ids_json, metadata_json)
-        VALUES (\(quote(statement.id)), \(quote(statement.subjectID)), \(quote(statement.predicate)), \(quote(statement.objectID)), \(quote(statement.text)), \(quote(statement.status.rawValue)), \(statement.confidence), \(quote(iso(statement.validAt))), \(quote(statement.invalidAt.map(iso))), \(quote(iso(statement.committedAt))), \(quote(json(statement.evidenceSpanIDs))), \(quote(json(statement.metadata))))
+        (id, subject_id, predicate, object_id, text, assertion_kind, confidence, valid_at, committed_at, evidence_span_ids_json, source_artifact_id, metadata_json)
+        VALUES (\(quote(statement.id)), \(quote(statement.subjectID)), \(quote(statement.predicate)), \(quote(statement.objectID)), \(quote(statement.text)), \(quote(statement.assertionKind.rawValue)), \(statement.confidence), \(quote(iso(statement.validAt))), \(quote(iso(statement.committedAt))), \(quote(json(statement.evidenceSpanIDs))), \(quote(statement.sourceArtifactID)), \(quote(json(statement.metadata))))
         """)
         try execute("DELETE FROM memory_l2_statement_evidence WHERE statement_id = \(quote(statement.id));")
         for spanID in statement.evidenceSpanIDs {
@@ -276,8 +276,8 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
     public func upsert(belief: MemoryOSBelief) throws {
         try execute("""
         INSERT OR REPLACE INTO memory_l3_beliefs
-        (id, topic, statement, status, confidence, evidence_statement_ids_json, created_at, updated_at, metadata_json)
-        VALUES (\(quote(belief.id)), \(quote(belief.topic)), \(quote(belief.statement)), \(quote(belief.status.rawValue)), \(belief.confidence), \(quote(json(belief.evidenceStatementIDs))), \(quote(iso(belief.createdAt))), \(quote(iso(belief.updatedAt))), \(quote(json(belief.metadata))))
+        (id, topic, statement, projection_kind, confidence, evidence_statement_ids_json, valid_at, projected_at, source_artifact_id, metadata_json)
+        VALUES (\(quote(belief.id)), \(quote(belief.topic)), \(quote(belief.statement)), \(quote(belief.projectionKind.rawValue)), \(belief.confidence), \(quote(json(belief.evidenceStatementIDs))), \(quote(iso(belief.validAt))), \(quote(iso(belief.projectedAt))), \(quote(belief.sourceArtifactID)), \(quote(json(belief.metadata))))
         """)
         try execute("DELETE FROM memory_l3_beliefs_fts WHERE belief_id = \(quote(belief.id));")
         try execute("INSERT INTO memory_l3_beliefs_fts(belief_id, topic, statement) VALUES (\(quote(belief.id)), \(quote(belief.topic)), \(quote(belief.statement)))")
@@ -288,8 +288,8 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
     public func upsert(entity: MemoryOSEntity) throws {
         try execute("""
         INSERT OR REPLACE INTO memory_l4_entities
-        (id, stable_key, entity_type, name, aliases_json, summary, confidence, status, created_at, updated_at, valid_from, valid_until, metadata_json)
-        VALUES (\(quote(entity.id)), \(quote(entity.stableKey)), \(quote(entity.entityType)), \(quote(entity.name)), \(quote(json(entity.aliases))), \(quote(entity.summary)), \(entity.confidence), \(quote(entity.status.rawValue)), \(quote(iso(entity.createdAt))), \(quote(iso(entity.updatedAt))), \(quote(entity.validFrom.map(iso))), \(quote(entity.validUntil.map(iso))), \(quote(json(entity.metadata))))
+        (id, stable_key, entity_type, name, aliases_json, summary, confidence, created_at, updated_at, valid_from, metadata_json)
+        VALUES (\(quote(entity.id)), \(quote(entity.stableKey)), \(quote(entity.entityType)), \(quote(entity.name)), \(quote(json(entity.aliases))), \(quote(entity.summary)), \(entity.confidence), \(quote(iso(entity.createdAt))), \(quote(iso(entity.updatedAt))), \(quote(entity.validFrom.map(iso))), \(quote(json(entity.metadata))))
         """)
         for alias in entity.aliases {
             try execute("""
@@ -303,7 +303,7 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
 
     public func entity(id: String) throws -> MemoryOSEntity? {
         try query(sql: """
-        SELECT id, stable_key, entity_type, name, aliases_json, summary, confidence, status, created_at, updated_at, valid_from, valid_until, metadata_json
+        SELECT id, stable_key, entity_type, name, aliases_json, summary, confidence, created_at, updated_at, valid_from, metadata_json
         FROM memory_l4_entities WHERE id = \(quote(id)) LIMIT 1
         """).map(decodeEntity).first
     }
@@ -311,8 +311,8 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
     public func upsert(entityStatement statement: MemoryOSEntityStatement) throws {
         try execute("""
         INSERT OR REPLACE INTO memory_l4_entity_statements
-        (id, entity_id, predicate, object_entity_id, text, status, confidence, valid_at, invalid_at, committed_at, evidence_span_ids_json, metadata_json)
-        VALUES (\(quote(statement.id)), \(quote(statement.entityID)), \(quote(statement.predicate)), \(quote(statement.objectEntityID)), \(quote(statement.text)), \(quote(statement.status.rawValue)), \(statement.confidence), \(quote(iso(statement.validAt))), \(quote(statement.invalidAt.map(iso))), \(quote(iso(statement.committedAt))), \(quote(json(statement.evidenceSpanIDs))), \(quote(json(statement.metadata))))
+        (id, entity_id, predicate, object_entity_id, text, assertion_kind, confidence, valid_at, committed_at, evidence_span_ids_json, source_artifact_id, metadata_json)
+        VALUES (\(quote(statement.id)), \(quote(statement.entityID)), \(quote(statement.predicate)), \(quote(statement.objectEntityID)), \(quote(statement.text)), \(quote(statement.assertionKind.rawValue)), \(statement.confidence), \(quote(iso(statement.validAt))), \(quote(iso(statement.committedAt))), \(quote(json(statement.evidenceSpanIDs))), \(quote(statement.sourceArtifactID)), \(quote(json(statement.metadata))))
         """)
         try execute("DELETE FROM memory_l4_entity_statement_evidence WHERE statement_id = \(quote(statement.id));")
         for spanID in statement.evidenceSpanIDs {
@@ -433,7 +433,7 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
     }
 
     private func decodeEntity(_ row: [String]) throws -> MemoryOSEntity {
-        MemoryOSEntity(id: row[0], stableKey: row[1], entityType: row[2], name: row[3], aliases: try decode([String].self, row[4]), summary: row[5], confidence: Double(row[6]) ?? 0, status: MemoryOSRecordStatus(rawValue: row[7]) ?? .active, createdAt: try date(row[8]), updatedAt: try date(row[9]), validFrom: try optionalDate(row[10]), validUntil: try optionalDate(row[11]), metadata: try decode([String: String].self, row[12]))
+        MemoryOSEntity(id: row[0], stableKey: row[1], entityType: row[2], name: row[3], aliases: try decode([String].self, row[4]), summary: row[5], confidence: Double(row[6]) ?? 0, createdAt: try date(row[7]), updatedAt: try date(row[8]), validFrom: try optionalDate(row[9]), metadata: try decode([String: String].self, row[10]))
     }
 
     public func json<T: Encodable>(_ value: T) -> String {
@@ -510,12 +510,12 @@ public extension SQLiteMemoryOSStore {
     CREATE TABLE IF NOT EXISTS memory_l1_queue_attempts (id TEXT PRIMARY KEY, queue_item_id TEXT NOT NULL, attempt_number INTEGER NOT NULL, status TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT, error_code TEXT, error_message TEXT, metadata_json TEXT NOT NULL DEFAULT '{}', FOREIGN KEY(queue_item_id) REFERENCES memory_l1_processing_queue(id));
     CREATE TABLE IF NOT EXISTS memory_l1_dead_letter_queue (id TEXT PRIMARY KEY, queue_item_id TEXT NOT NULL, failed_payload_json TEXT NOT NULL, error_code TEXT NOT NULL, error_message TEXT NOT NULL, created_at TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}');
 
-    CREATE TABLE IF NOT EXISTS memory_l2_nodes (id TEXT PRIMARY KEY, stable_key TEXT NOT NULL UNIQUE, node_type TEXT NOT NULL, name TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}');
+    CREATE TABLE IF NOT EXISTS memory_l2_nodes (id TEXT PRIMARY KEY, stable_key TEXT NOT NULL UNIQUE, node_type TEXT NOT NULL, name TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}');
     CREATE INDEX IF NOT EXISTS idx_memory_l2_nodes_key ON memory_l2_nodes(stable_key);
     CREATE TABLE IF NOT EXISTS memory_l2_edges (id TEXT PRIMARY KEY, subject_id TEXT NOT NULL, predicate TEXT NOT NULL, object_id TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}', FOREIGN KEY(subject_id) REFERENCES memory_l2_nodes(id), FOREIGN KEY(object_id) REFERENCES memory_l2_nodes(id));
-    CREATE TABLE IF NOT EXISTS memory_l2_statements (id TEXT PRIMARY KEY, subject_id TEXT NOT NULL, predicate TEXT NOT NULL, object_id TEXT, text TEXT NOT NULL, status TEXT NOT NULL, confidence REAL NOT NULL, valid_at TEXT NOT NULL, invalid_at TEXT, committed_at TEXT NOT NULL, evidence_span_ids_json TEXT NOT NULL DEFAULT '[]', metadata_json TEXT NOT NULL DEFAULT '{}', FOREIGN KEY(subject_id) REFERENCES memory_l2_nodes(id));
+    CREATE TABLE IF NOT EXISTS memory_l2_statements (id TEXT PRIMARY KEY, subject_id TEXT NOT NULL, predicate TEXT NOT NULL, object_id TEXT, text TEXT NOT NULL, assertion_kind TEXT NOT NULL, confidence REAL NOT NULL, valid_at TEXT NOT NULL, committed_at TEXT NOT NULL, evidence_span_ids_json TEXT NOT NULL DEFAULT '[]', source_artifact_id TEXT, metadata_json TEXT NOT NULL DEFAULT '{}', FOREIGN KEY(subject_id) REFERENCES memory_l2_nodes(id));
     CREATE INDEX IF NOT EXISTS idx_memory_l2_statements_subject ON memory_l2_statements(subject_id, committed_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_memory_l2_statements_status ON memory_l2_statements(status, committed_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_memory_l2_statements_temporal ON memory_l2_statements(subject_id, predicate, valid_at DESC, confidence DESC, committed_at DESC);
     CREATE TABLE IF NOT EXISTS memory_l2_statement_evidence (statement_id TEXT NOT NULL, span_id TEXT NOT NULL, strength REAL NOT NULL DEFAULT 1.0, PRIMARY KEY(statement_id, span_id), FOREIGN KEY(statement_id) REFERENCES memory_l2_statements(id), FOREIGN KEY(span_id) REFERENCES memory_l0_provenance_spans(id));
     CREATE INDEX IF NOT EXISTS idx_memory_l2_statement_evidence_statement ON memory_l2_statement_evidence(statement_id);
     CREATE TABLE IF NOT EXISTS memory_l2_episodes (id TEXT PRIMARY KEY, provenance_object_id TEXT, title TEXT NOT NULL, summary TEXT NOT NULL, occurred_at TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}');
@@ -527,8 +527,9 @@ public extension SQLiteMemoryOSStore {
     CREATE VIRTUAL TABLE IF NOT EXISTS memory_l2_nodes_fts USING fts5(node_id UNINDEXED, node_type UNINDEXED, name, summary, tokenize = 'unicode61 remove_diacritics 2');
     CREATE VIRTUAL TABLE IF NOT EXISTS memory_l2_statements_fts USING fts5(statement_id UNINDEXED, predicate UNINDEXED, text, tokenize = 'unicode61 remove_diacritics 2');
 
-    CREATE TABLE IF NOT EXISTS memory_l3_beliefs (id TEXT PRIMARY KEY, topic TEXT NOT NULL, statement TEXT NOT NULL, status TEXT NOT NULL, confidence REAL NOT NULL, evidence_statement_ids_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}');
-    CREATE INDEX IF NOT EXISTS idx_memory_l3_beliefs_topic ON memory_l3_beliefs(topic, status, updated_at DESC);
+    CREATE TABLE IF NOT EXISTS memory_l3_beliefs (id TEXT PRIMARY KEY, topic TEXT NOT NULL, statement TEXT NOT NULL, projection_kind TEXT NOT NULL, confidence REAL NOT NULL, evidence_statement_ids_json TEXT NOT NULL DEFAULT '[]', valid_at TEXT NOT NULL, projected_at TEXT NOT NULL, source_artifact_id TEXT, metadata_json TEXT NOT NULL DEFAULT '{}');
+    CREATE INDEX IF NOT EXISTS idx_memory_l3_beliefs_topic ON memory_l3_beliefs(topic, projected_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_memory_l3_beliefs_temporal ON memory_l3_beliefs(topic, valid_at DESC, confidence DESC, projected_at DESC);
     CREATE TABLE IF NOT EXISTS memory_l3_belief_evidence (belief_id TEXT NOT NULL, statement_id TEXT NOT NULL, strength REAL NOT NULL DEFAULT 1.0, PRIMARY KEY(belief_id, statement_id));
     CREATE INDEX IF NOT EXISTS idx_memory_l3_belief_evidence_belief ON memory_l3_belief_evidence(belief_id);
     CREATE TABLE IF NOT EXISTS memory_l3_belief_relations (id TEXT PRIMARY KEY, source_belief_id TEXT NOT NULL, target_belief_id TEXT NOT NULL, relation_type TEXT NOT NULL, created_at TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}');
@@ -536,11 +537,11 @@ public extension SQLiteMemoryOSStore {
     CREATE TABLE IF NOT EXISTS memory_l3_conflicts (id TEXT PRIMARY KEY, belief_id TEXT NOT NULL, related_belief_id TEXT, status TEXT NOT NULL, created_at TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}');
     CREATE VIRTUAL TABLE IF NOT EXISTS memory_l3_beliefs_fts USING fts5(belief_id UNINDEXED, topic, statement, tokenize = 'unicode61 remove_diacritics 2');
 
-    CREATE TABLE IF NOT EXISTS memory_l4_entities (id TEXT PRIMARY KEY, stable_key TEXT NOT NULL UNIQUE, entity_type TEXT NOT NULL, name TEXT NOT NULL, aliases_json TEXT NOT NULL DEFAULT '[]', summary TEXT NOT NULL DEFAULT '', confidence REAL NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, valid_from TEXT, valid_until TEXT, metadata_json TEXT NOT NULL DEFAULT '{}');
+    CREATE TABLE IF NOT EXISTS memory_l4_entities (id TEXT PRIMARY KEY, stable_key TEXT NOT NULL UNIQUE, entity_type TEXT NOT NULL, name TEXT NOT NULL, aliases_json TEXT NOT NULL DEFAULT '[]', summary TEXT NOT NULL DEFAULT '', confidence REAL NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, valid_from TEXT, metadata_json TEXT NOT NULL DEFAULT '{}');
     CREATE INDEX IF NOT EXISTS idx_memory_l4_entities_key ON memory_l4_entities(stable_key);
     CREATE TABLE IF NOT EXISTS memory_l4_entity_aliases (id TEXT PRIMARY KEY, entity_id TEXT NOT NULL, alias TEXT NOT NULL, normalized_alias TEXT NOT NULL, created_at TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}', FOREIGN KEY(entity_id) REFERENCES memory_l4_entities(id));
     CREATE INDEX IF NOT EXISTS idx_memory_l4_aliases_entity ON memory_l4_entity_aliases(entity_id, normalized_alias);
-    CREATE TABLE IF NOT EXISTS memory_l4_entity_statements (id TEXT PRIMARY KEY, entity_id TEXT NOT NULL, predicate TEXT NOT NULL, object_entity_id TEXT, text TEXT NOT NULL, status TEXT NOT NULL, confidence REAL NOT NULL, valid_at TEXT NOT NULL, invalid_at TEXT, committed_at TEXT NOT NULL, evidence_span_ids_json TEXT NOT NULL DEFAULT '[]', metadata_json TEXT NOT NULL DEFAULT '{}', FOREIGN KEY(entity_id) REFERENCES memory_l4_entities(id));
+    CREATE TABLE IF NOT EXISTS memory_l4_entity_statements (id TEXT PRIMARY KEY, entity_id TEXT NOT NULL, predicate TEXT NOT NULL, object_entity_id TEXT, text TEXT NOT NULL, assertion_kind TEXT NOT NULL, confidence REAL NOT NULL, valid_at TEXT NOT NULL, committed_at TEXT NOT NULL, evidence_span_ids_json TEXT NOT NULL DEFAULT '[]', source_artifact_id TEXT, metadata_json TEXT NOT NULL DEFAULT '{}', FOREIGN KEY(entity_id) REFERENCES memory_l4_entities(id));
     CREATE INDEX IF NOT EXISTS idx_memory_l4_statements_entity ON memory_l4_entity_statements(entity_id, committed_at DESC);
     CREATE TABLE IF NOT EXISTS memory_l4_entity_statement_evidence (statement_id TEXT NOT NULL, span_id TEXT NOT NULL, strength REAL NOT NULL DEFAULT 1.0, PRIMARY KEY(statement_id, span_id));
     CREATE INDEX IF NOT EXISTS idx_memory_l4_statement_evidence_statement ON memory_l4_entity_statement_evidence(statement_id);

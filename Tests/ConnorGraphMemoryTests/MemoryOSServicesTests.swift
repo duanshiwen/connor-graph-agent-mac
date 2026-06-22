@@ -36,26 +36,27 @@ import ConnorGraphMemory
     #expect(blocks.count == 2)
 }
 
-@Test func memoryOSStatementValidatorRequiresEvidenceForObservedStatements() {
-    let statement = MemoryOSStatement(subjectID: "n1", predicate: "states", text: "No evidence", status: .observed)
+@Test func memoryOSStatementValidatorRequiresEvidenceForTemporalStatements() {
+    let statement = MemoryOSStatement(subjectID: "n1", predicate: "states", text: "No evidence")
 
     let issues = MemoryOSStatementValidator().validate(statement)
 
     #expect(issues.contains { $0.code == "missing_evidence" })
 }
 
-@Test func memoryOSProjectionServiceRanksConfirmedStatementsFirst() {
-    let now = Date(timeIntervalSince1970: 1_000)
-    let observed = MemoryOSStatement(id: "observed", subjectID: "n", predicate: "p", text: "observed", status: .observed, confidence: 0.9, validAt: now, committedAt: now, evidenceSpanIDs: ["s"])
-    let confirmed = MemoryOSStatement(id: "confirmed", subjectID: "n", predicate: "p", text: "confirmed", status: .confirmed, confidence: 0.7, validAt: now, committedAt: now, evidenceSpanIDs: ["s"])
+@Test func memoryOSProjectionServiceRanksLatestTemporalStatementsFirst() {
+    let older = Date(timeIntervalSince1970: 1_000)
+    let newer = Date(timeIntervalSince1970: 2_000)
+    let oldStatement = MemoryOSStatement(id: "old", subjectID: "n", predicate: "p", text: "old", confidence: 0.99, validAt: older, committedAt: older, evidenceSpanIDs: ["s"])
+    let newStatement = MemoryOSStatement(id: "new", subjectID: "n", predicate: "p", text: "new", confidence: 0.7, validAt: newer, committedAt: newer, evidenceSpanIDs: ["s"])
 
-    let projection = MemoryOSProjectionService().currentProjection(statements: [observed, confirmed])
+    let projection = MemoryOSProjectionService().currentProjection(statements: [oldStatement, newStatement])
 
-    #expect(projection.first?.id == "confirmed")
+    #expect(projection.first?.id == "new")
 }
 
-@Test func memoryOSBeliefValidatorRequiresEvidenceForConfirmedBeliefs() {
-    let belief = MemoryOSBelief(topic: "memory", statement: "Memory is production-grade", status: .userConfirmed, confidence: 0.9)
+@Test func memoryOSBeliefValidatorRequiresEvidenceForTemporalBeliefProjections() {
+    let belief = MemoryOSBelief(topic: "memory", statement: "Memory is production-grade", projectionKind: .summarized, confidence: 0.9)
 
     let issues = MemoryOSBeliefValidator().validate(belief)
 
