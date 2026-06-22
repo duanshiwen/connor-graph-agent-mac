@@ -27,16 +27,18 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
     public var recentMessageLimit: Int
 
     private let presenter: AgentEventPresenter
-    private let memoryIngestionService: MemoryIngestionService
-    private let memoryStagingRepository: AppMemoryStagingBufferRepository?
+    private let memoryOSRepository: AppMemoryOSRepository?
+    private let memoryOSIngestionService: MemoryOSIngestionService
+    private let memoryOSFacade: AppMemoryOSFacade?
 
     public init(
         loopController: AgentLoopController<Provider>,
         session: AgentSession = AgentSession(),
         groupID: String = "default",
         recentMessageLimit: Int = 6,
-        memoryStagingRepository: AppMemoryStagingBufferRepository? = nil,
-        memoryIngestionService: MemoryIngestionService = MemoryIngestionService()
+        memoryOSRepository: AppMemoryOSRepository? = nil,
+        memoryOSIngestionService: MemoryOSIngestionService = MemoryOSIngestionService(),
+        memoryOSFacade: AppMemoryOSFacade? = nil
     ) {
         self.loopController = loopController
         self.session = session
@@ -46,8 +48,9 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
         self.groupID = groupID
         self.recentMessageLimit = recentMessageLimit
         self.presenter = AgentEventPresenter()
-        self.memoryStagingRepository = memoryStagingRepository
-        self.memoryIngestionService = memoryIngestionService
+        self.memoryOSRepository = memoryOSRepository
+        self.memoryOSIngestionService = memoryOSIngestionService
+        self.memoryOSFacade = memoryOSFacade
     }
 
     @discardableResult
@@ -55,7 +58,7 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
         let recentMessages = Array(session.messages.suffix(max(0, recentMessageLimit)))
         let userMessage = session.appendUserMessage(prompt)
         transcript = session.messages
-        try persistMemoryStagingAfterUserMessage(userMessage)
+        try persistMemoryOSAfterUserMessage(userMessage)
         let request = AgentChatRequest(
             sessionID: session.id,
             groupID: groupID,
@@ -83,7 +86,7 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
                     )
                     transcript = session.messages
                     if let assistantMessage {
-                        try persistMemoryStagingAfterAssistantMessage(assistantMessage)
+                        try persistMemoryOSAfterAssistantMessage(assistantMessage)
                     }
                 }
             }
@@ -102,25 +105,49 @@ public struct AgentLoopChatController<Provider: AgentModelProvider>: Sendable {
         }
     }
 
-    private func persistMemoryStagingAfterUserMessage(_ message: AgentMessage) throws {
-        guard let memoryStagingRepository else { return }
-        let existingBuffer = try memoryStagingRepository.loadBuffer(sessionID: session.id)
-        let result = memoryIngestionService.ingestUserMessage(
-            message,
-            sessionID: session.id,
-            into: existingBuffer
-        )
-        try memoryStagingRepository.saveBuffer(result.buffer)
+    private func persistMemoryOSAfterUserMessage(_ message: AgentMessage) throws {
+        if let memoryOSFacade {
+            _ = try memoryOSFacade.ingestChatMessage(
+                messageID: message.id,
+                sessionID: session.id,
+                role: "user",
+                content: message.content,
+                occurredAt: message.createdAt
+            )
+            return
+        }
+        guard let memoryOSRepository else { return }
+        let result = memoryOSIngestionService.ingest(MemoryOSIngestionInput(
+            sourceType: .chatMessage,
+            sourceID: message.id,
+            title: "User message",
+            content: message.content,
+            occurredAt: message.createdAt,
+            sessionID: session.id
+        ))
+        try memoryOSRepository.save(result)
     }
 
-    private func persistMemoryStagingAfterAssistantMessage(_ message: AgentMessage) throws {
-        guard let memoryStagingRepository else { return }
-        let existingBuffer = try memoryStagingRepository.loadBuffer(sessionID: session.id)
-        let result = memoryIngestionService.ingestAssistantMessage(
-            message,
-            sessionID: session.id,
-            into: existingBuffer ?? MemoryStagingBuffer(sessionID: session.id)
-        )
-        try memoryStagingRepository.saveBuffer(result.buffer)
+    private func persistMemoryOSAfterAssistantMessage(_ message: AgentMessage) throws {
+        if let memoryOSFacade {
+            _ = try memoryOSFacade.ingestChatMessage(
+                messageID: message.id,
+                sessionID: session.id,
+                role: "assistant",
+                content: message.content,
+                occurredAt: message.createdAt
+            )
+            return
+        }
+        guard let memoryOSRepository else { return }
+        let result = memoryOSIngestionService.ingest(MemoryOSIngestionInput(
+            sourceType: .assistantMessage,
+            sourceID: message.id,
+            title: "Assistant message",
+            content: message.content,
+            occurredAt: message.createdAt,
+            sessionID: session.id
+        ))
+        try memoryOSRepository.save(result)
     }
 }

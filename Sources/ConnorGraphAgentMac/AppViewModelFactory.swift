@@ -36,7 +36,6 @@ static func live() -> AppViewModel {
             automationConfig: automationConfig
         )
         viewModel.reloadPromotionCandidates()
-        viewModel.reloadGraphWriteCandidates()
         viewModel.reloadPendingApprovals()
         return viewModel
     } catch {

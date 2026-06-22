@@ -81,8 +81,7 @@ public struct NativeSessionManager: Sendable {
     public var compressionRecentMessageKeepCount: Int = 7
 
     private let presenter: AgentEventPresenter
-    private let memoryIngestionService: MemoryIngestionService
-    private let memoryStagingRepository: AppMemoryStagingBufferRepository?
+    private let memoryOSFacade: AppMemoryOSFacade?
     private let eventRecorder: AgentEventRecorder?
     private let pendingApprovalRepository: (any AgentPendingApprovalRepository)?
 
@@ -93,8 +92,7 @@ public struct NativeSessionManager: Sendable {
         groupID: String = "default",
         permissionMode: AgentPermissionMode = .askToWrite,
         recentMessageLimit: Int = 6,
-        memoryStagingRepository: AppMemoryStagingBufferRepository? = nil,
-        memoryIngestionService: MemoryIngestionService = MemoryIngestionService(),
+        memoryOSFacade: AppMemoryOSFacade? = nil,
         eventRecorder: AgentEventRecorder? = nil,
         pendingApprovalRepository: (any AgentPendingApprovalRepository)? = nil,
         compressionProvider: AnyLLMProvider? = nil,
@@ -111,8 +109,7 @@ public struct NativeSessionManager: Sendable {
         self.permissionMode = permissionMode
         self.recentMessageLimit = recentMessageLimit
         self.presenter = AgentEventPresenter()
-        self.memoryStagingRepository = memoryStagingRepository
-        self.memoryIngestionService = memoryIngestionService
+        self.memoryOSFacade = memoryOSFacade
         self.eventRecorder = eventRecorder
         self.pendingApprovalRepository = pendingApprovalRepository
         self.compressionProvider = compressionProvider
@@ -125,8 +122,7 @@ public struct NativeSessionManager: Sendable {
         sessionRepository: AppChatSessionRepository,
         session: AgentSession = AgentSession(),
         groupID: String = "default",
-        memoryStagingRepository: AppMemoryStagingBufferRepository? = nil,
-        memoryIngestionService: MemoryIngestionService = MemoryIngestionService()
+        memoryOSFacade: AppMemoryOSFacade? = nil
     ) {
         self.init(
             backend: AgentLoopBackend(loopController: loopController),
@@ -134,8 +130,7 @@ public struct NativeSessionManager: Sendable {
             session: session,
             groupID: groupID,
             permissionMode: loopController.configuration.permissionMode,
-            memoryStagingRepository: memoryStagingRepository,
-            memoryIngestionService: memoryIngestionService
+            memoryOSFacade: memoryOSFacade
         )
     }
 
@@ -166,7 +161,7 @@ public struct NativeSessionManager: Sendable {
         }()
         let userMessage = session.appendUserMessage(displayPrompt ?? prompt, attachments: attachments, contextSnapshot: activeSkillContextSnapshot)
         try persistSession()
-        try persistMemoryStagingAfterUserMessage(userMessage)
+        try persistMemoryOSAfterUserMessage(userMessage)
 
         let request = AgentChatRequest(
             sessionID: session.id,
@@ -316,7 +311,7 @@ public struct NativeSessionManager: Sendable {
                     )
                     try persistSession()
                     if let assistantMessage {
-                        try persistMemoryStagingAfterAssistantMessage(assistantMessage, runID: run.id)
+                        try persistMemoryOSAfterAssistantMessage(assistantMessage)
                     }
                 }
             }
@@ -530,7 +525,7 @@ public struct NativeSessionManager: Sendable {
         }
         let message = session.appendAssistantMessage(content)
         try persistSession()
-        try persistMemoryStagingAfterAssistantMessage(message, runID: runID)
+        try persistMemoryOSAfterAssistantMessage(message)
         return message
     }
 
@@ -566,49 +561,25 @@ public struct NativeSessionManager: Sendable {
         try sessionRepository.savePendingApproval(approval)
     }
 
-    private func persistMemoryStagingAfterUserMessage(_ message: AgentMessage) throws {
-        guard let memoryStagingRepository else { return }
-        let existingBuffer = try memoryStagingRepository.loadBuffer(sessionID: session.id)
-        let result = memoryIngestionService.ingestUserMessage(
-            message,
+    private func persistMemoryOSAfterUserMessage(_ message: AgentMessage) throws {
+        guard let memoryOSFacade else { return }
+        _ = try memoryOSFacade.ingestChatMessage(
+            messageID: message.id,
             sessionID: session.id,
-            into: existingBuffer
+            role: "user",
+            content: message.content,
+            occurredAt: message.createdAt
         )
-        try memoryStagingRepository.saveBuffer(result.buffer)
     }
 
-    private func persistMemoryStagingAfterAssistantMessage(_ message: AgentMessage, runID: String? = nil) throws {
-        guard let memoryStagingRepository else { return }
-        let existingBuffer = try memoryStagingRepository.loadBuffer(sessionID: session.id)
-        let result = memoryIngestionService.ingestAssistantMessage(
-            message,
+    private func persistMemoryOSAfterAssistantMessage(_ message: AgentMessage) throws {
+        guard let memoryOSFacade else { return }
+        _ = try memoryOSFacade.ingestChatMessage(
+            messageID: message.id,
             sessionID: session.id,
-            into: existingBuffer ?? MemoryStagingBuffer(sessionID: session.id)
+            role: "assistant",
+            content: message.content,
+            occurredAt: message.createdAt
         )
-        try memoryStagingRepository.saveBuffer(result.buffer)
-        try recordMemoryFeedbackSignals(from: result, runID: runID)
-    }
-
-    private func recordMemoryFeedbackSignals(from result: MemoryIngestionResult, runID: String?) throws {
-        guard !result.triggerReasons.isEmpty else { return }
-        let signals = AgentGraphMemoryFeedbackSignal.signals(from: result, runID: runID, sessionID: session.id)
-        for signal in signals {
-            try sessionRepository.appendJournalEvent(
-                runID: runID ?? "memory-feedback-\(session.id)",
-                sessionID: session.id,
-                kind: .graphMemoryProposed,
-                action: "memory_feedback_signal",
-                message: signal.rationale,
-                metadata: [
-                    "signal_id": signal.id,
-                    "trigger": signal.trigger.rawValue,
-                    "candidate_kind": signal.candidateKind,
-                    "importance": "\(signal.importance)",
-                    "confidence": "\(signal.confidence)",
-                    "source_buffer_id": signal.metadata["source_buffer_id"] ?? result.buffer.id,
-                    "pending_bundle_count": signal.metadata["pending_bundle_count"] ?? "\(result.buffer.pendingBundles.count)"
-                ]
-            )
-        }
     }
 }
