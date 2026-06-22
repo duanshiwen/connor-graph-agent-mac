@@ -89,8 +89,9 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         var registry = AgentToolRegistry()
         registry.registerSessionStatusTools(repository: AppChatSessionRepository(store: store, storagePaths: storagePaths))
         registry.register(GraphSearchTool(searchService: searchService))
-        registry.register(GraphIngestEpisodeTool(repository: store))
-        registry.register(GraphProposeWriteTool(repository: store))
+        if let memoryOSFacade = makeMemoryOSFacade() {
+            registry.registerMemoryOSTools(facade: memoryOSFacade)
+        }
         let settings = (try? settingsRepository.loadSettings()) ?? .default
         let runtimeSettings = loadRuntimeSettings()
         let resolvedWorkspace = AppProjectWorkingDirectoryResolver.resolveWorkspace(

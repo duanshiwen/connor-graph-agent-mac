@@ -321,3 +321,26 @@ private final class LocalToolsCredentialStore: CredentialStore, @unchecked Senda
     func readSecret(service: String, account: String) throws -> String? { secrets[service + ":" + account] }
     func deleteSecret(service: String, account: String) throws { secrets.removeValue(forKey: service + ":" + account) }
 }
+
+@Test func agentLoopRuntimeFactoryRegistersMemoryOSToolsInsteadOfLegacyGraphWriteTools() throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("connor-factory-memory-os-tools-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let storagePaths = AppStoragePaths.resolving(applicationSupportBaseDirectory: root)
+    try storagePaths.ensureDirectoryHierarchy(fileManager: .default)
+    let store = try SQLiteGraphKernelStore(path: storagePaths.databaseURL.path)
+    try store.migrate()
+    let settings = AppLLMSettingsRepository(
+        settingsStore: LocalToolsSettingsStore(),
+        credentialStore: LocalToolsCredentialStore()
+    )
+    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: settings, storagePaths: storagePaths)
+
+    let controller = factory.makeAgentLoopController(permissionMode: .readOnly)
+    let names = controller.toolRegistry.definitions.map(\.name)
+
+    #expect(names.contains("memory_os_dashboard_summary"))
+    #expect(names.contains("memory_os_ingest_observation"))
+    #expect(!names.contains("graph_ingest_episode"))
+    #expect(!names.contains("graph_propose_write"))
+}
