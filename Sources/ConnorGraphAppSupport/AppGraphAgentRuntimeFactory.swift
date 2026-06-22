@@ -38,7 +38,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             loopController: makeAgentLoopController(permissionMode: permissionMode, configuration: configuration, sessionWorkspace: sessionWorkspace, sessionLLMOverride: sessionLLMOverride),
             session: session,
             groupID: groupID,
-            memoryStagingRepository: AppMemoryStagingBufferRepository(store: store)
+            memoryOSFacade: makeMemoryOSFacade()
         )
     }
 
@@ -55,10 +55,20 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             session: session,
             groupID: groupID,
             permissionMode: permissionMode,
-            memoryStagingRepository: AppMemoryStagingBufferRepository(store: store)
+            memoryOSFacade: makeMemoryOSFacade()
         )
     }
 
+    private func makeMemoryOSFacade() -> AppMemoryOSFacade? {
+        guard let storagePaths else { return nil }
+        do {
+            let store = try SQLiteMemoryOSStore(path: storagePaths.memoryOSDatabaseURL.path)
+            try store.migrate()
+            return AppMemoryOSFacade(store: store)
+        } catch {
+            return nil
+        }
+    }
 
     private func registerPersistedMCPSourceTools(into registry: inout AgentToolRegistry, workingDirectory: URL) {
         guard let storagePaths else { return }
