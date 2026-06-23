@@ -25,6 +25,29 @@ import ConnorGraphAppSupport
     #expect(json.contains("Connor Memory OS"))
 }
 
+@Test func memoryOSGetCurrentUserProfileToolAggregatesCurrentUserHitsWithoutNameCoupling() async throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
+    try store.migrate()
+    let facade = AppMemoryOSFacade(store: store)
+    let now = Date(timeIntervalSince1970: 10_000)
+    let user = MemoryOSEntity(id: "person-current", stableKey: "current_user", entityType: "person", name: "Current User", aliases: ["primary user"], createdAt: now, updatedAt: now, metadata: ["role": "current_user"])
+    try store.upsert(entity: user)
+    try store.upsert(entityStatement: MemoryOSEntityStatement(id: "l4-user-pref-1", entityID: user.id, predicate: "prefers", text: "current_user prefers structured architectural explanations.", confidence: 0.92, validAt: now, committedAt: now, evidenceSpanIDs: ["span-user-1"]))
+    try store.upsert(node: MemoryOSNode(id: "node-current-user", stableKey: "current_user_profile", nodeType: "person_profile", name: "current_user profile"))
+    try store.upsert(statement: MemoryOSStatement(id: "stmt-user-1", subjectID: "node-current-user", predicate: "has_preference", text: "current_user prefers concise phase-by-phase execution updates.", confidence: 0.9, validAt: now, committedAt: now, evidenceSpanIDs: ["span-user-2"]))
+
+    let tool = MemoryOSGetCurrentUserProfileTool(facade: facade)
+    let result = try await tool.execute(arguments: AgentToolArguments(json: #"{"limit":10}"#), context: memoryOSToolContext())
+
+    let json = try #require(result.contentJSON)
+    #expect(result.toolName == "memory_os_get_current_user_profile")
+    #expect(result.contentText.contains("current_user profile"))
+    #expect(json.contains("\"currentUserMarker\":\"current_user\""))
+    #expect(json.contains("structured architectural explanations"))
+    #expect(json.contains("phase-by-phase execution updates"))
+    #expect(!json.contains("shiwen"))
+}
+
 @Test func memoryOSExpandL4ToolReturnsDepthExpansion() async throws {
     let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
     try store.migrate()

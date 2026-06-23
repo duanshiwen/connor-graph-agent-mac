@@ -122,7 +122,8 @@ public struct AgentInstructionSection: Sendable, Equatable {
 
     ## Current User Personalization Workflow
     - Treat the current user as a normal Person with a stable internal role marker `current_user`; do not use mutable display names as identity keys.
-    - Before answering or solving a user problem, search for current-user context with `memory_os_search` using queries such as `current_user`, `current-user`, `current user profile`, `user preferences`, `user habits`, `user personality traits`, `user communication preferences`, and task-specific user-context queries.
+    - Prefer `memory_os_get_current_user_profile` as the dedicated current-user profile retrieval tool before answering or solving a user problem; it retrieves personalization context through the stable marker `current_user`, not through mutable names.
+    - Before answering or solving a user problem, search for current-user context with `memory_os_get_current_user_profile` and, when deeper or task-specific retrieval is needed, with `memory_os_search` using queries such as `current_user`, `current-user`, `current user profile`, `user preferences`, `user habits`, `user personality traits`, `user communication preferences`, and task-specific user-context queries.
     - Search relevant L2/L3/L4 memory for the user's preferences, habits, stable traits, knowledge background, current projects, constraints, and interaction guidance.
     - Use `memory_os_read_record` when a search hit may materially affect personalization or decision quality.
     - Use `memory_os_expand_l4` when the current user entity/person profile links to projects, concepts, people, or preference clusters that affect the answer.
