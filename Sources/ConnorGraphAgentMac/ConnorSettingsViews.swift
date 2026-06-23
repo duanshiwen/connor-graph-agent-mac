@@ -768,6 +768,13 @@ enum AIConnectionCustomProtocol: String, CaseIterable, Equatable {
         case .anthropicCompatible: "Anthropic Compatible"
         }
     }
+
+    var modelValidationEndpointDescription: String {
+        switch self {
+        case .openAICompatible: "OpenAI-compatible /v1/chat/completions 最小连接校验"
+        case .anthropicCompatible: "Anthropic Messages /v1/messages 连接校验"
+        }
+    }
 }
 
 struct AIConnectionProviderPreset: Identifiable, Equatable {
@@ -1731,10 +1738,11 @@ struct AIConnectionSetupView: View {
             .split(separator: ",")
             .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+        let endpointDescription = selectedProviderPresetID == "custom" ? customProtocol.modelValidationEndpointDescription : "连接校验"
         if modelList.count > 1 {
-            return "使用服务商自己的模型 ID；已填写多个模型，Connor 将使用 \(healthCheckModelForSubmit) 执行首次连接校验。"
+            return "使用服务商自己的模型 ID；已填写多个模型，Connor 将使用 \(healthCheckModelForSubmit) 执行 \(endpointDescription)。"
         }
-        return "使用服务商自己的模型 ID；Connor 将使用 \(healthCheckModelForSubmit) 执行一次最小连接校验。"
+        return "使用服务商自己的模型 ID；Connor 将使用 \(healthCheckModelForSubmit) 执行 \(endpointDescription)。"
     }
 
     private var compatibilityModeHelpText: String {
