@@ -310,9 +310,9 @@ public struct AppLLMConnectionSetupService: Sendable {
     private func normalizedValidationModel(_ validationModel: String, selectedModel: String, model: String) -> String {
         let explicitValidationModel = validationModel.trimmingCharacters(in: .whitespacesAndNewlines)
         if !explicitValidationModel.isEmpty { return explicitValidationModel }
-        let selected = selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !selected.isEmpty { return selected }
-        return AppLLMConnectionConfig.firstModel(in: model)
+        let firstConfiguredModel = AppLLMConnectionConfig.firstModel(in: model)
+        if !firstConfiguredModel.isEmpty { return firstConfiguredModel }
+        return selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func normalizedSelectedModel(_ selectedModel: String, model: String) -> String {
