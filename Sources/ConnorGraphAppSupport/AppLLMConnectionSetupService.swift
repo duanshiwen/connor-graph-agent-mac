@@ -340,7 +340,10 @@ public extension AppLLMSettingsRepository {
             connections: connections,
             defaultConnectionID: makeDefault ? connection.id : current.defaultConnectionID
         )
-        try save(settings: settings, apiKey: apiKey)
+        try save(settings: settings, apiKey: nil)
+        if let apiKey, !apiKey.isEmpty {
+            try saveAPIKey(apiKey, connectionID: connection.id)
+        }
         if let oauthTokens {
             try saveOAuthTokens(oauthTokens, connectionID: connection.id)
         }

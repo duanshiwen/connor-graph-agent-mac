@@ -79,9 +79,10 @@ struct LLMConnectionSetupTests {
 
         #expect(result.connection.id == "provider-1")
         let loaded = try repository.loadSettings()
-        #expect(loaded.defaultConnectionID == "provider-1")
-        #expect(loaded.defaultConnection.connectionKind == .openAICompatible)
-        #expect(loaded.defaultConnection.hasAPIKey)
+        let savedConnection = try #require(loaded.connections.first { $0.id == "provider-1" })
+        #expect(loaded.defaultConnectionID != "provider-1")
+        #expect(savedConnection.connectionKind == .openAICompatible)
+        #expect(savedConnection.hasAPIKey)
         #expect(store.values.values.contains(where: { $0.contains("Provider 1") }))
         #expect(!store.values.values.contains(where: { $0.contains("secret") }))
         #expect(try repository.apiKey(for: "provider-1") == "secret")
