@@ -83,6 +83,9 @@ struct MemoryOSBackgroundPromptContractTests {
         #expect(prompt.contains("L3 reusable knowledge candidates"))
         #expect(prompt.contains("L4 stable entities"))
         #expect(prompt.contains("MemoryOSL1UnifiedProjectionOutput"))
+        #expect(prompt.contains("must search existing L2 operational memory"))
+        #expect(prompt.contains("must search existing L3/L4"))
+        #expect(prompt.contains("record search/judgment evidence"))
     }
 
     @Test func l1PromptIncludesPromotionFiltersAndStableL4EntityRules() {
@@ -113,6 +116,8 @@ struct MemoryOSBackgroundPromptContractTests {
         #expect(prompt.contains("If any dimension fails, do not create L3"))
         #expect(prompt.contains("If existing L3 already covers the idea, output no new L3 candidate"))
         #expect(prompt.contains("If existing L4 already contains the concept, reuse it rather than creating a duplicate"))
+        #expect(prompt.contains("must search L2, L3 and L4"))
+        #expect(prompt.contains("record the search-backed judgment"))
     }
 
     @Test func l1PromptDeclaresAllAllowedL2PredicatesAndAssertionKinds() {
