@@ -330,6 +330,61 @@ private enum AnthropicFixtures {
     #expect(content.last?["text"] as? String == "Use those search results before answering.")
 }
 
+@Test func anthropicProviderAdvertisesVisionForClaudeModel() throws {
+    let provider = AnthropicCompatibleProvider(
+        config: AnthropicCompatibleConfig(baseURL: URL(string: "https://api.anthropic.com")!, apiKey: "sk-ant-test", model: "claude-3-5-sonnet-latest"),
+        httpClient: AnthropicCapturingHTTPClient()
+    )
+
+    #expect(provider.capabilities.supportsVision)
+}
+
+@Test func anthropicProviderSerializesImageDataURLAsBase64ImageBlock() async throws {
+    let client = AnthropicCapturingHTTPClient()
+    let provider = AnthropicCompatibleProvider(
+        config: AnthropicCompatibleConfig(baseURL: URL(string: "https://api.anthropic.com")!, apiKey: "sk-ant-test", model: "claude-3-5-sonnet-latest"),
+        httpClient: client
+    )
+
+    _ = try await provider.complete(AgentModelRequest(messages: [
+        AgentModelMessage(
+            role: .user,
+            content: "Describe this image",
+            contentParts: [.text("Describe this image"), .imageDataURL("data:image/png;base64,iVBORw0KGgo=", mimeType: "image/png")]
+        )
+    ]))
+
+    let body = try #require(client.storage.capturedRequest?.body)
+    let object = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+    let messages = try #require(object["messages"] as? [[String: Any]])
+    let content = try #require(messages.first?["content"] as? [[String: Any]])
+    #expect(content.first?["type"] as? String == "text")
+    let imageBlock = try #require(content.first { $0["type"] as? String == "image" })
+    let source = try #require(imageBlock["source"] as? [String: Any])
+    #expect(source["type"] as? String == "base64")
+    #expect(source["media_type"] as? String == "image/png")
+    #expect(source["data"] as? String == "iVBORw0KGgo=")
+}
+
+@Test func anthropicProviderRejectsImageWhenModelDoesNotSupportVision() async throws {
+    let client = AnthropicCapturingHTTPClient()
+    let provider = AnthropicCompatibleProvider(
+        config: AnthropicCompatibleConfig(baseURL: URL(string: "https://api.example.com")!, apiKey: "sk-test", model: "text-only-test"),
+        httpClient: client
+    )
+
+    await #expect(throws: AnthropicCompatibleProviderError.unsupportedVisionInput(model: "text-only-test", reason: "Model text-only-test does not support vision input according to Connor model capability kernel.")) {
+        _ = try await provider.complete(AgentModelRequest(messages: [
+            AgentModelMessage(
+                role: .user,
+                content: "Describe this image",
+                contentParts: [.text("Describe this image"), .imageDataURL("data:image/png;base64,iVBORw0KGgo=", mimeType: "image/png")]
+            )
+        ]))
+    }
+    #expect(client.storage.capturedRequest == nil)
+}
+
 @Test func anthropicHealthCheckReturnsOKWhenProviderRespondsWithText() async throws {
     let client = AnthropicCapturingHTTPClient(body: AnthropicFixtures.textResponse)
     let provider = AnthropicCompatibleProvider(
