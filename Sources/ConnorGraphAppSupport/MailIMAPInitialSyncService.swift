@@ -23,6 +23,13 @@ public struct MailIMAPInitialSyncService: Sendable {
     }
 
     public func sync(account originalAccount: MailAccount) async throws -> MailInitialSyncResult {
+        if originalAccount.provider == .gmail || originalAccount.provider == .microsoft365 {
+            return MailInitialSyncResult(
+                account: updatedAccount(originalAccount, status: .blocked, summary: "此邮件账户类型已不再支持", reasons: ["请删除此旧账户后使用授权码、App Password 或通用 IMAP/SMTP 凭据重新添加。"]),
+                mailboxes: [],
+                messages: []
+            )
+        }
         guard let endpoint = originalAccount.incoming, endpoint.protocolKind == .imap else {
             return MailInitialSyncResult(
                 account: updatedAccount(originalAccount, status: .blocked, summary: "缺少 IMAP 收件服务器配置", reasons: ["Incoming endpoint is not IMAP"]),
