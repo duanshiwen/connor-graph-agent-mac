@@ -88,6 +88,7 @@ public enum OpenAICompatibleProviderError: Error, Equatable, Sendable {
     case invalidResponse
     case httpStatus(Int, message: String?)
     case missingAssistantMessage
+    case unsupportedVisionInput(model: String, reason: String)
 }
 
 extension OpenAICompatibleProviderError: LocalizedError {
@@ -106,6 +107,8 @@ extension OpenAICompatibleProviderError: LocalizedError {
             return "HTTP \(code)"
         case .missingAssistantMessage:
             return "OpenAI-compatible provider response did not include an assistant message."
+        case let .unsupportedVisionInput(model, reason):
+            return "OpenAI-compatible model \(model) cannot receive image input: \(reason)"
         }
     }
 }
@@ -176,15 +179,10 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
     public var sseClient: (any AgentSSEHTTPClient)?
 
     public var modelID: String { config.requestModel }
-    public var capabilities: AgentModelCapabilities {
-        AgentModelCapabilities(
-            supportsStreaming: true,
-            supportsToolCalling: true,
-            supportsParallelToolCalls: false,
-            supportsStructuredOutput: false,
-            supportsVision: true
-        )
+    public var capabilityProfile: AgentModelCapabilityProfile {
+        AgentModelCapabilityKernel.profile(providerKind: .openAICompatible, modelID: config.requestModel)
     }
+    public var capabilities: AgentModelCapabilities { capabilityProfile.agentCapabilities }
 
     public init(config: OpenAICompatibleConfig, httpClient: Client) {
         self.init(config: config, httpClient: httpClient, sseClient: nil)
@@ -323,6 +321,7 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
     }
 
     private func makeToolCallingRequest(_ request: AgentModelRequest, stream: Bool = false) throws -> AgentHTTPRequest {
+        try validateVisionSendAllowed(request)
         let endpoint = config.baseURL.appendingPathComponent("chat/completions")
         let messages = request.messages.enumerated().map { index, message in
             let role = projectedRole(for: message, index: index, instructionPlacement: request.instructionPlacement)
@@ -365,6 +364,16 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
             body: data,
             timeoutInterval: config.requestTimeout
         )
+    }
+
+    private func validateVisionSendAllowed(_ request: AgentModelRequest) throws {
+        let profile = capabilityProfile
+        switch AgentModelCapabilityKernel.visionSendDecision(profile: profile, request: request) {
+        case .allowed:
+            return
+        case .denied(let reason):
+            throw OpenAICompatibleProviderError.unsupportedVisionInput(model: profile.modelID, reason: reason)
+        }
     }
 
     private func projectedRole(for message: AgentModelMessage, index: Int, instructionPlacement: AgentInstructionPlacement) -> String {

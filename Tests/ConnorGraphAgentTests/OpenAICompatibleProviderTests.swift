@@ -243,6 +243,66 @@ private struct CapturingHTTPClient: AgentHTTPClient {
     #expect(client.captured?.headers["Authorization"] == nil)
 }
 
+@Test func openAICompatibleProviderSerializesImageDataURLContentPartsWhenModelSupportsVision() async throws {
+    let body = """
+    {
+      "choices": [
+        { "message": { "role": "assistant", "content": "I can see it." }, "finish_reason": "stop" }
+      ]
+    }
+    """.data(using: .utf8)!
+    let client = CapturingHTTPClient(responseBody: body)
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(baseURL: URL(string: "https://llm.example.com/v1")!, apiKey: "test-key", model: "gpt-4o-mini"),
+        httpClient: client
+    )
+
+    _ = try await provider.complete(AgentModelRequest(messages: [
+        AgentModelMessage(
+            role: .user,
+            content: "Describe this image",
+            contentParts: [.text("Describe this image"), .imageDataURL("data:image/png;base64,iVBORw0KGgo=", mimeType: "image/png", detail: "auto")]
+        )
+    ]))
+
+    let requestBody = try #require(client.captured?.body)
+    let object = try #require(try JSONSerialization.jsonObject(with: requestBody) as? [String: Any])
+    let messages = try #require(object["messages"] as? [[String: Any]])
+    let content = try #require(messages.first?["content"] as? [[String: Any]])
+    #expect(content.first?["type"] as? String == "text")
+    #expect(content.first?["text"] as? String == "Describe this image")
+    let imagePart = try #require(content.first { $0["type"] as? String == "image_url" })
+    let imageURL = try #require(imagePart["image_url"] as? [String: Any])
+    #expect(imageURL["url"] as? String == "data:image/png;base64,iVBORw0KGgo=")
+    #expect(imageURL["detail"] as? String == "auto")
+}
+
+@Test func openAICompatibleProviderRejectsImageContentWhenCapabilityKernelDeniesVision() async throws {
+    let body = """
+    {
+      "choices": [
+        { "message": { "role": "assistant", "content": "OK" }, "finish_reason": "stop" }
+      ]
+    }
+    """.data(using: .utf8)!
+    let client = CapturingHTTPClient(responseBody: body)
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(baseURL: URL(string: "https://llm.example.com/v1")!, apiKey: "test-key", model: "text-only-test"),
+        httpClient: client
+    )
+
+    await #expect(throws: OpenAICompatibleProviderError.unsupportedVisionInput(model: "text-only-test", reason: "Model text-only-test does not support vision input according to Connor model capability kernel.")) {
+        _ = try await provider.complete(AgentModelRequest(messages: [
+            AgentModelMessage(
+                role: .user,
+                content: "Describe this image",
+                contentParts: [.text("Describe this image"), .imageDataURL("data:image/png;base64,iVBORw0KGgo=", mimeType: "image/png")]
+            )
+        ]))
+    }
+    #expect(client.captured == nil)
+}
+
 @Test func openAICompatibleProviderReportsHTTPError() async throws {
     let body = #"{"error":{"message":"bad key"}}"#.data(using: .utf8)!
     let client = CapturingHTTPClient(responseBody: body, statusCode: 401)
