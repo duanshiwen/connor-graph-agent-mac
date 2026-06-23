@@ -4419,7 +4419,7 @@ final class AppViewModel: NSObject, ObservableObject {
                     updateBackgroundTask(sessionID: sessionID, taskID: taskID, status: .succeeded, detail: "没有用户 Prompt，已使用默认标题。")
                     return
                 }
-                let title = try await generateTitleFromUserPrompts(userPrompts)
+                let title = try await generateTitleFromUserPrompts(userPrompts, sessionID: sessionID)
                 renameChatSession(sessionID, title: title)
                 updateBackgroundTask(sessionID: sessionID, taskID: taskID, status: .succeeded, detail: "已更新为：\(title)")
             } catch {
@@ -4429,13 +4429,13 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
-    private func generateTitleFromUserPrompts(_ prompts: [String]) async throws -> String {
-        let provider = Self.makeLLMProvider(settingsRepository: llmSettingsRepository)
+    private func generateTitleFromUserPrompts(_ prompts: [String], sessionID: String) async throws -> String {
+        let provider = try sessionAgentModelProvider(sessionID: sessionID)
         let joinedPrompts = prompts.enumerated().map { index, prompt in
             "用户 Prompt \(index + 1):\n\(prompt)"
         }.joined(separator: "\n\n---\n\n")
-        let prompt = """
-        你是会话标题生成器。请根据下面这个对话中所有用户 Prompt，生成一个中文会话标题。
+        let userPrompt = """
+        请根据下面这个对话中所有用户 Prompt，生成一个中文会话标题。
 
         要求：
         - 20 个汉字以内
@@ -4446,8 +4446,14 @@ final class AppViewModel: NSObject, ObservableObject {
 
         \(joinedPrompts)
         """
-        let response = try await provider.complete(prompt: prompt, context: AgentContext(query: "session-title", items: []))
-        return sanitizedSessionTitle(response.text)
+        let response = try await provider.complete(AgentModelRequest(
+            messages: [
+                AgentModelMessage(role: .system, content: "你是会话标题生成器。"),
+                AgentModelMessage(role: .user, content: userPrompt)
+            ],
+            temperature: 1.0
+        ))
+        return sanitizedSessionTitle(response.text ?? "")
     }
 
     private func sanitizedSessionTitle(_ raw: String) -> String {
@@ -5526,7 +5532,7 @@ final class AppViewModel: NSObject, ObservableObject {
         isSummarizingChatSession = true
         defer { isSummarizingChatSession = false }
         do {
-            let provider = Self.makeLLMProvider(settingsRepository: llmSettingsRepository)
+            let provider = try sessionLLMProvider(sessionID: selectedChatSessionID)
             let summarizer = AgentSessionSummarizer(provider: provider)
             let summary = try await chatSessionRepository.summarizeSession(id: selectedChatSessionID, using: summarizer)
             latestChatSummary = summary
