@@ -218,7 +218,6 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
             }
             tools.append(contentsOf: config.featureOptions.serverTools.map(\.jsonObject))
             body["tools"] = tools
-            body["tool_choice"] = ["type": "auto"]
         }
         let data = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
         return AgentHTTPRequest(

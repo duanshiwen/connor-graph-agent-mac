@@ -213,6 +213,26 @@ private enum AnthropicFixtures {
     #expect(requestTools.first?["input_schema"] != nil)
 }
 
+@Test func anthropicToolRequestOmitsDefaultToolChoiceAuto() async throws {
+    let client = AnthropicCapturingHTTPClient()
+    let provider = AnthropicCompatibleProvider(
+        config: AnthropicCompatibleConfig(baseURL: URL(string: "https://api.anthropic.com")!, apiKey: "sk-ant-test", model: "claude-sonnet-test"),
+        httpClient: client
+    )
+    let tools = [AgentToolDefinition(
+        name: "graph_search",
+        description: "Search graph",
+        inputSchema: .object(properties: ["query": .string(description: "Query")], required: ["query"])
+    )]
+
+    _ = try await provider.complete(AgentModelRequest(messages: [AgentModelMessage(role: .user, content: "Find memory")], tools: tools))
+
+    let body = try #require(client.storage.capturedRequest?.body)
+    let object = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+    #expect(object["tools"] != nil)
+    #expect(object["tool_choice"] == nil)
+}
+
 @Test func anthropicParsesToolUseResponseIntoAgentToolCalls() async throws {
     let client = AnthropicCapturingHTTPClient(body: AnthropicFixtures.toolUseResponse)
     let provider = AnthropicCompatibleProvider(
