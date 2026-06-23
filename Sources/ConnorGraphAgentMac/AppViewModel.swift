@@ -3299,11 +3299,61 @@ final class AppViewModel: NSObject, ObservableObject {
 
     private func rebuildNativeSessionManagerForActiveSession() {
         let session = activeChatSession
+        _ = ensureSessionLLMOverride(sessionID: session.id)
         fallbackChatSession = session
         nativeSessionManager = makeNativeSessionManager(for: session)
     }
 
+    @discardableResult
+    private func ensureSessionLLMOverride(sessionID: String) -> SessionLLMOverride? {
+        var state = sessionStateSnapshotsBySessionID[sessionID]
+        if state == nil, let loaded = try? chatSessionRepository?.loadSessionState(sessionID: sessionID) {
+            state = loaded
+        }
+        if let existing = state?.llmOverride, !existing.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            sessionStateSnapshotsBySessionID[sessionID] = state ?? AppSessionStateSnapshot(sessionID: sessionID)
+            return existing
+        }
+        guard let settings = try? llmSettingsRepository.loadSettings() else { return nil }
+        let connection = settings.defaultConnection
+        let model = connection.effectiveModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !model.isEmpty else { return nil }
+        var nextState = state ?? AppSessionStateSnapshot(sessionID: sessionID)
+        let override = SessionLLMOverride(
+            providerMode: connection.providerMode.rawValue,
+            model: model,
+            baseURLString: nil,
+            connectionID: connection.id,
+            thinkingLevel: settings.defaultThinkingLevel.rawValue
+        )
+        nextState.llmOverride = override
+        nextState.updatedAt = Date()
+        sessionStateSnapshotsBySessionID[sessionID] = nextState
+        try? chatSessionRepository?.saveSessionState(nextState, sessionID: sessionID)
+        return override
+    }
+
+    private func sessionAgentModelProvider(sessionID: String) throws -> AnyAgentModelProvider {
+        let override = ensureSessionLLMOverride(sessionID: sessionID)
+        guard let provider = agentRuntimeFactory?.makeAgentModelProvider(sessionLLMOverride: override) else {
+            throw OpenAICompatibleProviderError.missingAPIKey
+        }
+        return provider
+    }
+
+    private func sessionLLMProvider(sessionID: String) throws -> AnyLLMProvider {
+        let provider = try sessionAgentModelProvider(sessionID: sessionID)
+        return AnyLLMProvider { prompt, context in
+            let response = try await provider.complete(AgentModelRequest(messages: [
+                AgentModelMessage(role: .system, content: AgentInstructionSection.defaultConnorInstruction),
+                AgentModelMessage(role: .user, content: "Question:\n\(prompt)\n\nGraph Context:\n\(context.renderedText)")
+            ]))
+            return LLMResponse(text: response.text ?? "", citations: context.items.map(\.sourceID))
+        }
+    }
+
     private func syncLLMModelDisplayFromSession(_ sessionID: String) {
+        _ = ensureSessionLLMOverride(sessionID: sessionID)
         if let override = sessionStateSnapshotsBySessionID[sessionID]?.llmOverride {
             llmSelectedModel = override.model
             llmThinkingLevel = AppLLMThinkingLevel.normalized(override.thinkingLevel) ?? ((try? llmSettingsRepository.loadSettings())?.defaultThinkingLevel ?? llmThinkingLevel)
@@ -4857,6 +4907,7 @@ final class AppViewModel: NSObject, ObservableObject {
             agentEventTimelinesByProcessKey.removeAll(keepingCapacity: true)
             try loadSessionCapsule(sessionID: session.id)
             try loadBackgroundTasks(sessionID: session.id)
+            _ = ensureSessionLLMOverride(sessionID: session.id)
             fallbackChatSession = session
             nativeSessionManager = makeNativeSessionManager(for: session)
             transcript = session.messages
