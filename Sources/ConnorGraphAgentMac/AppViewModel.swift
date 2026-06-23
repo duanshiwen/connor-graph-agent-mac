@@ -313,6 +313,9 @@ final class AppViewModel: NSObject, ObservableObject {
         return formatter
     }()
 
+    static let customGenderIdentitySelection = "__custom_gender_identity__"
+    static let genderIdentityPresetValues: Set<String> = ["女性", "男性", "非二元", "性别流动", "无性别", "酷儿 / 性别酷儿", "不愿透露"]
+
     @Published var selection: SidebarItem? = .agentChat
     @Published var query: String = "记忆"
     @Published var searchResults: [GraphSearchHit] = []
@@ -487,6 +490,8 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var userTimezone: String = ""
     @Published var userPreferredLanguage: String = ""
     @Published var userGenderIdentity: String = ""
+    @Published var userGenderIdentitySelection: String = ""
+    @Published var userGenderIdentityCustomText: String = ""
     @Published var userBirthDate: String = ""
     @Published var userBirthDatePickerDate: Date = Date()
     @Published var userCity: String = ""
@@ -584,6 +589,8 @@ final class AppViewModel: NSObject, ObservableObject {
             userTimezone,
             userPreferredLanguage,
             userGenderIdentity,
+            userGenderIdentitySelection,
+            userGenderIdentityCustomText,
             userBirthDate,
             userBirthDatePickerDate.timeIntervalSince1970.description,
             userCity,
@@ -3520,7 +3527,7 @@ final class AppViewModel: NSObject, ObservableObject {
             userDisplayName = settings.preferences.displayName
             userTimezone = settings.preferences.timezone
             userPreferredLanguage = settings.preferences.preferredLanguage
-            userGenderIdentity = settings.preferences.genderIdentity
+            applyLoadedGenderIdentity(settings.preferences.genderIdentity)
             userBirthDate = settings.preferences.birthDate
             if let parsedBirthDate = Self.birthDateFormatter.date(from: settings.preferences.birthDate) {
                 userBirthDatePickerDate = parsedBirthDate
@@ -3562,7 +3569,7 @@ final class AppViewModel: NSObject, ObservableObject {
             settings.preferences.displayName = userDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.timezone = userTimezone.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.preferredLanguage = userPreferredLanguage.trimmingCharacters(in: .whitespacesAndNewlines)
-            settings.preferences.genderIdentity = userGenderIdentity.trimmingCharacters(in: .whitespacesAndNewlines)
+            settings.preferences.genderIdentity = resolvedUserGenderIdentity().trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.birthDate = userBirthDate.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.city = userCity.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.country = userCountry.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3762,6 +3769,47 @@ final class AppViewModel: NSObject, ObservableObject {
 
     private var canUseUserNotifications: Bool {
         Bundle.main.bundleURL.pathExtension == "app"
+    }
+
+    func setUserGenderIdentitySelection(_ selection: String) {
+        userGenderIdentitySelection = selection
+        if selection == Self.customGenderIdentitySelection {
+            userGenderIdentity = userGenderIdentityCustomText
+        } else {
+            userGenderIdentityCustomText = ""
+            userGenderIdentity = selection
+        }
+        scheduleRuntimeSettingsAutosave()
+    }
+
+    func setUserGenderIdentityCustomText(_ text: String) {
+        userGenderIdentityCustomText = text
+        if userGenderIdentitySelection == Self.customGenderIdentitySelection {
+            userGenderIdentity = text
+        }
+        scheduleRuntimeSettingsAutosave()
+    }
+
+    private func applyLoadedGenderIdentity(_ value: String) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        userGenderIdentity = trimmed
+        if trimmed.isEmpty {
+            userGenderIdentitySelection = ""
+            userGenderIdentityCustomText = ""
+        } else if Self.genderIdentityPresetValues.contains(trimmed) {
+            userGenderIdentitySelection = trimmed
+            userGenderIdentityCustomText = ""
+        } else {
+            userGenderIdentitySelection = Self.customGenderIdentitySelection
+            userGenderIdentityCustomText = trimmed
+        }
+    }
+
+    private func resolvedUserGenderIdentity() -> String {
+        if userGenderIdentitySelection == Self.customGenderIdentitySelection {
+            return userGenderIdentityCustomText
+        }
+        return userGenderIdentitySelection
     }
 
     func setUserBirthDateFromPicker(_ date: Date) {
