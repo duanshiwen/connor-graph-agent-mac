@@ -963,7 +963,7 @@ struct AIConnectionOnboardingOption: Identifiable, Equatable {
             supportedModels: ["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2.5-asr", "mimo-v2.5-tts-voiceclone", "mimo-v2.5-tts-voicedesign", "mimo-v2.5-tts", "mimo-v2-pro", "mimo-v2-omni", "mimo-v2-tts"],
             setupTitle: "连接 Xiaomi MiMo",
             setupSubtitle: "使用小米 MiMo OpenAI Compatible API 驱动康纳同学。",
-            setupInstruction: "选择 MiMo 模型并填写 API Key。Endpoint 与 api-key 请求头已按官方文档预设。",
+            setupInstruction: "选择 MiMo 使用方式、模型并填写对应 API Key。sk-... 使用按量付费 endpoint；tp-... 使用 Token Plan endpoint。",
             loginButtonTitle: "继续",
             authURLString: "",
             authenticationKind: .direct
@@ -1046,6 +1046,7 @@ struct AIConnectionSetupView: View {
     @State private var showAPIKey = false
     @State private var selectedProviderPresetID = "openai"
     @State private var customProtocol: AIConnectionCustomProtocol = .openAICompatible
+    @State private var xiaomiMiMoConnectionMode: XiaomiMiMoConnectionModePreset = .payAsYouGo
     @State private var showsAdvancedConnectionSettings = false
 
     var body: some View {
@@ -1331,6 +1332,10 @@ struct AIConnectionSetupView: View {
                 presetProviderPickerRow
             }
 
+            if isXiaomiMiMoOption {
+                xiaomiMiMoConnectionModeCard
+            }
+
             primaryAPIKeyEntryCard(placeholder: apiKeyPlaceholderForCurrentPreset)
 
             advancedConnectionDisclosure
@@ -1408,6 +1413,38 @@ struct AIConnectionSetupView: View {
                 .truncationMode(.middle)
                 .textSelection(.enabled)
             Spacer(minLength: 0)
+        }
+    }
+
+    private var xiaomiMiMoConnectionModeCard: some View {
+        aiConnectionCard {
+            VStack(alignment: .leading, spacing: SettingsListLayout.spaceM) {
+                HStack(spacing: SettingsListLayout.spaceS) {
+                    Image(systemName: "switch.2")
+                        .foregroundStyle(option.tint)
+                    Text("使用方式")
+                        .font(SettingsListTypography.header)
+                }
+
+                Picker("使用方式", selection: $xiaomiMiMoConnectionMode) {
+                    ForEach(XiaomiMiMoConnectionModePreset.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .controlSize(.large)
+                .onChange(of: xiaomiMiMoConnectionMode) { _, _ in applyXiaomiMiMoConnectionMode() }
+
+                Text(xiaomiMiMoConnectionMode.subtitle)
+                    .font(SettingsListTypography.rowSubtitle)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text("当前 Endpoint：\(xiaomiMiMoConnectionMode.openAIEndpoint)")
+                    .font(SettingsListTypography.rowCaption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
         }
     }
 
@@ -1693,7 +1730,7 @@ struct AIConnectionSetupView: View {
     }
 
     private var apiKeyPlaceholderForCurrentPreset: String {
-        if option.id == "xiaomi-mimo" { return "MIMO_API_KEY" }
+        if isXiaomiMiMoOption { return xiaomiMiMoConnectionMode.keyPlaceholder }
         if option.id == "china-provider" || option.id == "other-provider" { return activeProviderPreset.keyPlaceholder }
         if option.providerMode == .anthropicMessages { return "sk-ant-..." }
         return "sk-..."
@@ -1909,8 +1946,17 @@ struct AIConnectionSetupView: View {
             selectedProviderPresetID = "qwen"
             applySelectedProviderPreset()
         }
+        if isXiaomiMiMoOption {
+            applyXiaomiMiMoConnectionMode()
+        }
         if option.id == "claude-pro-max" {
         }
+    }
+
+    private func applyXiaomiMiMoConnectionMode() {
+        guard isXiaomiMiMoOption else { return }
+        baseURLString = xiaomiMiMoConnectionMode.openAIEndpoint
+        connectionName = defaultDraftConnectionName(endpoint: baseURLString, fallback: option.connectionName)
     }
 
     private func applySelectedProviderPreset() {
@@ -2033,6 +2079,10 @@ struct AIConnectionSetupView: View {
         case .anthropicCompatible:
             return "适用于 Anthropic Messages /v1/messages 接口，例如 Anthropic API 或明确提供 Anthropic Skin 的网关。"
         }
+    }
+
+    private var isXiaomiMiMoOption: Bool {
+        option.id == "xiaomi-mimo"
     }
 
     private func currentPresetModelOptions() -> [String] {
