@@ -2268,7 +2268,7 @@ struct AIConnectionEntryRow: View {
     private var endpointDisplayName: String {
         switch connection.providerMode {
         case .openAIResponses, .openAICompatible, .anthropicMessages:
-            return host(from: connection.baseURLString)
+            return AppLLMEndpointDisplayName.host(from: connection.baseURLString)
         }
     }
 
@@ -2294,19 +2294,6 @@ struct AIConnectionEntryRow: View {
         }
     }
 
-    private func host(from rawValue: String) -> String {
-        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "未设置 endpoint" }
-        if let url = URL(string: trimmed), let host = url.host, !host.isEmpty {
-            return host
-        }
-        return trimmed
-            .replacingOccurrences(of: "https://", with: "")
-            .replacingOccurrences(of: "http://", with: "")
-            .split(separator: "/")
-            .first
-            .map(String.init) ?? trimmed
-    }
 }
 
 struct SettingsPermissionsSection: View {
