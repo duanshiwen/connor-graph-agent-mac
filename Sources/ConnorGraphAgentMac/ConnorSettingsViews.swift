@@ -1172,10 +1172,8 @@ struct AIConnectionSetupView: View {
                 }
             }
         case .direct:
-            if option.id == "china-provider" {
-                curatedChinaProviderAPIFields
-            } else if option.id == "deepseek" || option.id == "xiaomi-mimo" {
-                curatedSingleProviderAPIFields
+            if usesAPIKeyFirstPresetFlow {
+                presetProviderAPIKeyFirstFields
             } else if option.id == "other-provider" {
                 otherProviderAPIFields
             } else {
@@ -1233,7 +1231,7 @@ struct AIConnectionSetupView: View {
         )
     }
 
-    private var curatedSingleProviderAPIFields: some View {
+    private var presetProviderAPIKeyFirstFields: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text(option.setupInstruction)
                 .font(SettingsListTypography.rowSubtitle)
@@ -1241,8 +1239,26 @@ struct AIConnectionSetupView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
 
-            modelMultiSelect(title: "启用模型", models: option.supportedModels.isEmpty ? [option.selectedModel] : option.supportedModels)
-            apiKeyField(placeholder: option.id == "xiaomi-mimo" ? "MIMO_API_KEY" : "sk-...")
+            if option.id == "china-provider" || option.id == "other-provider" {
+                presetProviderPickerRow
+            }
+
+            apiKeyField(placeholder: apiKeyPlaceholderForCurrentPreset)
+        }
+    }
+
+    private var presetProviderPickerRow: some View {
+        aiConnectionSettingsRow(title: "服务商") {
+            Picker("服务商", selection: $selectedProviderPresetID) {
+                ForEach(option.id == "china-provider" ? chinaProviderPresets : AIConnectionProviderPreset.otherProviderPresets) { preset in
+                    Text(preset.title).tag(preset.id)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .controlSize(.large)
+            .frame(width: SettingsListLayout.pickerControlWidth, alignment: .leading)
+            .onChange(of: selectedProviderPresetID) { _, _ in applySelectedProviderPreset() }
         }
     }
 
@@ -1461,8 +1477,22 @@ struct AIConnectionSetupView: View {
     }
 
     private var activeProviderPreset: AIConnectionProviderPreset {
-        AIConnectionProviderPreset.otherProviderPresets.first { $0.id == selectedProviderPresetID }
-            ?? AIConnectionProviderPreset.otherProviderPresets[0]
+        let presets = option.id == "china-provider" ? AIConnectionProviderPreset.chinaProviderPresets : AIConnectionProviderPreset.otherProviderPresets
+        return presets.first { $0.id == selectedProviderPresetID } ?? presets[0]
+    }
+
+    private var usesAPIKeyFirstPresetFlow: Bool {
+        guard option.authenticationKind == .direct else { return false }
+        if option.id == "local-model" { return false }
+        if option.id == "other-provider" { return selectedProviderPresetID != "custom" }
+        return true
+    }
+
+    private var apiKeyPlaceholderForCurrentPreset: String {
+        if option.id == "xiaomi-mimo" { return "MIMO_API_KEY" }
+        if option.id == "china-provider" || option.id == "other-provider" { return activeProviderPreset.keyPlaceholder }
+        if option.providerMode == .anthropicMessages { return "sk-ant-..." }
+        return "sk-..."
     }
 
     private var chinaProviderPresets: [AIConnectionProviderPreset] {
