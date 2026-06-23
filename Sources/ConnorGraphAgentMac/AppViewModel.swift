@@ -3957,7 +3957,7 @@ final class AppViewModel: NSObject, ObservableObject {
             chatSessions = sessions
             allChatSessions = try chatSessionRepository.loadSessions(filter: .all)
             synchronizeSessionReadStates(from: allChatSessions)
-            let selectedID = selectedChatSessionID ?? sessions.first?.id
+            let selectedID = selectedChatSessionIDVisibleInCurrentFilter(sessions: sessions)
             selectedChatSessionID = selectedID
             if let selectedID, let session = try chatSessionRepository.loadSession(id: selectedID) {
                 try loadSessionCapsule(sessionID: selectedID)
@@ -3978,14 +3978,35 @@ final class AppViewModel: NSObject, ObservableObject {
                     restoreWorkspaceMode(for: selectedID)
                 }
             } else {
-                selectedSessionArtifactDirectories = nil
-                latestChatSummary = nil
+                clearSelectedChatSessionDetail()
             }
             chatSummaryMessage = nil
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
         }
+    }
+
+    private func selectedChatSessionIDVisibleInCurrentFilter(sessions: [AgentSession]) -> String? {
+        if let selectedChatSessionID {
+            return sessions.contains(where: { $0.id == selectedChatSessionID }) ? selectedChatSessionID : nil
+        }
+        return sessionListFilter == .all ? sessions.first?.id : nil
+    }
+
+    private func clearSelectedChatSessionDetail() {
+        selectedChatSessionID = nil
+        nativeSessionManager = nil
+        transcript = []
+        agentEventTimeline = []
+        latestChatSummary = nil
+        selectedSessionArtifactDirectories = nil
+        chatSummaryMessage = nil
+        lastContext = nil
+        lastPromptInspection = nil
+        isBrowserVisible = false
+        browserWorkspaceSessionID = nil
+        refreshSelectedSubmittingState()
     }
 
     func newChatSession() {
