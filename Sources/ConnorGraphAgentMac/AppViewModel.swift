@@ -483,7 +483,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var userCountry: String = ""
     @Published var userPreferenceNotes: String = ""
     @Published var userLocationStatusMessage: String?
-    @Published var appSettingsMessage: String?
+    @Published var settingsSectionMessageStore = SettingsSectionMessageStore()
     @Published var pendingAttachmentRefs: [AgentMessageAttachmentRef] = []
     @Published var attachmentPreviewModel: AttachmentPreviewModel?
 
@@ -1971,9 +1971,9 @@ final class AppViewModel: NSObject, ObservableObject {
         selectedMailMessageID = nil
         isPresentingAddMailAccountSheet = false
         if syncResult.account.health.status == .ready {
-            appSettingsMessage = "已添加邮件账户：\(displayName)，首次同步完成，拉取 \(syncResult.messages.count) 封邮件。"
+            setSettingsMessage("已添加邮件账户：\(displayName)，首次同步完成，拉取 \(syncResult.messages.count) 封邮件。", for: .mail)
         } else {
-            appSettingsMessage = "已添加邮件账户：\(displayName)，但首次同步未完成：\(syncResult.account.health.summary)。"
+            setSettingsMessage("已添加邮件账户：\(displayName)，但首次同步未完成：\(syncResult.account.health.summary)。", for: .mail)
         }
         errorMessage = nil
     }
@@ -2102,7 +2102,6 @@ final class AppViewModel: NSObject, ObservableObject {
             try await reconcileCalendarAccountRefreshTasks()
             reloadTaskManagementPresentation()
             calendarSyncMessage = "已同步本机日历：\(snapshot.collections.count) 个日历，\(snapshot.events.count) 个日程"
-            appSettingsMessage = calendarSyncMessage
             errorMessage = nil
             isSyncingSystemCalendar = false
             return true
@@ -2132,7 +2131,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 reloadContactsBrowserPresentation()
                 await persistContactRecords()
                 contactsSyncMessage = "已同步系统通讯录：\(records.count) 个联系人"
-                appSettingsMessage = contactsSyncMessage
+                setSettingsMessage(contactsSyncMessage, for: .preferences)
                 errorMessage = nil
             } catch {
                 let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -2200,7 +2199,6 @@ final class AppViewModel: NSObject, ObservableObject {
         isPresentingAddCalendarSourceSheet = false
         reloadCalendarBrowserPresentation()
         calendarSyncMessage = "已添加日历源：\(resolvedDisplayName)"
-        appSettingsMessage = calendarSyncMessage
         Task { @MainActor in
             await persistCalendarSnapshot()
             do {
@@ -2226,7 +2224,6 @@ final class AppViewModel: NSObject, ObservableObject {
         }
         reloadCalendarBrowserPresentation()
         calendarSyncMessage = "已移除日历源：\(account.displayName)"
-        appSettingsMessage = calendarSyncMessage
         Task { @MainActor in
             await persistCalendarSnapshot()
             do {
@@ -3275,6 +3272,22 @@ final class AppViewModel: NSObject, ObservableObject {
         selection = .llmSettings
     }
 
+    func settingsMessage(for section: ConnorSettingsSection) -> String? {
+        settingsSectionMessageStore.message(for: section)
+    }
+
+    func setSettingsMessage(_ message: String?, for section: ConnorSettingsSection) {
+        var store = settingsSectionMessageStore
+        store.set(message, for: section)
+        settingsSectionMessageStore = store
+    }
+
+    func clearSettingsMessage(for section: ConnorSettingsSection) {
+        var store = settingsSectionMessageStore
+        store.clear(for: section)
+        settingsSectionMessageStore = store
+    }
+
     private func makeNativeSessionManager(for session: AgentSession) -> NativeSessionManager? {
         agentRuntimeFactory?.makeNativeSessionManager(
             session: session,
@@ -3286,11 +3299,61 @@ final class AppViewModel: NSObject, ObservableObject {
 
     private func rebuildNativeSessionManagerForActiveSession() {
         let session = activeChatSession
+        _ = ensureSessionLLMOverride(sessionID: session.id)
         fallbackChatSession = session
         nativeSessionManager = makeNativeSessionManager(for: session)
     }
 
+    @discardableResult
+    private func ensureSessionLLMOverride(sessionID: String) -> SessionLLMOverride? {
+        var state = sessionStateSnapshotsBySessionID[sessionID]
+        if state == nil, let loaded = try? chatSessionRepository?.loadSessionState(sessionID: sessionID) {
+            state = loaded
+        }
+        if let existing = state?.llmOverride, !existing.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            sessionStateSnapshotsBySessionID[sessionID] = state ?? AppSessionStateSnapshot(sessionID: sessionID)
+            return existing
+        }
+        guard let settings = try? llmSettingsRepository.loadSettings() else { return nil }
+        let connection = settings.defaultConnection
+        let model = connection.effectiveModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !model.isEmpty else { return nil }
+        var nextState = state ?? AppSessionStateSnapshot(sessionID: sessionID)
+        let override = SessionLLMOverride(
+            providerMode: connection.providerMode.rawValue,
+            model: model,
+            baseURLString: nil,
+            connectionID: connection.id,
+            thinkingLevel: settings.defaultThinkingLevel.rawValue
+        )
+        nextState.llmOverride = override
+        nextState.updatedAt = Date()
+        sessionStateSnapshotsBySessionID[sessionID] = nextState
+        try? chatSessionRepository?.saveSessionState(nextState, sessionID: sessionID)
+        return override
+    }
+
+    private func sessionAgentModelProvider(sessionID: String) throws -> AnyAgentModelProvider {
+        let override = ensureSessionLLMOverride(sessionID: sessionID)
+        guard let provider = agentRuntimeFactory?.makeAgentModelProvider(sessionLLMOverride: override) else {
+            throw OpenAICompatibleProviderError.missingAPIKey
+        }
+        return provider
+    }
+
+    private func sessionLLMProvider(sessionID: String) throws -> AnyLLMProvider {
+        let provider = try sessionAgentModelProvider(sessionID: sessionID)
+        return AnyLLMProvider { prompt, context in
+            let response = try await provider.complete(AgentModelRequest(messages: [
+                AgentModelMessage(role: .system, content: AgentInstructionSection.defaultConnorInstruction),
+                AgentModelMessage(role: .user, content: "Question:\n\(prompt)\n\nGraph Context:\n\(context.renderedText)")
+            ]))
+            return LLMResponse(text: response.text ?? "", citations: context.items.map(\.sourceID))
+        }
+    }
+
     private func syncLLMModelDisplayFromSession(_ sessionID: String) {
+        _ = ensureSessionLLMOverride(sessionID: sessionID)
         if let override = sessionStateSnapshotsBySessionID[sessionID]?.llmOverride {
             llmSelectedModel = override.model
             llmThinkingLevel = AppLLMThinkingLevel.normalized(override.thinkingLevel) ?? ((try? llmSettingsRepository.loadSettings())?.defaultThinkingLevel ?? llmThinkingLevel)
@@ -3386,7 +3449,7 @@ final class AppViewModel: NSObject, ObservableObject {
             if activeChatSession.id == sessionID || selectedChatSessionID == sessionID {
                 rebuildNativeSessionManagerForActiveSession()
             }
-            appSettingsMessage = "当前会话 Workspace 已保存。"
+            setSettingsMessage("当前会话 Workspace 已保存。", for: .app)
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -3449,7 +3512,7 @@ final class AppViewModel: NSObject, ObservableObject {
             userCity = settings.preferences.city
             userCountry = settings.preferences.country
             userPreferenceNotes = settings.preferences.notes
-            appSettingsMessage = nil
+            settingsSectionMessageStore = SettingsSectionMessageStore()
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -3494,7 +3557,7 @@ final class AppViewModel: NSObject, ObservableObject {
             } else {
                 nativeSessionManager?.permissionMode = settings.loop.permissionMode
             }
-            appSettingsMessage = nil
+            settingsSectionMessageStore = SettingsSectionMessageStore()
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -3736,7 +3799,7 @@ final class AppViewModel: NSObject, ObservableObject {
             newDefinition.id = makeUniqueGovernanceStatusID(existingIDs: Set(config.statuses.map(\.id)), preferredName: definition.name)
             config.statuses.append(newDefinition)
         }
-        saveGovernanceConfig(config, successMessage: "状态定义已保存。")
+        saveGovernanceConfig(config, successMessage: "状态定义已保存。", section: .statuses)
     }
 
     func canDeleteStatusDefinition(_ definition: AgentSessionStatusDefinition) -> Bool {
@@ -3757,7 +3820,7 @@ final class AppViewModel: NSObject, ObservableObject {
             }
             var config = governanceConfig
             config.statuses.removeAll { $0.id == definition.id }
-            saveGovernanceConfig(config, successMessage: "状态“\(definition.name)”已删除。")
+            saveGovernanceConfig(config, successMessage: "状态“\(definition.name)”已删除。", section: .statuses)
             if case .status(let selectedStatus) = sessionListFilter, selectedStatus.rawValue == definition.id {
                 setSessionListFilter(.all, restoreWorkspaceMode: false)
             } else {
@@ -3784,7 +3847,7 @@ final class AppViewModel: NSObject, ObservableObject {
             newDefinition.id = makeUniqueGovernanceLabelID(existingIDs: Set(config.labels.map(\.id)), preferredName: definition.name)
             config.labels.append(newDefinition)
         }
-        saveGovernanceConfig(config, successMessage: "标签定义已保存。")
+        saveGovernanceConfig(config, successMessage: "标签定义已保存。", section: .labels)
     }
 
     func deleteLabelDefinition(_ definition: AgentSessionLabelDefinition) {
@@ -3800,7 +3863,7 @@ final class AppViewModel: NSObject, ObservableObject {
 
             var config = governanceConfig
             config.labels.removeAll { $0.id == definition.id }
-            saveGovernanceConfig(config, successMessage: "标签“\(definition.name)”已删除，并已从 \(removedFromSessionCount) 个会话移除。")
+            saveGovernanceConfig(config, successMessage: "标签“\(definition.name)”已删除，并已从 \(removedFromSessionCount) 个会话移除。", section: .labels)
             if case .label(let selectedLabelID) = sessionListFilter, selectedLabelID == definition.id {
                 setSessionListFilter(.all, restoreWorkspaceMode: false)
             } else {
@@ -3844,14 +3907,14 @@ final class AppViewModel: NSObject, ObservableObject {
         String(UUID().uuidString.lowercased().prefix(8))
     }
 
-    private func saveGovernanceConfig(_ config: AppSessionGovernanceConfig, successMessage: String) {
+    private func saveGovernanceConfig(_ config: AppSessionGovernanceConfig, successMessage: String, section: ConnorSettingsSection) {
         do {
             let normalizedConfig = AppSessionGovernanceConfig(statuses: config.statuses, labels: config.labels)
             try governanceConfigRepository?.save(normalizedConfig)
             governanceConfig = normalizedConfig
             chatSessionRepository?.governanceConfig = normalizedConfig
             automationConfig = try automationRepository?.loadOrCreateDefault(governanceConfig: normalizedConfig) ?? automationConfig
-            appSettingsMessage = successMessage
+            setSettingsMessage(successMessage, for: section)
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -3932,7 +3995,7 @@ final class AppViewModel: NSObject, ObservableObject {
         do {
             try runtimeSettingsRepository?.save(.default)
             loadRuntimeSettings()
-            appSettingsMessage = "设置已恢复默认值。"
+            setSettingsMessage("设置已恢复默认值。", for: .app)
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -4356,7 +4419,7 @@ final class AppViewModel: NSObject, ObservableObject {
                     updateBackgroundTask(sessionID: sessionID, taskID: taskID, status: .succeeded, detail: "没有用户 Prompt，已使用默认标题。")
                     return
                 }
-                let title = try await generateTitleFromUserPrompts(userPrompts)
+                let title = try await generateTitleFromUserPrompts(userPrompts, sessionID: sessionID)
                 renameChatSession(sessionID, title: title)
                 updateBackgroundTask(sessionID: sessionID, taskID: taskID, status: .succeeded, detail: "已更新为：\(title)")
             } catch {
@@ -4366,13 +4429,13 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
-    private func generateTitleFromUserPrompts(_ prompts: [String]) async throws -> String {
-        let provider = Self.makeLLMProvider(settingsRepository: llmSettingsRepository)
+    private func generateTitleFromUserPrompts(_ prompts: [String], sessionID: String) async throws -> String {
+        let provider = try sessionAgentModelProvider(sessionID: sessionID)
         let joinedPrompts = prompts.enumerated().map { index, prompt in
             "用户 Prompt \(index + 1):\n\(prompt)"
         }.joined(separator: "\n\n---\n\n")
-        let prompt = """
-        你是会话标题生成器。请根据下面这个对话中所有用户 Prompt，生成一个中文会话标题。
+        let userPrompt = """
+        请根据下面这个对话中所有用户 Prompt，生成一个中文会话标题。
 
         要求：
         - 20 个汉字以内
@@ -4383,8 +4446,14 @@ final class AppViewModel: NSObject, ObservableObject {
 
         \(joinedPrompts)
         """
-        let response = try await provider.complete(prompt: prompt, context: AgentContext(query: "session-title", items: []))
-        return sanitizedSessionTitle(response.text)
+        let response = try await provider.complete(AgentModelRequest(
+            messages: [
+                AgentModelMessage(role: .system, content: "你是会话标题生成器。"),
+                AgentModelMessage(role: .user, content: userPrompt)
+            ],
+            temperature: 1.0
+        ))
+        return sanitizedSessionTitle(response.text ?? "")
     }
 
     private func sanitizedSessionTitle(_ raw: String) -> String {
@@ -4844,6 +4913,7 @@ final class AppViewModel: NSObject, ObservableObject {
             agentEventTimelinesByProcessKey.removeAll(keepingCapacity: true)
             try loadSessionCapsule(sessionID: session.id)
             try loadBackgroundTasks(sessionID: session.id)
+            _ = ensureSessionLLMOverride(sessionID: session.id)
             fallbackChatSession = session
             nativeSessionManager = makeNativeSessionManager(for: session)
             transcript = session.messages
@@ -5462,7 +5532,7 @@ final class AppViewModel: NSObject, ObservableObject {
         isSummarizingChatSession = true
         defer { isSummarizingChatSession = false }
         do {
-            let provider = Self.makeLLMProvider(settingsRepository: llmSettingsRepository)
+            let provider = try sessionLLMProvider(sessionID: selectedChatSessionID)
             let summarizer = AgentSessionSummarizer(provider: provider)
             let summary = try await chatSessionRepository.summarizeSession(id: selectedChatSessionID, using: summarizer)
             latestChatSummary = summary

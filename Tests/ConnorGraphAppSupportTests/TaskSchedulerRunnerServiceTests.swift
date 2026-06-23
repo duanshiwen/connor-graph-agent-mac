@@ -9,11 +9,7 @@ struct TaskSchedulerRunnerServiceTests {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let repository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
-        for var defaultTask in ConnorTaskDefinition.systemDefaults(now: Date(timeIntervalSince1970: 0)) {
-            defaultTask.lifecycle.status = .stopped
-            defaultTask.lifecycle.lastFinishedAt = Date(timeIntervalSince1970: 0)
-            try repository.saveTask(defaultTask)
-        }
+        try saveSystemDefaultsAsNotDue(repository: repository, now: Date(timeIntervalSince1970: 2_000))
         var task = makeRSSRefreshTask(sourceID: "feed-a", intervalSeconds: 1_800, now: Date(timeIntervalSince1970: 0))
         task.lifecycle.lastFinishedAt = Date(timeIntervalSince1970: 0)
         try repository.saveTask(task)
@@ -37,6 +33,7 @@ struct TaskSchedulerRunnerServiceTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let repository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
         let now = Date(timeIntervalSince1970: 0)
+        try saveSystemDefaultsAsNotDue(repository: repository, now: Date(timeIntervalSince1970: 2_000))
         var tasks: [ConnorTaskDefinition] = []
         var explicitMailTask = ConnorTaskDefinition(
             id: "system.mail.check-every-10-minutes",
@@ -87,12 +84,9 @@ struct TaskSchedulerRunnerServiceTests {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let repository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
-        for var defaultTask in ConnorTaskDefinition.systemDefaults(now: Date(timeIntervalSince1970: 0)) {
-            defaultTask.lifecycle.status = .stopped
-            try repository.saveTask(defaultTask)
-        }
         let start = Date(timeIntervalSince1970: 1_000)
         let now = start.addingTimeInterval(3 * 24 * 60 * 60 + 3_600)
+        try saveSystemDefaultsAsNotDue(repository: repository, now: now)
         let expectedNextRun = start.addingTimeInterval(4 * 24 * 60 * 60)
         let task = ConnorTaskDefinition(
             id: "user.daily.catch-up",
@@ -131,6 +125,16 @@ struct TaskSchedulerRunnerServiceTests {
         #expect(await calls.messages == ["Daily check-in"])
         #expect(reloaded.lifecycle.status == .active)
         #expect(reloaded.lifecycle.nextRunAt == expectedNextRun)
+    }
+
+    private func saveSystemDefaultsAsNotDue(repository: AppTaskManagementRepository, now: Date) throws {
+        for var defaultTask in ConnorTaskDefinition.systemDefaults(now: Date(timeIntervalSince1970: 0)) {
+            let interval = defaultTask.trigger.intervalSeconds ?? 600
+            defaultTask.lifecycle.status = .active
+            defaultTask.lifecycle.lastFinishedAt = now
+            defaultTask.lifecycle.nextRunAt = now.addingTimeInterval(interval)
+            try repository.saveTask(defaultTask)
+        }
     }
 
     private func makeRSSRefreshTask(sourceID: String, intervalSeconds: TimeInterval, now: Date) -> ConnorTaskDefinition {

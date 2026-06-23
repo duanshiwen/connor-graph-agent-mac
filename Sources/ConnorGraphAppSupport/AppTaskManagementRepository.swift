@@ -3,12 +3,16 @@ import ConnorGraphCore
 
 public enum AppTaskManagementError: Error, Equatable, CustomStringConvertible {
     case taskNotFound(String)
+    case cannotStopProtectedSystemTask(String)
+    case cannotRestoreProtectedSystemTask(String)
     case cannotDeleteProtectedSystemTask(String)
     case invalidTaskID(String)
 
     public var description: String {
         switch self {
         case .taskNotFound(let id): "taskNotFound: \(id)"
+        case .cannotStopProtectedSystemTask(let id): "cannotStopProtectedSystemTask: \(id)"
+        case .cannotRestoreProtectedSystemTask(let id): "cannotRestoreProtectedSystemTask: \(id)"
         case .cannotDeleteProtectedSystemTask(let id): "cannotDeleteProtectedSystemTask: \(id)"
         case .invalidTaskID(let id): "invalidTaskID: \(id)"
         }
@@ -54,6 +58,10 @@ public struct AppTaskManagementRepository: Sendable {
                 existing.metadata.scope = .global
                 existing.metadata.isRecoverable = false
                 existing.metadata.recoveryPolicy = .none
+                if existing.lifecycle.status == .stopped || existing.lifecycle.status == .deleted {
+                    existing.lifecycle.status = .active
+                    existing.lifecycle.lastErrorMessage = nil
+                }
                 existing.updatedAt = previousTarget == existing.target ? existing.updatedAt : now
                 if existing != tasks[index] {
                     tasks[index] = existing
@@ -107,7 +115,11 @@ public struct AppTaskManagementRepository: Sendable {
 
     @discardableResult
     public func stopTask(id: String, reason: String? = nil) throws -> ConnorTaskDefinition {
-        try mutateTask(id: id) { task in
+        guard let task = try loadTask(id: id) else { throw AppTaskManagementError.taskNotFound(id) }
+        if task.origin == .system && task.metadata.isProtectedSystemTask {
+            throw AppTaskManagementError.cannotStopProtectedSystemTask(id)
+        }
+        return try mutateTask(id: id) { task in
             task.lifecycle.status = .stopped
             task.lifecycle.lastErrorMessage = reason
         }
@@ -115,7 +127,11 @@ public struct AppTaskManagementRepository: Sendable {
 
     @discardableResult
     public func restoreTask(id: String) throws -> ConnorTaskDefinition {
-        try mutateTask(id: id) { task in
+        guard let task = try loadTask(id: id) else { throw AppTaskManagementError.taskNotFound(id) }
+        if task.origin == .system && task.metadata.isProtectedSystemTask {
+            throw AppTaskManagementError.cannotRestoreProtectedSystemTask(id)
+        }
+        return try mutateTask(id: id) { task in
             task.lifecycle.status = .active
             task.lifecycle.lastErrorMessage = nil
         }
