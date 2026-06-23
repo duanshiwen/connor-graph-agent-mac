@@ -1321,23 +1321,29 @@ struct AIConnectionSetupView: View {
     }
 
     private func primaryAPIKeyEntryCard(placeholder: String) -> some View {
-        VStack(alignment: .leading, spacing: SettingsListLayout.spaceM) {
-            HStack(spacing: SettingsListLayout.spaceS) {
-                Image(systemName: "key")
-                    .foregroundStyle(option.tint)
-                Text("API Key")
-                    .font(SettingsListTypography.header)
+        aiConnectionCard {
+            VStack(alignment: .leading, spacing: SettingsListLayout.spaceM) {
+                HStack(spacing: SettingsListLayout.spaceS) {
+                    Image(systemName: "key")
+                        .foregroundStyle(option.tint)
+                    Text("API Key")
+                        .font(SettingsListTypography.header)
+                }
+                apiKeyInput(placeholder: placeholder)
+                Text(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "填写 API Key 后即可验证并添加连接。" : "API Key 只会保存到本机 credential store，不会写入普通配置文件。")
+                    .font(SettingsListTypography.rowSubtitle)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            apiKeyInput(placeholder: placeholder)
-            Text(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "填写 API Key 后即可验证并添加连接。" : "API Key 只会保存到本机 credential store，不会写入普通配置文件。")
-                .font(SettingsListTypography.rowSubtitle)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(SettingsListLayout.spaceL)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .textBackgroundColor).opacity(0.5), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(AppShellColors.hairline, lineWidth: 1))
+    }
+
+    private func aiConnectionCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .padding(SettingsListLayout.spaceL)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(nsColor: .textBackgroundColor).opacity(0.5), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(AppShellColors.hairline, lineWidth: 1))
     }
 
     private var presetProviderPickerRow: some View {
@@ -1387,51 +1393,55 @@ struct AIConnectionSetupView: View {
 
     private var otherProviderAPIFields: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text(option.setupInstruction)
-                .font(SettingsListTypography.rowSubtitle)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity)
-
-            apiKeyField(placeholder: activeProviderPreset.keyPlaceholder)
-
-            aiConnectionSettingsRow(title: "服务商") {
-                Picker("服务商", selection: $selectedProviderPresetID) {
-                    ForEach(AIConnectionProviderPreset.otherProviderPresets) { preset in
-                        Text(preset.title).tag(preset.id)
+            aiConnectionCard {
+                VStack(alignment: .leading, spacing: SettingsListLayout.spaceL) {
+                    HStack(spacing: SettingsListLayout.spaceS) {
+                        Image(systemName: "slider.horizontal.3")
+                            .foregroundStyle(option.tint)
+                        Text("自定义连接")
+                            .font(SettingsListTypography.header)
                     }
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .controlSize(.large)
-                .frame(width: SettingsListLayout.pickerControlWidth, alignment: .leading)
-                .onChange(of: selectedProviderPresetID) { _, _ in applySelectedProviderPreset() }
-            }
+                    aiConnectionSettingsRow(title: "服务商") {
+                        Picker("服务商", selection: $selectedProviderPresetID) {
+                            ForEach(AIConnectionProviderPreset.otherProviderPresets) { preset in
+                                Text(preset.title).tag(preset.id)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .controlSize(.large)
+                        .frame(width: SettingsListLayout.pickerControlWidth, alignment: .leading)
+                        .onChange(of: selectedProviderPresetID) { _, _ in applySelectedProviderPreset() }
+                    }
 
-            if selectedProviderPresetID == "custom" {
-                aiConnectionSettingsRow(title: "Endpoint") {
-                    aiConnectionTextField("https://your-api-endpoint.com", text: $baseURLString)
-                }
+                    if selectedProviderPresetID == "custom" {
+                        aiConnectionSettingsRow(title: "Endpoint") {
+                            aiConnectionTextField("https://your-api-endpoint.com", text: $baseURLString)
+                        }
 
-                aiConnectionSettingsRow(title: "兼容模式", help: compatibilityModeHelpText) {
-                    Picker("兼容模式", selection: $customProtocol) {
-                        ForEach(AIConnectionCustomProtocol.allCases, id: \.self) { protocolKind in
-                            Text(protocolKind.title).tag(protocolKind)
+                        aiConnectionSettingsRow(title: "兼容模式", help: compatibilityModeHelpText) {
+                            Picker("兼容模式", selection: $customProtocol) {
+                                ForEach(AIConnectionCustomProtocol.allCases, id: \.self) { protocolKind in
+                                    Text(protocolKind.title).tag(protocolKind)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .controlSize(.large)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
-                    .pickerStyle(.segmented)
-                    .controlSize(.large)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    aiConnectionSettingsRow(title: "模型", help: modelFieldHelpText) {
+                        if selectedProviderPresetID != "custom" && !activeProviderPreset.supportedModels.isEmpty {
+                            modelMultiSelect(title: "", models: activeProviderPreset.availableModels)
+                        } else {
+                            aiConnectionTextField("例如 deepseek-v4-flash；多个模型可用逗号分隔", text: $model)
+                        }
+                    }
                 }
             }
 
-            aiConnectionSettingsRow(title: "模型", help: modelFieldHelpText) {
-                if selectedProviderPresetID != "custom" && !activeProviderPreset.supportedModels.isEmpty {
-                    modelMultiSelect(title: "", models: activeProviderPreset.availableModels)
-                } else {
-                    aiConnectionTextField("例如 deepseek-v4-flash；多个模型可用逗号分隔", text: $model)
-                }
-            }
+            primaryAPIKeyEntryCard(placeholder: activeProviderPreset.keyPlaceholder)
         }
     }
 
