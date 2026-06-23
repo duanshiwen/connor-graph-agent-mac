@@ -203,6 +203,48 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(result.hits.count == 1)
         #expect(result.hits.allSatisfy { $0.layer == "L4" })
     }
+
+    @Test func memoryOSCLIInspectorListsQueueItems() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        let now = Date(timeIntervalSince1970: 20_000)
+        try store.enqueue(MemoryOSQueueItem(kind: MemoryOSBackgroundJobKind.l1ProcessBlockToL2.rawValue, priority: 10, payloadJSON: "{}", nextRunAt: now, idempotencyKey: "queue-test", payloadHash: "hash", createdAt: now, updatedAt: now))
+        let inspector = AppMemoryOSCLIInspector(store: store)
+
+        let queue = try inspector.queue(limit: 10, status: "pending", kind: MemoryOSBackgroundJobKind.l1ProcessBlockToL2.rawValue)
+
+        #expect(queue.count == 1)
+        #expect(queue[0].values["kind"] == MemoryOSBackgroundJobKind.l1ProcessBlockToL2.rawValue)
+        #expect(queue[0].values["status"] == "pending")
+    }
+
+    @Test func memoryOSCLIInspectorReportsPipelinePolicy() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        let inspector = AppMemoryOSCLIInspector(store: store)
+
+        let policy = inspector.pipelinePolicy()
+
+        #expect(policy.l1ToL2.maxPendingAgeSeconds == 86_400)
+        #expect(policy.l2ToKnowledge.maxPendingAgeSeconds == 86_400)
+        #expect(policy.l1ToL2.minPendingCount == 100)
+        #expect(policy.l2ToKnowledge.minPendingStatementCount == 80)
+    }
+
+    @Test func memoryOSCLIInspectorPlansL1AndL2JobsThroughFacade() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        let now = Date(timeIntervalSince1970: 30_000)
+        try seedMemoryOSCLIInspectorFixture(store: store, now: now)
+        let inspector = AppMemoryOSCLIInspector(store: store)
+
+        let l1Plan = try inspector.planL1(policy: MemoryOSL1ProcessingTriggerPolicy(minPendingCount: 1, maxEventsPerBlock: 10), now: now)
+        let l2Plan = try inspector.planL2(policy: MemoryOSL2KnowledgeSynthesisTriggerPolicy(minPendingStatementCount: 1, maxStatementsPerBlock: 10), now: now)
+
+        #expect(l1Plan.plannedJobs == 1)
+        #expect(l1Plan.kind == MemoryOSBackgroundJobKind.l1ProcessBlockToL2.rawValue)
+        #expect(l1Plan.jobIDs.count == 1)
+        #expect(l2Plan.plannedJobs == 1)
+        #expect(l2Plan.kind == MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue)
+        #expect(l2Plan.jobIDs.count == 1)
+    }
 }
 
 private func makeMemoryOSCLIInspectorStore() throws -> SQLiteMemoryOSStore {
