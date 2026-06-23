@@ -102,6 +102,27 @@ private final class HealthCheckFakeSettingsStore: LLMSettingsStore, @unchecked S
     #expect(result.message.contains("secret-key") == false)
 }
 
+@Test func healthCheckerMapsAnthropicHTTPErrorToUserFacingMessage() async throws {
+    let message = AppLLMProviderHealthChecker.userFacingMessage(
+        for: AnthropicCompatibleProviderError.httpStatus(400, message: "tool_use ids were found without tool_result blocks immediately after")
+    )
+
+    #expect(message.contains("HTTP 400"))
+    #expect(message.contains("tool_use ids"))
+    #expect(message.contains("请求参数"))
+}
+
+@Test func healthCheckerExplainsAnthropicServiceUnavailableHTTPStatus() async throws {
+    let message = AppLLMProviderHealthChecker.userFacingMessage(
+        for: AnthropicCompatibleProviderError.httpStatus(503, message: "upstream unavailable")
+    )
+
+    #expect(message.contains("服务暂时不可用"))
+    #expect(message.contains("HTTP 503"))
+    #expect(message.contains("upstream unavailable"))
+    #expect(message.contains("兼容模式"))
+}
+
 @Test func healthCheckerExplainsServiceUnavailableHTTPStatus() async throws {
     let settingsRepository = AppLLMSettingsRepository(
         settingsStore: HealthCheckFakeSettingsStore(),

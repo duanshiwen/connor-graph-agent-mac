@@ -313,7 +313,7 @@ public struct URLSessionAgentSSEHTTPClient: AgentSSEHTTPClient, Sendable, Equata
         for (key, value) in request.headers { urlRequest.setValue(value, forHTTPHeaderField: key) }
         let (bytes, response) = try await URLSession.shared.bytes(for: urlRequest)
         guard let httpResponse = response as? HTTPURLResponse else { throw AnthropicCompatibleProviderError.invalidResponse }
-        guard (200..<300).contains(httpResponse.statusCode) else { throw AnthropicCompatibleProviderError.httpStatus(httpResponse.statusCode) }
+        guard (200..<300).contains(httpResponse.statusCode) else { throw AnthropicCompatibleProviderError.httpStatus(httpResponse.statusCode, message: nil) }
         return AsyncThrowingStream { continuation in
             Task {
                 do {

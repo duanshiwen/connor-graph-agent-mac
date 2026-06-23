@@ -84,6 +84,14 @@ public struct AppLLMProviderHealthChecker: Sendable {
             return userFacingHTTPStatusMessage(code: code, message: message)
         case OpenAICompatibleProviderError.missingAssistantMessage:
             return "模型提供方响应中没有助手消息。"
+        case AnthropicCompatibleProviderError.invalidResponse:
+            return "Anthropic Messages 提供方返回了无效响应。"
+        case let AnthropicCompatibleProviderError.httpStatus(code, message):
+            return userFacingHTTPStatusMessage(code: code, message: message)
+        case AnthropicCompatibleProviderError.missingAssistantMessage:
+            return "Anthropic Messages 响应中没有助手消息。"
+        case let AnthropicCompatibleProviderError.streamError(message):
+            return message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Anthropic Messages 流式响应出错。" : message
         default:
             if let localized = (error as? LocalizedError)?.errorDescription, !localized.isEmpty {
                 return localized
