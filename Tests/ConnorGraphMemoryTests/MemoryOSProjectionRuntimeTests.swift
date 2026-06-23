@@ -59,3 +59,59 @@ import ConnorGraphMemory
     #expect(!rejected.accepted)
     #expect(rejected.issues.contains { $0.code == "schema_validation_failed" })
 }
+
+@Test func memoryOSProjectionServiceBuildsL2L3AndL4BatchFromL1UnifiedProjectionArtifact() throws {
+    let now = Date(timeIntervalSince1970: 2_000)
+    let output = MemoryOSL1UnifiedProjectionOutput(
+        operationalEntities: [
+            GraphStructuredExtractedEntity(localID: "project", name: "Connor Memory OS", entityKind: .workObject, scope: .project, aliases: ["Memory OS"], summary: "Local-first memory system", evidenceSpanIDs: ["span-1"])
+        ],
+        operationalStatements: [
+            GraphStructuredExtractedStatement(explicitID: "stmt-1", subjectLocalID: "project", predicate: .hasGoal, objectLocalID: "project", statementText: "Connor Memory OS should project L1 into durable memory layers.", confidence: 0.92, evidenceSpanIDs: ["span-1"])
+        ],
+        evidenceSpans: [GraphStructuredEvidenceSpan(id: "span-1", text: "Connor Memory OS should project L1 into L2, L3, and L4.")],
+        knowledgeCandidates: [
+            MemoryOSKnowledgeCandidate(
+                id: "knowledge-1",
+                title: "Memory layer projection discipline",
+                claim: "A memory system can project one evidence-backed capture block into operational facts, reusable knowledge, and stable entities while preserving layer boundaries.",
+                category: "internal/standards",
+                knowledgeType: "standard",
+                scope: "work-object",
+                domain: "software-engineering",
+                signalAssessment: MemoryOSKnowledgeSignalAssessment(signalQualityAccepted: true, reuseScopeAccepted: true, noveltyAccepted: true, structurabilityAccepted: true, reasons: ["Reusable Memory OS design rule"]),
+                confidence: 0.91,
+                evidenceStatementIDs: ["stmt-1"],
+                evidenceSpanIDs: ["span-1"],
+                relatedEntityIDs: ["concept-1"]
+            )
+        ],
+        conceptEntities: [
+            MemoryOSExtractedConceptEntity(localID: "concept-1", name: "L1 unified projection", conceptType: "memory_architecture_pattern", domain: "software-engineering", summary: "A single L1 extraction pass that can emit L2, L3, and L4 records.", evidenceSpanIDs: ["span-1"])
+        ],
+        conceptRelations: [
+            MemoryOSExtractedConceptRelation(id: "rel-1", subjectLocalID: "concept-1", predicate: "produces", objectLocalID: "concept-1", text: "L1 unified projection produces layered memory records.", evidenceSpanIDs: ["span-1"])
+        ],
+        promotionDecisions: [MemoryOSL1PromotionDecision(candidateID: "knowledge-1", accepted: true, signalQualityAccepted: true, reuseScopeAccepted: true, noveltyAccepted: true, structurabilityAccepted: true, evidenceStatementIDs: ["stmt-1"], evidenceSpanIDs: ["span-1"])]
+    )
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    let raw = String(data: try encoder.encode(output), encoding: .utf8)!
+    let artifact = MemoryOSArtifactEnvelopeService().envelope(rawContent: raw, artifactType: "memory_os_l1_unified_projection", schemaName: "MemoryOSL1UnifiedProjectionOutput", modelID: "test-model", processingRunID: "run-1")
+    let validation = MemoryOSLLMArtifactValidator().validateStructuredExtractionArtifact(artifact)
+
+    let result = MemoryOSProjectionService().projectionBatch(from: artifact, validation: validation, now: now)
+
+    guard result.accepted, let batch = result.batch else {
+        Issue.record("Expected accepted L1 unified projection batch")
+        return
+    }
+    #expect(batch.nodes.count == 1)
+    #expect(batch.statements.count == 1)
+    #expect(batch.entities.count == 2)
+    #expect(batch.entityStatements.count == 2)
+    #expect(batch.beliefs.count == 1)
+    #expect(batch.beliefs.first?.evidenceStatementIDs == ["l2-statement:\(artifact.id):stmt-1"])
+    #expect(batch.entities.contains { $0.name == "Connor Memory OS" })
+    #expect(batch.entities.contains { $0.name == "L1 unified projection" })
+}
