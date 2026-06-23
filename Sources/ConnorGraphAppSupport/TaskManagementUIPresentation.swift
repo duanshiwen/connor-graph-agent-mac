@@ -156,10 +156,10 @@ private extension TaskManagementUICard {
             lastRunLabel: latestRun?.startedAt.ISO8601Format() ?? task.lifecycle.lastRunAt?.ISO8601Format() ?? "",
             lastErrorLabel: latestRun?.errorMessage ?? task.lifecycle.lastErrorMessage ?? "",
             rationaleLabel: task.metadata.rationale ?? "",
-            canStop: task.lifecycle.status != .stopped && task.lifecycle.status != .deleted,
-            canRestore: task.lifecycle.status == .stopped,
+            canStop: !protected && task.lifecycle.status != .stopped && task.lifecycle.status != .deleted,
+            canRestore: !protected && task.lifecycle.status == .stopped,
             canDelete: !protected,
-            deleteDisabledReason: protected ? "系统任务受保护" : nil,
+            deleteDisabledReason: protected ? "系统任务受保护，不可暂停或删除" : nil,
             severity: task.lifecycle.status.taskUISeverity(latestRun: latestRun)
         )
     }

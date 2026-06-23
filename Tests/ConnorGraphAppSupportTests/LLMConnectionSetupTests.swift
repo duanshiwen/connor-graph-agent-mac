@@ -79,9 +79,10 @@ struct LLMConnectionSetupTests {
 
         #expect(result.connection.id == "provider-1")
         let loaded = try repository.loadSettings()
-        #expect(loaded.defaultConnectionID == "provider-1")
-        #expect(loaded.defaultConnection.connectionKind == .openAICompatible)
-        #expect(loaded.defaultConnection.hasAPIKey)
+        let savedConnection = try #require(loaded.connections.first { $0.id == "provider-1" })
+        #expect(loaded.defaultConnectionID != "provider-1")
+        #expect(savedConnection.connectionKind == .openAICompatible)
+        #expect(savedConnection.hasAPIKey)
         #expect(store.values.values.contains(where: { $0.contains("Provider 1") }))
         #expect(!store.values.values.contains(where: { $0.contains("secret") }))
         #expect(try repository.apiKey(for: "provider-1") == "secret")
@@ -113,8 +114,9 @@ struct LLMConnectionSetupTests {
         #expect(result.connection.model == "")
         #expect(result.connection.selectedModel == "")
         let loaded = try repository.loadSettings()
-        #expect(loaded.defaultConnection.model == "")
-        #expect(loaded.defaultConnection.selectedModel == "")
+        let savedConnection = try #require(loaded.connections.first { $0.id == "connor-gateway-anthropic" })
+        #expect(savedConnection.model == "")
+        #expect(savedConnection.selectedModel == "")
     }
 
     @Test func openAICompatibleValidationFallsBackToFirstConfiguredModelBeforeSelectedModel() async throws {
@@ -173,6 +175,39 @@ struct LLMConnectionSetupTests {
         #expect(config.apiKeyHeaderKind == .apiKey)
         #expect(try repository.apiKey(for: "xiaomi-mimo-test") == "mimo-secret")
         #expect(!store.values.values.contains(where: { $0.contains("mimo-secret") }))
+    }
+
+    @Test func xiaomiMiMoTokenPlanUsesTokenPlanEndpointAndAPIKeyHeaderKind() async throws {
+        let store = MemoryLLMSettingsStore()
+        let credentials = MemoryCredentialStore()
+        let repository = AppLLMSettingsRepository(settingsStore: store, credentialStore: credentials)
+        let service = AppLLMConnectionSetupService(
+            settingsRepository: repository,
+            openAICompatibleHealthCheck: { config in
+                #expect(config.baseURL.absoluteString == "https://token-plan-cn.xiaomimimo.com/v1")
+                #expect(config.model == "mimo-v2.5-pro")
+                #expect(config.apiKeyHeaderKind == .apiKey)
+                return LLMProviderHealthCheckResult(ok: true, model: config.model, message: "OK")
+            }
+        )
+
+        let result = try await service.setupConnection(AppLLMConnectionSetupInput(
+            id: "xiaomi-mimo-token-plan-test",
+            kind: .openAICompatible,
+            name: "token-plan-cn.xiaomimimo",
+            baseURLString: "https://token-plan-cn.xiaomimimo.com/v1",
+            model: "mimo-v2.5-pro",
+            apiKey: "tp-secret",
+            openAIAPIKeyHeaderKind: .apiKey
+        ))
+
+        #expect(result.connection.baseURLString == "https://token-plan-cn.xiaomimimo.com/v1")
+        #expect(result.connection.extraHTTPHeaders[AppLLMSettingsRepository.openAIAPIKeyHeaderKindMetadataKey] == OpenAICompatibleAPIKeyHeaderKind.apiKey.rawValue)
+        let config = try #require(try repository.openAICompatibleConfig(connectionID: "xiaomi-mimo-token-plan-test"))
+        #expect(config.baseURL.absoluteString == "https://token-plan-cn.xiaomimimo.com/v1")
+        #expect(config.apiKeyHeaderKind == .apiKey)
+        #expect(try repository.apiKey(for: "xiaomi-mimo-token-plan-test") == "tp-secret")
+        #expect(!store.values.values.contains(where: { $0.contains("tp-secret") }))
     }
 
 

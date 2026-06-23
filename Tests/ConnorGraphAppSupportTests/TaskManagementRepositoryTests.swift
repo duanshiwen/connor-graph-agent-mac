@@ -60,41 +60,44 @@ struct TaskManagementRepositoryTests {
         #expect(tasks.contains { $0.id == "system.calendar.account.calendar-account-a.refresh" })
     }
 
-    @Test func repositoryPreservesStoppedMaterializedSystemTasksWhenDefaultsAreEmpty() throws {
+    @Test func repositoryReactivatesStoppedProtectedSystemTasksWhenDefaultsLoad() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let repository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
-        var calendar = makeProtectedCalendarRefreshTask(accountID: "calendar-account-a")
-        calendar.lifecycle.status = .stopped
-        try repository.saveTask(calendar)
+        var defaultTask = try #require(ConnorTaskDefinition.systemDefaults(now: Date(timeIntervalSince1970: 0)).first)
+        defaultTask.lifecycle.status = .stopped
+        defaultTask.lifecycle.lastErrorMessage = "legacy pause"
+        try repository.saveTask(defaultTask)
 
         let tasks = try repository.loadOrCreateDefault(now: Date(timeIntervalSince1970: 10))
-        let reloadedCalendar = try #require(tasks.first { $0.id == calendar.id })
+        let reloadedTask = try #require(tasks.first { $0.id == defaultTask.id })
 
-        #expect(tasks.contains { $0.id == "system.mail.check-every-10-minutes" } == false)
-        #expect(tasks.contains { $0.id == "system.calendar.check-every-10-minutes" } == false)
-        #expect(tasks.contains { $0.target.targetID == "rss" } == false)
-        #expect(reloadedCalendar.lifecycle.status == .stopped)
-        #expect(reloadedCalendar.target.parameters["sourceInstanceID"] == "calendar-account-a")
+        #expect(reloadedTask.lifecycle.status == .active)
+        #expect(reloadedTask.lifecycle.lastErrorMessage == nil)
         #expect(FileManager.default.fileExists(atPath: repository.taskDefinitionsURL.path))
     }
 
-    @Test func repositoryStopsRestoresAndProtectsSystemTasks() throws {
+    @Test func repositoryRejectsStopRestoreAndDeleteForProtectedSystemTasks() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let repository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
         let calendar = makeProtectedCalendarRefreshTask(accountID: "calendar-account-a")
         try repository.saveTask(calendar)
 
-        let stopped = try repository.stopTask(id: calendar.id, reason: "quiet hours")
-        #expect(stopped.lifecycle.status == .stopped)
+        #expect(throws: AppTaskManagementError.self) {
+            try repository.stopTask(id: calendar.id, reason: "quiet hours")
+        }
 
-        let restored = try repository.restoreTask(id: calendar.id)
-        #expect(restored.lifecycle.status == .active)
+        #expect(throws: AppTaskManagementError.self) {
+            try repository.restoreTask(id: calendar.id)
+        }
 
         #expect(throws: AppTaskManagementError.self) {
             try repository.deleteTask(id: calendar.id, reason: "remove")
         }
+
+        let reloaded = try #require(try repository.loadTask(id: calendar.id))
+        #expect(reloaded.lifecycle.status == .active)
     }
 
     @Test func repositoryAllowsUserAndAITaskDeletion() throws {
@@ -117,6 +120,13 @@ struct TaskManagementRepositoryTests {
         try repository.saveTask(task)
         task.name = "Changed"
         try repository.saveTask(task)
+
+        let stopped = try repository.stopTask(id: task.id, reason: "quiet hours")
+        #expect(stopped.lifecycle.status == .stopped)
+
+        let restored = try repository.restoreTask(id: task.id)
+        #expect(restored.lifecycle.status == .active)
+
         let deleted = try repository.deleteTask(id: task.id, reason: "not needed")
 
         #expect(deleted.lifecycle.status == .deleted)

@@ -5,7 +5,7 @@ import ConnorGraphAppSupport
 
 @Suite("Task Management Stack Tests")
 struct TaskManagementStackTests {
-    @Test func stackUpdatesLifecycleWithoutRunningTargetImplementation() throws {
+    @Test func stackRejectsProtectedSystemStopAndUpdatesUserLifecycleWithoutRunningTargetImplementation() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let repository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
@@ -13,12 +13,27 @@ struct TaskManagementStackTests {
         let calendar = makeProtectedCalendarRefreshTask(accountID: "calendar-account-a")
         try repository.saveTask(calendar)
 
-        let stopped = try stack.stopTask(id: calendar.id, reason: "network constrained")
-        let restored = try stack.restoreTask(id: calendar.id)
+        #expect(throws: AppTaskManagementError.self) {
+            try stack.stopTask(id: calendar.id, reason: "network constrained")
+        }
+
+        let aiTask = ConnorTaskDefinition(
+            id: "ai.watch-keyword",
+            name: "Watch keyword",
+            origin: .ai,
+            trigger: ConnorTaskTrigger(kind: .eventTriggered, eventName: "rss.item.arrived", eventFilter: ["keyword": "Connor"]),
+            target: ConnorTaskTarget(targetKind: "external.runtime", targetID: "rss", operationName: "watch"),
+            lifecycle: ConnorTaskLifecycle(status: .active),
+            metadata: ConnorTaskMetadata(createdBySessionID: "session-1", rationale: "Track Connor news")
+        )
+        try stack.saveTask(aiTask)
+
+        let stopped = try stack.stopTask(id: aiTask.id, reason: "network constrained")
+        let restored = try stack.restoreTask(id: aiTask.id)
 
         #expect(stopped.lifecycle.status == .stopped)
         #expect(restored.lifecycle.status == .active)
-        #expect(restored.target.targetKind == "source.runtime")
+        #expect(restored.target.targetKind == "external.runtime")
     }
 
     @Test func stackRejectsProtectedSystemTaskDeletionButDeletesAITask() throws {
