@@ -404,6 +404,7 @@ public struct AgentRuntimePreferenceSettings: Codable, Sendable, Equatable {
     public var preferredLanguage: String
     public var city: String
     public var country: String
+    public var genderIdentity: String
     public var birthDate: String
     public var notes: String
 
@@ -413,6 +414,7 @@ public struct AgentRuntimePreferenceSettings: Codable, Sendable, Equatable {
         preferredLanguage: String = "",
         city: String = "",
         country: String = "",
+        genderIdentity: String = "",
         birthDate: String = "",
         notes: String = ""
     ) {
@@ -421,6 +423,7 @@ public struct AgentRuntimePreferenceSettings: Codable, Sendable, Equatable {
         self.preferredLanguage = preferredLanguage
         self.city = city
         self.country = country
+        self.genderIdentity = genderIdentity
         self.birthDate = birthDate
         self.notes = notes
     }
@@ -431,6 +434,7 @@ public struct AgentRuntimePreferenceSettings: Codable, Sendable, Equatable {
         case preferredLanguage
         case city
         case country
+        case genderIdentity
         case birthDate
         case notes
     }
@@ -442,6 +446,7 @@ public struct AgentRuntimePreferenceSettings: Codable, Sendable, Equatable {
         self.preferredLanguage = try container.decodeIfPresent(String.self, forKey: .preferredLanguage) ?? ""
         self.city = try container.decodeIfPresent(String.self, forKey: .city) ?? ""
         self.country = try container.decodeIfPresent(String.self, forKey: .country) ?? ""
+        self.genderIdentity = try container.decodeIfPresent(String.self, forKey: .genderIdentity) ?? ""
         self.birthDate = try container.decodeIfPresent(String.self, forKey: .birthDate) ?? ""
         self.notes = try container.decodeIfPresent(String.self, forKey: .notes) ?? ""
     }

@@ -230,6 +230,47 @@ struct SettingsPickerRow<Selection: Hashable, Content: View>: View {
     }
 }
 
+struct SettingsBirthDatePickerRow: View {
+    var title: String
+    var subtitle: String
+    @Binding var date: Date
+    var hasValue: Bool
+    var onDateChange: (Date) -> Void
+    var onClear: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(SettingsListTypography.rowTitleSelected)
+                Text(subtitle).font(SettingsListTypography.rowCaption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            HStack(spacing: 8) {
+                DatePicker(
+                    title,
+                    selection: Binding(
+                        get: { date },
+                        set: { newValue in
+                            date = newValue
+                            onDateChange(newValue)
+                        }
+                    ),
+                    displayedComponents: [.date]
+                )
+                .labelsHidden()
+                .controlSize(.large)
+                .frame(width: SettingsListLayout.pickerControlWidth, alignment: .trailing)
+
+                Button("清除", action: onClear)
+                    .buttonStyle(.bordered)
+                    .controlSize(.regular)
+                    .disabled(!hasValue)
+            }
+        }
+        .frame(minHeight: SettingsListLayout.rowMinHeight)
+    }
+}
+
 
 struct ShortcutRow: View {
     var title: String
