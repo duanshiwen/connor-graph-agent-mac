@@ -163,13 +163,35 @@ struct CommercialTrain7NativeMailSystemTests {
         #expect(syncHealth.status == .ready)
     }
 
+    @Test func googleAndMicrosoftMailProvidersAreTreatedAsUnsupportedLegacyAccounts() async throws {
+        let credentialStore = CommercialTrain7MemoryCredentialStore()
+        let googleBinding = MailCredentialBinding(keychainService: "test.legacy", accountName: "gmail@example.com", authMode: .appPassword)
+        try credentialStore.saveSecret("app-password", service: googleBinding.keychainService, account: googleBinding.accountName)
+        let account = MailAccount(
+            id: MailAccountID(rawValue: "legacy-gmail"),
+            provider: .gmail,
+            displayName: "Legacy Gmail",
+            identities: [MailIdentity(id: MailIdentityID(rawValue: "legacy-gmail-identity"), displayName: "Legacy Gmail", address: MailAddress(email: "gmail@example.com"))],
+            incoming: MailServerEndpoint(host: "imap.example.com", port: 993, security: .tls, protocolKind: .imap),
+            credentialBinding: googleBinding
+        )
+
+        let result = try await MailIMAPInitialSyncService(
+            credentialStore: AppMailCredentialStore(credentialStore: credentialStore)
+        ).sync(account: account)
+
+        #expect(result.account.health.status == .blocked)
+        #expect(result.account.health.summary == "此邮件账户类型已不再支持")
+        #expect(result.messages.isEmpty)
+    }
+
     @Test func oauthMailAccountsAreTreatedAsUnsupportedLegacyAccounts() async throws {
         let binding = MailCredentialBinding(keychainService: "test.oauth", accountName: "legacy@example.com", authMode: .oauth2)
         let credentialStore = CommercialTrain7MemoryCredentialStore()
         try credentialStore.saveSecret("legacy-oauth-token-package", service: binding.keychainService, account: binding.accountName)
         let account = MailAccount(
             id: MailAccountID(rawValue: "legacy-oauth"),
-            provider: .microsoft365,
+            provider: .genericIMAPSMTP,
             displayName: "Legacy OAuth",
             identities: [MailIdentity(id: MailIdentityID(rawValue: "legacy-identity"), displayName: "Legacy", address: MailAddress(email: "legacy@example.com"))],
             incoming: MailServerEndpoint(host: "imap.example.com", port: 993, security: .tls, protocolKind: .imap),
