@@ -42,14 +42,10 @@ public struct MailJMAPAdapter: MailProtocolAdapter {
     public func testConnection(endpoint: MailServerEndpoint) async throws -> MailAccountHealth { MailAccountHealth(status: .degraded, summary: "JMAP reserved adapter skeleton for \(endpoint.host)") }
 }
 
-public struct MailGmailAPIAdapter: MailProtocolAdapter {
-    public var protocolKind: MailProtocolKind { .gmailAPI }
-    public init() {}
-    public func testConnection(endpoint: MailServerEndpoint) async throws -> MailAccountHealth { MailAccountHealth(status: .degraded, summary: "Gmail API reserved adapter skeleton for \(endpoint.host)") }
-}
+public enum MailProtocolSupportPolicy {
+    public static let supportedProtocols: Set<MailProtocolKind> = [.imap, .smtp, .jmap]
 
-public struct MailMicrosoftGraphAdapter: MailProtocolAdapter {
-    public var protocolKind: MailProtocolKind { .microsoftGraph }
-    public init() {}
-    public func testConnection(endpoint: MailServerEndpoint) async throws -> MailAccountHealth { MailAccountHealth(status: .degraded, summary: "Microsoft Graph reserved adapter skeleton for \(endpoint.host)") }
+    public static func isSupported(_ kind: MailProtocolKind) -> Bool {
+        supportedProtocols.contains(kind)
+    }
 }

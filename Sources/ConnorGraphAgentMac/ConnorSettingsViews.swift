@@ -208,8 +208,7 @@ private struct CalendarSourceSettingsRow: View {
     private var providerName: String {
         switch account.provider {
         case .appleICloud: "Apple iCloud"
-        case .microsoft365: "Microsoft 365"
-        case .google: "Google"
+        case .microsoft365, .google: "已停止支持的旧账户"
         case .qq: "QQ"
         case .netEase: "网易"
         case .genericIMAPSMTP: "自定义 IMAP/SMTP"
@@ -221,8 +220,7 @@ private struct CalendarSourceSettingsRow: View {
     private var iconName: String {
         switch account.provider {
         case .appleICloud: "icloud"
-        case .microsoft365: "m.circle"
-        case .google: "g.circle"
+        case .microsoft365, .google: "exclamationmark.triangle"
         case .localFixture: "calendar"
         default: "calendar"
         }
@@ -443,7 +441,7 @@ private struct MailProviderPresetSettingsRow: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
-            Text(preset == .microsoft ? "OAuth 优先" : preset == .other ? "手动" : "授权码")
+            Text(preset == .other ? "手动" : "授权码")
                 .font(SettingsListTypography.rowCaptionEmphasized)
                 .foregroundStyle(.secondary)
         }
@@ -453,7 +451,6 @@ private struct MailProviderPresetSettingsRow: View {
     private var iconName: String {
         switch preset {
         case .apple: "apple.logo"
-        case .microsoft: "m.circle"
         case .qq: "q.circle"
         case .netease: "n.circle"
         case .other: "server.rack"
