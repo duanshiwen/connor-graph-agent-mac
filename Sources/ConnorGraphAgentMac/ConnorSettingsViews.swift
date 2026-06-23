@@ -208,8 +208,7 @@ private struct CalendarSourceSettingsRow: View {
     private var providerName: String {
         switch account.provider {
         case .appleICloud: "Apple iCloud"
-        case .microsoft365: "Microsoft 365"
-        case .google: "Google"
+        case .microsoft365, .google: "已停止支持的旧账户"
         case .qq: "QQ"
         case .netEase: "网易"
         case .genericIMAPSMTP: "自定义 IMAP/SMTP"
@@ -221,8 +220,7 @@ private struct CalendarSourceSettingsRow: View {
     private var iconName: String {
         switch account.provider {
         case .appleICloud: "icloud"
-        case .microsoft365: "m.circle"
-        case .google: "g.circle"
+        case .microsoft365, .google: "exclamationmark.triangle"
         case .localFixture: "calendar"
         default: "calendar"
         }
