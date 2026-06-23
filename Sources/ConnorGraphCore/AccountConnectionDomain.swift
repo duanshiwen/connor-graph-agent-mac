@@ -18,14 +18,25 @@ public enum ConnectedAccountProviderKind: String, Codable, Sendable, Equatable, 
 
     public var defaultCapabilities: [ConnectedAccountCapabilityKind] {
         switch self {
-        case .appleICloud, .microsoft365, .google:
+        case .appleICloud:
             return [.mail, .calendar, .contacts]
+        case .microsoft365, .google:
+            return []
         case .qq, .netEase, .genericIMAPSMTP:
             return [.mail]
         case .genericCalDAVCardDAV:
             return [.calendar, .contacts]
         case .localFixture:
             return [.mail, .calendar, .contacts]
+        }
+    }
+
+    public var isSupportedForNewConnection: Bool {
+        switch self {
+        case .microsoft365, .google:
+            return false
+        case .appleICloud, .qq, .netEase, .genericIMAPSMTP, .genericCalDAVCardDAV, .localFixture:
+            return true
         }
     }
 }
