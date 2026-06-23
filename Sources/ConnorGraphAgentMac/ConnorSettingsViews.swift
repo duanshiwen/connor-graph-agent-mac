@@ -1231,7 +1231,7 @@ struct AIConnectionSetupView: View {
                     aiConnectionSettingsRow(title: "模型", help: modelFieldHelpText) {
                         aiConnectionTextField("llama3.2", text: $model)
                     }
-                    aiConnectionSettingsRow(title: "默认模型", help: "默认模型会用于首次连接校验和新会话默认选择。") {
+                    aiConnectionSettingsRow(title: "默认模型", help: "默认模型用于新会话默认选择；连接校验始终使用模型列表中的第一个有效模型。") {
                         aiConnectionTextField("llama3.2", text: $selectedModel)
                     }
                     if includeAPIKey {
@@ -1349,7 +1349,7 @@ struct AIConnectionSetupView: View {
                 aiConnectionSettingsRow(title: "模型") {
                     aiConnectionTextField("claude-sonnet-4-5", text: $model)
                 }
-                aiConnectionSettingsRow(title: "默认模型", help: "默认模型会用于首次连接校验和新会话默认选择。") {
+                aiConnectionSettingsRow(title: "默认模型", help: "默认模型用于新会话默认选择；连接校验始终使用模型列表中的第一个有效模型。") {
                     aiConnectionTextField("claude-sonnet-4-5", text: $selectedModel)
                 }
             }
@@ -1674,7 +1674,7 @@ struct AIConnectionSetupView: View {
                     syncModelListFromSelection(fallbackModels: models)
                 }
             }
-            Text("可启用多个模型；默认模型用于首次 health check 和新会话默认选择。当前将使用 \(healthCheckModelForSubmit) 校验连接。")
+            Text("可启用多个模型；连接校验使用第一个启用模型，新会话默认选择仍由默认模型决定。当前将使用 \(healthCheckModelForSubmit) 校验连接。")
                 .font(SettingsListTypography.rowTitle)
                 .foregroundStyle(.secondary)
         }
@@ -1977,28 +1977,42 @@ struct AIConnectionSetupView: View {
     private func persistedSelectedModelForSubmit(modelList: String) -> String {
         if usesAPIKeyFirstPresetFlow && !showsAdvancedConnectionSettings { return "" }
         let selected = selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
-        return selected.isEmpty ? modelList : selected
+        let configuredModels = modelIDs(in: modelList)
+        guard !configuredModels.isEmpty else { return selected }
+        if !selected.isEmpty && configuredModels.contains(selected) { return selected }
+        return configuredModels[0]
     }
 
     private var healthCheckModelForSubmit: String {
+        let firstConfiguredModel = firstConfiguredModelForSubmit()
+        if !firstConfiguredModel.isEmpty { return firstConfiguredModel }
         let selected = selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
         if !selected.isEmpty { return selected }
-        return effectiveModelListForSubmit()
-            .split(separator: ",")
-            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-            .first { !$0.isEmpty } ?? "未选择模型"
+        return "未选择模型"
     }
 
     private var modelFieldHelpText: String {
-        let modelList = effectiveModelListForSubmit()
+        let modelList = modelIDs(in: effectiveModelListForSubmit())
+        let endpointDescription = selectedProviderPresetID == "custom" ? customProtocol.modelValidationEndpointDescription : "连接校验"
+        if modelList.count > 1 {
+            return "使用服务商自己的模型 ID；已填写多个模型，Connor 将使用第一个模型 \(healthCheckModelForSubmit) 执行 \(endpointDescription)，保存后可在会话中切换其他模型。"
+        }
+        return "使用服务商自己的模型 ID；Connor 将使用 \(healthCheckModelForSubmit) 执行 \(endpointDescription)。"
+    }
+
+    private func firstConfiguredModelForSubmit() -> String {
+        firstConfiguredModel(in: effectiveModelListForSubmit())
+    }
+
+    private func firstConfiguredModel(in modelList: String) -> String {
+        modelIDs(in: modelList).first ?? ""
+    }
+
+    private func modelIDs(in modelList: String) -> [String] {
+        modelList
             .split(separator: ",")
             .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-        let endpointDescription = selectedProviderPresetID == "custom" ? customProtocol.modelValidationEndpointDescription : "连接校验"
-        if modelList.count > 1 {
-            return "使用服务商自己的模型 ID；已填写多个模型，Connor 将使用 \(healthCheckModelForSubmit) 执行 \(endpointDescription)。"
-        }
-        return "使用服务商自己的模型 ID；Connor 将使用 \(healthCheckModelForSubmit) 执行 \(endpointDescription)。"
     }
 
     private var compatibilityModeHelpText: String {
