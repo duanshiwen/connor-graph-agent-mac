@@ -66,8 +66,10 @@ import ConnorGraphAppSupport
 
     registry.registerMemoryOSTools(facade: facade)
 
+    #expect(registry.definition(named: "memory_os_get_current_user_profile") != nil)
     #expect(registry.definition(named: "memory_os_read_record") != nil)
     #expect(registry.definition(named: "memory_os_read_provenance") != nil)
+    #expect(registry.permission(named: "memory_os_get_current_user_profile") == .readGraph)
     #expect(registry.permission(named: "memory_os_read_record") == .readGraph)
     #expect(registry.permission(named: "memory_os_read_provenance") == .readGraph)
 }

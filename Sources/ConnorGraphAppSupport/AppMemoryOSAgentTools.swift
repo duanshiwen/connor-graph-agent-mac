@@ -176,6 +176,78 @@ public struct MemoryOSSearchTool: AgentTool {
     }
 }
 
+public struct MemoryOSGetCurrentUserProfileTool: AgentTool {
+    public let name = "memory_os_get_current_user_profile"
+    public let description = "Retrieve current-user personalization context from Connor Memory OS using the stable marker current_user. Returns relevant L2/L3/L4 summaries for preferences, habits, traits, projects, constraints, and interaction guidance without relying on mutable display names."
+    public let permission: AgentPermissionCapability = .readGraph
+    public let inputSchema = AgentToolInputSchema.object(properties: [
+        "limit": .number(description: "Maximum number of aggregated hits. Defaults to 12, capped at 50."),
+        "focus": .string(description: "Optional task-specific focus query to combine with current-user profile retrieval.")
+    ], required: [])
+
+    private let facade: AppMemoryOSFacade
+
+    public init(facade: AppMemoryOSFacade) { self.facade = facade }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        let limit = max(1, min(arguments.int("limit") ?? 12, 50))
+        let focus = arguments.string("focus")?.trimmingCharacters(in: .whitespacesAndNewlines)
+        var queries = [
+            "current_user current user profile",
+            "current_user user preferences user habits user personality traits user communication preferences",
+            "current_user current projects constraints interaction guidance knowledge background"
+        ]
+        if let focus, !focus.isEmpty {
+            queries.insert("current_user \(focus)", at: 0)
+        }
+
+        var rows: [[String: Any]] = []
+        var seen = Set<String>()
+        for query in queries where rows.count < limit {
+            let hits = try facade.searchMemoryOS(MemoryOSRetrievalQuery(text: query, layers: [.l2, .l3, .l4], limit: limit, depth: 1))
+            for hit in hits where rows.count < limit {
+                let key = "\(hit.layer.rawValue):\(hit.recordID)"
+                guard seen.insert(key).inserted else { continue }
+                rows.append([
+                    "layer": hit.layer.rawValue,
+                    "recordID": hit.recordID,
+                    "title": hit.title,
+                    "summary": hit.summary,
+                    "matchedText": hit.matchedText,
+                    "score": hit.score,
+                    "evidenceRefs": hit.evidenceRefs,
+                    "provenanceRefs": hit.provenanceRefs,
+                    "entityRefs": hit.entityRefs,
+                    "canReadRaw": hit.canReadRaw,
+                    "canExpandDepth": hit.canExpandDepth,
+                    "metadata": hit.metadata
+                ])
+            }
+        }
+
+        let payload: [String: Any] = [
+            "currentUserMarker": "current_user",
+            "hitCount": rows.count,
+            "queries": queries,
+            "hits": rows,
+            "identityPolicy": "Use current_user as the stable internal role marker. Treat display names and aliases as mutable metadata, never as identity keys."
+        ]
+        let json = try Self.renderJSON(payload)
+        return AgentToolResult(
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: "Retrieved current_user profile context with \(rows.count) Memory OS hit(s).",
+            contentJSON: json,
+            citations: rows.compactMap { $0["recordID"] as? String }
+        )
+    }
+
+    private static func renderJSON(_ object: [String: Any]) throws -> String {
+        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        return String(data: data, encoding: .utf8) ?? "{}"
+    }
+}
+
 public struct MemoryOSExpandL4Tool: AgentTool {
     public let name = "memory_os_expand_l4"
     public let description = "Expand a Memory OS L4 entity/concept by depth-limited traversal. Use this for multi-hop context; expansion hits are context and do not replace evidence validation."
@@ -277,6 +349,7 @@ public extension AgentToolRegistry {
     mutating func registerMemoryOSTools(facade: AppMemoryOSFacade) {
         register(MemoryOSIngestObservationTool(facade: facade))
         register(MemoryOSProjectStructuredArtifactTool(facade: facade))
+        register(MemoryOSGetCurrentUserProfileTool(facade: facade))
         register(MemoryOSSearchTool(facade: facade))
         register(MemoryOSExpandL4Tool(facade: facade))
         register(MemoryOSReadRecordTool(facade: facade))
