@@ -484,6 +484,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var userPreferenceNotes: String = ""
     @Published var userLocationStatusMessage: String?
     @Published var appSettingsMessage: String?
+    @Published var settingsSectionMessageStore = SettingsSectionMessageStore()
     @Published var pendingAttachmentRefs: [AgentMessageAttachmentRef] = []
     @Published var attachmentPreviewModel: AttachmentPreviewModel?
 
@@ -3273,6 +3274,22 @@ final class AppViewModel: NSObject, ObservableObject {
     func selectSettingsSection(_ section: ConnorSettingsSection) {
         selectedSettingsSection = section
         selection = .llmSettings
+    }
+
+    func settingsMessage(for section: ConnorSettingsSection) -> String? {
+        settingsSectionMessageStore.message(for: section)
+    }
+
+    func setSettingsMessage(_ message: String?, for section: ConnorSettingsSection) {
+        var store = settingsSectionMessageStore
+        store.set(message, for: section)
+        settingsSectionMessageStore = store
+    }
+
+    func clearSettingsMessage(for section: ConnorSettingsSection) {
+        var store = settingsSectionMessageStore
+        store.clear(for: section)
+        settingsSectionMessageStore = store
     }
 
     private func makeNativeSessionManager(for session: AgentSession) -> NativeSessionManager? {
