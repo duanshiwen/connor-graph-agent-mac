@@ -128,6 +128,29 @@ public struct AppMemoryOSCLIInspector: Sendable {
         """, columns: ["id", "stable_key", "entity_type", "name", "aliases_json", "summary", "confidence", "created_at", "updated_at", "valid_from", "metadata_json"])
     }
 
+    public func search(query: String, layers: [String] = [], limit: Int = 20) throws -> MemoryOSCLISearchResult {
+        let normalizedLayers = layers.compactMap(normalizedLayer)
+        let retrievalLayers = normalizedLayers.isEmpty
+            ? MemoryOSRetrievalLayer.allCases
+            : normalizedLayers.compactMap(MemoryOSRetrievalLayer.init(rawValue:))
+        let hits = try SQLiteMemoryOSUnifiedRetrievalService(store: store).search(MemoryOSRetrievalQuery(text: query, layers: retrievalLayers, limit: safeLimit(limit), depth: 0))
+        return MemoryOSCLISearchResult(
+            query: query,
+            hits: Array(hits.prefix(safeLimit(limit))).map { hit in
+                MemoryOSCLISearchHit(
+                    layer: hit.layer.rawValue,
+                    id: hit.recordID,
+                    title: hit.title,
+                    snippet: hit.summary.isEmpty ? hit.matchedText : hit.summary,
+                    score: hit.score,
+                    evidenceRefs: hit.evidenceRefs,
+                    provenanceRefs: hit.provenanceRefs,
+                    entityRefs: hit.entityRefs
+                )
+            }
+        )
+    }
+
     public func read(layer: String, id: String) throws -> MemoryOSCLIRecord? {
         switch normalizedLayer(layer) {
         case "L0":
@@ -234,6 +257,33 @@ public struct MemoryOSCLIRecord: Codable, Sendable, Equatable {
     public init(layer: String, record: MemoryOSCLIRow) {
         self.layer = layer
         self.record = record
+    }
+}
+
+public struct MemoryOSCLISearchResult: Codable, Sendable, Equatable {
+    public var query: String
+    public var hits: [MemoryOSCLISearchHit]
+}
+
+public struct MemoryOSCLISearchHit: Codable, Sendable, Equatable {
+    public var layer: String
+    public var id: String
+    public var title: String
+    public var snippet: String
+    public var score: Double
+    public var evidenceRefs: [String]
+    public var provenanceRefs: [String]
+    public var entityRefs: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case layer
+        case id
+        case title
+        case snippet
+        case score
+        case evidenceRefs = "evidence_refs"
+        case provenanceRefs = "provenance_refs"
+        case entityRefs = "entity_refs"
     }
 }
 
