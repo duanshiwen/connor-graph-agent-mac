@@ -161,6 +161,54 @@ private struct ResponsesCapturingSSEClient: AgentSSEHTTPClient {
     #expect(output["output"] as? String == "{\"result\":\"found\"}")
 }
 
+@Test func openAIResponsesProviderSerializesImageDataURLContentParts() async throws {
+    let body = #"{"id":"resp_1","output":[{"type":"message","content":[{"type":"output_text","text":"I can see it."}]}]}"#.data(using: .utf8)!
+    let client = ResponsesCapturingHTTPClient(responseBody: body, statusCode: 200)
+    let provider = OpenAIResponsesProvider(
+        config: OpenAIResponsesConfig(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "test-key", model: "gpt-4o-mini"),
+        httpClient: client
+    )
+
+    _ = try await provider.complete(AgentModelRequest(messages: [
+        AgentModelMessage(
+            role: .user,
+            content: "Describe this image",
+            contentParts: [.text("Describe this image"), .imageDataURL("data:image/png;base64,iVBORw0KGgo=", mimeType: "image/png", detail: "auto")]
+        )
+    ]))
+
+    let requestBody = try #require(client.captured?.body)
+    let object = try #require(try JSONSerialization.jsonObject(with: requestBody) as? [String: Any])
+    let input = try #require(object["input"] as? [[String: Any]])
+    let message = try #require(input.first)
+    let content = try #require(message["content"] as? [[String: Any]])
+    #expect(content.first?["type"] as? String == "input_text")
+    #expect(content.first?["text"] as? String == "Describe this image")
+    let imagePart = try #require(content.first { $0["type"] as? String == "input_image" })
+    #expect(imagePart["image_url"] as? String == "data:image/png;base64,iVBORw0KGgo=")
+    #expect(imagePart["detail"] as? String == "auto")
+}
+
+@Test func openAIResponsesProviderRejectsImageWhenCapabilityKernelDeniesVision() async throws {
+    let body = #"{"id":"resp_1","output":[{"type":"message","content":[{"type":"output_text","text":"OK"}]}]}"#.data(using: .utf8)!
+    let client = ResponsesCapturingHTTPClient(responseBody: body, statusCode: 200)
+    let provider = OpenAIResponsesProvider(
+        config: OpenAIResponsesConfig(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "test-key", model: "text-only-test"),
+        httpClient: client
+    )
+
+    await #expect(throws: OpenAICompatibleProviderError.unsupportedVisionInput(model: "text-only-test", reason: "Model text-only-test does not support vision input according to Connor model capability kernel.")) {
+        _ = try await provider.complete(AgentModelRequest(messages: [
+            AgentModelMessage(
+                role: .user,
+                content: "Describe this image",
+                contentParts: [.text("Describe this image"), .imageDataURL("data:image/png;base64,iVBORw0KGgo=", mimeType: "image/png")]
+            )
+        ]))
+    }
+    #expect(client.captured == nil)
+}
+
 @Test func openAIResponsesProviderStreamsTypedTextEvents() async throws {
     let sseClient = ResponsesCapturingSSEClient(frames: [
         "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n",
