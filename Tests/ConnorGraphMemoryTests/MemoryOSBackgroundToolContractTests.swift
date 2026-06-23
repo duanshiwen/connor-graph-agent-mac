@@ -25,7 +25,8 @@ struct MemoryOSBackgroundToolContractTests {
         #expect(request.prompt.contains("Available tools"))
         #expect(request.prompt.contains("memory_os_search"))
         #expect(request.prompt.contains("memory_os_read_provenance"))
-        #expect(request.prompt.contains("Use memory_os_search before emitting facts likely to duplicate existing L2"))
+        #expect(request.prompt.contains("Must use memory_os_search before deciding whether emitted L2 facts are new, duplicates, or refinements"))
+        #expect(request.prompt.contains("Record search-backed judgment"))
     }
 
     @Test func l2WorkerRequestIncludesKnowledgeSynthesisTools() throws {
@@ -47,7 +48,8 @@ struct MemoryOSBackgroundToolContractTests {
         #expect(toolNames.contains("memory_os_read_provenance"))
         #expect(request.prompt.contains("Available tools"))
         #expect(request.prompt.contains("memory_os_read_record"))
-        #expect(request.prompt.contains("Search L3 and L4 before creating L3 knowledge or L4 concepts"))
+        #expect(request.prompt.contains("Must search L2, L3 and L4 before creating, reusing, or rejecting L3 knowledge"))
+        #expect(request.prompt.contains("Record search-backed judgment"))
     }
 
     @Test func toolDescriptorsCarrySchemasAndUsagePolicies() throws {

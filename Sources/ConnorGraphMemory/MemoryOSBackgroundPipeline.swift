@@ -139,8 +139,9 @@ public struct MemoryOSL1ToL2PromptBuilder: Sendable {
         - Produce conservative L3 reusable knowledge candidates only when all promotion filters pass.
         - Produce L4 stable entities, concept entities and durable relations when entity identity or concept structure is clear.
         - Ignore noise, duplicates, transient wording and unsupported guesses.
-        - You may search existing L2 operational memory before deciding whether a fact is new, duplicate or a refinement.
-        - You may search existing L3/L4 before deciding whether a knowledge candidate or entity is novel.
+        - You must search existing L2 operational memory before deciding whether a fact is new, duplicate or a refinement.
+        - You must search existing L3/L4 before emitting any L3 knowledge candidate, L4 stable entity, L4 concept entity, or L4 durable relation.
+        - You must record search/judgment evidence in metadata or promotionDecisions: searched layers, duplicate/novelty outcome, reuse/rejection reason, and reused entity/concept ids when applicable.
         - If raw L0 material is needed, request the referenced provenance object or span instead of guessing.
         - Output only MemoryOSL1UnifiedProjectionOutput JSON.
 
@@ -190,7 +191,7 @@ public struct MemoryOSL1ToL2PromptBuilder: Sendable {
         - novelty: pass only if the material is new or materially enriches existing L3/L4 memory.
         - structurability: pass only if it can be assigned category, knowledge_type, scope, domain, and related concept entities.
         - All four filters must pass before emitting a knowledgeCandidate.
-        - promotionDecisions must record signal_quality, reuse_scope, novelty, structurability, accepted/rejected reasons and evidence ids.
+        - promotionDecisions must record signal_quality, reuse_scope, novelty, structurability, accepted/rejected reasons, evidence ids, searched layers, duplicate/novelty judgment, and reused entity/concept ids when applicable.
         - Do not promote ordinary operational facts into L3.
         - Do not promote personal preferences, one-off tasks, calendar facts, transient environment details or implementation status into L3 unless they encode a reusable rule, standard, framework, process, or decision basis.
 
@@ -208,9 +209,10 @@ public struct MemoryOSL1ToL2PromptBuilder: Sendable {
         5. If a fact refines an existing L2 fact, emit append-only refinement material rather than overwriting history.
         6. Every emitted operational fact must cite at least one capture_event_id and at least one provenance_object_id or span_id.
         7. Choose the most precise allowed predicate and the most appropriate metadata.l2_fact_type for every operational statement.
-        8. Separately evaluate whether any extracted material qualifies as L3 reusable knowledge using all four promotion filters.
-        9. Separately evaluate whether any stable L4 entity, concept entity, or durable relation should be emitted.
-        10. Do not produce unsupported guesses, broad conclusions without evidence, or knowledge/entity records that fail the rules above.
+        8. Before emitting or rejecting L3/L4 candidates, search L2/L3/L4 for related facts, existing knowledge, duplicate concepts, reusable entities and supersession context.
+        9. Separately evaluate whether any extracted material qualifies as L3 reusable knowledge using all four promotion filters, and record the search-backed judgment in promotionDecisions.
+        10. Separately evaluate whether any stable L4 entity, concept entity, or durable relation should be emitted, reused, or rejected, and record the search-backed judgment in metadata or promotionDecisions.
+        11. Do not produce unsupported guesses, broad conclusions without evidence, or knowledge/entity records that fail the rules above.
 
         L1 capture events are provided as an ordered JSON packet:
         \(Self.renderJSON(packet))
@@ -297,7 +299,8 @@ public struct MemoryOSL2ToKnowledgePromptBuilder: Sendable {
         - novelty: pass/fail plus reason
         - structurability: pass/fail plus reason
 
-        You may search L2, L3 and L4 before deciding whether to produce knowledge candidates, concept entities, concept relations or refined L2 facts.
+        You must search L2, L3 and L4 before deciding whether to produce knowledge candidates, concept entities, concept relations or refined L2 facts.
+        You must record the search-backed judgment for every accepted or rejected candidate: searched layers, duplicate/novelty outcome, reuse/rejection reason, and reused entity/concept ids when applicable.
         Do not promote ordinary personal or operational facts into L3. If a fact should be more accurate, propose refined L2 facts as append-only follow-up material rather than overwriting history.
         Output only MemoryOSKnowledgeExtractionOutput JSON for accepted knowledge candidates and L4 concepts/relations.
 
@@ -460,11 +463,11 @@ public struct MemoryOSBackgroundToolResult: Sendable, Codable, Equatable {
 
 public enum MemoryOSBackgroundToolCatalog {
     public static func l1ToL2Tools() -> [MemoryOSBackgroundToolDescriptor] {
-        [searchTool(layers: ["L2", "L4"], usage: "Use memory_os_search before emitting facts likely to duplicate existing L2 or when resolving L4 entity identity."), readProvenanceTool(), expandL4Tool(usage: "Use memory_os_expand_l4 only when L4 entity identity or relation context is necessary for grounded L2 extraction.")]
+        [searchTool(layers: ["L2", "L3", "L4"], usage: "Must use memory_os_search before deciding whether emitted L2 facts are new/refinements and before creating or reusing L3/L4 candidates; record duplicate/novelty judgment in metadata or promotionDecisions."), readProvenanceTool(), expandL4Tool(usage: "Use memory_os_expand_l4 when L4 entity identity, duplicate concept detection, or relation context is necessary for grounded L1 projection.")]
     }
 
     public static func l2ToKnowledgeTools() -> [MemoryOSBackgroundToolDescriptor] {
-        [searchTool(layers: ["L2", "L3", "L4"], usage: "Search L3 and L4 before creating L3 knowledge or L4 concepts; search L2 when related operational context is needed."), expandL4Tool(usage: "Use memory_os_expand_l4 before creating concept relations or when concept identity is ambiguous."), readRecordTool(), readProvenanceTool()]
+        [searchTool(layers: ["L2", "L3", "L4"], usage: "Must search L2, L3 and L4 before creating, reusing or rejecting L3 knowledge, L4 concepts, concept relations, or refined L2 facts; record duplicate/novelty judgment and reuse/rejection rationale."), expandL4Tool(usage: "Use memory_os_expand_l4 before creating concept relations or when concept identity is ambiguous."), readRecordTool(), readProvenanceTool()]
     }
 
     public static func promptSection(for tools: [MemoryOSBackgroundToolDescriptor], stage: String) -> String {
@@ -639,8 +642,10 @@ public struct MemoryOSBackgroundJobWorker<Executor: MemoryOSBackgroundModelExecu
         Stage-specific tool policy:
         - Prefer the provided L1 packet first.
         - Use memory_os_read_provenance when exact raw evidence is required.
-        - Use memory_os_search before emitting facts likely to duplicate existing L2.
-        - Use memory_os_expand_l4 only for entity identity ambiguity.
+        - Must use memory_os_search before deciding whether emitted L2 facts are new, duplicates, or refinements.
+        - Must use memory_os_search across L3/L4 before emitting or rejecting L3 knowledge candidates, L4 stable entities, L4 concept entities, or L4 durable relations.
+        - Record search-backed judgment in metadata or promotionDecisions: searched layers, duplicate/novelty outcome, reuse/rejection reason, and reused entity/concept ids when applicable.
+        - Use memory_os_expand_l4 for entity identity ambiguity, duplicate concept detection, or relation context.
 
         Job contract:
         - job_id: \(draft.id)
@@ -659,8 +664,9 @@ public struct MemoryOSBackgroundJobWorker<Executor: MemoryOSBackgroundModelExecu
         \(MemoryOSBackgroundToolCatalog.promptSection(for: tools, stage: "L2→Knowledge synthesis"))
 
         Stage-specific tool policy:
-        - Search L3 and L4 before creating L3 knowledge or L4 concepts.
-        - Use memory_os_expand_l4 before adding concept relations.
+        - Must search L2, L3 and L4 before creating, reusing, or rejecting L3 knowledge, L4 concepts, concept relations, or refined L2 facts.
+        - Record search-backed judgment for every accepted or rejected candidate: searched layers, duplicate/novelty outcome, reuse/rejection reason, and reused entity/concept ids when applicable.
+        - Use memory_os_expand_l4 before adding concept relations or when concept identity is ambiguous.
         - Use memory_os_read_record only when summary-level context is insufficient.
         - Use memory_os_read_provenance when original evidence must be verified.
 
