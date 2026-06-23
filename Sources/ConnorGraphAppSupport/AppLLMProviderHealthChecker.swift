@@ -23,6 +23,7 @@ public struct AppLLMProviderHealthChecker: Sendable {
     public var settingsRepository: AppLLMSettingsRepository
     public var openAIResponsesHealthCheck: OpenAIResponsesHealthCheck
     public var openAICompatibleHealthCheck: OpenAICompatibleHealthCheck
+    public var anthropicCompatibleHealthCheck: AnthropicCompatibleHealthCheck
 
     public init(
         settingsRepository: AppLLMSettingsRepository = AppLLMSettingsRepository(),
@@ -31,11 +32,15 @@ public struct AppLLMProviderHealthChecker: Sendable {
         },
         openAICompatibleHealthCheck: @escaping OpenAICompatibleHealthCheck = { config in
             try await OpenAICompatibleProvider(config: config).healthCheck()
+        },
+        anthropicCompatibleHealthCheck: @escaping AnthropicCompatibleHealthCheck = { config in
+            try await AnthropicCompatibleProvider(config: config).healthCheck()
         }
     ) {
         self.settingsRepository = settingsRepository
         self.openAIResponsesHealthCheck = openAIResponsesHealthCheck
         self.openAICompatibleHealthCheck = openAICompatibleHealthCheck
+        self.anthropicCompatibleHealthCheck = anthropicCompatibleHealthCheck
     }
 
     public func testConnection() async -> AppLLMProviderHealthCheckResult {
@@ -53,10 +58,14 @@ public struct AppLLMProviderHealthChecker: Sendable {
                     message: result.message
                 )
             case .anthropicMessages:
-                guard try settingsRepository.anthropicCompatibleConfig(connectionID: connection.id) != nil else {
+                guard let config = try settingsRepository.anthropicCompatibleConfig(connectionID: connection.id) else {
                     return AppLLMProviderHealthCheckResult(status: .notConfigured, message: "Anthropic Messages 连接缺少 API Key。")
                 }
-                return AppLLMProviderHealthCheckResult(status: .success, message: "Anthropic Messages 连接配置可用。")
+                let result = try await anthropicCompatibleHealthCheck(config)
+                return AppLLMProviderHealthCheckResult(
+                    status: result.ok ? .success : .failed,
+                    message: result.message
+                )
             case .openAICompatible:
                 guard let config = try settingsRepository.openAICompatibleConfig(connectionID: connection.id) else {
                     return AppLLMProviderHealthCheckResult(status: .notConfigured, message: "OpenAI Compatible 连接缺少 API Key。")
