@@ -1556,9 +1556,13 @@ struct AIConnectionSetupView: View {
 
             Button(action: { showAPIKey.toggle() }) {
                 Image(systemName: showAPIKey ? "eye.slash" : "eye")
+                    .font(SettingsListTypography.icon)
                     .foregroundStyle(.secondary)
+                    .frame(width: 32, height: 32)
+                    .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(showAPIKey ? "隐藏 API Key" : "显示 API Key")
             .help(showAPIKey ? "隐藏 API Key" : "显示 API Key")
         }
     }
@@ -1597,11 +1601,11 @@ struct AIConnectionSetupView: View {
             content()
         }
         .padding(.horizontal, SettingsListLayout.spaceL)
-        .frame(height: SettingsListLayout.fieldHeight)
-        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous))
+        .frame(minHeight: SettingsListLayout.fieldHeight)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous)
-                .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+                .stroke(Color.secondary.opacity(0.14), lineWidth: 1)
         )
     }
 
@@ -1610,6 +1614,8 @@ struct AIConnectionSetupView: View {
             TextField(placeholder, text: text)
                 .textFieldStyle(.plain)
                 .font(SettingsListTypography.rowTitle)
+                .lineLimit(1)
+                .textSelection(.enabled)
         }
     }
 
