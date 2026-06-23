@@ -213,6 +213,26 @@ private enum AnthropicFixtures {
     #expect(requestTools.first?["input_schema"] != nil)
 }
 
+@Test func anthropicToolRequestOmitsDefaultToolChoiceAuto() async throws {
+    let client = AnthropicCapturingHTTPClient()
+    let provider = AnthropicCompatibleProvider(
+        config: AnthropicCompatibleConfig(baseURL: URL(string: "https://api.anthropic.com")!, apiKey: "sk-ant-test", model: "claude-sonnet-test"),
+        httpClient: client
+    )
+    let tools = [AgentToolDefinition(
+        name: "graph_search",
+        description: "Search graph",
+        inputSchema: .object(properties: ["query": .string(description: "Query")], required: ["query"])
+    )]
+
+    _ = try await provider.complete(AgentModelRequest(messages: [AgentModelMessage(role: .user, content: "Find memory")], tools: tools))
+
+    let body = try #require(client.storage.capturedRequest?.body)
+    let object = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+    #expect(object["tools"] != nil)
+    #expect(object["tool_choice"] == nil)
+}
+
 @Test func anthropicParsesToolUseResponseIntoAgentToolCalls() async throws {
     let client = AnthropicCapturingHTTPClient(body: AnthropicFixtures.toolUseResponse)
     let provider = AnthropicCompatibleProvider(
@@ -256,6 +276,60 @@ private enum AnthropicFixtures {
     #expect(content.first?["tool_use_id"] as? String == "toolu_123")
 }
 
+@Test func anthropicMultipleToolResultsAreGroupedIntoSingleImmediateUserMessage() async throws {
+    let client = AnthropicCapturingHTTPClient()
+    let provider = AnthropicCompatibleProvider(
+        config: AnthropicCompatibleConfig(baseURL: URL(string: "https://api.anthropic.com")!, apiKey: "sk-ant-test", model: "claude-sonnet-test"),
+        httpClient: client
+    )
+
+    _ = try await provider.complete(AgentModelRequest(messages: [
+        AgentModelMessage(role: .user, content: "Search and fetch memory"),
+        AgentModelMessage(role: .assistant, content: "", toolCalls: [
+            AgentToolCall(id: "toolu_search", name: "graph_search", argumentsJSON: #"{"query":"memory"}"#),
+            AgentToolCall(id: "toolu_fetch", name: "graph_fetch", argumentsJSON: #"{"id":"node-1"}"#)
+        ]),
+        AgentModelMessage(role: .tool, content: #"{"hits":["node-1"]}"#, toolCallID: "toolu_search", name: "graph_search"),
+        AgentModelMessage(role: .tool, content: #"{"id":"node-1","title":"Memory"}"#, toolCallID: "toolu_fetch", name: "graph_fetch")
+    ]))
+
+    let body = try #require(client.storage.capturedRequest?.body)
+    let object = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+    let messages = try #require(object["messages"] as? [[String: Any]])
+    #expect(messages.map { $0["role"] as? String } == ["user", "assistant", "user"])
+    let toolResultMessage = try #require(messages.last)
+    let content = try #require(toolResultMessage["content"] as? [[String: Any]])
+    #expect(content.map { $0["type"] as? String } == ["tool_result", "tool_result"])
+    #expect(content.map { $0["tool_use_id"] as? String } == ["toolu_search", "toolu_fetch"])
+}
+
+@Test func anthropicToolResultBlocksPrecedeTextWhenAdjacentUserMessageIsMerged() async throws {
+    let client = AnthropicCapturingHTTPClient()
+    let provider = AnthropicCompatibleProvider(
+        config: AnthropicCompatibleConfig(baseURL: URL(string: "https://api.anthropic.com")!, apiKey: "sk-ant-test", model: "claude-sonnet-test"),
+        httpClient: client
+    )
+
+    _ = try await provider.complete(AgentModelRequest(messages: [
+        AgentModelMessage(role: .user, content: "Search, then continue with this clarification."),
+        AgentModelMessage(role: .assistant, content: "", toolCalls: [
+            AgentToolCall(id: "toolu_search", name: "graph_search", argumentsJSON: #"{"query":"memory"}"#)
+        ]),
+        AgentModelMessage(role: .tool, content: #"{"hits":[]}"#, toolCallID: "toolu_search", name: "graph_search"),
+        AgentModelMessage(role: .user, content: "Use those search results before answering.")
+    ]))
+
+    let body = try #require(client.storage.capturedRequest?.body)
+    let object = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+    let messages = try #require(object["messages"] as? [[String: Any]])
+    #expect(messages.map { $0["role"] as? String } == ["user", "assistant", "user"])
+    let mergedUserMessage = try #require(messages.last)
+    let content = try #require(mergedUserMessage["content"] as? [[String: Any]])
+    #expect(content.map { $0["type"] as? String } == ["tool_result", "text"])
+    #expect(content.first?["tool_use_id"] as? String == "toolu_search")
+    #expect(content.last?["text"] as? String == "Use those search results before answering.")
+}
+
 @Test func anthropicHealthCheckReturnsOKWhenProviderRespondsWithText() async throws {
     let client = AnthropicCapturingHTTPClient(body: AnthropicFixtures.textResponse)
     let provider = AnthropicCompatibleProvider(
@@ -269,6 +343,24 @@ private enum AnthropicFixtures {
     #expect(result.model == "claude-sonnet-test")
 }
 
+@Test func anthropicHTTPErrorPreservesSafeResponseMessage() async throws {
+    let client = AnthropicCapturingHTTPClient(statusCode: 400, body: #"{"error":{"type":"invalid_request_error","message":"tool_use ids were found without tool_result blocks immediately after"}}"#)
+    let provider = AnthropicCompatibleProvider(
+        config: AnthropicCompatibleConfig(baseURL: URL(string: "https://api.anthropic.com")!, apiKey: "bad-key", model: "claude-sonnet-test"),
+        httpClient: client
+    )
+
+    do {
+        _ = try await provider.healthCheck()
+        Issue.record("Expected health check to throw an HTTP status error")
+    } catch let AnthropicCompatibleProviderError.httpStatus(code, message) {
+        #expect(code == 400)
+        #expect(message?.contains("tool_use ids") == true)
+    } catch {
+        Issue.record("Unexpected error: \(error)")
+    }
+}
+
 @Test func anthropicHealthCheckThrowsOnHTTPFailure() async throws {
     let client = AnthropicCapturingHTTPClient(statusCode: 401, body: #"{"error":{"message":"unauthorized"}}"#)
     let provider = AnthropicCompatibleProvider(
@@ -276,7 +368,7 @@ private enum AnthropicFixtures {
         httpClient: client
     )
 
-    await #expect(throws: AnthropicCompatibleProviderError.httpStatus(401)) {
+    await #expect(throws: AnthropicCompatibleProviderError.httpStatus(401, message: "unauthorized")) {
         _ = try await provider.healthCheck()
     }
 }
