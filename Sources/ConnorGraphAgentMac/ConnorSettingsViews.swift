@@ -1212,15 +1212,72 @@ struct AIConnectionSetupView: View {
             } else if option.id == "other-provider" {
                 otherProviderAPIFields
             } else {
-                VStack(spacing: 16) {
-                    Text(option.setupInstruction)
-                        .font(SettingsListTypography.rowSubtitle)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                    openAICompatibleFields(includeAPIKey: true)
+                directConnectionFields(includeAPIKey: true)
+            }
+        }
+    }
+
+    private func directConnectionFields(includeAPIKey: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 18) {
+            aiConnectionInstructionCard
+            aiConnectionCard {
+                VStack(alignment: .leading, spacing: SettingsListLayout.spaceL) {
+                    aiConnectionSettingsRow(title: "连接名称") {
+                        aiConnectionTextField(option.connectionName, text: $connectionName)
+                    }
+                    aiConnectionSettingsRow(title: "Endpoint", help: localEndpointHelpText) {
+                        aiConnectionTextField("http://localhost:11434/v1", text: $baseURLString)
+                    }
+                    aiConnectionSettingsRow(title: "模型", help: modelFieldHelpText) {
+                        aiConnectionTextField("llama3.2", text: $model)
+                    }
+                    aiConnectionSettingsRow(title: "默认模型", help: "默认模型会用于首次连接校验和新会话默认选择。") {
+                        aiConnectionTextField("llama3.2", text: $selectedModel)
+                    }
+                    if includeAPIKey {
+                        aiConnectionSettingsRow(title: "API Key", help: apiKeyHelpText) {
+                            apiKeyInput(placeholder: option.id == "local-model" ? "本地模型可留空" : "API Key")
+                        }
+                    }
                 }
             }
         }
+    }
+
+    private var aiConnectionInstructionCard: some View {
+        HStack(alignment: .top, spacing: SettingsListLayout.spaceM) {
+            Image(systemName: "checklist.checked")
+                .font(SettingsListTypography.largeIcon)
+                .foregroundStyle(option.tint)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(option.setupInstruction)
+                    .font(SettingsListTypography.rowTitleSelected)
+                    .foregroundStyle(.primary)
+                Text("按 Tab 键会依次移动到下一个字段；验证成功后，凭据只保存到本机。")
+                    .font(SettingsListTypography.rowSubtitle)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(SettingsListLayout.spaceL)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(AppShellColors.hairline, lineWidth: 1))
+    }
+
+    private var localEndpointHelpText: String {
+        if option.id == "local-model" {
+            return "Ollama 默认地址通常是 http://localhost:11434/v1；本地回环地址允许不填写 API Key。"
+        }
+        return "填写兼容服务的 /v1 endpoint。"
+    }
+
+    private var apiKeyHelpText: String {
+        if option.id == "local-model" {
+            return "本地模型通常可以留空；如果你的本地网关启用了认证，再填写对应 Key。"
+        }
+        return "API Key 会保存到本机 credential store，不会写入普通配置文件。"
     }
 
     private var githubCopilotAutomaticConfigurationSummary: some View {
