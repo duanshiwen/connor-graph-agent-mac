@@ -470,6 +470,59 @@ public struct MemoryOSKnowledgeExtractionOutput: Codable, Sendable, Equatable {
     }
 }
 
+public struct MemoryOSL1PromotionDecision: Codable, Sendable, Equatable, Identifiable {
+    public var id: String { candidateID }
+    public var candidateID: String
+    public var accepted: Bool
+    public var signalQualityAccepted: Bool
+    public var reuseScopeAccepted: Bool
+    public var noveltyAccepted: Bool
+    public var structurabilityAccepted: Bool
+    public var reasons: [String]
+    public var evidenceStatementIDs: [String]
+    public var evidenceSpanIDs: [String]
+    public var metadata: [String: String]
+
+    public init(candidateID: String, accepted: Bool, signalQualityAccepted: Bool = false, reuseScopeAccepted: Bool = false, noveltyAccepted: Bool = false, structurabilityAccepted: Bool = false, reasons: [String] = [], evidenceStatementIDs: [String] = [], evidenceSpanIDs: [String] = [], metadata: [String: String] = [:]) {
+        self.candidateID = candidateID
+        self.accepted = accepted
+        self.signalQualityAccepted = signalQualityAccepted
+        self.reuseScopeAccepted = reuseScopeAccepted
+        self.noveltyAccepted = noveltyAccepted
+        self.structurabilityAccepted = structurabilityAccepted
+        self.reasons = reasons
+        self.evidenceStatementIDs = evidenceStatementIDs
+        self.evidenceSpanIDs = evidenceSpanIDs
+        self.metadata = metadata
+    }
+}
+
+public struct MemoryOSL1UnifiedProjectionOutput: Codable, Sendable, Equatable {
+    public var operationalEntities: [GraphStructuredExtractedEntity]
+    public var operationalStatements: [GraphStructuredExtractedStatement]
+    public var evidenceSpans: [GraphStructuredEvidenceSpan]
+    public var knowledgeCandidates: [MemoryOSKnowledgeCandidate]
+    public var conceptEntities: [MemoryOSExtractedConceptEntity]
+    public var conceptRelations: [MemoryOSExtractedConceptRelation]
+    public var promotionDecisions: [MemoryOSL1PromotionDecision]
+    public var warnings: [GraphStructuredExtractionWarning]
+    public var confidence: Double?
+    public var metadata: [String: String]
+
+    public init(operationalEntities: [GraphStructuredExtractedEntity] = [], operationalStatements: [GraphStructuredExtractedStatement] = [], evidenceSpans: [GraphStructuredEvidenceSpan] = [], knowledgeCandidates: [MemoryOSKnowledgeCandidate] = [], conceptEntities: [MemoryOSExtractedConceptEntity] = [], conceptRelations: [MemoryOSExtractedConceptRelation] = [], promotionDecisions: [MemoryOSL1PromotionDecision] = [], warnings: [GraphStructuredExtractionWarning] = [], confidence: Double? = nil, metadata: [String: String] = [:]) {
+        self.operationalEntities = operationalEntities
+        self.operationalStatements = operationalStatements
+        self.evidenceSpans = evidenceSpans
+        self.knowledgeCandidates = knowledgeCandidates
+        self.conceptEntities = conceptEntities
+        self.conceptRelations = conceptRelations
+        self.promotionDecisions = promotionDecisions
+        self.warnings = warnings
+        self.confidence = confidence
+        self.metadata = metadata
+    }
+}
+
 public struct MemoryOSBelief: Codable, Sendable, Equatable, Identifiable {
     public var id: String
     public var topic: String
