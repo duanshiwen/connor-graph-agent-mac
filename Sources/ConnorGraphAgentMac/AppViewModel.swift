@@ -1972,9 +1972,9 @@ final class AppViewModel: NSObject, ObservableObject {
         selectedMailMessageID = nil
         isPresentingAddMailAccountSheet = false
         if syncResult.account.health.status == .ready {
-            appSettingsMessage = "已添加邮件账户：\(displayName)，首次同步完成，拉取 \(syncResult.messages.count) 封邮件。"
+            setSettingsMessage("已添加邮件账户：\(displayName)，首次同步完成，拉取 \(syncResult.messages.count) 封邮件。", for: .mail)
         } else {
-            appSettingsMessage = "已添加邮件账户：\(displayName)，但首次同步未完成：\(syncResult.account.health.summary)。"
+            setSettingsMessage("已添加邮件账户：\(displayName)，但首次同步未完成：\(syncResult.account.health.summary)。", for: .mail)
         }
         errorMessage = nil
     }
@@ -2103,7 +2103,6 @@ final class AppViewModel: NSObject, ObservableObject {
             try await reconcileCalendarAccountRefreshTasks()
             reloadTaskManagementPresentation()
             calendarSyncMessage = "已同步本机日历：\(snapshot.collections.count) 个日历，\(snapshot.events.count) 个日程"
-            appSettingsMessage = calendarSyncMessage
             errorMessage = nil
             isSyncingSystemCalendar = false
             return true
@@ -2133,7 +2132,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 reloadContactsBrowserPresentation()
                 await persistContactRecords()
                 contactsSyncMessage = "已同步系统通讯录：\(records.count) 个联系人"
-                appSettingsMessage = contactsSyncMessage
+                setSettingsMessage(contactsSyncMessage, for: .preferences)
                 errorMessage = nil
             } catch {
                 let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -2201,7 +2200,6 @@ final class AppViewModel: NSObject, ObservableObject {
         isPresentingAddCalendarSourceSheet = false
         reloadCalendarBrowserPresentation()
         calendarSyncMessage = "已添加日历源：\(resolvedDisplayName)"
-        appSettingsMessage = calendarSyncMessage
         Task { @MainActor in
             await persistCalendarSnapshot()
             do {
@@ -2227,7 +2225,6 @@ final class AppViewModel: NSObject, ObservableObject {
         }
         reloadCalendarBrowserPresentation()
         calendarSyncMessage = "已移除日历源：\(account.displayName)"
-        appSettingsMessage = calendarSyncMessage
         Task { @MainActor in
             await persistCalendarSnapshot()
             do {
@@ -3403,7 +3400,7 @@ final class AppViewModel: NSObject, ObservableObject {
             if activeChatSession.id == sessionID || selectedChatSessionID == sessionID {
                 rebuildNativeSessionManagerForActiveSession()
             }
-            appSettingsMessage = "当前会话 Workspace 已保存。"
+            setSettingsMessage("当前会话 Workspace 已保存。", for: .app)
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -3466,7 +3463,7 @@ final class AppViewModel: NSObject, ObservableObject {
             userCity = settings.preferences.city
             userCountry = settings.preferences.country
             userPreferenceNotes = settings.preferences.notes
-            appSettingsMessage = nil
+            settingsSectionMessageStore = SettingsSectionMessageStore()
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -3511,7 +3508,7 @@ final class AppViewModel: NSObject, ObservableObject {
             } else {
                 nativeSessionManager?.permissionMode = settings.loop.permissionMode
             }
-            appSettingsMessage = nil
+            settingsSectionMessageStore = SettingsSectionMessageStore()
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -3753,7 +3750,7 @@ final class AppViewModel: NSObject, ObservableObject {
             newDefinition.id = makeUniqueGovernanceStatusID(existingIDs: Set(config.statuses.map(\.id)), preferredName: definition.name)
             config.statuses.append(newDefinition)
         }
-        saveGovernanceConfig(config, successMessage: "状态定义已保存。")
+        saveGovernanceConfig(config, successMessage: "状态定义已保存。", section: .statuses)
     }
 
     func canDeleteStatusDefinition(_ definition: AgentSessionStatusDefinition) -> Bool {
@@ -3774,7 +3771,7 @@ final class AppViewModel: NSObject, ObservableObject {
             }
             var config = governanceConfig
             config.statuses.removeAll { $0.id == definition.id }
-            saveGovernanceConfig(config, successMessage: "状态“\(definition.name)”已删除。")
+            saveGovernanceConfig(config, successMessage: "状态“\(definition.name)”已删除。", section: .statuses)
             if case .status(let selectedStatus) = sessionListFilter, selectedStatus.rawValue == definition.id {
                 setSessionListFilter(.all, restoreWorkspaceMode: false)
             } else {
@@ -3801,7 +3798,7 @@ final class AppViewModel: NSObject, ObservableObject {
             newDefinition.id = makeUniqueGovernanceLabelID(existingIDs: Set(config.labels.map(\.id)), preferredName: definition.name)
             config.labels.append(newDefinition)
         }
-        saveGovernanceConfig(config, successMessage: "标签定义已保存。")
+        saveGovernanceConfig(config, successMessage: "标签定义已保存。", section: .labels)
     }
 
     func deleteLabelDefinition(_ definition: AgentSessionLabelDefinition) {
@@ -3817,7 +3814,7 @@ final class AppViewModel: NSObject, ObservableObject {
 
             var config = governanceConfig
             config.labels.removeAll { $0.id == definition.id }
-            saveGovernanceConfig(config, successMessage: "标签“\(definition.name)”已删除，并已从 \(removedFromSessionCount) 个会话移除。")
+            saveGovernanceConfig(config, successMessage: "标签“\(definition.name)”已删除，并已从 \(removedFromSessionCount) 个会话移除。", section: .labels)
             if case .label(let selectedLabelID) = sessionListFilter, selectedLabelID == definition.id {
                 setSessionListFilter(.all, restoreWorkspaceMode: false)
             } else {
@@ -3861,14 +3858,14 @@ final class AppViewModel: NSObject, ObservableObject {
         String(UUID().uuidString.lowercased().prefix(8))
     }
 
-    private func saveGovernanceConfig(_ config: AppSessionGovernanceConfig, successMessage: String) {
+    private func saveGovernanceConfig(_ config: AppSessionGovernanceConfig, successMessage: String, section: ConnorSettingsSection) {
         do {
             let normalizedConfig = AppSessionGovernanceConfig(statuses: config.statuses, labels: config.labels)
             try governanceConfigRepository?.save(normalizedConfig)
             governanceConfig = normalizedConfig
             chatSessionRepository?.governanceConfig = normalizedConfig
             automationConfig = try automationRepository?.loadOrCreateDefault(governanceConfig: normalizedConfig) ?? automationConfig
-            appSettingsMessage = successMessage
+            setSettingsMessage(successMessage, for: section)
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -3949,7 +3946,7 @@ final class AppViewModel: NSObject, ObservableObject {
         do {
             try runtimeSettingsRepository?.save(.default)
             loadRuntimeSettings()
-            appSettingsMessage = "设置已恢复默认值。"
+            setSettingsMessage("设置已恢复默认值。", for: .app)
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
