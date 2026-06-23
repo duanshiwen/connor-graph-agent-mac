@@ -168,6 +168,41 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(try inspector.read(layer: "belief", id: "belief-1")?.layer == "L3")
         #expect(try inspector.read(layer: "entity", id: "entity-1")?.layer == "L4")
     }
+
+    @Test func memoryOSCLIInspectorSearchesL2Statements() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        try seedMemoryOSCLIInspectorFixture(store: store)
+        let inspector = AppMemoryOSCLIInspector(store: store)
+
+        let result = try inspector.search(query: "Connor", layers: ["L2"], limit: 10)
+
+        #expect(result.query == "Connor")
+        #expect(result.hits.count == 1)
+        #expect(result.hits[0].layer == "L2")
+        #expect(result.hits[0].id == "stmt-1")
+    }
+
+    @Test func memoryOSCLIInspectorSearchesAcrossL3AndL4() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        try seedMemoryOSCLIInspectorFixture(store: store)
+        let inspector = AppMemoryOSCLIInspector(store: store)
+
+        let result = try inspector.search(query: "Memory", layers: ["L3", "L4"], limit: 10)
+
+        #expect(result.hits.map(\.layer).contains("L3"))
+        #expect(result.hits.map(\.layer).contains("L4"))
+    }
+
+    @Test func memoryOSCLIInspectorSearchRespectsLayerFilterAndLimit() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        try seedMemoryOSCLIInspectorFixture(store: store)
+        let inspector = AppMemoryOSCLIInspector(store: store)
+
+        let result = try inspector.search(query: "Memory", layers: ["L4"], limit: 1)
+
+        #expect(result.hits.count == 1)
+        #expect(result.hits.allSatisfy { $0.layer == "L4" })
+    }
 }
 
 private func makeMemoryOSCLIInspectorStore() throws -> SQLiteMemoryOSStore {
