@@ -168,6 +168,62 @@ private struct FakeAgentHTTPClient: AgentHTTPClient, Sendable {
     #expect(connection.models.map(\.id) == ["gpt-current", "gpt-local", "gpt-a", "gpt-z"])
 }
 
+@Test func modelCatalogDoesNotInjectConfiguredModelsIntoLiveOpenAICompatibleCatalog() async throws {
+    let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
+    let connection = AppLLMConnectionConfig(
+        id: "connor-gateway-anthropic",
+        name: "Connor AI Gateway · Anthropic",
+        providerMode: .openAICompatible,
+        connectionKind: .openAICompatible,
+        baseURLString: "https://cnai.connor.run/v1",
+        model: "anthropic/claude-sonnet-4",
+        selectedModel: "anthropic/claude-sonnet-4"
+    )
+    try repository.save(
+        settings: AppLLMSettings(connections: [connection], defaultConnectionID: connection.id),
+        apiKey: "secret-key"
+    )
+    let body = #"{"data":[{"id":"deepseek-v4-flash"},{"id":"deepseek-v4-pro"},{"id":"gpt-5.5"}]}"#.data(using: .utf8)!
+    let catalog = AppLLMModelCatalog(
+        settingsRepository: repository,
+        httpClient: FakeAgentHTTPClient(response: AgentHTTPResponse(statusCode: 200, body: body))
+    )
+
+    let connections = await catalog.loadConnections()
+    let loadedConnection = try #require(connections.first)
+
+    #expect(loadedConnection.isLiveCatalog == true)
+    #expect(loadedConnection.models.map(\.id) == ["deepseek-v4-flash", "deepseek-v4-pro", "gpt-5.5"])
+}
+
+@Test func anthropicCompatibleCatalogDoesNotHardcodeSonnetFallbackWhenNoModelConfigured() async throws {
+    let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
+    let connection = AppLLMConnectionConfig(
+        id: "anthropic-compatible-empty",
+        name: "Anthropic Compatible",
+        providerMode: .anthropicMessages,
+        connectionKind: .anthropicCompatible,
+        baseURLString: "https://api.anthropic.com/v1",
+        model: "",
+        selectedModel: ""
+    )
+    try repository.save(
+        settings: AppLLMSettings(connections: [connection], defaultConnectionID: connection.id),
+        apiKey: "secret-key"
+    )
+    let catalog = AppLLMModelCatalog(
+        settingsRepository: repository,
+        httpClient: FakeAgentHTTPClient(response: AgentHTTPResponse(statusCode: 200, body: Data()))
+    )
+
+    let connections = await catalog.loadConnections()
+    let loadedConnection = try #require(connections.first)
+
+    #expect(loadedConnection.providerMode == .anthropicMessages)
+    #expect(loadedConnection.isLiveCatalog == false)
+    #expect(loadedConnection.models.isEmpty)
+}
+
 @Test func modelCatalogFallsBackToConfiguredModelWhenOpenAIKeyMissing() async throws {
     let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
     try repository.save(
