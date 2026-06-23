@@ -1462,6 +1462,12 @@ struct AIConnectionSetupView: View {
                     .font(SettingsListTypography.rowSubtitle)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                if let warning = xiaomiMiMoKeyEndpointMismatchWarning {
+                    Label(warning, systemImage: "exclamationmark.triangle")
+                        .font(SettingsListTypography.rowSubtitle)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }
@@ -1734,6 +1740,11 @@ struct AIConnectionSetupView: View {
         if option.id == "china-provider" || option.id == "other-provider" { return activeProviderPreset.keyPlaceholder }
         if option.providerMode == .anthropicMessages { return "sk-ant-..." }
         return "sk-..."
+    }
+
+    private var xiaomiMiMoKeyEndpointMismatchWarning: String? {
+        guard isXiaomiMiMoOption else { return nil }
+        return xiaomiMiMoConnectionMode.keyEndpointMismatchWarning(for: apiKey)
     }
 
     private var compatibilitySummaryTitle: String {
