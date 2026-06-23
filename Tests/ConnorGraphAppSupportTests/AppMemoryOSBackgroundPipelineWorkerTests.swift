@@ -87,15 +87,19 @@ private final class StaticMemoryOSBackgroundExecutor: MemoryOSBackgroundModelExe
 }
 
 private func encodedGraphArtifact() throws -> String {
-    let output = GraphStructuredExtractionOutput(
-        entities: [
+    let output = MemoryOSL1UnifiedProjectionOutput(
+        operationalEntities: [
             GraphStructuredExtractedEntity(localID: "person-1", name: "诗闻", entityKind: .personObject, scope: .personal, confidence: 0.95, evidenceSpanIDs: ["span-1"]),
             GraphStructuredExtractedEntity(localID: "project-1", name: "Connor Memory OS", entityKind: .workObject, scope: .project, confidence: 0.93, evidenceSpanIDs: ["span-1"])
         ],
-        statements: [
+        operationalStatements: [
             GraphStructuredExtractedStatement(explicitID: "stmt-1", subjectLocalID: "person-1", predicate: .relatedTo, objectLocalID: "project-1", statementText: "诗闻正在推进 Connor Memory OS。", confidence: 0.91, evidenceSpanIDs: ["span-1"])
         ],
-        evidenceSpans: [GraphStructuredEvidenceSpan(id: "span-1", text: "诗闻正在推进 Connor Memory OS。")]
+        evidenceSpans: [GraphStructuredEvidenceSpan(id: "span-1", text: "诗闻正在推进 Connor Memory OS。")],
+        knowledgeCandidates: [],
+        conceptEntities: [],
+        conceptRelations: [],
+        promotionDecisions: []
     )
     let encoder = JSONEncoder()
     encoder.dateEncodingStrategy = .iso8601
