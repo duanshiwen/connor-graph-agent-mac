@@ -1865,10 +1865,11 @@ struct AIConnectionSetupView: View {
                 let connectionKind: AppLLMConnectionKind = option.providerMode == .openAIResponses ? .openAIResponses : (option.providerMode == .anthropicMessages || (usesProviderPreset && customProtocol == .anthropicCompatible) ? .anthropicCompatible : .openAICompatible)
                 let submittedModelList = persistedModelListForSubmit()
                 let submittedSelectedModel = persistedSelectedModelForSubmit(modelList: submittedModelList)
+                let submittedName = submittedConnectionNameForSubmit()
                 let input = AppLLMConnectionSetupInput(
                     id: nil,
                     kind: connectionKind,
-                    name: connectionName,
+                    name: submittedName,
                     baseURLString: baseURLString,
                     model: submittedModelList,
                     selectedModel: submittedSelectedModel,
@@ -1894,8 +1895,8 @@ struct AIConnectionSetupView: View {
 
     private func initializeDrafts() {
         guard connectionName.isEmpty else { return }
-        connectionName = option.connectionName
         baseURLString = option.baseURLString
+        connectionName = defaultDraftConnectionName(endpoint: option.baseURLString, fallback: option.connectionName)
         model = option.model
         selectedModel = option.selectedModel
         selectedModelIDs = Set(option.modelOptionsFallback)
@@ -1915,15 +1916,15 @@ struct AIConnectionSetupView: View {
     private func applySelectedProviderPreset() {
         let preset = activeProviderPreset
         if preset.id != "custom" {
-            connectionName = preset.title
             baseURLString = preset.endpoint
+            connectionName = defaultDraftConnectionName(endpoint: preset.endpoint, fallback: preset.title)
             model = preset.availableModels.joined(separator: ",")
             selectedModel = preset.defaultModel
             selectedModelIDs = Set(preset.availableModels)
             customProtocol = preset.protocolKind
         } else {
-            connectionName = option.connectionName
             baseURLString = ""
+            connectionName = option.connectionName
             model = ""
             selectedModel = ""
             selectedModelIDs = []
@@ -1958,6 +1959,16 @@ struct AIConnectionSetupView: View {
         if selectedModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !models.contains(selectedModel) {
             selectedModel = models.first ?? ""
         }
+    }
+
+    private func submittedConnectionNameForSubmit() -> String {
+        let trimmedName = connectionName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedName.isEmpty { return trimmedName }
+        return defaultDraftConnectionName(endpoint: baseURLString, fallback: option.connectionName)
+    }
+
+    private func defaultDraftConnectionName(endpoint: String, fallback: String) -> String {
+        AppLLMEndpointDisplayName.defaultConnectionName(from: endpoint, fallback: fallback)
     }
 
     private func effectiveModelListForSubmit() -> String {
