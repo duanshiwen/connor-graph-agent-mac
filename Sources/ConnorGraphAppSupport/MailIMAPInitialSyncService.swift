@@ -117,7 +117,7 @@ public struct MailIMAPInitialSyncService: Sendable {
 
     private func candidateUsernames(email: String, provider: MailProviderKind) -> [String] {
         var usernames = [email]
-        if provider == .genericIMAPSMTP || provider == .localFixture || provider == .jmap || provider == .gmail || provider == .microsoft365 {
+        if provider == .genericIMAPSMTP || provider == .localFixture || provider == .jmap {
             return usernames
         }
         if let local = email.split(separator: "@").first.map(String.init), !local.isEmpty {
