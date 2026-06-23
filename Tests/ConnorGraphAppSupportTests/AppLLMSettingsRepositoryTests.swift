@@ -148,6 +148,60 @@ private struct FakeAgentHTTPClient: AgentHTTPClient, Sendable {
     #expect(config.reasoningEffort == nil)
 }
 
+@Test func saveConnectionDoesNotMakeNewConnectionDefaultUnlessRequested() throws {
+    let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
+    let original = AppLLMConnectionConfig(
+        id: "original",
+        name: "Original",
+        providerMode: .openAICompatible,
+        baseURLString: "https://original.example/v1",
+        model: "original-model",
+        selectedModel: "original-model"
+    )
+    let added = AppLLMConnectionConfig(
+        id: "added",
+        name: "Added",
+        providerMode: .openAICompatible,
+        baseURLString: "https://added.example/v1",
+        model: "added-model",
+        selectedModel: "added-model"
+    )
+    try repository.save(settings: AppLLMSettings(connections: [original], defaultConnectionID: original.id), apiKey: "original-key")
+
+    try repository.saveConnection(added, apiKey: "added-key")
+    let loaded = try repository.loadSettings()
+
+    #expect(loaded.connections.map(\.id).contains(original.id))
+    #expect(loaded.connections.map(\.id).contains(added.id))
+    #expect(loaded.defaultConnectionID == original.id)
+}
+
+@Test func saveConnectionCanExplicitlyMakeNewConnectionDefault() throws {
+    let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
+    let original = AppLLMConnectionConfig(
+        id: "original",
+        name: "Original",
+        providerMode: .openAICompatible,
+        baseURLString: "https://original.example/v1",
+        model: "original-model",
+        selectedModel: "original-model"
+    )
+    let added = AppLLMConnectionConfig(
+        id: "added",
+        name: "Added",
+        providerMode: .openAICompatible,
+        baseURLString: "https://added.example/v1",
+        model: "added-model",
+        selectedModel: "added-model"
+    )
+    try repository.save(settings: AppLLMSettings(connections: [original], defaultConnectionID: original.id), apiKey: "original-key")
+
+    try repository.saveConnection(added, apiKey: "added-key", makeDefault: true)
+    let loaded = try repository.loadSettings()
+
+    #expect(loaded.defaultConnectionID == added.id)
+}
+
 @Test func modelCatalogLoadsOpenAICompatibleModelsFromProvider() async throws {
     let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
     try repository.save(

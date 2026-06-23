@@ -31,7 +31,7 @@ public struct AppLLMConnectionSetupInput: Sendable, Equatable {
         oauthTokens: AppLLMOAuthTokens? = nil,
         anthropicAuthHeaderKind: AnthropicCompatibleAuthHeaderKind = .xAPIKey,
         openAIAPIKeyHeaderKind: OpenAICompatibleAPIKeyHeaderKind = .bearer,
-        makeDefault: Bool = true
+        makeDefault: Bool = false
     ) {
         self.id = id
         self.kind = kind
@@ -327,7 +327,7 @@ public extension AppLLMSettingsRepository {
         _ connection: AppLLMConnectionConfig,
         apiKey: String? = nil,
         oauthTokens: AppLLMOAuthTokens? = nil,
-        makeDefault: Bool = true
+        makeDefault: Bool = false
     ) throws {
         let current = (try? loadSettings()) ?? .default
         var connections = current.connections
