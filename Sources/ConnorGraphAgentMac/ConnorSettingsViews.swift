@@ -1279,10 +1279,7 @@ struct AIConnectionSetupView: View {
 
             apiKeyField(placeholder: activeProviderPreset.keyPlaceholder)
 
-            HStack(alignment: .center, spacing: SettingsListLayout.spaceL) {
-                Text("服务商")
-                    .font(SettingsListTypography.header)
-                Spacer(minLength: SettingsListLayout.spaceL)
+            aiConnectionSettingsRow(title: "服务商") {
                 Picker("服务商", selection: $selectedProviderPresetID) {
                     ForEach(AIConnectionProviderPreset.otherProviderPresets) { preset in
                         Text(preset.title).tag(preset.id)
@@ -1291,56 +1288,39 @@ struct AIConnectionSetupView: View {
                 .labelsHidden()
                 .pickerStyle(.menu)
                 .controlSize(.large)
-                .frame(width: SettingsListLayout.pickerControlWidth, alignment: .trailing)
+                .frame(width: SettingsListLayout.pickerControlWidth, alignment: .leading)
                 .onChange(of: selectedProviderPresetID) { _, _ in applySelectedProviderPreset() }
             }
-            .frame(maxWidth: .infinity, minHeight: SettingsListLayout.rowMinHeight)
 
             if selectedProviderPresetID == "custom" {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Endpoint")
-                        .font(SettingsListTypography.header)
-                    TextField("https://your-api-endpoint.com", text: $baseURLString)
-                        .textFieldStyle(.roundedBorder)
-                        .font(SettingsListTypography.rowTitle)
+                aiConnectionSettingsRow(title: "Endpoint") {
+                    aiConnectionTextField("https://your-api-endpoint.com", text: $baseURLString)
                 }
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Protocol")
-                        .font(SettingsListTypography.header)
-                    Picker("Protocol", selection: $customProtocol) {
+                aiConnectionSettingsRow(title: "兼容模式", help: compatibilityModeHelpText) {
+                    Picker("兼容模式", selection: $customProtocol) {
                         ForEach(AIConnectionCustomProtocol.allCases, id: \.self) { protocolKind in
                             Text(protocolKind.title).tag(protocolKind)
                         }
                     }
                     .pickerStyle(.segmented)
                     .controlSize(.large)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    Text(customProtocol == .anthropicCompatible ? "Anthropic Compatible 使用 /v1/messages 协议，适合 Anthropic API、OpenRouter Anthropic Skin、Vercel AI Gateway 等兼容服务。" : "大多数第三方接口（Ollama、vLLM、DashScope 等）使用 OpenAI Compatible。")
-                        .font(SettingsListTypography.rowTitle)
-                        .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("默认模型 / 模型列表 · 必填")
-                    .font(SettingsListTypography.header)
+            aiConnectionSettingsRow(title: "模型", help: modelFieldHelpText) {
                 if selectedProviderPresetID != "custom" && !activeProviderPreset.supportedModels.isEmpty {
                     modelMultiSelect(title: "", models: activeProviderPreset.availableModels)
                 } else {
-                    TextField("例如 deepseek-v4-flash；多个模型可用逗号分隔", text: $model)
-                        .textFieldStyle(.roundedBorder)
-                        .font(SettingsListTypography.rowTitle)
+                    aiConnectionTextField("例如 deepseek-v4-flash；多个模型可用逗号分隔", text: $model)
                 }
-                Text(modelFieldHelpText)
-                    .font(SettingsListTypography.rowTitle)
-                    .foregroundStyle(.secondary)
             }
         }
     }
 
     private func apiKeyField(placeholder: String) -> some View {
-        aiConnectionFormRow(title: "API Key") {
+        aiConnectionSettingsRow(title: "API Key") {
             aiConnectionInputContainer {
                 Group {
                     if showAPIKey {
@@ -1360,6 +1340,23 @@ struct AIConnectionSetupView: View {
                 .help(showAPIKey ? "隐藏 API Key" : "显示 API Key")
             }
         }
+    }
+
+    private func aiConnectionSettingsRow<Content: View>(title: String, help: String? = nil, @ViewBuilder content: () -> Content) -> some View {
+        HStack(alignment: .top, spacing: SettingsListLayout.spaceL) {
+            Text(title)
+                .font(SettingsListTypography.header)
+                .frame(width: 104, alignment: .leading)
+                .padding(.top, 8)
+            VStack(alignment: .leading, spacing: SettingsListLayout.spaceS) {
+                content()
+                if let help, !help.isEmpty {
+                    aiConnectionHelpText(help)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func aiConnectionFormRow<Content: View>(title: String, help: String? = nil, @ViewBuilder content: () -> Content) -> some View {
@@ -1738,6 +1735,15 @@ struct AIConnectionSetupView: View {
             return "使用服务商自己的模型 ID；已填写多个模型，Connor 将使用 \(healthCheckModelForSubmit) 执行首次连接校验。"
         }
         return "使用服务商自己的模型 ID；Connor 将使用 \(healthCheckModelForSubmit) 执行一次最小连接校验。"
+    }
+
+    private var compatibilityModeHelpText: String {
+        switch customProtocol {
+        case .openAICompatible:
+            return "适用于 OpenAI-compatible /v1/chat/completions 接口，例如 vLLM、Ollama、DashScope、DeepSeek、MiMo 等服务。"
+        case .anthropicCompatible:
+            return "适用于 Anthropic Messages /v1/messages 接口，例如 Anthropic API 或明确提供 Anthropic Skin 的网关。"
+        }
     }
 
     private func currentPresetModelOptions() -> [String] {
