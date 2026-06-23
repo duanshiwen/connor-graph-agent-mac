@@ -68,7 +68,7 @@ public struct MemoryOSL1ToL2JobDraft: Sendable, Codable, Equatable, Identifiable
     public var createdAt: Date
     public var metadata: [String: String]
 
-    public init(id: String = UUID().uuidString, kind: String = MemoryOSBackgroundJobKind.l1ProcessBlockToL2.rawValue, captureEventIDs: [String], provenanceObjectIDs: [String], sourceSpanIDs: [String], schemaName: String = "GraphStructuredExtractionOutput", prompt: String, createdAt: Date = Date(), metadata: [String: String] = [:]) {
+    public init(id: String = UUID().uuidString, kind: String = MemoryOSBackgroundJobKind.l1ProcessBlockToL2.rawValue, captureEventIDs: [String], provenanceObjectIDs: [String], sourceSpanIDs: [String], schemaName: String = "MemoryOSL1UnifiedProjectionOutput", prompt: String, createdAt: Date = Date(), metadata: [String: String] = [:]) {
         self.id = id
         self.kind = kind
         self.captureEventIDs = captureEventIDs
@@ -124,28 +124,38 @@ public struct MemoryOSL1ToL2PromptBuilder: Sendable {
             }
         ]
         return """
-        You are processing Connor Memory OS L1 capture events into L2 operational facts.
+        You are performing Connor Memory OS L1 unified projection.
 
         Layer semantics:
         - L0 is the durable provenance layer and source of raw evidence.
         - L1 is the active processing buffer / ordered memory sequence.
         - L2 is operational facts / working memory.
-        - A successful L1→L2 projection clears the processed L1 buffer only after artifact acceptance; failures preserve L1 for retry or dead-letter review.
+        - L3 is reusable knowledge: standards, principles, frameworks, decision bases, processes and durable cognitive structures.
+        - L4 is stable entities, concept entities and durable entity/concept relations.
+        - A successful L1 unified projection clears the processed L1 buffer only after artifact acceptance; failures preserve L1 for retry or dead-letter review.
 
         Goal:
-        - Extract only evidence-backed L2 operational facts / working memory.
+        - Produce evidence-backed L2 operational facts / working memory.
+        - Produce conservative L3 reusable knowledge candidates only when all promotion filters pass.
+        - Produce L4 stable entities, concept entities and durable relations when entity identity or concept structure is clear.
         - Ignore noise, duplicates, transient wording and unsupported guesses.
         - You may search existing L2 operational memory before deciding whether a fact is new, duplicate or a refinement.
+        - You may search existing L3/L4 before deciding whether a knowledge candidate or entity is novel.
         - If raw L0 material is needed, request the referenced provenance object or span instead of guessing.
-        - Output only GraphStructuredExtractionOutput JSON.
+        - Output only MemoryOSL1UnifiedProjectionOutput JSON.
 
-        L2 output contract:
-        - Output schema is GraphStructuredExtractionOutput JSON with entities, statements, evidenceSpans, warnings, confidence and metadata.
-        - Each statement must use a predicate from the allowed GraphPredicate raw values below.
-        - Each statement should represent one atomic operational fact, not a broad interpretation.
+        L1 unified output contract:
+        - Output schema is MemoryOSL1UnifiedProjectionOutput JSON with operationalEntities, operationalStatements, evidenceSpans, knowledgeCandidates, conceptEntities, conceptRelations, promotionDecisions, warnings, confidence and metadata.
+        - operationalEntities and operationalStatements are the L2 operational graph section.
+        - knowledgeCandidates are L3 candidates and must pass all promotion filters.
+        - conceptEntities and conceptRelations are the L4 stable concept/entity graph section.
+        - Each operational statement must use a predicate from the allowed GraphPredicate raw values below.
+        - Each operational statement should represent one atomic operational fact, not a broad interpretation.
         - Use statement metadata to preserve extraction discipline and downstream routing.
         - Required statement metadata keys when applicable: metadata.l2_fact_type, metadata.capture_event_ids, metadata.provenance_object_ids, metadata.span_ids.
         - metadata.capture_event_ids, metadata.provenance_object_ids and metadata.span_ids should be comma-separated stable ids when multiple inputs support the same consolidated fact.
+        - L3 knowledgeCandidates.evidenceStatementIDs must reference operationalStatements local statement ids from this same artifact.
+        - L3 knowledgeCandidates.evidenceSpanIDs and L4 conceptRelations.evidenceSpanIDs must reference evidenceSpans ids.
 
         Allowed L2 assertion_kind values:
         - observed: directly stated or directly observed in the L1 event / L0 evidence.
@@ -174,16 +184,33 @@ public struct MemoryOSL1ToL2PromptBuilder: Sendable {
         - If a fact could fit multiple categories, choose the category that best describes why the fact will be retrieved later.
         - The taxonomy is for L2 operational routing only; it is not a reason to promote a fact into L3.
 
+        L3 promotion filters:
+        - signal_quality: pass only if the material is substantial knowledge rather than noise, style, or a one-off detail.
+        - reuse_scope: pass only if the material will be reusable across future sessions, tasks, projects or decisions.
+        - novelty: pass only if the material is new or materially enriches existing L3/L4 memory.
+        - structurability: pass only if it can be assigned category, knowledge_type, scope, domain, and related concept entities.
+        - All four filters must pass before emitting a knowledgeCandidate.
+        - promotionDecisions must record signal_quality, reuse_scope, novelty, structurability, accepted/rejected reasons and evidence ids.
+        - Do not promote ordinary operational facts into L3.
+        - Do not promote personal preferences, one-off tasks, calendar facts, transient environment details or implementation status into L3 unless they encode a reusable rule, standard, framework, process, or decision basis.
+
+        Stable L4 entity rules:
+        - Create or reuse L4 stable entities for people, organizations, projects/work objects, products, locations, durable documents/artifacts, and durable concepts/frameworks/standards.
+        - Create conceptEntities only when the concept has a stable name, useful summary, clear type, evidence, and future retrieval value.
+        - Create conceptRelations only when the relation is durable, evidence-backed, and useful for reasoning or retrieval.
+        - Do not create L4 entities for vague temporary phrases, one-off tasks, ephemeral UI wording, unsupported inferred categories, or purely stylistic wording.
+
         Workflow:
         1. Read L1 events in chronological order.
-        2. Extract candidate facts per event.
+        2. Extract candidate operational facts per event for L2.
         3. Drop noise, transient wording, unsupported guesses and purely stylistic duplicates.
-        4. Consolidate duplicate facts across events while preserving all evidence references.
+        4. Consolidate duplicate operational facts across events while preserving all evidence references.
         5. If a fact refines an existing L2 fact, emit append-only refinement material rather than overwriting history.
-        6. Every emitted fact must cite at least one capture_event_id and at least one provenance_object_id or span_id.
-        7. Choose the most precise allowed predicate and the most appropriate metadata.l2_fact_type for every statement.
-        8. Do not create L3 knowledge records.
-        9. Do not produce theories, frameworks, broad conclusions, or unsupported guesses.
+        6. Every emitted operational fact must cite at least one capture_event_id and at least one provenance_object_id or span_id.
+        7. Choose the most precise allowed predicate and the most appropriate metadata.l2_fact_type for every operational statement.
+        8. Separately evaluate whether any extracted material qualifies as L3 reusable knowledge using all four promotion filters.
+        9. Separately evaluate whether any stable L4 entity, concept entity, or durable relation should be emitted.
+        10. Do not produce unsupported guesses, broad conclusions without evidence, or knowledge/entity records that fail the rules above.
 
         L1 capture events are provided as an ordered JSON packet:
         \(Self.renderJSON(packet))
@@ -566,7 +593,7 @@ public struct MemoryOSBackgroundJobWorker<Executor: MemoryOSBackgroundModelExecu
     }
 
     public func run(_ draft: MemoryOSL1ToL2JobDraft) throws -> MemoryOSBackgroundJobExecutionResult {
-        let artifactType = "graph_structured_extraction"
+        let artifactType = "memory_os_l1_unified_projection"
         let tools = MemoryOSBackgroundToolCatalog.l1ToL2Tools()
         let prompt = enrichedL1Prompt(draft, tools: tools)
         let request = MemoryOSBackgroundModelRequest(
@@ -621,7 +648,7 @@ public struct MemoryOSBackgroundJobWorker<Executor: MemoryOSBackgroundModelExecu
         - provenance_object_ids: \(draft.provenanceObjectIDs.joined(separator: ","))
         - source_span_ids: \(draft.sourceSpanIDs.joined(separator: ","))
         - output_schema: \(draft.schemaName)
-        - semantic boundary: produce L2 operational facts only; do not create L3 knowledge records.
+        - semantic boundary: produce L2 operational facts, conservative L3 reusable knowledge candidates, and stable L4 entity/concept projections under evidence and promotion-policy constraints.
         """
     }
 
