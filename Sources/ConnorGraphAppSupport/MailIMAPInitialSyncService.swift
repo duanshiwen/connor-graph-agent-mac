@@ -23,6 +23,13 @@ public struct MailIMAPInitialSyncService: Sendable {
     }
 
     public func sync(account originalAccount: MailAccount) async throws -> MailInitialSyncResult {
+        if originalAccount.provider == .gmail || originalAccount.provider == .microsoft365 {
+            return MailInitialSyncResult(
+                account: updatedAccount(originalAccount, status: .blocked, summary: "此邮件账户类型已不再支持", reasons: ["请删除此旧账户后使用授权码、App Password 或通用 IMAP/SMTP 凭据重新添加。"]),
+                mailboxes: [],
+                messages: []
+            )
+        }
         guard let endpoint = originalAccount.incoming, endpoint.protocolKind == .imap else {
             return MailInitialSyncResult(
                 account: updatedAccount(originalAccount, status: .blocked, summary: "缺少 IMAP 收件服务器配置", reasons: ["Incoming endpoint is not IMAP"]),
@@ -55,22 +62,16 @@ public struct MailIMAPInitialSyncService: Sendable {
         }
 
         do {
+            if binding.authMode == .oauth2 {
+                return MailInitialSyncResult(
+                    account: updatedAccount(originalAccount, status: .blocked, summary: "OAuth 邮件登录已不再支持", reasons: ["请删除此旧账户后使用授权码、App Password 或通用 IMAP/SMTP 凭据重新添加。"]),
+                    mailboxes: [],
+                    messages: []
+                )
+            }
             let client = BlockingIMAPClient(host: endpoint.host, port: endpoint.port)
             let loginUsernames = candidateUsernames(email: email, provider: originalAccount.provider)
-            let snapshot: BlockingIMAPClient.Snapshot
-            if binding.authMode == .oauth2 {
-                let oauthCredential = try MicrosoftMailOAuthCredentialPackage.decode(from: rawCredential)
-                guard oauthCredential.isAccessTokenUsable else {
-                    return MailInitialSyncResult(
-                        account: updatedAccount(originalAccount, status: .unauthenticated, summary: "Microsoft OAuth token 已过期", reasons: ["Please sign in with Microsoft again to refresh mail access"]),
-                        mailboxes: [],
-                        messages: []
-                    )
-                }
-                snapshot = try client.withOAuth2Session(usernames: loginUsernames, accessToken: oauthCredential.accessToken, messageLimit: messageLimit)
-            } else {
-                snapshot = try client.withPasswordSession(usernames: loginUsernames, password: rawCredential, messageLimit: messageLimit)
-            }
+            let snapshot = try client.withPasswordSession(usernames: loginUsernames, password: rawCredential, messageLimit: messageLimit)
             let accountID = originalAccount.id
             let inboxID = MailMailboxID(rawValue: "\(accountID.rawValue)-inbox")
             let now = Date()
@@ -116,7 +117,7 @@ public struct MailIMAPInitialSyncService: Sendable {
 
     private func candidateUsernames(email: String, provider: MailProviderKind) -> [String] {
         var usernames = [email]
-        if provider == .genericIMAPSMTP || provider == .localFixture || provider == .jmap || provider == .gmail || provider == .microsoft365 {
+        if provider == .genericIMAPSMTP || provider == .localFixture || provider == .jmap {
             return usernames
         }
         if let local = email.split(separator: "@").first.map(String.init), !local.isEmpty {

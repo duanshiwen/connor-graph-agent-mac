@@ -142,6 +142,14 @@ struct CommercialTrain7NativeMailSystemTests {
         #expect(shell.command(for: .openMailSources)?.keyboardShortcut == "⌘8")
     }
 
+    @Test func mailProtocolSupportPolicyExcludesGmailAPIAndMicrosoftGraph() {
+        #expect(MailProtocolSupportPolicy.supportedProtocols == [.imap, .smtp, .jmap])
+        #expect(MailProtocolSupportPolicy.isSupported(.imap))
+        #expect(MailProtocolSupportPolicy.isSupported(.smtp))
+        #expect(!MailProtocolSupportPolicy.isSupported(.gmailAPI))
+        #expect(!MailProtocolSupportPolicy.isSupported(.microsoftGraph))
+    }
+
     @Test func mailRuntimeSeparatesProtocolAndParserResponsibilities() async throws {
         let imap = MailIMAPAdapter()
         let smtp = MailSMTPAdapter()
@@ -153,6 +161,50 @@ struct CommercialTrain7NativeMailSystemTests {
         let account = MailAccount(id: MailAccountID(rawValue: "a"), provider: .genericIMAPSMTP, displayName: "A", identities: [], credentialBinding: MailCredentialBinding(keychainService: "svc", accountName: "a", authMode: .oauth2))
         let syncHealth = MailSyncEngine().readiness(account: account, mailboxCount: 1, cursorCount: 1)
         #expect(syncHealth.status == .ready)
+    }
+
+    @Test func googleAndMicrosoftMailProvidersAreTreatedAsUnsupportedLegacyAccounts() async throws {
+        let credentialStore = CommercialTrain7MemoryCredentialStore()
+        let googleBinding = MailCredentialBinding(keychainService: "test.legacy", accountName: "gmail@example.com", authMode: .appPassword)
+        try credentialStore.saveSecret("app-password", service: googleBinding.keychainService, account: googleBinding.accountName)
+        let account = MailAccount(
+            id: MailAccountID(rawValue: "legacy-gmail"),
+            provider: .gmail,
+            displayName: "Legacy Gmail",
+            identities: [MailIdentity(id: MailIdentityID(rawValue: "legacy-gmail-identity"), displayName: "Legacy Gmail", address: MailAddress(email: "gmail@example.com"))],
+            incoming: MailServerEndpoint(host: "imap.example.com", port: 993, security: .tls, protocolKind: .imap),
+            credentialBinding: googleBinding
+        )
+
+        let result = try await MailIMAPInitialSyncService(
+            credentialStore: AppMailCredentialStore(credentialStore: credentialStore)
+        ).sync(account: account)
+
+        #expect(result.account.health.status == .blocked)
+        #expect(result.account.health.summary == "此邮件账户类型已不再支持")
+        #expect(result.messages.isEmpty)
+    }
+
+    @Test func oauthMailAccountsAreTreatedAsUnsupportedLegacyAccounts() async throws {
+        let binding = MailCredentialBinding(keychainService: "test.oauth", accountName: "legacy@example.com", authMode: .oauth2)
+        let credentialStore = CommercialTrain7MemoryCredentialStore()
+        try credentialStore.saveSecret("legacy-oauth-token-package", service: binding.keychainService, account: binding.accountName)
+        let account = MailAccount(
+            id: MailAccountID(rawValue: "legacy-oauth"),
+            provider: .genericIMAPSMTP,
+            displayName: "Legacy OAuth",
+            identities: [MailIdentity(id: MailIdentityID(rawValue: "legacy-identity"), displayName: "Legacy", address: MailAddress(email: "legacy@example.com"))],
+            incoming: MailServerEndpoint(host: "imap.example.com", port: 993, security: .tls, protocolKind: .imap),
+            credentialBinding: binding
+        )
+
+        let result = try await MailIMAPInitialSyncService(
+            credentialStore: AppMailCredentialStore(credentialStore: credentialStore)
+        ).sync(account: account)
+
+        #expect(result.account.health.status == .blocked)
+        #expect(result.account.health.summary == "OAuth 邮件登录已不再支持")
+        #expect(result.messages.isEmpty)
     }
 
     @Test func mailBrowserDefaultPresentationIsEmpty() {
@@ -213,9 +265,19 @@ struct CommercialTrain7NativeMailSystemTests {
         #expect(folderMessages.map(\.subject) == ["OAuth migration checklist"])
     }
 
-    @Test func mailAccountProviderPresetsIncludeAppleMicrosoftQQNetEaseAndOther() {
+    @Test func mailAccountProviderPresetsExcludeGoogleMicrosoftAndExchange() {
         let presets = MailAccountProviderPreset.allCases
-        #expect(presets.map(\.id) == ["apple", "microsoft", "qq", "netease", "other"])
+        #expect(presets.map(\.id) == ["apple", "qq", "netease", "other"])
+
+        let providerText = presets
+            .flatMap { [$0.id, $0.title, $0.subtitle, $0.guidance, $0.incomingHost, $0.outgoingHost] }
+            .joined(separator: " ")
+        #expect(!providerText.localizedCaseInsensitiveContains("Microsoft"))
+        #expect(!providerText.localizedCaseInsensitiveContains("Exchange"))
+        #expect(!providerText.localizedCaseInsensitiveContains("Outlook"))
+        #expect(!providerText.localizedCaseInsensitiveContains("Google"))
+        #expect(!providerText.localizedCaseInsensitiveContains("Gmail"))
+        #expect(!providerText.localizedCaseInsensitiveContains("OAuth"))
 
         let apple = MailAccountProviderPreset.apple
         #expect(apple.incomingHost == "imap.mail.me.com")
@@ -234,10 +296,6 @@ struct CommercialTrain7NativeMailSystemTests {
         #expect(netease.outgoingHost == "smtp.163.com")
         #expect(netease.guidance.contains("POP/SMTP/IMAP"))
         #expect(netease.guidance.contains("授权码"))
-
-        let microsoft = MailAccountProviderPreset.microsoft
-        #expect(microsoft.guidance.localizedCaseInsensitiveContains("Microsoft 登录"))
-        #expect(microsoft.outgoingPort == 587)
 
         let other = MailAccountProviderPreset.other
         #expect(other.incomingHost.isEmpty)
@@ -308,5 +366,21 @@ struct CommercialTrain7NativeMailSystemTests {
         ]
 
         return NativeMailBrowserPresentation(accounts: accounts, mailboxes: mailboxes, messages: messages)
+    }
+}
+
+private final class CommercialTrain7MemoryCredentialStore: CredentialStore, @unchecked Sendable {
+    private var secrets: [String: String] = [:]
+
+    func saveSecret(_ secret: String, service: String, account: String) throws {
+        secrets["\(service)::\(account)"] = secret
+    }
+
+    func readSecret(service: String, account: String) throws -> String? {
+        secrets["\(service)::\(account)"]
+    }
+
+    func deleteSecret(service: String, account: String) throws {
+        secrets.removeValue(forKey: "\(service)::\(account)")
     }
 }
