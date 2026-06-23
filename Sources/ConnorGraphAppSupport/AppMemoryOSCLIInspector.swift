@@ -128,6 +128,38 @@ public struct AppMemoryOSCLIInspector: Sendable {
         """, columns: ["id", "stable_key", "entity_type", "name", "aliases_json", "summary", "confidence", "created_at", "updated_at", "valid_from", "metadata_json"])
     }
 
+    public func read(layer: String, id: String) throws -> MemoryOSCLIRecord? {
+        switch normalizedLayer(layer) {
+        case "L0":
+            return try firstRecord(layer: "L0", sql: """
+            SELECT id, source_type, source_id, title, content, content_hash, occurred_at, ingested_at, session_id, work_object_id, confidentiality, status, metadata_json
+            FROM memory_l0_provenance_objects WHERE id = \(store.quote(id)) LIMIT 1
+            """, columns: ["id", "source_type", "source_id", "title", "content", "content_hash", "occurred_at", "ingested_at", "session_id", "work_object_id", "confidentiality", "status", "metadata_json"])
+        case "L1":
+            return try firstRecord(layer: "L1", sql: """
+            SELECT id, provenance_object_id, event_type, occurred_at, token_estimate, processing_state, metadata_json
+            FROM memory_l1_capture_events WHERE id = \(store.quote(id)) LIMIT 1
+            """, columns: ["id", "provenance_object_id", "event_type", "occurred_at", "token_estimate", "processing_state", "metadata_json"])
+        case "L2":
+            return try firstRecord(layer: "L2", sql: """
+            SELECT id, subject_id, predicate, object_id, text, assertion_kind, confidence, valid_at, committed_at, evidence_span_ids_json, source_artifact_id, metadata_json
+            FROM memory_l2_statements WHERE id = \(store.quote(id)) LIMIT 1
+            """, columns: ["id", "subject_id", "predicate", "object_id", "text", "assertion_kind", "confidence", "valid_at", "committed_at", "evidence_span_ids_json", "source_artifact_id", "metadata_json"])
+        case "L3":
+            return try firstRecord(layer: "L3", sql: """
+            SELECT id, topic, statement, projection_kind, confidence, evidence_statement_ids_json, valid_at, projected_at, source_artifact_id, metadata_json
+            FROM memory_l3_beliefs WHERE id = \(store.quote(id)) LIMIT 1
+            """, columns: ["id", "topic", "statement", "projection_kind", "confidence", "evidence_statement_ids_json", "valid_at", "projected_at", "source_artifact_id", "metadata_json"])
+        case "L4":
+            return try firstRecord(layer: "L4", sql: """
+            SELECT id, stable_key, entity_type, name, aliases_json, summary, confidence, created_at, updated_at, valid_from, metadata_json
+            FROM memory_l4_entities WHERE id = \(store.quote(id)) LIMIT 1
+            """, columns: ["id", "stable_key", "entity_type", "name", "aliases_json", "summary", "confidence", "created_at", "updated_at", "valid_from", "metadata_json"])
+        default:
+            return nil
+        }
+    }
+
     private func layerCounts() throws -> MemoryOSCLILayerSummary {
         MemoryOSCLILayerSummary(
             l0: MemoryOSCLIL0Counts(
@@ -167,6 +199,21 @@ public struct AppMemoryOSCLIInspector: Sendable {
         }
     }
 
+    private func firstRecord(layer: String, sql: String, columns: [String]) throws -> MemoryOSCLIRecord? {
+        try rows(sql: sql, columns: columns).first.map { MemoryOSCLIRecord(layer: layer, record: $0) }
+    }
+
+    private func normalizedLayer(_ layer: String) -> String? {
+        switch layer.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "l0", "provenance", "object", "provenance_object": "L0"
+        case "l1", "capture", "event", "capture_event": "L1"
+        case "l2", "statement": "L2"
+        case "l3", "belief", "knowledge": "L3"
+        case "l4", "entity": "L4"
+        default: nil
+        }
+    }
+
     private func safeLimit(_ limit: Int) -> Int {
         min(max(limit, 1), 500)
     }
@@ -177,6 +224,16 @@ public struct MemoryOSCLIRow: Codable, Sendable, Equatable {
 
     public init(values: [String: String]) {
         self.values = values
+    }
+}
+
+public struct MemoryOSCLIRecord: Codable, Sendable, Equatable {
+    public var layer: String
+    public var record: MemoryOSCLIRow
+
+    public init(layer: String, record: MemoryOSCLIRow) {
+        self.layer = layer
+        self.record = record
     }
 }
 

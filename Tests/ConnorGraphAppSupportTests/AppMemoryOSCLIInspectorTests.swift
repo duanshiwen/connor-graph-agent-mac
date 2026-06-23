@@ -123,6 +123,51 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(entities[0].values["entity_type"] == "concept")
         #expect(entities[0].values["name"] == "Connor Memory OS")
     }
+
+    @Test func memoryOSCLIInspectorReadsRecordByLayerAndID() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        try seedMemoryOSCLIInspectorFixture(store: store)
+        let inspector = AppMemoryOSCLIInspector(store: store)
+
+        let l0 = try #require(try inspector.read(layer: "L0", id: "object-1"))
+        let l1 = try #require(try inspector.read(layer: "L1", id: "event-1"))
+        let l2 = try #require(try inspector.read(layer: "L2", id: "stmt-1"))
+        let l3 = try #require(try inspector.read(layer: "L3", id: "belief-1"))
+        let l4 = try #require(try inspector.read(layer: "L4", id: "entity-1"))
+
+        #expect(l0.layer == "L0")
+        #expect(l0.record.values["id"] == "object-1")
+        #expect(l1.layer == "L1")
+        #expect(l1.record.values["id"] == "event-1")
+        #expect(l2.layer == "L2")
+        #expect(l2.record.values["id"] == "stmt-1")
+        #expect(l3.layer == "L3")
+        #expect(l3.record.values["id"] == "belief-1")
+        #expect(l4.layer == "L4")
+        #expect(l4.record.values["id"] == "entity-1")
+    }
+
+    @Test func memoryOSCLIInspectorReturnsNilForMissingRecord() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        try seedMemoryOSCLIInspectorFixture(store: store)
+        let inspector = AppMemoryOSCLIInspector(store: store)
+
+        let missing = try inspector.read(layer: "L2", id: "missing-statement")
+
+        #expect(missing == nil)
+    }
+
+    @Test func memoryOSCLIInspectorAcceptsLayerAliases() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        try seedMemoryOSCLIInspectorFixture(store: store)
+        let inspector = AppMemoryOSCLIInspector(store: store)
+
+        #expect(try inspector.read(layer: "provenance", id: "object-1")?.layer == "L0")
+        #expect(try inspector.read(layer: "capture", id: "event-1")?.layer == "L1")
+        #expect(try inspector.read(layer: "statement", id: "stmt-1")?.layer == "L2")
+        #expect(try inspector.read(layer: "belief", id: "belief-1")?.layer == "L3")
+        #expect(try inspector.read(layer: "entity", id: "entity-1")?.layer == "L4")
+    }
 }
 
 private func makeMemoryOSCLIInspectorStore() throws -> SQLiteMemoryOSStore {
