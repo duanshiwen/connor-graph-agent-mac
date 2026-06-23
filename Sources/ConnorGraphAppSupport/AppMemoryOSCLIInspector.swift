@@ -128,6 +128,47 @@ public struct AppMemoryOSCLIInspector: Sendable {
         """, columns: ["id", "stable_key", "entity_type", "name", "aliases_json", "summary", "confidence", "created_at", "updated_at", "valid_from", "metadata_json"])
     }
 
+    public func queue(limit: Int = 20, status: String? = nil, kind: String? = nil) throws -> [MemoryOSCLIRow] {
+        let statusClause = status.map { " AND status = \(store.quote($0))" } ?? ""
+        let kindClause = kind.map { " AND kind = \(store.quote($0))" } ?? ""
+        return try rows(sql: """
+        SELECT id, kind, status, priority, payload_json, attempt_count, max_attempts, next_run_at, locked_at, locked_by, lease_expires_at, idempotency_key, payload_hash, created_at, updated_at, error_code, error_message
+        FROM memory_l1_processing_queue
+        WHERE 1 = 1\(statusClause)\(kindClause)
+        ORDER BY created_at DESC, priority DESC, id ASC
+        LIMIT \(safeLimit(limit))
+        """, columns: ["id", "kind", "status", "priority", "payload_json", "attempt_count", "max_attempts", "next_run_at", "locked_at", "locked_by", "lease_expires_at", "idempotency_key", "payload_hash", "created_at", "updated_at", "error_code", "error_message"])
+    }
+
+    public func pipelinePolicy() -> MemoryOSCLIPipelinePolicy {
+        let l1 = MemoryOSL1ProcessingTriggerPolicy()
+        let l2 = MemoryOSL2KnowledgeSynthesisTriggerPolicy()
+        return MemoryOSCLIPipelinePolicy(
+            l1ToL2: MemoryOSCLIL1PipelinePolicy(
+                minPendingCount: l1.minPendingCount,
+                maxEventsPerBlock: l1.maxEventsPerBlock,
+                maxTokensPerBlock: l1.maxTokensPerBlock,
+                maxPendingAgeSeconds: l1.maxPendingAge.map(Int.init)
+            ),
+            l2ToKnowledge: MemoryOSCLIL2PipelinePolicy(
+                minPendingStatementCount: l2.minPendingStatementCount,
+                maxStatementsPerBlock: l2.maxStatementsPerBlock,
+                maxTokensPerBlock: l2.maxTokensPerBlock,
+                maxPendingAgeSeconds: l2.maxPendingAge.map(Int.init)
+            )
+        )
+    }
+
+    public func planL1(policy: MemoryOSL1ProcessingTriggerPolicy = MemoryOSL1ProcessingTriggerPolicy(), now: Date = Date()) throws -> MemoryOSCLIPlanResult {
+        let jobs = try AppMemoryOSFacade(store: store).enqueueL1ToL2BackgroundJobs(policy: policy, now: now)
+        return MemoryOSCLIPlanResult(plannedJobs: jobs.count, kind: MemoryOSBackgroundJobKind.l1ProcessBlockToL2.rawValue, jobIDs: jobs.map(\.id))
+    }
+
+    public func planL2(policy: MemoryOSL2KnowledgeSynthesisTriggerPolicy = MemoryOSL2KnowledgeSynthesisTriggerPolicy(), now: Date = Date()) throws -> MemoryOSCLIPlanResult {
+        let jobs = try AppMemoryOSFacade(store: store).enqueueL2ToKnowledgeBackgroundJobs(policy: policy, now: now)
+        return MemoryOSCLIPlanResult(plannedJobs: jobs.count, kind: MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue, jobIDs: jobs.map(\.id))
+    }
+
     public func search(query: String, layers: [String] = [], limit: Int = 20) throws -> MemoryOSCLISearchResult {
         let normalizedLayers = layers.compactMap(normalizedLayer)
         let retrievalLayers = normalizedLayers.isEmpty
@@ -284,6 +325,56 @@ public struct MemoryOSCLISearchHit: Codable, Sendable, Equatable {
         case evidenceRefs = "evidence_refs"
         case provenanceRefs = "provenance_refs"
         case entityRefs = "entity_refs"
+    }
+}
+
+public struct MemoryOSCLIPipelinePolicy: Codable, Sendable, Equatable {
+    public var l1ToL2: MemoryOSCLIL1PipelinePolicy
+    public var l2ToKnowledge: MemoryOSCLIL2PipelinePolicy
+
+    enum CodingKeys: String, CodingKey {
+        case l1ToL2 = "l1_to_l2"
+        case l2ToKnowledge = "l2_to_knowledge"
+    }
+}
+
+public struct MemoryOSCLIL1PipelinePolicy: Codable, Sendable, Equatable {
+    public var minPendingCount: Int
+    public var maxEventsPerBlock: Int
+    public var maxTokensPerBlock: Int
+    public var maxPendingAgeSeconds: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case minPendingCount = "min_pending_count"
+        case maxEventsPerBlock = "max_events_per_block"
+        case maxTokensPerBlock = "max_tokens_per_block"
+        case maxPendingAgeSeconds = "max_pending_age_seconds"
+    }
+}
+
+public struct MemoryOSCLIL2PipelinePolicy: Codable, Sendable, Equatable {
+    public var minPendingStatementCount: Int
+    public var maxStatementsPerBlock: Int
+    public var maxTokensPerBlock: Int
+    public var maxPendingAgeSeconds: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case minPendingStatementCount = "min_pending_statement_count"
+        case maxStatementsPerBlock = "max_statements_per_block"
+        case maxTokensPerBlock = "max_tokens_per_block"
+        case maxPendingAgeSeconds = "max_pending_age_seconds"
+    }
+}
+
+public struct MemoryOSCLIPlanResult: Codable, Sendable, Equatable {
+    public var plannedJobs: Int
+    public var kind: String
+    public var jobIDs: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case plannedJobs = "planned_jobs"
+        case kind
+        case jobIDs = "job_ids"
     }
 }
 
