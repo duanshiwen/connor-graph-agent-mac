@@ -79,3 +79,79 @@ import ConnorGraphMemory
     #expect(!service.shouldRecoverLease(status: .succeeded, leaseExpiresAt: now.addingTimeInterval(-1), now: now))
     #expect(service.nextRetryDelay(attemptCount: 3) == 8)
 }
+
+@Test func memoryOSArtifactValidatorAcceptsL1UnifiedProjectionOutput() throws {
+    let output = makeAcceptedL1UnifiedProjectionOutput()
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    let raw = String(data: try encoder.encode(output), encoding: .utf8)!
+    let artifact = MemoryOSArtifactEnvelopeService().envelope(rawContent: raw, artifactType: "memory_os_l1_unified_projection", schemaName: "MemoryOSL1UnifiedProjectionOutput", modelID: "test-model")
+
+    let validation = MemoryOSLLMArtifactValidator().validateStructuredExtractionArtifact(artifact)
+
+    #expect(validation.accepted)
+    #expect(validation.normalizedRecordCount == 5)
+}
+
+@Test func memoryOSArtifactValidatorRejectsL1UnifiedKnowledgeCandidateWithoutAcceptedSignals() throws {
+    var output = makeAcceptedL1UnifiedProjectionOutput()
+    output.knowledgeCandidates[0].signalAssessment = MemoryOSKnowledgeSignalAssessment(signalQualityAccepted: true, reuseScopeAccepted: false, noveltyAccepted: true, structurabilityAccepted: true, reasons: ["Not reusable"])
+    let raw = String(data: try JSONEncoder().encode(output), encoding: .utf8)!
+    let artifact = MemoryOSArtifactEnvelopeService().envelope(rawContent: raw, artifactType: "memory_os_l1_unified_projection", schemaName: "MemoryOSL1UnifiedProjectionOutput", modelID: "test-model")
+
+    let validation = MemoryOSLLMArtifactValidator().validateStructuredExtractionArtifact(artifact)
+
+    #expect(!validation.accepted)
+    #expect(validation.issues.contains { $0.code == "knowledge_promotion_rejected" })
+}
+
+@Test func memoryOSArtifactValidatorRejectsL1UnifiedConceptRelationWithUnknownEntity() throws {
+    var output = makeAcceptedL1UnifiedProjectionOutput()
+    output.conceptRelations[0].objectLocalID = "missing-concept"
+    let raw = String(data: try JSONEncoder().encode(output), encoding: .utf8)!
+    let artifact = MemoryOSArtifactEnvelopeService().envelope(rawContent: raw, artifactType: "memory_os_l1_unified_projection", schemaName: "MemoryOSL1UnifiedProjectionOutput", modelID: "test-model")
+
+    let validation = MemoryOSLLMArtifactValidator().validateStructuredExtractionArtifact(artifact)
+
+    #expect(!validation.accepted)
+    #expect(validation.issues.contains { $0.code == "unknown_relation_object" })
+}
+
+private func makeAcceptedL1UnifiedProjectionOutput() -> MemoryOSL1UnifiedProjectionOutput {
+    MemoryOSL1UnifiedProjectionOutput(
+        operationalEntities: [
+            GraphStructuredExtractedEntity(localID: "project", name: "Connor Memory OS", entityKind: .workObject, scope: .project, summary: "Local-first memory system", evidenceSpanIDs: ["span-1"])
+        ],
+        operationalStatements: [
+            GraphStructuredExtractedStatement(explicitID: "stmt-1", subjectLocalID: "project", predicate: .hasGoal, objectLocalID: "project", statementText: "Connor Memory OS should project L1 into durable memory layers.", evidenceSpanIDs: ["span-1"])
+        ],
+        evidenceSpans: [GraphStructuredEvidenceSpan(id: "span-1", text: "Connor Memory OS should project L1 into L2, L3, and L4.")],
+        knowledgeCandidates: [
+            MemoryOSKnowledgeCandidate(
+                id: "knowledge-1",
+                title: "Memory layer projection discipline",
+                claim: "A memory system can project one evidence-backed capture block into operational facts, reusable knowledge, and stable entities while preserving layer boundaries.",
+                category: "internal/standards",
+                knowledgeType: "standard",
+                scope: "work-object",
+                domain: "software-engineering",
+                signalAssessment: MemoryOSKnowledgeSignalAssessment(signalQualityAccepted: true, reuseScopeAccepted: true, noveltyAccepted: true, structurabilityAccepted: true, reasons: ["Reusable Memory OS design rule"]),
+                confidence: 0.91,
+                evidenceStatementIDs: ["stmt-1"],
+                evidenceSpanIDs: ["span-1"],
+                relatedEntityIDs: ["concept-1"]
+            )
+        ],
+        conceptEntities: [
+            MemoryOSExtractedConceptEntity(localID: "concept-1", name: "L1 unified projection", conceptType: "memory_architecture_pattern", domain: "software-engineering", summary: "A single L1 extraction pass that can emit L2, L3, and L4 records.", evidenceSpanIDs: ["span-1"])
+        ],
+        conceptRelations: [
+            MemoryOSExtractedConceptRelation(id: "rel-1", subjectLocalID: "concept-1", predicate: "produces", objectLocalID: "concept-1", text: "L1 unified projection produces layered memory records.", evidenceSpanIDs: ["span-1"])
+        ],
+        promotionDecisions: [
+            MemoryOSL1PromotionDecision(candidateID: "knowledge-1", accepted: true, signalQualityAccepted: true, reuseScopeAccepted: true, noveltyAccepted: true, structurabilityAccepted: true, reasons: ["All filters pass"], evidenceStatementIDs: ["stmt-1"], evidenceSpanIDs: ["span-1"])
+        ],
+        confidence: 0.9,
+        metadata: ["stage": "l1_unified_projection"]
+    )
+}

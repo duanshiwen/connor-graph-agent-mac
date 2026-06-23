@@ -131,6 +131,8 @@ public struct MemoryOSLLMArtifactValidator: Sendable {
             return validateGraphStructuredExtractionArtifact(artifact, data: data)
         case "MemoryOSKnowledgeExtractionOutput":
             return validateKnowledgeExtractionArtifact(artifact, data: data)
+        case "MemoryOSL1UnifiedProjectionOutput":
+            return validateL1UnifiedProjectionArtifact(artifact, data: data)
         default:
             return MemoryOSArtifactValidationResult(artifactID: artifact.id, accepted: false, issues: [MemoryOSValidationIssue(code: "unsupported_schema", message: "Unsupported artifact schema: \(artifact.schemaName).")])
         }
@@ -155,38 +157,13 @@ public struct MemoryOSLLMArtifactValidator: Sendable {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             let output = try decoder.decode(MemoryOSKnowledgeExtractionOutput.self, from: data)
-            let promotion = MemoryOSKnowledgePromotionPolicy()
-            var issues: [MemoryOSValidationIssue] = []
-            let evidenceIDs = Set(output.evidenceSpans.map(\.id))
-            let entityIDs = Set(output.conceptEntities.map(\.localID))
-
-            for candidate in output.knowledgeCandidates {
-                let decision = promotion.evaluate(candidate)
-                if !decision.accepted {
-                    issues.append(MemoryOSValidationIssue(code: "knowledge_promotion_rejected", message: "Knowledge candidate rejected by promotion policy: \(candidate.title)."))
-                }
-                if candidate.evidenceStatementIDs.isEmpty {
-                    issues.append(MemoryOSValidationIssue(code: "missing_knowledge_evidence", message: "Knowledge candidate requires evidence statements: \(candidate.title)."))
-                }
-                for entityID in candidate.relatedEntityIDs where !entityIDs.contains(entityID) {
-                    issues.append(MemoryOSValidationIssue(code: "unknown_knowledge_entity", message: "Knowledge candidate references unknown concept entity: \(entityID)."))
-                }
-                for spanID in candidate.evidenceSpanIDs where !evidenceIDs.contains(spanID) {
-                    issues.append(MemoryOSValidationIssue(code: "unknown_evidence_span", message: "Knowledge candidate references unknown evidence span: \(spanID)."))
-                }
-            }
-
-            for relation in output.conceptRelations {
-                if !entityIDs.contains(relation.subjectLocalID) {
-                    issues.append(MemoryOSValidationIssue(code: "unknown_relation_subject", message: "Concept relation references unknown subject: \(relation.subjectLocalID)."))
-                }
-                if !entityIDs.contains(relation.objectLocalID) {
-                    issues.append(MemoryOSValidationIssue(code: "unknown_relation_object", message: "Concept relation references unknown object: \(relation.objectLocalID)."))
-                }
-                if relation.evidenceSpanIDs.isEmpty {
-                    issues.append(MemoryOSValidationIssue(code: "missing_relation_evidence", message: "Concept relation requires evidence spans: \(relation.id)."))
-                }
-            }
+            let issues = validateKnowledgeSections(
+                candidates: output.knowledgeCandidates,
+                conceptEntities: output.conceptEntities,
+                conceptRelations: output.conceptRelations,
+                evidenceSpanIDs: Set(output.evidenceSpans.map(\.id)),
+                allowedEvidenceStatementIDs: nil
+            )
 
             return MemoryOSArtifactValidationResult(
                 artifactID: artifact.id,
@@ -197,6 +174,86 @@ public struct MemoryOSLLMArtifactValidator: Sendable {
         } catch {
             return MemoryOSArtifactValidationResult(artifactID: artifact.id, accepted: false, issues: [MemoryOSValidationIssue(code: "json_decode_failed", message: String(describing: error))])
         }
+    }
+
+    private func validateL1UnifiedProjectionArtifact(_ artifact: MemoryOSLLMArtifactEnvelope, data: Data) -> MemoryOSArtifactValidationResult {
+        do {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let output = try decoder.decode(MemoryOSL1UnifiedProjectionOutput.self, from: data)
+            let graphOutput = GraphStructuredExtractionOutput(
+                entities: output.operationalEntities,
+                statements: output.operationalStatements,
+                evidenceSpans: output.evidenceSpans,
+                warnings: output.warnings,
+                confidence: output.confidence,
+                metadata: output.metadata
+            )
+            try graphOutput.validate(requireStatementEvidence: true)
+
+            let issues = validateKnowledgeSections(
+                candidates: output.knowledgeCandidates,
+                conceptEntities: output.conceptEntities,
+                conceptRelations: output.conceptRelations,
+                evidenceSpanIDs: Set(output.evidenceSpans.map(\.id)),
+                allowedEvidenceStatementIDs: Set(output.operationalStatements.map(\.id))
+            )
+
+            return MemoryOSArtifactValidationResult(
+                artifactID: artifact.id,
+                accepted: issues.isEmpty,
+                issues: issues,
+                normalizedRecordCount: output.operationalEntities.count + output.operationalStatements.count + output.knowledgeCandidates.count + output.conceptEntities.count + output.conceptRelations.count
+            )
+        } catch let error as GraphStructuredExtractionValidationError {
+            return MemoryOSArtifactValidationResult(artifactID: artifact.id, accepted: false, issues: [MemoryOSValidationIssue(code: "schema_validation_failed", message: error.description)])
+        } catch {
+            return MemoryOSArtifactValidationResult(artifactID: artifact.id, accepted: false, issues: [MemoryOSValidationIssue(code: "json_decode_failed", message: String(describing: error))])
+        }
+    }
+
+    private func validateKnowledgeSections(candidates: [MemoryOSKnowledgeCandidate], conceptEntities: [MemoryOSExtractedConceptEntity], conceptRelations: [MemoryOSExtractedConceptRelation], evidenceSpanIDs: Set<String>, allowedEvidenceStatementIDs: Set<String>?) -> [MemoryOSValidationIssue] {
+        let promotion = MemoryOSKnowledgePromotionPolicy()
+        var issues: [MemoryOSValidationIssue] = []
+        let entityIDs = Set(conceptEntities.map(\.localID))
+
+        for candidate in candidates {
+            let decision = promotion.evaluate(candidate)
+            if !decision.accepted {
+                issues.append(MemoryOSValidationIssue(code: "knowledge_promotion_rejected", message: "Knowledge candidate rejected by promotion policy: \(candidate.title)."))
+            }
+            if candidate.evidenceStatementIDs.isEmpty {
+                issues.append(MemoryOSValidationIssue(code: "missing_knowledge_evidence", message: "Knowledge candidate requires evidence statements: \(candidate.title)."))
+            }
+            if let allowedEvidenceStatementIDs {
+                for statementID in candidate.evidenceStatementIDs where !allowedEvidenceStatementIDs.contains(statementID) {
+                    issues.append(MemoryOSValidationIssue(code: "unknown_knowledge_evidence_statement", message: "Knowledge candidate references unknown L1 operational statement: \(statementID)."))
+                }
+            }
+            for entityID in candidate.relatedEntityIDs where !entityIDs.contains(entityID) {
+                issues.append(MemoryOSValidationIssue(code: "unknown_knowledge_entity", message: "Knowledge candidate references unknown concept entity: \(entityID)."))
+            }
+            for spanID in candidate.evidenceSpanIDs where !evidenceSpanIDs.contains(spanID) {
+                issues.append(MemoryOSValidationIssue(code: "unknown_evidence_span", message: "Knowledge candidate references unknown evidence span: \(spanID)."))
+            }
+        }
+
+        for relation in conceptRelations {
+            if !entityIDs.contains(relation.subjectLocalID) {
+                issues.append(MemoryOSValidationIssue(code: "unknown_relation_subject", message: "Concept relation references unknown subject: \(relation.subjectLocalID)."))
+            }
+            if !entityIDs.contains(relation.objectLocalID) {
+                issues.append(MemoryOSValidationIssue(code: "unknown_relation_object", message: "Concept relation references unknown object: \(relation.objectLocalID)."))
+            }
+            if relation.evidenceSpanIDs.isEmpty {
+                issues.append(MemoryOSValidationIssue(code: "missing_relation_evidence", message: "Concept relation requires evidence spans: \(relation.id)."))
+            }
+            for spanID in relation.evidenceSpanIDs where !evidenceSpanIDs.contains(spanID) {
+                issues.append(MemoryOSValidationIssue(code: "unknown_evidence_span", message: "Concept relation references unknown evidence span: \(spanID)."))
+            }
+        }
+
+        return issues
     }
 }
 
@@ -280,6 +337,10 @@ public struct MemoryOSProjectionService: Sendable {
                 return MemoryOSProjectionBuildResult(accepted: true, batch: batch, validation: validation)
             case "MemoryOSKnowledgeExtractionOutput":
                 let output = try decoder.decode(MemoryOSKnowledgeExtractionOutput.self, from: data)
+                let batch = projectionBatch(from: output, artifactID: artifact.id, now: now)
+                return MemoryOSProjectionBuildResult(accepted: true, batch: batch, validation: validation)
+            case "MemoryOSL1UnifiedProjectionOutput":
+                let output = try decoder.decode(MemoryOSL1UnifiedProjectionOutput.self, from: data)
                 let batch = projectionBatch(from: output, artifactID: artifact.id, now: now)
                 return MemoryOSProjectionBuildResult(accepted: true, batch: batch, validation: validation)
             default:
@@ -394,6 +455,54 @@ public struct MemoryOSProjectionService: Sendable {
             entities: Array(entityByLocalID.values).sorted { $0.id < $1.id },
             entityStatements: entityStatements,
             beliefs: beliefs
+        )
+    }
+
+    public func projectionBatch(from output: MemoryOSL1UnifiedProjectionOutput, artifactID: String, now: Date = Date()) -> MemoryOSProjectionBatch {
+        let operationalOutput = GraphStructuredExtractionOutput(
+            entities: output.operationalEntities,
+            statements: output.operationalStatements,
+            evidenceSpans: output.evidenceSpans,
+            warnings: output.warnings,
+            confidence: output.confidence,
+            metadata: output.metadata
+        )
+        let operationalBatch = projectionBatch(from: operationalOutput, artifactID: artifactID, now: now)
+        let localStatementIDMap = Dictionary(uniqueKeysWithValues: output.operationalStatements.map { statement in
+            (statement.id, "l2-statement:\(artifactID):\(statement.id)")
+        })
+        let remappedCandidates = output.knowledgeCandidates.map { candidate in
+            var next = candidate
+            next.evidenceStatementIDs = candidate.evidenceStatementIDs.map { localStatementIDMap[$0] ?? $0 }
+            next.relatedEntityIDs = candidate.relatedEntityIDs.map { localID in
+                let scope = output.conceptEntities.first { $0.localID == localID }?.domain ?? "knowledge"
+                if let concept = output.conceptEntities.first(where: { $0.localID == localID }) {
+                    let stableKey = MemoryOSStableKeyBuilder.stableKey(type: concept.conceptType, name: concept.name, scope: scope)
+                    return "l4-entity:\(stableKey)"
+                }
+                return localID
+            }
+            next.metadata = next.metadata.merging(["source_stage": "l1_unified_projection"]) { _, new in new }
+            return next
+        }
+        let knowledgeOutput = MemoryOSKnowledgeExtractionOutput(
+            knowledgeCandidates: remappedCandidates,
+            conceptEntities: output.conceptEntities,
+            conceptRelations: output.conceptRelations,
+            evidenceSpans: output.evidenceSpans.map { MemoryOSKnowledgeEvidenceSpan(id: $0.id, text: $0.text, startOffset: $0.startOffset, endOffset: $0.endOffset) },
+            warnings: output.warnings.map(\.message),
+            metadata: output.metadata.merging(["source_stage": "l1_unified_projection"]) { _, new in new }
+        )
+        let knowledgeBatch = projectionBatch(from: knowledgeOutput, artifactID: artifactID, now: now)
+        let entitiesByID = Dictionary(grouping: operationalBatch.entities + knowledgeBatch.entities, by: \.id).compactMapValues { $0.first }
+
+        return MemoryOSProjectionBatch(
+            artifactID: artifactID,
+            nodes: operationalBatch.nodes,
+            statements: operationalBatch.statements,
+            entities: Array(entitiesByID.values).sorted { $0.id < $1.id },
+            entityStatements: (operationalBatch.entityStatements + knowledgeBatch.entityStatements).sorted { $0.id < $1.id },
+            beliefs: knowledgeBatch.beliefs
         )
     }
 

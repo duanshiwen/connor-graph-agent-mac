@@ -20,8 +20,10 @@ import ConnorGraphAppSupport
     let runnable = try store.runnableQueueItems(kind: MemoryOSBackgroundJobKind.l1ProcessBlockToL2.rawValue, limit: 10, now: now)
     #expect(runnable.count == 2)
     let payload = try store.decode(MemoryOSL1ToL2JobDraft.self, runnable[0].payloadJSON)
-    #expect(payload.schemaName == "GraphStructuredExtractionOutput")
+    #expect(payload.schemaName == "MemoryOSL1UnifiedProjectionOutput")
     #expect(payload.prompt.contains("L2 operational facts"))
+    #expect(payload.prompt.contains("L3 reusable knowledge candidates"))
+    #expect(payload.prompt.contains("L4 stable entities"))
 }
 
 @Test func appMemoryOSFacadeEnqueuesL2ToKnowledgeJobsFromProcessingState() throws {

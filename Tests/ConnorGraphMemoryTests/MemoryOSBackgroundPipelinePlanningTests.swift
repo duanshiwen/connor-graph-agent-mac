@@ -24,7 +24,7 @@ import ConnorGraphMemory
     #expect(jobs.first?.kind == MemoryOSBackgroundJobKind.l1ProcessBlockToL2.rawValue)
     #expect(jobs.first?.captureEventIDs == ["capture-0", "capture-1"])
     #expect(jobs.first?.sourceSpanIDs == ["span-0", "span-1"])
-    #expect(jobs.first?.schemaName == "GraphStructuredExtractionOutput")
+    #expect(jobs.first?.schemaName == "MemoryOSL1UnifiedProjectionOutput")
     #expect(jobs.first?.prompt.contains("L2 operational facts") == true)
     #expect(jobs.first?.prompt.contains("search existing L2") == true)
 }
