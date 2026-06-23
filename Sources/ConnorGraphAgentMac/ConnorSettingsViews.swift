@@ -1323,16 +1323,16 @@ struct AIConnectionSetupView: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Default Model · required")
+                Text("默认模型 / 模型列表 · 必填")
                     .font(SettingsListTypography.header)
                 if selectedProviderPresetID != "custom" && !activeProviderPreset.supportedModels.isEmpty {
                     modelMultiSelect(title: "", models: activeProviderPreset.availableModels)
                 } else {
-                    TextField("例如 gpt-4o-mini、deepseek-v4-flash、google/gemini-2.5-flash", text: $model)
+                    TextField("例如 deepseek-v4-flash；多个模型可用逗号分隔", text: $model)
                         .textFieldStyle(.roundedBorder)
                         .font(SettingsListTypography.rowTitle)
                 }
-                Text("使用服务商自己的模型 ID。当前 Connor 会用该模型执行一次真实连接校验。")
+                Text(modelFieldHelpText)
                     .font(SettingsListTypography.rowTitle)
                     .foregroundStyle(.secondary)
             }
@@ -1418,7 +1418,7 @@ struct AIConnectionSetupView: View {
                     syncModelListFromSelection(fallbackModels: models)
                 }
             }
-            Text("可启用多个模型；默认模型用于首次 health check 和新会话默认选择。")
+            Text("可启用多个模型；默认模型用于首次 health check 和新会话默认选择。当前将使用 \(healthCheckModelForSubmit) 校验连接。")
                 .font(SettingsListTypography.rowTitle)
                 .foregroundStyle(.secondary)
         }
@@ -1686,6 +1686,26 @@ struct AIConnectionSetupView: View {
             if !enabled.isEmpty { return enabled.joined(separator: ",") }
         }
         return model.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var healthCheckModelForSubmit: String {
+        let selected = selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !selected.isEmpty { return selected }
+        return effectiveModelListForSubmit()
+            .split(separator: ",")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty } ?? "未选择模型"
+    }
+
+    private var modelFieldHelpText: String {
+        let modelList = effectiveModelListForSubmit()
+            .split(separator: ",")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        if modelList.count > 1 {
+            return "使用服务商自己的模型 ID；已填写多个模型，Connor 将使用 \(healthCheckModelForSubmit) 执行首次连接校验。"
+        }
+        return "使用服务商自己的模型 ID；Connor 将使用 \(healthCheckModelForSubmit) 执行一次最小连接校验。"
     }
 
     private func currentPresetModelOptions() -> [String] {
