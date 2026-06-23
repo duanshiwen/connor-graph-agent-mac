@@ -142,6 +142,14 @@ struct CommercialTrain7NativeMailSystemTests {
         #expect(shell.command(for: .openMailSources)?.keyboardShortcut == "⌘8")
     }
 
+    @Test func mailProtocolSupportPolicyExcludesGmailAPIAndMicrosoftGraph() {
+        #expect(MailProtocolSupportPolicy.supportedProtocols == [.imap, .smtp, .jmap])
+        #expect(MailProtocolSupportPolicy.isSupported(.imap))
+        #expect(MailProtocolSupportPolicy.isSupported(.smtp))
+        #expect(!MailProtocolSupportPolicy.isSupported(.gmailAPI))
+        #expect(!MailProtocolSupportPolicy.isSupported(.microsoftGraph))
+    }
+
     @Test func mailRuntimeSeparatesProtocolAndParserResponsibilities() async throws {
         let imap = MailIMAPAdapter()
         let smtp = MailSMTPAdapter()
