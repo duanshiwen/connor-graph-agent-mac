@@ -30,8 +30,10 @@ struct CalendarContactsCapabilityDomainTests {
 
     @Test func providerPresetsExposeDefaultCapabilities() {
         #expect(ConnectedAccountProviderKind.appleICloud.defaultCapabilities == [.mail, .calendar, .contacts])
-        #expect(ConnectedAccountProviderKind.microsoft365.defaultCapabilities == [.mail, .calendar, .contacts])
-        #expect(ConnectedAccountProviderKind.google.defaultCapabilities == [.mail, .calendar, .contacts])
+        #expect(ConnectedAccountProviderKind.microsoft365.defaultCapabilities == [])
+        #expect(ConnectedAccountProviderKind.google.defaultCapabilities == [])
+        #expect(!ConnectedAccountProviderKind.microsoft365.isSupportedForNewConnection)
+        #expect(!ConnectedAccountProviderKind.google.isSupportedForNewConnection)
         #expect(ConnectedAccountProviderKind.qq.defaultCapabilities == [.mail])
         #expect(ConnectedAccountProviderKind.netEase.defaultCapabilities == [.mail])
         #expect(ConnectedAccountProviderKind.genericIMAPSMTP.defaultCapabilities == [.mail])

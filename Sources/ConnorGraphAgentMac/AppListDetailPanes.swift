@@ -94,7 +94,7 @@ struct AddCalendarSourceSheet: View {
                 VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
                     Text("添加日历源")
                         .font(.system(size: 24, weight: .semibold))
-                    Text("当前接入 macOS Calendar / EventKit。你在系统日历中登录的 iCloud、Google、Exchange / Microsoft 365 日历都会一起同步。")
+                    Text("当前接入 macOS Calendar / EventKit，并保留标准 CalDAV 服务作为开放协议路径。")
                         .font(AgentChatTypography.meta)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -115,7 +115,7 @@ struct AddCalendarSourceSheet: View {
                     .font(AgentChatTypography.meta)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("如果要同步 Google、Microsoft 365、Exchange 或 iCloud 日历，请先在 macOS 系统设置 / 日历 App 中添加对应账户；Connor 会通过 EventKit 读取系统已经聚合的日历。")
+                Text("本机日历只读取 macOS 已授权可见的日历；如需连接其他日历服务，请使用标准 CalDAV 配置。")
                     .font(AgentChatTypography.meta)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1431,8 +1431,7 @@ private struct MailAccountListRow: View {
 
     private func icon(for provider: MailProviderKind) -> String {
         switch provider {
-        case .gmail: "g.circle.fill"
-        case .microsoft365: "m.circle.fill"
+        case .gmail, .microsoft365: "exclamationmark.triangle.fill"
         case .jmap: "j.circle.fill"
         case .genericIMAPSMTP: "envelope"
         case .localFixture: "shippingbox"

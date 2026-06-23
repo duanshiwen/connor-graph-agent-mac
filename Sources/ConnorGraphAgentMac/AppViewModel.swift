@@ -21,7 +21,6 @@ enum AppMailAccountSetupError: LocalizedError {
     case invalidEmail
     case missingCredential
     case missingServerConfiguration
-    case missingMicrosoftOAuthClientID
 
     var errorDescription: String? {
         switch self {
@@ -31,8 +30,6 @@ enum AppMailAccountSetupError: LocalizedError {
             return "请输入授权凭据或 App Password。"
         case .missingServerConfiguration:
             return "请填写完整的收件/发件服务器配置。"
-        case .missingMicrosoftOAuthClientID:
-            return "缺少 Microsoft OAuth Client ID。请在 Microsoft Entra 注册桌面应用，并配置 CONNOR_MICROSOFT_MAIL_CLIENT_ID；回调 URI 使用 http://localhost:1476/mail/microsoft/callback。"
         }
     }
 }
@@ -1913,27 +1910,12 @@ final class AppViewModel: NSObject, ObservableObject {
         let incomingHost = rawIncomingHost.trimmingCharacters(in: .whitespacesAndNewlines)
         let outgoingHost = rawOutgoingHost.trimmingCharacters(in: .whitespacesAndNewlines)
         guard email.contains("@"), email.contains(".") else { throw AppMailAccountSetupError.invalidEmail }
-        if preset != .microsoft {
-            guard !credential.isEmpty else { throw AppMailAccountSetupError.missingCredential }
-        }
+        guard !credential.isEmpty else { throw AppMailAccountSetupError.missingCredential }
         guard !incomingHost.isEmpty, !outgoingHost.isEmpty, incomingPort > 0, outgoingPort > 0 else {
             throw AppMailAccountSetupError.missingServerConfiguration
         }
 
-        let credentialToStore: String
-        if preset == .microsoft {
-            guard let oauthConfiguration = MicrosoftMailOAuthConfiguration.loadFromProcessAndDefaults() else {
-                throw AppMailAccountSetupError.missingMicrosoftOAuthClientID
-            }
-            let oauthCredential = try await MicrosoftMailOAuthService.shared.authenticate(
-                configuration: oauthConfiguration,
-                loginHint: email,
-                openURL: { url in NSWorkspace.shared.open(url) }
-            )
-            credentialToStore = try oauthCredential.encodedString()
-        } else {
-            credentialToStore = credential
-        }
+        let credentialToStore = credential
 
         let now = Date()
         let slug = Self.mailAccountSlug(for: email)
@@ -1999,7 +1981,6 @@ final class AppViewModel: NSObject, ObservableObject {
 
     private func mailProviderKind(for preset: MailAccountProviderPreset) -> MailProviderKind {
         switch preset {
-        case .microsoft: .microsoft365
         case .apple, .qq, .netease, .other: .genericIMAPSMTP
         }
     }
@@ -2257,8 +2238,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private func calendarProviderDisplayName(_ provider: ConnectedAccountProviderKind) -> String {
         switch provider {
         case .appleICloud: "Apple iCloud"
-        case .microsoft365: "Microsoft 365"
-        case .google: "Google"
+        case .microsoft365, .google: "已停止支持的旧账户"
         case .qq: "QQ"
         case .netEase: "网易"
         case .genericIMAPSMTP: "自定义 IMAP/SMTP"

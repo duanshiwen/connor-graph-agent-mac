@@ -32,11 +32,16 @@ struct CalendarContactsPresentationTests {
         #expect(presentation.query == "诗")
     }
 
-    @Test func accountConnectionRuntimeCreatesProviderCapabilities() async throws {
+    @Test func googleAndMicrosoftConnectedProvidersAreUnsupportedLegacyProviders() async throws {
         let runtime = AccountConnectionRuntime()
-        let account = runtime.makeAccount(provider: .google, displayName: "Google", primaryIdentifier: "alice@example.com")
+        let google = runtime.makeAccount(provider: .google, displayName: "Legacy Google", primaryIdentifier: "alice@example.com")
+        let microsoft = runtime.makeAccount(provider: .microsoft365, displayName: "Legacy Microsoft", primaryIdentifier: "alice@example.com")
 
-        #expect(account.enabledCapabilities == [.mail, .calendar, .contacts])
-        #expect(account.capability(.calendar)?.status == .enabled)
+        #expect(ConnectedAccountProviderKind.google.defaultCapabilities.isEmpty)
+        #expect(ConnectedAccountProviderKind.microsoft365.defaultCapabilities.isEmpty)
+        #expect(!ConnectedAccountProviderKind.google.isSupportedForNewConnection)
+        #expect(!ConnectedAccountProviderKind.microsoft365.isSupportedForNewConnection)
+        #expect(google.enabledCapabilities.isEmpty)
+        #expect(microsoft.enabledCapabilities.isEmpty)
     }
 }
