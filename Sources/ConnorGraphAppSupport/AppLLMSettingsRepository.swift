@@ -570,14 +570,13 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
         let apiKeyHeaderKind = OpenAICompatibleAPIKeyHeaderKind(rawValue: connection.extraHTTPHeaders[Self.openAIAPIKeyHeaderKindMetadataKey] ?? "") ?? .bearer
         var extraHeaders = connection.extraHTTPHeaders
         extraHeaders.removeValue(forKey: Self.openAIAPIKeyHeaderKindMetadataKey)
-        let thinkingLevel = thinkingLevelOverride ?? settings.defaultThinkingLevel
         return OpenAICompatibleConfig(
             baseURL: baseURL,
             apiKey: apiKey,
             model: modelOverride ?? connection.effectiveModel,
             extraHeaders: extraHeaders,
             apiKeyHeaderKind: apiKeyHeaderKind,
-            reasoningEffort: thinkingLevel.openAIReasoningEffort
+            reasoningEffort: nil
         )
     }
 
@@ -644,27 +643,22 @@ public struct AppLLMModelCatalog<Client: AgentHTTPClient>: Sendable {
     }
 
     private func anthropicCompatibleConnection(connection: AppLLMConnectionConfig, isDefault: Bool) -> AppLLMModelConnection {
-        let selectedModel = connection.effectiveModel
-        let fallbackModel = selectedModel.isEmpty ? "claude-sonnet-4-5" : selectedModel
-        return AppLLMModelConnection(
+        AppLLMModelConnection(
             id: connection.id,
             title: connection.name + (isDefault ? " · 默认" : ""),
             subtitle: "Anthropic Compatible · \(connection.baseURLString)",
             providerMode: connection.providerMode,
-            models: options(from: connection, fallback: fallbackModel),
+            models: configuredOptions(from: connection),
             isLiveCatalog: false
         )
     }
 
     private func openAICompatibleConnection(connection: AppLLMConnectionConfig, isDefault: Bool) async -> AppLLMModelConnection {
-        let configuredModels = connection.modelOptions
-        let selectedModel = connection.effectiveModel
-        let fallbackModel = selectedModel.isEmpty ? AppLLMSettings.default.effectiveModel : selectedModel
         guard let baseURL = URL(string: connection.baseURLString) else {
-            return AppLLMModelConnection(id: connection.id, title: connection.name + (isDefault ? " · 默认" : ""), subtitle: "OpenAI Compatible · Base URL 无效", providerMode: .openAICompatible, models: options(from: connection, fallback: fallbackModel), isLiveCatalog: false)
+            return AppLLMModelConnection(id: connection.id, title: connection.name + (isDefault ? " · 默认" : ""), subtitle: "OpenAI Compatible · Base URL 无效", providerMode: .openAICompatible, models: configuredOptions(from: connection), isLiveCatalog: false)
         }
         guard let apiKey = try? settingsRepository.apiKey(for: connection.id), !apiKey.isEmpty else {
-            return AppLLMModelConnection(id: connection.id, title: connection.name + (isDefault ? " · 默认" : ""), subtitle: "OpenAI Compatible · 缺少 API Key", providerMode: .openAICompatible, models: options(from: connection, fallback: fallbackModel), isLiveCatalog: false)
+            return AppLLMModelConnection(id: connection.id, title: connection.name + (isDefault ? " · 默认" : ""), subtitle: "OpenAI Compatible · 缺少 API Key", providerMode: .openAICompatible, models: configuredOptions(from: connection), isLiveCatalog: false)
         }
         var client = httpClient
         let request = AgentHTTPRequest(
@@ -676,30 +670,25 @@ public struct AppLLMModelCatalog<Client: AgentHTTPClient>: Sendable {
         do {
             let response = try await client.send(request)
             guard response.statusCode >= 200, response.statusCode < 300 else {
-                return AppLLMModelConnection(id: connection.id, title: connection.name + (isDefault ? " · 默认" : ""), subtitle: "OpenAI Compatible · 模型列表请求失败（HTTP \(response.statusCode)）", providerMode: .openAICompatible, models: options(from: connection, fallback: fallbackModel), isLiveCatalog: false)
+                return AppLLMModelConnection(id: connection.id, title: connection.name + (isDefault ? " · 默认" : ""), subtitle: "OpenAI Compatible · 模型列表请求失败（HTTP \(response.statusCode)）", providerMode: .openAICompatible, models: configuredOptions(from: connection), isLiveCatalog: false)
             }
             let modelIDs = try Self.parseModelIDs(response.body)
-            var options = modelIDs.map { AppLLMModelOption(id: $0) }
-            let missingConfiguredModels = configuredModels.filter { configuredModel in !options.contains(where: { $0.id == configuredModel }) }
-            options.insert(contentsOf: missingConfiguredModels.map { AppLLMModelOption(id: $0) }, at: 0)
-            if options.isEmpty { options = [AppLLMModelOption(id: fallbackModel)] }
+            let options = modelIDs.map { AppLLMModelOption(id: $0) }
             return AppLLMModelConnection(id: connection.id, title: connection.name + (isDefault ? " · 默认" : ""), subtitle: "OpenAI Compatible · \(baseURL.absoluteString)", providerMode: .openAICompatible, models: options, isLiveCatalog: true)
         } catch {
-            return AppLLMModelConnection(id: connection.id, title: connection.name + (isDefault ? " · 默认" : ""), subtitle: "OpenAI Compatible · 模型列表解析失败", providerMode: .openAICompatible, models: options(from: connection, fallback: fallbackModel), isLiveCatalog: false)
+            return AppLLMModelConnection(id: connection.id, title: connection.name + (isDefault ? " · 默认" : ""), subtitle: "OpenAI Compatible · 模型列表解析失败", providerMode: .openAICompatible, models: configuredOptions(from: connection), isLiveCatalog: false)
         }
     }
 
     private func fallbackConnections(error: Error) -> [AppLLMModelConnection] {
         let settings = (try? settingsRepository.loadSettings()) ?? .default
         let connection = settings.defaultConnection
-        let fallbackModel = connection.effectiveModel.isEmpty ? AppLLMSettings.default.effectiveModel : connection.effectiveModel
-        return [AppLLMModelConnection(id: connection.id, title: connection.name, subtitle: "模型目录不可用：\(error.localizedDescription)", providerMode: connection.providerMode, models: options(from: connection, fallback: fallbackModel), isLiveCatalog: false)]
+        return [AppLLMModelConnection(id: connection.id, title: connection.name, subtitle: "模型目录不可用：\(error.localizedDescription)", providerMode: connection.providerMode, models: configuredOptions(from: connection), isLiveCatalog: false)]
     }
 
-    private func options(from connection: AppLLMConnectionConfig, fallback: String) -> [AppLLMModelOption] {
+    private func configuredOptions(from connection: AppLLMConnectionConfig) -> [AppLLMModelOption] {
         var ids = connection.modelOptions
-        if ids.isEmpty { ids = [fallback] }
-        let selected = connection.effectiveModel
+        let selected = connection.selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
         if !selected.isEmpty, !ids.contains(selected) { ids.insert(selected, at: 0) }
         return ids.map { AppLLMModelOption(id: $0) }
     }
