@@ -252,8 +252,28 @@ private struct CapturingHTTPClient: AgentHTTPClient {
     )
     let context = AgentContext(query: "memory", items: [])
 
-    await #expect(throws: OpenAICompatibleProviderError.httpStatus(401)) {
+    await #expect(throws: OpenAICompatibleProviderError.httpStatus(401, message: "bad key")) {
         try await provider.complete(prompt: "memory", context: context)
+    }
+}
+
+@Test func openAICompatibleProviderHTTPErrorDescriptionIncludesSafeResponseMessage() async throws {
+    let body = #"{"error":{"message":"unsupported parameter: temperature","type":"invalid_request_error"}}"#.data(using: .utf8)!
+    let client = CapturingHTTPClient(responseBody: body, statusCode: 400)
+    let provider = OpenAICompatibleProvider(
+        config: OpenAICompatibleConfig(baseURL: URL(string: "https://llm.example.com/v1")!, apiKey: "secret-key", model: "gpt-test"),
+        httpClient: client
+    )
+    let context = AgentContext(query: "memory", items: [])
+
+    do {
+        _ = try await provider.complete(prompt: "memory", context: context)
+        Issue.record("Expected HTTP error")
+    } catch {
+        let description = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+        #expect(description.contains("HTTP 400"))
+        #expect(description.contains("unsupported parameter: temperature"))
+        #expect(description.contains("secret-key") == false)
     }
 }
 
@@ -280,19 +300,28 @@ private struct CapturingHTTPClient: AgentHTTPClient {
     #expect(client.captured?.url.absoluteString == "https://llm.example.com/v1/chat/completions")
     #expect(client.captured?.headers["Authorization"] == "Bearer secret-key")
     let requestBody = try #require(client.captured?.body)
-    let requestText = String(data: requestBody, encoding: .utf8) ?? ""
-    #expect(requestText.contains("Reply with exactly: OK"))
+    let requestObject = try #require(try JSONSerialization.jsonObject(with: requestBody) as? [String: Any])
+    let messages = try #require(requestObject["messages"] as? [[String: Any]])
+    #expect(requestObject["model"] as? String == "gpt-health")
+    #expect(messages.count == 1)
+    #expect(messages.first?["role"] as? String == "user")
+    #expect(messages.first?["content"] as? String == "Reply with exactly: OK")
+    #expect(requestObject["temperature"] == nil)
+    #expect(requestObject["reasoning_effort"] == nil)
+    #expect(requestObject["tools"] == nil)
+    #expect(requestObject["tool_choice"] == nil)
+    #expect(requestObject["stream"] == nil)
 }
 
 @Test func openAICompatibleProviderHealthCheckFailsOnHTTPError() async throws {
-    let body = #"{\"error\":{\"message\":\"bad key\"}}"#.data(using: .utf8)!
+    let body = #"{"error":{"message":"bad key"}}"#.data(using: .utf8)!
     let client = CapturingHTTPClient(responseBody: body, statusCode: 403)
     let provider = OpenAICompatibleProvider(
         config: OpenAICompatibleConfig(baseURL: URL(string: "https://llm.example.com/v1")!, apiKey: "bad", model: "gpt-health"),
         httpClient: client
     )
 
-    await #expect(throws: OpenAICompatibleProviderError.httpStatus(403)) {
+    await #expect(throws: OpenAICompatibleProviderError.httpStatus(403, message: "bad key")) {
         try await provider.healthCheck()
     }
 }
