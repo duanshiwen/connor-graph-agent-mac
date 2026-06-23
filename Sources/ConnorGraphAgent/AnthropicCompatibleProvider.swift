@@ -78,6 +78,8 @@ public enum AnthropicCompatibleProviderError: Error, Equatable, Sendable {
     case httpStatus(Int, message: String?)
     case missingAssistantMessage
     case streamError(String)
+    case unsupportedVisionInput(model: String, reason: String)
+    case invalidImageDataURL
 }
 
 extension AnthropicCompatibleProviderError: LocalizedError {
@@ -94,6 +96,10 @@ extension AnthropicCompatibleProviderError: LocalizedError {
             return "Anthropic-compatible provider response did not include an assistant message."
         case let .streamError(message):
             return message
+        case let .unsupportedVisionInput(model, reason):
+            return "Anthropic-compatible model \(model) cannot receive image input: \(reason)"
+        case .invalidImageDataURL:
+            return "Anthropic-compatible provider received a malformed image data URL."
         }
     }
 }
@@ -104,15 +110,12 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
     public var sseClient: (any AgentSSEHTTPClient)?
 
     public var modelID: String { config.requestModel }
-    public var capabilities: AgentModelCapabilities {
-        AgentModelCapabilities(
-            supportsStreaming: config.featureOptions.streamingEnabled,
-            supportsToolCalling: true,
-            supportsParallelToolCalls: false,
-            supportsStructuredOutput: false,
-            supportsVision: false
-        )
+    public var capabilityProfile: AgentModelCapabilityProfile {
+        var profile = AgentModelCapabilityKernel.profile(providerKind: .anthropicCompatible, modelID: config.requestModel)
+        profile.supportsStreaming = config.featureOptions.streamingEnabled
+        return profile
     }
+    public var capabilities: AgentModelCapabilities { capabilityProfile.agentCapabilities }
 
     public init(config: AnthropicCompatibleConfig, httpClient: Client, sseClient: (any AgentSSEHTTPClient)? = nil) {
         self.config = config
@@ -188,6 +191,7 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
     }
 
     private func makeMessagesRequest(_ request: AgentModelRequest, stream: Bool = false) throws -> AgentHTTPRequest {
+        try validateVisionSendAllowed(request)
         var body: [String: Any] = [
             "model": config.requestModel,
             "max_tokens": config.maxTokens,
@@ -297,12 +301,32 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
                     guard let text = part.text, !text.isEmpty else { return nil }
                     return ["type": "text", "text": text]
                 case .imageDataURL:
-                    return nil
+                    guard let parsed = AgentImageDataURLParser.parse(part.dataURL ?? "", fallbackMimeType: part.mimeType) else {
+                        return nil
+                    }
+                    return [
+                        "type": "image",
+                        "source": [
+                            "type": "base64",
+                            "media_type": parsed.mimeType,
+                            "data": parsed.base64
+                        ]
+                    ]
                 }
             }
             if !blocks.isEmpty { return blocks }
         }
         return [["type": "text", "text": message.content]]
+    }
+
+    private func validateVisionSendAllowed(_ request: AgentModelRequest) throws {
+        let profile = capabilityProfile
+        switch AgentModelCapabilityKernel.visionSendDecision(profile: profile, request: request) {
+        case .allowed:
+            return
+        case .denied(let reason):
+            throw AnthropicCompatibleProviderError.unsupportedVisionInput(model: profile.modelID, reason: reason)
+        }
     }
 
     private static func errorMessage(from data: Data) -> String? {
