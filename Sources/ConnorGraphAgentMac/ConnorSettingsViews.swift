@@ -1046,6 +1046,7 @@ struct AIConnectionSetupView: View {
     @State private var showAPIKey = false
     @State private var selectedProviderPresetID = "openai"
     @State private var customProtocol: AIConnectionCustomProtocol = .openAICompatible
+    @State private var showsAdvancedConnectionSettings = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1240,7 +1241,38 @@ struct AIConnectionSetupView: View {
             }
 
             primaryAPIKeyEntryCard(placeholder: apiKeyPlaceholderForCurrentPreset)
+
+            advancedConnectionDisclosure
         }
+    }
+
+    private var advancedConnectionDisclosure: some View {
+        DisclosureGroup(isExpanded: $showsAdvancedConnectionSettings) {
+            VStack(alignment: .leading, spacing: SettingsListLayout.spaceM) {
+                aiConnectionSettingsRow(title: "连接名称") {
+                    aiConnectionTextField("Anthropic / Claude", text: $connectionName)
+                }
+                aiConnectionSettingsRow(title: "Endpoint") {
+                    aiConnectionTextField("https://api.example.com/v1", text: $baseURLString)
+                }
+                aiConnectionSettingsRow(title: "模型") {
+                    aiConnectionTextField("claude-sonnet-4-5", text: $model)
+                }
+                aiConnectionSettingsRow(title: "默认模型", help: "默认模型会用于首次连接校验和新会话默认选择。") {
+                    aiConnectionTextField("claude-sonnet-4-5", text: $selectedModel)
+                }
+            }
+            .padding(.top, SettingsListLayout.spaceM)
+        } label: {
+            Text("高级设置（通常不需要修改）")
+                .font(SettingsListTypography.rowTitleSelected)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, SettingsListLayout.spaceL)
+        .padding(.vertical, SettingsListLayout.spaceM)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(AppShellColors.hairline, lineWidth: 1))
     }
 
     private var providerSummaryCard: some View {
