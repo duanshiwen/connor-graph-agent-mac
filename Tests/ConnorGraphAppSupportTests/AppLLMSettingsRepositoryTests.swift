@@ -123,6 +123,31 @@ private struct FakeAgentHTTPClient: AgentHTTPClient, Sendable {
     #expect(config == nil)
 }
 
+@Test func settingsRepositoryDoesNotInjectReasoningEffortIntoOpenAICompatibleConfigByDefault() throws {
+    let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
+    try repository.save(
+        settings: AppLLMSettings(
+            connections: [
+                AppLLMConnectionConfig(
+                    id: "compatible",
+                    name: "Compatible Gateway",
+                    providerMode: .openAICompatible,
+                    baseURLString: "https://example.com/v1",
+                    model: "gpt-compatible",
+                    selectedModel: "gpt-compatible"
+                )
+            ],
+            defaultConnectionID: "compatible",
+            defaultThinkingLevel: .medium
+        ),
+        apiKey: "secret-key"
+    )
+
+    let config = try #require(try repository.openAICompatibleConfig(connectionID: "compatible"))
+
+    #expect(config.reasoningEffort == nil)
+}
+
 @Test func modelCatalogLoadsOpenAICompatibleModelsFromProvider() async throws {
     let repository = AppLLMSettingsRepository(settingsStore: FakeSettingsStore(), credentialStore: FakeCredentialStore())
     try repository.save(

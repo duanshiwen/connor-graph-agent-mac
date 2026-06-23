@@ -91,7 +91,7 @@ private final class HealthCheckFakeSettingsStore: LLMSettingsStore, @unchecked S
     let checker = AppLLMProviderHealthChecker(
         settingsRepository: settingsRepository,
         openAICompatibleHealthCheck: { _ in
-            throw OpenAICompatibleProviderError.httpStatus(401)
+            throw OpenAICompatibleProviderError.httpStatus(401, message: "bad key")
         }
     )
 
