@@ -45,15 +45,10 @@ public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvid
     public var sseClient: (any AgentSSEHTTPClient)?
 
     public var modelID: String { config.requestModel }
-    public var capabilities: AgentModelCapabilities {
-        AgentModelCapabilities(
-            supportsStreaming: true,
-            supportsToolCalling: true,
-            supportsParallelToolCalls: true,
-            supportsStructuredOutput: true,
-            supportsVision: true
-        )
+    public var capabilityProfile: AgentModelCapabilityProfile {
+        AgentModelCapabilityKernel.profile(providerKind: .openAIResponses, modelID: config.requestModel)
     }
+    public var capabilities: AgentModelCapabilities { capabilityProfile.agentCapabilities }
 
     public init(config: OpenAIResponsesConfig, httpClient: Client, sseClient: (any AgentSSEHTTPClient)? = nil) {
         self.config = config
@@ -134,6 +129,7 @@ public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvid
     }
 
     private func makeRequest(_ request: AgentModelRequest, stream: Bool) throws -> AgentHTTPRequest {
+        try validateVisionSendAllowed(request)
         let endpoint = config.baseURL.appendingPathComponent("responses")
         var body: [String: Any] = [
             "model": config.requestModel,
@@ -185,11 +181,41 @@ public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvid
                     ]
                 } ?? []
             default:
-                return [[
-                    "role": role,
-                    "content": message.content
-                ]]
+                var item: [String: Any] = ["role": role]
+                if let contentParts = responsesContentParts(for: message), !contentParts.isEmpty {
+                    item["content"] = contentParts
+                } else {
+                    item["content"] = message.content
+                }
+                return [item]
             }
+        }
+    }
+
+    private func responsesContentParts(for message: AgentModelMessage) -> [[String: Any]]? {
+        guard let parts = message.contentParts, !parts.isEmpty else { return nil }
+        let mapped = parts.compactMap { part -> [String: Any]? in
+            switch part.kind {
+            case .text:
+                guard let text = part.text, !text.isEmpty else { return nil }
+                return ["type": "input_text", "text": text]
+            case .imageDataURL:
+                guard let dataURL = part.dataURL, !dataURL.isEmpty else { return nil }
+                var object: [String: Any] = ["type": "input_image", "image_url": dataURL]
+                if let detail = part.detail, !detail.isEmpty { object["detail"] = detail }
+                return object
+            }
+        }
+        return mapped.isEmpty ? nil : mapped
+    }
+
+    private func validateVisionSendAllowed(_ request: AgentModelRequest) throws {
+        let profile = capabilityProfile
+        switch AgentModelCapabilityKernel.visionSendDecision(profile: profile, request: request) {
+        case .allowed:
+            return
+        case .denied(let reason):
+            throw OpenAICompatibleProviderError.unsupportedVisionInput(model: profile.modelID, reason: reason)
         }
     }
 
