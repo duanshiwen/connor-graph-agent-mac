@@ -87,6 +87,36 @@ struct LLMConnectionSetupTests {
         #expect(try repository.apiKey(for: "provider-1") == "secret")
     }
 
+    @Test func openAICompatibleUsesValidationModelWithoutPersistingItAsCatalogModel() async throws {
+        let store = MemoryLLMSettingsStore()
+        let credentials = MemoryCredentialStore()
+        let repository = AppLLMSettingsRepository(settingsStore: store, credentialStore: credentials)
+        let service = AppLLMConnectionSetupService(
+            settingsRepository: repository,
+            openAICompatibleHealthCheck: { config in
+                #expect(config.model == "anthropic/claude-sonnet-4")
+                return LLMProviderHealthCheckResult(ok: true, model: config.model, message: "OK")
+            }
+        )
+
+        let result = try await service.setupConnection(AppLLMConnectionSetupInput(
+            id: "connor-gateway-anthropic",
+            kind: .openAICompatible,
+            name: "Connor AI Gateway · Anthropic",
+            baseURLString: "https://cnai.connor.run/v1",
+            model: "",
+            selectedModel: "",
+            validationModel: "anthropic/claude-sonnet-4",
+            apiKey: "secret"
+        ))
+
+        #expect(result.connection.model == "")
+        #expect(result.connection.selectedModel == "")
+        let loaded = try repository.loadSettings()
+        #expect(loaded.defaultConnection.model == "")
+        #expect(loaded.defaultConnection.selectedModel == "")
+    }
+
     @Test func xiaomiMiMoOpenAICompatiblePersistsAPIKeyHeaderKind() async throws {
         let store = MemoryLLMSettingsStore()
         let credentials = MemoryCredentialStore()
