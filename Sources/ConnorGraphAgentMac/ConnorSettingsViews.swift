@@ -83,7 +83,7 @@ struct ConnorSettingsDetailView: View {
                 .frame(maxWidth: 760)
                 .frame(maxWidth: .infinity, alignment: .center)
 
-                if let message = viewModel.appSettingsMessage {
+                if let message = viewModel.settingsMessage(for: viewModel.selectedSettingsSection) {
                     Text(message)
                         .font(SettingsListTypography.rowCaption)
                         .foregroundStyle(.secondary)
