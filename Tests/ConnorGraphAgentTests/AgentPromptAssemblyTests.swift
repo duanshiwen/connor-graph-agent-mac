@@ -59,19 +59,32 @@ import ConnorGraphAgent
     #expect(prompt.contains("user habits"))
     #expect(prompt.contains("user personality traits"))
     #expect(prompt.contains("user communication preferences"))
+    #expect(prompt.contains("memory_os_get_current_user_profile"))
     #expect(prompt.contains("memory_os_search"))
     #expect(prompt.contains("memory_os_read_record"))
     #expect(prompt.contains("memory_os_expand_l4"))
     #expect(prompt.contains("memory_os_read_provenance"))
+    #expect(!prompt.localizedCaseInsensitiveContains("shiwen"))
 }
 
 @Test func defaultSystemPromptRequiresCurrentUserLookupBeforeAnswering() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
     #expect(prompt.contains("Before answering or solving a user problem"))
+    #expect(prompt.contains("Prefer `memory_os_get_current_user_profile`"))
     #expect(prompt.contains("Search relevant L2/L3/L4 memory for the user's preferences"))
     #expect(prompt.contains("never let older profile memory override the user's latest explicit request"))
     #expect(prompt.contains("If the user changes their name"))
+    #expect(!prompt.localizedCaseInsensitiveContains("shiwen"))
+}
+
+@Test func defaultSystemPromptDocumentsCurrentUserProfileTool() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("memory_os_get_current_user_profile"))
+    #expect(prompt.contains("dedicated current-user profile retrieval tool"))
+    #expect(prompt.contains("stable marker `current_user`"))
+    #expect(!prompt.localizedCaseInsensitiveContains("shiwen"))
 }
 
 @Test func agentPromptProjectorLegacyModeMatchesNormalizedPromptShape() async throws {
