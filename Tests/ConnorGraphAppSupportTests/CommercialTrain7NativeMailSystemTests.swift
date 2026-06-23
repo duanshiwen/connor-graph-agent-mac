@@ -155,6 +155,28 @@ struct CommercialTrain7NativeMailSystemTests {
         #expect(syncHealth.status == .ready)
     }
 
+    @Test func oauthMailAccountsAreTreatedAsUnsupportedLegacyAccounts() async throws {
+        let binding = MailCredentialBinding(keychainService: "test.oauth", accountName: "legacy@example.com", authMode: .oauth2)
+        let credentialStore = CommercialTrain7MemoryCredentialStore()
+        try credentialStore.saveSecret("legacy-oauth-token-package", service: binding.keychainService, account: binding.accountName)
+        let account = MailAccount(
+            id: MailAccountID(rawValue: "legacy-oauth"),
+            provider: .microsoft365,
+            displayName: "Legacy OAuth",
+            identities: [MailIdentity(id: MailIdentityID(rawValue: "legacy-identity"), displayName: "Legacy", address: MailAddress(email: "legacy@example.com"))],
+            incoming: MailServerEndpoint(host: "imap.example.com", port: 993, security: .tls, protocolKind: .imap),
+            credentialBinding: binding
+        )
+
+        let result = try await MailIMAPInitialSyncService(
+            credentialStore: AppMailCredentialStore(credentialStore: credentialStore)
+        ).sync(account: account)
+
+        #expect(result.account.health.status == .blocked)
+        #expect(result.account.health.summary == "OAuth 邮件登录已不再支持")
+        #expect(result.messages.isEmpty)
+    }
+
     @Test func mailBrowserDefaultPresentationIsEmpty() {
         let presentation = NativeMailBrowserPresentation.empty
         #expect(presentation.accounts.isEmpty)
@@ -314,5 +336,21 @@ struct CommercialTrain7NativeMailSystemTests {
         ]
 
         return NativeMailBrowserPresentation(accounts: accounts, mailboxes: mailboxes, messages: messages)
+    }
+}
+
+private final class CommercialTrain7MemoryCredentialStore: CredentialStore, @unchecked Sendable {
+    private var secrets: [String: String] = [:]
+
+    func saveSecret(_ secret: String, service: String, account: String) throws {
+        secrets["\(service)::\(account)"] = secret
+    }
+
+    func readSecret(service: String, account: String) throws -> String? {
+        secrets["\(service)::\(account)"]
+    }
+
+    func deleteSecret(service: String, account: String) throws {
+        secrets.removeValue(forKey: "\(service)::\(account)")
     }
 }
