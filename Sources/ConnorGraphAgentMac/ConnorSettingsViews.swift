@@ -1340,10 +1340,8 @@ struct AIConnectionSetupView: View {
     }
 
     private func apiKeyField(placeholder: String) -> some View {
-        VStack(alignment: .leading, spacing: SettingsListLayout.spaceS) {
-            Text("API Key")
-                .font(SettingsListTypography.header)
-            HStack(spacing: SettingsListLayout.spaceS) {
+        aiConnectionFormRow(title: "API Key") {
+            aiConnectionInputContainer {
                 Group {
                     if showAPIKey {
                         TextField(placeholder, text: $apiKey)
@@ -1353,6 +1351,7 @@ struct AIConnectionSetupView: View {
                 }
                 .textFieldStyle(.plain)
                 .font(SettingsListTypography.rowTitle)
+
                 Button(action: { showAPIKey.toggle() }) {
                     Image(systemName: showAPIKey ? "eye.slash" : "eye")
                         .foregroundStyle(.secondary)
@@ -1360,14 +1359,47 @@ struct AIConnectionSetupView: View {
                 .buttonStyle(.plain)
                 .help(showAPIKey ? "隐藏 API Key" : "显示 API Key")
             }
-            .padding(.horizontal, SettingsListLayout.spaceL)
-            .frame(height: SettingsListLayout.fieldHeight)
-            .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous)
-                    .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
-            )
         }
+    }
+
+    private func aiConnectionFormRow<Content: View>(title: String, help: String? = nil, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceS) {
+            Text(title)
+                .font(SettingsListTypography.header)
+            content()
+            if let help, !help.isEmpty {
+                aiConnectionHelpText(help)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func aiConnectionInputContainer<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        HStack(spacing: SettingsListLayout.spaceS) {
+            content()
+        }
+        .padding(.horizontal, SettingsListLayout.spaceL)
+        .frame(height: SettingsListLayout.fieldHeight)
+        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous)
+                .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+        )
+    }
+
+    private func aiConnectionTextField(_ placeholder: String, text: Binding<String>) -> some View {
+        aiConnectionInputContainer {
+            TextField(placeholder, text: text)
+                .textFieldStyle(.plain)
+                .font(SettingsListTypography.rowTitle)
+        }
+    }
+
+    private func aiConnectionHelpText(_ text: String) -> some View {
+        Text(text)
+            .font(SettingsListTypography.rowTitle)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private func modelMultiSelect(title: String, models: [String]) -> some View {
