@@ -50,6 +50,7 @@ struct AgentRuntimePreferenceSettingsTests {
         #expect(preferences.preferredLanguage.isEmpty)
         #expect(preferences.city.isEmpty)
         #expect(preferences.country.isEmpty)
+        #expect(preferences.genderIdentity.isEmpty)
         #expect(preferences.birthDate.isEmpty)
         #expect(preferences.notes.isEmpty)
     }
@@ -72,11 +73,12 @@ struct AgentRuntimePreferenceSettingsTests {
         #expect(preferences.preferredLanguage == "")
         #expect(preferences.city == "London")
         #expect(preferences.country == "United Kingdom")
+        #expect(preferences.genderIdentity == "")
         #expect(preferences.birthDate == "")
         #expect(preferences.notes == "Prefers concise answers.")
     }
 
-    @Test func decodesBirthDateWhenPresent() throws {
+    @Test func decodesGenderIdentityAndBirthDateWhenPresent() throws {
         let data = Data("""
         {
           "displayName": "Alex",
@@ -84,6 +86,7 @@ struct AgentRuntimePreferenceSettingsTests {
           "preferredLanguage": "English",
           "city": "London",
           "country": "United Kingdom",
+          "genderIdentity": "非二元",
           "birthDate": "1990-01-01",
           "notes": "Prefers concise answers."
         }
@@ -91,6 +94,7 @@ struct AgentRuntimePreferenceSettingsTests {
 
         let preferences = try JSONDecoder().decode(AgentRuntimePreferenceSettings.self, from: data)
 
+        #expect(preferences.genderIdentity == "非二元")
         #expect(preferences.birthDate == "1990-01-01")
     }
 
@@ -155,6 +159,7 @@ struct AgentRuntimePreferenceSettingsTests {
             preferredLanguage: "简体中文",
             city: "杭州",
             country: "中国",
+            genderIdentity: "非二元",
             birthDate: "1990-01-01",
             notes: "数学公式使用块级 LaTeX。"
         )
@@ -165,18 +170,29 @@ struct AgentRuntimePreferenceSettingsTests {
         #expect(prompt.contains("- 称呼：诗闻"))
         #expect(prompt.contains("- 时区：Asia/Shanghai"))
         #expect(prompt.contains("- 语言偏好：简体中文"))
+        #expect(prompt.contains("- 性别：非二元"))
         #expect(prompt.contains("- 出生日期：1990-01-01"))
+        #expect(prompt.range(of: "- 性别：非二元")!.lowerBound < prompt.range(of: "- 出生日期：1990-01-01")!.lowerBound)
         #expect(prompt.contains("- 城市：杭州"))
         #expect(prompt.contains("- 国家/地区：中国"))
         #expect(prompt.contains("- 备注：数学公式使用块级 LaTeX。"))
     }
 
-    @Test func promptBuilderOmitsEmptyBirthDate() {
+    @Test func promptBuilderOmitsEmptyGenderAndBirthDate() {
         let preferences = AgentRuntimePreferenceSettings(displayName: "诗闻")
 
         let prompt = UserBasicInfoPromptBuilder(preferences: preferences).promptSection
 
         #expect(prompt.contains("- 称呼：诗闻"))
+        #expect(!prompt.contains("性别"))
         #expect(!prompt.contains("出生日期"))
+    }
+
+    @Test func promptBuilderIncludesPreferNotToSayGenderWhenExplicitlyChosen() {
+        let preferences = AgentRuntimePreferenceSettings(genderIdentity: "不愿透露")
+
+        let prompt = UserBasicInfoPromptBuilder(preferences: preferences).promptSection
+
+        #expect(prompt.contains("- 性别：不愿透露"))
     }
 }
