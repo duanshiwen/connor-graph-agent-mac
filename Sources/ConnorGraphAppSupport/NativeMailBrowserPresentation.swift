@@ -11,7 +11,6 @@ public enum NativeMailBrowserEmptyState: String, Codable, Sendable, Equatable, H
 
 public enum MailAccountProviderPreset: String, CaseIterable, Codable, Sendable, Equatable, Hashable, Identifiable {
     case apple
-    case microsoft
     case qq
     case netease
     case other
@@ -21,7 +20,6 @@ public enum MailAccountProviderPreset: String, CaseIterable, Codable, Sendable, 
     public var title: String {
         switch self {
         case .apple: "Apple iCloud"
-        case .microsoft: "Microsoft Outlook / 365"
         case .qq: "QQ 邮箱"
         case .netease: "网易 163 / 126"
         case .other: "其他 IMAP/SMTP"
@@ -31,7 +29,6 @@ public enum MailAccountProviderPreset: String, CaseIterable, Codable, Sendable, 
     public var subtitle: String {
         switch self {
         case .apple: "iCloud Mail，使用 App 专用密码"
-        case .microsoft: "优先 Microsoft 登录，IMAP/SMTP 作为高级选项"
         case .qq: "需要先开启 IMAP/SMTP，并使用 16 位授权码"
         case .netease: "适用于 163/126，推荐 IMAP 与客户端授权码"
         case .other: "手动填写收件和发件服务器"
@@ -41,7 +38,6 @@ public enum MailAccountProviderPreset: String, CaseIterable, Codable, Sendable, 
     public var incomingHost: String {
         switch self {
         case .apple: "imap.mail.me.com"
-        case .microsoft: "outlook.office365.com"
         case .qq: "imap.qq.com"
         case .netease: "imap.163.com"
         case .other: ""
@@ -50,7 +46,7 @@ public enum MailAccountProviderPreset: String, CaseIterable, Codable, Sendable, 
 
     public var incomingPort: Int {
         switch self {
-        case .apple, .microsoft, .qq, .netease: 993
+        case .apple, .qq, .netease: 993
         case .other: 993
         }
     }
@@ -58,7 +54,6 @@ public enum MailAccountProviderPreset: String, CaseIterable, Codable, Sendable, 
     public var outgoingHost: String {
         switch self {
         case .apple: "smtp.mail.me.com"
-        case .microsoft: "smtp.office365.com"
         case .qq: "smtp.qq.com"
         case .netease: "smtp.163.com"
         case .other: ""
@@ -67,7 +62,7 @@ public enum MailAccountProviderPreset: String, CaseIterable, Codable, Sendable, 
 
     public var outgoingPort: Int {
         switch self {
-        case .apple, .microsoft: 587
+        case .apple: 587
         case .qq, .netease: 465
         case .other: 587
         }
@@ -77,7 +72,7 @@ public enum MailAccountProviderPreset: String, CaseIterable, Codable, Sendable, 
 
     public var outgoingSecurity: MailConnectionSecurity {
         switch self {
-        case .apple, .microsoft: .startTLS
+        case .apple: .startTLS
         case .qq, .netease: .tls
         case .other: .startTLS
         }
@@ -85,7 +80,6 @@ public enum MailAccountProviderPreset: String, CaseIterable, Codable, Sendable, 
 
     public var authMode: MailAuthMode {
         switch self {
-        case .microsoft: .oauth2
         case .apple, .qq, .netease: .appPassword
         case .other: .appPassword
         }
@@ -95,8 +89,6 @@ public enum MailAccountProviderPreset: String, CaseIterable, Codable, Sendable, 
         switch self {
         case .apple:
             "Apple iCloud Mail 使用 imap.mail.me.com:993 和 smtp.mail.me.com:587。请使用 Apple 账户生成的 App 专用密码，不要输入 Apple ID 主密码。"
-        case .microsoft:
-            "Microsoft 账户建议优先使用 Microsoft 登录 / OAuth / Graph。手动 IMAP/SMTP 仅作为高级选项，常见发件端口为 587 + STARTTLS。"
         case .qq:
             "QQ 邮箱默认关闭 POP3/SMTP/IMAP。请先在网页版设置中开启服务，第三方客户端必须使用 16 位授权码。"
         case .netease:
