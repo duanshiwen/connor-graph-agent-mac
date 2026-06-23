@@ -65,11 +65,11 @@ public struct AppMemoryOSCLIInspector: Sendable {
 
     public func listL0Objects(limit: Int = 20) throws -> [MemoryOSCLIRow] {
         try rows(sql: """
-        SELECT id, source_type, source_id, title, content_hash, occurred_at, ingested_at, session_id, work_object_id, confidentiality, status, metadata_json
+        SELECT id, source_type, source_id, title, content, content_hash, occurred_at, ingested_at, session_id, work_object_id, confidentiality, status, metadata_json
         FROM memory_l0_provenance_objects
         ORDER BY occurred_at DESC, id ASC
         LIMIT \(safeLimit(limit))
-        """, columns: ["id", "source_type", "source_id", "title", "content_hash", "occurred_at", "ingested_at", "session_id", "work_object_id", "confidentiality", "status", "metadata_json"])
+        """, columns: ["id", "source_type", "source_id", "title", "content", "content_hash", "occurred_at", "ingested_at", "session_id", "work_object_id", "confidentiality", "status", "metadata_json"])
     }
 
     public func listL0Spans(limit: Int = 20) throws -> [MemoryOSCLIRow] {
@@ -83,12 +83,13 @@ public struct AppMemoryOSCLIInspector: Sendable {
 
     public func listL1Pending(limit: Int = 20) throws -> [MemoryOSCLIRow] {
         try rows(sql: """
-        SELECT id, provenance_object_id, event_type, occurred_at, token_estimate, processing_state, metadata_json
-        FROM memory_l1_capture_events
-        WHERE processing_state IN ('pending', 'queued')
-        ORDER BY occurred_at ASC, id ASC
+        SELECT c.id, c.provenance_object_id, c.event_type, c.occurred_at, c.token_estimate, c.processing_state, c.metadata_json, o.title, o.content
+        FROM memory_l1_capture_events c
+        JOIN memory_l0_provenance_objects o ON o.id = c.provenance_object_id
+        WHERE c.processing_state IN ('pending', 'queued')
+        ORDER BY c.occurred_at ASC, c.id ASC
         LIMIT \(safeLimit(limit))
-        """, columns: ["id", "provenance_object_id", "event_type", "occurred_at", "token_estimate", "processing_state", "metadata_json"])
+        """, columns: ["id", "provenance_object_id", "event_type", "occurred_at", "token_estimate", "processing_state", "metadata_json", "provenance_title", "provenance_content"])
     }
 
     public func listL2Statements(limit: Int = 20) throws -> [MemoryOSCLIRow] {
@@ -102,12 +103,15 @@ public struct AppMemoryOSCLIInspector: Sendable {
 
     public func listL2PendingKnowledge(limit: Int = 20) throws -> [MemoryOSCLIRow] {
         try rows(sql: """
-        SELECT statement_id, processing_kind, status, source_artifact_id, processed_by_artifact_id, last_attempt_at, metadata_json
-        FROM memory_l2_statement_processing_state
-        WHERE processing_kind = 'knowledge_synthesis' AND status = 'pending'
-        ORDER BY last_attempt_at ASC, statement_id ASC
+        SELECT p.statement_id, p.processing_kind, p.status, p.source_artifact_id, p.processed_by_artifact_id, p.last_attempt_at, p.metadata_json, s.subject_id, s.predicate, s.object_id, s.text, s.evidence_span_ids_json, COALESCE(GROUP_CONCAT(sp.text, '\n---\n'), '')
+        FROM memory_l2_statement_processing_state p
+        JOIN memory_l2_statements s ON s.id = p.statement_id
+        LEFT JOIN memory_l0_provenance_spans sp ON INSTR(s.evidence_span_ids_json, sp.id) > 0
+        WHERE p.processing_kind = 'knowledge_synthesis' AND p.status = 'pending'
+        GROUP BY p.statement_id, p.processing_kind, p.status, p.source_artifact_id, p.processed_by_artifact_id, p.last_attempt_at, p.metadata_json, s.subject_id, s.predicate, s.object_id, s.text, s.evidence_span_ids_json
+        ORDER BY p.last_attempt_at ASC, p.statement_id ASC
         LIMIT \(safeLimit(limit))
-        """, columns: ["statement_id", "processing_kind", "status", "source_artifact_id", "processed_by_artifact_id", "last_attempt_at", "metadata_json"])
+        """, columns: ["statement_id", "processing_kind", "status", "source_artifact_id", "processed_by_artifact_id", "last_attempt_at", "metadata_json", "subject_id", "predicate", "object_id", "statement_text", "evidence_span_ids_json", "evidence_span_texts"])
     }
 
     public func listL3Beliefs(limit: Int = 20) throws -> [MemoryOSCLIRow] {
@@ -131,13 +135,18 @@ public struct AppMemoryOSCLIInspector: Sendable {
     public func queue(limit: Int = 20, status: String? = nil, kind: String? = nil) throws -> [MemoryOSCLIRow] {
         let statusClause = status.map { " AND status = \(store.quote($0))" } ?? ""
         let kindClause = kind.map { " AND kind = \(store.quote($0))" } ?? ""
-        return try rows(sql: """
+        let baseRows = try rows(sql: """
         SELECT id, kind, status, priority, payload_json, attempt_count, max_attempts, next_run_at, locked_at, locked_by, lease_expires_at, idempotency_key, payload_hash, created_at, updated_at, error_code, error_message
         FROM memory_l1_processing_queue
         WHERE 1 = 1\(statusClause)\(kindClause)
         ORDER BY created_at DESC, priority DESC, id ASC
         LIMIT \(safeLimit(limit))
         """, columns: ["id", "kind", "status", "priority", "payload_json", "attempt_count", "max_attempts", "next_run_at", "locked_at", "locked_by", "lease_expires_at", "idempotency_key", "payload_hash", "created_at", "updated_at", "error_code", "error_message"])
+        return try baseRows.map { row in
+            var values = row.values
+            values["context_text"] = try queueContextText(for: row)
+            return MemoryOSCLIRow(values: values)
+        }
     }
 
     public func pipelinePolicy() -> MemoryOSCLIPipelinePolicy {
@@ -265,6 +274,45 @@ public struct AppMemoryOSCLIInspector: Sendable {
 
     private func firstRecord(layer: String, sql: String, columns: [String]) throws -> MemoryOSCLIRecord? {
         try rows(sql: sql, columns: columns).first.map { MemoryOSCLIRecord(layer: layer, record: $0) }
+    }
+
+    private func queueContextText(for row: MemoryOSCLIRow) throws -> String {
+        guard let kind = row.values["kind"], let payload = row.values["payload_json"] else { return "" }
+        switch kind {
+        case MemoryOSBackgroundJobKind.l1ProcessBlockToL2.rawValue:
+            let draft = try? store.decode(MemoryOSL1ToL2JobDraft.self, payload)
+            return try provenanceContent(forCaptureEventIDs: draft?.captureEventIDs ?? [])
+        case MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue:
+            let draft = try? store.decode(MemoryOSL2ToKnowledgeJobDraft.self, payload)
+            return try statementText(forStatementIDs: draft?.statementIDs ?? [])
+        default:
+            return ""
+        }
+    }
+
+    private func provenanceContent(forCaptureEventIDs ids: [String]) throws -> String {
+        guard !ids.isEmpty else { return "" }
+        let quotedIDs = ids.map(store.quote).joined(separator: ", ")
+        let rows = try store.query(sql: """
+        SELECT o.content
+        FROM memory_l1_capture_events c
+        JOIN memory_l0_provenance_objects o ON o.id = c.provenance_object_id
+        WHERE c.id IN (\(quotedIDs))
+        ORDER BY c.occurred_at ASC, c.id ASC
+        """)
+        return rows.map { $0.first ?? "" }.filter { !$0.isEmpty }.joined(separator: "\n---\n")
+    }
+
+    private func statementText(forStatementIDs ids: [String]) throws -> String {
+        guard !ids.isEmpty else { return "" }
+        let quotedIDs = ids.map(store.quote).joined(separator: ", ")
+        let rows = try store.query(sql: """
+        SELECT text
+        FROM memory_l2_statements
+        WHERE id IN (\(quotedIDs))
+        ORDER BY committed_at ASC, id ASC
+        """)
+        return rows.map { $0.first ?? "" }.filter { !$0.isEmpty }.joined(separator: "\n---\n")
     }
 
     private func normalizedLayer(_ layer: String) -> String? {
