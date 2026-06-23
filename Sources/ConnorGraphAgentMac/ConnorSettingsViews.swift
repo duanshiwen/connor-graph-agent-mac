@@ -1233,18 +1233,79 @@ struct AIConnectionSetupView: View {
 
     private var presetProviderAPIKeyFirstFields: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text(option.setupInstruction)
-                .font(SettingsListTypography.rowSubtitle)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity)
+            providerSummaryCard
 
             if option.id == "china-provider" || option.id == "other-provider" {
                 presetProviderPickerRow
             }
 
-            apiKeyField(placeholder: apiKeyPlaceholderForCurrentPreset)
+            primaryAPIKeyEntryCard(placeholder: apiKeyPlaceholderForCurrentPreset)
         }
+    }
+
+    private var providerSummaryCard: some View {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceM) {
+            HStack(alignment: .top, spacing: SettingsListLayout.spaceM) {
+                Image(systemName: option.systemImage)
+                    .font(SettingsListTypography.largeIcon)
+                    .foregroundStyle(option.tint)
+                    .frame(width: 30)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(connectionName)
+                        .font(SettingsListTypography.rowTitleSelected)
+                    Text("已为你预设接口地址、兼容模式和默认模型；通常只需要填写 API Key。")
+                        .font(SettingsListTypography.rowSubtitle)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Divider().opacity(0.6)
+
+            providerSummaryRow(title: "接口地址", value: baseURLString)
+            providerSummaryRow(title: "默认模型", value: selectedModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? model : selectedModel)
+            providerSummaryRow(title: "兼容模式", value: compatibilitySummaryTitle)
+        }
+        .padding(SettingsListLayout.spaceL)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .textBackgroundColor).opacity(0.5), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(AppShellColors.hairline, lineWidth: 1))
+    }
+
+    private func providerSummaryRow(title: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: SettingsListLayout.spaceM) {
+            Text(title)
+                .font(SettingsListTypography.rowCaptionEmphasized)
+                .foregroundStyle(.secondary)
+                .frame(width: 68, alignment: .leading)
+            Text(value.isEmpty ? "未设置" : value)
+                .font(SettingsListTypography.rowCaption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func primaryAPIKeyEntryCard(placeholder: String) -> some View {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceM) {
+            HStack(spacing: SettingsListLayout.spaceS) {
+                Image(systemName: "key")
+                    .foregroundStyle(option.tint)
+                Text("API Key")
+                    .font(SettingsListTypography.header)
+            }
+            apiKeyInput(placeholder: placeholder)
+            Text(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "填写 API Key 后即可验证并添加连接。" : "API Key 只会保存到本机 credential store，不会写入普通配置文件。")
+                .font(SettingsListTypography.rowSubtitle)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(SettingsListLayout.spaceL)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .textBackgroundColor).opacity(0.5), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(AppShellColors.hairline, lineWidth: 1))
     }
 
     private var presetProviderPickerRow: some View {
@@ -1344,24 +1405,28 @@ struct AIConnectionSetupView: View {
 
     private func apiKeyField(placeholder: String) -> some View {
         aiConnectionSettingsRow(title: "API Key") {
-            aiConnectionInputContainer {
-                Group {
-                    if showAPIKey {
-                        TextField(placeholder, text: $apiKey)
-                    } else {
-                        SecureField(placeholder, text: $apiKey)
-                    }
-                }
-                .textFieldStyle(.plain)
-                .font(SettingsListTypography.rowTitle)
+            apiKeyInput(placeholder: placeholder)
+        }
+    }
 
-                Button(action: { showAPIKey.toggle() }) {
-                    Image(systemName: showAPIKey ? "eye.slash" : "eye")
-                        .foregroundStyle(.secondary)
+    private func apiKeyInput(placeholder: String) -> some View {
+        aiConnectionInputContainer {
+            Group {
+                if showAPIKey {
+                    TextField(placeholder, text: $apiKey)
+                } else {
+                    SecureField(placeholder, text: $apiKey)
                 }
-                .buttonStyle(.plain)
-                .help(showAPIKey ? "隐藏 API Key" : "显示 API Key")
             }
+            .textFieldStyle(.plain)
+            .font(SettingsListTypography.rowTitle)
+
+            Button(action: { showAPIKey.toggle() }) {
+                Image(systemName: showAPIKey ? "eye.slash" : "eye")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help(showAPIKey ? "隐藏 API Key" : "显示 API Key")
         }
     }
 
@@ -1493,6 +1558,16 @@ struct AIConnectionSetupView: View {
         if option.id == "china-provider" || option.id == "other-provider" { return activeProviderPreset.keyPlaceholder }
         if option.providerMode == .anthropicMessages { return "sk-ant-..." }
         return "sk-..."
+    }
+
+    private var compatibilitySummaryTitle: String {
+        if option.providerMode == .anthropicMessages { return "Anthropic Messages" }
+        if option.id == "china-provider" || option.id == "other-provider" { return activeProviderPreset.protocolKind.title }
+        switch option.providerMode {
+        case .openAIResponses: return "OpenAI Responses"
+        case .openAICompatible: return "OpenAI Compatible"
+        case .anthropicMessages: return "Anthropic Messages"
+        }
     }
 
     private var chinaProviderPresets: [AIConnectionProviderPreset] {
