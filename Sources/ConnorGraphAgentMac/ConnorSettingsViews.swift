@@ -1049,65 +1049,99 @@ struct AIConnectionSetupView: View {
     @State private var showsAdvancedConnectionSettings = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            Spacer(minLength: 72)
-
+        ScrollView {
             VStack(spacing: SettingsListLayout.spaceXL) {
-                VStack(spacing: SettingsListLayout.spaceS) {
-                    Text(option.setupTitle)
-                        .font(SettingsListTypography.header)
-                    Text(option.setupSubtitle)
-                        .font(SettingsListTypography.rowSubtitle)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
+                setupHero
 
                 setupContent
                     .frame(maxWidth: SettingsListLayout.formMaxWidth)
 
-                if let statusMessage {
-                    Text(statusMessage)
-                        .font(SettingsListTypography.rowSubtitle)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: SettingsListLayout.formMaxWidth)
-                }
+                setupFeedback
 
-                if let errorMessage {
-                    Text(errorMessage)
-                        .font(SettingsListTypography.rowSubtitle)
-                        .foregroundStyle(.red)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, SettingsListLayout.spaceL)
-                        .padding(.vertical, SettingsListLayout.spaceM)
-                        .frame(maxWidth: SettingsListLayout.formMaxWidth)
-                        .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous))
-                }
-
-                HStack(spacing: SettingsListLayout.spaceL) {
-                    Button(action: back) {
-                        Text("返回")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-
-                    Button(action: primaryAction) {
-                        Label(primaryButtonTitle, systemImage: primaryButtonIcon)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .disabled(isPrimaryButtonDisabled || isAuthenticating)
-                }
-                .frame(maxWidth: SettingsListLayout.formMaxWidth)
+                setupActionBar
+                    .frame(maxWidth: SettingsListLayout.formMaxWidth)
             }
-
-            Spacer(minLength: 96)
+            .padding(.top, 56)
+            .padding(.bottom, 72)
+            .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity)
         .frame(minHeight: 760)
         .onAppear(perform: initializeDrafts)
+    }
+
+    private var setupHero: some View {
+        VStack(spacing: SettingsListLayout.spaceM) {
+            ZStack {
+                Circle()
+                    .fill(option.tint.opacity(0.12))
+                    .frame(width: 58, height: 58)
+                Image(systemName: option.systemImage)
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(option.tint)
+            }
+            .accessibilityHidden(true)
+
+            VStack(spacing: SettingsListLayout.spaceS) {
+                Text(option.setupTitle)
+                    .font(SettingsListTypography.header)
+                    .multilineTextAlignment(.center)
+                Text(option.setupSubtitle)
+                    .font(SettingsListTypography.rowSubtitle)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: SettingsListLayout.formMaxWidth)
+    }
+
+    @ViewBuilder
+    private var setupFeedback: some View {
+        if let statusMessage {
+            Text(statusMessage)
+                .font(SettingsListTypography.rowSubtitle)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: SettingsListLayout.formMaxWidth)
+        }
+
+        if let errorMessage {
+            Text(errorMessage)
+                .font(SettingsListTypography.rowSubtitle)
+                .foregroundStyle(.red)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, SettingsListLayout.spaceL)
+                .padding(.vertical, SettingsListLayout.spaceM)
+                .frame(maxWidth: SettingsListLayout.formMaxWidth)
+                .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous))
+        }
+    }
+
+    private var setupActionBar: some View {
+        HStack(spacing: SettingsListLayout.spaceL) {
+            Button(action: back) {
+                Text("返回")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+
+            Button(action: primaryAction) {
+                Label(primaryButtonTitle, systemImage: primaryButtonIcon)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .keyboardShortcut(.defaultAction)
+            .disabled(isPrimaryButtonDisabled || isAuthenticating)
+        }
+        .padding(SettingsListLayout.spaceS)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous)
+                .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+        )
     }
 
     @ViewBuilder
