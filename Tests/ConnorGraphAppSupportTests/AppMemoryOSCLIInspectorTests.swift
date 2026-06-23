@@ -48,6 +48,81 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(layers.l3.beliefs == 1)
         #expect(layers.l4.entities == 1)
     }
+
+    @Test func memoryOSCLIInspectorListsL0ObjectsAndSpans() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        try seedMemoryOSCLIInspectorFixture(store: store)
+        let inspector = AppMemoryOSCLIInspector(store: store)
+
+        let objects = try inspector.listL0Objects(limit: 10)
+        let spans = try inspector.listL0Spans(limit: 10)
+
+        #expect(objects.count == 1)
+        #expect(objects[0].values["id"] == "object-1")
+        #expect(objects[0].values["source_type"] == "chat_message")
+        #expect(objects[0].values["title"] == "User message")
+        #expect(spans.count == 1)
+        #expect(spans[0].values["id"] == "span-1")
+        #expect(spans[0].values["provenance_object_id"] == "object-1")
+        #expect(spans[0].values["text"] == "Connor Memory OS CLI")
+    }
+
+    @Test func memoryOSCLIInspectorListsL1PendingCaptureEvents() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        try seedMemoryOSCLIInspectorFixture(store: store)
+        let inspector = AppMemoryOSCLIInspector(store: store)
+
+        let events = try inspector.listL1Pending(limit: 10)
+
+        #expect(events.count == 1)
+        #expect(events[0].values["id"] == "event-1")
+        #expect(events[0].values["processing_state"] == "pending")
+        #expect(events[0].values["token_estimate"] == "12")
+    }
+
+    @Test func memoryOSCLIInspectorListsL2StatementsAndPendingKnowledge() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        try seedMemoryOSCLIInspectorFixture(store: store)
+        let inspector = AppMemoryOSCLIInspector(store: store)
+
+        let statements = try inspector.listL2Statements(limit: 10)
+        let pending = try inspector.listL2PendingKnowledge(limit: 10)
+
+        #expect(statements.count == 1)
+        #expect(statements[0].values["id"] == "stmt-1")
+        #expect(statements[0].values["predicate"] == "describes")
+        #expect(statements[0].values["source_artifact_id"] == "artifact-1")
+        #expect(pending.count == 1)
+        #expect(pending[0].values["statement_id"] == "stmt-1")
+        #expect(pending[0].values["processing_kind"] == "knowledge_synthesis")
+        #expect(pending[0].values["status"] == "pending")
+    }
+
+    @Test func memoryOSCLIInspectorListsL3Beliefs() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        try seedMemoryOSCLIInspectorFixture(store: store)
+        let inspector = AppMemoryOSCLIInspector(store: store)
+
+        let beliefs = try inspector.listL3Beliefs(limit: 10)
+
+        #expect(beliefs.count == 1)
+        #expect(beliefs[0].values["id"] == "belief-1")
+        #expect(beliefs[0].values["topic"] == "Connor Memory OS")
+        #expect(beliefs[0].values["source_artifact_id"] == "artifact-2")
+    }
+
+    @Test func memoryOSCLIInspectorListsL4Entities() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        try seedMemoryOSCLIInspectorFixture(store: store)
+        let inspector = AppMemoryOSCLIInspector(store: store)
+
+        let entities = try inspector.listL4Entities(limit: 10)
+
+        #expect(entities.count == 1)
+        #expect(entities[0].values["id"] == "entity-1")
+        #expect(entities[0].values["entity_type"] == "concept")
+        #expect(entities[0].values["name"] == "Connor Memory OS")
+    }
 }
 
 private func makeMemoryOSCLIInspectorStore() throws -> SQLiteMemoryOSStore {

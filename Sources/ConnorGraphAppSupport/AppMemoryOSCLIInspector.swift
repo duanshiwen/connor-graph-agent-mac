@@ -63,6 +63,71 @@ public struct AppMemoryOSCLIInspector: Sendable {
         try layerCounts()
     }
 
+    public func listL0Objects(limit: Int = 20) throws -> [MemoryOSCLIRow] {
+        try rows(sql: """
+        SELECT id, source_type, source_id, title, content_hash, occurred_at, ingested_at, session_id, work_object_id, confidentiality, status, metadata_json
+        FROM memory_l0_provenance_objects
+        ORDER BY occurred_at DESC, id ASC
+        LIMIT \(safeLimit(limit))
+        """, columns: ["id", "source_type", "source_id", "title", "content_hash", "occurred_at", "ingested_at", "session_id", "work_object_id", "confidentiality", "status", "metadata_json"])
+    }
+
+    public func listL0Spans(limit: Int = 20) throws -> [MemoryOSCLIRow] {
+        try rows(sql: """
+        SELECT id, provenance_object_id, start_offset, end_offset, text, metadata_json
+        FROM memory_l0_provenance_spans
+        ORDER BY id ASC
+        LIMIT \(safeLimit(limit))
+        """, columns: ["id", "provenance_object_id", "start_offset", "end_offset", "text", "metadata_json"])
+    }
+
+    public func listL1Pending(limit: Int = 20) throws -> [MemoryOSCLIRow] {
+        try rows(sql: """
+        SELECT id, provenance_object_id, event_type, occurred_at, token_estimate, processing_state, metadata_json
+        FROM memory_l1_capture_events
+        WHERE processing_state IN ('pending', 'queued')
+        ORDER BY occurred_at ASC, id ASC
+        LIMIT \(safeLimit(limit))
+        """, columns: ["id", "provenance_object_id", "event_type", "occurred_at", "token_estimate", "processing_state", "metadata_json"])
+    }
+
+    public func listL2Statements(limit: Int = 20) throws -> [MemoryOSCLIRow] {
+        try rows(sql: """
+        SELECT id, subject_id, predicate, object_id, text, assertion_kind, confidence, valid_at, committed_at, evidence_span_ids_json, source_artifact_id, metadata_json
+        FROM memory_l2_statements
+        ORDER BY committed_at DESC, id ASC
+        LIMIT \(safeLimit(limit))
+        """, columns: ["id", "subject_id", "predicate", "object_id", "text", "assertion_kind", "confidence", "valid_at", "committed_at", "evidence_span_ids_json", "source_artifact_id", "metadata_json"])
+    }
+
+    public func listL2PendingKnowledge(limit: Int = 20) throws -> [MemoryOSCLIRow] {
+        try rows(sql: """
+        SELECT statement_id, processing_kind, status, source_artifact_id, processed_by_artifact_id, last_attempt_at, metadata_json
+        FROM memory_l2_statement_processing_state
+        WHERE processing_kind = 'knowledge_synthesis' AND status = 'pending'
+        ORDER BY last_attempt_at ASC, statement_id ASC
+        LIMIT \(safeLimit(limit))
+        """, columns: ["statement_id", "processing_kind", "status", "source_artifact_id", "processed_by_artifact_id", "last_attempt_at", "metadata_json"])
+    }
+
+    public func listL3Beliefs(limit: Int = 20) throws -> [MemoryOSCLIRow] {
+        try rows(sql: """
+        SELECT id, topic, statement, projection_kind, confidence, evidence_statement_ids_json, valid_at, projected_at, source_artifact_id, metadata_json
+        FROM memory_l3_beliefs
+        ORDER BY projected_at DESC, id ASC
+        LIMIT \(safeLimit(limit))
+        """, columns: ["id", "topic", "statement", "projection_kind", "confidence", "evidence_statement_ids_json", "valid_at", "projected_at", "source_artifact_id", "metadata_json"])
+    }
+
+    public func listL4Entities(limit: Int = 20) throws -> [MemoryOSCLIRow] {
+        try rows(sql: """
+        SELECT id, stable_key, entity_type, name, aliases_json, summary, confidence, created_at, updated_at, valid_from, metadata_json
+        FROM memory_l4_entities
+        ORDER BY updated_at DESC, id ASC
+        LIMIT \(safeLimit(limit))
+        """, columns: ["id", "stable_key", "entity_type", "name", "aliases_json", "summary", "confidence", "created_at", "updated_at", "valid_from", "metadata_json"])
+    }
+
     private func layerCounts() throws -> MemoryOSCLILayerSummary {
         MemoryOSCLILayerSummary(
             l0: MemoryOSCLIL0Counts(
@@ -94,6 +159,24 @@ public struct AppMemoryOSCLIInspector: Sendable {
     private func count(_ table: String, where predicate: String? = nil) throws -> Int {
         let whereClause = predicate.map { " WHERE \($0)" } ?? ""
         return Int(try store.query(sql: "SELECT COUNT(*) FROM \(table)\(whereClause);").first?.first ?? "0") ?? 0
+    }
+
+    private func rows(sql: String, columns: [String]) throws -> [MemoryOSCLIRow] {
+        try store.query(sql: sql).map { row in
+            MemoryOSCLIRow(values: Dictionary(uniqueKeysWithValues: zip(columns, row)))
+        }
+    }
+
+    private func safeLimit(_ limit: Int) -> Int {
+        min(max(limit, 1), 500)
+    }
+}
+
+public struct MemoryOSCLIRow: Codable, Sendable, Equatable {
+    public var values: [String: String]
+
+    public init(values: [String: String]) {
+        self.values = values
     }
 }
 
