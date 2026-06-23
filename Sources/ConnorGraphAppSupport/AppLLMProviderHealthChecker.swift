@@ -80,7 +80,10 @@ public struct AppLLMProviderHealthChecker: Sendable {
             return "Base URL 无效：\(value)"
         case OpenAICompatibleProviderError.invalidResponse:
             return "模型提供方返回了无效响应。"
-        case let OpenAICompatibleProviderError.httpStatus(code):
+        case let OpenAICompatibleProviderError.httpStatus(code, message):
+            if let message, !message.isEmpty {
+                return "模型提供方返回 HTTP 状态码 \(code)：\(message)"
+            }
             return "模型提供方返回 HTTP 状态码 \(code)。"
         case OpenAICompatibleProviderError.missingAssistantMessage:
             return "模型提供方响应中没有助手消息。"

@@ -85,7 +85,7 @@ public struct OpenAIResponsesProvider<Client: AgentHTTPClient>: AgentModelProvid
         let httpRequest = try makeRequest(request, stream: false)
         let response = try await client.send(httpRequest)
         if response.statusCode < 200 || response.statusCode >= 300 {
-            throw OpenAICompatibleProviderError.httpStatus(response.statusCode)
+            throw OpenAICompatibleProviderError.httpStatus(response.statusCode, message: nil)
         }
         return try OpenAIResponsesParser.parseResponse(response.body)
     }

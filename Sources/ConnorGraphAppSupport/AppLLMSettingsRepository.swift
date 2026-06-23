@@ -570,14 +570,13 @@ public struct AppLLMSettingsRepository: @unchecked Sendable {
         let apiKeyHeaderKind = OpenAICompatibleAPIKeyHeaderKind(rawValue: connection.extraHTTPHeaders[Self.openAIAPIKeyHeaderKindMetadataKey] ?? "") ?? .bearer
         var extraHeaders = connection.extraHTTPHeaders
         extraHeaders.removeValue(forKey: Self.openAIAPIKeyHeaderKindMetadataKey)
-        let thinkingLevel = thinkingLevelOverride ?? settings.defaultThinkingLevel
         return OpenAICompatibleConfig(
             baseURL: baseURL,
             apiKey: apiKey,
             model: modelOverride ?? connection.effectiveModel,
             extraHeaders: extraHeaders,
             apiKeyHeaderKind: apiKeyHeaderKind,
-            reasoningEffort: thinkingLevel.openAIReasoningEffort
+            reasoningEffort: nil
         )
     }
 
