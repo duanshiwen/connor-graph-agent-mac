@@ -55,7 +55,7 @@ struct MemoryOSBackgroundPromptContractTests {
 
         #expect(prompt.contains("L0 is the durable provenance layer"))
         #expect(prompt.contains("L1 is the active processing buffer"))
-        #expect(prompt.contains("successful L1→L2 projection"))
+        #expect(prompt.contains("successful L1 unified projection"))
     }
 
     @Test func l1PromptDefinesDisciplinedFactExtractionWorkflow() {
@@ -64,13 +64,38 @@ struct MemoryOSBackgroundPromptContractTests {
         let prompt = MemoryOSL1ToL2PromptBuilder().prompt(for: [event])
 
         #expect(prompt.contains("Read L1 events in chronological order"))
-        #expect(prompt.contains("Extract candidate facts per event"))
+        #expect(prompt.contains("Extract candidate operational facts per event"))
         #expect(prompt.contains("Drop noise"))
-        #expect(prompt.contains("Consolidate duplicate facts"))
-        #expect(prompt.contains("Every emitted fact must cite at least one capture_event_id"))
+        #expect(prompt.contains("Consolidate duplicate operational facts"))
+        #expect(prompt.contains("Every emitted operational fact must cite at least one capture_event_id"))
         #expect(prompt.contains("provenance_object_id or span_id"))
-        #expect(prompt.contains("Do not create L3 knowledge records"))
-        #expect(prompt.contains("Do not produce theories, frameworks, broad conclusions, or unsupported guesses"))
+        #expect(!prompt.contains("Do not create L3 knowledge records"))
+        #expect(prompt.contains("Do not promote ordinary operational facts into L3"))
+    }
+
+    @Test func l1PromptDefinesUnifiedProjectionIntoL2L3AndL4() {
+        let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
+
+        let prompt = MemoryOSL1ToL2PromptBuilder().prompt(for: [event])
+
+        #expect(prompt.contains("L1 unified projection"))
+        #expect(prompt.contains("L2 operational facts"))
+        #expect(prompt.contains("L3 reusable knowledge candidates"))
+        #expect(prompt.contains("L4 stable entities"))
+        #expect(prompt.contains("MemoryOSL1UnifiedProjectionOutput"))
+    }
+
+    @Test func l1PromptIncludesPromotionFiltersAndStableL4EntityRules() {
+        let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
+
+        let prompt = MemoryOSL1ToL2PromptBuilder().prompt(for: [event])
+
+        #expect(prompt.contains("signal_quality"))
+        #expect(prompt.contains("reuse_scope"))
+        #expect(prompt.contains("novelty"))
+        #expect(prompt.contains("structurability"))
+        #expect(prompt.contains("Stable L4 entity rules"))
+        #expect(prompt.contains("Do not create L4 entities for vague temporary phrases"))
     }
 
     @Test func l2KnowledgePromptDefinesConservativeFourFilterReview() {

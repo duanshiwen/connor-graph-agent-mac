@@ -61,6 +61,7 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(objects[0].values["id"] == "object-1")
         #expect(objects[0].values["source_type"] == "chat_message")
         #expect(objects[0].values["title"] == "User message")
+        #expect(objects[0].values["content"] == "诗闻正在测试 Connor Memory OS CLI。")
         #expect(spans.count == 1)
         #expect(spans[0].values["id"] == "span-1")
         #expect(spans[0].values["provenance_object_id"] == "object-1")
@@ -78,6 +79,8 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(events[0].values["id"] == "event-1")
         #expect(events[0].values["processing_state"] == "pending")
         #expect(events[0].values["token_estimate"] == "12")
+        #expect(events[0].values["provenance_title"] == "User message")
+        #expect(events[0].values["provenance_content"] == "诗闻正在测试 Connor Memory OS CLI。")
     }
 
     @Test func memoryOSCLIInspectorListsL2StatementsAndPendingKnowledge() throws {
@@ -96,6 +99,8 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(pending[0].values["statement_id"] == "stmt-1")
         #expect(pending[0].values["processing_kind"] == "knowledge_synthesis")
         #expect(pending[0].values["status"] == "pending")
+        #expect(pending[0].values["statement_text"] == "Connor Memory OS 是康纳同学的重要系统。")
+        #expect(pending[0].values["evidence_span_texts"] == "Connor Memory OS CLI")
     }
 
     @Test func memoryOSCLIInspectorListsL3Beliefs() throws {
@@ -207,14 +212,16 @@ struct AppMemoryOSCLIInspectorTests {
     @Test func memoryOSCLIInspectorListsQueueItems() throws {
         let store = try makeMemoryOSCLIInspectorStore()
         let now = Date(timeIntervalSince1970: 20_000)
-        try store.enqueue(MemoryOSQueueItem(kind: MemoryOSBackgroundJobKind.l1ProcessBlockToL2.rawValue, priority: 10, payloadJSON: "{}", nextRunAt: now, idempotencyKey: "queue-test", payloadHash: "hash", createdAt: now, updatedAt: now))
+        try seedMemoryOSCLIInspectorFixture(store: store, now: now)
         let inspector = AppMemoryOSCLIInspector(store: store)
+        _ = try inspector.planL1(policy: MemoryOSL1ProcessingTriggerPolicy(minPendingCount: 1, maxEventsPerBlock: 10), now: now)
 
         let queue = try inspector.queue(limit: 10, status: "pending", kind: MemoryOSBackgroundJobKind.l1ProcessBlockToL2.rawValue)
 
         #expect(queue.count == 1)
         #expect(queue[0].values["kind"] == MemoryOSBackgroundJobKind.l1ProcessBlockToL2.rawValue)
         #expect(queue[0].values["status"] == "pending")
+        #expect(queue[0].values["context_text"] == "诗闻正在测试 Connor Memory OS CLI。")
     }
 
     @Test func memoryOSCLIInspectorReportsPipelinePolicy() throws {
