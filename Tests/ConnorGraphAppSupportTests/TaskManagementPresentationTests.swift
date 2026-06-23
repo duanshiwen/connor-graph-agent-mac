@@ -18,9 +18,10 @@ struct TaskManagementPresentationTests {
             createdAt: now,
             updatedAt: now
         )
-        let presentation = TaskManagementUIPresentation.build(tasks: ConnorTaskDefinition.systemDefaults(now: now) + [eventTask], runHistory: [])
+        let systemDefaults = ConnorTaskDefinition.systemDefaults(now: now)
+        let presentation = TaskManagementUIPresentation.build(tasks: systemDefaults + [eventTask], runHistory: [])
 
-        #expect(presentation.scheduledTasks.count == 0)
+        #expect(presentation.scheduledTasks.count == systemDefaults.count)
         #expect(presentation.eventTriggeredTasks.map(\.id) == ["ai.watch-keyword"])
         #expect(presentation.summary.manualTaskCount == 0)
         #expect(presentation.summary.reviewControlCount == 0)
@@ -48,13 +49,14 @@ struct TaskManagementPresentationTests {
             updatedAt: now
         )
 
-        let presentation = TaskManagementUIPresentation.build(tasks: ConnorTaskDefinition.systemDefaults(now: now) + [mediaTask], runHistory: [])
+        let systemDefaults = ConnorTaskDefinition.systemDefaults(now: now)
+        let presentation = TaskManagementUIPresentation.build(tasks: systemDefaults + [mediaTask], runHistory: [])
 
         #expect(!presentation.cards.contains { $0.id == mediaTask.id })
         #expect(!presentation.scheduledTasks.contains { $0.id == mediaTask.id })
-        #expect(presentation.scheduledTasks.count == 0)
-        #expect(presentation.summary.scheduledTaskCount == 0)
-        #expect(presentation.summary.totalTaskCount == 0)
+        #expect(presentation.scheduledTasks.count == systemDefaults.count)
+        #expect(presentation.summary.scheduledTaskCount == systemDefaults.count)
+        #expect(presentation.summary.totalTaskCount == systemDefaults.count)
     }
 
     @Test func systemTaskCardDisablesDeleteAndExposesOpaqueTarget() throws {
@@ -65,8 +67,10 @@ struct TaskManagementPresentationTests {
         #expect(card.originBadge == "系统")
         #expect(card.triggerLabel == "定时")
         #expect(card.targetLabel == "source.runtime:calendar.refresh")
+        #expect(card.canStop == false)
+        #expect(card.canRestore == false)
         #expect(card.canDelete == false)
-        #expect(card.deleteDisabledReason == "系统任务受保护")
+        #expect(card.deleteDisabledReason == "系统任务受保护，不可暂停或删除")
         #expect(card.hasReviewControls == false)
         #expect(card.hasManualTaskControls == false)
     }

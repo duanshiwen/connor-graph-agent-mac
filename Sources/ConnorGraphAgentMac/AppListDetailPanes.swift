@@ -1136,7 +1136,7 @@ private struct AddTaskAutomationSheet: View {
                             TextField("可选；说明为什么需要这个任务", text: $rationale)
                                 .textFieldStyle(.roundedBorder)
                         }
-                        RSSSetupHint("任务会以“用户”来源创建，可在详情页暂停、恢复或删除；系统保护任务不受此表单影响。")
+                        RSSSetupHint("任务会以“用户”来源创建，可在详情页暂停、恢复或删除；系统保护任务不受此表单影响，且不可暂停、恢复或删除。")
                     }
 
                     RSSHintCard(title: hintTitle, guidance: hintGuidance)
