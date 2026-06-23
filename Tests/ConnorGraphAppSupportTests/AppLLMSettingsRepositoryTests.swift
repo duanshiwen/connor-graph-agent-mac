@@ -165,7 +165,7 @@ private struct FakeAgentHTTPClient: AgentHTTPClient, Sendable {
 
     #expect(connection.providerMode == .openAICompatible)
     #expect(connection.isLiveCatalog == true)
-    #expect(connection.models.map(\.id) == ["gpt-current", "gpt-local", "gpt-a", "gpt-z"])
+    #expect(connection.models.map(\.id) == ["gpt-a", "gpt-z"])
 }
 
 @Test func modelCatalogDoesNotInjectConfiguredModelsIntoLiveOpenAICompatibleCatalog() async throws {
