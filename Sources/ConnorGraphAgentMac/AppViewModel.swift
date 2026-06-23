@@ -2238,8 +2238,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private func calendarProviderDisplayName(_ provider: ConnectedAccountProviderKind) -> String {
         switch provider {
         case .appleICloud: "Apple iCloud"
-        case .microsoft365: "Microsoft 365"
-        case .google: "Google"
+        case .microsoft365, .google: "已停止支持的旧账户"
         case .qq: "QQ"
         case .netEase: "网易"
         case .genericIMAPSMTP: "自定义 IMAP/SMTP"
