@@ -213,9 +213,19 @@ struct CommercialTrain7NativeMailSystemTests {
         #expect(folderMessages.map(\.subject) == ["OAuth migration checklist"])
     }
 
-    @Test func mailAccountProviderPresetsIncludeAppleMicrosoftQQNetEaseAndOther() {
+    @Test func mailAccountProviderPresetsExcludeGoogleMicrosoftAndExchange() {
         let presets = MailAccountProviderPreset.allCases
-        #expect(presets.map(\.id) == ["apple", "microsoft", "qq", "netease", "other"])
+        #expect(presets.map(\.id) == ["apple", "qq", "netease", "other"])
+
+        let providerText = presets
+            .flatMap { [$0.id, $0.title, $0.subtitle, $0.guidance, $0.incomingHost, $0.outgoingHost] }
+            .joined(separator: " ")
+        #expect(!providerText.localizedCaseInsensitiveContains("Microsoft"))
+        #expect(!providerText.localizedCaseInsensitiveContains("Exchange"))
+        #expect(!providerText.localizedCaseInsensitiveContains("Outlook"))
+        #expect(!providerText.localizedCaseInsensitiveContains("Google"))
+        #expect(!providerText.localizedCaseInsensitiveContains("Gmail"))
+        #expect(!providerText.localizedCaseInsensitiveContains("OAuth"))
 
         let apple = MailAccountProviderPreset.apple
         #expect(apple.incomingHost == "imap.mail.me.com")
@@ -234,10 +244,6 @@ struct CommercialTrain7NativeMailSystemTests {
         #expect(netease.outgoingHost == "smtp.163.com")
         #expect(netease.guidance.contains("POP/SMTP/IMAP"))
         #expect(netease.guidance.contains("授权码"))
-
-        let microsoft = MailAccountProviderPreset.microsoft
-        #expect(microsoft.guidance.localizedCaseInsensitiveContains("Microsoft 登录"))
-        #expect(microsoft.outgoingPort == 587)
 
         let other = MailAccountProviderPreset.other
         #expect(other.incomingHost.isEmpty)
