@@ -1285,7 +1285,7 @@ struct AIConnectionSetupView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(connectionName)
                         .font(SettingsListTypography.rowTitleSelected)
-                    Text("已为你预设接口地址、兼容模式和默认模型；通常只需要填写 API Key。")
+                    Text("已为你预设接口地址和兼容模式；首次验证会使用推荐模型，通常只需要填写 API Key。")
                         .font(SettingsListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1766,8 +1766,8 @@ struct AIConnectionSetupView: View {
             do {
                 let usesProviderPreset = option.id == "other-provider" || option.id == "china-provider"
                 let connectionKind: AppLLMConnectionKind = option.providerMode == .openAIResponses ? .openAIResponses : (option.providerMode == .anthropicMessages || (usesProviderPreset && customProtocol == .anthropicCompatible) ? .anthropicCompatible : .openAICompatible)
-                let submittedModelList = effectiveModelListForSubmit()
-                let submittedSelectedModel = selectedModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? submittedModelList : selectedModel
+                let submittedModelList = persistedModelListForSubmit()
+                let submittedSelectedModel = persistedSelectedModelForSubmit(modelList: submittedModelList)
                 let input = AppLLMConnectionSetupInput(
                     id: nil,
                     kind: connectionKind,
@@ -1775,6 +1775,7 @@ struct AIConnectionSetupView: View {
                     baseURLString: baseURLString,
                     model: submittedModelList,
                     selectedModel: submittedSelectedModel,
+                    validationModel: healthCheckModelForSubmit,
                     apiKey: apiKey,
                     anthropicAuthHeaderKind: activeProviderPreset.authHeaderKind,
                     openAIAPIKeyHeaderKind: openAIAPIKeyHeaderKindForCurrentDraft()
@@ -1869,6 +1870,17 @@ struct AIConnectionSetupView: View {
             if !enabled.isEmpty { return enabled.joined(separator: ",") }
         }
         return model.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func persistedModelListForSubmit() -> String {
+        if usesAPIKeyFirstPresetFlow && !showsAdvancedConnectionSettings { return "" }
+        return effectiveModelListForSubmit()
+    }
+
+    private func persistedSelectedModelForSubmit(modelList: String) -> String {
+        if usesAPIKeyFirstPresetFlow && !showsAdvancedConnectionSettings { return "" }
+        let selected = selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        return selected.isEmpty ? modelList : selected
     }
 
     private var healthCheckModelForSubmit: String {

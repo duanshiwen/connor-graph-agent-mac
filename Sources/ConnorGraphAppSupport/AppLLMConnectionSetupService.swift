@@ -12,6 +12,7 @@ public struct AppLLMConnectionSetupInput: Sendable, Equatable {
     public var baseURLString: String
     public var model: String
     public var selectedModel: String
+    public var validationModel: String
     public var apiKey: String?
     public var oauthTokens: AppLLMOAuthTokens?
     public var anthropicAuthHeaderKind: AnthropicCompatibleAuthHeaderKind
@@ -25,6 +26,7 @@ public struct AppLLMConnectionSetupInput: Sendable, Equatable {
         baseURLString: String = "",
         model: String = "",
         selectedModel: String = "",
+        validationModel: String = "",
         apiKey: String? = nil,
         oauthTokens: AppLLMOAuthTokens? = nil,
         anthropicAuthHeaderKind: AnthropicCompatibleAuthHeaderKind = .xAPIKey,
@@ -37,6 +39,7 @@ public struct AppLLMConnectionSetupInput: Sendable, Equatable {
         self.baseURLString = baseURLString
         self.model = model
         self.selectedModel = selectedModel
+        self.validationModel = validationModel
         self.apiKey = apiKey
         self.oauthTokens = oauthTokens
         self.anthropicAuthHeaderKind = anthropicAuthHeaderKind
@@ -132,11 +135,12 @@ public struct AppLLMConnectionSetupService: Sendable {
         let baseURLString = input.baseURLString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let baseURL = URL(string: baseURLString), !baseURLString.isEmpty else { throw AppLLMConnectionSetupError.invalidBaseURL(baseURLString) }
         let model = normalizedModel(input.model)
-        guard !model.isEmpty else { throw AppLLMConnectionSetupError.missingModel }
+        let validationModel = normalizedValidationModel(input.validationModel, selectedModel: input.selectedModel, model: model)
+        guard !validationModel.isEmpty else { throw AppLLMConnectionSetupError.missingModel }
         let suppliedAPIKey = input.apiKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !suppliedAPIKey.isEmpty else { throw AppLLMConnectionSetupError.missingAPIKey }
 
-        let config = OpenAIResponsesConfig(baseURL: baseURL, apiKey: suppliedAPIKey, model: model, apiKeyHeaderKind: input.openAIAPIKeyHeaderKind)
+        let config = OpenAIResponsesConfig(baseURL: baseURL, apiKey: suppliedAPIKey, model: validationModel, apiKeyHeaderKind: input.openAIAPIKeyHeaderKind)
         let health = try await openAIResponsesHealthCheck(config)
         guard health.ok else { throw AppLLMConnectionSetupError.healthCheckFailed(health.message) }
 
@@ -159,12 +163,13 @@ public struct AppLLMConnectionSetupService: Sendable {
         let baseURLString = input.baseURLString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let baseURL = URL(string: baseURLString), !baseURLString.isEmpty else { throw AppLLMConnectionSetupError.invalidBaseURL(baseURLString) }
         let model = normalizedModel(input.model)
-        guard !model.isEmpty else { throw AppLLMConnectionSetupError.missingModel }
+        let validationModel = normalizedValidationModel(input.validationModel, selectedModel: input.selectedModel, model: model)
+        guard !validationModel.isEmpty else { throw AppLLMConnectionSetupError.missingModel }
         let suppliedAPIKey = input.apiKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let apiKey = suppliedAPIKey.isEmpty && Self.isLocalBaseURL(baseURL) ? "connor-local-model" : suppliedAPIKey
         guard !apiKey.isEmpty else { throw AppLLMConnectionSetupError.missingAPIKey }
 
-        let config = OpenAICompatibleConfig(baseURL: baseURL, apiKey: apiKey, model: model, apiKeyHeaderKind: input.openAIAPIKeyHeaderKind)
+        let config = OpenAICompatibleConfig(baseURL: baseURL, apiKey: apiKey, model: validationModel, apiKeyHeaderKind: input.openAIAPIKeyHeaderKind)
         let health = try await openAICompatibleHealthCheck(config)
         guard health.ok else { throw AppLLMConnectionSetupError.healthCheckFailed(health.message) }
 
@@ -258,11 +263,12 @@ public struct AppLLMConnectionSetupService: Sendable {
         let baseURLString = input.baseURLString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let baseURL = URL(string: baseURLString), !baseURLString.isEmpty else { throw AppLLMConnectionSetupError.invalidBaseURL(baseURLString) }
         let model = normalizedModel(input.model)
-        guard !model.isEmpty else { throw AppLLMConnectionSetupError.missingModel }
+        let validationModel = normalizedValidationModel(input.validationModel, selectedModel: input.selectedModel, model: model)
+        guard !validationModel.isEmpty else { throw AppLLMConnectionSetupError.missingModel }
         let apiKey = input.apiKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !apiKey.isEmpty else { throw AppLLMConnectionSetupError.missingAPIKey }
 
-        let config = AnthropicCompatibleConfig(baseURL: baseURL, apiKey: apiKey, model: model, authHeaderKind: input.anthropicAuthHeaderKind)
+        let config = AnthropicCompatibleConfig(baseURL: baseURL, apiKey: apiKey, model: validationModel, authHeaderKind: input.anthropicAuthHeaderKind)
         let health = try await anthropicCompatibleHealthCheck(config)
         guard health.ok else { throw AppLLMConnectionSetupError.healthCheckFailed(health.message) }
 
@@ -299,6 +305,14 @@ public struct AppLLMConnectionSetupService: Sendable {
 
     private func normalizedModel(_ model: String) -> String {
         model.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func normalizedValidationModel(_ validationModel: String, selectedModel: String, model: String) -> String {
+        let explicitValidationModel = validationModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !explicitValidationModel.isEmpty { return explicitValidationModel }
+        let selected = selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !selected.isEmpty { return selected }
+        return AppLLMConnectionConfig.firstModel(in: model)
     }
 
     private func normalizedSelectedModel(_ selectedModel: String, model: String) -> String {
