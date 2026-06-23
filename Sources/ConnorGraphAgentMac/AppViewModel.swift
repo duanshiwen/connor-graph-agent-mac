@@ -305,6 +305,14 @@ struct MCPSourceDraft: Equatable {
 
 @MainActor
 final class AppViewModel: NSObject, ObservableObject {
+    private static let birthDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
     @Published var selection: SidebarItem? = .agentChat
     @Published var query: String = "记忆"
     @Published var searchResults: [GraphSearchHit] = []
@@ -478,7 +486,9 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var userDisplayName: String = ""
     @Published var userTimezone: String = ""
     @Published var userPreferredLanguage: String = ""
+    @Published var userGenderIdentity: String = ""
     @Published var userBirthDate: String = ""
+    @Published var userBirthDatePickerDate: Date = Date()
     @Published var userCity: String = ""
     @Published var userCountry: String = ""
     @Published var userPreferenceNotes: String = ""
@@ -573,7 +583,9 @@ final class AppViewModel: NSObject, ObservableObject {
             userDisplayName,
             userTimezone,
             userPreferredLanguage,
+            userGenderIdentity,
             userBirthDate,
+            userBirthDatePickerDate.timeIntervalSince1970.description,
             userCity,
             userCountry,
             userPreferenceNotes
@@ -3508,7 +3520,11 @@ final class AppViewModel: NSObject, ObservableObject {
             userDisplayName = settings.preferences.displayName
             userTimezone = settings.preferences.timezone
             userPreferredLanguage = settings.preferences.preferredLanguage
+            userGenderIdentity = settings.preferences.genderIdentity
             userBirthDate = settings.preferences.birthDate
+            if let parsedBirthDate = Self.birthDateFormatter.date(from: settings.preferences.birthDate) {
+                userBirthDatePickerDate = parsedBirthDate
+            }
             userCity = settings.preferences.city
             userCountry = settings.preferences.country
             userPreferenceNotes = settings.preferences.notes
@@ -3546,6 +3562,7 @@ final class AppViewModel: NSObject, ObservableObject {
             settings.preferences.displayName = userDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.timezone = userTimezone.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.preferredLanguage = userPreferredLanguage.trimmingCharacters(in: .whitespacesAndNewlines)
+            settings.preferences.genderIdentity = userGenderIdentity.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.birthDate = userBirthDate.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.city = userCity.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.country = userCountry.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3745,6 +3762,17 @@ final class AppViewModel: NSObject, ObservableObject {
 
     private var canUseUserNotifications: Bool {
         Bundle.main.bundleURL.pathExtension == "app"
+    }
+
+    func setUserBirthDateFromPicker(_ date: Date) {
+        userBirthDatePickerDate = date
+        userBirthDate = Self.birthDateFormatter.string(from: date)
+        scheduleRuntimeSettingsAutosave()
+    }
+
+    func clearUserBirthDate() {
+        userBirthDate = ""
+        scheduleRuntimeSettingsAutosave()
     }
 
     func refreshSystemPreferenceDefaults() {
