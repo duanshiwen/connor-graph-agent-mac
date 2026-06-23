@@ -20,6 +20,9 @@ struct ConnorCLI {
         if args.first == "tasks" {
             return try routeTasks(args: Array(args.dropFirst()), encoder: encoder)
         }
+        if args.first == "memory" {
+            return try AppMemoryOSCLIRouter.route(args: Array(args.dropFirst()), inspector: AppMemoryOSCLIRouter.makeLiveInspector(), encoder: encoder)
+        }
         let error: [String: String] = ["error": "unknown_command", "usage": "connor commands"]
         return try encode(error, encoder: encoder)
     }

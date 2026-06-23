@@ -245,6 +245,56 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(l2Plan.kind == MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue)
         #expect(l2Plan.jobIDs.count == 1)
     }
+
+    @Test func memoryOSCLIRouterRoutesStatusCommand() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        let output = try AppMemoryOSCLIRouter.route(args: ["status"], inspector: AppMemoryOSCLIInspector(store: store), encoder: memoryOSCLITestEncoder())
+
+        #expect(output.contains("\"schema\""))
+        #expect(output.contains("\"layers\""))
+    }
+
+    @Test func memoryOSCLIRouterRoutesLayerListCommands() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        try seedMemoryOSCLIInspectorFixture(store: store)
+        let inspector = AppMemoryOSCLIInspector(store: store)
+
+        let output = try AppMemoryOSCLIRouter.route(args: ["l2", "statements", "--limit", "5"], inspector: inspector, encoder: memoryOSCLITestEncoder())
+
+        #expect(output.contains("stmt-1"))
+        #expect(output.contains("describes"))
+    }
+
+    @Test func memoryOSCLIRouterRoutesReadCommand() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        try seedMemoryOSCLIInspectorFixture(store: store)
+        let inspector = AppMemoryOSCLIInspector(store: store)
+
+        let output = try AppMemoryOSCLIRouter.route(args: ["read", "L4", "entity-1"], inspector: inspector, encoder: memoryOSCLITestEncoder())
+
+        #expect(output.contains("\"layer\" : \"L4\""))
+        #expect(output.contains("entity-1"))
+    }
+
+    @Test func memoryOSCLIRouterRoutesSearchCommand() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        try seedMemoryOSCLIInspectorFixture(store: store)
+        let inspector = AppMemoryOSCLIInspector(store: store)
+
+        let output = try AppMemoryOSCLIRouter.route(args: ["search", "Memory", "--layers", "L3,L4", "--limit", "5"], inspector: inspector, encoder: memoryOSCLITestEncoder())
+
+        #expect(output.contains("\"query\" : \"Memory\""))
+        #expect(output.contains("\"layer\" : \"L3\"") || output.contains("\"layer\" : \"L4\""))
+    }
+
+    @Test func memoryOSCLIRouterReturnsHelpfulErrors() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        let inspector = AppMemoryOSCLIInspector(store: store)
+
+        let output = try AppMemoryOSCLIRouter.route(args: ["read", "L2"], inspector: inspector, encoder: memoryOSCLITestEncoder())
+
+        #expect(output.contains("missing_layer_or_id"))
+    }
 }
 
 private func makeMemoryOSCLIInspectorStore() throws -> SQLiteMemoryOSStore {
@@ -252,6 +302,12 @@ private func makeMemoryOSCLIInspectorStore() throws -> SQLiteMemoryOSStore {
     let store = try SQLiteMemoryOSStore(path: url.path)
     try store.migrate()
     return store
+}
+
+private func memoryOSCLITestEncoder() -> JSONEncoder {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    return encoder
 }
 
 private func seedMemoryOSCLIInspectorFixture(store: SQLiteMemoryOSStore, now: Date = Date(timeIntervalSince1970: 10_000)) throws {
