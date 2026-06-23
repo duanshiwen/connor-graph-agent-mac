@@ -443,7 +443,7 @@ private struct MailProviderPresetSettingsRow: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
-            Text(preset == .microsoft ? "OAuth 优先" : preset == .other ? "手动" : "授权码")
+            Text(preset == .other ? "手动" : "授权码")
                 .font(SettingsListTypography.rowCaptionEmphasized)
                 .foregroundStyle(.secondary)
         }
@@ -453,7 +453,6 @@ private struct MailProviderPresetSettingsRow: View {
     private var iconName: String {
         switch preset {
         case .apple: "apple.logo"
-        case .microsoft: "m.circle"
         case .qq: "q.circle"
         case .netease: "n.circle"
         case .other: "server.rack"
