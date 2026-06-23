@@ -75,9 +75,27 @@ public struct AnthropicCompatibleConfig: Sendable, Equatable {
 
 public enum AnthropicCompatibleProviderError: Error, Equatable, Sendable {
     case invalidResponse
-    case httpStatus(Int)
+    case httpStatus(Int, message: String?)
     case missingAssistantMessage
     case streamError(String)
+}
+
+extension AnthropicCompatibleProviderError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .invalidResponse:
+            return "Anthropic-compatible provider returned an invalid response."
+        case let .httpStatus(code, message):
+            if let message, !message.isEmpty {
+                return "HTTP \(code): \(message)"
+            }
+            return "HTTP \(code)"
+        case .missingAssistantMessage:
+            return "Anthropic-compatible provider response did not include an assistant message."
+        case let .streamError(message):
+            return message
+        }
+    }
 }
 
 public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider, StreamingAgentModelProvider, Sendable {
@@ -122,7 +140,7 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
         let httpRequest = try makeMessagesRequest(request)
         let httpResponse = try await client.send(httpRequest)
         if httpResponse.statusCode < 200 || httpResponse.statusCode >= 300 {
-            throw AnthropicCompatibleProviderError.httpStatus(httpResponse.statusCode)
+            throw AnthropicCompatibleProviderError.httpStatus(httpResponse.statusCode, message: Self.errorMessage(from: httpResponse.body))
         }
         return try parseMessagesResponse(httpResponse.body)
     }
@@ -173,7 +191,7 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
         var body: [String: Any] = [
             "model": config.requestModel,
             "max_tokens": config.maxTokens,
-            "messages": request.messages.compactMap { anthropicMessage(for: $0) }
+            "messages": anthropicMessages(for: request.messages)
         ]
         if stream { body["stream"] = true }
         if let thinking = config.featureOptions.thinking { body["thinking"] = thinking.jsonObject }
@@ -200,7 +218,6 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
             }
             tools.append(contentsOf: config.featureOptions.serverTools.map(\.jsonObject))
             body["tools"] = tools
-            body["tool_choice"] = ["type": "auto"]
         }
         let data = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
         return AgentHTTPRequest(
@@ -212,42 +229,64 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
         )
     }
 
-    private func anthropicMessage(for message: AgentModelMessage) -> [String: Any]? {
-        switch message.role {
-        case .system:
-            return nil
-        case .user:
-            return ["role": "user", "content": contentBlocks(for: message)]
-        case .assistant:
-            if message.providerMetadata?.providerID == "anthropic-compatible",
-               let raw = message.providerMetadata?.rawAssistantContentJSON,
-               let data = raw.data(using: .utf8),
-               let blocks = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
-                return ["role": "assistant", "content": blocks]
+    private func anthropicMessages(for messages: [AgentModelMessage]) -> [[String: Any]] {
+        var result: [[String: Any]] = []
+        var index = messages.startIndex
+        while index < messages.endIndex {
+            let message = messages[index]
+            switch message.role {
+            case .system:
+                index = messages.index(after: index)
+            case .user:
+                result.append(["role": "user", "content": contentBlocks(for: message)])
+                index = messages.index(after: index)
+            case .assistant:
+                result.append(anthropicAssistantMessage(for: message))
+                index = messages.index(after: index)
+            case .tool:
+                var content: [[String: Any]] = []
+                while index < messages.endIndex, messages[index].role == .tool {
+                    content.append(toolResultBlock(for: messages[index]))
+                    index = messages.index(after: index)
+                }
+                if index < messages.endIndex, messages[index].role == .user {
+                    content.append(contentsOf: contentBlocks(for: messages[index]))
+                    index = messages.index(after: index)
+                }
+                result.append(["role": "user", "content": content])
             }
-            var content: [[String: Any]] = []
-            let text = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !text.isEmpty { content.append(["type": "text", "text": text]) }
-            for toolCall in message.toolCalls ?? [] {
-                let inputObject = (try? JSONSerialization.jsonObject(with: Data(toolCall.argumentsJSON.utf8))) ?? [:]
-                content.append([
-                    "type": "tool_use",
-                    "id": toolCall.id,
-                    "name": toolCall.name,
-                    "input": inputObject
-                ])
-            }
-            return ["role": "assistant", "content": content]
-        case .tool:
-            return [
-                "role": "user",
-                "content": [[
-                    "type": "tool_result",
-                    "tool_use_id": message.toolCallID ?? message.id,
-                    "content": message.content
-                ]]
-            ]
         }
+        return result
+    }
+
+    private func anthropicAssistantMessage(for message: AgentModelMessage) -> [String: Any] {
+        if message.providerMetadata?.providerID == "anthropic-compatible",
+           let raw = message.providerMetadata?.rawAssistantContentJSON,
+           let data = raw.data(using: .utf8),
+           let blocks = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            return ["role": "assistant", "content": blocks]
+        }
+        var content: [[String: Any]] = []
+        let text = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.isEmpty { content.append(["type": "text", "text": text]) }
+        for toolCall in message.toolCalls ?? [] {
+            let inputObject = (try? JSONSerialization.jsonObject(with: Data(toolCall.argumentsJSON.utf8))) ?? [:]
+            content.append([
+                "type": "tool_use",
+                "id": toolCall.id,
+                "name": toolCall.name,
+                "input": inputObject
+            ])
+        }
+        return ["role": "assistant", "content": content]
+    }
+
+    private func toolResultBlock(for message: AgentModelMessage) -> [String: Any] {
+        [
+            "type": "tool_result",
+            "tool_use_id": message.toolCallID ?? message.id,
+            "content": message.content
+        ]
     }
 
     private func contentBlocks(for message: AgentModelMessage) -> [[String: Any]] {
@@ -264,6 +303,31 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
             if !blocks.isEmpty { return blocks }
         }
         return [["type": "text", "text": message.content]]
+    }
+
+    private static func errorMessage(from data: Data) -> String? {
+        guard !data.isEmpty else { return nil }
+        if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if let error = object["error"] as? [String: Any] {
+                if let message = error["message"] as? String, !message.isEmpty {
+                    return sanitizedErrorMessage(message)
+                }
+                if let type = error["type"] as? String, !type.isEmpty {
+                    return sanitizedErrorMessage(type)
+                }
+            }
+            if let message = object["message"] as? String, !message.isEmpty {
+                return sanitizedErrorMessage(message)
+            }
+        }
+        guard let text = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
+        return sanitizedErrorMessage(text)
+    }
+
+    private static func sanitizedErrorMessage(_ message: String) -> String {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.count <= 800 { return trimmed }
+        return String(trimmed.prefix(800)) + "…"
     }
 
     private func messagesEndpoint() -> URL {

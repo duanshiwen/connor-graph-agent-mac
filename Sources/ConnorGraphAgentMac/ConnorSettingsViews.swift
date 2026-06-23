@@ -768,6 +768,13 @@ enum AIConnectionCustomProtocol: String, CaseIterable, Equatable {
         case .anthropicCompatible: "Anthropic Compatible"
         }
     }
+
+    var modelValidationEndpointDescription: String {
+        switch self {
+        case .openAICompatible: "OpenAI-compatible /v1/chat/completions 最小连接校验"
+        case .anthropicCompatible: "Anthropic Messages /v1/messages 连接校验"
+        }
+    }
 }
 
 struct AIConnectionProviderPreset: Identifiable, Equatable {
@@ -816,7 +823,7 @@ struct AIConnectionProviderPreset: Identifiable, Equatable {
         AIConnectionProviderPreset(id: "zai", title: "z.ai (GLM)", endpoint: "https://api.z.ai/api/paas/v4", defaultModel: "glm-4.5", supportedModels: ["glm-4.5", "glm-4.5-air", "glm-4.5-flash", "glm-4-plus", "glm-4-flash"], keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "huggingface", title: "Hugging Face", endpoint: "https://router.huggingface.co/v1", defaultModel: "openai/gpt-oss-120b", keyPlaceholder: "hf_...", protocolKind: .openAICompatible),
         AIConnectionProviderPreset(id: "anthropic", title: "Anthropic API", endpoint: "https://api.anthropic.com", defaultModel: "claude-sonnet-4-5", keyPlaceholder: "sk-ant-...", protocolKind: .anthropicCompatible, authHeaderKind: .xAPIKey),
-        AIConnectionProviderPreset(id: "openrouter-anthropic", title: "OpenRouter · Anthropic", endpoint: "https://openrouter.ai/api", defaultModel: "anthropic/claude-sonnet-4.5", keyPlaceholder: "sk-or-...", protocolKind: .anthropicCompatible, authHeaderKind: .bearer),
+        AIConnectionProviderPreset(id: "openrouter-anthropic", title: "OpenRouter · Anthropic", endpoint: "https://openrouter.ai/api/v1", defaultModel: "anthropic/claude-sonnet-4.5", keyPlaceholder: "sk-or-...", protocolKind: .openAICompatible, openAIAPIKeyHeaderKind: .bearer),
         AIConnectionProviderPreset(id: "vercel-anthropic", title: "Vercel AI Gateway · Anthropic", endpoint: "https://ai-gateway.vercel.sh/v1", defaultModel: "anthropic/claude-sonnet-4", keyPlaceholder: "vck_...", protocolKind: .anthropicCompatible, authHeaderKind: .bearer),
         AIConnectionProviderPreset(id: "custom", title: "Custom", endpoint: "", defaultModel: "", keyPlaceholder: "Paste your key here...", protocolKind: .openAICompatible)
     ]
@@ -918,7 +925,7 @@ struct AIConnectionOnboardingOption: Identifiable, Equatable {
             selectedModel: "gpt-4.1",
             setupTitle: "连接 GitHub Copilot",
             setupSubtitle: "使用 GitHub Copilot 订阅驱动康纳同学。",
-            setupInstruction: "在 GitHub 页面输入此代码以授权。浏览器会打开 github.com/login/device。",
+            setupInstruction: "在 GitHub 页面输入此代码以授权。系统默认浏览器会打开 github.com/login/device。",
             loginButtonTitle: "打开 GitHub 授权页",
             authURLString: "https://github.com/login/device",
             authenticationKind: .deviceCode(code: "B3D1-87D5", verificationURL: "https://github.com/login/device")
@@ -1039,67 +1046,102 @@ struct AIConnectionSetupView: View {
     @State private var showAPIKey = false
     @State private var selectedProviderPresetID = "openai"
     @State private var customProtocol: AIConnectionCustomProtocol = .openAICompatible
+    @State private var showsAdvancedConnectionSettings = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            Spacer(minLength: 72)
-
+        ScrollView {
             VStack(spacing: SettingsListLayout.spaceXL) {
-                VStack(spacing: SettingsListLayout.spaceS) {
-                    Text(option.setupTitle)
-                        .font(SettingsListTypography.header)
-                    Text(option.setupSubtitle)
-                        .font(SettingsListTypography.rowSubtitle)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
+                setupHero
 
                 setupContent
                     .frame(maxWidth: SettingsListLayout.formMaxWidth)
 
-                if let statusMessage {
-                    Text(statusMessage)
-                        .font(SettingsListTypography.rowSubtitle)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: SettingsListLayout.formMaxWidth)
-                }
+                setupFeedback
 
-                if let errorMessage {
-                    Text(errorMessage)
-                        .font(SettingsListTypography.rowSubtitle)
-                        .foregroundStyle(.red)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, SettingsListLayout.spaceL)
-                        .padding(.vertical, SettingsListLayout.spaceM)
-                        .frame(maxWidth: SettingsListLayout.formMaxWidth)
-                        .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous))
-                }
-
-                HStack(spacing: SettingsListLayout.spaceL) {
-                    Button(action: back) {
-                        Text("返回")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-
-                    Button(action: primaryAction) {
-                        Label(primaryButtonTitle, systemImage: primaryButtonIcon)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .disabled(isPrimaryButtonDisabled || isAuthenticating)
-                }
-                .frame(maxWidth: SettingsListLayout.formMaxWidth)
+                setupActionBar
+                    .frame(maxWidth: SettingsListLayout.formMaxWidth)
             }
-
-            Spacer(minLength: 96)
+            .padding(.top, 56)
+            .padding(.bottom, 72)
+            .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity)
         .frame(minHeight: 760)
         .onAppear(perform: initializeDrafts)
+    }
+
+    private var setupHero: some View {
+        VStack(spacing: SettingsListLayout.spaceM) {
+            ZStack {
+                Circle()
+                    .fill(option.tint.opacity(0.12))
+                    .frame(width: 58, height: 58)
+                Image(systemName: option.systemImage)
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(option.tint)
+            }
+            .accessibilityHidden(true)
+
+            VStack(spacing: SettingsListLayout.spaceS) {
+                Text(option.setupTitle)
+                    .font(SettingsListTypography.header)
+                    .multilineTextAlignment(.center)
+                Text(option.setupSubtitle)
+                    .font(SettingsListTypography.rowSubtitle)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: SettingsListLayout.formMaxWidth)
+    }
+
+    @ViewBuilder
+    private var setupFeedback: some View {
+        if let statusMessage {
+            Text(statusMessage)
+                .font(SettingsListTypography.rowSubtitle)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: SettingsListLayout.formMaxWidth)
+        }
+
+        if let errorMessage {
+            Text(errorMessage)
+                .font(SettingsListTypography.rowSubtitle)
+                .foregroundStyle(.red)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, SettingsListLayout.spaceL)
+                .padding(.vertical, SettingsListLayout.spaceM)
+                .frame(maxWidth: SettingsListLayout.formMaxWidth)
+                .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous))
+        }
+    }
+
+    private var setupActionBar: some View {
+        HStack(spacing: SettingsListLayout.spaceL) {
+            Button(action: back) {
+                Text("返回")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+
+            Button(action: primaryAction) {
+                Label(primaryButtonTitle, systemImage: primaryButtonIcon)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .keyboardShortcut(.defaultAction)
+            .disabled(isPrimaryButtonDisabled || isAuthenticating)
+        }
+        .padding(SettingsListLayout.spaceS)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: SettingsListLayout.radiusL, style: .continuous)
+                .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+        )
     }
 
     @ViewBuilder
@@ -1123,7 +1165,7 @@ struct AIConnectionSetupView: View {
                 .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
 
                 if didOpenBrowser {
-                    Text("浏览器已打开。完成网页认证后，康纳同学会自动验证并保存连接。")
+                    Text("系统默认浏览器已打开。完成网页认证后，康纳同学会自动验证并保存连接。")
                         .font(SettingsListTypography.header)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 18)
@@ -1155,7 +1197,7 @@ struct AIConnectionSetupView: View {
                                 .stroke(Color.secondary.opacity(0.14), lineWidth: 1)
                         )
                         .textSelection(.enabled)
-                    Text(didOpenBrowser ? "浏览器已打开 \(displayURL(githubDeviceCode.verificationURI))" : "点击下方按钮打开 \(displayURL(githubDeviceCode.verificationURI))")
+                    Text(didOpenBrowser ? "系统默认浏览器已打开 \(displayURL(githubDeviceCode.verificationURI))" : "点击下方按钮用系统默认浏览器打开 \(displayURL(githubDeviceCode.verificationURI))")
                         .font(SettingsListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
                 } else {
@@ -1165,22 +1207,77 @@ struct AIConnectionSetupView: View {
                 }
             }
         case .direct:
-            if option.id == "china-provider" {
-                curatedChinaProviderAPIFields
-            } else if option.id == "deepseek" || option.id == "xiaomi-mimo" {
-                curatedSingleProviderAPIFields
+            if usesAPIKeyFirstPresetFlow {
+                presetProviderAPIKeyFirstFields
             } else if option.id == "other-provider" {
                 otherProviderAPIFields
             } else {
-                VStack(spacing: 16) {
-                    Text(option.setupInstruction)
-                        .font(SettingsListTypography.rowSubtitle)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                    openAICompatibleFields(includeAPIKey: true)
+                directConnectionFields(includeAPIKey: true)
+            }
+        }
+    }
+
+    private func directConnectionFields(includeAPIKey: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 18) {
+            aiConnectionInstructionCard
+            aiConnectionCard {
+                VStack(alignment: .leading, spacing: SettingsListLayout.spaceL) {
+                    aiConnectionSettingsRow(title: "连接名称") {
+                        aiConnectionTextField(option.connectionName, text: $connectionName)
+                    }
+                    aiConnectionSettingsRow(title: "Endpoint", help: localEndpointHelpText) {
+                        aiConnectionTextField("http://localhost:11434/v1", text: $baseURLString)
+                    }
+                    aiConnectionSettingsRow(title: "模型", help: modelFieldHelpText) {
+                        aiConnectionTextField("llama3.2", text: $model)
+                    }
+                    aiConnectionSettingsRow(title: "默认模型", help: "默认模型用于新会话默认选择；连接校验始终使用模型列表中的第一个有效模型。") {
+                        aiConnectionTextField("llama3.2", text: $selectedModel)
+                    }
+                    if includeAPIKey {
+                        aiConnectionSettingsRow(title: "API Key", help: apiKeyHelpText) {
+                            apiKeyInput(placeholder: option.id == "local-model" ? "本地模型可留空" : "API Key")
+                        }
+                    }
                 }
             }
         }
+    }
+
+    private var aiConnectionInstructionCard: some View {
+        HStack(alignment: .top, spacing: SettingsListLayout.spaceM) {
+            Image(systemName: "checklist.checked")
+                .font(SettingsListTypography.largeIcon)
+                .foregroundStyle(option.tint)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(option.setupInstruction)
+                    .font(SettingsListTypography.rowTitleSelected)
+                    .foregroundStyle(.primary)
+                Text("按 Tab 键会依次移动到下一个字段；验证成功后，凭据只保存到本机。")
+                    .font(SettingsListTypography.rowSubtitle)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(SettingsListLayout.spaceL)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(AppShellColors.hairline, lineWidth: 1))
+    }
+
+    private var localEndpointHelpText: String {
+        if option.id == "local-model" {
+            return "Ollama 默认地址通常是 http://localhost:11434/v1；本地回环地址允许不填写 API Key。"
+        }
+        return "填写兼容服务的 /v1 endpoint。"
+    }
+
+    private var apiKeyHelpText: String {
+        if option.id == "local-model" {
+            return "本地模型通常可以留空；如果你的本地网关启用了认证，再填写对应 Key。"
+        }
+        return "API Key 会保存到本机 credential store，不会写入普通配置文件。"
     }
 
     private var githubCopilotAutomaticConfigurationSummary: some View {
@@ -1226,16 +1323,132 @@ struct AIConnectionSetupView: View {
         )
     }
 
-    private var curatedSingleProviderAPIFields: some View {
+    private var presetProviderAPIKeyFirstFields: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text(option.setupInstruction)
-                .font(SettingsListTypography.rowSubtitle)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity)
+            providerSummaryCard
 
-            modelMultiSelect(title: "启用模型", models: option.supportedModels.isEmpty ? [option.selectedModel] : option.supportedModels)
-            apiKeyField(placeholder: option.id == "xiaomi-mimo" ? "MIMO_API_KEY" : "sk-...")
+            if option.id == "china-provider" || option.id == "other-provider" {
+                presetProviderPickerRow
+            }
+
+            primaryAPIKeyEntryCard(placeholder: apiKeyPlaceholderForCurrentPreset)
+
+            advancedConnectionDisclosure
+        }
+    }
+
+    private var advancedConnectionDisclosure: some View {
+        DisclosureGroup(isExpanded: $showsAdvancedConnectionSettings) {
+            VStack(alignment: .leading, spacing: SettingsListLayout.spaceM) {
+                aiConnectionSettingsRow(title: "连接名称") {
+                    aiConnectionTextField("Anthropic / Claude", text: $connectionName)
+                }
+                aiConnectionSettingsRow(title: "Endpoint") {
+                    aiConnectionTextField("https://api.example.com/v1", text: $baseURLString)
+                }
+                aiConnectionSettingsRow(title: "模型") {
+                    aiConnectionTextField("claude-sonnet-4-5", text: $model)
+                }
+                aiConnectionSettingsRow(title: "默认模型", help: "默认模型用于新会话默认选择；连接校验始终使用模型列表中的第一个有效模型。") {
+                    aiConnectionTextField("claude-sonnet-4-5", text: $selectedModel)
+                }
+            }
+            .padding(.top, SettingsListLayout.spaceM)
+        } label: {
+            Text("高级设置（通常不需要修改）")
+                .font(SettingsListTypography.rowTitleSelected)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, SettingsListLayout.spaceL)
+        .padding(.vertical, SettingsListLayout.spaceM)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(AppShellColors.hairline, lineWidth: 1))
+    }
+
+    private var providerSummaryCard: some View {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceM) {
+            HStack(alignment: .top, spacing: SettingsListLayout.spaceM) {
+                Image(systemName: option.systemImage)
+                    .font(SettingsListTypography.largeIcon)
+                    .foregroundStyle(option.tint)
+                    .frame(width: 30)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(connectionName)
+                        .font(SettingsListTypography.rowTitleSelected)
+                    Text("已为你预设接口地址和兼容模式；首次验证会使用推荐模型，通常只需要填写 API Key。")
+                        .font(SettingsListTypography.rowSubtitle)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Divider().opacity(0.6)
+
+            providerSummaryRow(title: "接口地址", value: baseURLString)
+            providerSummaryRow(title: "默认模型", value: selectedModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? model : selectedModel)
+            providerSummaryRow(title: "兼容模式", value: compatibilitySummaryTitle)
+        }
+        .padding(SettingsListLayout.spaceL)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .textBackgroundColor).opacity(0.5), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(AppShellColors.hairline, lineWidth: 1))
+    }
+
+    private func providerSummaryRow(title: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: SettingsListLayout.spaceM) {
+            Text(title)
+                .font(SettingsListTypography.rowCaptionEmphasized)
+                .foregroundStyle(.secondary)
+                .frame(width: 68, alignment: .leading)
+            Text(value.isEmpty ? "未设置" : value)
+                .font(SettingsListTypography.rowCaption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func primaryAPIKeyEntryCard(placeholder: String) -> some View {
+        aiConnectionCard {
+            VStack(alignment: .leading, spacing: SettingsListLayout.spaceM) {
+                HStack(spacing: SettingsListLayout.spaceS) {
+                    Image(systemName: "key")
+                        .foregroundStyle(option.tint)
+                    Text("API Key")
+                        .font(SettingsListTypography.header)
+                }
+                apiKeyInput(placeholder: placeholder)
+                Text(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "填写 API Key 后即可验证并添加连接。" : "API Key 只会保存到本机 credential store，不会写入普通配置文件。")
+                    .font(SettingsListTypography.rowSubtitle)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func aiConnectionCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .padding(SettingsListLayout.spaceL)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(nsColor: .textBackgroundColor).opacity(0.5), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(AppShellColors.hairline, lineWidth: 1))
+    }
+
+    private var presetProviderPickerRow: some View {
+        aiConnectionSettingsRow(title: "服务商") {
+            Picker("服务商", selection: $selectedProviderPresetID) {
+                ForEach(option.id == "china-provider" ? chinaProviderPresets : AIConnectionProviderPreset.otherProviderPresets) { preset in
+                    Text(preset.title).tag(preset.id)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .controlSize(.large)
+            .frame(width: SettingsListLayout.pickerControlWidth, alignment: .leading)
+            .onChange(of: selectedProviderPresetID) { _, _ in applySelectedProviderPreset() }
         }
     }
 
@@ -1271,103 +1484,146 @@ struct AIConnectionSetupView: View {
 
     private var otherProviderAPIFields: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text(option.setupInstruction)
-                .font(SettingsListTypography.rowSubtitle)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity)
-
-            apiKeyField(placeholder: activeProviderPreset.keyPlaceholder)
-
-            HStack(alignment: .center, spacing: SettingsListLayout.spaceL) {
-                Text("服务商")
-                    .font(SettingsListTypography.header)
-                Spacer(minLength: SettingsListLayout.spaceL)
-                Picker("服务商", selection: $selectedProviderPresetID) {
-                    ForEach(AIConnectionProviderPreset.otherProviderPresets) { preset in
-                        Text(preset.title).tag(preset.id)
+            aiConnectionCard {
+                VStack(alignment: .leading, spacing: SettingsListLayout.spaceL) {
+                    HStack(spacing: SettingsListLayout.spaceS) {
+                        Image(systemName: "slider.horizontal.3")
+                            .foregroundStyle(option.tint)
+                        Text("自定义连接")
+                            .font(SettingsListTypography.header)
                     }
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .controlSize(.large)
-                .frame(width: SettingsListLayout.pickerControlWidth, alignment: .trailing)
-                .onChange(of: selectedProviderPresetID) { _, _ in applySelectedProviderPreset() }
-            }
-            .frame(maxWidth: .infinity, minHeight: SettingsListLayout.rowMinHeight)
+                    aiConnectionSettingsRow(title: "服务商") {
+                        Picker("服务商", selection: $selectedProviderPresetID) {
+                            ForEach(AIConnectionProviderPreset.otherProviderPresets) { preset in
+                                Text(preset.title).tag(preset.id)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .controlSize(.large)
+                        .frame(width: SettingsListLayout.pickerControlWidth, alignment: .leading)
+                        .onChange(of: selectedProviderPresetID) { _, _ in applySelectedProviderPreset() }
+                    }
 
-            if selectedProviderPresetID == "custom" {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Endpoint")
-                        .font(SettingsListTypography.header)
-                    TextField("https://your-api-endpoint.com", text: $baseURLString)
-                        .textFieldStyle(.roundedBorder)
-                        .font(SettingsListTypography.rowTitle)
-                }
+                    if selectedProviderPresetID == "custom" {
+                        aiConnectionSettingsRow(title: "Endpoint") {
+                            aiConnectionTextField("https://your-api-endpoint.com", text: $baseURLString)
+                        }
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Protocol")
-                        .font(SettingsListTypography.header)
-                    Picker("Protocol", selection: $customProtocol) {
-                        ForEach(AIConnectionCustomProtocol.allCases, id: \.self) { protocolKind in
-                            Text(protocolKind.title).tag(protocolKind)
+                        aiConnectionSettingsRow(title: "兼容模式", help: compatibilityModeHelpText) {
+                            Picker("兼容模式", selection: $customProtocol) {
+                                ForEach(AIConnectionCustomProtocol.allCases, id: \.self) { protocolKind in
+                                    Text(protocolKind.title).tag(protocolKind)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .controlSize(.large)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
-                    .pickerStyle(.segmented)
-                    .controlSize(.large)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    Text(customProtocol == .anthropicCompatible ? "Anthropic Compatible 使用 /v1/messages 协议，适合 Anthropic API、OpenRouter Anthropic Skin、Vercel AI Gateway 等兼容服务。" : "大多数第三方接口（Ollama、vLLM、DashScope 等）使用 OpenAI Compatible。")
-                        .font(SettingsListTypography.rowTitle)
-                        .foregroundStyle(.secondary)
+
+                    aiConnectionSettingsRow(title: "模型", help: modelFieldHelpText) {
+                        if selectedProviderPresetID != "custom" && !activeProviderPreset.supportedModels.isEmpty {
+                            modelMultiSelect(title: "", models: activeProviderPreset.availableModels)
+                        } else {
+                            aiConnectionTextField("例如 deepseek-v4-flash；多个模型可用逗号分隔", text: $model)
+                        }
+                    }
                 }
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Default Model · required")
-                    .font(SettingsListTypography.header)
-                if selectedProviderPresetID != "custom" && !activeProviderPreset.supportedModels.isEmpty {
-                    modelMultiSelect(title: "", models: activeProviderPreset.availableModels)
-                } else {
-                    TextField("例如 gpt-4o-mini、deepseek-v4-flash、google/gemini-2.5-flash", text: $model)
-                        .textFieldStyle(.roundedBorder)
-                        .font(SettingsListTypography.rowTitle)
-                }
-                Text("使用服务商自己的模型 ID。当前 Connor 会用该模型执行一次真实连接校验。")
-                    .font(SettingsListTypography.rowTitle)
-                    .foregroundStyle(.secondary)
-            }
+            primaryAPIKeyEntryCard(placeholder: activeProviderPreset.keyPlaceholder)
         }
     }
 
     private func apiKeyField(placeholder: String) -> some View {
-        VStack(alignment: .leading, spacing: SettingsListLayout.spaceS) {
-            Text("API Key")
-                .font(SettingsListTypography.header)
-            HStack(spacing: SettingsListLayout.spaceS) {
-                Group {
-                    if showAPIKey {
-                        TextField(placeholder, text: $apiKey)
-                    } else {
-                        SecureField(placeholder, text: $apiKey)
-                    }
+        aiConnectionSettingsRow(title: "API Key") {
+            apiKeyInput(placeholder: placeholder)
+        }
+    }
+
+    private func apiKeyInput(placeholder: String) -> some View {
+        aiConnectionInputContainer {
+            Group {
+                if showAPIKey {
+                    TextField(placeholder, text: $apiKey)
+                } else {
+                    SecureField(placeholder, text: $apiKey)
                 }
+            }
+            .textFieldStyle(.plain)
+            .font(SettingsListTypography.rowTitle)
+
+            Button(action: { showAPIKey.toggle() }) {
+                Image(systemName: showAPIKey ? "eye.slash" : "eye")
+                    .font(SettingsListTypography.icon)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 32, height: 32)
+                    .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(showAPIKey ? "隐藏 API Key" : "显示 API Key")
+            .help(showAPIKey ? "隐藏 API Key" : "显示 API Key")
+        }
+    }
+
+    private func aiConnectionSettingsRow<Content: View>(title: String, help: String? = nil, @ViewBuilder content: () -> Content) -> some View {
+        HStack(alignment: .top, spacing: SettingsListLayout.spaceL) {
+            Text(title)
+                .font(SettingsListTypography.header)
+                .frame(width: 104, alignment: .leading)
+                .padding(.top, 8)
+            VStack(alignment: .leading, spacing: SettingsListLayout.spaceS) {
+                content()
+                if let help, !help.isEmpty {
+                    aiConnectionHelpText(help)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func aiConnectionFormRow<Content: View>(title: String, help: String? = nil, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: SettingsListLayout.spaceS) {
+            Text(title)
+                .font(SettingsListTypography.header)
+            content()
+            if let help, !help.isEmpty {
+                aiConnectionHelpText(help)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func aiConnectionInputContainer<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        HStack(spacing: SettingsListLayout.spaceS) {
+            content()
+        }
+        .padding(.horizontal, SettingsListLayout.spaceL)
+        .frame(minHeight: SettingsListLayout.fieldHeight)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous)
+                .stroke(Color.secondary.opacity(0.14), lineWidth: 1)
+        )
+    }
+
+    private func aiConnectionTextField(_ placeholder: String, text: Binding<String>) -> some View {
+        aiConnectionInputContainer {
+            TextField(placeholder, text: text)
                 .textFieldStyle(.plain)
                 .font(SettingsListTypography.rowTitle)
-                Button(action: { showAPIKey.toggle() }) {
-                    Image(systemName: showAPIKey ? "eye.slash" : "eye")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .help(showAPIKey ? "隐藏 API Key" : "显示 API Key")
-            }
-            .padding(.horizontal, SettingsListLayout.spaceL)
-            .frame(height: SettingsListLayout.fieldHeight)
-            .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: SettingsListLayout.radiusM, style: .continuous)
-                    .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
-            )
+                .lineLimit(1)
+                .textSelection(.enabled)
         }
+    }
+
+    private func aiConnectionHelpText(_ text: String) -> some View {
+        Text(text)
+            .font(SettingsListTypography.rowTitle)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private func modelMultiSelect(title: String, models: [String]) -> some View {
@@ -1418,15 +1674,39 @@ struct AIConnectionSetupView: View {
                     syncModelListFromSelection(fallbackModels: models)
                 }
             }
-            Text("可启用多个模型；默认模型用于首次 health check 和新会话默认选择。")
+            Text("可启用多个模型；连接校验使用第一个启用模型，新会话默认选择仍由默认模型决定。当前将使用 \(healthCheckModelForSubmit) 校验连接。")
                 .font(SettingsListTypography.rowTitle)
                 .foregroundStyle(.secondary)
         }
     }
 
     private var activeProviderPreset: AIConnectionProviderPreset {
-        AIConnectionProviderPreset.otherProviderPresets.first { $0.id == selectedProviderPresetID }
-            ?? AIConnectionProviderPreset.otherProviderPresets[0]
+        let presets = option.id == "china-provider" ? AIConnectionProviderPreset.chinaProviderPresets : AIConnectionProviderPreset.otherProviderPresets
+        return presets.first { $0.id == selectedProviderPresetID } ?? presets[0]
+    }
+
+    private var usesAPIKeyFirstPresetFlow: Bool {
+        guard option.authenticationKind == .direct else { return false }
+        if option.id == "local-model" { return false }
+        if option.id == "other-provider" { return selectedProviderPresetID != "custom" }
+        return true
+    }
+
+    private var apiKeyPlaceholderForCurrentPreset: String {
+        if option.id == "xiaomi-mimo" { return "MIMO_API_KEY" }
+        if option.id == "china-provider" || option.id == "other-provider" { return activeProviderPreset.keyPlaceholder }
+        if option.providerMode == .anthropicMessages { return "sk-ant-..." }
+        return "sk-..."
+    }
+
+    private var compatibilitySummaryTitle: String {
+        if option.providerMode == .anthropicMessages { return "Anthropic Messages" }
+        if option.id == "china-provider" || option.id == "other-provider" { return activeProviderPreset.protocolKind.title }
+        switch option.providerMode {
+        case .openAIResponses: return "OpenAI Responses"
+        case .openAICompatible: return "OpenAI Compatible"
+        case .anthropicMessages: return "Anthropic Messages"
+        }
     }
 
     private var chinaProviderPresets: [AIConnectionProviderPreset] {
@@ -1500,13 +1780,13 @@ struct AIConnectionSetupView: View {
     private func authenticateChatGPTAndAddConnection() {
         isAuthenticating = true
         didOpenBrowser = true
-        statusMessage = "正在用内置浏览器打开 ChatGPT 登录页，并等待浏览器回调…"
+        statusMessage = "正在用系统默认浏览器打开 ChatGPT 登录页，并等待浏览器回调…"
         errorMessage = nil
         Task {
             do {
                 let result = try await AppLLMOAuthService.shared.authenticateChatGPT { url in
                     Task { @MainActor in
-                        viewModel.openURLInCurrentChatBrowser(url)
+                        viewModel.openURLInSystemDefaultBrowser(url)
                     }
                 }
                 let input = AppLLMConnectionSetupInput(
@@ -1545,9 +1825,9 @@ struct AIConnectionSetupView: View {
                     githubDeviceCode = code
                     didOpenBrowser = true
                     if let url = URL(string: code.verificationURI) {
-                        viewModel.openURLInCurrentChatBrowser(url)
+                        viewModel.openURLInSystemDefaultBrowser(url)
                     }
-                    statusMessage = "在内置浏览器的 GitHub 页面输入授权码后，康纳同学会自动继续。"
+                    statusMessage = "在系统默认浏览器的 GitHub 页面输入授权码后，康纳同学会自动继续。"
                 }
                 let tokens = try await AppLLMOAuthService.shared.pollGitHubCopilotTokens(deviceCode: code)
                 let input = AppLLMConnectionSetupInput(
@@ -1583,15 +1863,17 @@ struct AIConnectionSetupView: View {
             do {
                 let usesProviderPreset = option.id == "other-provider" || option.id == "china-provider"
                 let connectionKind: AppLLMConnectionKind = option.providerMode == .openAIResponses ? .openAIResponses : (option.providerMode == .anthropicMessages || (usesProviderPreset && customProtocol == .anthropicCompatible) ? .anthropicCompatible : .openAICompatible)
-                let submittedModelList = effectiveModelListForSubmit()
-                let submittedSelectedModel = selectedModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? submittedModelList : selectedModel
+                let submittedModelList = persistedModelListForSubmit()
+                let submittedSelectedModel = persistedSelectedModelForSubmit(modelList: submittedModelList)
+                let submittedName = submittedConnectionNameForSubmit()
                 let input = AppLLMConnectionSetupInput(
                     id: nil,
                     kind: connectionKind,
-                    name: connectionName,
+                    name: submittedName,
                     baseURLString: baseURLString,
                     model: submittedModelList,
                     selectedModel: submittedSelectedModel,
+                    validationModel: healthCheckModelForSubmit,
                     apiKey: apiKey,
                     anthropicAuthHeaderKind: activeProviderPreset.authHeaderKind,
                     openAIAPIKeyHeaderKind: openAIAPIKeyHeaderKindForCurrentDraft()
@@ -1613,8 +1895,8 @@ struct AIConnectionSetupView: View {
 
     private func initializeDrafts() {
         guard connectionName.isEmpty else { return }
-        connectionName = option.connectionName
         baseURLString = option.baseURLString
+        connectionName = defaultDraftConnectionName(endpoint: option.baseURLString, fallback: option.connectionName)
         model = option.model
         selectedModel = option.selectedModel
         selectedModelIDs = Set(option.modelOptionsFallback)
@@ -1634,15 +1916,15 @@ struct AIConnectionSetupView: View {
     private func applySelectedProviderPreset() {
         let preset = activeProviderPreset
         if preset.id != "custom" {
-            connectionName = preset.title
             baseURLString = preset.endpoint
+            connectionName = defaultDraftConnectionName(endpoint: preset.endpoint, fallback: preset.title)
             model = preset.availableModels.joined(separator: ",")
             selectedModel = preset.defaultModel
             selectedModelIDs = Set(preset.availableModels)
             customProtocol = preset.protocolKind
         } else {
-            connectionName = option.connectionName
             baseURLString = ""
+            connectionName = option.connectionName
             model = ""
             selectedModel = ""
             selectedModelIDs = []
@@ -1679,6 +1961,16 @@ struct AIConnectionSetupView: View {
         }
     }
 
+    private func submittedConnectionNameForSubmit() -> String {
+        let trimmedName = connectionName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedName.isEmpty { return trimmedName }
+        return defaultDraftConnectionName(endpoint: baseURLString, fallback: option.connectionName)
+    }
+
+    private func defaultDraftConnectionName(endpoint: String, fallback: String) -> String {
+        AppLLMEndpointDisplayName.defaultConnectionName(from: endpoint, fallback: fallback)
+    }
+
     private func effectiveModelListForSubmit() -> String {
         if !selectedModelIDs.isEmpty {
             let sourceModels = currentPresetModelOptions()
@@ -1686,6 +1978,61 @@ struct AIConnectionSetupView: View {
             if !enabled.isEmpty { return enabled.joined(separator: ",") }
         }
         return model.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func persistedModelListForSubmit() -> String {
+        if usesAPIKeyFirstPresetFlow && !showsAdvancedConnectionSettings { return "" }
+        return effectiveModelListForSubmit()
+    }
+
+    private func persistedSelectedModelForSubmit(modelList: String) -> String {
+        if usesAPIKeyFirstPresetFlow && !showsAdvancedConnectionSettings { return "" }
+        let selected = selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        let configuredModels = modelIDs(in: modelList)
+        guard !configuredModels.isEmpty else { return selected }
+        if !selected.isEmpty && configuredModels.contains(selected) { return selected }
+        return configuredModels[0]
+    }
+
+    private var healthCheckModelForSubmit: String {
+        let firstConfiguredModel = firstConfiguredModelForSubmit()
+        if !firstConfiguredModel.isEmpty { return firstConfiguredModel }
+        let selected = selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !selected.isEmpty { return selected }
+        return "未选择模型"
+    }
+
+    private var modelFieldHelpText: String {
+        let modelList = modelIDs(in: effectiveModelListForSubmit())
+        let endpointDescription = selectedProviderPresetID == "custom" ? customProtocol.modelValidationEndpointDescription : "连接校验"
+        if modelList.count > 1 {
+            return "使用服务商自己的模型 ID；已填写多个模型，Connor 将使用第一个模型 \(healthCheckModelForSubmit) 执行 \(endpointDescription)，保存后可在会话中切换其他模型。"
+        }
+        return "使用服务商自己的模型 ID；Connor 将使用 \(healthCheckModelForSubmit) 执行 \(endpointDescription)。"
+    }
+
+    private func firstConfiguredModelForSubmit() -> String {
+        firstConfiguredModel(in: effectiveModelListForSubmit())
+    }
+
+    private func firstConfiguredModel(in modelList: String) -> String {
+        modelIDs(in: modelList).first ?? ""
+    }
+
+    private func modelIDs(in modelList: String) -> [String] {
+        modelList
+            .split(separator: ",")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private var compatibilityModeHelpText: String {
+        switch customProtocol {
+        case .openAICompatible:
+            return "适用于 OpenAI-compatible /v1/chat/completions 接口，例如 vLLM、Ollama、DashScope、DeepSeek、MiMo 等服务。"
+        case .anthropicCompatible:
+            return "适用于 Anthropic Messages /v1/messages 接口，例如 Anthropic API 或明确提供 Anthropic Skin 的网关。"
+        }
     }
 
     private func currentPresetModelOptions() -> [String] {
@@ -1719,8 +2066,7 @@ struct AIConnectionSetupView: View {
     }
 
     private func displayError(_ error: Error) -> String {
-        if let localized = (error as? LocalizedError)?.errorDescription, !localized.isEmpty { return localized }
-        return String(describing: error)
+        AppLLMProviderHealthChecker.userFacingMessage(for: error)
     }
 
     private func displayURL(_ rawValue: String) -> String {
@@ -1933,7 +2279,7 @@ struct AIConnectionEntryRow: View {
     private var endpointDisplayName: String {
         switch connection.providerMode {
         case .openAIResponses, .openAICompatible, .anthropicMessages:
-            return host(from: connection.baseURLString)
+            return AppLLMEndpointDisplayName.host(from: connection.baseURLString)
         }
     }
 
@@ -1959,19 +2305,6 @@ struct AIConnectionEntryRow: View {
         }
     }
 
-    private func host(from rawValue: String) -> String {
-        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "未设置 endpoint" }
-        if let url = URL(string: trimmed), let host = url.host, !host.isEmpty {
-            return host
-        }
-        return trimmed
-            .replacingOccurrences(of: "https://", with: "")
-            .replacingOccurrences(of: "http://", with: "")
-            .split(separator: "/")
-            .first
-            .map(String.init) ?? trimmed
-    }
 }
 
 struct SettingsPermissionsSection: View {

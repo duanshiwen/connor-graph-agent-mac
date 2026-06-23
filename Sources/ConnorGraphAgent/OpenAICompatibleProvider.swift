@@ -86,8 +86,28 @@ public enum OpenAICompatibleProviderError: Error, Equatable, Sendable {
     case missingAPIKey
     case invalidBaseURL(String)
     case invalidResponse
-    case httpStatus(Int)
+    case httpStatus(Int, message: String?)
     case missingAssistantMessage
+}
+
+extension OpenAICompatibleProviderError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .missingAPIKey:
+            return "Missing OpenAI-compatible API key."
+        case let .invalidBaseURL(value):
+            return "Invalid OpenAI-compatible base URL: \(value)"
+        case .invalidResponse:
+            return "OpenAI-compatible provider returned an invalid response."
+        case let .httpStatus(code, message):
+            if let message, !message.isEmpty {
+                return "HTTP \(code): \(message)"
+            }
+            return "HTTP \(code)"
+        case .missingAssistantMessage:
+            return "OpenAI-compatible provider response did not include an assistant message."
+        }
+    }
 }
 
 public struct LLMProviderHealthCheckResult: Sendable, Equatable {
@@ -181,7 +201,7 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
         let request = try makeRequest(prompt: prompt, context: context)
         let response = try await client.send(request)
         if response.statusCode < 200 || response.statusCode >= 300 {
-            throw OpenAICompatibleProviderError.httpStatus(response.statusCode)
+            throw OpenAICompatibleProviderError.httpStatus(response.statusCode, message: Self.errorMessage(from: response.body))
         }
         let text = try parseResponse(response.body)
         return LLMResponse(text: text, citations: context.items.map(\.sourceID))
@@ -196,7 +216,7 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
         let request = try makeToolCallingRequest(modelRequest)
         let response = try await client.send(request)
         if response.statusCode < 200 || response.statusCode >= 300 {
-            throw OpenAICompatibleProviderError.httpStatus(response.statusCode)
+            throw OpenAICompatibleProviderError.httpStatus(response.statusCode, message: Self.errorMessage(from: response.body))
         }
         return try parseToolCallingResponse(response.body)
     }
@@ -232,12 +252,35 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
     }
 
     public func healthCheck() async throws -> LLMProviderHealthCheckResult {
-        let context = AgentContext(query: "provider-health-check", items: [])
-        let response = try await complete(prompt: "Reply with exactly: OK", context: context)
+        var client = httpClient
+        let request = try makeHealthCheckRequest()
+        let response = try await client.send(request)
+        if response.statusCode < 200 || response.statusCode >= 300 {
+            throw OpenAICompatibleProviderError.httpStatus(response.statusCode, message: Self.errorMessage(from: response.body))
+        }
+        let text = try parseResponse(response.body)
         return LLMProviderHealthCheckResult(
-            ok: !response.text.isEmpty,
+            ok: !text.isEmpty,
             model: config.requestModel,
             message: "Connection OK: \(config.requestModel)"
+        )
+    }
+
+    private func makeHealthCheckRequest() throws -> AgentHTTPRequest {
+        let endpoint = config.baseURL.appendingPathComponent("chat/completions")
+        let body = OpenAIChatCompletionRequest(
+            model: config.requestModel,
+            messages: [OpenAIChatMessage(role: "user", content: "Reply with exactly: OK")],
+            temperature: nil
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return AgentHTTPRequest(
+            url: endpoint,
+            method: "POST",
+            headers: requestHeaders(),
+            body: try encoder.encode(body),
+            timeoutInterval: config.requestTimeout
         )
     }
 
@@ -359,6 +402,31 @@ public struct OpenAICompatibleProvider<Client: AgentHTTPClient>: LLMProvider, St
             rawResponseJSON: String(data: data, encoding: .utf8)
         )
     }
+
+    private static func errorMessage(from data: Data) -> String? {
+        guard !data.isEmpty else { return nil }
+        if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if let error = object["error"] as? [String: Any] {
+                if let message = error["message"] as? String, !message.isEmpty {
+                    return sanitizedErrorMessage(message)
+                }
+                if let code = error["code"] as? String, !code.isEmpty {
+                    return sanitizedErrorMessage(code)
+                }
+            }
+            if let message = object["message"] as? String, !message.isEmpty {
+                return sanitizedErrorMessage(message)
+            }
+        }
+        guard let text = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
+        return sanitizedErrorMessage(text)
+    }
+
+    private static func sanitizedErrorMessage(_ message: String) -> String {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.count <= 800 { return trimmed }
+        return String(trimmed.prefix(800)) + "…"
+    }
 }
 
 public extension OpenAICompatibleProvider where Client == URLSessionAgentHTTPClient {
@@ -370,13 +438,13 @@ public extension OpenAICompatibleProvider where Client == URLSessionAgentHTTPCli
 private struct OpenAIChatCompletionRequest: Encodable {
     var model: String
     var messages: [OpenAIChatMessage]
-    var temperature: Double
+    var temperature: Double?
     var tools: [OpenAIToolDefinition]?
     var toolChoice: String?
     var reasoningEffort: String?
     var stream: Bool?
 
-    init(model: String, messages: [OpenAIChatMessage], temperature: Double, tools: [OpenAIToolDefinition]? = nil, toolChoice: String? = nil, reasoningEffort: String? = nil, stream: Bool? = nil) {
+    init(model: String, messages: [OpenAIChatMessage], temperature: Double? = nil, tools: [OpenAIToolDefinition]? = nil, toolChoice: String? = nil, reasoningEffort: String? = nil, stream: Bool? = nil) {
         self.model = model
         self.messages = messages
         self.temperature = temperature

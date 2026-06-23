@@ -26,6 +26,10 @@ private final class HealthCheckFakeSettingsStore: LLMSettingsStore, @unchecked S
     func set(_ value: String, forKey key: String) { values[key] = value }
 }
 
+private final class HealthCheckCapturedAnthropicConfig: @unchecked Sendable {
+    var value: AnthropicCompatibleConfig?
+}
+
 @Test func healthCheckerReportsDefaultOpenAIResponsesProviderNeedsConfiguration() async throws {
     let settingsRepository = AppLLMSettingsRepository(
         settingsStore: HealthCheckFakeSettingsStore(),
@@ -79,6 +83,63 @@ private final class HealthCheckFakeSettingsStore: LLMSettingsStore, @unchecked S
     #expect(result.message == "Connection OK: model-a")
 }
 
+@Test func healthCheckerRunsAnthropicCompatibleHealthCheck() async throws {
+    let settingsRepository = AppLLMSettingsRepository(
+        settingsStore: HealthCheckFakeSettingsStore(),
+        credentialStore: HealthCheckFakeCredentialStore()
+    )
+    let connection = AppLLMConnectionConfig(
+        id: "anthropic-native",
+        name: "Anthropic Native",
+        providerMode: .anthropicMessages,
+        connectionKind: .anthropicCompatible,
+        baseURLString: "https://api.anthropic.com/v1",
+        model: "claude-sonnet-test",
+        selectedModel: "claude-sonnet-test",
+        hasAPIKey: true
+    )
+    try settingsRepository.save(settings: AppLLMSettings(connections: [connection], defaultConnectionID: connection.id), apiKey: "sk-ant-test")
+    let receivedConfig = HealthCheckCapturedAnthropicConfig()
+    let checker = AppLLMProviderHealthChecker(
+        settingsRepository: settingsRepository,
+        anthropicCompatibleHealthCheck: { config in
+            receivedConfig.value = config
+            return LLMProviderHealthCheckResult(ok: true, model: config.model, message: "Connection OK: \(config.model)")
+        }
+    )
+
+    let result = await checker.testConnection()
+
+    #expect(result.status == .success)
+    #expect(result.message == "Connection OK: claude-sonnet-test")
+    #expect(receivedConfig.value?.apiKey == "sk-ant-test")
+    #expect(receivedConfig.value?.baseURL.absoluteString == "https://api.anthropic.com/v1")
+}
+
+@Test func healthCheckerReportsMissingAnthropicCompatibleConfig() async throws {
+    let settingsRepository = AppLLMSettingsRepository(
+        settingsStore: HealthCheckFakeSettingsStore(),
+        credentialStore: HealthCheckFakeCredentialStore()
+    )
+    let connection = AppLLMConnectionConfig(
+        id: "anthropic-native",
+        name: "Anthropic Native",
+        providerMode: .anthropicMessages,
+        connectionKind: .anthropicCompatible,
+        baseURLString: "https://api.anthropic.com/v1",
+        model: "claude-sonnet-test",
+        selectedModel: "claude-sonnet-test",
+        hasAPIKey: false
+    )
+    try settingsRepository.save(settings: AppLLMSettings(connections: [connection], defaultConnectionID: connection.id), apiKey: nil)
+    let checker = AppLLMProviderHealthChecker(settingsRepository: settingsRepository)
+
+    let result = await checker.testConnection()
+
+    #expect(result.status == .notConfigured)
+    #expect(result.message.contains("API Key"))
+}
+
 @Test func healthCheckerMapsProviderErrorToFailureMessageWithoutSecret() async throws {
     let settingsRepository = AppLLMSettingsRepository(
         settingsStore: HealthCheckFakeSettingsStore(),
@@ -91,7 +152,7 @@ private final class HealthCheckFakeSettingsStore: LLMSettingsStore, @unchecked S
     let checker = AppLLMProviderHealthChecker(
         settingsRepository: settingsRepository,
         openAICompatibleHealthCheck: { _ in
-            throw OpenAICompatibleProviderError.httpStatus(401)
+            throw OpenAICompatibleProviderError.httpStatus(401, message: "bad key")
         }
     )
 
@@ -99,5 +160,51 @@ private final class HealthCheckFakeSettingsStore: LLMSettingsStore, @unchecked S
 
     #expect(result.status == .failed)
     #expect(result.message.contains("401"))
+    #expect(result.message.contains("secret-key") == false)
+}
+
+@Test func healthCheckerMapsAnthropicHTTPErrorToUserFacingMessage() async throws {
+    let message = AppLLMProviderHealthChecker.userFacingMessage(
+        for: AnthropicCompatibleProviderError.httpStatus(400, message: "tool_use ids were found without tool_result blocks immediately after")
+    )
+
+    #expect(message.contains("HTTP 400"))
+    #expect(message.contains("tool_use ids"))
+    #expect(message.contains("请求参数"))
+}
+
+@Test func healthCheckerExplainsAnthropicServiceUnavailableHTTPStatus() async throws {
+    let message = AppLLMProviderHealthChecker.userFacingMessage(
+        for: AnthropicCompatibleProviderError.httpStatus(503, message: "upstream unavailable")
+    )
+
+    #expect(message.contains("服务暂时不可用"))
+    #expect(message.contains("HTTP 503"))
+    #expect(message.contains("upstream unavailable"))
+    #expect(message.contains("兼容模式"))
+}
+
+@Test func healthCheckerExplainsServiceUnavailableHTTPStatus() async throws {
+    let settingsRepository = AppLLMSettingsRepository(
+        settingsStore: HealthCheckFakeSettingsStore(),
+        credentialStore: HealthCheckFakeCredentialStore()
+    )
+    try settingsRepository.save(
+        settings: AppLLMSettings(baseURLString: "https://example.com/v1", model: "model-a", hasAPIKey: false, providerMode: .openAICompatible),
+        apiKey: "secret-key"
+    )
+    let checker = AppLLMProviderHealthChecker(
+        settingsRepository: settingsRepository,
+        openAICompatibleHealthCheck: { _ in
+            throw OpenAICompatibleProviderError.httpStatus(503, message: nil)
+        }
+    )
+
+    let result = await checker.testConnection()
+
+    #expect(result.status == .failed)
+    #expect(result.message.contains("服务暂时不可用"))
+    #expect(result.message.contains("HTTP 503"))
+    #expect(result.message.contains("兼容模式"))
     #expect(result.message.contains("secret-key") == false)
 }

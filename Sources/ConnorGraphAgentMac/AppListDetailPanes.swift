@@ -1584,7 +1584,11 @@ struct CraftDetailPaneView: View {
             case .observeLog:
                 ObserveLogView(entries: viewModel.observeLogEntries)
             case .agentChat:
-                AgentChatView(viewModel: viewModel)
+                if viewModel.selectedChatSessionID == nil {
+                    AgentChatNoSelectionDetailView()
+                } else {
+                    AgentChatView(viewModel: viewModel)
+                }
             case .promotionQueue:
                 PromotionQueueView(viewModel: viewModel)
             case .pendingApprovals:
@@ -1614,6 +1618,22 @@ struct CraftDetailPaneView: View {
     }
 }
 
+private struct AgentChatNoSelectionDetailView: View {
+    var body: some View {
+        VStack(alignment: .center, spacing: AppShellLayout.spaceL) {
+            Spacer(minLength: 80)
+            ContentUnavailableView(
+                "未选择会话",
+                systemImage: "bubble.left.and.bubble.right",
+                description: Text("从当前会话列表选择一个会话查看详情。")
+            )
+            .frame(maxWidth: .infinity)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(AppShellColors.detailBackground)
+    }
+}
 
 struct CalendarSourceSettingsView: View {
     @ObservedObject var viewModel: AppViewModel
