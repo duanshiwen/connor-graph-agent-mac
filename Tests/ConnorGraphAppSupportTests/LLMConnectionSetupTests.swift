@@ -114,8 +114,9 @@ struct LLMConnectionSetupTests {
         #expect(result.connection.model == "")
         #expect(result.connection.selectedModel == "")
         let loaded = try repository.loadSettings()
-        #expect(loaded.defaultConnection.model == "")
-        #expect(loaded.defaultConnection.selectedModel == "")
+        let savedConnection = try #require(loaded.connections.first { $0.id == "connor-gateway-anthropic" })
+        #expect(savedConnection.model == "")
+        #expect(savedConnection.selectedModel == "")
     }
 
     @Test func openAICompatibleValidationFallsBackToFirstConfiguredModelBeforeSelectedModel() async throws {
