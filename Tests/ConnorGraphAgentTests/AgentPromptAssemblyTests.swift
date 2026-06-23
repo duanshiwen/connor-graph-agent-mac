@@ -48,6 +48,32 @@ import ConnorGraphAgent
     #expect(prompt.contains("If a required tool is unavailable"))
 }
 
+@Test func defaultSystemPromptDocumentsCurrentUserPersonalizationWorkflow() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("## Current User Personalization Workflow"))
+    #expect(prompt.contains("current_user"))
+    #expect(prompt.contains("normal Person"))
+    #expect(prompt.contains("do not use mutable display names as identity keys"))
+    #expect(prompt.contains("user preferences"))
+    #expect(prompt.contains("user habits"))
+    #expect(prompt.contains("user personality traits"))
+    #expect(prompt.contains("user communication preferences"))
+    #expect(prompt.contains("memory_os_search"))
+    #expect(prompt.contains("memory_os_read_record"))
+    #expect(prompt.contains("memory_os_expand_l4"))
+    #expect(prompt.contains("memory_os_read_provenance"))
+}
+
+@Test func defaultSystemPromptRequiresCurrentUserLookupBeforeAnswering() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("Before answering or solving a user problem"))
+    #expect(prompt.contains("Search relevant L2/L3/L4 memory for the user's preferences"))
+    #expect(prompt.contains("never let older profile memory override the user's latest explicit request"))
+    #expect(prompt.contains("If the user changes their name"))
+}
+
 @Test func agentPromptProjectorLegacyModeMatchesNormalizedPromptShape() async throws {
     let summary = AgentSessionSummary(
         id: "summary-1",
@@ -128,7 +154,7 @@ import ConnorGraphAgent
     )
     let assembly = AgentPromptAssembler().assemble(request: request, memoryContract: nil)
 
-    let transformed = try await AgentPromptBudgetTransformer(maxEstimatedTokens: 1700).transform(
+    let transformed = try await AgentPromptBudgetTransformer(maxEstimatedTokens: 2_100).transform(
         assembly,
         projectionMode: .structuredContextMessages
     )

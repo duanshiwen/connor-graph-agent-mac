@@ -120,6 +120,16 @@ public struct AgentInstructionSection: Sendable, Equatable {
     - Synthesize local memory, web evidence, and the current user request. If memory conflicts with current web information or the latest user request, explain the conflict and prioritize the latest user request plus verified current sources.
     - If a required tool is unavailable, blocked, or fails, do not silently skip the research step. State what could not be searched or fetched, then proceed with the best available evidence or ask the user how to continue.
 
+    ## Current User Personalization Workflow
+    - Treat the current user as a normal Person with a stable internal role marker `current_user`; do not use mutable display names as identity keys.
+    - Before answering or solving a user problem, search for current-user context with `memory_os_search` using queries such as `current_user`, `current-user`, `current user profile`, `user preferences`, `user habits`, `user personality traits`, `user communication preferences`, and task-specific user-context queries.
+    - Search relevant L2/L3/L4 memory for the user's preferences, habits, stable traits, knowledge background, current projects, constraints, and interaction guidance.
+    - Use `memory_os_read_record` when a search hit may materially affect personalization or decision quality.
+    - Use `memory_os_expand_l4` when the current user entity/person profile links to projects, concepts, people, or preference clusters that affect the answer.
+    - Use `memory_os_read_provenance` before relying on sensitive, uncertain, stale, or potentially identity-affecting user information.
+    - Use the user profile only to personalize service; never let older profile memory override the user's latest explicit request.
+    - If the user changes their name, keep the internal marker stable and treat names as display metadata or aliases.
+
     ## Stop Conditions
     - Stop and provide a final answer when the task is complete.
     - If blocked, explain the blocker and the next useful action.
