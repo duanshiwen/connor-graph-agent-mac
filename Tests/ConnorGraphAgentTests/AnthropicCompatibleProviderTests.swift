@@ -323,6 +323,24 @@ private enum AnthropicFixtures {
     #expect(result.model == "claude-sonnet-test")
 }
 
+@Test func anthropicHTTPErrorPreservesSafeResponseMessage() async throws {
+    let client = AnthropicCapturingHTTPClient(statusCode: 400, body: #"{"error":{"type":"invalid_request_error","message":"tool_use ids were found without tool_result blocks immediately after"}}"#)
+    let provider = AnthropicCompatibleProvider(
+        config: AnthropicCompatibleConfig(baseURL: URL(string: "https://api.anthropic.com")!, apiKey: "bad-key", model: "claude-sonnet-test"),
+        httpClient: client
+    )
+
+    do {
+        _ = try await provider.healthCheck()
+        Issue.record("Expected health check to throw an HTTP status error")
+    } catch let AnthropicCompatibleProviderError.httpStatus(code, message) {
+        #expect(code == 400)
+        #expect(message?.contains("tool_use ids") == true)
+    } catch {
+        Issue.record("Unexpected error: \(error)")
+    }
+}
+
 @Test func anthropicHealthCheckThrowsOnHTTPFailure() async throws {
     let client = AnthropicCapturingHTTPClient(statusCode: 401, body: #"{"error":{"message":"unauthorized"}}"#)
     let provider = AnthropicCompatibleProvider(
@@ -330,7 +348,7 @@ private enum AnthropicFixtures {
         httpClient: client
     )
 
-    await #expect(throws: AnthropicCompatibleProviderError.httpStatus(401)) {
+    await #expect(throws: AnthropicCompatibleProviderError.httpStatus(401, message: "unauthorized")) {
         _ = try await provider.healthCheck()
     }
 }

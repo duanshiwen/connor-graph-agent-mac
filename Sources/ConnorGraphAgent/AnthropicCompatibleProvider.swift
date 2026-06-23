@@ -75,9 +75,27 @@ public struct AnthropicCompatibleConfig: Sendable, Equatable {
 
 public enum AnthropicCompatibleProviderError: Error, Equatable, Sendable {
     case invalidResponse
-    case httpStatus(Int)
+    case httpStatus(Int, message: String?)
     case missingAssistantMessage
     case streamError(String)
+}
+
+extension AnthropicCompatibleProviderError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .invalidResponse:
+            return "Anthropic-compatible provider returned an invalid response."
+        case let .httpStatus(code, message):
+            if let message, !message.isEmpty {
+                return "HTTP \(code): \(message)"
+            }
+            return "HTTP \(code)"
+        case .missingAssistantMessage:
+            return "Anthropic-compatible provider response did not include an assistant message."
+        case let .streamError(message):
+            return message
+        }
+    }
 }
 
 public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider, StreamingAgentModelProvider, Sendable {
@@ -122,7 +140,7 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
         let httpRequest = try makeMessagesRequest(request)
         let httpResponse = try await client.send(httpRequest)
         if httpResponse.statusCode < 200 || httpResponse.statusCode >= 300 {
-            throw AnthropicCompatibleProviderError.httpStatus(httpResponse.statusCode)
+            throw AnthropicCompatibleProviderError.httpStatus(httpResponse.statusCode, message: Self.errorMessage(from: httpResponse.body))
         }
         return try parseMessagesResponse(httpResponse.body)
     }
@@ -286,6 +304,31 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
             if !blocks.isEmpty { return blocks }
         }
         return [["type": "text", "text": message.content]]
+    }
+
+    private static func errorMessage(from data: Data) -> String? {
+        guard !data.isEmpty else { return nil }
+        if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if let error = object["error"] as? [String: Any] {
+                if let message = error["message"] as? String, !message.isEmpty {
+                    return sanitizedErrorMessage(message)
+                }
+                if let type = error["type"] as? String, !type.isEmpty {
+                    return sanitizedErrorMessage(type)
+                }
+            }
+            if let message = object["message"] as? String, !message.isEmpty {
+                return sanitizedErrorMessage(message)
+            }
+        }
+        guard let text = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
+        return sanitizedErrorMessage(text)
+    }
+
+    private static func sanitizedErrorMessage(_ message: String) -> String {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.count <= 800 { return trimmed }
+        return String(trimmed.prefix(800)) + "…"
     }
 
     private func messagesEndpoint() -> URL {
