@@ -267,7 +267,16 @@ struct SettingsPreferencesSection: View {
                 Divider()
                 SettingsTextFieldRow(title: "语言偏好", subtitle: "未设置时自动读取系统语言；康纳同学会优先按此语言回复。", text: $viewModel.userPreferredLanguage)
                 Divider()
-                SettingsTextFieldRow(title: "出生日期", subtitle: "可选。建议使用 YYYY-MM-DD，用于年龄、人生阶段和长期个性化上下文。", text: $viewModel.userBirthDate)
+                SettingsGenderIdentityRow(viewModel: viewModel)
+                Divider()
+                SettingsBirthDatePickerRow(
+                    title: "出生日期",
+                    subtitle: "可选。用于年龄、人生阶段和长期个性化上下文。",
+                    date: $viewModel.userBirthDatePickerDate,
+                    hasValue: !viewModel.userBirthDate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                    onDateChange: { viewModel.setUserBirthDateFromPicker($0) },
+                    onClear: { viewModel.clearUserBirthDate() }
+                )
                 Divider()
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
@@ -317,5 +326,59 @@ struct SettingsPreferencesSection: View {
                     .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
         }
+    }
+}
+
+private struct SettingsGenderIdentityRow: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("性别")
+                        .font(SettingsListTypography.rowTitleSelected)
+                    Text("可选。用于称呼、语气和长期个性化上下文；不会推断法定性别或出生性别。")
+                        .font(SettingsListTypography.rowCaption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Picker(
+                    "性别",
+                    selection: Binding(
+                        get: { viewModel.userGenderIdentitySelection },
+                        set: { viewModel.setUserGenderIdentitySelection($0) }
+                    )
+                ) {
+                    Text("未设置").tag("")
+                    Text("女性").tag("女性")
+                    Text("男性").tag("男性")
+                    Text("非二元").tag("非二元")
+                    Text("性别流动").tag("性别流动")
+                    Text("无性别").tag("无性别")
+                    Text("酷儿 / 性别酷儿").tag("酷儿 / 性别酷儿")
+                    Text("不愿透露").tag("不愿透露")
+                    Text("自我描述…").tag(AppViewModel.customGenderIdentitySelection)
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .controlSize(.large)
+                .frame(width: SettingsListLayout.pickerControlWidth, alignment: .trailing)
+            }
+            .frame(minHeight: SettingsListLayout.rowMinHeight)
+
+            if viewModel.userGenderIdentitySelection == AppViewModel.customGenderIdentitySelection {
+                TextField(
+                    "请描述你的性别身份",
+                    text: Binding(
+                        get: { viewModel.userGenderIdentityCustomText },
+                        set: { viewModel.setUserGenderIdentityCustomText($0) }
+                    )
+                )
+                .font(SettingsListTypography.rowTitle)
+                .textFieldStyle(.roundedBorder)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
