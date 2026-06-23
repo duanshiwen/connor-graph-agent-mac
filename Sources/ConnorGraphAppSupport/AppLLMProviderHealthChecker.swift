@@ -68,11 +68,11 @@ public struct AppLLMProviderHealthChecker: Sendable {
                 )
             }
         } catch {
-            return AppLLMProviderHealthCheckResult(status: .failed, message: Self.safeMessage(for: error))
+            return AppLLMProviderHealthCheckResult(status: .failed, message: Self.userFacingMessage(for: error))
         }
     }
 
-    private static func safeMessage(for error: Error) -> String {
+    public static func userFacingMessage(for error: Error) -> String {
         switch error {
         case OpenAICompatibleProviderError.missingAPIKey:
             return "OpenAI Compatible 连接缺少 API Key。"
@@ -81,14 +81,28 @@ public struct AppLLMProviderHealthChecker: Sendable {
         case OpenAICompatibleProviderError.invalidResponse:
             return "模型提供方返回了无效响应。"
         case let OpenAICompatibleProviderError.httpStatus(code, message):
-            if let message, !message.isEmpty {
-                return "模型提供方返回 HTTP 状态码 \(code)：\(message)"
-            }
-            return "模型提供方返回 HTTP 状态码 \(code)。"
+            return userFacingHTTPStatusMessage(code: code, message: message)
         case OpenAICompatibleProviderError.missingAssistantMessage:
             return "模型提供方响应中没有助手消息。"
         default:
+            if let localized = (error as? LocalizedError)?.errorDescription, !localized.isEmpty {
+                return localized
+            }
             return String(describing: error)
+        }
+    }
+
+    private static func userFacingHTTPStatusMessage(code: Int, message: String?) -> String {
+        let suffix = message.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        switch code {
+        case 400:
+            return suffix.map { "请求参数不被服务端接受（HTTP 400）：\($0)" } ?? "请求参数不被服务端接受（HTTP 400）。请检查模型 ID、Endpoint 与兼容模式。"
+        case 401, 403:
+            return suffix.map { "API Key 无效或没有权限（HTTP \(code)）：\($0)" } ?? "API Key 无效或没有权限（HTTP \(code)）。请检查密钥和服务商权限。"
+        case 503:
+            return suffix.map { "服务暂时不可用（HTTP 503）：\($0)。可能是模型服务过载、维护、上游网关不可达，或兼容模式选择不匹配。" } ?? "服务暂时不可用（HTTP 503）。可能是模型服务过载、维护、上游网关不可达，或兼容模式选择不匹配。请确认兼容模式与服务端接口一致后稍后重试。"
+        default:
+            return suffix.map { "模型服务返回 HTTP \(code)：\($0)" } ?? "模型服务返回 HTTP \(code)。"
         }
     }
 }

@@ -101,3 +101,28 @@ private final class HealthCheckFakeSettingsStore: LLMSettingsStore, @unchecked S
     #expect(result.message.contains("401"))
     #expect(result.message.contains("secret-key") == false)
 }
+
+@Test func healthCheckerExplainsServiceUnavailableHTTPStatus() async throws {
+    let settingsRepository = AppLLMSettingsRepository(
+        settingsStore: HealthCheckFakeSettingsStore(),
+        credentialStore: HealthCheckFakeCredentialStore()
+    )
+    try settingsRepository.save(
+        settings: AppLLMSettings(baseURLString: "https://example.com/v1", model: "model-a", hasAPIKey: false, providerMode: .openAICompatible),
+        apiKey: "secret-key"
+    )
+    let checker = AppLLMProviderHealthChecker(
+        settingsRepository: settingsRepository,
+        openAICompatibleHealthCheck: { _ in
+            throw OpenAICompatibleProviderError.httpStatus(503, message: nil)
+        }
+    )
+
+    let result = await checker.testConnection()
+
+    #expect(result.status == .failed)
+    #expect(result.message.contains("服务暂时不可用"))
+    #expect(result.message.contains("HTTP 503"))
+    #expect(result.message.contains("兼容模式"))
+    #expect(result.message.contains("secret-key") == false)
+}

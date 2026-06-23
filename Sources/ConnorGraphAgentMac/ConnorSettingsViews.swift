@@ -1777,8 +1777,7 @@ struct AIConnectionSetupView: View {
     }
 
     private func displayError(_ error: Error) -> String {
-        if let localized = (error as? LocalizedError)?.errorDescription, !localized.isEmpty { return localized }
-        return String(describing: error)
+        AppLLMProviderHealthChecker.userFacingMessage(for: error)
     }
 
     private func displayURL(_ rawValue: String) -> String {
