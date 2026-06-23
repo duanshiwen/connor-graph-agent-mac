@@ -117,6 +117,33 @@ struct LLMConnectionSetupTests {
         #expect(loaded.defaultConnection.selectedModel == "")
     }
 
+    @Test func openAICompatibleValidationFallsBackToFirstConfiguredModelBeforeSelectedModel() async throws {
+        let store = MemoryLLMSettingsStore()
+        let credentials = MemoryCredentialStore()
+        let repository = AppLLMSettingsRepository(settingsStore: store, credentialStore: credentials)
+        let service = AppLLMConnectionSetupService(
+            settingsRepository: repository,
+            openAICompatibleHealthCheck: { config in
+                #expect(config.model == "deepseek-v4-flash")
+                return LLMProviderHealthCheckResult(ok: true, model: config.model, message: "OK")
+            }
+        )
+
+        let result = try await service.setupConnection(AppLLMConnectionSetupInput(
+            id: "custom-openai-compatible",
+            kind: .openAICompatible,
+            name: "Custom OpenAI Compatible",
+            baseURLString: "https://cnai.connor.run/v1",
+            model: "deepseek-v4-flash, deepseek-v4-pro, gpt-5.5",
+            selectedModel: "gpt-4o-mini",
+            validationModel: "",
+            apiKey: "secret"
+        ))
+
+        #expect(result.connection.model == "deepseek-v4-flash, deepseek-v4-pro, gpt-5.5")
+        #expect(result.connection.selectedModel == "gpt-4o-mini")
+    }
+
     @Test func xiaomiMiMoOpenAICompatiblePersistsAPIKeyHeaderKind() async throws {
         let store = MemoryLLMSettingsStore()
         let credentials = MemoryCredentialStore()
@@ -369,6 +396,33 @@ struct LLMConnectionSetupTests {
         #expect(result.connection.hasAPIKey)
         #expect(try repository.apiKey(for: "anthropic-test") == "secret")
         #expect(!store.values.values.contains(where: { $0.contains("secret") }))
+    }
+
+    @Test func anthropicCompatibleValidationFallsBackToFirstConfiguredModelBeforeSelectedModel() async throws {
+        let store = MemoryLLMSettingsStore()
+        let credentials = MemoryCredentialStore()
+        let repository = AppLLMSettingsRepository(settingsStore: store, credentialStore: credentials)
+        let service = AppLLMConnectionSetupService(
+            settingsRepository: repository,
+            anthropicCompatibleHealthCheck: { config in
+                #expect(config.model == "deepseek-v4-flash")
+                return LLMProviderHealthCheckResult(ok: true, model: config.model, message: "OK")
+            }
+        )
+
+        let result = try await service.setupConnection(AppLLMConnectionSetupInput(
+            id: "custom-anthropic-compatible",
+            kind: .anthropicCompatible,
+            name: "Custom Anthropic Compatible",
+            baseURLString: "https://cnai.connor.run/v1",
+            model: "deepseek-v4-flash, deepseek-v4-pro, gpt-5.5",
+            selectedModel: "gpt-4o-mini",
+            validationModel: "",
+            apiKey: "secret"
+        ))
+
+        #expect(result.connection.model == "deepseek-v4-flash, deepseek-v4-pro, gpt-5.5")
+        #expect(result.connection.selectedModel == "gpt-4o-mini")
     }
 
     @Test func anthropicCompatibleBearerAuthKindPersistsAndLoadsIntoRuntimeConfig() async throws {
