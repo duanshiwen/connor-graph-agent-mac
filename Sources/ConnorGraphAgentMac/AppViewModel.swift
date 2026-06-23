@@ -483,7 +483,6 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var userCountry: String = ""
     @Published var userPreferenceNotes: String = ""
     @Published var userLocationStatusMessage: String?
-    @Published var appSettingsMessage: String?
     @Published var settingsSectionMessageStore = SettingsSectionMessageStore()
     @Published var pendingAttachmentRefs: [AgentMessageAttachmentRef] = []
     @Published var attachmentPreviewModel: AttachmentPreviewModel?
