@@ -918,7 +918,7 @@ struct AIConnectionOnboardingOption: Identifiable, Equatable {
             selectedModel: "gpt-4.1",
             setupTitle: "连接 GitHub Copilot",
             setupSubtitle: "使用 GitHub Copilot 订阅驱动康纳同学。",
-            setupInstruction: "在 GitHub 页面输入此代码以授权。浏览器会打开 github.com/login/device。",
+            setupInstruction: "在 GitHub 页面输入此代码以授权。系统默认浏览器会打开 github.com/login/device。",
             loginButtonTitle: "打开 GitHub 授权页",
             authURLString: "https://github.com/login/device",
             authenticationKind: .deviceCode(code: "B3D1-87D5", verificationURL: "https://github.com/login/device")
@@ -1123,7 +1123,7 @@ struct AIConnectionSetupView: View {
                 .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
 
                 if didOpenBrowser {
-                    Text("浏览器已打开。完成网页认证后，康纳同学会自动验证并保存连接。")
+                    Text("系统默认浏览器已打开。完成网页认证后，康纳同学会自动验证并保存连接。")
                         .font(SettingsListTypography.header)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 18)
@@ -1155,7 +1155,7 @@ struct AIConnectionSetupView: View {
                                 .stroke(Color.secondary.opacity(0.14), lineWidth: 1)
                         )
                         .textSelection(.enabled)
-                    Text(didOpenBrowser ? "浏览器已打开 \(displayURL(githubDeviceCode.verificationURI))" : "点击下方按钮打开 \(displayURL(githubDeviceCode.verificationURI))")
+                    Text(didOpenBrowser ? "系统默认浏览器已打开 \(displayURL(githubDeviceCode.verificationURI))" : "点击下方按钮用系统默认浏览器打开 \(displayURL(githubDeviceCode.verificationURI))")
                         .font(SettingsListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
                 } else {
@@ -1500,13 +1500,13 @@ struct AIConnectionSetupView: View {
     private func authenticateChatGPTAndAddConnection() {
         isAuthenticating = true
         didOpenBrowser = true
-        statusMessage = "正在用内置浏览器打开 ChatGPT 登录页，并等待浏览器回调…"
+        statusMessage = "正在用系统默认浏览器打开 ChatGPT 登录页，并等待浏览器回调…"
         errorMessage = nil
         Task {
             do {
                 let result = try await AppLLMOAuthService.shared.authenticateChatGPT { url in
                     Task { @MainActor in
-                        viewModel.openURLInCurrentChatBrowser(url)
+                        viewModel.openURLInSystemDefaultBrowser(url)
                     }
                 }
                 let input = AppLLMConnectionSetupInput(
@@ -1545,9 +1545,9 @@ struct AIConnectionSetupView: View {
                     githubDeviceCode = code
                     didOpenBrowser = true
                     if let url = URL(string: code.verificationURI) {
-                        viewModel.openURLInCurrentChatBrowser(url)
+                        viewModel.openURLInSystemDefaultBrowser(url)
                     }
-                    statusMessage = "在内置浏览器的 GitHub 页面输入授权码后，康纳同学会自动继续。"
+                    statusMessage = "在系统默认浏览器的 GitHub 页面输入授权码后，康纳同学会自动继续。"
                 }
                 let tokens = try await AppLLMOAuthService.shared.pollGitHubCopilotTokens(deviceCode: code)
                 let input = AppLLMConnectionSetupInput(

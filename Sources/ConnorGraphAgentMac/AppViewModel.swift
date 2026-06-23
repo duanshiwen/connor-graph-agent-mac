@@ -996,6 +996,10 @@ final class AppViewModel: NSObject, ObservableObject {
         showBrowserWorkspace(for: sessionID)
     }
 
+    func openURLInSystemDefaultBrowser(_ url: URL) {
+        NSWorkspace.shared.open(url)
+    }
+
     @discardableResult
     private func focusExistingBrowserTabIfPresent(urlString: String, preferredSessionID: String, planner: BrowserExternalOpenPlanner = BrowserExternalOpenPlanner()) -> Bool {
         guard let existing = existingBrowserTab(for: urlString, preferredSessionID: preferredSessionID, planner: planner) else { return false }
