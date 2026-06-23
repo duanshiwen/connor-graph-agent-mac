@@ -173,7 +173,7 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
         var body: [String: Any] = [
             "model": config.requestModel,
             "max_tokens": config.maxTokens,
-            "messages": request.messages.compactMap { anthropicMessage(for: $0) }
+            "messages": anthropicMessages(for: request.messages)
         ]
         if stream { body["stream"] = true }
         if let thinking = config.featureOptions.thinking { body["thinking"] = thinking.jsonObject }
@@ -212,42 +212,64 @@ public struct AnthropicCompatibleProvider<Client: AgentHTTPClient>: LLMProvider,
         )
     }
 
-    private func anthropicMessage(for message: AgentModelMessage) -> [String: Any]? {
-        switch message.role {
-        case .system:
-            return nil
-        case .user:
-            return ["role": "user", "content": contentBlocks(for: message)]
-        case .assistant:
-            if message.providerMetadata?.providerID == "anthropic-compatible",
-               let raw = message.providerMetadata?.rawAssistantContentJSON,
-               let data = raw.data(using: .utf8),
-               let blocks = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
-                return ["role": "assistant", "content": blocks]
+    private func anthropicMessages(for messages: [AgentModelMessage]) -> [[String: Any]] {
+        var result: [[String: Any]] = []
+        var index = messages.startIndex
+        while index < messages.endIndex {
+            let message = messages[index]
+            switch message.role {
+            case .system:
+                index = messages.index(after: index)
+            case .user:
+                result.append(["role": "user", "content": contentBlocks(for: message)])
+                index = messages.index(after: index)
+            case .assistant:
+                result.append(anthropicAssistantMessage(for: message))
+                index = messages.index(after: index)
+            case .tool:
+                var content: [[String: Any]] = []
+                while index < messages.endIndex, messages[index].role == .tool {
+                    content.append(toolResultBlock(for: messages[index]))
+                    index = messages.index(after: index)
+                }
+                if index < messages.endIndex, messages[index].role == .user {
+                    content.append(contentsOf: contentBlocks(for: messages[index]))
+                    index = messages.index(after: index)
+                }
+                result.append(["role": "user", "content": content])
             }
-            var content: [[String: Any]] = []
-            let text = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !text.isEmpty { content.append(["type": "text", "text": text]) }
-            for toolCall in message.toolCalls ?? [] {
-                let inputObject = (try? JSONSerialization.jsonObject(with: Data(toolCall.argumentsJSON.utf8))) ?? [:]
-                content.append([
-                    "type": "tool_use",
-                    "id": toolCall.id,
-                    "name": toolCall.name,
-                    "input": inputObject
-                ])
-            }
-            return ["role": "assistant", "content": content]
-        case .tool:
-            return [
-                "role": "user",
-                "content": [[
-                    "type": "tool_result",
-                    "tool_use_id": message.toolCallID ?? message.id,
-                    "content": message.content
-                ]]
-            ]
         }
+        return result
+    }
+
+    private func anthropicAssistantMessage(for message: AgentModelMessage) -> [String: Any] {
+        if message.providerMetadata?.providerID == "anthropic-compatible",
+           let raw = message.providerMetadata?.rawAssistantContentJSON,
+           let data = raw.data(using: .utf8),
+           let blocks = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            return ["role": "assistant", "content": blocks]
+        }
+        var content: [[String: Any]] = []
+        let text = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.isEmpty { content.append(["type": "text", "text": text]) }
+        for toolCall in message.toolCalls ?? [] {
+            let inputObject = (try? JSONSerialization.jsonObject(with: Data(toolCall.argumentsJSON.utf8))) ?? [:]
+            content.append([
+                "type": "tool_use",
+                "id": toolCall.id,
+                "name": toolCall.name,
+                "input": inputObject
+            ])
+        }
+        return ["role": "assistant", "content": content]
+    }
+
+    private func toolResultBlock(for message: AgentModelMessage) -> [String: Any] {
+        [
+            "type": "tool_result",
+            "tool_use_id": message.toolCallID ?? message.id,
+            "content": message.content
+        ]
     }
 
     private func contentBlocks(for message: AgentModelMessage) -> [[String: Any]] {
