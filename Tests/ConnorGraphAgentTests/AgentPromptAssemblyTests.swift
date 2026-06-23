@@ -23,6 +23,31 @@ import ConnorGraphAgent
     #expect(!assembly.instruction.text.contains("specialized AI assistant for knowledge graph operations"))
 }
 
+@Test func defaultSystemPromptDocumentsMemoryAndWebResearchTools() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("## Mandatory Research Workflow"))
+    #expect(prompt.contains("Before solving a user problem"))
+    #expect(prompt.contains("search local Memory OS"))
+    #expect(prompt.contains("search current web information"))
+    #expect(prompt.contains("memory_os_search"))
+    #expect(prompt.contains("memory_os_read_record"))
+    #expect(prompt.contains("memory_os_expand_l4"))
+    #expect(prompt.contains("memory_os_read_provenance"))
+    #expect(prompt.contains("web_search"))
+    #expect(prompt.contains("web_fetch"))
+    #expect(prompt.contains("browser_fetch"))
+}
+
+@Test func defaultSystemPromptRequiresLocalAndWebSearchForUserProblemSolving() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("must search local Memory OS"))
+    #expect(prompt.contains("must search current web information"))
+    #expect(prompt.contains("most complete and up-to-date background knowledge"))
+    #expect(prompt.contains("If a required tool is unavailable"))
+}
+
 @Test func agentPromptProjectorLegacyModeMatchesNormalizedPromptShape() async throws {
     let summary = AgentSessionSummary(
         id: "summary-1",
