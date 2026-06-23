@@ -2038,12 +2038,10 @@ struct AIConnectionSetupView: View {
     }
 
     private func persistedModelListForSubmit() -> String {
-        if usesAPIKeyFirstPresetFlow && !showsAdvancedConnectionSettings { return "" }
-        return effectiveModelListForSubmit()
+        effectiveModelListForSubmit()
     }
 
     private func persistedSelectedModelForSubmit(modelList: String) -> String {
-        if usesAPIKeyFirstPresetFlow && !showsAdvancedConnectionSettings { return "" }
         let selected = selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
         let configuredModels = modelIDs(in: modelList)
         guard !configuredModels.isEmpty else { return selected }
