@@ -4,6 +4,25 @@ import Testing
 
 @Suite("Browser Assisted Web Tool Tests")
 struct BrowserAssistedWebToolTests {
+    @Test func searchEngineMCPConfigurationDoesNotUseLocalCraftDefaults() {
+        let configuration = SearchEngineMCPConfiguration(environment: [:])
+
+        #expect(configuration.pythonExecutable == nil)
+        #expect(configuration.sourceDirectory == nil)
+        #expect(!configuration.isConfigured)
+    }
+
+    @Test func searchEngineMCPConfigurationReadsExplicitEnvironment() {
+        let configuration = SearchEngineMCPConfiguration(environment: [
+            "CONNOR_SEARCH_ENGINE_MCP_PYTHON": "/opt/search-engine-mcp/venv/bin/python",
+            "CONNOR_SEARCH_ENGINE_MCP_DIR": "/opt/search-engine-mcp"
+        ])
+
+        #expect(configuration.pythonExecutable == "/opt/search-engine-mcp/venv/bin/python")
+        #expect(configuration.sourceDirectory == "/opt/search-engine-mcp")
+        #expect(configuration.isConfigured)
+    }
+
     @Test func googleWebSearchUsesBrowserAssistedHandler() async throws {
         try await assertSearchUsesBrowserAssistedHandler(
             engine: "google",

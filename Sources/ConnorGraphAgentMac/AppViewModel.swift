@@ -3469,16 +3469,6 @@ final class AppViewModel: NSObject, ObservableObject {
                 }
             }
             var settings = try runtimeSettingsRepository?.loadOrCreateDefault() ?? .default
-            if settings.schemaVersion < 3,
-               settings.preferences.displayName == "诗闻",
-               settings.preferences.timezone == "Asia/Shanghai",
-               settings.preferences.city == "杭州",
-               settings.preferences.country == "中国",
-               settings.preferences.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                settings.preferences = AgentRuntimePreferenceSettings()
-                settings.schemaVersion = 3
-                shouldPersistSystemPreferenceDefaults = true
-            }
             defaultPermissionMode = settings.loop.permissionMode == .allowAll ? .askToWrite : settings.loop.permissionMode
             showProviderIcons = settings.ui.showProviderIcons
             richToolDescriptionsEnabled = settings.ui.richToolDescriptionsEnabled
