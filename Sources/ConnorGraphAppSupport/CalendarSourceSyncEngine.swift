@@ -50,6 +50,8 @@ public struct CalendarSourceSyncResult: Sendable, Equatable {
     public var unchangedEvents: Int
     public var updatedCollections: Int
     public var diagnostics: [CalendarSourceSyncDiagnostic]
+    public var collections: [CalendarCollection]
+    public var events: [CalendarEvent]
 
     public init(
         accountID: CalendarAccountID,
@@ -59,7 +61,9 @@ public struct CalendarSourceSyncResult: Sendable, Equatable {
         deletedEvents: Int = 0,
         unchangedEvents: Int = 0,
         updatedCollections: Int = 0,
-        diagnostics: [CalendarSourceSyncDiagnostic] = []
+        diagnostics: [CalendarSourceSyncDiagnostic] = [],
+        collections: [CalendarCollection] = [],
+        events: [CalendarEvent] = []
     ) {
         self.accountID = accountID
         self.sourceKind = sourceKind
@@ -69,6 +73,8 @@ public struct CalendarSourceSyncResult: Sendable, Equatable {
         self.unchangedEvents = unchangedEvents
         self.updatedCollections = updatedCollections
         self.diagnostics = diagnostics
+        self.collections = collections
+        self.events = events
     }
 }
 
