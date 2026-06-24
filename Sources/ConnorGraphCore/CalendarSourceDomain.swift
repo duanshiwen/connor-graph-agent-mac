@@ -387,6 +387,98 @@ public struct CalendarFreeBusyBlock: Codable, Sendable, Equatable, Hashable, Ide
     }
 }
 
+public struct CalendarSourceSyncCursor: Codable, Sendable, Equatable, Hashable {
+    public var syncToken: String?
+    public var etag: String?
+    public var lastSeenEventIDs: [CalendarEventID]
+
+    public init(syncToken: String? = nil, etag: String? = nil, lastSeenEventIDs: [CalendarEventID] = []) {
+        self.syncToken = syncToken
+        self.etag = etag
+        self.lastSeenEventIDs = lastSeenEventIDs
+    }
+}
+
+public struct CalendarSyncFailureRecord: Codable, Sendable, Equatable, Hashable {
+    public var occurredAt: Date
+    public var code: String
+    public var message: String
+    public var isCredentialRelated: Bool
+
+    public init(occurredAt: Date = Date(), code: String, message: String, isCredentialRelated: Bool = false) {
+        self.occurredAt = occurredAt
+        self.code = code
+        self.message = message
+        self.isCredentialRelated = isCredentialRelated
+    }
+}
+
+public struct CalendarCollectionSyncState: Codable, Sendable, Equatable, Hashable, Identifiable {
+    public var id: CalendarID { collectionID }
+    public var collectionID: CalendarID
+    public var cursor: CalendarSourceSyncCursor
+    public var lastSuccessfulSyncAt: Date?
+    public var eventCount: Int
+
+    public init(collectionID: CalendarID, cursor: CalendarSourceSyncCursor = CalendarSourceSyncCursor(), lastSuccessfulSyncAt: Date? = nil, eventCount: Int = 0) {
+        self.collectionID = collectionID
+        self.cursor = cursor
+        self.lastSuccessfulSyncAt = lastSuccessfulSyncAt
+        self.eventCount = max(0, eventCount)
+    }
+}
+
+public struct CalendarAccountSyncState: Codable, Sendable, Equatable, Hashable, Identifiable {
+    public var id: CalendarAccountID { accountID }
+    public var accountID: CalendarAccountID
+    public var sourceKind: CalendarSourceKind
+    public var lastAttemptedSyncAt: Date?
+    public var lastSuccessfulSyncAt: Date?
+    public var failureCount: Int
+    public var nextRetryAt: Date?
+    public var lastFailure: CalendarSyncFailureRecord?
+    public var collectionStates: [CalendarCollectionSyncState]
+
+    public init(
+        accountID: CalendarAccountID,
+        sourceKind: CalendarSourceKind,
+        lastAttemptedSyncAt: Date? = nil,
+        lastSuccessfulSyncAt: Date? = nil,
+        failureCount: Int = 0,
+        nextRetryAt: Date? = nil,
+        lastFailure: CalendarSyncFailureRecord? = nil,
+        collectionStates: [CalendarCollectionSyncState] = []
+    ) {
+        self.accountID = accountID
+        self.sourceKind = sourceKind
+        self.lastAttemptedSyncAt = lastAttemptedSyncAt
+        self.lastSuccessfulSyncAt = lastSuccessfulSyncAt
+        self.failureCount = max(0, failureCount)
+        self.nextRetryAt = nextRetryAt
+        self.lastFailure = lastFailure
+        self.collectionStates = collectionStates
+    }
+}
+
+public struct CalendarSyncBackoffPolicy: Codable, Sendable, Equatable, Hashable {
+    public var initialDelaySeconds: TimeInterval
+    public var multiplier: Double
+    public var maxDelaySeconds: TimeInterval
+
+    public init(initialDelaySeconds: TimeInterval = 60, multiplier: Double = 2, maxDelaySeconds: TimeInterval = 3_600) {
+        self.initialDelaySeconds = max(0, initialDelaySeconds)
+        self.multiplier = max(1, multiplier)
+        self.maxDelaySeconds = max(self.initialDelaySeconds, maxDelaySeconds)
+    }
+
+    public func delaySeconds(failureCount: Int) -> TimeInterval {
+        guard failureCount > 0, initialDelaySeconds > 0 else { return 0 }
+        let exponent = max(0, failureCount - 1)
+        let delay = initialDelaySeconds * pow(multiplier, Double(exponent))
+        return min(delay, maxDelaySeconds)
+    }
+}
+
 public enum CalendarMutationKind: String, Codable, Sendable, Equatable, Hashable {
     case createEvent
     case updateEvent
