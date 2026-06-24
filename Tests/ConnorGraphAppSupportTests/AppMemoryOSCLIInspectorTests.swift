@@ -284,6 +284,23 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(output.contains("entity-1"))
     }
 
+    @Test func memoryOSCLIRouterRoutesL4FindAndNeighborsCommands() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        try seedMemoryOSCLIInspectorFixture(store: store)
+        let now = Date(timeIntervalSince1970: 10_000)
+        try store.upsert(entity: MemoryOSEntity(id: "entity-graph", stableKey: "concept:graph", entityType: "concept", name: "Graph", summary: "Graph concept", confidence: 0.9, createdAt: now, updatedAt: now))
+        try store.upsert(entityStatement: MemoryOSEntityStatement(id: "entity-edge-1", entityID: "entity-1", predicate: "relates_to", objectEntityID: "entity-graph", text: "Connor Memory OS relates to Graph.", confidence: 0.9, validAt: now, committedAt: now))
+        let inspector = AppMemoryOSCLIInspector(store: store)
+        let encoder = memoryOSCLITestEncoder()
+
+        let find = try AppMemoryOSCLIRouter.route(args: ["l4", "find", "Memory OS"], inspector: inspector, encoder: encoder)
+        #expect(find.contains("entity-1"))
+
+        let neighbors = try AppMemoryOSCLIRouter.route(args: ["l4", "neighbors", "entity-1", "--direction", "outgoing"], inspector: inspector, encoder: encoder)
+        #expect(neighbors.contains("entity-edge-1"))
+        #expect(neighbors.contains("entity-graph"))
+    }
+
     @Test func memoryOSCLIRouterRoutesSearchCommand() throws {
         let store = try makeMemoryOSCLIInspectorStore()
         try seedMemoryOSCLIInspectorFixture(store: store)

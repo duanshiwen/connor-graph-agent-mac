@@ -72,6 +72,30 @@ public struct MemoryOSGraphSubgraph: Sendable, Codable, Equatable {
     }
 }
 
+public struct MemoryOSL4EntityFindQuery: Sendable, Codable, Equatable {
+    public var text: String
+    public var limit: Int
+
+    public init(text: String, limit: Int = 20) {
+        self.text = text
+        self.limit = limit
+    }
+}
+
+public struct MemoryOSL4NeighborsQuery: Sendable, Codable, Equatable {
+    public var entityID: String
+    public var direction: MemoryOSGraphDirection
+    public var predicates: [String]
+    public var limit: Int
+
+    public init(entityID: String, direction: MemoryOSGraphDirection = .both, predicates: [String] = [], limit: Int = 100) {
+        self.entityID = entityID
+        self.direction = direction
+        self.predicates = predicates
+        self.limit = limit
+    }
+}
+
 public struct MemoryOSL4InstanceQuery: Sendable, Codable, Equatable {
     public var classEntityIDs: [String]
     public var predicates: [String]
@@ -89,6 +113,90 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
 
     public init(store: SQLiteMemoryOSStore) {
         self.store = store
+    }
+
+    public func l4FindEntity(_ query: MemoryOSL4EntityFindQuery) throws -> MemoryOSGraphSubgraph {
+        let text = query.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return MemoryOSGraphSubgraph(explanation: "No entity search text was provided.") }
+        let limit = min(max(query.limit, 1), 100)
+        let quoted = store.quote(text)
+        let like = store.quote("%\(text)%")
+        let rows = try store.query(sql: """
+        SELECT DISTINCT e.id, e.entity_type, e.name, e.summary,
+               CASE
+                 WHEN e.id = \(quoted) THEN 100
+                 WHEN e.stable_key = \(quoted) THEN 95
+                 WHEN e.name = \(quoted) THEN 90
+                 WHEN EXISTS (SELECT 1 FROM memory_l4_entity_aliases a WHERE a.entity_id = e.id AND a.alias = \(quoted)) THEN 85
+                 WHEN e.name LIKE \(like) THEN 50
+                 ELSE 25
+               END AS rank_score
+        FROM memory_l4_entities e
+        LEFT JOIN memory_l4_entity_aliases a ON a.entity_id = e.id
+        WHERE e.id = \(quoted)
+           OR e.stable_key = \(quoted)
+           OR e.name = \(quoted)
+           OR e.name LIKE \(like)
+           OR a.alias = \(quoted)
+           OR a.alias LIKE \(like)
+        ORDER BY rank_score DESC, e.name ASC, e.id ASC
+        LIMIT \(limit)
+        """)
+        let nodes = rows.map { row in
+            MemoryOSGraphNode(id: row[0], layer: .l4, kind: row[1], title: row[2], summary: row[3], metadata: ["rank_score": row[4]])
+        }
+        return MemoryOSGraphSubgraph(nodes: nodes, explanation: "L4 entity find query: \(text); returned \(nodes.count) entity node(s).")
+    }
+
+    public func l4Neighbors(_ query: MemoryOSL4NeighborsQuery) throws -> MemoryOSGraphSubgraph {
+        let entityID = query.entityID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !entityID.isEmpty else { return MemoryOSGraphSubgraph(explanation: "No entity id was provided.") }
+        let limit = min(max(query.limit, 1), 1_000)
+        let predicateClause = query.predicates.isEmpty ? "" : " AND s.predicate IN (\(query.predicates.map(store.quote).joined(separator: ",")))"
+        var statements: [[String]] = []
+        if query.direction == .outgoing || query.direction == .both {
+            statements += try store.query(sql: """
+            SELECT s.id, s.entity_id, s.predicate, COALESCE(s.object_entity_id, ''), s.text, s.evidence_span_ids_json, s.confidence, s.valid_at, 'outgoing'
+            FROM memory_l4_entity_statements s
+            WHERE s.entity_id = \(store.quote(entityID))\(predicateClause)
+            ORDER BY s.committed_at DESC, s.id ASC
+            LIMIT \(limit)
+            """)
+        }
+        if query.direction == .incoming || query.direction == .both {
+            statements += try store.query(sql: """
+            SELECT s.id, s.entity_id, s.predicate, COALESCE(s.object_entity_id, ''), s.text, s.evidence_span_ids_json, s.confidence, s.valid_at, 'incoming'
+            FROM memory_l4_entity_statements s
+            WHERE s.object_entity_id = \(store.quote(entityID))\(predicateClause)
+            ORDER BY s.committed_at DESC, s.id ASC
+            LIMIT \(limit)
+            """)
+        }
+        statements = Array(statements.prefix(limit))
+
+        var nodeIDs = Set([entityID])
+        for row in statements {
+            nodeIDs.insert(row[1])
+            if !row[3].isEmpty { nodeIDs.insert(row[3]) }
+        }
+        let nodes = try l4Nodes(ids: Array(nodeIDs))
+        var evidenceRefs: [String] = []
+        let edges = statements.map { row in
+            let evidence = (try? store.decode([String].self, row[5])) ?? []
+            evidenceRefs.append(contentsOf: evidence)
+            return MemoryOSGraphEdge(
+                id: row[0],
+                layer: .l4,
+                sourceID: row[1],
+                targetID: row[3].isEmpty ? row[1] : row[3],
+                predicate: row[2],
+                evidenceRefs: evidence,
+                confidence: Double(row[6]),
+                validAt: row[7].isEmpty ? nil : row[7],
+                metadata: ["statement_text": row[4], "direction": row[8]]
+            )
+        }
+        return MemoryOSGraphSubgraph(nodes: nodes, edges: edges, evidenceRefs: Array(Set(evidenceRefs)).sorted(), provenanceRefs: [], explanation: "L4 neighbors query: entity \(entityID), direction \(query.direction.rawValue); returned \(edges.count) edge(s).")
     }
 
     public func l4Instances(_ query: MemoryOSL4InstanceQuery) throws -> MemoryOSGraphSubgraph {
@@ -153,5 +261,23 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
             provenanceRefs: [],
             explanation: "L4 instances query: predicates \(predicates.joined(separator: ",")) -> classes \(classIDs.joined(separator: ",")); returned \(rows.count) instance edge(s)."
         )
+    }
+
+    private func l4Nodes(ids: [String]) throws -> [MemoryOSGraphNode] {
+        let cleanIDs = ids.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        guard !cleanIDs.isEmpty else { return [] }
+        let quoted = cleanIDs.map(store.quote).joined(separator: ",")
+        let rows = try store.query(sql: """
+        SELECT id, entity_type, name, summary
+        FROM memory_l4_entities
+        WHERE id IN (\(quoted))
+        ORDER BY name ASC, id ASC
+        """)
+        var nodes = rows.map { row in MemoryOSGraphNode(id: row[0], layer: .l4, kind: row[1], title: row[2], summary: row[3]) }
+        let known = Set(nodes.map(\.id))
+        for missing in cleanIDs where !known.contains(missing) {
+            nodes.append(MemoryOSGraphNode(id: missing, layer: .l4, kind: "external_or_literal", title: missing))
+        }
+        return nodes
     }
 }
