@@ -150,3 +150,46 @@ import ConnorGraphMemory
     #expect(jobs.count == 1)
     #expect(jobs.first?.statementIDs == ["statement-1"])
 }
+
+@Test func l1PolicyReportsCountThresholdReasonAtDefault100PendingEvents() throws {
+    let now = Date(timeIntervalSince1970: 10_000)
+    let events = (0..<100).map { index in
+        MemoryOSCaptureEvent(
+            id: "capture-default-\(index)",
+            provenanceObjectID: "object-default-\(index)",
+            eventType: MemoryOSSourceType.chatMessage.rawValue,
+            occurredAt: now.addingTimeInterval(Double(index)),
+            tokenEstimate: 10,
+            processingState: .pending,
+            metadata: [:]
+        )
+    }
+
+    let reason = MemoryOSL1ProcessingTriggerPolicy().triggerReason(events: events, now: now)
+
+    #expect(reason == .pendingCountThreshold)
+}
+
+@Test func l2PolicyDefaultRequires100PendingStatements() throws {
+    let now = Date(timeIntervalSince1970: 20_000)
+    let statements = (0..<99).map { index in
+        MemoryOSStatement(
+            id: "statement-default-\(index)",
+            subjectID: "node-\(index)",
+            predicate: "observed",
+            text: "事实 \(index)",
+            assertionKind: .observed,
+            confidence: 0.8,
+            validAt: now,
+            committedAt: now,
+            evidenceSpanIDs: [],
+            metadata: ["processing_state": "pending_knowledge_synthesis"]
+        )
+    }
+
+    let policy = MemoryOSL2KnowledgeSynthesisTriggerPolicy()
+
+    #expect(policy.minPendingStatementCount == 100)
+    #expect(policy.triggerReason(statements: statements, now: now) == nil)
+    #expect(policy.triggerReason(statements: statements + [MemoryOSStatement(id: "statement-default-99", subjectID: "node-99", predicate: "observed", text: "事实 99", assertionKind: .observed, confidence: 0.8, validAt: now, committedAt: now, evidenceSpanIDs: [], metadata: ["processing_state": "pending_knowledge_synthesis"])], now: now) == .pendingCountThreshold)
+}
