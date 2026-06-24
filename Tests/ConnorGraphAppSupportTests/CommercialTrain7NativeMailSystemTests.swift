@@ -77,7 +77,7 @@ struct CommercialTrain7NativeMailSystemTests {
         var registry = AgentToolRegistry()
         registry.registerNativeMailTools(runtime: runtime)
 
-        #expect(!registry.definitions.map(\.name).contains("mail_search_messages"))
+        #expect(registry.definitions.map(\.name).contains("mail_search_messages"))
         #expect(registry.definitions.map(\.name).contains("mail_send_draft"))
         #expect(registry.permission(named: "mail_send_draft") == .sendMail)
 
@@ -127,7 +127,7 @@ struct CommercialTrain7NativeMailSystemTests {
             extensionRuntime: .ready(enabledSourceCount: 1, loadedSkillCount: 1, enabledAutomationRuleCount: 1),
             graphMemory: .ready(pendingCandidateCount: 0, openHoldCount: 0, recentChangeCount: 0, contextReady: true, ingestionReady: true, distillationReady: true),
             nativeUI: .ready(shellItemCount: 13, commandCount: 12, settingsPanelsReady: true, homeSurfaceReady: true, readinessDashboardLinked: true, primaryActionCount: 7, emptyStateCount: 4, keyboardShortcutCount: 10, settingsSectionCount: 7),
-            nativeMailSystem: .ready(accountCount: 1, healthyAccountCount: 1, credentialBoundaryReady: true, syncCursorReady: true, toolAuditReady: true, sendApprovalReady: true, contactApprovalReady: true, attachmentImportReady: true, evidencePolicyReady: true)
+            nativeMailSystem: .ready(accountCount: 1, healthyAccountCount: 1, credentialBoundaryReady: true, syncCursorReady: true, toolAuditReady: true, sendApprovalReady: true, smtpSendAdapterReady: true, persistentDraftStoreReady: true, contactApprovalReady: true, attachmentImportReady: true, evidencePolicyReady: true)
         )
         let dashboard = CommercialReadinessGate().evaluate(input)
         #expect(dashboard.cards.map(\.phase).contains(.nativeMailSystem))
@@ -156,7 +156,7 @@ struct CommercialTrain7NativeMailSystemTests {
         let imapHealth = try await imap.testConnection(endpoint: MailServerEndpoint(host: "imap.example.com", port: 993, security: .tls, protocolKind: .imap))
         let smtpHealth = try await smtp.testConnection(endpoint: MailServerEndpoint(host: "smtp.example.com", port: 587, security: .startTLS, protocolKind: .smtp))
         #expect(imapHealth.status == .degraded)
-        #expect(smtpHealth.status == .degraded)
+        #expect(smtpHealth.status == .ready)
 
         let account = MailAccount(id: MailAccountID(rawValue: "a"), provider: .genericIMAPSMTP, displayName: "A", identities: [], credentialBinding: MailCredentialBinding(keychainService: "svc", accountName: "a", authMode: .oauth2))
         let syncHealth = MailSyncEngine().readiness(account: account, mailboxCount: 1, cursorCount: 1)

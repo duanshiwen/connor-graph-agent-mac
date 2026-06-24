@@ -133,6 +133,18 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         registry.registerTimeAnalysisTool()
         if let storagePaths {
             registry.registerNativeCalendarTools(runtime: CalendarSourceAgentRuntimeBridge(store: FileBackedCalendarSourceRuntimeStore(storagePaths: storagePaths)))
+            let mailStore = FileBackedMailSourceStore(storagePaths: storagePaths)
+            let mailDraftStore = FileBackedMailDraftRepository(
+                storeURL: storagePaths.applicationSupportDirectory
+                    .appendingPathComponent("mail", isDirectory: true)
+                    .appendingPathComponent("drafts.json")
+            )
+            registry.registerNativeMailTools(runtime: MailRuntime(
+                repository: mailStore,
+                cache: mailStore,
+                draftStore: mailDraftStore,
+                credentialStore: AppMailCredentialStore(credentialStore: settingsRepository.credentialStore)
+            ))
         } else {
             registry.registerNativeCalendarTools(runtime: InMemoryAgentCalendarRuntime())
         }

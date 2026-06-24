@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 public struct MailMessageHeaders: Codable, Sendable, Equatable, Hashable {
     public var messageIDHeader: String?
@@ -151,8 +152,17 @@ public struct MailDraft: Codable, Sendable, Equatable, Hashable, Identifiable {
     public var bcc: [MailAddress]
     public var subject: String
     public var body: String
+    public var htmlBody: String?
+    public var replyTo: [MailAddress]
     public var attachmentIDs: [MailAttachmentID]
     public var inReplyToMessageID: MailMessageID?
+    public var messageIDHeader: String?
+    public var inReplyToHeader: String?
+    public var referencesHeaders: [String]
+    public var approvedEnvelopeHash: String?
+    public var lastSendError: String?
+    public var sentReceiptID: String?
+    public var intentSummary: String?
     public var status: MailDraftStatus
     public var createdAt: Date
     public var updatedAt: Date
@@ -166,8 +176,17 @@ public struct MailDraft: Codable, Sendable, Equatable, Hashable, Identifiable {
         bcc: [MailAddress] = [],
         subject: String,
         body: String,
+        htmlBody: String? = nil,
+        replyTo: [MailAddress] = [],
         attachmentIDs: [MailAttachmentID] = [],
         inReplyToMessageID: MailMessageID? = nil,
+        messageIDHeader: String? = nil,
+        inReplyToHeader: String? = nil,
+        referencesHeaders: [String] = [],
+        approvedEnvelopeHash: String? = nil,
+        lastSendError: String? = nil,
+        sentReceiptID: String? = nil,
+        intentSummary: String? = nil,
         status: MailDraftStatus = .draft,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
@@ -180,11 +199,99 @@ public struct MailDraft: Codable, Sendable, Equatable, Hashable, Identifiable {
         self.bcc = bcc
         self.subject = subject
         self.body = body
+        self.htmlBody = htmlBody
+        self.replyTo = replyTo
         self.attachmentIDs = attachmentIDs
         self.inReplyToMessageID = inReplyToMessageID
+        self.messageIDHeader = messageIDHeader
+        self.inReplyToHeader = inReplyToHeader
+        self.referencesHeaders = referencesHeaders
+        self.approvedEnvelopeHash = approvedEnvelopeHash
+        self.lastSendError = lastSendError
+        self.sentReceiptID = sentReceiptID
+        self.intentSummary = intentSummary
         self.status = status
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+    }
+
+    public func envelopeHash() -> String {
+        let snapshot = MailSendEnvelopeSnapshot(draft: self)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = (try? encoder.encode(snapshot)) ?? Data()
+        let digest = SHA256.hash(data: data)
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+public struct MailSendEnvelopeSnapshot: Codable, Sendable, Equatable, Hashable {
+    public var accountID: MailAccountID
+    public var identityID: MailIdentityID
+    public var to: [MailAddress]
+    public var cc: [MailAddress]
+    public var bcc: [MailAddress]
+    public var subject: String
+    public var body: String
+    public var htmlBody: String?
+    public var replyTo: [MailAddress]
+    public var attachmentIDs: [MailAttachmentID]
+    public var inReplyToMessageID: MailMessageID?
+    public var messageIDHeader: String?
+    public var inReplyToHeader: String?
+    public var referencesHeaders: [String]
+
+    public init(draft: MailDraft) {
+        self.accountID = draft.accountID
+        self.identityID = draft.identityID
+        self.to = draft.to
+        self.cc = draft.cc
+        self.bcc = draft.bcc
+        self.subject = draft.subject
+        self.body = draft.body
+        self.htmlBody = draft.htmlBody
+        self.replyTo = draft.replyTo
+        self.attachmentIDs = draft.attachmentIDs
+        self.inReplyToMessageID = draft.inReplyToMessageID
+        self.messageIDHeader = draft.messageIDHeader
+        self.inReplyToHeader = draft.inReplyToHeader
+        self.referencesHeaders = draft.referencesHeaders
+    }
+}
+
+public enum MailSendAttemptStatus: String, Codable, Sendable, Equatable, Hashable {
+    case pendingApproval
+    case sending
+    case sent
+    case failed
+    case cancelled
+}
+
+public struct MailSendAttempt: Codable, Sendable, Equatable, Hashable, Identifiable {
+    public var id: String
+    public var draftID: MailDraftID
+    public var status: MailSendAttemptStatus
+    public var providerMessageID: String?
+    public var envelopeHash: String
+    public var errorSummary: String?
+    public var createdAt: Date
+
+    public init(
+        id: String = UUID().uuidString,
+        draftID: MailDraftID,
+        status: MailSendAttemptStatus,
+        providerMessageID: String? = nil,
+        envelopeHash: String,
+        errorSummary: String? = nil,
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.draftID = draftID
+        self.status = status
+        self.providerMessageID = providerMessageID
+        self.envelopeHash = envelopeHash
+        self.errorSummary = errorSummary
+        self.createdAt = createdAt
     }
 }
 

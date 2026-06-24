@@ -35,24 +35,35 @@ public struct MailRuntime: Sendable {
     public var repository: any MailSourceRepository
     public var cache: any MailSourceCache
     public var auditLog: any MailAuditLogProtocol
-    public var draftStore: MailDraftStore
+    public var draftStore: any MailDraftRepository
+    public var credentialStore: AppMailCredentialStore
+    public var smtpClient: any MailSMTPClient
+    public var messageComposer: MailMessageComposer
 
     public init(
         repository: any MailSourceRepository,
         cache: any MailSourceCache,
         auditLog: any MailAuditLogProtocol = InMemoryMailAuditLog(),
-        draftStore: MailDraftStore = MailDraftStore()
+        draftStore: any MailDraftRepository = MailDraftStore(),
+        credentialStore: AppMailCredentialStore = AppMailCredentialStore(),
+        smtpClient: any MailSMTPClient = NetworkMailSMTPClient(),
+        messageComposer: MailMessageComposer = MailMessageComposer()
     ) {
         self.repository = repository
         self.cache = cache
         self.auditLog = auditLog
         self.draftStore = draftStore
+        self.credentialStore = credentialStore
+        self.smtpClient = smtpClient
+        self.messageComposer = messageComposer
     }
 
     public static func fixture() -> MailRuntime {
         let accountID = MailAccountID(rawValue: "fixture-account")
         let identity = MailIdentity(id: MailIdentityID(rawValue: "fixture-identity"), displayName: "Connor Fixture", address: MailAddress(name: "Connor Fixture", email: "connor@example.com"))
-        let account = MailAccount(id: accountID, provider: .localFixture, displayName: "Fixture Mail", identities: [identity], health: MailAccountHealth(status: .ready, summary: "Fixture ready"))
+        let binding = AppMailCredentialStore.binding(accountID: accountID, email: identity.address.email, authMode: .appPassword)
+        let credentialStore = CommercialFixtureMailCredentialStore(secret: "fixture-password", binding: binding)
+        let account = MailAccount(id: accountID, provider: .localFixture, displayName: "Fixture Mail", identities: [identity], outgoing: MailServerEndpoint(host: "smtp.fixture.local", port: 587, security: .startTLS, protocolKind: .smtp), credentialBinding: binding, health: MailAccountHealth(status: .ready, summary: "Fixture ready"))
         let inbox = MailMailbox(id: MailMailboxID(rawValue: "fixture-inbox"), accountID: accountID, name: "Inbox", path: "INBOX", role: .inbox, status: MailMailboxStatus(messageCount: 1, unreadCount: 1, syncCursor: MailSyncCursor(value: "1"), lastSyncedAt: Date()))
         let summary = MailMessageSummary(
             id: MailMessageID(rawValue: "fixture-message-1"),
@@ -69,7 +80,7 @@ public struct MailRuntime: Sendable {
         let body = MailMessageBody(plainText: MailBodyPart(mimeType: "text/plain", text: "Commercial native mail system fixture body", byteCount: 43), redactedPreview: "Commercial native mail system fixture body", bodyHash: "fixture-body-hash")
         let attachment = MailAttachmentDescriptor(id: MailAttachmentID(rawValue: "fixture-attachment-1"), messageID: summary.id, filename: "brief.pdf", mimeType: "application/pdf", byteCount: 1024)
         let detail = MailMessageDetail(summary: summary, headers: MailMessageHeaders(messageIDHeader: "<fixture@example.com>", rawHeaderHash: "fixture-header-hash"), body: body, attachments: [attachment])
-        return MailRuntime(repository: InMemoryMailSourceRepository(accounts: [account]), cache: InMemoryMailSourceCache(mailboxes: [inbox], messages: [detail]))
+        return MailRuntime(repository: InMemoryMailSourceRepository(accounts: [account]), cache: InMemoryMailSourceCache(mailboxes: [inbox], messages: [detail]), credentialStore: AppMailCredentialStore(credentialStore: credentialStore), smtpClient: FakeMailSMTPClient(response: MailSMTPSendResponse(providerMessageID: "fixture-smtp-message-id")))
     }
 
     public func listAccounts(runID: String? = nil, sessionID: String? = nil) async throws -> [MailAccount] {
@@ -122,29 +133,123 @@ public struct MailRuntime: Sendable {
         try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, kind: .stateMutated, riskClass: .mutation, redactedSummary: "Set read state for \(messageIDs.count) messages to \(isRead)"))
     }
 
-    public func createDraft(accountID: MailAccountID, identityID: MailIdentityID, to: [MailAddress], subject: String, body: String, runID: String? = nil, sessionID: String? = nil) async throws -> MailDraft {
-        let draft = MailDraft(id: MailDraftID(rawValue: UUID().uuidString), accountID: accountID, identityID: identityID, to: to, subject: subject, body: body)
-        await draftStore.save(draft)
+    public func createDraft(accountID: MailAccountID, identityID: MailIdentityID, to: [MailAddress], cc: [MailAddress] = [], bcc: [MailAddress] = [], replyTo: [MailAddress] = [], subject: String, body: String, htmlBody: String? = nil, inReplyToMessageID: MailMessageID? = nil, attachmentIDs: [MailAttachmentID] = [], intentSummary: String? = nil, runID: String? = nil, sessionID: String? = nil) async throws -> MailDraft {
+        let draft = MailDraft(id: MailDraftID(rawValue: UUID().uuidString), accountID: accountID, identityID: identityID, to: to, cc: cc, bcc: bcc, subject: subject, body: body, htmlBody: htmlBody, replyTo: replyTo, attachmentIDs: attachmentIDs, inReplyToMessageID: inReplyToMessageID, intentSummary: intentSummary)
+        try await draftStore.save(draft)
         try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: accountID, draftID: draft.id, kind: .draftCreated, riskClass: .mutation, redactedSummary: "Created mail draft to \(to.map(\.email).joined(separator: ", "))"))
         return draft
     }
 
     public func sendApprovalPayload(draftID: MailDraftID) async throws -> MailRuntimeSendApproval {
-        guard let draft = await draftStore.draft(id: draftID) else { throw MailRuntimeError.draftNotFound(draftID.rawValue) }
+        guard let draft = try await draftStore.draft(id: draftID) else { throw MailRuntimeError.draftNotFound(draftID.rawValue) }
         let account = try await repository.account(id: draft.accountID)
         let from = account?.identities.first { $0.id == draft.identityID }?.address.email ?? "unknown"
         return MailRuntimeSendApproval(draft: draft, from: from)
     }
 
     public func sendDraft(draftID: MailDraftID, approved: Bool, runID: String? = nil, sessionID: String? = nil) async throws -> MailSendReceipt {
-        guard let draft = await draftStore.draft(id: draftID) else { throw MailRuntimeError.draftNotFound(draftID.rawValue) }
+        guard let draft = try await draftStore.draft(id: draftID) else { throw MailRuntimeError.draftNotFound(draftID.rawValue) }
         guard approved else {
             try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: draft.accountID, draftID: draftID, kind: .sendApprovalRequested, riskClass: .send, redactedSummary: "Send approval required"))
             throw MailRuntimeError.approvalRequired(draftID.rawValue)
         }
-        let receipt = MailSendReceipt(draftID: draftID, providerMessageID: "fixture-sent-\(draftID.rawValue)", envelopeHash: String(abs(draft.subject.hashValue)))
-        try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: draft.accountID, draftID: draftID, kind: .messageSent, riskClass: .send, redactedSummary: "Sent approved draft to \(draft.to.map(\.email).joined(separator: ", "))", payloadHash: receipt.envelopeHash))
-        return receipt
+        guard draft.status != .sent, draft.status != .discarded else {
+            throw MailRuntimeError.invalidDraftState(draft.status.rawValue)
+        }
+        guard !draft.to.isEmpty || !draft.cc.isEmpty || !draft.bcc.isEmpty else {
+            throw MailRuntimeError.missingRecipients(draftID.rawValue)
+        }
+        guard let account = try await repository.account(id: draft.accountID) else {
+            throw MailRuntimeError.accountNotFound(draft.accountID.rawValue)
+        }
+        guard let identity = account.identities.first(where: { $0.id == draft.identityID }) else {
+            throw MailRuntimeError.identityNotFound(draft.identityID.rawValue)
+        }
+        guard identity.canSend else {
+            throw MailRuntimeError.identityCannotSend(draft.identityID.rawValue)
+        }
+        guard let endpoint = account.outgoing else {
+            throw MailRuntimeError.missingOutgoingEndpoint(account.id.rawValue)
+        }
+        guard let binding = account.credentialBinding else {
+            throw MailRuntimeError.missingCredential(account.id.rawValue)
+        }
+        guard let password = try credentialStore.readCredential(binding: binding), !password.isEmpty else {
+            throw MailRuntimeError.missingCredential(account.id.rawValue)
+        }
+
+        let composed = try messageComposer.compose(draft: draft, identity: identity)
+        try await draftStore.recordSendAttempt(MailSendAttempt(draftID: draftID, status: .sending, envelopeHash: composed.envelopeHash))
+        do {
+            let response = try await smtpClient.send(MailSMTPSendRequest(
+                endpoint: endpoint,
+                username: binding.accountName,
+                password: password,
+                from: identity.address,
+                recipients: composed.envelopeRecipients,
+                rawMessage: MailMessageComposer.dotStuff(composed.rawMessage),
+                envelopeHash: composed.envelopeHash
+            ))
+            let receipt = MailSendReceipt(draftID: draftID, providerMessageID: response.providerMessageID, sentAt: response.sentAt, envelopeHash: composed.envelopeHash)
+            try await draftStore.recordSendAttempt(MailSendAttempt(draftID: draftID, status: .sent, providerMessageID: response.providerMessageID, envelopeHash: composed.envelopeHash))
+            _ = try await draftStore.updateStatus(id: draftID, status: .sent, sentReceiptID: receipt.providerMessageID)
+            try await saveSentMessage(draft: draft, identity: identity, receipt: receipt, messageIDHeader: composed.messageID)
+            try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: draft.accountID, draftID: draftID, kind: .messageSent, riskClass: .send, redactedSummary: "Sent approved draft to \(draft.to.map(\.email).joined(separator: ", "))", payloadHash: receipt.envelopeHash))
+            return receipt
+        } catch {
+            _ = try? await draftStore.updateStatus(id: draftID, status: .failed, lastSendError: String(describing: error))
+            try? await draftStore.recordSendAttempt(MailSendAttempt(draftID: draftID, status: .failed, envelopeHash: composed.envelopeHash, errorSummary: String(describing: error)))
+            throw error
+        }
+    }
+
+    public func sendHistory(draftID: MailDraftID) async throws -> MailSendHistory {
+        guard let draft = try await draftStore.draft(id: draftID) else { throw MailRuntimeError.draftNotFound(draftID.rawValue) }
+        let attempts = try await draftStore.sendAttempts(draftID: draftID)
+        let auditRecords = try await auditLog.listRecords().filter { $0.draftID == draftID }
+        return MailSendHistory(draft: draft, attempts: attempts, auditRecords: auditRecords)
+    }
+
+    private func saveSentMessage(draft: MailDraft, identity: MailIdentity, receipt: MailSendReceipt, messageIDHeader: String) async throws {
+        let mailboxID = MailMailboxID(rawValue: "\(draft.accountID.rawValue)-sent")
+        let existingMailboxes = try await cache.listMailboxes(accountID: draft.accountID)
+        if !existingMailboxes.contains(where: { $0.id == mailboxID }) {
+            try await cache.saveMailbox(MailMailbox(
+                id: mailboxID,
+                accountID: draft.accountID,
+                name: "Sent",
+                path: "Sent",
+                role: .sent,
+                status: MailMailboxStatus(messageCount: 0, unreadCount: 0, lastSyncedAt: receipt.sentAt)
+            ))
+        }
+        let messageID = MailMessageID(rawValue: receipt.providerMessageID)
+        let summary = MailMessageSummary(
+            id: messageID,
+            accountID: draft.accountID,
+            mailboxID: mailboxID,
+            threadID: draft.inReplyToMessageID.map { MailThreadID(rawValue: $0.rawValue) },
+            subject: draft.subject,
+            from: identity.address,
+            to: draft.to,
+            cc: draft.cc,
+            date: receipt.sentAt,
+            snippet: String(draft.body.prefix(240)),
+            flags: MailMessageFlags(isRead: true),
+            hasAttachments: !draft.attachmentIDs.isEmpty
+        )
+        let body = MailMessageBody(
+            plainText: MailBodyPart(mimeType: "text/plain", text: draft.body, byteCount: Data(draft.body.utf8).count),
+            htmlText: draft.htmlBody.map { MailBodyPart(mimeType: "text/html", text: $0, byteCount: Data($0.utf8).count) },
+            redactedPreview: String(draft.body.prefix(500)),
+            bodyHash: receipt.envelopeHash
+        )
+        try await cache.saveMessage(MailMessageDetail(
+            summary: summary,
+            headers: MailMessageHeaders(messageIDHeader: messageIDHeader, inReplyTo: draft.inReplyToHeader, references: draft.referencesHeaders, rawHeaderHash: receipt.envelopeHash),
+            body: body,
+            attachments: []
+        ))
     }
 
     public func evidenceCandidate(for messageID: MailMessageID) async throws -> MailEvidenceCandidate {
@@ -162,21 +267,25 @@ public struct NativeMailReadiness: Codable, Sendable, Equatable {
     public var syncCursorReady: Bool
     public var toolAuditReady: Bool
     public var sendApprovalReady: Bool
+    public var smtpSendAdapterReady: Bool
+    public var persistentDraftStoreReady: Bool
     public var contactApprovalReady: Bool
     public var attachmentImportReady: Bool
     public var evidencePolicyReady: Bool
 
     public var isReady: Bool {
-        accountCount > 0 && healthyAccountCount > 0 && credentialBoundaryReady && syncCursorReady && toolAuditReady && sendApprovalReady && contactApprovalReady && attachmentImportReady && evidencePolicyReady
+        accountCount > 0 && healthyAccountCount > 0 && credentialBoundaryReady && syncCursorReady && toolAuditReady && sendApprovalReady && smtpSendAdapterReady && persistentDraftStoreReady && contactApprovalReady && attachmentImportReady && evidencePolicyReady
     }
 
-    public init(accountCount: Int, healthyAccountCount: Int, credentialBoundaryReady: Bool, syncCursorReady: Bool, toolAuditReady: Bool, sendApprovalReady: Bool, contactApprovalReady: Bool, attachmentImportReady: Bool, evidencePolicyReady: Bool) {
+    public init(accountCount: Int, healthyAccountCount: Int, credentialBoundaryReady: Bool, syncCursorReady: Bool, toolAuditReady: Bool, sendApprovalReady: Bool, smtpSendAdapterReady: Bool = true, persistentDraftStoreReady: Bool = true, contactApprovalReady: Bool, attachmentImportReady: Bool, evidencePolicyReady: Bool) {
         self.accountCount = accountCount
         self.healthyAccountCount = healthyAccountCount
         self.credentialBoundaryReady = credentialBoundaryReady
         self.syncCursorReady = syncCursorReady
         self.toolAuditReady = toolAuditReady
         self.sendApprovalReady = sendApprovalReady
+        self.smtpSendAdapterReady = smtpSendAdapterReady
+        self.persistentDraftStoreReady = persistentDraftStoreReady
         self.contactApprovalReady = contactApprovalReady
         self.attachmentImportReady = attachmentImportReady
         self.evidencePolicyReady = evidencePolicyReady
