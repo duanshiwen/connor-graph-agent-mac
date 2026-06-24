@@ -252,7 +252,7 @@ struct AddMailAccountSheet: View {
             VStack(alignment: .leading, spacing: SettingsListLayout.spaceXS) {
                 Text("添加邮件账户")
                     .font(SettingsListTypography.header)
-                Text("选择服务商后，Connor 会预填常见 IMAP/SMTP 配置。添加后会创建账户并准备同步；真实邮件拉取由 Mail Runtime 同步层完成。")
+                Text("选择服务商后，康纳同学会预填常见 IMAP/SMTP 配置。添加后会创建账户并开始准备同步。")
                     .font(SettingsListTypography.rowSubtitle)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
