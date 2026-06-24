@@ -350,3 +350,49 @@ private final class LocalToolsCredentialStore: CredentialStore, @unchecked Senda
     #expect(!names.contains("graph_ingest_episode"))
     #expect(!names.contains("graph_propose_write"))
 }
+
+@Test func agentLoopRuntimeFactoryRegistersNativeMailToolsWithFileBackedRuntime() async throws {
+    let appDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ConnorFactoryNativeMailTools-", isDirectory: true)
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: appDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: appDirectory) }
+    let storagePaths = AppStoragePaths(applicationSupportDirectory: appDirectory)
+    try storagePaths.ensureDirectoryHierarchy()
+
+    let storeURL = appDirectory.appendingPathComponent("store.sqlite")
+    let store = try SQLiteGraphKernelStore(path: storeURL.path)
+    try store.migrate()
+    let settings = AppLLMSettingsRepository(
+        settingsStore: LocalToolsSettingsStore(),
+        credentialStore: LocalToolsCredentialStore()
+    )
+
+    let accountID = MailAccountID(rawValue: "mail-account-1")
+    let identity = MailIdentity(id: MailIdentityID(rawValue: "identity-1"), displayName: "Connor", address: MailAddress(email: "connor@example.com"))
+    let mailStore = FileBackedMailSourceStore(storagePaths: storagePaths)
+    try await mailStore.saveAccount(MailAccount(id: accountID, provider: .genericIMAPSMTP, displayName: "Connor Mail", identities: [identity], outgoing: MailServerEndpoint(host: "smtp.example.com", port: 587, security: .startTLS, protocolKind: .smtp)))
+
+    let factory = AppGraphAgentRuntimeFactory(store: store, settingsRepository: settings, storagePaths: storagePaths)
+    let controller = factory.makeAgentLoopController(permissionMode: .readOnly)
+    let names = controller.toolRegistry.definitions.map(\.name)
+
+    #expect(names.contains("mail_list_accounts"))
+    #expect(names.contains("mail_search_messages"))
+    #expect(names.contains("mail_create_draft"))
+    #expect(names.contains("mail_send_draft"))
+    #expect(controller.toolRegistry.permission(named: "mail_send_draft") == .sendMail)
+
+    let result = try await controller.toolRegistry.execute(
+        AgentToolCall(name: "mail_list_accounts", argumentsJSON: "{}"),
+        context: AgentToolExecutionContext(
+            runID: "run-mail-factory",
+            sessionID: "session-mail-factory",
+            groupID: "default",
+            userPrompt: "list mail",
+            toolCallID: "mail-list",
+            policyEngine: AgentPolicyEngine(permissionMode: .allowAll)
+        )
+    )
+    #expect(result.contentJSON?.contains("Connor Mail") == true)
+}
