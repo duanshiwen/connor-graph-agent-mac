@@ -23,10 +23,10 @@ public enum SQLiteMemoryOSStoreError: Error, Sendable, Equatable, CustomStringCo
 }
 
 public final class SQLiteMemoryOSStore: @unchecked Sendable {
-    public static let currentSchemaVersion = 3
+    public static let currentSchemaVersion = 4
 
     public static let requiredSchemaTables: Set<String> = [
-        "memory_schema_migrations", "memory_legacy_import_runs", "memory_store_health_checks",
+        "memory_schema_migrations", "memory_legacy_import_runs", "memory_store_health_checks", "memory_builtin_datasets",
         "memory_audit_events", "memory_processing_metrics", "memory_error_events", "memory_recovery_actions",
         "memory_discard_events",
         "memory_l0_provenance_objects", "memory_l0_provenance_spans", "memory_l0_derivations", "memory_l0_content_hashes",
@@ -115,6 +115,34 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
 
     public func pragmaValue(_ name: String) throws -> String? {
         try query(sql: "PRAGMA \(name);").first?.first
+    }
+
+    // MARK: - Built-in datasets
+
+    public func saveBuiltinDataset(id: String, kind: String, version: String, installedAt: Date = Date(), manifest: [String: String] = [:], stats: [String: String] = [:]) throws {
+        try execute("""
+        INSERT OR REPLACE INTO memory_builtin_datasets
+        (id, kind, version, installed_at, manifest_json, stats_json)
+        VALUES (\(quote(id)), \(quote(kind)), \(quote(version)), \(quote(iso(installedAt))), \(quote(json(manifest))), \(quote(json(stats))))
+        """)
+    }
+
+    public func builtinDataset(id: String) throws -> [String: String]? {
+        guard let row = try query(sql: """
+        SELECT id, kind, version, installed_at, manifest_json, stats_json
+        FROM memory_builtin_datasets WHERE id = \(quote(id)) LIMIT 1
+        """).first else { return nil }
+        var result: [String: String] = [
+            "id": row[0],
+            "kind": row[1],
+            "version": row[2],
+            "installed_at": row[3]
+        ]
+        let manifest = try decode([String: String].self, row[4])
+        let stats = try decode([String: String].self, row[5])
+        for (key, value) in manifest { result["manifest.\(key)"] = value }
+        for (key, value) in stats { result["stats.\(key)"] = value }
+        return result
     }
 
     // MARK: - L0
@@ -482,6 +510,7 @@ public extension SQLiteMemoryOSStore {
     CREATE TABLE IF NOT EXISTS memory_schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}');
     CREATE TABLE IF NOT EXISTS memory_legacy_import_runs (id TEXT PRIMARY KEY, status TEXT NOT NULL, dry_run INTEGER NOT NULL, started_at TEXT NOT NULL, finished_at TEXT, imported_count INTEGER NOT NULL DEFAULT 0, failed_count INTEGER NOT NULL DEFAULT 0, metadata_json TEXT NOT NULL DEFAULT '{}');
     CREATE TABLE IF NOT EXISTS memory_store_health_checks (id TEXT PRIMARY KEY, status TEXT NOT NULL, checked_at TEXT NOT NULL, report_json TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS memory_builtin_datasets (id TEXT PRIMARY KEY, kind TEXT NOT NULL, version TEXT NOT NULL, installed_at TEXT NOT NULL, manifest_json TEXT NOT NULL DEFAULT '{}', stats_json TEXT NOT NULL DEFAULT '{}');
     CREATE TABLE IF NOT EXISTS memory_audit_events (id TEXT PRIMARY KEY, event_type TEXT NOT NULL, actor TEXT NOT NULL, subject_id TEXT, payload_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
     CREATE INDEX IF NOT EXISTS idx_memory_audit_events_time ON memory_audit_events(created_at DESC);
     CREATE TABLE IF NOT EXISTS memory_processing_metrics (id TEXT PRIMARY KEY, metric_name TEXT NOT NULL, metric_value REAL NOT NULL, dimensions_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);

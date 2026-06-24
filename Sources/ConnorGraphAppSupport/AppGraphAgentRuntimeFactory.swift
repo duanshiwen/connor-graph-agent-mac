@@ -62,6 +62,9 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
     private func makeMemoryOSFacade() -> AppMemoryOSFacade? {
         guard let storagePaths else { return nil }
         do {
+            if let builtinURL = FoundationKGBuiltinBootstrapper.builtinDatabaseURL() {
+                _ = try FoundationKGBuiltinBootstrapper.ensureBuiltinDatabaseIfNeeded(memoryOSDatabaseURL: storagePaths.memoryOSDatabaseURL, builtinDatabaseURL: builtinURL)
+            }
             let store = try SQLiteMemoryOSStore(path: storagePaths.memoryOSDatabaseURL.path)
             try store.migrate()
             return AppMemoryOSFacade(store: store)

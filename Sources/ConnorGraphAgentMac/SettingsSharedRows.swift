@@ -294,7 +294,8 @@ struct SettingsBirthDatePickerRow: View {
 
                 Button("清除", action: onClear)
                     .buttonStyle(.bordered)
-                    .controlSize(.regular)
+                    .controlSize(.large)
+                    .frame(minHeight: 36)
                     .disabled(!hasValue)
             }
         }
