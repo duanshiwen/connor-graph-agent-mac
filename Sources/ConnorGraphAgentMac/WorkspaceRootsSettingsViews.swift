@@ -15,7 +15,7 @@ struct WorkspaceRootsSettingsContent: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("当前会话 Workspace")
+                    Text("当前会话工作目录")
                         .font(SettingsListTypography.rowTitleSelected)
                     Text(summaryText)
                         .font(SettingsListTypography.rowCaption)
@@ -52,7 +52,7 @@ struct WorkspaceRootsSettingsContent: View {
                 .buttonStyle(.bordered)
                 .disabled(viewModel.workspaceRootPathInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-            Text("保存到当前 Session Capsule。Native local tools 可访问所有 roots；为空时回退到进程 cwd。")
+            Text("这些目录只用于当前会话。本地工具可在你授权的目录中读取或处理文件；未设置时使用默认工作目录。")
                 .font(SettingsListTypography.rowCaption)
                 .foregroundStyle(.secondary)
         }
@@ -61,11 +61,11 @@ struct WorkspaceRootsSettingsContent: View {
 
     private var summaryText: String {
         if let primaryRoot {
-            return "主目录：\(primaryRoot.path) · 共 \(viewModel.workspaceRoots.count) 个 root"
+            return "主目录：\(primaryRoot.path) · 共 \(viewModel.workspaceRoots.count) 个目录"
         }
         let fallback = viewModel.defaultWorkingDirectoryPath.trimmingCharacters(in: .whitespacesAndNewlines)
         if !fallback.isEmpty { return "默认项目目录：\(fallback)" }
-        return "尚未设置；将使用进程 cwd。"
+        return "尚未设置；将使用默认工作目录。"
     }
 
     private func chooseDirectories() {
@@ -152,7 +152,7 @@ struct SettingsShortcutsSection: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsHeroHeader(
                 title: "快捷键",
-                subtitle: "管理应用和 Browser Workspace 的常用键盘操作。修改后会写入 runtime-settings.json 并立即用于菜单命令或局部 key monitor。",
+                subtitle: "管理应用和内置浏览器的常用键盘操作。修改后会立即生效。",
                 systemImage: "keyboard"
             ) {
                 EmptyView()
@@ -171,7 +171,7 @@ struct SettingsShortcutsSection: View {
                 }
             }
 
-            SettingsGroup(title: "Browser Workspace") {
+            SettingsGroup(title: "内置浏览器") {
                 ForEach(browserActions.indices, id: \.self) { index in
                     if index > 0 { Divider() }
                     EditableShortcutRow(
@@ -188,11 +188,11 @@ struct SettingsShortcutsSection: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("按住说话 · 鼠标按住或按住 Option", systemImage: "mic")
                         .font(SettingsListTypography.rowTitleSelected)
-                    Text("Composer 的语音输入使用系统语音识别：录音中显示实时 partial 结果，松开后直接提交当前识别文本，不再启动后台整理任务。浏览器媒体转写仍使用独立的本地媒体运行时。")
+                    Text("在对话输入框中按住说话，录音时会显示实时识别文字，松开后直接发送当前识别内容。")
                         .font(SettingsListTypography.rowCaption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text("长按空格可以作为未来高级选项，但默认关闭；只有在能够消费 Space keyDown、避免向文本框输入重复空格时才应启用。")
+                    Text("目前推荐使用鼠标按住或 Option 键进行语音输入，避免和文字输入冲突。")
                         .font(SettingsListTypography.rowCaption)
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -200,7 +200,7 @@ struct SettingsShortcutsSection: View {
                 .padding(.vertical, 2)
             }
 
-            Text("修改后会写入 runtime-settings.json,并由菜单命令或 Browser Workspace 局部 key monitor 真实生效。Governance / Source / Skill 等低频入口不在此页暴露快捷键,避免占用过多 ⌘ 数字键。")
+            Text("修改后的快捷键会立即生效。此处只展示常用操作，低频入口暂不单独配置快捷键。")
                 .font(SettingsListTypography.rowCaption)
                 .foregroundStyle(.secondary)
         }
@@ -236,11 +236,11 @@ struct SettingsShortcutsSection: View {
         case .toggleBrowser: "在当前会话中切换内置浏览器工作区。"
         case .focusTopSearch: "聚焦应用顶部的会话搜索框。"
         case .openSettings: "打开设置中心。"
-        case .focusBrowserAddress: "Browser Workspace 可见时聚焦地址栏。"
-        case .newBrowserTab: "Browser Workspace 可见时创建新标签。"
-        case .closeBrowserTab: "Browser Workspace 可见时关闭当前标签,不关闭 macOS 窗口。"
-        case .browserBack: "Browser Workspace 当前标签后退。"
-        case .browserForward: "Browser Workspace 当前标签前进。"
+        case .focusBrowserAddress: "内置浏览器可见时聚焦地址栏。"
+        case .newBrowserTab: "内置浏览器可见时创建新标签。"
+        case .closeBrowserTab: "内置浏览器可见时关闭当前标签，不关闭应用窗口。"
+        case .browserBack: "内置浏览器当前标签后退。"
+        case .browserForward: "内置浏览器当前标签前进。"
         case .toggleBrowserBookmarks: "切换浏览器书签面板。"
         case .toggleBrowserHistory: "切换浏览器历史面板。"
         }
