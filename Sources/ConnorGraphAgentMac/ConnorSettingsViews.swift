@@ -768,8 +768,8 @@ enum AIConnectionCustomProtocol: String, CaseIterable, Equatable {
 
     var modelValidationEndpointDescription: String {
         switch self {
-        case .openAICompatible: "OpenAI-compatible /v1/chat/completions 最小连接校验"
-        case .anthropicCompatible: "Anthropic Messages /v1/messages 连接校验"
+        case .openAICompatible: "OpenAI 兼容连接测试"
+        case .anthropicCompatible: "Anthropic 兼容连接测试"
         }
     }
 }
@@ -868,7 +868,7 @@ struct AIConnectionOnboardingOption: Identifiable, Equatable {
             selectedModel: "gpt-4.1",
             setupTitle: "连接 OpenAI API",
             setupSubtitle: "使用 API Key 连接 OpenAI Responses API。",
-            setupInstruction: "填写 OpenAI API Key、Base URL 和模型名称。康纳同学会通过原生 Swift Responses API 管线运行模型。",
+            setupInstruction: "填写 OpenAI API Key、接口地址和模型名称。康纳同学会用这组信息连接模型服务。",
             loginButtonTitle: "验证并添加连接",
             authURLString: "https://platform.openai.com/api-keys",
             authenticationKind: .direct
@@ -886,7 +886,7 @@ struct AIConnectionOnboardingOption: Identifiable, Equatable {
             selectedModel: "claude-sonnet-4-5",
             setupTitle: "连接 Anthropic / Claude",
             setupSubtitle: "使用 API Key 连接 Claude。",
-            setupInstruction: "填写 Anthropic API Key、Base URL 和模型名称。康纳同学会通过原生 Swift Messages API 管线运行模型。",
+            setupInstruction: "填写 Anthropic API Key、接口地址和模型名称。康纳同学会用这组信息连接模型服务。",
             loginButtonTitle: "验证并添加连接",
             authURLString: "https://console.anthropic.com/settings/keys",
             authenticationKind: .direct
@@ -941,7 +941,7 @@ struct AIConnectionOnboardingOption: Identifiable, Equatable {
             supportedModels: ["deepseek-v4-flash", "deepseek-v4-pro"],
             setupTitle: "连接 DeepSeek",
             setupSubtitle: "使用 DeepSeek OpenAI Compatible API 驱动康纳同学。",
-            setupInstruction: "选择 DeepSeek 模型并填写 API Key。Endpoint 已按官方文档预设。",
+            setupInstruction: "选择 DeepSeek 模型并填写 API Key。接口地址已按官方文档预设。",
             loginButtonTitle: "继续",
             authURLString: "",
             authenticationKind: .direct
@@ -978,7 +978,7 @@ struct AIConnectionOnboardingOption: Identifiable, Equatable {
             selectedModel: "qwen-plus",
             setupTitle: "连接中国常用模型",
             setupSubtitle: "从国内常用模型 API 中选择一个兼容服务。",
-            setupInstruction: "选择服务商和模型并填写 API Key。Endpoint 已按常用 OpenAI Compatible 地址预设。",
+            setupInstruction: "选择服务商和模型并填写 API Key。接口地址已按常用兼容服务预设。",
             loginButtonTitle: "继续",
             authURLString: "",
             authenticationKind: .direct
@@ -996,7 +996,7 @@ struct AIConnectionOnboardingOption: Identifiable, Equatable {
             selectedModel: AppLLMSettings.default.effectiveModel,
             setupTitle: "连接其他提供商",
             setupSubtitle: "接入 Anthropic、AWS Bedrock、OpenRouter、Google 或其他兼容服务。",
-            setupInstruction: "下一步将填写 Base URL、模型和 API Key。",
+            setupInstruction: "下一步将填写接口地址、模型和 API Key。",
             loginButtonTitle: "继续",
             authURLString: "",
             authenticationKind: .direct
@@ -1223,7 +1223,7 @@ struct AIConnectionSetupView: View {
                     aiConnectionSettingsRow(title: "连接名称") {
                         aiConnectionTextField(option.connectionName, text: $connectionName)
                     }
-                    aiConnectionSettingsRow(title: "Endpoint", help: localEndpointHelpText) {
+                    aiConnectionSettingsRow(title: "接口地址", help: localEndpointHelpText) {
                         aiConnectionTextField("http://localhost:11434/v1", text: $baseURLString)
                     }
                     aiConnectionSettingsRow(title: "模型", help: modelFieldHelpText) {
@@ -1286,7 +1286,7 @@ struct AIConnectionSetupView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("自动配置 GitHub Copilot")
                         .font(SettingsListTypography.header)
-                    Text("授权成功后，康纳同学会使用 Copilot token 中的 proxy endpoint 自动选择正确 API 地址，不需要手动填写 Base URL 或 API Key。")
+                    Text("授权成功后，康纳同学会自动选择正确的连接地址，不需要手动填写接口地址或 API Key。")
                         .font(SettingsListTypography.rowTitle)
                         .foregroundStyle(.secondary)
                 }
@@ -1299,7 +1299,7 @@ struct AIConnectionSetupView: View {
                 Text(connectionName)
             }
             HStack {
-                Text("Endpoint")
+                Text("连接地址")
                     .foregroundStyle(.secondary)
                 Spacer()
                 Text("由 Copilot 授权自动派生")
@@ -1345,7 +1345,7 @@ struct AIConnectionSetupView: View {
                 aiConnectionSettingsRow(title: "连接名称") {
                     aiConnectionTextField("Anthropic / Claude", text: $connectionName)
                 }
-                aiConnectionSettingsRow(title: "Endpoint") {
+                aiConnectionSettingsRow(title: "接口地址") {
                     aiConnectionTextField("https://api.example.com/v1", text: $baseURLString)
                 }
                 aiConnectionSettingsRow(title: "模型") {
@@ -1437,7 +1437,7 @@ struct AIConnectionSetupView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text("当前 Endpoint：\(xiaomiMiMoConnectionMode.openAIEndpoint)")
+                Text("当前接口地址：\(xiaomiMiMoConnectionMode.openAIEndpoint)")
                     .font(SettingsListTypography.rowCaption)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
@@ -1546,7 +1546,7 @@ struct AIConnectionSetupView: View {
                     }
 
                     if selectedProviderPresetID == "custom" {
-                        aiConnectionSettingsRow(title: "Endpoint") {
+                        aiConnectionSettingsRow(title: "接口地址") {
                             aiConnectionTextField("https://your-api-endpoint.com", text: $baseURLString)
                         }
 
@@ -1714,7 +1714,7 @@ struct AIConnectionSetupView: View {
                     syncModelListFromSelection(fallbackModels: models)
                 }
             }
-            Text("可启用多个模型；连接校验使用第一个启用模型，新会话默认选择仍由默认模型决定。当前将使用 \(healthCheckModelForSubmit) 校验连接。")
+            Text("可启用多个模型；测试连接时会使用当前可用的模型之一，新会话仍会使用你选择的默认模型。")
                 .font(SettingsListTypography.rowTitle)
                 .foregroundStyle(.secondary)
         }
@@ -1762,7 +1762,7 @@ struct AIConnectionSetupView: View {
         VStack(alignment: .leading, spacing: 10) {
             TextField("连接名称", text: $connectionName)
                 .textFieldStyle(.roundedBorder)
-            TextField("Base URL", text: $baseURLString)
+            TextField("接口地址", text: $baseURLString)
                 .textFieldStyle(.roundedBorder)
             TextField("模型", text: $model)
                 .textFieldStyle(.roundedBorder)
@@ -2058,9 +2058,9 @@ struct AIConnectionSetupView: View {
         let modelList = modelIDs(in: effectiveModelListForSubmit())
         let endpointDescription = selectedProviderPresetID == "custom" ? customProtocol.modelValidationEndpointDescription : "连接校验"
         if modelList.count > 1 {
-            return "使用服务商自己的模型 ID；已填写多个模型，Connor 将使用第一个模型 \(healthCheckModelForSubmit) 执行 \(endpointDescription)，保存后可在会话中切换其他模型。"
+            return "使用服务商自己的模型 ID。已填写多个模型时，康纳同学会使用其中一个模型测试连接，保存后可在会话中切换其他模型。"
         }
-        return "使用服务商自己的模型 ID；Connor 将使用 \(healthCheckModelForSubmit) 执行 \(endpointDescription)。"
+        return "使用服务商自己的模型 ID。康纳同学会用该模型测试连接。"
     }
 
     private func firstConfiguredModelForSubmit() -> String {
