@@ -39,6 +39,58 @@ struct CalendarContactsCapabilityDomainTests {
         #expect(ConnectedAccountProviderKind.genericIMAPSMTP.defaultCapabilities == [.mail])
     }
 
+    @Test func calendarSourceConfigurationCodableRoundTripsReadOnlyCommercialFields() throws {
+        let configuration = CalendarSourceConfiguration(
+            sourceKind: .genericCalDAV,
+            authMode: .appPassword,
+            syncMode: .readOnly,
+            serverURL: URL(string: "https://caldav.example.com")!,
+            username: "shiwen@example.com",
+            principalURL: URL(string: "https://caldav.example.com/principals/shiwen")!,
+            calendarHomeSetURL: URL(string: "https://caldav.example.com/calendars/shiwen")!,
+            subscriptionURL: nil,
+            syncWindowPastDays: 30,
+            syncWindowFutureDays: 365,
+            enabledCollectionIDs: [CalendarID(rawValue: "calendar-work")],
+            providerMetadata: ["preset": "nextcloud"]
+        )
+
+        let data = try JSONEncoder().encode(configuration)
+        let decoded = try JSONDecoder().decode(CalendarSourceConfiguration.self, from: data)
+
+        #expect(decoded == configuration)
+        #expect(decoded.sourceKind.supportsWrite == false)
+        #expect(decoded.sourceKind.displayName == "标准 CalDAV")
+    }
+
+    @Test func calendarAccountMigratesLegacyProviderToSourceKindAndConfiguration() throws {
+        let legacyJSON = """
+        {
+          "id": "calendar-account-macos-eventkit",
+          "provider": "localFixture",
+          "displayName": "本机日历",
+          "health": {
+            "status": "ready",
+            "checkedAt": "2026-06-24T03:40:00Z",
+            "summary": "已同步 macOS Calendar / EventKit",
+            "blockingReasons": []
+          },
+          "createdAt": "2026-06-24T03:40:00Z",
+          "updatedAt": "2026-06-24T03:40:00Z"
+        }
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let decoded = try decoder.decode(CalendarAccount.self, from: Data(legacyJSON.utf8))
+
+        #expect(decoded.sourceKind == .macOSEventKit)
+        #expect(decoded.configuration.sourceKind == .macOSEventKit)
+        #expect(decoded.configuration.syncMode == .readOnly)
+        #expect(decoded.configuration.syncWindowPastDays == 30)
+        #expect(decoded.configuration.syncWindowFutureDays == 365)
+    }
+
     @Test func calendarDomainCodableRoundTripsEvent() throws {
         let event = CalendarEvent(
             id: CalendarEventID(rawValue: "event-1"),
