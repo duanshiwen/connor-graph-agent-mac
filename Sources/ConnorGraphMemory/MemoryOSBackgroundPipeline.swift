@@ -316,6 +316,13 @@ public struct MemoryOSL2ToKnowledgePromptBuilder: Sendable {
         - novelty: pass/fail plus reason
         - structurability: pass/fail plus reason
 
+        Person/profile knowledge boundary:
+        - Ordinary current-user profile facts, preferences, habits, goals, traits and communication preferences should remain L2 operational memory by default.
+        - Ordinary other-person profile facts and relationships should also remain L2 by default.
+        - Do not create L3 knowledge candidates for facts like “X likes Y”, “the user prefers Z”, or “person A knows person B” unless the material is abstracted into a reusable principle, standard, process, framework or decision basis.
+        - If a person/profile L2 fact is inaccurate or too coarse, propose refined L2 facts as append-only follow-up material rather than promoting it to L3.
+        - Person-related L3 candidates must explain their reusable scope, such as interaction policy, persona modeling standard, collaboration process or decision basis.
+
         You must search L2, L3 and L4 before deciding whether to produce knowledge candidates, concept entities, concept relations or refined L2 facts.
         You must record the search-backed judgment for every accepted or rejected candidate: searched layers, duplicate/novelty outcome, reuse/rejection reason, and reused entity/concept ids when applicable.
         Do not promote ordinary personal or operational facts into L3. If a fact should be more accurate, propose refined L2 facts as append-only follow-up material rather than overwriting history.
