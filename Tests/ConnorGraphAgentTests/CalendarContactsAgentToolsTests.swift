@@ -39,26 +39,20 @@ struct CalendarContactsAgentToolsTests {
         #expect(result.contentJSON?.contains("产品讨论") == true)
     }
 
-    @Test func calendarWriteToolRequiresApprovalForMutation() async throws {
+    @Test func calendarWriteToolIsCurrentlyDisabledEvenWithApproval() async throws {
         let runtime = InMemoryAgentCalendarRuntime(events: [])
         let tool = CalendarWriteTool(runtime: runtime)
 
         var deniedCalendarWrite = false
         do {
             _ = try await tool.execute(
-                arguments: try AgentToolArguments(json: "{\"operation\":\"create_event\",\"title\":\"新日程\",\"calendarID\":\"calendar-work\",\"start\":\"2026-06-19T06:00:00Z\",\"end\":\"2026-06-19T07:00:00Z\",\"approved\":false}"),
-                context: Self.context(toolCallID: "call-calendar-write")
+                arguments: try AgentToolArguments(json: "{\"operation\":\"create_event\",\"title\":\"新日程\",\"calendarID\":\"calendar-work\",\"start\":\"2026-06-19T06:00:00Z\",\"end\":\"2026-06-19T07:00:00Z\",\"approved\":true}"),
+                context: Self.context(toolCallID: "call-calendar-write-disabled")
             )
-        } catch AgentToolError.permissionDenied(_) {
-            deniedCalendarWrite = true
+        } catch AgentToolError.permissionDenied(let message) {
+            deniedCalendarWrite = message.contains("暂不支持")
         }
         #expect(deniedCalendarWrite)
-
-        let approved = try await tool.execute(
-            arguments: try AgentToolArguments(json: "{\"operation\":\"create_event\",\"title\":\"新日程\",\"calendarID\":\"calendar-work\",\"start\":\"2026-06-19T06:00:00Z\",\"end\":\"2026-06-19T07:00:00Z\",\"approved\":true}"),
-            context: Self.context(toolCallID: "call-calendar-write-approved")
-        )
-        #expect(approved.contentText.contains("Created approved calendar event"))
     }
 
     @Test func contactsReadAndWriteToolsUseAggregatedOperations() async throws {
