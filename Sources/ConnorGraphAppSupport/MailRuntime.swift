@@ -202,6 +202,13 @@ public struct MailRuntime: Sendable {
         }
     }
 
+    public func sendHistory(draftID: MailDraftID) async throws -> MailSendHistory {
+        guard let draft = try await draftStore.draft(id: draftID) else { throw MailRuntimeError.draftNotFound(draftID.rawValue) }
+        let attempts = try await draftStore.sendAttempts(draftID: draftID)
+        let auditRecords = try await auditLog.listRecords().filter { $0.draftID == draftID }
+        return MailSendHistory(draft: draft, attempts: attempts, auditRecords: auditRecords)
+    }
+
     public func evidenceCandidate(for messageID: MailMessageID) async throws -> MailEvidenceCandidate {
         let detail = try await getMessage(id: messageID, includeBody: false)
         let candidate = MailEvidenceCandidate(accountID: detail.summary.accountID, mailboxID: detail.summary.mailboxID, messageID: messageID, evidenceKind: "mail-message", redactedSummary: detail.summary.subject, sourceHash: detail.headers.rawHeaderHash)
