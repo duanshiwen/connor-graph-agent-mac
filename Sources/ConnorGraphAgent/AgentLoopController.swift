@@ -18,7 +18,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
     public var budget: AgentBudgetConfiguration
 
     public init(
-        maxToolIterations: Int = 64,
+        maxToolIterations: Int = 256,
         maxToolCallsPerIteration: Int = 4,
         maxRunDurationSeconds: Int = 1800,
         maxToolResultBytes: Int = 32 * 1024,
@@ -62,7 +62,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.maxToolIterations = try container.decodeIfPresent(Int.self, forKey: .maxToolIterations) ?? 64
+        self.maxToolIterations = try container.decodeIfPresent(Int.self, forKey: .maxToolIterations) ?? 256
         self.maxToolCallsPerIteration = try container.decodeIfPresent(Int.self, forKey: .maxToolCallsPerIteration) ?? 4
         self.maxRunDurationSeconds = try container.decodeIfPresent(Int.self, forKey: .maxRunDurationSeconds) ?? 1800
         self.maxToolResultBytes = try container.decodeIfPresent(Int.self, forKey: .maxToolResultBytes) ?? 32 * 1024
