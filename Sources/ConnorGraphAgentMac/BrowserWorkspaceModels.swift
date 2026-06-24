@@ -60,13 +60,11 @@ struct BrowserTabState: Identifiable {
     var initialURLString: String
     var webView: WKWebView?
     var navigationState: WebNavigationState
-    var mediaSnapshot: BrowserMediaSourceSnapshot?
 
     init(id: UUID = UUID(), initialURLString: String) {
         self.id = id
         self.initialURLString = initialURLString
         self.navigationState = WebNavigationState(canGoBack: false, canGoForward: false, title: "", url: initialURLString)
-        self.mediaSnapshot = nil
     }
 
     init(snapshot: BrowserTabSnapshot, webView: WKWebView?) {
@@ -80,7 +78,6 @@ struct BrowserTabState: Identifiable {
             url: snapshot.currentURLString,
             isLoading: snapshot.isLoading
         )
-        self.mediaSnapshot = nil
     }
 
     var snapshot: BrowserTabSnapshot {

@@ -4,45 +4,18 @@ import WebKit
 import ConnorGraphCore
 import ConnorGraphAppSupport
 
-enum BrowserMediaSnapshotDecoder {
-    static func decode(from data: Data) -> BrowserMediaSourceSnapshot? {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .custom { decoder in
-            let container = try decoder.singleValueContainer()
-            let raw = try container.decode(String.self)
-            if let date = parseISO8601Date(raw) {
-                return date
-            }
-            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unsupported ISO-8601 date: \(raw)")
-        }
-        return try? decoder.decode(BrowserMediaSourceSnapshot.self, from: data)
-    }
-
-    private static func parseISO8601Date(_ raw: String) -> Date? {
-        let withFractionalSeconds = ISO8601DateFormatter()
-        withFractionalSeconds.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = withFractionalSeconds.date(from: raw) { return date }
-
-        let withoutFractionalSeconds = ISO8601DateFormatter()
-        withoutFractionalSeconds.formatOptions = [.withInternetDateTime]
-        return withoutFractionalSeconds.date(from: raw)
-    }
-}
-
 struct EmbeddedWebView: NSViewRepresentable {
     var initialURLString: String
     var onWebViewCreated: (WKWebView) -> Void
     var onNavigationStateChanged: (WebNavigationState) -> Void
     var onOpenInNewTab: (URL) -> Void
     var onSelectionChanged: (BrowserSelectionPayload) -> Void
-    var onMediaSnapshotChanged: (BrowserMediaSourceSnapshot) -> Void = { _ in }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
             onNavigationStateChanged: onNavigationStateChanged,
             onOpenInNewTab: onOpenInNewTab,
-            onSelectionChanged: onSelectionChanged,
-            onMediaSnapshotChanged: onMediaSnapshotChanged
+            onSelectionChanged: onSelectionChanged
         )
     }
 
@@ -50,9 +23,7 @@ struct EmbeddedWebView: NSViewRepresentable {
         let configuration = WKWebViewConfiguration()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         configuration.userContentController.addUserScript(WKUserScript(source: Self.selectionObserverScript, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
-        configuration.userContentController.addUserScript(WKUserScript(source: Self.mediaObserverScript, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
         configuration.userContentController.add(context.coordinator, name: Coordinator.selectionMessageName)
-        configuration.userContentController.add(context.coordinator, name: Coordinator.mediaMessageName)
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
@@ -70,209 +41,7 @@ struct EmbeddedWebView: NSViewRepresentable {
         context.coordinator.onNavigationStateChanged = onNavigationStateChanged
         context.coordinator.onOpenInNewTab = onOpenInNewTab
         context.coordinator.onSelectionChanged = onSelectionChanged
-        context.coordinator.onMediaSnapshotChanged = onMediaSnapshotChanged
     }
-
-    static let mediaObserverScript = """
-    (function() {
-      if (window.__connorMediaObserverInstalled) { return; }
-      window.__connorMediaObserverInstalled = true;
-
-      var lastPayloadSignature = '';
-      var pendingReportTimer = null;
-      var observedMediaElements = [];
-
-      function attr(selector, name) {
-        var element = document.querySelector(selector);
-        return element ? (element.getAttribute(name) || '') : '';
-      }
-
-      function collectMediaElements(root, output, visitedRoots) {
-        if (!root || visitedRoots.indexOf(root) >= 0) { return; }
-        visitedRoots.push(root);
-        try {
-          if (root.querySelectorAll) {
-            Array.prototype.forEach.call(root.querySelectorAll('video,audio'), function(element) {
-              if (output.indexOf(element) < 0) { output.push(element); }
-            });
-            Array.prototype.forEach.call(root.querySelectorAll('*'), function(element) {
-              if (element.shadowRoot) { collectMediaElements(element.shadowRoot, output, visitedRoots); }
-            });
-          }
-        } catch (error) {}
-      }
-
-      function sourceFor(element) {
-        var current = element.currentSrc || element.src || '';
-        if (!current && element.querySelector) {
-          var source = element.querySelector('source');
-          if (source) { current = source.src || source.getAttribute('src') || ''; }
-        }
-        return current || null;
-      }
-
-      function stableIDFor(element, index) {
-        if (element.id) { return element.id; }
-        var explicit = element.getAttribute && (element.getAttribute('data-connor-media-id') || element.getAttribute('aria-label'));
-        if (explicit) { return explicit; }
-        var tag = element.tagName ? element.tagName.toLowerCase() : 'media';
-        var src = sourceFor(element) || '';
-        var rect = element.getBoundingClientRect ? element.getBoundingClientRect() : { x: 0, y: 0, width: 0, height: 0 };
-        return tag + '-' + index + '-' + Math.round(rect.x) + '-' + Math.round(rect.y) + '-' + Math.round(rect.width) + '-' + Math.round(rect.height) + '-' + src.slice(0, 80);
-      }
-
-      function mediaElements() {
-        var elements = [];
-        collectMediaElements(document, elements, []);
-        observedMediaElements = elements;
-        return elements.map(function(element, index) {
-          var current = sourceFor(element);
-          return {
-            id: stableIDFor(element, index),
-            kind: element.tagName ? element.tagName.toLowerCase() : 'media',
-            sourceURLString: current,
-            durationSeconds: isFinite(element.duration) ? element.duration : null,
-            currentTimeSeconds: isFinite(element.currentTime) ? element.currentTime : null,
-            isPaused: !!element.paused,
-            isMuted: !!element.muted,
-            readyState: typeof element.readyState === 'number' ? element.readyState : null
-          };
-        });
-      }
-
-      function openGraphMedia() {
-        var candidates = [];
-        var values = [
-          { value: attr('meta[property="og:video"]', 'content') || attr('meta[property="og:video:url"]', 'content') || attr('meta[property="og:video:secure_url"]', 'content'), type: 'video' },
-          { value: attr('meta[property="og:audio"]', 'content') || attr('meta[property="og:audio:url"]', 'content') || attr('meta[property="og:audio:secure_url"]', 'content'), type: 'audio' },
-          { value: attr('meta[name="twitter:player"]', 'content'), type: 'video' },
-          { value: attr('meta[name="twitter:player:stream"]', 'content'), type: 'video' }
-        ];
-        values.forEach(function(item, index) {
-          if (item.value) { candidates.push({ id: 'meta-' + index, sourceURLString: item.value, type: item.type }); }
-        });
-        return candidates;
-      }
-
-      function mediaSessionSelection() {
-        try {
-          if (!navigator.mediaSession || !navigator.mediaSession.metadata) { return null; }
-          var metadata = navigator.mediaSession.metadata;
-          var parts = [metadata.title, metadata.artist, metadata.album].filter(Boolean);
-          return parts.length ? parts.join(' — ') : null;
-        } catch (error) {
-          return null;
-        }
-      }
-
-      function buildMediaPayload() {
-        return {
-          pageURLString: location.href || '',
-          pageTitle: document.title || '',
-          detectedAt: new Date().toISOString(),
-          mediaElements: mediaElements(),
-          openGraphMedia: openGraphMedia(),
-          canonicalURLString: attr('link[rel="canonical"]', 'href') || null,
-          userVisibleSelection: mediaSessionSelection()
-        };
-      }
-
-      function payloadSignature(payload) {
-        return JSON.stringify({
-          pageURLString: payload.pageURLString,
-          pageTitle: payload.pageTitle,
-          mediaElements: payload.mediaElements.map(function(item) {
-            return {
-              id: item.id,
-              kind: item.kind,
-              sourceURLString: item.sourceURLString,
-              durationSeconds: item.durationSeconds,
-              isPaused: item.isPaused,
-              isMuted: item.isMuted,
-              readyState: item.readyState
-            };
-          }),
-          openGraphMedia: payload.openGraphMedia,
-          canonicalURLString: payload.canonicalURLString,
-          userVisibleSelection: payload.userVisibleSelection
-        });
-      }
-
-      function reportMediaNow() {
-        try {
-          var payload = buildMediaPayload();
-          var signature = payloadSignature(payload);
-          if (signature === lastPayloadSignature) { return; }
-          lastPayloadSignature = signature;
-          window.webkit.messageHandlers.connorMedia.postMessage(JSON.stringify(payload));
-        } catch (error) {}
-      }
-
-      function scheduleReport(delay) {
-        if (pendingReportTimer) { clearTimeout(pendingReportTimer); }
-        pendingReportTimer = setTimeout(function() {
-          pendingReportTimer = null;
-          reportMediaNow();
-        }, delay || 150);
-      }
-
-      function attachMediaEventListeners(element) {
-        if (!element || element.__connorMediaListenersInstalled) { return; }
-        element.__connorMediaListenersInstalled = true;
-        ['loadstart', 'loadedmetadata', 'loadeddata', 'durationchange', 'play', 'playing', 'pause', 'timeupdate', 'volumechange', 'encrypted', 'waitingforkey', 'error'].forEach(function(eventName) {
-          element.addEventListener(eventName, function() { scheduleReport(100); }, true);
-        });
-      }
-
-      function refreshObservedMediaListeners() {
-        mediaElements();
-        observedMediaElements.forEach(attachMediaEventListeners);
-      }
-
-      window.__connorCollectMediaSnapshot = function() {
-        refreshObservedMediaListeners();
-        return JSON.stringify(buildMediaPayload());
-      };
-
-      function instrumentHistory(methodName) {
-        var original = history[methodName];
-        if (typeof original !== 'function') { return; }
-        history[methodName] = function() {
-          var result = original.apply(this, arguments);
-          setTimeout(function() { refreshObservedMediaListeners(); reportMediaNow(); }, 0);
-          setTimeout(function() { refreshObservedMediaListeners(); reportMediaNow(); }, 1000);
-          return result;
-        };
-      }
-
-      refreshObservedMediaListeners();
-      reportMediaNow();
-      ['play', 'playing', 'pause', 'loadedmetadata', 'durationchange', 'loadeddata'].forEach(function(eventName) {
-        document.addEventListener(eventName, function() { refreshObservedMediaListeners(); scheduleReport(100); }, true);
-      });
-      window.addEventListener('popstate', function() { refreshObservedMediaListeners(); scheduleReport(100); });
-      instrumentHistory('pushState');
-      instrumentHistory('replaceState');
-
-      if (window.MutationObserver && document.documentElement) {
-        var observer = new MutationObserver(function(mutations) {
-          var relevant = mutations.some(function(mutation) {
-            return mutation.type === 'childList' || mutation.type === 'attributes';
-          });
-          if (relevant) {
-            refreshObservedMediaListeners();
-            scheduleReport(250);
-          }
-        });
-        observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'poster', 'aria-label', 'title'] });
-      }
-
-      setTimeout(function() { refreshObservedMediaListeners(); reportMediaNow(); }, 500);
-      setTimeout(function() { refreshObservedMediaListeners(); reportMediaNow(); }, 2000);
-      setTimeout(function() { refreshObservedMediaListeners(); reportMediaNow(); }, 5000);
-      setInterval(function() { refreshObservedMediaListeners(); reportMediaNow(); }, 5000);
-    })();
-    """
 
     static let selectionObserverScript = """
     (function() {
@@ -323,23 +92,19 @@ struct EmbeddedWebView: NSViewRepresentable {
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
         static let selectionMessageName = "connorSelection"
-        static let mediaMessageName = "connorMedia"
         weak var webView: WKWebView?
         var onNavigationStateChanged: (WebNavigationState) -> Void
         var onOpenInNewTab: (URL) -> Void
         var onSelectionChanged: (BrowserSelectionPayload) -> Void
-        var onMediaSnapshotChanged: (BrowserMediaSourceSnapshot) -> Void
 
         init(
             onNavigationStateChanged: @escaping (WebNavigationState) -> Void,
             onOpenInNewTab: @escaping (URL) -> Void,
-            onSelectionChanged: @escaping (BrowserSelectionPayload) -> Void,
-            onMediaSnapshotChanged: @escaping (BrowserMediaSourceSnapshot) -> Void
+            onSelectionChanged: @escaping (BrowserSelectionPayload) -> Void
         ) {
             self.onNavigationStateChanged = onNavigationStateChanged
             self.onOpenInNewTab = onOpenInNewTab
             self.onSelectionChanged = onSelectionChanged
-            self.onMediaSnapshotChanged = onMediaSnapshotChanged
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -350,10 +115,6 @@ struct EmbeddedWebView: NSViewRepresentable {
                let payload = try? JSONDecoder().decode(BrowserSelectionPayload.self, from: data) {
                 DispatchQueue.main.async { self.onSelectionChanged(payload) }
                 return
-            }
-            if message.name == Self.mediaMessageName,
-               let payload = BrowserMediaSnapshotDecoder.decode(from: data) {
-                DispatchQueue.main.async { self.onMediaSnapshotChanged(payload) }
             }
         }
 
