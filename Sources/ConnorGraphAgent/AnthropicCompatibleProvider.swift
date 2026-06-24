@@ -28,7 +28,7 @@ public struct AnthropicCompatibleConfig: Sendable, Equatable {
         anthropicVersion: String = "2023-06-01",
         extraHeaders: [String: String] = [:],
         maxTokens: Int = 4096,
-        requestTimeout: TimeInterval = 180,
+        requestTimeout: TimeInterval = 300,
         featureOptions: AnthropicCompatibleFeatureOptions = AnthropicCompatibleFeatureOptions()
     ) {
         self.baseURL = baseURL
@@ -60,7 +60,7 @@ public struct AnthropicCompatibleConfig: Sendable, Equatable {
             anthropicVersion: anthropicVersion,
             extraHeaders: extraHeaders,
             maxTokens: maxTokens,
-            requestTimeout: 180,
+            requestTimeout: 300,
             featureOptions: featureOptions
         )
     }

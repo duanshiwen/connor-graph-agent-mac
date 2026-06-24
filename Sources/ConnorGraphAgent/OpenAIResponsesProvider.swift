@@ -19,7 +19,7 @@ public struct OpenAIResponsesConfig: Sendable, Equatable {
         apiKeyHeaderKind: OpenAICompatibleAPIKeyHeaderKind = .bearer,
         reasoningEffort: String? = nil,
         includeEncryptedReasoning: Bool = false,
-        requestTimeout: TimeInterval = 180
+        requestTimeout: TimeInterval = 300
     ) {
         self.baseURL = baseURL
         self.apiKey = apiKey

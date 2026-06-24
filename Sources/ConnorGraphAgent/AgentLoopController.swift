@@ -20,7 +20,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
     public init(
         maxToolIterations: Int = 64,
         maxToolCallsPerIteration: Int = 4,
-        maxRunDurationSeconds: Int = 180,
+        maxRunDurationSeconds: Int = 1800,
         maxToolResultBytes: Int = 32 * 1024,
         allowParallelToolCalls: Bool = false,
         maxConsecutiveToolResultErrors: Int = 6,
@@ -64,7 +64,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.maxToolIterations = try container.decodeIfPresent(Int.self, forKey: .maxToolIterations) ?? 64
         self.maxToolCallsPerIteration = try container.decodeIfPresent(Int.self, forKey: .maxToolCallsPerIteration) ?? 4
-        self.maxRunDurationSeconds = try container.decodeIfPresent(Int.self, forKey: .maxRunDurationSeconds) ?? 180
+        self.maxRunDurationSeconds = try container.decodeIfPresent(Int.self, forKey: .maxRunDurationSeconds) ?? 1800
         self.maxToolResultBytes = try container.decodeIfPresent(Int.self, forKey: .maxToolResultBytes) ?? 32 * 1024
         self.allowParallelToolCalls = try container.decodeIfPresent(Bool.self, forKey: .allowParallelToolCalls) ?? false
         self.maxConsecutiveToolResultErrors = try container.decodeIfPresent(Int.self, forKey: .maxConsecutiveToolResultErrors) ?? 6
