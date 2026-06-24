@@ -2,14 +2,17 @@ import Foundation
 import ConnorGraphCore
 import ConnorGraphMemory
 import ConnorGraphStore
+import ConnorGraphSearch
 
 public struct AppMemoryOSCLIInspector: Sendable {
     public var store: SQLiteMemoryOSStore
     public var databasePath: String
+    public var searchKernel: MemoryOSSearchKernel?
 
-    public init(store: SQLiteMemoryOSStore, databasePath: String = "memory-os.sqlite") {
+    public init(store: SQLiteMemoryOSStore, databasePath: String = "memory-os.sqlite", searchKernel: MemoryOSSearchKernel? = nil) {
         self.store = store
         self.databasePath = databasePath
+        self.searchKernel = searchKernel
     }
 
     public func status(now: Date = Date()) throws -> MemoryOSCLIStatus {
@@ -187,7 +190,7 @@ public struct AppMemoryOSCLIInspector: Sendable {
         let retrievalLayers = normalizedLayers.isEmpty
             ? MemoryOSRetrievalLayer.allCases
             : normalizedLayers.compactMap(MemoryOSRetrievalLayer.init(rawValue:))
-        let hits = try SQLiteMemoryOSUnifiedRetrievalService(store: store).search(MemoryOSRetrievalQuery(text: query, layers: retrievalLayers, limit: safeLimit(limit), depth: 0))
+        let hits = try AppMemoryOSFacade(store: store, searchKernel: searchKernel).searchMemoryOS(MemoryOSRetrievalQuery(text: query, layers: retrievalLayers, limit: safeLimit(limit), depth: 0))
         return MemoryOSCLISearchResult(
             query: query,
             hits: Array(hits.prefix(safeLimit(limit))).map { hit in

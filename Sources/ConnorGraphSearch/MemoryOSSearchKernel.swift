@@ -1,6 +1,6 @@
 import Foundation
 
-public final class MemoryOSSearchKernel {
+public final class MemoryOSSearchKernel: @unchecked Sendable {
     private let ffi: MemoryOSSearchKernelFFI
     private let handle: OpaquePointer
     private let encoder: JSONEncoder

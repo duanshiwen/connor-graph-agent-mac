@@ -53,7 +53,8 @@ public enum AppMemoryOSCLIRouter {
         }
         let store = try SQLiteMemoryOSStore(path: paths.memoryOSDatabaseURL.path)
         try store.migrate()
-        return AppMemoryOSCLIInspector(store: store, databasePath: paths.memoryOSDatabaseURL.path)
+        let searchKernel = try AppMemoryOSSearchKernelFactory.makeLive(paths: paths)
+        return AppMemoryOSCLIInspector(store: store, databasePath: paths.memoryOSDatabaseURL.path, searchKernel: searchKernel)
     }
 
     private static func routeL0(args: [String], inspector: AppMemoryOSCLIInspector, encoder: JSONEncoder) throws -> String {

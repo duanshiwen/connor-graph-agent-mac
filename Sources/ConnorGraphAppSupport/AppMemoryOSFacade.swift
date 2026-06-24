@@ -2,6 +2,56 @@ import Foundation
 import ConnorGraphCore
 import ConnorGraphMemory
 import ConnorGraphStore
+import ConnorGraphSearch
+
+
+private extension MemoryOSSearchKernelLayer {
+    init(retrievalLayer: MemoryOSRetrievalLayer) {
+        switch retrievalLayer {
+        case .l0: self = .l0
+        case .l1: self = .l1
+        case .l2: self = .l2
+        case .l3: self = .l3
+        case .l4: self = .l4
+        }
+    }
+}
+
+private extension MemoryOSRetrievalLayer {
+    init(searchKernelLayer: MemoryOSSearchKernelLayer) {
+        switch searchKernelLayer {
+        case .l0: self = .l0
+        case .l1: self = .l1
+        case .l2: self = .l2
+        case .l3: self = .l3
+        case .l4: self = .l4
+        }
+    }
+}
+
+private extension MemoryOSRetrievalHit {
+    init(searchKernelHit hit: MemoryOSSearchKernelHit) {
+        var metadata: [String: String] = [
+            "backend": "tantivy-embedded",
+            "record_kind": hit.recordKind,
+            "matched_channel": hit.matchedChannel,
+            "rank_reason": hit.rankReason
+        ]
+        metadata["kernel_metadata_json"] = hit.metadataJSON
+        self.init(
+            layer: MemoryOSRetrievalLayer(searchKernelLayer: hit.layer),
+            recordID: hit.recordID,
+            title: hit.title,
+            summary: hit.snippet,
+            matchedText: hit.snippet,
+            score: hit.score,
+            entityRefs: hit.layer == .l4 ? [hit.recordID] : [],
+            canReadRaw: hit.layer != .l4,
+            canExpandDepth: hit.layer == .l4,
+            metadata: metadata
+        )
+    }
+}
 
 public struct AppMemoryOSOperationalSummary: Sendable, Equatable, Codable {
     public var healthReport: MemoryOSStoreHealthReport
@@ -57,17 +107,20 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
     public var repository: AppMemoryOSRepository
     public var ingestionService: MemoryOSIngestionService
     public var backgroundRunner: AppMemoryOSBackgroundJobRunner
+    public var searchKernel: MemoryOSSearchKernel?
 
     public init(
         store: SQLiteMemoryOSStore,
         repository: AppMemoryOSRepository? = nil,
         ingestionService: MemoryOSIngestionService = MemoryOSIngestionService(),
-        backgroundRunner: AppMemoryOSBackgroundJobRunner = AppMemoryOSBackgroundJobRunner()
+        backgroundRunner: AppMemoryOSBackgroundJobRunner = AppMemoryOSBackgroundJobRunner(),
+        searchKernel: MemoryOSSearchKernel? = nil
     ) {
         self.store = store
         self.repository = repository ?? AppMemoryOSRepository(store: store)
         self.ingestionService = ingestionService
         self.backgroundRunner = backgroundRunner
+        self.searchKernel = searchKernel
     }
 
     public func operationalSummary(now: Date = Date()) throws -> AppMemoryOSOperationalSummary {
@@ -95,7 +148,15 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
     }
 
     public func searchMemoryOS(_ query: MemoryOSRetrievalQuery) throws -> [MemoryOSRetrievalHit] {
-        try SQLiteMemoryOSUnifiedRetrievalService(store: store).search(query)
+        if let searchKernel {
+            let response = try searchKernel.search(MemoryOSSearchKernelRequest(
+                query: query.text,
+                layers: query.layers.map(MemoryOSSearchKernelLayer.init(retrievalLayer:)),
+                limit: query.limit
+            ))
+            return response.hits.map(MemoryOSRetrievalHit.init(searchKernelHit:))
+        }
+        return try SQLiteMemoryOSUnifiedRetrievalService(store: store).search(query)
     }
 
     public func expandMemoryOSL4(entityID: String, depth: Int = 1, limit: Int = 20) throws -> [MemoryOSL4ExpansionHit] {
