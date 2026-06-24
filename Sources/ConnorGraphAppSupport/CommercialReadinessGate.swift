@@ -137,6 +137,8 @@ public enum CommercialNativeMailSystemReadiness: Codable, Sendable, Equatable {
         syncCursorReady: Bool,
         toolAuditReady: Bool,
         sendApprovalReady: Bool,
+        smtpSendAdapterReady: Bool,
+        persistentDraftStoreReady: Bool,
         contactApprovalReady: Bool,
         attachmentImportReady: Bool,
         evidencePolicyReady: Bool
@@ -175,6 +177,8 @@ public struct CommercialReadinessInput: Codable, Sendable, Equatable {
             syncCursorReady: true,
             toolAuditReady: true,
             sendApprovalReady: true,
+            smtpSendAdapterReady: true,
+            persistentDraftStoreReady: true,
             contactApprovalReady: true,
             attachmentImportReady: true,
             evidencePolicyReady: true
@@ -484,7 +488,7 @@ public struct CommercialReadinessGate: Sendable, Equatable {
 
     private func nativeMailSystemCard(_ readiness: CommercialNativeMailSystemReadiness) -> CommercialReadinessCard {
         switch readiness {
-        case .ready(let accountCount, let healthyAccountCount, let credentialBoundaryReady, let syncCursorReady, let toolAuditReady, let sendApprovalReady, let contactApprovalReady, let attachmentImportReady, let evidencePolicyReady):
+        case .ready(let accountCount, let healthyAccountCount, let credentialBoundaryReady, let syncCursorReady, let toolAuditReady, let sendApprovalReady, let smtpSendAdapterReady, let persistentDraftStoreReady, let contactApprovalReady, let attachmentImportReady, let evidencePolicyReady):
             let blockingReasons = [
                 accountCount > 0 ? nil : "No mail accounts registered",
                 healthyAccountCount > 0 ? nil : "No healthy mail accounts",
@@ -492,6 +496,8 @@ public struct CommercialReadinessGate: Sendable, Equatable {
                 syncCursorReady ? nil : "Sync cursor governance is not ready",
                 toolAuditReady ? nil : "Mail tool audit is not ready",
                 sendApprovalReady ? nil : "Send approval runtime is not ready",
+                smtpSendAdapterReady ? nil : "SMTP send adapter is not ready",
+                persistentDraftStoreReady ? nil : "Persistent mail draft store is not ready",
                 contactApprovalReady ? nil : "Contact approval runtime is not ready",
                 attachmentImportReady ? nil : "Mail attachment import is not ready",
                 evidencePolicyReady ? nil : "Mail evidence policy is not ready"
@@ -499,7 +505,7 @@ public struct CommercialReadinessGate: Sendable, Equatable {
             return CommercialReadinessCard(
                 phase: .nativeMailSystem,
                 status: blockingReasons.isEmpty ? .ready : .blocked,
-                evidence: "\(accountCount) accounts · \(healthyAccountCount) healthy · credential \(credentialBoundaryReady ? "ready" : "blocked") · sync \(syncCursorReady ? "ready" : "blocked") · audit \(toolAuditReady ? "ready" : "blocked") · send approval \(sendApprovalReady ? "ready" : "blocked")",
+                evidence: "\(accountCount) accounts · \(healthyAccountCount) healthy · credential \(credentialBoundaryReady ? "ready" : "blocked") · sync \(syncCursorReady ? "ready" : "blocked") · audit \(toolAuditReady ? "ready" : "blocked") · send approval \(sendApprovalReady ? "ready" : "blocked") · smtp \(smtpSendAdapterReady ? "ready" : "blocked") · drafts \(persistentDraftStoreReady ? "ready" : "blocked")",
                 metrics: [
                     "accounts": "\(accountCount)",
                     "healthyAccounts": "\(healthyAccountCount)",
@@ -507,6 +513,8 @@ public struct CommercialReadinessGate: Sendable, Equatable {
                     "syncCursor": syncCursorReady ? "ready" : "blocked",
                     "toolAudit": toolAuditReady ? "ready" : "blocked",
                     "sendApproval": sendApprovalReady ? "ready" : "blocked",
+                    "smtpSendAdapter": smtpSendAdapterReady ? "ready" : "blocked",
+                    "persistentDraftStore": persistentDraftStoreReady ? "ready" : "blocked",
                     "contactApproval": contactApprovalReady ? "ready" : "blocked",
                     "attachmentImport": attachmentImportReady ? "ready" : "blocked",
                     "evidencePolicy": evidencePolicyReady ? "ready" : "blocked"
