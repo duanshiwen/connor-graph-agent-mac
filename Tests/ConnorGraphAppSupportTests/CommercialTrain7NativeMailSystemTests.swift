@@ -77,7 +77,7 @@ struct CommercialTrain7NativeMailSystemTests {
         var registry = AgentToolRegistry()
         registry.registerNativeMailTools(runtime: runtime)
 
-        #expect(!registry.definitions.map(\.name).contains("mail_search_messages"))
+        #expect(registry.definitions.map(\.name).contains("mail_search_messages"))
         #expect(registry.definitions.map(\.name).contains("mail_send_draft"))
         #expect(registry.permission(named: "mail_send_draft") == .sendMail)
 
