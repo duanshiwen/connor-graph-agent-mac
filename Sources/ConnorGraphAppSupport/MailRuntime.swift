@@ -267,21 +267,25 @@ public struct NativeMailReadiness: Codable, Sendable, Equatable {
     public var syncCursorReady: Bool
     public var toolAuditReady: Bool
     public var sendApprovalReady: Bool
+    public var smtpSendAdapterReady: Bool
+    public var persistentDraftStoreReady: Bool
     public var contactApprovalReady: Bool
     public var attachmentImportReady: Bool
     public var evidencePolicyReady: Bool
 
     public var isReady: Bool {
-        accountCount > 0 && healthyAccountCount > 0 && credentialBoundaryReady && syncCursorReady && toolAuditReady && sendApprovalReady && contactApprovalReady && attachmentImportReady && evidencePolicyReady
+        accountCount > 0 && healthyAccountCount > 0 && credentialBoundaryReady && syncCursorReady && toolAuditReady && sendApprovalReady && smtpSendAdapterReady && persistentDraftStoreReady && contactApprovalReady && attachmentImportReady && evidencePolicyReady
     }
 
-    public init(accountCount: Int, healthyAccountCount: Int, credentialBoundaryReady: Bool, syncCursorReady: Bool, toolAuditReady: Bool, sendApprovalReady: Bool, contactApprovalReady: Bool, attachmentImportReady: Bool, evidencePolicyReady: Bool) {
+    public init(accountCount: Int, healthyAccountCount: Int, credentialBoundaryReady: Bool, syncCursorReady: Bool, toolAuditReady: Bool, sendApprovalReady: Bool, smtpSendAdapterReady: Bool = true, persistentDraftStoreReady: Bool = true, contactApprovalReady: Bool, attachmentImportReady: Bool, evidencePolicyReady: Bool) {
         self.accountCount = accountCount
         self.healthyAccountCount = healthyAccountCount
         self.credentialBoundaryReady = credentialBoundaryReady
         self.syncCursorReady = syncCursorReady
         self.toolAuditReady = toolAuditReady
         self.sendApprovalReady = sendApprovalReady
+        self.smtpSendAdapterReady = smtpSendAdapterReady
+        self.persistentDraftStoreReady = persistentDraftStoreReady
         self.contactApprovalReady = contactApprovalReady
         self.attachmentImportReady = attachmentImportReady
         self.evidencePolicyReady = evidencePolicyReady
