@@ -211,7 +211,7 @@ public struct RSSExportOPMLTool: AgentTool {
 public struct RSSCreateEvidenceCandidateTool: AgentTool {
     public let runtime: any AgentRSSRuntime
     public var name: String { "rss_create_evidence_candidate" }
-    public var description: String { "Create a governed Graph Memory evidence candidate from an RSS item without direct graph write." }
+    public var description: String { "Create a governed Memory OS evidence candidate from an RSS item without direct memory projection." }
     public var permission: AgentPermissionCapability { .readRSS }
     public var inputSchema: AgentToolInputSchema { .object(properties: ["itemID": .string(description: "RSS item ID")], required: ["itemID"]) }
     public init(runtime: any AgentRSSRuntime) { self.runtime = runtime }

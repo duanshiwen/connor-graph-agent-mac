@@ -500,7 +500,7 @@ private enum RSSSourcePreset: String, CaseIterable, Identifiable {
         case .swiftBlog:
             "适合跟踪 Swift 语言、并发、Package Manager 和工具链公告。正文读取仍需显式工具调用。"
         case .hackerNews:
-            "适合发现技术趋势。进入 Graph Memory 前必须先生成 evidence candidate 并人工审查。"
+            "适合发现技术趋势。投影到 Memory OS 前必须先生成 evidence candidate 并人工审查。"
         case .custom:
             "输入自定义 feed URL。同步和状态变更都经过 Connor Policy Engine 和 audit trail。"
         }
