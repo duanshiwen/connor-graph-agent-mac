@@ -281,13 +281,16 @@ public struct SearchEngineMCPTool: AgentTool {
 
     private let configuration: SearchEngineMCPConfiguration
     private let browserAssistedSearchHandler: BrowserAssistedSearchHandler?
+    private let nativeSearchClient: NativeWebSearchClient
 
     public init(
         configuration: SearchEngineMCPConfiguration = SearchEngineMCPConfiguration(),
-        browserAssistedSearchHandler: BrowserAssistedSearchHandler? = nil
+        browserAssistedSearchHandler: BrowserAssistedSearchHandler? = nil,
+        nativeSearchClient: NativeWebSearchClient = NativeWebSearchClient()
     ) {
         self.configuration = configuration
         self.browserAssistedSearchHandler = browserAssistedSearchHandler
+        self.nativeSearchClient = nativeSearchClient
     }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
@@ -339,14 +342,19 @@ public struct SearchEngineMCPTool: AgentTool {
             }
         }
 
-        let payload: [String: Any] = ["query": query, "engine": engine, "max_results": maxResults]
-        let text = try await SearchEngineMCPSubprocess.call(tool: "search", arguments: payload, configuration: configuration)
+        let nativeResult = try await nativeSearchClient.search(query: query, engine: engine, maxResults: maxResults)
         return AgentToolResult(
             toolCallID: context.toolCallID,
             toolName: name,
-            contentText: text,
-            contentJSON: BrowserFetchTool.encodeJSONObject(["query": query, "engine": engine, "maxResults": maxResults, "text": text]),
-            citations: Self.extractURLs(from: text)
+            contentText: nativeResult.markdown,
+            contentJSON: BrowserFetchTool.encodeJSONObject([
+                "query": nativeResult.query,
+                "engine": nativeResult.engine,
+                "maxResults": maxResults,
+                "results": nativeResult.results.map { ["title": $0.title, "url": $0.url, "snippet": $0.snippet] },
+                "text": nativeResult.markdown
+            ]),
+            citations: nativeResult.results.map(\.url)
         )
     }
 
