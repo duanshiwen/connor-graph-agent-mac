@@ -99,7 +99,7 @@ impl ConnorMemorySearchKernel {
             let snippet = if !summary.is_empty() { summary } else { body.chars().take(240).collect() };
             let metadata_json = stored_text(&doc, fields.metadata_json).unwrap_or_else(|| "{}".to_string());
             let layer_enum = serde_json::from_str(&format!("\"{}\"", layer)).unwrap_or(SearchLayer::L4);
-            let boosted_score = score + exact_match_boost(&request.query, &record_id, &title, &exact_terms);
+            let boosted_score = score + exact_match_boost(&request.query, &record_id, &record_kind, &title, &exact_terms);
             hits.push(MemorySearchHit {
                 layer: layer_enum,
                 record_id,
@@ -123,7 +123,7 @@ fn dedupe_doc_addresses(items: &mut Vec<(f32, DocAddress)>) {
     items.retain(|(_, address)| seen.insert(*address));
 }
 
-fn exact_match_boost(query: &str, record_id: &str, title: &str, exact_terms: &str) -> f32 {
+fn exact_match_boost(query: &str, record_id: &str, record_kind: &str, title: &str, exact_terms: &str) -> f32 {
     let q = query.trim().to_lowercase();
     if q.is_empty() { return 0.0; }
     let exact = exact_terms.lines().map(|term| term.trim().to_lowercase()).collect::<Vec<_>>();
@@ -131,6 +131,8 @@ fn exact_match_boost(query: &str, record_id: &str, title: &str, exact_terms: &st
     if record_id.to_lowercase() == q { boost += 1_200.0; }
     if exact.iter().any(|term| term == &q) { boost += 1_000.0; }
     if title.to_lowercase() == q { boost += 1_000.0; }
+    if exact.iter().any(|term| term == &q) && matches!(record_kind, "entity" | "Entity") { boost += 500.0; }
+    if matches!(record_kind, "entity_statement" | "EntityStatement") { boost -= 50.0; }
     if title.to_lowercase().contains(&q) { boost += 10.0; }
     boost
 }

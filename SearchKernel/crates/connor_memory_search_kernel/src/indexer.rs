@@ -2,7 +2,7 @@ use std::path::Path;
 
 use tantivy::{Index, TantivyDocument};
 
-use crate::document::MemorySearchDocument;
+use crate::document::{MemorySearchDocument, SearchRecordKind};
 use crate::error::{KernelError, KernelResult};
 use crate::schema::{memory_search_fields, memory_search_schema};
 use crate::tokenizer::searchable_text;
@@ -52,9 +52,12 @@ impl MemorySearchIndexer {
 }
 
 fn exact_terms(item: &MemorySearchDocument) -> Vec<String> {
-    let mut terms = vec![item.record_id.clone(), item.title.clone()];
-    terms.extend(item.aliases.iter().cloned());
-    terms.extend(item.ids.iter().cloned());
+    let mut terms = vec![item.record_id.clone()];
+    if item.record_kind != SearchRecordKind::EntityStatement {
+        terms.push(item.title.clone());
+        terms.extend(item.aliases.iter().cloned());
+        terms.extend(item.ids.iter().cloned());
+    }
     terms.sort();
     terms.dedup();
     terms
