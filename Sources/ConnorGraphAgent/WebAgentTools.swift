@@ -482,15 +482,18 @@ public struct SearchEngineMCPWebFetchTool: AgentTool {
     private let configuration: SearchEngineMCPConfiguration
     private let browserAssistedSearchHandler: BrowserAssistedSearchHandler?
     private let browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler?
+    private let nativeFetchClient: NativeWebFetchClient
 
     public init(
         configuration: SearchEngineMCPConfiguration = SearchEngineMCPConfiguration(),
         browserAssistedSearchHandler: BrowserAssistedSearchHandler? = nil,
-        browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler? = nil
+        browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler? = nil,
+        nativeFetchClient: NativeWebFetchClient = NativeWebFetchClient()
     ) {
         self.configuration = configuration
         self.browserAssistedSearchHandler = browserAssistedSearchHandler
         self.browserAssistedWebFetchHandler = browserAssistedWebFetchHandler
+        self.nativeFetchClient = nativeFetchClient
     }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
@@ -558,20 +561,29 @@ public struct SearchEngineMCPWebFetchTool: AgentTool {
                 }
             }
         }
-        let payload: [String: Any] = [
-            "url": url,
-            "extract_mode": extractMode,
-            "render_mode": renderMode,
-            "wait_until": waitUntil,
-            "timeout_ms": timeoutMilliseconds
-        ]
-        let text = try await SearchEngineMCPSubprocess.call(tool: "web_fetch", arguments: payload, configuration: configuration)
+        let nativeResult = try await nativeFetchClient.fetch(
+            urlString: url,
+            extractMode: extractMode,
+            timeoutMilliseconds: timeoutMilliseconds
+        )
         return AgentToolResult(
             toolCallID: context.toolCallID,
             toolName: name,
-            contentText: text,
-            contentJSON: BrowserFetchTool.encodeJSONObject(["url": url, "text": text]),
-            citations: [url]
+            contentText: nativeResult.contentText,
+            contentJSON: BrowserFetchTool.encodeJSONObject([
+                "url": nativeResult.urlString,
+                "finalURL": nativeResult.finalURLString,
+                "title": nativeResult.title,
+                "renderMode": renderMode,
+                "extractMode": extractMode,
+                "engine": nativeResult.engine,
+                "statusCode": nativeResult.statusCode,
+                "mimeType": nativeResult.mimeType,
+                "truncated": nativeResult.truncated,
+                "originalCharacterCount": nativeResult.originalCharacterCount,
+                "text": nativeResult.contentText
+            ]),
+            citations: [nativeResult.finalURLString.isEmpty ? nativeResult.urlString : nativeResult.finalURLString]
         )
     }
 }
