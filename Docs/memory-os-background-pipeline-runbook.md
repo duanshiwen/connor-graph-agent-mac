@@ -41,14 +41,14 @@ Call:
 try facade.enqueueL1ToL2BackgroundJobs()
 ```
 
-Or schedule via Task Management target:
+Or run the daily/fallback sweep through Task Management target:
 
 ```text
 targetKind: memory_os.pipeline
 operationName: plan_l1_to_l2_jobs
 ```
 
-This reads pending L1 capture events, applies threshold/token policy, builds `MemoryOSL1ToL2JobDraft`, and enqueues:
+Count-based L1→L2 planning is event-driven after L1 capture writes. The coordinator enqueues planning when pending L1 captures reach 100. The Task Management system task is a daily age/fallback sweep; it enqueues planning when the oldest pending L1 capture is at least 24 hours old. Both paths read pending L1 capture events, apply threshold/token policy, build `MemoryOSL1ToL2JobDraft`, and enqueue:
 
 ```text
 memory.l1.process_block_to_l2
@@ -147,14 +147,14 @@ Call:
 try facade.enqueueL2ToKnowledgeBackgroundJobs()
 ```
 
-Or schedule via Task Management target:
+Or run the daily/fallback sweep through Task Management target:
 
 ```text
 targetKind: memory_os.pipeline
 operationName: plan_l2_to_knowledge_jobs
 ```
 
-This reads:
+Count-based L2→Knowledge planning is event-driven after L2 statements are marked pending for knowledge synthesis. The coordinator enqueues planning when pending statements reach 100. The Task Management system task is a daily age/fallback sweep; it enqueues planning when the oldest pending statement is at least 24 hours old. Both paths read:
 
 ```text
 memory_l2_statement_processing_state

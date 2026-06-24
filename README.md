@@ -272,8 +272,8 @@ graph/evaluations/reports/*.json
 内置系统任务会在启动时自动补齐到 `task-definitions.json`。当前 protected system tasks 包括：
 
 ```text
-system.memory-os.plan-l1-to-l2                memory_os.pipeline:default.plan_l1_to_l2_jobs     interval 300s
-system.memory-os.plan-l2-to-knowledge         memory_os.pipeline:default.plan_l2_to_knowledge_jobs interval 600s
+system.memory-os.plan-l1-to-l2                memory_os.pipeline:default.plan_l1_to_l2_jobs     interval 86400s daily sweep
+system.memory-os.plan-l2-to-knowledge         memory_os.pipeline:default.plan_l2_to_knowledge_jobs interval 86400s daily sweep
 system.mail.check-every-10-minutes            source.runtime:mail.refresh
 system.calendar.check-every-10-minutes        source.runtime:calendar.refresh
 system.rss.source.{rssSourceID}.refresh       source.runtime:rss.refresh(sourceInstanceID={rssSourceID})
@@ -382,7 +382,7 @@ L2/L3/L4 records do not use semantic lifecycle states such as confirmed, conflic
 
 The write path is deliberately controlled: chat messages, browser selections and native-session evidence enter through `AppMemoryOSFacade`, are preserved as L0/L1 records, and only validated structured artifacts may project into L2/L3/L4. LLMs may propose structured artifacts, but the repository only accepts them after durable artifact preservation, schema validation, evidence validation, audit logging and transactional projection. `GraphStructuredExtractionOutput` projects evidence-backed operational facts into L2 and stable entity facts into L4. `MemoryOSKnowledgeExtractionOutput` projects accepted knowledge candidates into L3 and concept entities/relations into L4. Rejected artifacts remain operational validation outcomes and never become memory truth records.
 
-The background pipeline has two AI job types. `memory.l1.process_block_to_l2` is planned by `MemoryOSL1ToL2JobPlanner`: pending L1 captures are grouped by threshold/token policy, wrapped as an ordered JSON `l1_capture_events` packet, and queued to produce `GraphStructuredExtractionOutput`. `memory.l2.synthesize_knowledge` is planned by `MemoryOSL2ToKnowledgeJobPlanner`: pending L2 statement processing states are grouped into ordered JSON `l2_statements` synthesis packets, wrapped with the four-filter knowledge prompt, and queued to produce `MemoryOSKnowledgeExtractionOutput`. `MemoryOSBackgroundJobWorker` and `AppMemoryOSFacade.runBackgroundAIQueueOnce(...)` execute those jobs through a `MemoryOSBackgroundModelExecutor`, then hand the returned artifact JSON to the existing validation/projection gate. Program code plans jobs and validates artifacts; the LLM does the semantic judgment in prompt space.
+The background pipeline has two AI job types. `memory.l1.process_block_to_l2` is planned by `MemoryOSL1ToL2JobPlanner`: pending L1 captures are grouped by threshold/token policy, wrapped as an ordered JSON `l1_capture_events` packet, and queued to produce `GraphStructuredExtractionOutput`. L1→L2 planning is event-driven when pending L1 captures reach 100, and the daily system sweep also triggers it when the oldest pending L1 capture is at least 24 hours old. `memory.l2.synthesize_knowledge` is planned by `MemoryOSL2ToKnowledgeJobPlanner`: pending L2 statement processing states are grouped into ordered JSON `l2_statements` synthesis packets, wrapped with the four-filter knowledge prompt, and queued to produce `MemoryOSKnowledgeExtractionOutput`. L2→Knowledge planning is event-driven when pending knowledge-synthesis statements reach 100, and the daily system sweep also triggers it when the oldest pending statement is at least 24 hours old. `MemoryOSBackgroundJobWorker` and `AppMemoryOSFacade.runBackgroundAIQueueOnce(...)` execute those jobs through a `MemoryOSBackgroundModelExecutor`, then hand the returned artifact JSON to the existing validation/projection gate. Program code plans jobs and validates artifacts; the LLM does the semantic judgment in prompt space.
 
 The background prompt contract is now explicit rather than a loose manifest. L1→L2 prompts identify L0 as durable evidence, L1 as the active ordered buffer, and L2 as operational facts; they require chronological per-event extraction, noise rejection, duplicate consolidation, evidence refs, and conservative L3/L4 candidate creation only through the unified projection contract and promotion filters. L2→Knowledge prompts are conservative reviewers: most L2 facts should not become L3, high confidence alone is insufficient, all four filters must pass, and accepted knowledge candidates must include explicit `signal_quality`, `reuse_scope`, `novelty`, and `structurability` AI judgment fields.
 
@@ -394,7 +394,7 @@ L1 is an active memory sequence, not the durable source of truth. L0 keeps the r
 
 L2 organization state is tracked outside the immutable fact row through `memory_l2_statement_processing_state`. This lets Connor select unorganized L2 facts for knowledge synthesis without overwriting historical statements. Improvements to L2 should append refined statements and connect them through metadata/projection state rather than mutating old facts in place.
 
-Native source ingestion is normalized through `AppMemoryOSNativeSourceEventBridge`, which adapts Mail, Calendar, RSS, browser history and attachment text into `ingestSourceEvent(...)`. Task scheduling reaches the pipeline through `memory_os.pipeline` targets such as `plan_l1_to_l2_jobs` and `plan_l2_to_knowledge_jobs`.
+Native source ingestion is normalized through `AppMemoryOSNativeSourceEventBridge`, which adapts Mail, Calendar, RSS, browser history and attachment text into `ingestSourceEvent(...)`. Capture ingestion immediately checks the L1 count threshold; accepted L1→L2 projections immediately check the L2 pending-statement count threshold. Task scheduling reaches the pipeline through `memory_os.pipeline` targets such as `plan_l1_to_l2_jobs` and `plan_l2_to_knowledge_jobs`, but those protected system tasks are daily age/fallback sweeps rather than 5-minute polling loops.
 
 L3 promotion is governed by four knowledge filters:
 
@@ -415,7 +415,7 @@ The old Graph Memory workflow has been removed from production architecture: sta
 - Skill prompt augmentation
 - Product OS automation legacy repositories remain for compatibility, but new background work is owned by Task Management Stack
 - Three task origins：
-  - `system`：Connor protected tasks，用户可查看、暂停和恢复，不可删除；当前包括 Memory OS L1→L2 / L2→Knowledge 规划任务、10 分钟邮件刷新、10 分钟日历刷新，以及由每个 RSS source 的 `fetchPolicy.intervalMinutes` 派生出的 per-source RSS refresh tasks
+  - `system`：Connor protected tasks，用户可查看、暂停和恢复，不可删除；当前包括 Memory OS L1→L2 / L2→Knowledge 每日 age/fallback sweep 任务、10 分钟邮件刷新、10 分钟日历刷新，以及由每个 RSS source 的 `fetchPolicy.intervalMinutes` 派生出的 per-source RSS refresh tasks
   - `user`：用户创建的任务，可编辑/删除；当前受模板约束
   - `ai`：AI 通过受治理工具创建的任务，可被用户编辑/删除；当前受模板约束
 - Two trigger modes：
