@@ -132,6 +132,10 @@ public struct AppMemoryOSCLIInspector: Sendable {
         """, columns: ["id", "stable_key", "entity_type", "name", "aliases_json", "summary", "confidence", "created_at", "updated_at", "valid_from", "metadata_json"])
     }
 
+    public func listL4Instances(classEntityIDs: [String], predicates: [String] = ["P31"], limit: Int = 100) throws -> MemoryOSGraphSubgraph {
+        try SQLiteMemoryOSGraphRetrievalService(store: store).l4Instances(MemoryOSL4InstanceQuery(classEntityIDs: classEntityIDs, predicates: predicates, limit: safeLimit(limit)))
+    }
+
     public func queue(limit: Int = 20, status: String? = nil, kind: String? = nil) throws -> [MemoryOSCLIRow] {
         let statusClause = status.map { " AND status = \(store.quote($0))" } ?? ""
         let kindClause = kind.map { " AND kind = \(store.quote($0))" } ?? ""

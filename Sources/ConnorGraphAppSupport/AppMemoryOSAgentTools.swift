@@ -291,6 +291,59 @@ public struct MemoryOSExpandL4Tool: AgentTool {
     }
 }
 
+public struct MemoryOSL4InstancesTool: AgentTool {
+    public let name = "memory_os_l4_instances"
+    public let description = "Query Memory OS L4 graph for instances of one or more class entities using predicates such as P31. Use this for list/all/which/有哪些/所有/列出 class membership questions after resolving the class entity id; unlike memory_os_search, this returns graph-structured instance edges."
+    public let permission: AgentPermissionCapability = .readGraph
+    public let inputSchema = AgentToolInputSchema.object(properties: [
+        "classEntityIDs": .array(items: .string(description: "L4 class entity id such as wikidata:Q6256 or wikidata:Q3624078."), description: "Class entity ids to enumerate instances for."),
+        "predicates": .array(items: .string(description: "Predicate id, usually P31 for instance-of."), description: "Optional predicates. Defaults to P31."),
+        "limit": .number(description: "Maximum instance edges. Defaults to 100, capped at 1000.")
+    ], required: ["classEntityIDs"])
+
+    private let facade: AppMemoryOSFacade
+
+    public init(facade: AppMemoryOSFacade) { self.facade = facade }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        let classIDs = parseStringArray(arguments.array("classEntityIDs"))
+        guard !classIDs.isEmpty else {
+            throw AgentToolError.invalidArguments("classEntityIDs is required")
+        }
+        let predicates = parseStringArray(arguments.array("predicates"))
+        let limit = max(1, min(arguments.int("limit") ?? 100, 1_000))
+        let subgraph = try facade.queryMemoryOSL4Instances(classEntityIDs: classIDs, predicates: predicates.isEmpty ? ["P31"] : predicates, limit: limit)
+        let payload: [String: Any] = [
+            "classEntityIDs": classIDs,
+            "predicates": predicates.isEmpty ? ["P31"] : predicates,
+            "nodeCount": subgraph.nodes.count,
+            "edgeCount": subgraph.edges.count,
+            "nodes": subgraph.nodes.map { node in
+                ["id": node.id, "layer": node.layer.rawValue, "kind": node.kind, "title": node.title, "summary": node.summary, "metadata": node.metadata] as [String: Any]
+            },
+            "edges": subgraph.edges.map { edge in
+                ["id": edge.id, "layer": edge.layer.rawValue, "sourceID": edge.sourceID, "targetID": edge.targetID, "predicate": edge.predicate, "evidenceRefs": edge.evidenceRefs, "confidence": edge.confidence as Any, "validAt": edge.validAt as Any, "metadata": edge.metadata] as [String: Any]
+            },
+            "evidenceRefs": subgraph.evidenceRefs,
+            "provenanceRefs": subgraph.provenanceRefs,
+            "explanation": subgraph.explanation
+        ]
+        let json = try Self.renderJSON(payload)
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "L4 instances query returned \(subgraph.edges.count) instance edge(s) for \(classIDs.joined(separator: ", ")).", contentJSON: json, citations: subgraph.nodes.map(\.id) + subgraph.edges.map(\.id))
+    }
+
+    private func parseStringArray(_ values: [SendableJSONValue]?) -> [String] {
+        values?.compactMap { value in
+            value.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
+        }.filter { !$0.isEmpty } ?? []
+    }
+
+    private static func renderJSON(_ object: [String: Any]) throws -> String {
+        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        return String(data: data, encoding: .utf8) ?? "{}"
+    }
+}
+
 public struct MemoryOSReadRecordTool: AgentTool {
     public let name = "memory_os_read_record"
     public let description = "Read a full Connor Memory OS record by layer and recordID after a search hit. Use when summary-level context is insufficient for evidence, novelty, or concept/entity identity checks."
@@ -352,6 +405,7 @@ public extension AgentToolRegistry {
         register(MemoryOSGetCurrentUserProfileTool(facade: facade))
         register(MemoryOSSearchTool(facade: facade))
         register(MemoryOSExpandL4Tool(facade: facade))
+        register(MemoryOSL4InstancesTool(facade: facade))
         register(MemoryOSReadRecordTool(facade: facade))
         register(MemoryOSReadProvenanceTool(facade: facade))
     }
