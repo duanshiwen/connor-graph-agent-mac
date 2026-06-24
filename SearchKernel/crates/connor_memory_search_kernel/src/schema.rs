@@ -11,6 +11,8 @@ pub const FIELD_BODY: &str = "body";
 pub const FIELD_KEYWORDS: &str = "keywords";
 pub const FIELD_IDS: &str = "ids";
 pub const FIELD_METADATA_JSON: &str = "metadata_json";
+pub const FIELD_EXACT_TERMS: &str = "exact_terms";
+pub const FIELD_EXACT_RAW: &str = "exact_raw";
 
 #[derive(Debug, Clone, Copy)]
 pub struct MemorySearchFields {
@@ -25,6 +27,8 @@ pub struct MemorySearchFields {
     pub keywords: Field,
     pub ids: Field,
     pub metadata_json: Field,
+    pub exact_terms: Field,
+    pub exact_raw: Field,
 }
 
 pub fn memory_search_schema() -> Schema {
@@ -40,6 +44,8 @@ pub fn memory_search_schema() -> Schema {
     builder.add_text_field(FIELD_KEYWORDS, TEXT | STORED);
     builder.add_text_field(FIELD_IDS, TEXT | STORED);
     builder.add_text_field(FIELD_METADATA_JSON, STORED);
+    builder.add_text_field(FIELD_EXACT_TERMS, TEXT | STORED);
+    builder.add_text_field(FIELD_EXACT_RAW, STRING | STORED);
     builder.build()
 }
 
@@ -56,5 +62,7 @@ pub fn memory_search_fields(schema: &Schema) -> MemorySearchFields {
         keywords: schema.get_field(FIELD_KEYWORDS).expect("keywords field"),
         ids: schema.get_field(FIELD_IDS).expect("ids field"),
         metadata_json: schema.get_field(FIELD_METADATA_JSON).expect("metadata_json field"),
+        exact_terms: schema.get_field(FIELD_EXACT_TERMS).expect("exact_terms field"),
+        exact_raw: schema.get_field(FIELD_EXACT_RAW).expect("exact_raw field"),
     }
 }

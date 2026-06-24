@@ -1387,7 +1387,8 @@ final class AppViewModel: NSObject, ObservableObject {
                 let store = try SQLiteMemoryOSStore(path: storagePaths.memoryOSDatabaseURL.path)
                 try store.migrate()
                 self.memoryOSStore = store
-                self.memoryOSFacade = AppMemoryOSFacade(store: store)
+                let searchKernel = try AppMemoryOSSearchKernelFactory.makeLive(paths: storagePaths)
+                self.memoryOSFacade = AppMemoryOSFacade(store: store, searchKernel: searchKernel)
             } catch {
                 self.errorMessage = "Memory OS 初始化失败：\(error)"
             }

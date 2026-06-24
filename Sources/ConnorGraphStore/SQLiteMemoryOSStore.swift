@@ -46,12 +46,14 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         "idx_memory_audit_events_time", "idx_memory_error_events_time"
     ]
 
+    public let databasePath: String
     private var db: OpaquePointer?
     private let databaseLock = NSLock()
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
     public init(path: String) throws {
+        self.databasePath = path
         encoder.outputFormatting = [.sortedKeys]
         guard sqlite3_open(path, &db) == SQLITE_OK else {
             throw SQLiteMemoryOSStoreError.openFailed(Self.message(db))
