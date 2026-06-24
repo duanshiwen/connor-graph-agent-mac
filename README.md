@@ -356,7 +356,9 @@ Connor's default system prompt includes a task bootstrap workflow for every user
 
 - Native source domains and app-support repositories
 - Presentation models for settings and browsing surfaces
-- Mail draft/send governance boundaries
+- Mail draft/send governance boundaries：AI 可创建持久草稿、请求发送，但真实 SMTP 发送必须通过 `sendMail` 权限审批；用户点击 Allow 后同一个 Agent run 才会 resume 并发送。
+- Native Mail send pipeline：`mail_create_draft` 写入 Connor-owned draft store；`mail_send_draft` 生成邮件审批 payload（收件人、主题、正文预览、envelope hash），通过 Composer/permission surface 审批后由 native runtime 从 Keychain-backed credential boundary 读取凭据、构造 RFC 5322/MIME 消息并调用 SMTP client。
+- Sent-message closure：发送成功会记录 send attempt/receipt/audit，并写入本地 Sent mailbox/source cache，使 `mail_search_messages` 可检索已发送邮件；失败会保留 failed attempt 和 draft error。
 - RSS feed registry/cache/read-state boundaries
 - Contacts and Calendar system adapter seams
 - Credential and permission boundaries separate from LLM/provider access
@@ -489,6 +491,9 @@ Before claiming a change is complete：
 - Keep attachment source of truth in Session Capsule / Attachment Store.
 - Any native source mutation must update, invalidate, or explicitly fallback around the Native Source Search index.
 - Any Mail/RSS/Calendar search result must preserve temporal metadata; time-sensitive queries should use structured `timePreset` or `startDate`/`endDate` filters.
+- Mail sending must never trust model-supplied `approved` flags. The only send authorization source is the human approval resolution carried by `AgentToolExecutionContext.approvedCapabilities(.sendMail)` after Composer/permission UI Allow.
+- Mail credentials must never appear in tool JSON, prompt context, audit payloads, README examples, or source cache records; only native runtime credential stores may materialize secrets immediately before SMTP transport.
+- Mail send readiness requires: registered native mail tools, persistent draft store, SMTP send adapter boundary, approval UI, send attempts/audit, and Sent cache/index writeback.
 - Calendar time filtering should use event interval overlap by default so cross-day and all-day events are not omitted.
 - Keep Agent tool names unique and avoid duplicate semantic search tools when an existing native source search tool covers the task.
 - Add accessibility labels for pure icon controls.
