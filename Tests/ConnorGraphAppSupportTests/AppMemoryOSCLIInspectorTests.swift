@@ -284,6 +284,20 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(output.contains("entity-1"))
     }
 
+    @Test func memoryOSCLIRouterRoutesTraceEvidenceCommand() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        try seedMemoryOSCLIInspectorFixture(store: store)
+        let inspector = AppMemoryOSCLIInspector(store: store)
+        let encoder = memoryOSCLITestEncoder()
+
+        let output = try AppMemoryOSCLIRouter.route(args: ["trace", "evidence", "--statement", "stmt-1", "--limit", "10"], inspector: inspector, encoder: encoder)
+
+        #expect(output.contains("stmt-1"))
+        #expect(output.contains("span-1"))
+        #expect(output.contains("object-1"))
+        #expect(output.contains("evidenced_by"))
+    }
+
     @Test func memoryOSCLIRouterRoutesL2FindCommand() throws {
         let store = try makeMemoryOSCLIInspectorStore()
         try seedMemoryOSCLIInspectorFixture(store: store)

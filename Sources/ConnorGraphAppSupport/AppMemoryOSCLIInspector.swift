@@ -84,6 +84,10 @@ public struct AppMemoryOSCLIInspector: Sendable {
         """, columns: ["id", "provenance_object_id", "start_offset", "end_offset", "text", "metadata_json"])
     }
 
+    public func traceEvidence(spanIDs: [String] = [], statementIDs: [String] = [], beliefIDs: [String] = [], limit: Int = 100) throws -> MemoryOSGraphSubgraph {
+        try AppMemoryOSFacade(store: store, searchKernel: searchKernel).traceMemoryOSEvidence(spanIDs: spanIDs, statementIDs: statementIDs, beliefIDs: beliefIDs, limit: safeLimit(limit))
+    }
+
     public func listL1Pending(limit: Int = 20) throws -> [MemoryOSCLIRow] {
         try rows(sql: """
         SELECT c.id, c.provenance_object_id, c.event_type, c.occurred_at, c.token_estimate, c.processing_state, c.metadata_json, o.title, o.content

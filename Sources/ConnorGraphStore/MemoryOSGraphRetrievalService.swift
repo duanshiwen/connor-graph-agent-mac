@@ -72,6 +72,20 @@ public struct MemoryOSGraphSubgraph: Sendable, Codable, Equatable {
     }
 }
 
+public struct MemoryOSEvidenceTraceQuery: Sendable, Codable, Equatable {
+    public var spanIDs: [String]
+    public var statementIDs: [String]
+    public var beliefIDs: [String]
+    public var limit: Int
+
+    public init(spanIDs: [String] = [], statementIDs: [String] = [], beliefIDs: [String] = [], limit: Int = 100) {
+        self.spanIDs = spanIDs
+        self.statementIDs = statementIDs
+        self.beliefIDs = beliefIDs
+        self.limit = limit
+    }
+}
+
 public struct MemoryOSL2StatementFindQuery: Sendable, Codable, Equatable {
     public var text: String
     public var subjectID: String?
@@ -141,6 +155,86 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
 
     public init(store: SQLiteMemoryOSStore) {
         self.store = store
+    }
+
+    public func traceEvidence(_ query: MemoryOSEvidenceTraceQuery) throws -> MemoryOSGraphSubgraph {
+        let limit = min(max(query.limit, 1), 500)
+        var spanIDs = Set(query.spanIDs.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
+        let statementIDs = Set(query.statementIDs.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
+        let beliefIDs = Set(query.beliefIDs.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
+        guard !spanIDs.isEmpty || !statementIDs.isEmpty || !beliefIDs.isEmpty else {
+            return MemoryOSGraphSubgraph(explanation: "No span, statement, or belief ids were provided for evidence tracing.")
+        }
+        var nodes: [MemoryOSGraphNode] = []
+        var edges: [MemoryOSGraphEdge] = []
+        if !beliefIDs.isEmpty {
+            let quoted = beliefIDs.map(store.quote).joined(separator: ",")
+            let rows = try store.query(sql: """
+            SELECT id, topic, statement, projection_kind, evidence_statement_ids_json
+            FROM memory_l3_beliefs
+            WHERE id IN (\(quoted))
+            LIMIT \(limit)
+            """)
+            for row in rows {
+                nodes.append(MemoryOSGraphNode(id: row[0], layer: .l3, kind: row[3], title: row[1], summary: row[2]))
+                let ids = (try? store.decode([String].self, row[4])) ?? []
+                for statementID in ids where !statementID.isEmpty {
+                    edges.append(MemoryOSGraphEdge(id: "\(row[0])->\(statementID)", layer: .l3, sourceID: row[0], targetID: statementID, predicate: "supported_by"))
+                }
+            }
+        }
+        var allStatementIDs = statementIDs
+        if !beliefIDs.isEmpty {
+            let quoted = beliefIDs.map(store.quote).joined(separator: ",")
+            let rows = try store.query(sql: "SELECT evidence_statement_ids_json FROM memory_l3_beliefs WHERE id IN (\(quoted)) LIMIT \(limit)")
+            for row in rows {
+                for id in ((try? store.decode([String].self, row[0])) ?? []) where !id.isEmpty { allStatementIDs.insert(id) }
+            }
+        }
+        if !allStatementIDs.isEmpty {
+            let quoted = allStatementIDs.map(store.quote).joined(separator: ",")
+            let rows = try store.query(sql: """
+            SELECT id, subject_id, predicate, COALESCE(object_id, ''), text, assertion_kind, evidence_span_ids_json
+            FROM memory_l2_statements
+            WHERE id IN (\(quoted))
+            LIMIT \(limit)
+            """)
+            for row in rows {
+                nodes.append(MemoryOSGraphNode(id: row[0], layer: .l2, kind: row[5], title: row[2], summary: row[4], metadata: ["subject_id": row[1], "object_id": row[3]]))
+                let ids = (try? store.decode([String].self, row[6])) ?? []
+                for spanID in ids where !spanID.isEmpty {
+                    spanIDs.insert(spanID)
+                    edges.append(MemoryOSGraphEdge(id: "\(row[0])->\(spanID)", layer: .l2, sourceID: row[0], targetID: spanID, predicate: "evidenced_by"))
+                }
+            }
+        }
+        var provenanceRefs: [String] = []
+        if !spanIDs.isEmpty {
+            let quoted = Array(spanIDs).prefix(limit).map(store.quote).joined(separator: ",")
+            let rows = try store.query(sql: """
+            SELECT sp.id, sp.provenance_object_id, sp.text, COALESCE(sp.start_offset, ''), COALESCE(sp.end_offset, ''), o.title, o.source_type, COALESCE(o.source_id, ''), o.occurred_at, o.confidentiality, substr(o.content, 1, 500)
+            FROM memory_l0_provenance_spans sp
+            JOIN memory_l0_provenance_objects o ON o.id = sp.provenance_object_id
+            WHERE sp.id IN (\(quoted))
+            ORDER BY o.occurred_at DESC, sp.id ASC
+            LIMIT \(limit)
+            """)
+            for row in rows {
+                provenanceRefs.append(row[1])
+                nodes.append(MemoryOSGraphNode(id: row[0], layer: .l0, kind: "provenance_span", title: row[5], summary: row[2], metadata: ["provenance_object_id": row[1], "start_offset": row[3], "end_offset": row[4]]))
+                nodes.append(MemoryOSGraphNode(id: row[1], layer: .l0, kind: row[6], title: row[5], summary: row[10], metadata: ["source_id": row[7], "occurred_at": row[8], "confidentiality": row[9]]))
+                edges.append(MemoryOSGraphEdge(id: "\(row[0])->\(row[1])", layer: .l0, sourceID: row[0], targetID: row[1], predicate: "span_of"))
+            }
+        }
+        var seen = Set<String>()
+        let dedupedNodes = nodes.filter { seen.insert("\($0.layer.rawValue):\($0.id)").inserted }
+        return MemoryOSGraphSubgraph(
+            nodes: dedupedNodes,
+            edges: edges,
+            evidenceRefs: Array(spanIDs).sorted(),
+            provenanceRefs: Array(Set(provenanceRefs)).sorted(),
+            explanation: "Evidence trace returned \(dedupedNodes.count) node(s), \(edges.count) edge(s), \(spanIDs.count) span reference(s)."
+        )
     }
 
     public func l2FindStatements(_ query: MemoryOSL2StatementFindQuery) throws -> MemoryOSGraphSubgraph {
