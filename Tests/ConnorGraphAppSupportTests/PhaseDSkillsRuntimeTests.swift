@@ -32,7 +32,7 @@ globs:
 ---
 # Session Summary
 
-Use concise bullets. Never bypass Connor graph admission.
+Use concise bullets. Never bypass Connor Memory OS projection gates.
 """
 
 @Test func skillsRuntimeRepositoryParsesAndPersistsSkillManifests() throws {
@@ -51,7 +51,7 @@ Use concise bullets. Never bypass Connor graph admission.
     #expect(loaded.manifest.triggers == [.manual, .afterModelResponse])
     #expect(loaded.manifest.requiredCapabilities == [.readSession])
     #expect(loaded.manifest.requiredSources == ["local-filesystem"])
-    #expect(loaded.instructions.contains("Never bypass Connor graph admission"))
+    #expect(loaded.instructions.contains("Never bypass Connor Memory OS projection gates"))
     #expect(loaded.skillURL == skillURL)
 }
 

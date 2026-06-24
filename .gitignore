@@ -55,10 +55,6 @@ playground.xcworkspace
 # Logs
 *.log
 
-# App-managed media runtime downloads (large model artifacts)
-Sources/ConnorGraphAgentMac/Resources/MediaRuntime/whisperkit/models/
-Sources/ConnorGraphAgentMac/Resources/MediaRuntime/**/*.partial
-
 # Certificate files
 *.cer
 *.p12

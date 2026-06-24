@@ -90,9 +90,9 @@ struct AgentAttachmentInspectorView: View {
     }
 
     private var evidenceSection: some View {
-        inspectorSection("Graph Memory Evidence") {
+        inspectorSection("Memory OS Evidence") {
             if evidenceCandidates.isEmpty {
-                emptyText("No evidence candidate yet. Create a candidate to stage attachment provenance for Graph Memory review.")
+                emptyText("No evidence candidate yet. Create a candidate for Memory OS provenance review.")
             } else {
                 ForEach(evidenceCandidates) { candidate in
                     VStack(alignment: .leading, spacing: AgentChatLayout.spaceXS) {
