@@ -461,6 +461,7 @@ public struct MemoryOSCLISearchIndexMeta: Codable, Sendable, Equatable {
     public var indexedLayers: [String]
     public var documentCount: Int
     public var builtAt: String
+    public var sourceDatabaseFingerprint: MemoryOSCLISearchIndexFingerprint?
 
     enum CodingKeys: String, CodingKey {
         case indexSchemaVersion
@@ -469,7 +470,18 @@ public struct MemoryOSCLISearchIndexMeta: Codable, Sendable, Equatable {
         case indexedLayers
         case documentCount
         case builtAt
+        case sourceDatabaseFingerprint
     }
+}
+
+public struct MemoryOSCLISearchIndexFingerprint: Codable, Sendable, Equatable {
+    public var databaseFileSize: Int64
+    public var databaseModifiedAt: String
+    public var walFileSize: Int64
+    public var walModifiedAt: String
+    public var shmFileSize: Int64
+    public var shmModifiedAt: String
+    public var tableCounts: [String: Int]?
 }
 
 public struct MemoryOSCLISearchIndexStats: Codable, Sendable, Equatable {

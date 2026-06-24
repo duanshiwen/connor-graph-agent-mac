@@ -313,6 +313,7 @@ struct AppMemoryOSCLIInspectorTests {
         let stats = try AppMemoryOSCLIRouter.route(args: ["search-index", "stats"], inspector: inspector, encoder: encoder)
         #expect(stats.contains("\"connor_meta\""))
         #expect(stats.contains("\"index_size_bytes\""))
+        #expect(stats.contains("sourceDatabaseFingerprint"))
 
         let verify = try AppMemoryOSCLIRouter.route(args: ["search-index", "verify"], inspector: inspector, encoder: encoder)
         #expect(verify.contains("\"status\" : \"ok\""))
