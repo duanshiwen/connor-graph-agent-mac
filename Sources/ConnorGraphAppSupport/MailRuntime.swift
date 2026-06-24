@@ -193,6 +193,7 @@ public struct MailRuntime: Sendable {
             let receipt = MailSendReceipt(draftID: draftID, providerMessageID: response.providerMessageID, sentAt: response.sentAt, envelopeHash: composed.envelopeHash)
             try await draftStore.recordSendAttempt(MailSendAttempt(draftID: draftID, status: .sent, providerMessageID: response.providerMessageID, envelopeHash: composed.envelopeHash))
             _ = try await draftStore.updateStatus(id: draftID, status: .sent, sentReceiptID: receipt.providerMessageID)
+            try await saveSentMessage(draft: draft, identity: identity, receipt: receipt, messageIDHeader: composed.messageID)
             try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: draft.accountID, draftID: draftID, kind: .messageSent, riskClass: .send, redactedSummary: "Sent approved draft to \(draft.to.map(\.email).joined(separator: ", "))", payloadHash: receipt.envelopeHash))
             return receipt
         } catch {
@@ -207,6 +208,48 @@ public struct MailRuntime: Sendable {
         let attempts = try await draftStore.sendAttempts(draftID: draftID)
         let auditRecords = try await auditLog.listRecords().filter { $0.draftID == draftID }
         return MailSendHistory(draft: draft, attempts: attempts, auditRecords: auditRecords)
+    }
+
+    private func saveSentMessage(draft: MailDraft, identity: MailIdentity, receipt: MailSendReceipt, messageIDHeader: String) async throws {
+        let mailboxID = MailMailboxID(rawValue: "\(draft.accountID.rawValue)-sent")
+        let existingMailboxes = try await cache.listMailboxes(accountID: draft.accountID)
+        if !existingMailboxes.contains(where: { $0.id == mailboxID }) {
+            try await cache.saveMailbox(MailMailbox(
+                id: mailboxID,
+                accountID: draft.accountID,
+                name: "Sent",
+                path: "Sent",
+                role: .sent,
+                status: MailMailboxStatus(messageCount: 0, unreadCount: 0, lastSyncedAt: receipt.sentAt)
+            ))
+        }
+        let messageID = MailMessageID(rawValue: receipt.providerMessageID)
+        let summary = MailMessageSummary(
+            id: messageID,
+            accountID: draft.accountID,
+            mailboxID: mailboxID,
+            threadID: draft.inReplyToMessageID.map { MailThreadID(rawValue: $0.rawValue) },
+            subject: draft.subject,
+            from: identity.address,
+            to: draft.to,
+            cc: draft.cc,
+            date: receipt.sentAt,
+            snippet: String(draft.body.prefix(240)),
+            flags: MailMessageFlags(isRead: true),
+            hasAttachments: !draft.attachmentIDs.isEmpty
+        )
+        let body = MailMessageBody(
+            plainText: MailBodyPart(mimeType: "text/plain", text: draft.body, byteCount: Data(draft.body.utf8).count),
+            htmlText: draft.htmlBody.map { MailBodyPart(mimeType: "text/html", text: $0, byteCount: Data($0.utf8).count) },
+            redactedPreview: String(draft.body.prefix(500)),
+            bodyHash: receipt.envelopeHash
+        )
+        try await cache.saveMessage(MailMessageDetail(
+            summary: summary,
+            headers: MailMessageHeaders(messageIDHeader: messageIDHeader, inReplyTo: draft.inReplyToHeader, references: draft.referencesHeaders, rawHeaderHash: receipt.envelopeHash),
+            body: body,
+            attachments: []
+        ))
     }
 
     public func evidenceCandidate(for messageID: MailMessageID) async throws -> MailEvidenceCandidate {
