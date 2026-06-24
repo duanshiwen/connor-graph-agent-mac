@@ -56,11 +56,11 @@ struct TaskSchedulerServiceTests {
         let finishedAt = Date(timeIntervalSince1970: 120)
         let now = Date(timeIntervalSince1970: 1_000)
         let base = ConnorTaskDefinition(
-            id: "media.transcription.media-job-example",
-            name: "Media",
+            id: "ai.once-session-message",
+            name: "One-time message",
             origin: .ai,
             trigger: ConnorTaskTrigger(kind: .scheduled, runAt: startedAt, recurrence: .once),
-            target: .mediaTranscriptionRun(jobID: "media-job-example", ownerSessionID: "session-1"),
+            target: .sendMessageToSession(sessionID: "session-1", message: "Run once"),
             lifecycle: ConnorTaskLifecycle(status: .active, nextRunAt: startedAt),
             metadata: ConnorTaskMetadata(ownerSessionID: "session-1")
         )

@@ -116,7 +116,7 @@ public struct TaskManagementUIPresentation: Codable, Sendable, Equatable {
                 return (lhs.finishedAt ?? .distantPast) > (rhs.finishedAt ?? .distantPast)
             }.first
         }
-        let visibleTasks = tasks.filter { $0.lifecycle.status != .deleted && !$0.isHiddenFromTaskManagementUI }
+        let visibleTasks = tasks.filter { $0.lifecycle.status != .deleted }
         let cards = visibleTasks
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
             .map { TaskManagementUICard(task: $0, latestRun: latestRunByTask[$0.id]) }
@@ -133,12 +133,6 @@ public struct TaskManagementUIPresentation: Codable, Sendable, Equatable {
             ),
             cards: cards
         )
-    }
-}
-
-private extension ConnorTaskDefinition {
-    var isHiddenFromTaskManagementUI: Bool {
-        target.targetKind == "media.transcription" && target.operationName == "run"
     }
 }
 

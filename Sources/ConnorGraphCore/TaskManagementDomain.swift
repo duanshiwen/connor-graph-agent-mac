@@ -32,7 +32,6 @@ public enum ConnorTaskRecurrence: String, Codable, Sendable, Equatable, CaseIter
 
 public enum ConnorTaskEventName {
     public static let sessionStatusChanged = "session.status.changed"
-    public static let mediaTranscriptionRequested = "media.transcription.requested"
 }
 
 public struct ConnorTaskTrigger: Codable, Sendable, Equatable {
@@ -88,18 +87,6 @@ public struct ConnorTaskTarget: Codable, Sendable, Equatable {
         var parameters = ["message": message]
         if !title.isEmpty { parameters["title"] = title }
         return ConnorTaskTarget(targetKind: "session.ai", targetID: "new", operationName: "createSessionAndSendMessage", parameters: parameters)
-    }
-
-    public static func mediaTranscriptionRun(jobID: String, ownerSessionID: String) -> ConnorTaskTarget {
-        ConnorTaskTarget(
-            targetKind: "media.transcription",
-            targetID: jobID,
-            operationName: "run",
-            parameters: [
-                "jobID": jobID,
-                "ownerSessionID": ownerSessionID
-            ]
-        )
     }
 }
 
