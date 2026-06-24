@@ -33,7 +33,7 @@ public struct OpenAICompatibleConfig: Sendable, Equatable {
             extraHeaders: extraHeaders,
             apiKeyHeaderKind: apiKeyHeaderKind,
             reasoningEffort: reasoningEffort,
-            requestTimeout: 180
+            requestTimeout: 300
         )
     }
 

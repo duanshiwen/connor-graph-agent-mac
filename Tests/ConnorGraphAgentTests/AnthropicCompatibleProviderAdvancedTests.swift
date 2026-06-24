@@ -40,7 +40,7 @@ private struct FixtureSSEClient: AgentSSEHTTPClient {
         model: "claude-sonnet-test"
     )
 
-    #expect(config.requestTimeout == 180)
+    #expect(config.requestTimeout == 300)
 }
 
 @Test func anthropicCompletionRequestUsesConfiguredTimeout() async throws {

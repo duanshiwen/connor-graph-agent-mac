@@ -47,7 +47,7 @@ private struct CapturingHTTPClient: AgentHTTPClient {
         model: "gpt-test"
     )
 
-    #expect(config.requestTimeout == 180)
+    #expect(config.requestTimeout == 300)
 }
 
 @Test func openAICompatibleProviderAppliesConfiguredRequestTimeout() async throws {
