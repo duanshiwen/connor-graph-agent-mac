@@ -127,7 +127,7 @@ struct CommercialTrain7NativeMailSystemTests {
             extensionRuntime: .ready(enabledSourceCount: 1, loadedSkillCount: 1, enabledAutomationRuleCount: 1),
             graphMemory: .ready(pendingCandidateCount: 0, openHoldCount: 0, recentChangeCount: 0, contextReady: true, ingestionReady: true, distillationReady: true),
             nativeUI: .ready(shellItemCount: 13, commandCount: 12, settingsPanelsReady: true, homeSurfaceReady: true, readinessDashboardLinked: true, primaryActionCount: 7, emptyStateCount: 4, keyboardShortcutCount: 10, settingsSectionCount: 7),
-            nativeMailSystem: .ready(accountCount: 1, healthyAccountCount: 1, credentialBoundaryReady: true, syncCursorReady: true, toolAuditReady: true, sendApprovalReady: true, contactApprovalReady: true, attachmentImportReady: true, evidencePolicyReady: true)
+            nativeMailSystem: .ready(accountCount: 1, healthyAccountCount: 1, credentialBoundaryReady: true, syncCursorReady: true, toolAuditReady: true, sendApprovalReady: true, smtpSendAdapterReady: true, persistentDraftStoreReady: true, contactApprovalReady: true, attachmentImportReady: true, evidencePolicyReady: true)
         )
         let dashboard = CommercialReadinessGate().evaluate(input)
         #expect(dashboard.cards.map(\.phase).contains(.nativeMailSystem))
