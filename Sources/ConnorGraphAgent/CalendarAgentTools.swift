@@ -112,11 +112,11 @@ public struct CalendarReadTool: AgentTool {
 public struct CalendarWriteTool: AgentTool {
     public let runtime: any AgentCalendarRuntime
     public var name: String { "calendar_write" }
-    public var description: String { "Write Connor-owned calendar data using operations: create_event, update_event, delete_event, respond_to_invite. MVP supports create_event." }
+    public var description: String { "Calendar write operations are currently disabled. Connor calendar sources are read-only until write approval, conflict detection, and audit are implemented." }
     public var permission: AgentPermissionCapability { .mutateCalendar }
     public var inputSchema: AgentToolInputSchema {
         .object(properties: [
-            "operation": .string(description: "create_event | update_event | delete_event | respond_to_invite"),
+            "operation": .string(description: "create_event | update_event | delete_event | respond_to_invite; currently disabled"),
             "calendarID": .string(description: "Calendar ID"),
             "title": .string(description: "Event title"),
             "start": .string(description: "ISO-8601 start timestamp"),
@@ -128,17 +128,7 @@ public struct CalendarWriteTool: AgentTool {
     public init(runtime: any AgentCalendarRuntime) { self.runtime = runtime }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        let operation = arguments.string("operation") ?? ""
-        guard operation == "create_event" else { throw AgentToolError.invalidArguments("MVP calendar_write supports create_event") }
-        guard let calendarID = arguments.string("calendarID"), let title = arguments.string("title"), let startString = arguments.string("start"), let endString = arguments.string("end") else {
-            throw AgentToolError.invalidArguments("calendarID, title, start, and end are required")
-        }
-        let formatter = ISO8601DateFormatter()
-        guard let start = formatter.date(from: startString), let end = formatter.date(from: endString) else {
-            throw AgentToolError.invalidArguments("start and end must be ISO-8601 timestamps")
-        }
-        let receipt = try await runtime.createEvent(calendarID: CalendarID(rawValue: calendarID), title: title, start: start, end: end, approved: arguments.bool("approved") ?? false, runID: context.runID, sessionID: context.sessionID)
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: receipt.summary, contentJSON: try MailJSON.encode(receipt))
+        throw AgentToolError.permissionDenied("日历写入功能暂不支持。当前 Calendar Source Platform 仅开放只读同步与读取工具；写入需要后续实现审批、冲突检测和审计后再启用。")
     }
 }
 
