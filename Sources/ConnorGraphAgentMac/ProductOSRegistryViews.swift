@@ -124,8 +124,8 @@ struct ProductOSRegistryView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Label("Single Home Root: no multi-workspace abstraction is introduced.", systemImage: "house")
                         Label("数据源凭据和连接器执行仍由康纳同学治理。", systemImage: "lock.shield")
-                        Label("Skills are instruction profiles; they cannot bypass graph admission or audit.", systemImage: "checkmark.seal")
-                        Label("Graph memory stays a kernel, not a normal RAG/source plugin.", systemImage: "brain.head.profile")
+                        Label("Skills are instruction profiles; they cannot bypass Memory OS projection gates or audit.", systemImage: "checkmark.seal")
+                        Label("Memory OS stays a kernel, not a normal RAG/source plugin.", systemImage: "brain.head.profile")
                         Label("Automation execution is audit-first: actions are recorded for review before becoming background execution.", systemImage: "bolt.badge.clock")
                     }
                     .foregroundStyle(.secondary)
