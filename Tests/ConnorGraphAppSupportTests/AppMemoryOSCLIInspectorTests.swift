@@ -3,6 +3,7 @@ import Testing
 import ConnorGraphCore
 import ConnorGraphMemory
 import ConnorGraphStore
+import ConnorGraphSearch
 import ConnorGraphAppSupport
 
 @Suite("Memory OS CLI Inspector Tests")
@@ -292,6 +293,30 @@ struct AppMemoryOSCLIInspectorTests {
 
         #expect(output.contains("\"query\" : \"Memory\""))
         #expect(output.contains("\"layer\" : \"L3\"") || output.contains("\"layer\" : \"L4\""))
+    }
+
+    @Test func memoryOSCLIRouterRoutesSearchIndexCommands() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        try seedMemoryOSCLIInspectorFixture(store: store)
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent("memory-os-cli-search-index-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temp) }
+        let libraryURL = MemoryOSSearchKernel.defaultReleaseLibraryURL(repositoryRoot: URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true))
+        let kernel = try MemoryOSSearchKernel(libraryURL: libraryURL, indexDirectory: temp.appendingPathComponent("index", isDirectory: true))
+        let inspector = AppMemoryOSCLIInspector(store: store, databasePath: store.databasePath, searchKernel: kernel)
+        let encoder = memoryOSCLITestEncoder()
+
+        let rebuild = try AppMemoryOSCLIRouter.route(args: ["search-index", "rebuild"], inspector: inspector, encoder: encoder)
+        #expect(rebuild.contains("\"status\" : \"rebuilt\""))
+        #expect(rebuild.contains("\"document_count\""))
+
+        let stats = try AppMemoryOSCLIRouter.route(args: ["search-index", "stats"], inspector: inspector, encoder: encoder)
+        #expect(stats.contains("\"connor_meta\""))
+        #expect(stats.contains("\"index_size_bytes\""))
+
+        let verify = try AppMemoryOSCLIRouter.route(args: ["search-index", "verify"], inspector: inspector, encoder: encoder)
+        #expect(verify.contains("\"status\" : \"ok\""))
+        #expect(verify.contains("smoke_Memory"))
     }
 
     @Test func memoryOSCLIRouterReturnsHelpfulErrors() throws {
