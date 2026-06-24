@@ -32,6 +32,18 @@ public struct MemoryOSSearchKernelHit: Sendable, Codable, Equatable, Identifiabl
     public var rankReason: String
     public var metadataJSON: String
 
+    enum CodingKeys: String, CodingKey {
+        case layer
+        case recordID = "record_id"
+        case recordKind = "record_kind"
+        case title
+        case snippet
+        case score
+        case matchedChannel = "matched_channel"
+        case rankReason = "rank_reason"
+        case metadataJSON = "metadata_json"
+    }
+
     public init(layer: MemoryOSSearchKernelLayer, recordID: String, recordKind: String, title: String, snippet: String, score: Double, matchedChannel: String, rankReason: String, metadataJSON: String = "{}") {
         self.layer = layer
         self.recordID = recordID
