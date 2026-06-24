@@ -233,7 +233,7 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(policy.l1ToL2.maxPendingAgeSeconds == 86_400)
         #expect(policy.l2ToKnowledge.maxPendingAgeSeconds == 86_400)
         #expect(policy.l1ToL2.minPendingCount == 100)
-        #expect(policy.l2ToKnowledge.minPendingStatementCount == 80)
+        #expect(policy.l2ToKnowledge.minPendingStatementCount == 100)
     }
 
     @Test func memoryOSCLIInspectorPlansL1AndL2JobsThroughFacade() throws {
