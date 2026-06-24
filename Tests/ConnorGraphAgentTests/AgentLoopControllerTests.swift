@@ -103,7 +103,7 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
     #expect(configuration.maxToolIterations == 32)
     #expect(configuration.promptProjectionMode == .legacySingleUserMessage)
     #expect(configuration.promptMaxEstimatedTokens == 8_000)
-    #expect(configuration.maxConsecutiveToolResultErrors == 6)
+    #expect(configuration.maxConsecutiveToolResultErrors == 0)
 }
 
 @Test func agentLoopEmitsTextDeltaForStreamingProvider() async throws {
@@ -756,8 +756,8 @@ private struct BashLikeOutputTool: AgentTool {
     #expect(errorToolMessage.content.contains("Unknown tool"))
 }
 
-@Test func agentLoopStopsAfterTooManyConsecutiveToolResultErrors() async throws {
-    let responses = (1...3).map { index in
+@Test func agentLoopContinuesDespiteConsecutiveToolResultErrors() async throws {
+    let errorResponses = (1...3).map { index in
         AgentModelResponse(
             text: nil,
             toolCalls: [AgentToolCall(id: "call-error-\(index)", name: "missing_tool", argumentsJSON: #"{}"#)],
@@ -765,24 +765,21 @@ private struct BashLikeOutputTool: AgentTool {
             finishReason: .toolCalls
         )
     }
-    let provider = ScriptedModelProvider(responses: responses)
+    let recoveryResponse = AgentModelResponse(text: "Recovered.", usage: AgentModelUsage(promptTokens: 1, completionTokens: 1))
+    let provider = ScriptedModelProvider(responses: errorResponses + [recoveryResponse])
     let loop = AgentLoopController(
         modelProvider: provider,
         toolRegistry: AgentToolRegistry(),
-        configuration: AgentLoopConfiguration(maxToolIterations: 8, maxConsecutiveToolResultErrors: 3)
+        configuration: AgentLoopConfiguration(maxToolIterations: 8, maxConsecutiveToolResultErrors: 0)
     )
 
     var events: [AgentEvent] = []
-    do {
-        for try await event in loop.run(AgentChatRequest(sessionID: "session-too-many-errors", userMessage: "Keep failing")) {
-            events.append(event)
-        }
-    } catch AgentLoopError.maxToolIterationsReached {
-        // Expected fuse.
+    for try await event in loop.run(AgentChatRequest(sessionID: "session-errors-no-fuse", userMessage: "Keep failing then recover")) {
+        events.append(event)
     }
 
     #expect(events.map(\.kind).filter { $0 == .toolFailed }.count == 3)
-    #expect(events.last?.kind == .runFailed)
+    #expect(events.last?.kind == .runCompleted)
 }
 
 @Test func agentLoopParallelToolCallsAppendToolResultsInAssistantSourceOrder() async throws {
