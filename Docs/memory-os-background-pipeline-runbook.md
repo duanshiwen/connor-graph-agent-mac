@@ -325,3 +325,39 @@ Still intentionally deferred:
 - Real provider-backed `MemoryOSBackgroundModelExecutor` adapter.
 - Deep runtime wiring at every source implementation site beyond the common bridge.
 - Dedicated `memory_os_read_record` full-record tool.
+
+## Retrieval Contract: Embedded Search + Graph Query
+
+Memory OS retrieval is graph-first.
+
+```text
+Search Kernel: find candidate entry points.
+Graph Retrieval Kernel: produce graph-complete answers.
+```
+
+`memory_os_search` uses the local embedded search path to retrieve ranked candidate records across L0/L1/L2/L3/L4. Search hits are not memory truth and are not complete graph answers.
+
+Use graph tools when the user asks for:
+
+- relationships;
+- all/list/which/有哪些/所有/列出 class membership;
+- evidence chains;
+- timelines;
+- cross-layer context.
+
+For L4 class membership questions, first resolve the class entity with search or known ids, then call `memory_os_l4_instances`. Example:
+
+```text
+User: 有哪些国家？
+1. Search/resolve 国家 -> wikidata:Q6256 / wikidata:Q3624078 / wikidata:Q7275.
+2. Query L4 instances with predicate P31.
+3. Answer from graph results, not from search summaries alone.
+```
+
+The embedded Tantivy index is derived local data stored next to the Memory OS database:
+
+```text
+~/Library/Application Support/Connor/graph/search-index/memory-os-tantivy/
+```
+
+SQLite remains the source of truth for L0-L4 graph records.
