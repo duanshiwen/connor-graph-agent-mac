@@ -16,6 +16,29 @@ private func temporaryMemoryOSSchemaDatabaseURL(_ name: String = UUID().uuidStri
     #expect(tables.contains("memory_l2_statements"))
     #expect(tables.contains("memory_l3_beliefs"))
     #expect(tables.contains("memory_l4_entities"))
+    #expect(tables.contains("memory_builtin_datasets"))
+}
+
+@Test func memoryOSStorePersistsBuiltinDatasetMetadata() throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryMemoryOSSchemaDatabaseURL().path)
+    try store.migrate()
+    let installedAt = Date(timeIntervalSince1970: 1_800)
+
+    try store.saveBuiltinDataset(
+        id: "foundation-kg-builtin-l4",
+        kind: "foundation_kg",
+        version: "foundation_kg_v1",
+        installedAt: installedAt,
+        manifest: ["source": "wikidata-lite"],
+        stats: ["entities": "75981"]
+    )
+
+    let persistedDataset = try store.builtinDataset(id: "foundation-kg-builtin-l4")
+    let dataset = try #require(persistedDataset)
+    #expect(dataset["kind"] == "foundation_kg")
+    #expect(dataset["version"] == "foundation_kg_v1")
+    #expect(dataset["manifest.source"] == "wikidata-lite")
+    #expect(dataset["stats.entities"] == "75981")
 }
 
 @Test func memoryOSSchemaMigrationCreatesAllFTSTables() throws {
