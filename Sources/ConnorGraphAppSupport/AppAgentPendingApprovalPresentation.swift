@@ -16,16 +16,24 @@ public struct AppAgentPendingApprovalPresentation: Sendable, Equatable, Identifi
     public var statusLabel: String
     public var severity: AppAgentPendingApprovalSeverity
     public var createdAt: Date
+    public var allowsAlwaysAllow: Bool
 
     public init(_ approval: AgentPendingApproval) {
         self.id = approval.id
         self.requestID = approval.requestID
-        self.title = "Permission requested: \(approval.capability.rawValue)"
-        let tool = approval.toolName.map { " · Tool: \($0)" } ?? ""
-        self.detail = "Request \(approval.requestID)\(tool) · Payload: \(Self.compactJSON(approval.payloadJSON))"
+        let mailApproval = AppMailSendApprovalPresentation(approval)
+        if mailApproval.isMailSendRequest {
+            self.title = mailApproval.title
+            self.detail = [mailApproval.recipientSummary, mailApproval.subjectSummary, mailApproval.securitySummary].joined(separator: " · ")
+        } else {
+            self.title = "Permission requested: \(approval.capability.rawValue)"
+            let tool = approval.toolName.map { " · Tool: \($0)" } ?? ""
+            self.detail = "Request \(approval.requestID)\(tool) · Payload: \(Self.compactJSON(approval.payloadJSON))"
+        }
         self.statusLabel = approval.status.rawValue
         self.severity = Self.severity(for: approval.status)
         self.createdAt = approval.createdAt
+        self.allowsAlwaysAllow = approval.capability != .sendMail
     }
 
     private static func severity(for status: AgentPendingApprovalStatus) -> AppAgentPendingApprovalSeverity {

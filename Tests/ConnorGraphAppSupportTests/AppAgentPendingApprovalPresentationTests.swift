@@ -28,6 +28,24 @@ import ConnorGraphCore
     #expect(row.createdAt == Date(timeIntervalSince1970: 1_000))
 }
 
+@Test func appPendingApprovalPresentationSpecialCasesMailSendApproval() {
+    let approval = AgentPendingApproval(
+        requestID: "request-mail",
+        runID: "run-1",
+        sessionID: "session-1",
+        capability: .sendMail,
+        toolName: "mail_send_draft",
+        payloadJSON: "{\"draftID\":\"draft-1\",\"to\":[\"alice@example.com\"],\"subject\":\"Hello\"}"
+    )
+
+    let row = AppAgentPendingApprovalPresentation(approval)
+
+    #expect(row.title == "确认发送邮件")
+    #expect(row.detail.contains("收件人：alice@example.com"))
+    #expect(row.detail.contains("主题：Hello"))
+    #expect(row.allowsAlwaysAllow == false)
+}
+
 @Test func appPendingApprovalPresentationMapsResolvedStatusesForNativeUI() {
     let statuses: [AgentPendingApprovalStatus] = [.pending, .approved, .denied, .cancelled]
 
