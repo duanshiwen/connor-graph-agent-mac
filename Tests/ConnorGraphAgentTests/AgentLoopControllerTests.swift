@@ -660,7 +660,7 @@ private struct BashLikeOutputTool: AgentTool {
     }
 
     let request = await provider.lastRequest
-    #expect(request?.messages.contains(where: { $0.role == .system && $0.content.contains("Relevant Graph Memory Context") }) == true)
+    #expect(request?.messages.contains(where: { $0.role == .system && $0.content.contains("Relevant Memory OS Context") }) == true)
     #expect(request?.messages.contains(where: { $0.content.contains("诗闻喜欢结构化推进") }) == true)
     let textComplete = events.compactMap { event -> AgentTextCompleteEvent? in
         if case .textComplete(let payload) = event { return payload }
