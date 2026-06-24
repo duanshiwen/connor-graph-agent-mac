@@ -117,6 +117,10 @@ public struct AppMemoryOSCLIInspector: Sendable {
         """, columns: ["statement_id", "processing_kind", "status", "source_artifact_id", "processed_by_artifact_id", "last_attempt_at", "metadata_json", "subject_id", "predicate", "object_id", "statement_text", "evidence_span_ids_json", "evidence_span_texts"])
     }
 
+    public func findL2Statements(text: String = "", subjectID: String? = nil, predicates: [String] = [], limit: Int = 50) throws -> MemoryOSGraphSubgraph {
+        try AppMemoryOSFacade(store: store, searchKernel: searchKernel).findMemoryOSL2Statements(text: text, subjectID: subjectID, predicates: predicates, limit: safeLimit(limit))
+    }
+
     public func listL3Beliefs(limit: Int = 20) throws -> [MemoryOSCLIRow] {
         try rows(sql: """
         SELECT id, topic, statement, projection_kind, confidence, evidence_statement_ids_json, valid_at, projected_at, source_artifact_id, metadata_json

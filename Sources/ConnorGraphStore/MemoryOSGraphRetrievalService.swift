@@ -72,6 +72,20 @@ public struct MemoryOSGraphSubgraph: Sendable, Codable, Equatable {
     }
 }
 
+public struct MemoryOSL2StatementFindQuery: Sendable, Codable, Equatable {
+    public var text: String
+    public var subjectID: String?
+    public var predicates: [String]
+    public var limit: Int
+
+    public init(text: String = "", subjectID: String? = nil, predicates: [String] = [], limit: Int = 50) {
+        self.text = text
+        self.subjectID = subjectID
+        self.predicates = predicates
+        self.limit = limit
+    }
+}
+
 public struct MemoryOSL4EntityFindQuery: Sendable, Codable, Equatable {
     public var text: String
     public var limit: Int
@@ -113,6 +127,60 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
 
     public init(store: SQLiteMemoryOSStore) {
         self.store = store
+    }
+
+    public func l2FindStatements(_ query: MemoryOSL2StatementFindQuery) throws -> MemoryOSGraphSubgraph {
+        let text = query.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let subjectID = query.subjectID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let predicates = query.predicates.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        guard !text.isEmpty || !(subjectID?.isEmpty ?? true) || !predicates.isEmpty else {
+            return MemoryOSGraphSubgraph(explanation: "No L2 statement query, subject id, or predicate filter was provided.")
+        }
+        let limit = min(max(query.limit, 1), 500)
+        var clauses: [String] = []
+        if let subjectID, !subjectID.isEmpty { clauses.append("s.subject_id = \(store.quote(subjectID))") }
+        if !predicates.isEmpty { clauses.append("s.predicate IN (\(predicates.map(store.quote).joined(separator: ",")))") }
+        if !text.isEmpty {
+            let like = store.quote("%\(text)%")
+            clauses.append("(s.text LIKE \(like) OR s.subject_id LIKE \(like) OR s.object_id LIKE \(like) OR s.predicate LIKE \(like))")
+        }
+        let rows = try store.query(sql: """
+        SELECT s.id, s.subject_id, s.predicate, COALESCE(s.object_id, ''), s.text, s.assertion_kind, s.confidence, s.valid_at, s.evidence_span_ids_json, COALESCE(n.node_type, ''), COALESCE(n.name, '')
+        FROM memory_l2_statements s
+        LEFT JOIN memory_l2_nodes n ON n.id = s.subject_id
+        WHERE \(clauses.joined(separator: " AND "))
+        ORDER BY s.valid_at DESC, s.confidence DESC, s.committed_at DESC, s.id ASC
+        LIMIT \(limit)
+        """)
+        var nodesByID: [String: MemoryOSGraphNode] = [:]
+        var evidenceRefs: [String] = []
+        let edges = rows.map { row in
+            let subjectTitle = row[10].isEmpty ? row[1] : row[10]
+            nodesByID[row[1]] = MemoryOSGraphNode(id: row[1], layer: .l2, kind: row[9].isEmpty ? "l2_subject" : row[9], title: subjectTitle)
+            if !row[3].isEmpty {
+                nodesByID[row[3]] = MemoryOSGraphNode(id: row[3], layer: .l2, kind: "l2_object", title: row[3])
+            }
+            let evidence = (try? store.decode([String].self, row[8])) ?? []
+            evidenceRefs.append(contentsOf: evidence)
+            return MemoryOSGraphEdge(
+                id: row[0],
+                layer: .l2,
+                sourceID: row[1],
+                targetID: row[3].isEmpty ? row[1] : row[3],
+                predicate: row[2],
+                evidenceRefs: evidence,
+                confidence: Double(row[6]),
+                validAt: row[7],
+                metadata: ["statement_text": row[4], "assertion_kind": row[5]]
+            )
+        }
+        return MemoryOSGraphSubgraph(
+            nodes: Array(nodesByID.values).sorted { $0.id < $1.id },
+            edges: edges,
+            evidenceRefs: Array(Set(evidenceRefs)).sorted(),
+            provenanceRefs: [],
+            explanation: "L2 statement query returned \(edges.count) statement edge(s)."
+        )
     }
 
     public func l4FindEntity(_ query: MemoryOSL4EntityFindQuery) throws -> MemoryOSGraphSubgraph {

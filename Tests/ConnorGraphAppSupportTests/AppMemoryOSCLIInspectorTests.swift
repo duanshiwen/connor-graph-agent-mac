@@ -284,6 +284,19 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(output.contains("entity-1"))
     }
 
+    @Test func memoryOSCLIRouterRoutesL2FindCommand() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        try seedMemoryOSCLIInspectorFixture(store: store)
+        let inspector = AppMemoryOSCLIInspector(store: store)
+        let encoder = memoryOSCLITestEncoder()
+
+        let output = try AppMemoryOSCLIRouter.route(args: ["l2", "find", "康纳", "--predicate", "describes", "--limit", "5"], inspector: inspector, encoder: encoder)
+
+        #expect(output.contains("stmt-1"))
+        #expect(output.contains("node-1"))
+        #expect(output.contains("span-1"))
+    }
+
     @Test func memoryOSCLIRouterRoutesL4FindAndNeighborsCommands() throws {
         let store = try makeMemoryOSCLIInspectorStore()
         try seedMemoryOSCLIInspectorFixture(store: store)
