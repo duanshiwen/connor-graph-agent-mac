@@ -52,6 +52,45 @@ struct MailRuntimeSendPipelineTests {
         #expect(request.rawMessage.contains("Subject: Real send"))
     }
 
+    @Test func sendHistoryAggregatesReceiptAttemptsAndAuditRecords() async throws {
+        let accountID = MailAccountID(rawValue: "account-history")
+        let identityID = MailIdentityID(rawValue: "identity-history")
+        let binding = AppMailCredentialStore.binding(accountID: accountID, email: "connor@example.com", authMode: .appPassword)
+        let account = MailAccount(
+            id: accountID,
+            provider: .genericIMAPSMTP,
+            displayName: "History Account",
+            identities: [MailIdentity(id: identityID, displayName: "Connor", address: MailAddress(email: "connor@example.com"))],
+            outgoing: MailServerEndpoint(host: "smtp.example.com", port: 587, security: .startTLS, protocolKind: .smtp),
+            credentialBinding: binding,
+            health: MailAccountHealth(status: .ready, summary: "ready")
+        )
+        let rawCredentialStore = TestMailCredentialStore()
+        try rawCredentialStore.saveSecret("app-password", service: binding.keychainService, account: binding.accountName)
+        let auditLog = InMemoryMailAuditLog()
+        let draftRepository = InMemoryMailDraftRepository()
+        let runtime = MailRuntime(
+            repository: InMemoryMailSourceRepository(accounts: [account]),
+            cache: InMemoryMailSourceCache(),
+            auditLog: auditLog,
+            draftStore: draftRepository,
+            credentialStore: AppMailCredentialStore(credentialStore: rawCredentialStore),
+            smtpClient: FakeMailSMTPClient(response: MailSMTPSendResponse(providerMessageID: "provider-history"))
+        )
+        let draft = try await runtime.createDraft(accountID: accountID, identityID: identityID, to: [MailAddress(email: "alice@example.com")], subject: "History", body: "Body")
+
+        _ = try await runtime.sendDraft(draftID: draft.id, approved: true, runID: "run-history", sessionID: "session-history")
+        let history = try await runtime.sendHistory(draftID: draft.id)
+
+        #expect(history.draft.status == .sent)
+        #expect(history.providerMessageID == "provider-history")
+        #expect(history.envelopeHash == draft.envelopeHash())
+        #expect(history.attempts.map(\.status) == [.sending, .sent])
+        #expect(history.auditRecords.contains { $0.kind == .draftCreated })
+        #expect(history.auditRecords.contains { $0.kind == .messageSent && $0.payloadHash == draft.envelopeHash() })
+        #expect(history.isTerminal)
+    }
+
     @Test func unapprovedSendDoesNotCallSMTPAndKeepsApprovalGate() async throws {
         let runtime = MailRuntime.fixture()
         let draft = try await runtime.createDraft(accountID: MailAccountID(rawValue: "fixture-account"), identityID: MailIdentityID(rawValue: "fixture-identity"), to: [MailAddress(email: "alice@example.com")], subject: "Needs approval", body: "Body")
