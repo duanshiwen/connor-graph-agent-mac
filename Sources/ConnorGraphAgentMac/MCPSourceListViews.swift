@@ -59,7 +59,7 @@ private struct SourceListHeader: View {
 
     var body: some View {
         ZStack {
-            Text("MCP Sources")
+            Text("外部工具连接")
                 .font(AppListTypography.header)
                 .frame(maxWidth: .infinity, alignment: .center)
 
@@ -72,8 +72,8 @@ private struct SourceListHeader: View {
                 }
                 .buttonStyle(.plain)
                 .contentShape(Circle())
-                .help("添加 MCP Source")
-                .accessibilityLabel("添加 MCP Source")
+                .help("添加外部工具连接")
+                .accessibilityLabel("添加外部工具连接")
             }
         }
         .padding(.horizontal, 14)
@@ -84,9 +84,9 @@ private struct SourceListHeader: View {
 private struct SourceListEmptyState: View {
     var body: some View {
         ContentUnavailableView(
-            "暂无 MCP Source",
+            "暂无外部工具连接",
             systemImage: "server.rack",
-            description: Text("使用右上角「添加 Source」创建第一个外部工具连接。")
+            description: Text("使用右上角「添加」创建第一个外部工具连接。")
         )
         .padding(.top, 80)
     }
@@ -117,7 +117,7 @@ private struct MCPSourceAddSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: AppShellLayout.spaceL) {
                     MCPSourceDialogSection(title: "基础信息", systemImage: "person.text.rectangle") {
-                        MCPSourceDialogRow("Source ID") {
+                        MCPSourceDialogRow("连接标识") {
                             TextField("local-files", text: $draft.sourceID)
                                 .disabled(draft.isEditing)
                                 .textFieldStyle(.roundedBorder)
@@ -127,7 +127,7 @@ private struct MCPSourceAddSheet: View {
                                 .textFieldStyle(.roundedBorder)
                         }
                         if draft.isEditing {
-                            MCPSourceDialogHint("Source ID 已锁定，用于保持 health、catalog 和 audit 的持久化路径稳定。")
+                            MCPSourceDialogHint("连接标识已锁定，用于保持已有连接记录稳定。")
                         }
                     }
 
@@ -143,17 +143,17 @@ private struct MCPSourceAddSheet: View {
                         }
 
                         if draft.transportKind == "http" {
-                            MCPSourceDialogRow("Endpoint") {
+                            MCPSourceDialogRow("连接地址") {
                                 TextField("https://mcp.example.com/mcp", text: $draft.command)
                                     .textFieldStyle(.roundedBorder)
                             }
-                            MCPSourceDialogHint("HTTP endpoint 需使用 HTTPS；本地开发允许 localhost 或 127.0.0.1。当前支持 JSON response path，SSE 会 fail closed。")
+                            MCPSourceDialogHint("远程连接建议使用 HTTPS；本机服务可使用 localhost 或 127.0.0.1。")
                         } else {
-                            MCPSourceDialogRow("Command") {
+                            MCPSourceDialogRow("启动命令") {
                                 TextField("/usr/bin/python3 或 npx", text: $draft.command)
                                     .textFieldStyle(.roundedBorder)
                             }
-                            MCPSourceDialogRow("Arguments", alignment: .top) {
+                            MCPSourceDialogRow("启动参数", alignment: .top) {
                                 TextField("用空格或换行分隔", text: $draft.argumentsText, axis: .vertical)
                                     .textFieldStyle(.roundedBorder)
                                     .lineLimit(2...4)
@@ -164,34 +164,34 @@ private struct MCPSourceAddSheet: View {
                     MCPSourceDialogSection(title: "凭据", systemImage: "key") {
                         MCPSourceDialogRow("类型") {
                             Picker("", selection: $draft.credentialRequirement) {
-                                Text("None").tag(ProductOSCredentialRequirement.none)
+                                Text("不需要").tag(ProductOSCredentialRequirement.none)
                                 Text("Bearer Token").tag(ProductOSCredentialRequirement.bearerToken)
-                                Text("API Key Header").tag(ProductOSCredentialRequirement.apiKeyHeader)
-                                Text("Multi Header").tag(ProductOSCredentialRequirement.multiHeader)
+                                Text("API Key 请求头").tag(ProductOSCredentialRequirement.apiKeyHeader)
+                                Text("多个请求头").tag(ProductOSCredentialRequirement.multiHeader)
                             }
                             .labelsHidden()
                             .frame(maxWidth: 240, alignment: .leading)
                         }
                         if draft.credentialRequirement != .none {
-                            MCPSourceDialogRow("Binding") {
+                            MCPSourceDialogRow("凭据名称") {
                                 TextField("GITHUB_TOKEN 或 x-api-key:API_KEY", text: $draft.credentialEnvironmentText)
                                     .textFieldStyle(.roundedBorder)
                             }
-                            MCPSourceDialogRow("Secret") {
-                                SecureField(draft.isEditing ? "留空则保留现有 secret" : "Secret 或 ENV=secret 多行", text: $draft.credentialSecret)
+                            MCPSourceDialogRow("密钥内容") {
+                                SecureField(draft.isEditing ? "留空则保留现有密钥" : "密钥内容，或每行一个 NAME=secret", text: $draft.credentialSecret)
                                     .textFieldStyle(.roundedBorder)
                             }
-                            MCPSourceDialogHint("Secret 只保存到 Connor credential store，不写入 source 配置文件。stdio 使用 env binding；HTTP bearer 使用 Authorization header。")
+                            MCPSourceDialogHint("密钥只会安全保存在本机，不会写入连接配置。")
                         }
                     }
 
-                    MCPSourceDialogSection(title: "治理", systemImage: "checkmark.shield") {
+                    MCPSourceDialogSection(title: "权限", systemImage: "checkmark.shield") {
                         MCPSourceDialogRow("状态") {
                             Picker("", selection: $draft.status) {
-                                Text("Draft").tag(ProductOSRegistryEntryStatus.draft)
-                                Text("Enabled").tag(ProductOSRegistryEntryStatus.enabled)
-                                Text("Disabled").tag(ProductOSRegistryEntryStatus.disabled)
-                                Text("Needs Review").tag(ProductOSRegistryEntryStatus.needsReview)
+                                Text("草稿").tag(ProductOSRegistryEntryStatus.draft)
+                                Text("已启用").tag(ProductOSRegistryEntryStatus.enabled)
+                                Text("已停用").tag(ProductOSRegistryEntryStatus.disabled)
+                                Text("需要确认").tag(ProductOSRegistryEntryStatus.needsReview)
                             }
                             .labelsHidden()
                             .frame(maxWidth: 180, alignment: .leading)
@@ -199,7 +199,7 @@ private struct MCPSourceAddSheet: View {
                         MCPSourceDialogToggleRow("允许外部网络", isOn: $draft.allowExternalNetwork)
                         MCPSourceDialogToggleRow("允许读取会话", isOn: $draft.allowReadSession)
                         MCPSourceDialogToggleRow("允许读取工作区", isOn: $draft.allowWorkspaceRead)
-                        MCPSourceDialogRow("图谱写入") {
+                        MCPSourceDialogRow("写入记忆") {
                             Text("关闭")
                                 .foregroundStyle(.secondary)
                         }
@@ -232,9 +232,9 @@ private struct MCPSourceAddSheet: View {
     private var dialogHeader: some View {
         HStack(alignment: .top, spacing: AppShellLayout.spaceM) {
             VStack(alignment: .leading, spacing: AppShellLayout.spaceXS) {
-                Text(draft.isEditing ? "编辑 MCP Source" : "添加 MCP Source")
+                Text(draft.isEditing ? "编辑外部工具连接" : "添加外部工具连接")
                     .font(.system(size: 26, weight: .semibold))
-                Text("连接 stdio 或 HTTP MCP 服务。凭据由 Connor Keychain 托管，不写入 source 配置文件。")
+                Text("连接本机命令或 HTTP 工具服务。凭据会安全保存在本机，不写入连接配置。")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -253,8 +253,8 @@ private struct MCPSourceAddSheet: View {
     private var dialogFooter: some View {
         HStack(alignment: .center, spacing: AppShellLayout.spaceM) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Source ID 使用 lowercase-kebab-case。")
-                Text("需要凭据时，环境变量名需使用大写 ENV_NAME。")
+                Text("连接标识建议使用小写英文、数字和连字符。")
+                Text("需要凭据时，请使用清晰的凭据名称。")
             }
             .font(AgentChatTypography.meta)
             .foregroundStyle(.secondary)
@@ -262,7 +262,7 @@ private struct MCPSourceAddSheet: View {
 
             Spacer()
             Button("取消", action: onCancel)
-            Button(draft.isEditing ? "保存修改" : "保存 Source", action: onSave)
+            Button(draft.isEditing ? "保存修改" : "保存连接", action: onSave)
                 .buttonStyle(.borderedProminent)
                 .disabled(!canSave)
                 .keyboardShortcut(.defaultAction)
