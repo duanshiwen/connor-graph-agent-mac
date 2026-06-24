@@ -46,6 +46,40 @@ struct MailAgentToolsTests {
         #expect(request.intentSummary == "Follow up")
     }
 
+    @Test func sendDraftApprovalPayloadIncludesMailSummary() async throws {
+        let runtime = RecordingMailRuntime()
+        let tool = MailSendDraftTool(runtime: runtime)
+        let context = AgentToolExecutionContext(runID: "run", sessionID: "session", groupID: "group", userPrompt: "send", toolCallID: "call", policyEngine: AgentPolicyEngine(permissionMode: .allowAll), approvedCapabilities: [])
+        let call = AgentToolCall(id: "call", runID: "run", sessionID: "session", name: "mail_send_draft", argumentsJSON: "{\"draftID\":\"draft-1\"}")
+
+        let payload = await tool.approvalPayloadJSON(for: call, context: context)
+
+        #expect(payload.contains("alice@example.com"))
+        #expect(payload.contains("envelope-1"))
+        #expect(payload.contains("Quarterly update"))
+    }
+
+    @Test func sendDraftToolBuildsApprovalPayloadFromRuntimeDraft() async throws {
+        let runtime = RecordingMailRuntime()
+        await runtime.setApprovalPayload(MailSendApprovalBridge(
+            draftID: MailDraftID(rawValue: "draft-1"),
+            title: "Send email approval",
+            from: "connor@example.com",
+            to: ["alice@example.com"],
+            subject: "Runtime subject",
+            bodyPreview: "Runtime body",
+            riskSummary: "approval gated",
+            envelopeHash: "runtime-hash"
+        ))
+        let tool = MailSendDraftTool(runtime: runtime)
+        let context = AgentToolExecutionContext(runID: "run", sessionID: "session", groupID: "group", userPrompt: "send", toolCallID: "call", policyEngine: AgentPolicyEngine(permissionMode: .allowAll), approvedCapabilities: [])
+        let payload = await tool.approvalPayloadJSON(for: AgentToolCall(name: "mail_send_draft", argumentsJSON: "{\"draftID\":\"draft-1\",\"subject\":\"model supplied\"}"), context: context)
+
+        #expect(payload.contains("Runtime subject"))
+        #expect(payload.contains("runtime-hash"))
+        #expect(!payload.contains("model supplied"))
+    }
+
     @Test func sendDraftIgnoresModelApprovedFlagAndUsesApprovalContext() async throws {
         let runtime = RecordingMailRuntime()
         let tool = MailSendDraftTool(runtime: runtime)
@@ -81,6 +115,11 @@ private actor RecordingMailRuntime: AgentMailRuntime {
 
     var lastCreateDraft: CreateDraftRequest?
     var lastSendApproved: Bool?
+    var approvalPayload: MailSendApprovalBridge?
+
+    func setApprovalPayload(_ payload: MailSendApprovalBridge) {
+        self.approvalPayload = payload
+    }
 
     func listAccounts(runID: String?, sessionID: String?) async throws -> [MailAccount] { [] }
     func searchMessages(_ request: MailRuntimeSearchRequestBridge, runID: String?, sessionID: String?) async throws -> [MailMessageSummary] { [] }
@@ -90,6 +129,10 @@ private actor RecordingMailRuntime: AgentMailRuntime {
     func createDraft(accountID: MailAccountID, identityID: MailIdentityID, to: [MailAddress], cc: [MailAddress], bcc: [MailAddress], replyTo: [MailAddress], subject: String, body: String, htmlBody: String?, inReplyToMessageID: MailMessageID?, attachmentIDs: [MailAttachmentID], intentSummary: String?, runID: String?, sessionID: String?) async throws -> MailDraft {
         lastCreateDraft = CreateDraftRequest(accountID: accountID, identityID: identityID, to: to, cc: cc, bcc: bcc, replyTo: replyTo, subject: subject, body: body, htmlBody: htmlBody, inReplyToMessageID: inReplyToMessageID, attachmentIDs: attachmentIDs, intentSummary: intentSummary)
         return MailDraft(id: MailDraftID(rawValue: "draft-1"), accountID: accountID, identityID: identityID, to: to, cc: cc, bcc: bcc, subject: subject, body: body, htmlBody: htmlBody, replyTo: replyTo, attachmentIDs: attachmentIDs, inReplyToMessageID: inReplyToMessageID, intentSummary: intentSummary)
+    }
+
+    func sendApprovalBridgePayload(draftID: MailDraftID) async throws -> MailSendApprovalBridge {
+        approvalPayload ?? MailSendApprovalBridge(draftID: draftID, title: "Send email approval", from: "connor@example.com", to: ["alice@example.com"], cc: [], bcc: [], subject: "Quarterly update", bodyPreview: "Preview", attachmentCount: 0, riskSummary: "approval required", envelopeHash: "envelope-1")
     }
 
     func sendDraft(draftID: MailDraftID, approved: Bool, runID: String?, sessionID: String?) async throws -> MailSendReceipt {
