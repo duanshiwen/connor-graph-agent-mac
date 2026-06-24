@@ -130,6 +130,10 @@ public struct AppMemoryOSCLIInspector: Sendable {
         """, columns: ["id", "topic", "statement", "projection_kind", "confidence", "evidence_statement_ids_json", "valid_at", "projected_at", "source_artifact_id", "metadata_json"])
     }
 
+    public func expandL3Belief(beliefID: String? = nil, topic: String? = nil, text: String? = nil, limit: Int = 20) throws -> MemoryOSGraphSubgraph {
+        try AppMemoryOSFacade(store: store, searchKernel: searchKernel).expandMemoryOSL3Belief(beliefID: beliefID, topic: topic, text: text, limit: safeLimit(limit))
+    }
+
     public func listL4Entities(limit: Int = 20) throws -> [MemoryOSCLIRow] {
         try rows(sql: """
         SELECT id, stable_key, entity_type, name, aliases_json, summary, confidence, created_at, updated_at, valid_from, metadata_json

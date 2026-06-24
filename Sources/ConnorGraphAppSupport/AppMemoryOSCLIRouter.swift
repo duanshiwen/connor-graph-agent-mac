@@ -96,7 +96,18 @@ public enum AppMemoryOSCLIRouter {
     private static func routeL3(args: [String], inspector: AppMemoryOSCLIInspector, encoder: JSONEncoder) throws -> String {
         switch args.first ?? "beliefs" {
         case "beliefs": return try encode(try inspector.listL3Beliefs(limit: intOption("--limit", in: args, default: 20)), encoder: encoder)
-        default: return try encode(MemoryOSCLIError(error: "unknown_l3_command", usage: "connor memory l3 beliefs"), encoder: encoder)
+        case "expand":
+            let text = args.dropFirst().first.flatMap { $0.hasPrefix("--") ? nil : $0 } ?? ""
+            return try encode(
+                try inspector.expandL3Belief(
+                    beliefID: optionValue("--belief", in: args),
+                    topic: optionValue("--topic", in: args),
+                    text: text,
+                    limit: intOption("--limit", in: args, default: 20)
+                ),
+                encoder: encoder
+            )
+        default: return try encode(MemoryOSCLIError(error: "unknown_l3_command", usage: "connor memory l3 beliefs|expand [text] [--belief id] [--topic topic] [--limit N]"), encoder: encoder)
         }
     }
 

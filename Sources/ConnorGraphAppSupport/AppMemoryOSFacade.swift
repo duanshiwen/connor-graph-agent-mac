@@ -167,6 +167,10 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         try SQLiteMemoryOSGraphRetrievalService(store: store).l2FindStatements(MemoryOSL2StatementFindQuery(text: text, subjectID: subjectID, predicates: predicates, limit: limit))
     }
 
+    public func expandMemoryOSL3Belief(beliefID: String? = nil, topic: String? = nil, text: String? = nil, limit: Int = 20) throws -> MemoryOSGraphSubgraph {
+        try SQLiteMemoryOSGraphRetrievalService(store: store).l3ExpandBelief(MemoryOSL3BeliefExpandQuery(beliefID: beliefID, topic: topic, text: text, limit: limit))
+    }
+
     public func findMemoryOSL4Entity(text: String, limit: Int = 20) throws -> MemoryOSGraphSubgraph {
         try SQLiteMemoryOSGraphRetrievalService(store: store).l4FindEntity(MemoryOSL4EntityFindQuery(text: text, limit: limit))
     }
