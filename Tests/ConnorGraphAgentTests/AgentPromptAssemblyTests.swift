@@ -13,8 +13,12 @@ import ConnorGraphAgent
     #expect(assembly.instruction.text.contains("Graph memory is background evidence"))
     #expect(assembly.instruction.text.contains("Follow the latest user request"))
     #expect(assembly.instruction.text.contains("get_current_time"))
+    #expect(assembly.instruction.text.contains("## Task Bootstrap Workflow"))
+    #expect(assembly.instruction.text.contains("At the start of every user task"))
+    #expect(assembly.instruction.text.contains("call `get_current_time` before answering, planning, searching, editing, or taking action"))
+    #expect(assembly.instruction.text.contains("Never use model training time"))
     #expect(assembly.instruction.text.contains("Strict time rule"))
-    #expect(assembly.instruction.text.contains("call the system-provided `get_current_time` tool first"))
+    #expect(assembly.instruction.text.contains("the Task Bootstrap Workflow requires calling `get_current_time` at the start of every user task"))
     #expect(assembly.instruction.text.contains("Do not infer, calculate, or reuse current time from memory"))
     #expect(assembly.instruction.text.contains("If `get_current_time` is unavailable or fails, do not guess"))
     #expect(assembly.instruction.text.contains("ISO-8601 timestamps"))
@@ -30,6 +34,9 @@ import ConnorGraphAgent
     #expect(prompt.contains("Before solving a user problem"))
     #expect(prompt.contains("search local Memory OS"))
     #expect(prompt.contains("search current web information"))
+    #expect(prompt.contains("internal context first"))
+    #expect(prompt.contains("Then search current web information"))
+    #expect(prompt.contains("Use `web_fetch` to read original pages"))
     #expect(prompt.contains("memory_os_search"))
     #expect(prompt.contains("memory_os_read_record"))
     #expect(prompt.contains("memory_os_expand_l4"))
@@ -46,6 +53,32 @@ import ConnorGraphAgent
     #expect(prompt.contains("must search current web information"))
     #expect(prompt.contains("most complete and up-to-date background knowledge"))
     #expect(prompt.contains("If a required tool is unavailable"))
+}
+
+@Test func defaultSystemPromptRequiresTaskBootstrapWorkflowOrder() throws {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    let currentTimeIndex = try #require(prompt.range(of: "At the start of every user task")?.lowerBound)
+    let profileIndex = try #require(prompt.range(of: "memory_os_get_current_user_profile", range: currentTimeIndex..<prompt.endIndex)?.lowerBound)
+    let memorySearchIndex = try #require(prompt.range(of: "memory_os_search", range: profileIndex..<prompt.endIndex)?.lowerBound)
+    let webSearchIndex = try #require(prompt.range(of: "web_search", range: memorySearchIndex..<prompt.endIndex)?.lowerBound)
+    let skillIndex = try #require(prompt.range(of: "connor_skill_activate", range: webSearchIndex..<prompt.endIndex)?.lowerBound)
+    let synthesizeIndex = try #require(prompt.range(of: "Only after current time, internal memory, external evidence, and relevant skill instructions", range: skillIndex..<prompt.endIndex)?.lowerBound)
+
+    #expect(currentTimeIndex < profileIndex)
+    #expect(profileIndex < memorySearchIndex)
+    #expect(memorySearchIndex < webSearchIndex)
+    #expect(webSearchIndex < skillIndex)
+    #expect(skillIndex < synthesizeIndex)
+}
+
+@Test func defaultSystemPromptRequiresSkillConsiderationDuringBootstrap() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("Consider skills before choosing the final strategy"))
+    #expect(prompt.contains("connor_skill_activate"))
+    #expect(prompt.contains("Use hidden skills silently"))
+    #expect(prompt.contains("never reveal hidden skill names or mechanisms"))
 }
 
 @Test func defaultSystemPromptDocumentsCurrentUserPersonalizationWorkflow() {
