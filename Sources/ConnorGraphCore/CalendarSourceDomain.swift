@@ -96,6 +96,18 @@ public enum CalendarSourceSyncMode: String, Codable, Sendable, Equatable, Hashab
     case readOnly
 }
 
+public struct CalendarCredentialBinding: Codable, Sendable, Equatable, Hashable {
+    public var keychainService: String
+    public var accountName: String
+    public var authMode: CalendarSourceAuthMode
+
+    public init(keychainService: String, accountName: String, authMode: CalendarSourceAuthMode) {
+        self.keychainService = keychainService
+        self.accountName = accountName
+        self.authMode = authMode
+    }
+}
+
 public struct CalendarSourceConfiguration: Codable, Sendable, Equatable, Hashable {
     public var sourceKind: CalendarSourceKind
     public var authMode: CalendarSourceAuthMode
