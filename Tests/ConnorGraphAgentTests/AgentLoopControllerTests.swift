@@ -80,7 +80,7 @@ private struct StreamingFinalAnswerProvider: StreamingAgentModelProvider {
 @Test func agentLoopConfigurationDefaultsAllowDeeperSingleRunWork() {
     let configuration = AgentLoopConfiguration()
 
-    #expect(configuration.maxToolIterations == 64)
+    #expect(configuration.maxToolIterations == 256)
     #expect(configuration.maxToolCallsPerIteration == 4)
     #expect(configuration.promptProjectionMode == .legacySingleUserMessage)
 }
