@@ -291,6 +291,73 @@ public struct MemoryOSExpandL4Tool: AgentTool {
     }
 }
 
+public struct MemoryOSL4FindEntityTool: AgentTool {
+    public let name = "memory_os_l4_find_entity"
+    public let description = "Find Memory OS L4 entity nodes by exact id, stable key, name, or alias. Use this to resolve an entity/class before graph traversal or class membership queries."
+    public let permission: AgentPermissionCapability = .readGraph
+    public let inputSchema = AgentToolInputSchema.object(properties: [
+        "text": .string(description: "Entity id, stable key, name, or alias to resolve."),
+        "limit": .number(description: "Maximum entity nodes. Defaults to 20.")
+    ], required: ["text"])
+
+    private let facade: AppMemoryOSFacade
+    public init(facade: AppMemoryOSFacade) { self.facade = facade }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        guard let text = arguments.string("text"), !text.isEmpty else { throw AgentToolError.invalidArguments("text is required") }
+        let limit = max(1, min(arguments.int("limit") ?? 20, 100))
+        let subgraph = try facade.findMemoryOSL4Entity(text: text, limit: limit)
+        let payload = MemoryOSL4GraphToolPayload.render(subgraph: subgraph, extra: ["query": text])
+        let json = try MemoryOSL4GraphToolPayload.renderJSON(payload)
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "L4 entity find returned \(subgraph.nodes.count) node(s) for \(text).", contentJSON: json, citations: subgraph.nodes.map(\.id))
+    }
+}
+
+public struct MemoryOSL4NeighborsTool: AgentTool {
+    public let name = "memory_os_l4_neighbors"
+    public let description = "Query outgoing, incoming, or both-direction L4 graph neighbors for a known entity id. Use this for relationship questions after resolving the entity."
+    public let permission: AgentPermissionCapability = .readGraph
+    public let inputSchema = AgentToolInputSchema.object(properties: [
+        "entityID": .string(description: "L4 entity id to traverse from."),
+        "direction": .string(description: "outgoing, incoming, or both. Defaults to both."),
+        "predicates": .array(items: .string(description: "Optional predicate id filter."), description: "Optional predicate filters."),
+        "limit": .number(description: "Maximum edge count. Defaults to 100.")
+    ], required: ["entityID"])
+
+    private let facade: AppMemoryOSFacade
+    public init(facade: AppMemoryOSFacade) { self.facade = facade }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        guard let entityID = arguments.string("entityID"), !entityID.isEmpty else { throw AgentToolError.invalidArguments("entityID is required") }
+        let direction = arguments.string("direction").flatMap(MemoryOSGraphDirection.init(rawValue:)) ?? .both
+        let predicates = arguments.array("predicates")?.compactMap { $0.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty } ?? []
+        let limit = max(1, min(arguments.int("limit") ?? 100, 1_000))
+        let subgraph = try facade.queryMemoryOSL4Neighbors(entityID: entityID, direction: direction, predicates: predicates, limit: limit)
+        let payload = MemoryOSL4GraphToolPayload.render(subgraph: subgraph, extra: ["entityID": entityID, "direction": direction.rawValue, "predicates": predicates])
+        let json = try MemoryOSL4GraphToolPayload.renderJSON(payload)
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "L4 neighbors query returned \(subgraph.edges.count) edge(s) for \(entityID).", contentJSON: json, citations: subgraph.nodes.map(\.id) + subgraph.edges.map(\.id))
+    }
+}
+
+private enum MemoryOSL4GraphToolPayload {
+    static func render(subgraph: MemoryOSGraphSubgraph, extra: [String: Any]) -> [String: Any] {
+        var payload = extra
+        payload["nodeCount"] = subgraph.nodes.count
+        payload["edgeCount"] = subgraph.edges.count
+        payload["nodes"] = subgraph.nodes.map { ["id": $0.id, "layer": $0.layer.rawValue, "kind": $0.kind, "title": $0.title, "summary": $0.summary, "metadata": $0.metadata] as [String: Any] }
+        payload["edges"] = subgraph.edges.map { ["id": $0.id, "layer": $0.layer.rawValue, "sourceID": $0.sourceID, "targetID": $0.targetID, "predicate": $0.predicate, "evidenceRefs": $0.evidenceRefs, "confidence": $0.confidence as Any, "validAt": $0.validAt as Any, "metadata": $0.metadata] as [String: Any] }
+        payload["evidenceRefs"] = subgraph.evidenceRefs
+        payload["provenanceRefs"] = subgraph.provenanceRefs
+        payload["explanation"] = subgraph.explanation
+        return payload
+    }
+
+    static func renderJSON(_ object: [String: Any]) throws -> String {
+        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        return String(data: data, encoding: .utf8) ?? "{}"
+    }
+}
+
 public struct MemoryOSL4InstancesTool: AgentTool {
     public let name = "memory_os_l4_instances"
     public let description = "Query Memory OS L4 graph for instances of one or more class entities using predicates such as P31. Use this for list/all/which/有哪些/所有/列出 class membership questions after resolving the class entity id; unlike memory_os_search, this returns graph-structured instance edges."
@@ -405,6 +472,8 @@ public extension AgentToolRegistry {
         register(MemoryOSGetCurrentUserProfileTool(facade: facade))
         register(MemoryOSSearchTool(facade: facade))
         register(MemoryOSExpandL4Tool(facade: facade))
+        register(MemoryOSL4FindEntityTool(facade: facade))
+        register(MemoryOSL4NeighborsTool(facade: facade))
         register(MemoryOSL4InstancesTool(facade: facade))
         register(MemoryOSReadRecordTool(facade: facade))
         register(MemoryOSReadProvenanceTool(facade: facade))

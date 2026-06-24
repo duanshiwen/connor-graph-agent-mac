@@ -135,6 +135,14 @@ public struct AppMemoryOSCLIInspector: Sendable {
         """, columns: ["id", "stable_key", "entity_type", "name", "aliases_json", "summary", "confidence", "created_at", "updated_at", "valid_from", "metadata_json"])
     }
 
+    public func findL4Entity(text: String, limit: Int = 20) throws -> MemoryOSGraphSubgraph {
+        try AppMemoryOSFacade(store: store, searchKernel: searchKernel).findMemoryOSL4Entity(text: text, limit: safeLimit(limit))
+    }
+
+    public func listL4Neighbors(entityID: String, direction: MemoryOSGraphDirection = .both, predicates: [String] = [], limit: Int = 100) throws -> MemoryOSGraphSubgraph {
+        try AppMemoryOSFacade(store: store, searchKernel: searchKernel).queryMemoryOSL4Neighbors(entityID: entityID, direction: direction, predicates: predicates, limit: safeLimit(limit))
+    }
+
     public func listL4Instances(classEntityIDs: [String], predicates: [String] = ["P31"], limit: Int = 100) throws -> MemoryOSGraphSubgraph {
         try SQLiteMemoryOSGraphRetrievalService(store: store).l4Instances(MemoryOSL4InstanceQuery(classEntityIDs: classEntityIDs, predicates: predicates, limit: safeLimit(limit)))
     }
