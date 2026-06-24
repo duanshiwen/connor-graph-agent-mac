@@ -18,8 +18,8 @@ Connor 当前坚持以下主权边界：
 - **Memory sovereignty belongs to Connor Memory OS**：LLM 不直接写 L2/L3/L4；所有记忆写入必须经过 L0 provenance、L1 capture/queue、processing artifact、schema/evidence validators、temporal current-view derivation 与 SQLite Memory OS repository。旧 Graph Memory 主链路不再作为商用架构保留；只移植 SQLite temporal graph kernel 的存储能力到 L2/L4。Memory OS 是隐藏后台基础设施：主侧边栏、detail pane 和 agent tool registry 不暴露 `Memory OS` dashboard / `memory_os_dashboard_summary`。
 - **Source sovereignty belongs to Connor Source Platform**：MCP servers 是能力提供者，不拥有 Connor source registry、permission policy、audit、readiness state 或 graph ingestion policy。
 - **UI sovereignty belongs to Swift Native Shell**：不引入 Electron/Web UI，不 fork Craft UI。文件预览、设置、菜单、快捷键、选择器等优先使用 macOS / SwiftUI / AppKit 原生语义。
-- **Task sovereignty belongs to Connor Task Management Stack**：任务栈负责统一生命周期、运行历史、恢复意图和本地 CLI/API 管理面；不承载具体 runtime 实现，也不承担审批 gate。浏览器媒体转写也是 `media.transcription.run` target，不建立第二套媒体专用全局队列。
-- **Attachment sovereignty belongs to Connor Session OS / Attachment Store**：用户文件先进入本地 Session Capsule；原文件、manifest、派生抽取文本、message refs 和治理证据由 Connor 管理。媒体转写全文作为附件/derivative 写入 Session Capsule，不塞进 chat body。
+- **Task sovereignty belongs to Connor Task Management Stack**：任务栈负责统一生命周期、运行历史、恢复意图和本地 CLI/API 管理面；不承载具体 runtime 实现，也不承担审批 gate。
+- **Attachment sovereignty belongs to Connor Session OS / Attachment Store**：用户文件先进入本地 Session Capsule；原文件、manifest、派生抽取文本、message refs 和治理证据由 Connor 管理。
 - **Mail/RSS/Contacts/Calendar sovereignty belongs to Connor native runtimes**：账号、凭据边界、同步游标、source cache、草稿/读取状态、审计和 Graph evidence policy 由 Connor 拥有。
 
 明确不做：
@@ -172,47 +172,7 @@ Application service layer. It contains repositories, adapters and native runtime
 - Browser bookmarks/history/context builders
 - Skills, automation, task management and product readiness
 
-### 3.7 Browser Media Transcription Foundation
-
-Connor 的内置浏览器媒体本地转写系统遵守“browser detects, task stack executes, attachment store owns output”的边界：
-
-```text
-WKWebView Browser Media Detection
-  ↓
-BrowserMediaSourceSnapshot
-  ↓
-MediaTranscriptionTaskCreationService
-  ↓
-Connor Task Management Stack target: media.transcription.run
-  ↓
-MediaTranscriptionTaskHandler + MediaRuntimeSupervisor
-  ↓
-Session-owned media job manifest / events / progress / diagnostics / checkpoints
-  ↓
-MediaTranscriptionAttachmentWriter
-  ↓
-Session Attachment Store + follow-up prompt
-```
-
-当前代码层已建立：
-
-- `BrowserMediaTranscriptionDomain.swift`：job、state machine、runtime snapshot、progress、artifact refs；多段媒体选择会先拆成多个单源 snapshot，确保每个 `media.transcription.run` job 只对应一个媒体源。
-- `MediaTranscriptionJobStore.swift`：`sessions/{sessionID}/data/media-jobs/{jobID}/` 下的 durable manifest、event log、progress、diagnostics 与 checkpoints。
-- `MediaRuntimeSupervisor.swift`：Python / yt-dlp / FFmpeg / WhisperKit sidecar health snapshot；真实 runtime 必须通过 checksum、license manifest 与 Application Support sidecar 目录治理。
-- `WhisperKitMediaLocalTranscriber.swift`：默认本地 ASR provider，使用 Argmax `WhisperKit` Swift SDK 加载 app-managed `openai_whisper-medium`（balanced/default）模型；媒体转写不使用 macOS Speech 作为默认路径。
-- `MediaTranscriptionTaskHandler.swift`：复用现有 `TaskTargetRunner` 的 `media.transcription.run` 分支；不新增独立 queue。
-- `TaskManagementUIPresentation.swift`：浏览器媒体转写属于可恢复后台任务，不进入系统定时任务列表；用户在会话 background task surface 中查看进度。
-- `MediaTranscriptionAttachmentWriter.swift`：将 transcript/segments/diagnostics 写入 Session Attachment Store derivatives；完成后的 follow-up message 必须携带当前 job 最新 transcript attachment ref，让模型通过附件上下文读取全文，而不是只在 prompt 中写附件 ID。
-- `BrowserWebViewRepresentable.swift`：注入媒体检测 JS，识别 `<video>` / `<audio>` / OpenGraph media，不 hook DRM、不抓 cookie、不绕过站点权限。
-
-Runtime 合规边界：
-
-- yt-dlp：采用受治理 Python source/wheelhouse 路线，不使用官方 PyInstaller binary 作为默认分发物；禁止 `--update`、`--exec`、任意 cookie、任意外部 downloader 和未确认 playlist 批量处理。
-- FFmpeg：只允许 LGPL build；不得启用 GPL/nonfree parts；必须记录 configure flags、checksum、source offer / license notice。
-- WhisperKit / SpeakerKit / models：必须记录 SDK 与模型 license、version、checksum；模型按需下载或受治理物化。
-- Python runtime：只作为 yt-dlp sidecar 能力，不作为通用 Python 执行器暴露。
-
-### 3.8 ConnorGraphAgentMac
+### 3.7 ConnorGraphAgentMac
 
 SwiftUI macOS application target. It owns：
 
@@ -416,7 +376,7 @@ L1 is an active memory sequence, not the durable source of truth. L0 keeps the r
 
 L2 organization state is tracked outside the immutable fact row through `memory_l2_statement_processing_state`. This lets Connor select unorganized L2 facts for knowledge synthesis without overwriting historical statements. Improvements to L2 should append refined statements and connect them through metadata/projection state rather than mutating old facts in place.
 
-Native source ingestion is normalized through `AppMemoryOSNativeSourceEventBridge`, which adapts Mail, Calendar, RSS, browser history, attachment text and media transcripts into `ingestSourceEvent(...)`. Task scheduling reaches the pipeline through `memory_os.pipeline` targets such as `plan_l1_to_l2_jobs` and `plan_l2_to_knowledge_jobs`.
+Native source ingestion is normalized through `AppMemoryOSNativeSourceEventBridge`, which adapts Mail, Calendar, RSS, browser history and attachment text into `ingestSourceEvent(...)`. Task scheduling reaches the pipeline through `memory_os.pipeline` targets such as `plan_l1_to_l2_jobs` and `plan_l2_to_knowledge_jobs`.
 
 L3 promotion is governed by four knowledge filters:
 
@@ -450,10 +410,9 @@ The old Graph Memory workflow has been removed from production architecture: sta
   - `tasks_list`
   - `tasks_create_scheduled_session_message`
   - `tasks_create_session_status_message`
-- Task runtime execution：`TaskSchedulerService` 计算 due tasks，`TaskSchedulerRunnerService` 记录 run history 并调用 `TaskTargetRunner`，真实分发到 Native Mail / Calendar / RSS runtimes、Session OS message flow 或浏览器媒体转写 handler。`source.runtime` refresh targets 现在通过 `SourceRefreshTaskRequest` 传递 `sourceKind`、`sourceInstanceID` 和 `runID`；RSS source-instance task 会只刷新对应 RSS source，而不是刷新所有 RSS sources。
+- Task runtime execution：`TaskSchedulerService` 计算 due tasks，`TaskSchedulerRunnerService` 记录 run history 并调用 `TaskTargetRunner`，真实分发到 Native Mail / Calendar / RSS runtimes 或 Session OS message flow。`source.runtime` refresh targets 现在通过 `SourceRefreshTaskRequest` 传递 `sourceKind`、`sourceInstanceID` 和 `runID`；RSS source-instance task 会只刷新对应 RSS source，而不是刷新所有 RSS sources。
 - Source sync policy boundary：source config 是同步策略事实来源，TaskDefinition 是 materialized projection。RSS 当前由 `SourceRefreshTaskMaterializer` 根据 `RSSSource.fetchPolicy.intervalMinutes` 生成/更新 `system.rss.source.{rssSourceID}.refresh`；当 RSS source 删除后，对应 task definition 会被物理清除，避免开发阶段保留无效结构。
 - Missed recurring schedule semantics：应用启动和 60 秒轮询都会扫描 due tasks；如果每日/每周/每月重复任务在应用未运行期间错过至少一次，Connor 下次启动/轮询时会立即补执行一次，并把 `nextRunAt` 推进到原始 `runAt` 锚点之后的下一个未来计划点；不会对错过的每一个周期批量补跑，避免会话消息或 source refresh 噪音。Source refresh 同步同样采用 catch up once 语义：恢复后运行一次以追平 source cursor，而不是按错过 interval 批量 replay。
-- 浏览器媒体转写任务使用 Task Stack 获得 recoverable run/history 能力，但不作为“系统定时任务”卡片显示；它的用户可见面在对应会话的 background task surface。若用户一次选择多段媒体，App 会拆成多个单源 job/task；每个完成后的 follow-up chat 只携带该 job 最新 transcript 附件 ref，避免跨视频提交错附件。
 - Session-scoped background task adapter remains for recoverable per-session runtime intents
 
 ---
