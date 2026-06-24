@@ -157,4 +157,49 @@ struct MemoryOSBackgroundPromptContractTests {
         #expect(prompt.contains("metadata.provenance_object_ids"))
         #expect(prompt.contains("metadata.span_ids"))
     }
+
+    @Test func l1PromptDefinesCurrentUserAndOtherPersonBoundary() {
+        let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
+
+        let prompt = MemoryOSL1ToL2PromptBuilder().prompt(for: [event])
+
+        #expect(prompt.contains("The current user is the human operating this Connor installation/session"))
+        #expect(prompt.contains("Other named or described people are other_person entities"))
+        #expect(prompt.contains("Do not merge other people into the current user"))
+        #expect(prompt.contains("Do not assign another person's preferences"))
+    }
+
+    @Test func l1PromptRequiresPersonRoleMetadataForProfileFacts() {
+        let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
+
+        let prompt = MemoryOSL1ToL2PromptBuilder().prompt(for: [event])
+
+        #expect(prompt.contains("metadata.person_role"))
+        #expect(prompt.contains("current_user"))
+        #expect(prompt.contains("other_person"))
+        #expect(prompt.contains("ambiguous_person"))
+        #expect(prompt.contains("metadata.person_resolution"))
+    }
+
+    @Test func l1PromptClarifiesPersonProfileFactRouting() {
+        let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
+
+        let prompt = MemoryOSL1ToL2PromptBuilder().prompt(for: [event])
+
+        #expect(prompt.contains("Current-user preferences, habits, goals, stable traits, communication preferences and knowledge background are L2 profile_preference facts"))
+        #expect(prompt.contains("Other-person profile facts may also be L2 profile_preference or relationship facts"))
+        #expect(prompt.contains("Do not promote ordinary person profile facts into L3 merely because confidence is high"))
+    }
+
+    @Test func l2KnowledgePromptDoesNotPromoteOrdinaryPersonFacts() {
+        let statement = MemoryOSStatement(id: "stmt-1", subjectID: "node-1", predicate: "PREFERS", text: "The current user prefers structured implementation plans.", confidence: 0.97, evidenceSpanIDs: ["span-1"], metadata: ["l2_fact_type": "profile_preference", "person_role": "current_user"])
+
+        let prompt = MemoryOSL2ToKnowledgePromptBuilder().prompt(for: [statement])
+
+        #expect(prompt.contains("Ordinary current-user profile facts"))
+        #expect(prompt.contains("Ordinary other-person profile facts"))
+        #expect(prompt.contains("Do not create L3 knowledge candidates for facts like"))
+        #expect(prompt.contains("Person-related L3 candidates must explain their reusable scope"))
+    }
 }
+
