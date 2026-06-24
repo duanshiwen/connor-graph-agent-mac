@@ -36,14 +36,11 @@ enum AppMailAccountSetupError: LocalizedError {
 
 enum AppViewModelTaskCreationError: LocalizedError {
     case missingRepository
-    case mediaTranscriptionAlreadyRunning
 
     var errorDescription: String? {
         switch self {
         case .missingRepository:
             return "任务管理存储尚未初始化，请稍后重试。"
-        case .mediaTranscriptionAlreadyRunning:
-            return "当前会话已有媒体转写任务正在运行，请等待完成后再创建新的转写任务。"
         }
     }
 }
@@ -551,7 +548,6 @@ final class AppViewModel: NSObject, ObservableObject {
     private var hasActivatedRuntimeSettingsSideEffects = false
     private var locationCoordinator: UserLocationCoordinator?
     private var taskSchedulerTimer: Timer?
-    private var mediaRuntimeBootstrapTask: Task<Void, Never>?
     private lazy var speechTranscriptionCoordinator = SessionSpeechTranscriptionCoordinator(
         transcriber: SessionSpeechTranscriptionController()
     )
@@ -1450,7 +1446,6 @@ final class AppViewModel: NSObject, ObservableObject {
         reloadChatSessions()
         loadBrowserHistory()
         reloadSchemaHealthReport()
-        Task { await ensureMediaTranscriptionRuntimeOnLaunch() }
     }
 
     private func apply(snapshot: GraphStoreSnapshot) {
@@ -1543,50 +1538,6 @@ final class AppViewModel: NSObject, ObservableObject {
         return task.id
     }
 
-    @discardableResult
-    func requestBrowserMediaTranscription(source: BrowserMediaSourceSnapshot) throws -> String {
-        try requestBrowserMediaTranscription(selection: .defaultAllSources(from: source))
-    }
-
-    @discardableResult
-    func requestBrowserMediaTranscription(selection: BrowserMediaTranscriptionSelection) throws -> String {
-        guard let taskManagementRepository else { throw AppViewModelTaskCreationError.missingRepository }
-        let ownerSessionID = selectedChatSessionID ?? activeChatSession.id
-        guard runningMediaTranscriptionTask(for: ownerSessionID) == nil else { throw AppViewModelTaskCreationError.mediaTranscriptionAlreadyRunning }
-        let stack = TaskManagementStack(repository: taskManagementRepository, sessionRepository: chatSessionRepository)
-        let selectedSnapshots = selection.selectedSingleSourceSnapshots
-        var results: [MediaTranscriptionTaskCreationResult] = []
-        for snapshot in selectedSnapshots {
-            let result = try stack.createMediaTranscriptionTask(
-                ownerSessionID: ownerSessionID,
-                source: snapshot,
-                request: selection.mediaTranscriptionRequest
-            )
-            results.append(result)
-            upsertBackgroundTask(
-                AppSessionBackgroundTask(
-                    id: result.task.id,
-                    sessionID: ownerSessionID,
-                    kind: Self.mediaTranscriptionBackgroundTaskKind,
-                    title: "网页媒体转写",
-                    detail: mediaTranscriptionBackgroundTaskDetail(sourceCount: 1, mode: selection.mode),
-                    status: .queued,
-                    payloadJSON: mediaTranscriptionBackgroundTaskPayload(taskID: result.task.id, jobID: result.job.id, mode: selection.mode)
-                )
-            )
-        }
-        reloadTaskManagementPresentation()
-        selectedTaskAutomationID = results.first?.task.id
-        let selectedCount = results.count
-        isBackgroundTasksPresented = true
-        showAttachmentToast(
-            title: "已开始媒体处理",
-            message: "Connor 将处理 \(selectedCount) 个媒体源：\(selection.mode.displayTitle)。完成后结果会分别写入当前会话附件。",
-            systemImage: "waveform.badge.magnifyingglass"
-        )
-        return results.first?.task.id ?? ""
-    }
-
     func stopTask(_ id: String) {
         do {
             _ = try taskManagementRepository?.stopTask(id: id, reason: "Stopped from Task Management UI")
@@ -1651,10 +1602,6 @@ final class AppViewModel: NSObject, ObservableObject {
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("session.ai") }
                 return await self.performTaskSessionMessage(request)
             },
-            mediaTranscription: { [weak self] request in
-                guard let self else { throw TaskTargetRunnerError.unsupportedTarget("media.transcription") }
-                return try await self.performMediaTranscriptionTask(request)
-            },
             memoryOSPipeline: { [weak self] request in
                 guard let self else { throw TaskTargetRunnerError.unsupportedTarget("memory_os.pipeline") }
                 return try await self.performMemoryOSPipelineTask(request)
@@ -1663,71 +1610,12 @@ final class AppViewModel: NSObject, ObservableObject {
         do {
             try await reconcileSourceRefreshTasks()
             let scheduler = TaskSchedulerService()
-            let dueTasks = scheduler.dueTasks(try taskManagementRepository.loadOrCreateDefault(), now: Date())
-            for task in dueTasks where task.target.targetKind == "media.transcription" {
-                updateBackgroundTask(
-                    sessionID: task.target.parameters["ownerSessionID"] ?? selectedChatSessionID ?? activeChatSession.id,
-                    taskID: task.id,
-                    status: .running,
-                    detail: "正在处理网页媒体：获取字幕/音频、转写并写入当前会话附件。"
-                )
-            }
             let service = TaskSchedulerRunnerService(repository: taskManagementRepository, scheduler: scheduler, runner: runner)
-            let outcomes = try await service.runDueTasks()
-            for outcome in outcomes {
-                guard dueTasks.contains(where: { $0.id == outcome.taskID && $0.target.targetKind == "media.transcription" }) else { continue }
-                if outcome.succeeded {
-                    updateMediaTranscriptionBackgroundTask(taskID: outcome.taskID, status: .succeeded, detail: outcome.summary)
-                    if let task = dueTasks.first(where: { $0.id == outcome.taskID }) {
-                        await sendMediaTranscriptionFollowUpIfPossible(for: task)
-                    }
-                } else {
-                    let task = dueTasks.first(where: { $0.id == outcome.taskID })
-                    let userFacingError = mediaTranscriptionUserFacingError(for: task) ?? outcome.errorMessage
-                    updateMediaTranscriptionBackgroundTask(taskID: outcome.taskID, status: .failed, detail: outcome.summary, errorMessage: userFacingError)
-                }
-            }
+            _ = try await service.runDueTasks()
             reloadTaskManagementPresentation()
         } catch {
             errorMessage = String(describing: error)
         }
-    }
-
-    private func performMediaTranscriptionTask(_ request: MediaTranscriptionTaskRequest) async throws -> String {
-        guard let storagePaths else { throw TaskTargetRunnerError.unsupportedTarget("media.transcription storage unavailable") }
-        _ = try await MediaRuntimeBootstrapService(sidecarsDirectory: storagePaths.sidecarsDirectory).ensureBaselineTools()
-        _ = try await WhisperKitModelBootstrapService(sidecarsDirectory: storagePaths.sidecarsDirectory).ensureRequiredBundledModels()
-        let handler = MediaTranscriptionTaskHandler(
-            store: MediaTranscriptionJobStore(paths: storagePaths),
-            runtimeSupervisor: MediaRuntimeSupervisor(sidecarsDirectory: storagePaths.sidecarsDirectory),
-            requireHealthyRuntime: true
-        )
-        return try await handler.run(request)
-    }
-
-    private func mediaTranscriptionUserFacingError(for task: ConnorTaskDefinition?) -> String? {
-        guard let task, let storagePaths else { return nil }
-        let jobID = task.target.parameters["jobID"] ?? task.target.targetID
-        let ownerSessionID = task.target.parameters["ownerSessionID"] ?? task.metadata.ownerSessionID
-        guard let ownerSessionID, !ownerSessionID.isEmpty else { return nil }
-        return (try? MediaTranscriptionJobStore(paths: storagePaths).load(sessionID: ownerSessionID, jobID: jobID))?.lastErrorMessage
-    }
-
-    private func sendMediaTranscriptionFollowUpIfPossible(for task: ConnorTaskDefinition) async {
-        guard let storagePaths else { return }
-        let jobID = task.target.parameters["jobID"] ?? task.target.targetID
-        let ownerSessionID = task.target.parameters["ownerSessionID"] ?? task.metadata.ownerSessionID
-        guard let ownerSessionID, !ownerSessionID.isEmpty else { return }
-        guard let job = try? MediaTranscriptionJobStore(paths: storagePaths).load(sessionID: ownerSessionID, jobID: jobID) else { return }
-        guard let attachmentID = job.artifacts.attachmentIDs.last else { return }
-        guard let manifest = try? AppSessionAttachmentStore(paths: storagePaths).loadManifest(sessionID: ownerSessionID, attachmentID: attachmentID) else { return }
-        let prompt = MediaTranscriptionPromptBuilder().analysisPrompt(job: job, attachmentID: attachmentID)
-        selectedChatSessionID = ownerSessionID
-        if let session = try? chatSessionRepository?.loadSession(id: ownerSessionID) {
-            fallbackChatSession = session
-            nativeSessionManager = makeNativeSessionManager(for: session)
-        }
-        _ = await submitChat(prompt: prompt, clearComposer: false, attachments: [manifest.messageRef])
     }
 
     private func reconcileSourceRefreshTasks(now: Date = Date()) async throws {
@@ -4176,84 +4064,10 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
-    private static let mediaTranscriptionBackgroundTaskKind = "media_transcription"
-    private static let mediaRuntimeBootstrapBackgroundTaskKind = "media_runtime_bootstrap"
-
-    private func ensureMediaTranscriptionRuntimeOnLaunch() async {
-        guard mediaRuntimeBootstrapTask == nil else { return }
-        guard let storagePaths else { return }
-        let report = await MediaRuntimeSupervisor(sidecarsDirectory: storagePaths.sidecarsDirectory).healthCheck()
-        guard !report.isHealthy else { return }
-        let sessionID = selectedChatSessionID ?? activeChatSession.id
-        let task = enqueueBackgroundTask(
-            sessionID: sessionID,
-            title: "准备媒体转写运行时",
-            detail: "正在检查并下载 Connor 内置 yt-dlp、ffmpeg 与 WhisperKit small + medium 模型。",
-            kind: Self.mediaRuntimeBootstrapBackgroundTaskKind
-        )
-        isBackgroundTasksPresented = true
-        mediaRuntimeBootstrapTask = Task { [weak self] in
-            guard let self else { return }
-            let toolService = MediaRuntimeBootstrapService(sidecarsDirectory: storagePaths.sidecarsDirectory)
-            let modelService = WhisperKitModelBootstrapService(sidecarsDirectory: storagePaths.sidecarsDirectory)
-            do {
-                updateBackgroundTask(sessionID: sessionID, taskID: task.id, status: .running, detail: "正在准备媒体获取与转码组件。")
-                _ = try await toolService.ensureBaselineTools { [weak self] progress in
-                    Task { @MainActor in
-                        guard let self else { return }
-                        let percent = progress.totalBytes > 0 ? Int(progress.fractionCompleted * 100) : 0
-                        let suffix = progress.totalBytes > 0 ? "（\(percent)%）" : ""
-                        self.updateBackgroundTask(sessionID: sessionID, taskID: task.id, status: .running, detail: "\(progress.message)\(suffix)")
-                    }
-                }
-                updateBackgroundTask(sessionID: sessionID, taskID: task.id, status: .running, detail: "正在准备 WhisperKit small + medium 基线模型。")
-                _ = try await modelService.ensureRequiredBundledModels { [weak self] progress in
-                    Task { @MainActor in
-                        guard let self else { return }
-                        let percent = progress.totalBytes > 0 ? Int(progress.fractionCompleted * 100) : 0
-                        let suffix = progress.totalBytes > 0 ? "（\(percent)%）" : ""
-                        self.updateBackgroundTask(sessionID: sessionID, taskID: task.id, status: .running, detail: "\(progress.message)\(suffix)")
-                    }
-                }
-                await MainActor.run {
-                    self.updateBackgroundTask(sessionID: sessionID, taskID: task.id, status: .succeeded, detail: "媒体转写运行时已就绪：yt-dlp、ffmpeg、WhisperKit small + medium 可用。")
-                    self.showAttachmentToast(title: "媒体转写运行时已就绪", message: "Connor 已准备好媒体获取、转码和 WhisperKit 基线模型。", systemImage: "checkmark.seal.fill")
-                    self.mediaRuntimeBootstrapTask = nil
-                }
-            } catch {
-                await MainActor.run {
-                    self.updateBackgroundTask(sessionID: sessionID, taskID: task.id, status: .failed, detail: "媒体转写运行时准备失败", errorMessage: String(describing: error))
-                    self.mediaRuntimeBootstrapTask = nil
-                }
-            }
-        }
-    }
-
     func backgroundTasks(for sessionID: String?) -> [AppSessionBackgroundTask] {
         guard let sessionID else { return [] }
         return backgroundTasksBySessionID[sessionID, default: []]
             .sorted { $0.createdAt > $1.createdAt }
-    }
-
-    func runningMediaTranscriptionTask(for sessionID: String?) -> AppSessionBackgroundTask? {
-        backgroundTasks(for: sessionID).first { task in
-            task.kind == Self.mediaTranscriptionBackgroundTaskKind && (task.status == .queued || task.status == .running)
-        }
-    }
-
-    private func mediaTranscriptionBackgroundTaskDetail(sourceCount: Int, mode: BrowserMediaTranscriptionMode) -> String {
-        "等待处理 \(sourceCount) 个网页媒体源：\(mode.displayTitle)。结果会写入当前会话附件。"
-    }
-
-    private func mediaTranscriptionBackgroundTaskPayload(taskID: String, jobID: String, mode: BrowserMediaTranscriptionMode) -> String {
-        "{\"taskID\":\"\(taskID)\",\"jobID\":\"\(jobID)\",\"mode\":\"\(mode.rawValue)\"}"
-    }
-
-    private func updateMediaTranscriptionBackgroundTask(taskID: String, status: AppSessionBackgroundTaskStatus, detail: String? = nil, errorMessage: String? = nil) {
-        for (sessionID, tasks) in backgroundTasksBySessionID where tasks.contains(where: { $0.id == taskID && $0.kind == Self.mediaTranscriptionBackgroundTaskKind }) {
-            updateBackgroundTask(sessionID: sessionID, taskID: taskID, status: status, detail: detail, errorMessage: errorMessage)
-            return
-        }
     }
 
     var activeSessionBackgroundTasks: [AppSessionBackgroundTask] {
