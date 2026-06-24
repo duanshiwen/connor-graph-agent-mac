@@ -1,7 +1,7 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-22 23:54 GMT+8  
-当前分支目标：将过旧 Graph Memory 主链路硬切换为商用稳定版 **Connor Memory OS L0-L4**；只移植旧 SQLite temporal graph kernel 的存储能力作为 L2/L4 底层 adapter，删除 staging / distillation / extraction / admission / candidate review / self-healing 等旧结构，避免长期技术债务。
+文档更新时间：2026-06-24 11:21 GMT+8  
+当前文档基线：`remove-browser-media-transcription` 之后的当前工作树；README 只记录当前真实架构、配置和开发约束，不作为历史 changelog。过旧 Graph Memory 主链路已切换为商用稳定版 **Connor Memory OS L0-L4**；旧 SQLite temporal graph kernel 仅作为 L2/L4 底层存储 / retrieval adapter 保留。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用和 SwiftPM package。它的目标不是做“图谱编辑器”或“LLM SDK 外壳”，而是构建一个本地优先的 **memory-os-native Agent OS**：以 Session OS、Policy Engine、Memory OS、Source/MCP Platform、Native UI、Task Management Stack 和 Attachment Store 共同组成可治理的本地智能工作台。
 
@@ -20,7 +20,7 @@ Connor 当前坚持以下主权边界：
 - **UI sovereignty belongs to Swift Native Shell**：不引入 Electron/Web UI，不 fork Craft UI。文件预览、设置、菜单、快捷键、选择器等优先使用 macOS / SwiftUI / AppKit 原生语义。
 - **Task sovereignty belongs to Connor Task Management Stack**：任务栈负责统一生命周期、运行历史、恢复意图和本地 CLI/API 管理面；不承载具体 runtime 实现，也不承担审批 gate。
 - **Attachment sovereignty belongs to Connor Session OS / Attachment Store**：用户文件先进入本地 Session Capsule；原文件、manifest、派生抽取文本、message refs 和治理证据由 Connor 管理。
-- **Mail/RSS/Contacts/Calendar sovereignty belongs to Connor native runtimes**：账号、凭据边界、同步游标、source cache、草稿/读取状态、审计和 Graph evidence policy 由 Connor 拥有。
+- **Mail/RSS/Contacts/Calendar sovereignty belongs to Connor native runtimes**：账号、凭据边界、同步游标、source cache、草稿/读取状态、审计和 Memory OS evidence policy 由 Connor 拥有。
 
 明确不做：
 
@@ -36,7 +36,7 @@ MCP server owning product state
 External model provider owning Connor session state
 Direct LLM access to IMAP / SMTP / OAuth / Contacts credentials
 Unapproved email sending
-Auto-writing external-source facts into Graph Memory
+Auto-projecting external-source facts into Memory OS truth records without validation
 Executing feed HTML JavaScript or auto-loading remote tracking resources
 ```
 
@@ -48,8 +48,9 @@ Executing feed HTML JavaScript or auto-loading remote tracking resources
 Package name: ConnorGraphAgentMac
 Swift tools version: 6.0
 Platform: macOS 14+
-Current local toolchain used in this review: Apple Swift 6.3.2
-System frameworks: sqlite3, Security, EventKit, Contacts, WebKit, PDFKit, QuickLookUI
+External SwiftPM package dependencies: none
+Explicit linker settings: sqlite3, Security, EventKit, Contacts, WebKit, AVFoundation, Speech, CoreLocation
+Source-level Apple framework imports include: PDFKit and QuickLookUI for attachment preview/extraction surfaces
 ```
 
 Products：
@@ -81,7 +82,7 @@ Sources/ConnorGraphAgentMac    SwiftUI/AppKit macOS application shell
 Sources/ConnorCLI              Local-only CLI control surface
 ```
 
-Test targets cover all major modules, including Agent loop, Graph Memory, Store, Search, AppSupport, UI presentation policies, browser, attachments, mail/RSS, skills, tasks, and settings.
+Test targets cover all major modules, including Agent loop, Memory OS / temporal graph kernel, Store, Search, AppSupport, UI presentation policies, browser, attachments, mail/RSS, skills, tasks, and settings.
 
 ---
 
@@ -215,10 +216,11 @@ Connor/
 │   ├── exports/
 │   ├── snapshots/
 │   └── evaluations/
-├── logs/
-│   ├── audit/
-│   └── runtime/
-└── sidecars/
+└── logs/
+    ├── audit/
+    └── runtime/
+
+Sidecar-related directories are only materialized when a governed runtime explicitly owns them.
 ```
 
 Session Capsule layout：
@@ -261,21 +263,23 @@ tasks/task-definitions.json
 tasks/task-run-history.jsonl
 tasks/task-event-log.jsonl
 tasks/task-deletion-log.jsonl
+labels/labels.json
+statuses/statuses.json
+graph/evaluations/retrieval-evaluation-cases.json
+graph/evaluations/reports/*.json
+```
 
-内置系统任务会在启动时自动补齐到 `task-definitions.json`。Mail / Calendar 当前仍保留 source-type level protected tasks；RSS 已迁移到 source-instance level materialized tasks：
+内置系统任务会在启动时自动补齐到 `task-definitions.json`。当前 protected system tasks 包括：
 
 ```text
+system.memory-os.plan-l1-to-l2                memory_os.pipeline:default.plan_l1_to_l2_jobs     interval 300s
+system.memory-os.plan-l2-to-knowledge         memory_os.pipeline:default.plan_l2_to_knowledge_jobs interval 600s
 system.mail.check-every-10-minutes            source.runtime:mail.refresh
 system.calendar.check-every-10-minutes        source.runtime:calendar.refresh
 system.rss.source.{rssSourceID}.refresh       source.runtime:rss.refresh(sourceInstanceID={rssSourceID})
 ```
 
 RSS 不再存在全局 source-type refresh task；开发期本地遗留的无 `sourceInstanceID` RSS refresh task 会在 reconcile 时从 task definitions 中物理清除。
-labels/labels.json
-statuses/statuses.json
-graph/evaluations/retrieval-evaluation-cases.json
-graph/evaluations/reports/*.json
-```
 
 API keys and provider credentials must not be stored in JSON settings files. They belong in local credential stores / Keychain-backed repositories.
 
@@ -310,7 +314,7 @@ API keys and provider credentials must not be stored in JSON settings files. The
 - Non-streaming completion and provider health-check paths remain available as fallbacks
 - Per-connection settings and per-session model override
 - Provider health checks and credential boundary
-- Connor owns sessions, tool execution, pending approvals, audit events and graph-memory writes; model providers never own Connor product state
+- Connor owns sessions, tool execution, pending approvals, audit events and Memory OS projection gates; model providers never own Connor product state
 
 ### 5.4 MCP Source Platform
 
@@ -397,7 +401,7 @@ The old Graph Memory workflow has been removed from production architecture: sta
 - Skill prompt augmentation
 - Product OS automation legacy repositories remain for compatibility, but new background work is owned by Task Management Stack
 - Three task origins：
-  - `system`：Connor protected tasks，用户可查看、暂停和恢复，不可删除；当前包括 10 分钟邮件刷新、10 分钟日历刷新，以及由每个 RSS source 的 `fetchPolicy.intervalMinutes` 派生出的 per-source RSS refresh tasks
+  - `system`：Connor protected tasks，用户可查看、暂停和恢复，不可删除；当前包括 Memory OS L1→L2 / L2→Knowledge 规划任务、10 分钟邮件刷新、10 分钟日历刷新，以及由每个 RSS source 的 `fetchPolicy.intervalMinutes` 派生出的 per-source RSS refresh tasks
   - `user`：用户创建的任务，可编辑/删除；当前受模板约束
   - `ai`：AI 通过受治理工具创建的任务，可被用户编辑/删除；当前受模板约束
 - Two trigger modes：
@@ -437,7 +441,6 @@ From the repository root：
 
 ```bash
 swift test
-swift test --filter ScientificComputeRuntimeTests
 swift test --filter Browser
 swift build
 swift run connor --help
@@ -451,11 +454,13 @@ swift --version
 find Sources Tests -name '*.swift' | wc -l
 ```
 
-Current review baseline：
+Current local scan baseline：
 
 ```text
-swift test
-→ Test run with 866 tests in 77 suites passed.
+branch: remove-browser-media-transcription
+source files: 345 Swift files under Sources
+test files: 254 Swift files under Tests
+total: 599 Swift files
 ```
 
 ---
@@ -468,7 +473,7 @@ Before claiming a change is complete：
 - Run full `swift test` before final handoff.
 - Keep provider/sidecar/source adapters behind Connor-owned policy and audit boundaries.
 - Keep credentials out of JSON config files.
-- Keep Graph Memory writes staged and reviewable.
+- Keep Memory OS writes behind provenance capture, artifact validation, audit logging and projection gates.
 - Keep attachment source of truth in Session Capsule / Attachment Store.
 - Any native source mutation must update, invalidate, or explicitly fallback around the Native Source Search index.
 - Any Mail/RSS/Calendar search result must preserve temporal metadata; time-sensitive queries should use structured `timePreset` or `startDate`/`endDate` filters.
