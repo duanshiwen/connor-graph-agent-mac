@@ -131,7 +131,11 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         registry.register(ScienceOptimizeTool())
         registry.register(ScienceTableComputeTool())
         registry.registerTimeAnalysisTool()
-        registry.registerNativeCalendarTools(runtime: InMemoryAgentCalendarRuntime())
+        if let storagePaths {
+            registry.registerNativeCalendarTools(runtime: CalendarSourceAgentRuntimeBridge(store: FileBackedCalendarSourceRuntimeStore(storagePaths: storagePaths)))
+        } else {
+            registry.registerNativeCalendarTools(runtime: InMemoryAgentCalendarRuntime())
+        }
         registry.registerNativeContactsAggregateTools(runtime: InMemoryAgentContactRuntime())
         registry.register(BrowserFetchTool())
         registry.register(NativeWebSearchTool(browserAssistedSearchHandler: browserAssistedSearchHandler))

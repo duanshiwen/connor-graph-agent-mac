@@ -518,8 +518,10 @@ final class AppViewModel: NSObject, ObservableObject {
     private var rssRuntime = RSSRuntime(repository: InMemoryRSSSourceRepository(), cache: InMemoryRSSSourceCache())
     private var mailStore: FileBackedMailSourceStore?
     private var calendarStore: FileBackedCalendarSourceStore?
+    private var calendarRuntimeStore: FileBackedCalendarSourceRuntimeStore?
     private var contactStore: FileBackedContactSourceStore?
     private var mailCredentialStore = AppMailCredentialStore()
+    private var calendarCredentialStore = AppCalendarCredentialStore()
     private var agentRuntimeFactory: AppGraphAgentRuntimeFactory?
     private var hybridSearchService: (any GraphHybridSearchService)?
     private var isRunningBackgroundJobs: Bool = false
@@ -1368,6 +1370,7 @@ final class AppViewModel: NSObject, ObservableObject {
             )
             self.mailStore = FileBackedMailSourceStore(storagePaths: storagePaths)
             self.calendarStore = FileBackedCalendarSourceStore(storagePaths: storagePaths)
+            self.calendarRuntimeStore = FileBackedCalendarSourceRuntimeStore(storagePaths: storagePaths)
             self.contactStore = FileBackedContactSourceStore(storagePaths: storagePaths)
         }
         if let repository {
@@ -1682,10 +1685,33 @@ final class AppViewModel: NSObject, ObservableObject {
     private func refreshCalendarForScheduledTask(sourceInstanceID: String?, runID: String?) async -> String {
         if let sourceInstanceID, !sourceInstanceID.isEmpty,
            sourceInstanceID != CalendarEventKitAdapter.systemAccountID.rawValue {
-            guard calendarAccounts.contains(where: { $0.id.rawValue == sourceInstanceID }) else {
+            guard let account = calendarAccounts.first(where: { $0.id.rawValue == sourceInstanceID }) else {
                 return "Calendar account not found: \(sourceInstanceID)"
             }
-            return "Calendar refreshed account \(sourceInstanceID); remote sync adapter unavailable"
+            guard let calendarRuntimeStore else { return "Calendar runtime store unavailable" }
+            let engine = CalendarSourceSyncEngine(
+                connectors: [
+                    CalendarICSSubscriptionConnector(),
+                    CalendarCalDAVConnector(kind: .genericCalDAV),
+                    CalendarCalDAVConnector(kind: .appleICloudCalDAV),
+                    CalendarCalDAVConnector(kind: .fastmailCalDAV),
+                    CalendarCalDAVConnector(kind: .nextcloudCalDAV)
+                ],
+                runtimeStore: calendarRuntimeStore
+            )
+            do {
+                let credential = readCalendarCredential(for: account)
+                let result = try await engine.sync(request: CalendarSourceSyncRequest(account: account, credential: credential, runID: runID))
+                let snapshot = try await calendarRuntimeStore.loadSnapshot()
+                calendarAccounts = mergeAccounts(calendarAccounts, snapshot.accounts)
+                calendarCollections = mergeCollections(calendarCollections, snapshot.collections)
+                calendarEvents = mergeEvents(calendarEvents, snapshot.events)
+                reloadCalendarBrowserPresentation()
+                await persistCalendarSnapshot()
+                return "Calendar refreshed account \(sourceInstanceID); synced \(result.events.count) events across \(result.collections.count) calendars"
+            } catch {
+                return "Calendar refresh failed for account \(sourceInstanceID): \(error.localizedDescription)"
+            }
         }
         let succeeded = await syncSystemCalendarNow()
         return succeeded ? (calendarSyncMessage ?? "Calendar refreshed") : (calendarSyncMessage ?? "Calendar refresh failed")
@@ -1940,10 +1966,12 @@ final class AppViewModel: NSObject, ObservableObject {
 
     func reloadCalendarContactsFromStorage() async {
         do {
-            if let snapshot = try await calendarStore?.loadSnapshot() {
-                calendarAccounts = snapshot.accounts
-                calendarCollections = snapshot.collections
-                calendarEvents = snapshot.events
+            let legacySnapshot = try await calendarStore?.loadSnapshot()
+            let runtimeSnapshot = try await calendarRuntimeStore?.loadSnapshot()
+            if legacySnapshot != nil || runtimeSnapshot != nil {
+                calendarAccounts = mergeAccounts(legacySnapshot?.accounts ?? [], runtimeSnapshot?.accounts ?? [])
+                calendarCollections = mergeCollections(legacySnapshot?.collections ?? [], runtimeSnapshot?.collections ?? [])
+                calendarEvents = mergeEvents(legacySnapshot?.events ?? [], runtimeSnapshot?.events ?? [])
                 reloadCalendarBrowserPresentation()
             }
             if let records = try await contactStore?.loadRecords() {
@@ -1958,13 +1986,24 @@ final class AppViewModel: NSObject, ObservableObject {
 
     private func persistCalendarSnapshot() async {
         do {
-            try await calendarStore?.saveSnapshot(
-                FileBackedCalendarSourceStore.Snapshot(
-                    accounts: calendarAccounts,
-                    collections: calendarCollections,
-                    events: calendarEvents
-                )
+            let snapshot = FileBackedCalendarSourceStore.Snapshot(
+                accounts: calendarAccounts,
+                collections: calendarCollections,
+                events: calendarEvents
             )
+            try await calendarStore?.saveSnapshot(snapshot)
+            if let calendarRuntimeStore {
+                let runtimeSnapshot = try await calendarRuntimeStore.loadSnapshot()
+                try await calendarRuntimeStore.saveSnapshot(
+                    CalendarSourceRuntimeSnapshot(
+                        accounts: calendarAccounts,
+                        collections: calendarCollections,
+                        events: calendarEvents,
+                        syncStates: runtimeSnapshot.syncStates,
+                        diagnostics: runtimeSnapshot.diagnostics
+                    )
+                )
+            }
         } catch {
             errorMessage = "无法保存日历缓存：\(error.localizedDescription)"
         }
@@ -2028,6 +2067,36 @@ final class AppViewModel: NSObject, ObservableObject {
             }
             isSyncingSystemContacts = false
         }
+    }
+
+    private func readCalendarCredential(for account: CalendarAccount) -> String? {
+        if account.configuration.authMode == .none { return nil }
+        if let username = account.configuration.username {
+            let binding = AppCalendarCredentialStore.binding(accountID: account.id, username: username, authMode: account.configuration.authMode)
+            return try? calendarCredentialStore.readCredential(binding: binding)
+        }
+        if let binding = account.credentialBinding {
+            return try? KeychainCredentialStore().readSecret(service: binding.keychainService, account: binding.accountName)
+        }
+        return nil
+    }
+
+    private func mergeAccounts(_ primary: [CalendarAccount], _ overlay: [CalendarAccount]) -> [CalendarAccount] {
+        var byID = Dictionary(uniqueKeysWithValues: primary.map { ($0.id, $0) })
+        for account in overlay { byID[account.id] = account }
+        return byID.values.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+    }
+
+    private func mergeCollections(_ primary: [CalendarCollection], _ overlay: [CalendarCollection]) -> [CalendarCollection] {
+        var byID = Dictionary(uniqueKeysWithValues: primary.map { ($0.id, $0) })
+        for collection in overlay { byID[collection.id] = collection }
+        return byID.values.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+    }
+
+    private func mergeEvents(_ primary: [CalendarEvent], _ overlay: [CalendarEvent]) -> [CalendarEvent] {
+        var byID = Dictionary(uniqueKeysWithValues: primary.map { ($0.id, $0) })
+        for event in overlay { byID[event.id] = event }
+        return byID.values.sorted { $0.start.date < $1.start.date }
     }
 
     private func upsertSystemCalendarSnapshot(_ snapshot: CalendarEventKitSnapshot) {
