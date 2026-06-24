@@ -16,7 +16,7 @@ struct LLMSettingsView: View {
             }
             .pickerStyle(.segmented)
 
-            TextField("Base URL", text: $viewModel.llmBaseURLString)
+            TextField("接口地址", text: $viewModel.llmBaseURLString)
                 .textFieldStyle(.roundedBorder)
             TextField("模型列表（逗号分隔）", text: $viewModel.llmModel)
                 .textFieldStyle(.roundedBorder)
@@ -25,9 +25,9 @@ struct LLMSettingsView: View {
 
             GroupBox {
                 VStack(alignment: .leading, spacing: 6) {
-                    Label("原生模型管线", systemImage: "sparkles.rectangle.stack")
+                    Label("模型连接", systemImage: "sparkles.rectangle.stack")
                         .font(SettingsListTypography.rowCaptionEmphasized)
-                    Text("OpenAI 官方连接通过 Connor 原生 Responses API 管线执行；Claude/Anthropic 通过 Connor 原生 Swift Messages API 管线执行。Session、工具、权限审批、审计和 Graph Memory 均由 Connor 自己持有。")
+                    Text("模型连接用于生成回复；会话、工具调用和权限确认由康纳同学在本机统一管理。")
                 }
                 .font(SettingsListTypography.rowCaption)
                 .foregroundStyle(.secondary)
@@ -49,11 +49,11 @@ struct LLMSettingsView: View {
 
             GroupBox {
                 VStack(alignment: .leading, spacing: 6) {
-                    Label("安全提示：API Key 会保存到康纳同学 Home 的本地加密凭据文件", systemImage: "lock.shield")
+                    Label("安全提示：API Key 会加密保存在本机", systemImage: "lock.shield")
                         .font(SettingsListTypography.rowCaptionEmphasized)
-                    Text("为减少钥匙串弹窗，康纳同学会使用本机生成的 master key 对 API Key 进行 AES-GCM 加密，并写入 Application Support/Connor/config/credentials。")
-                    Text("API Key 不会以明文写入应用设置、项目文件或 Git 仓库；删除 API Key 会移除对应加密凭据文件。")
-                    Text("这是本机本地加密存储，不依赖 macOS 钥匙串授权弹窗。")
+                    Text("康纳同学会将 API Key 加密保存在本机，用于之后连接模型服务。")
+                    Text("API Key 不会以明文写入应用设置、项目文件或 Git 仓库；删除 API Key 会移除对应凭据。")
+                    Text("这是本机加密存储，不会上传到模型服务之外的地方。")
                 }
                 .font(SettingsListTypography.rowCaption)
                 .foregroundStyle(.secondary)
