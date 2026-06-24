@@ -179,9 +179,9 @@ private struct MailAddressLine: View {
 private struct MailGovernanceHintStrip: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
-            MailChecklistRow(title: "读取不自动标记已读", isReady: true, detail: "列表和详情预览不会隐式修改邮件 read state。")
-            MailChecklistRow(title: "发信始终需要审批", isReady: true, detail: "草稿发送必须进入 Connor approval gate。")
-            MailChecklistRow(title: "附件导入受治理", isReady: true, detail: "附件进入 Session Capsule / Attachment Store 后再供 Agent 使用。")
+            MailChecklistRow(title: "读取不自动标记已读", isReady: true, detail: "列表和详情预览不会自动把邮件标记为已读。")
+            MailChecklistRow(title: "发信始终需要审批", isReady: true, detail: "发送草稿前，康纳同学会先请求确认。")
+            MailChecklistRow(title: "附件导入受保护", isReady: true, detail: "附件会先保存到当前会话，再供康纳同学使用。")
         }
     }
 }
