@@ -102,6 +102,10 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         try SQLiteMemoryOSUnifiedRetrievalService(store: store).expandL4(entityID: entityID, depth: depth, limit: limit)
     }
 
+    public func queryMemoryOSL4Instances(classEntityIDs: [String], predicates: [String] = ["P31"], limit: Int = 100) throws -> MemoryOSGraphSubgraph {
+        try SQLiteMemoryOSGraphRetrievalService(store: store).l4Instances(MemoryOSL4InstanceQuery(classEntityIDs: classEntityIDs, predicates: predicates, limit: limit))
+    }
+
     public func ingestChatMessage(
         messageID: String,
         sessionID: String,

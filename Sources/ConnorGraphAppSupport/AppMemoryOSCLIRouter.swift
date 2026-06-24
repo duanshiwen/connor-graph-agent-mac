@@ -88,8 +88,22 @@ public enum AppMemoryOSCLIRouter {
 
     private static func routeL4(args: [String], inspector: AppMemoryOSCLIInspector, encoder: JSONEncoder) throws -> String {
         switch args.first ?? "entities" {
-        case "entities": return try encode(try inspector.listL4Entities(limit: intOption("--limit", in: args, default: 20)), encoder: encoder)
-        default: return try encode(MemoryOSCLIError(error: "unknown_l4_command", usage: "connor memory l4 entities"), encoder: encoder)
+        case "entities":
+            return try encode(try inspector.listL4Entities(limit: intOption("--limit", in: args, default: 20)), encoder: encoder)
+        case "instances":
+            guard let classIDs = args.dropFirst().first, !classIDs.hasPrefix("--") else {
+                return try encode(MemoryOSCLIError(error: "missing_class_entity_ids", usage: "connor memory l4 instances <class-id[,class-id...]> [--predicate P31] [--limit N]"), encoder: encoder)
+            }
+            return try encode(
+                try inspector.listL4Instances(
+                    classEntityIDs: splitCSV(classIDs),
+                    predicates: optionValue("--predicate", in: args).map(splitCSV) ?? ["P31"],
+                    limit: intOption("--limit", in: args, default: 100)
+                ),
+                encoder: encoder
+            )
+        default:
+            return try encode(MemoryOSCLIError(error: "unknown_l4_command", usage: "connor memory l4 entities|instances"), encoder: encoder)
         }
     }
 
