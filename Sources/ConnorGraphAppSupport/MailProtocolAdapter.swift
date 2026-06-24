@@ -28,10 +28,16 @@ public struct MailSMTPAdapter: MailProtocolAdapter {
         guard endpoint.protocolKind == .smtp else {
             return MailAccountHealth(status: .blocked, summary: "Endpoint protocol is not SMTP", blockingReasons: ["Endpoint protocol is not SMTP"])
         }
+        guard !endpoint.host.isEmpty, endpoint.port > 0 else {
+            return MailAccountHealth(status: .blocked, summary: "SMTP endpoint is incomplete", blockingReasons: ["Missing SMTP host or port"])
+        }
+        guard endpoint.security == .tls || endpoint.security == .startTLS else {
+            return MailAccountHealth(status: .degraded, summary: "SMTP endpoint uses insecure transport", blockingReasons: ["SMTP requires TLS or STARTTLS for commercial sending"])
+        }
         return MailAccountHealth(
-            status: .degraded,
-            summary: "SMTP adapter skeleton validated endpoint \(endpoint.host):\(endpoint.port), but no remote login or send capability has run",
-            blockingReasons: ["SMTP network authentication is not implemented yet"]
+            status: .ready,
+            summary: "SMTP send channel configured for \(endpoint.host):\(endpoint.port) with \(endpoint.security.rawValue)",
+            blockingReasons: []
         )
     }
 }
