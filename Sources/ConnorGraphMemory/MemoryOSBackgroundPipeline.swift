@@ -145,6 +145,14 @@ public struct MemoryOSL1ToL2PromptBuilder: Sendable {
         - If raw L0 material is needed, request the referenced provenance object or span instead of guessing.
         - Output only MemoryOSL1UnifiedProjectionOutput JSON.
 
+        Current user and person boundary:
+        - The current user is the human operating this Connor installation/session.
+        - Treat first-person references from user-authored chat/session evidence (I, me, my, 我, 我的, 用户) as the current user when source metadata supports that authorship.
+        - Other named or described people are other_person entities, not the current user.
+        - Do not merge other people into the current user.
+        - Do not assign another person's preferences, habits, goals, traits, location, family, relationships or commitments to the current user unless explicitly supported by evidence.
+        - If person identity is ambiguous, preserve the ambiguity in metadata/warnings instead of guessing or merging.
+
         L1 unified output contract:
         - Output schema is MemoryOSL1UnifiedProjectionOutput JSON with operationalEntities, operationalStatements, evidenceSpans, knowledgeCandidates, conceptEntities, conceptRelations, promotionDecisions, warnings, confidence and metadata.
         - operationalEntities and operationalStatements are the L2 operational graph section.
@@ -154,6 +162,7 @@ public struct MemoryOSL1ToL2PromptBuilder: Sendable {
         - Each operational statement should represent one atomic operational fact, not a broad interpretation.
         - Use statement metadata to preserve extraction discipline and downstream routing.
         - Required statement metadata keys when applicable: metadata.l2_fact_type, metadata.capture_event_ids, metadata.provenance_object_ids, metadata.span_ids.
+        - For person/profile facts, also set metadata.person_role to current_user, other_person, or ambiguous_person; set metadata.person_resolution to resolved, ambiguous, or needs_confirmation when applicable.
         - metadata.capture_event_ids, metadata.provenance_object_ids and metadata.span_ids should be comma-separated stable ids when multiple inputs support the same consolidated fact.
         - L3 knowledgeCandidates.evidenceStatementIDs must reference operationalStatements local statement ids from this same artifact.
         - L3 knowledgeCandidates.evidenceSpanIDs and L4 conceptRelations.evidenceSpanIDs must reference evidenceSpans ids.
@@ -167,7 +176,7 @@ public struct MemoryOSL1ToL2PromptBuilder: Sendable {
         \(Self.allowedPredicateGuide())
 
         L2 fact taxonomy:
-        - profile_preference: user profile, preference, dislike, habit, goal, stable personal context, or personalized operating preference.
+        - profile_preference: current-user profile facts and explicitly evidenced person profile facts, including preference, dislike, habit, goal, stable trait, stable personal context, knowledge background, communication preference, or personalized operating preference.
         - project_state: current project/work-object state, milestone, scope, requirement, constraint, design direction, or active decision context.
         - task_commitment: task, TODO, commitment, responsibility, due date, reminder, follow-up, assignment, completion or postponement.
         - calendar_time: calendar event, schedule, time block, deadline, conflict, occurrence time, start/end time or temporal coordination fact.
@@ -185,6 +194,11 @@ public struct MemoryOSL1ToL2PromptBuilder: Sendable {
         - If a fact could fit multiple categories, choose the category that best describes why the fact will be retrieved later.
         - The taxonomy is for L2 operational routing only; it is not a reason to promote a fact into L3.
 
+        Person/profile routing rules:
+        - Current-user preferences, habits, goals, stable traits, communication preferences and knowledge background are L2 profile_preference facts unless they encode reusable knowledge.
+        - Other-person profile facts may also be L2 profile_preference or relationship facts, but must be clearly marked as other_person.
+        - Do not promote ordinary person profile facts into L3 merely because confidence is high.
+
         L3 promotion filters:
         - signal_quality: pass only if the material is substantial knowledge rather than noise, style, or a one-off detail.
         - reuse_scope: pass only if the material will be reusable across future sessions, tasks, projects or decisions.
@@ -197,6 +211,9 @@ public struct MemoryOSL1ToL2PromptBuilder: Sendable {
 
         Stable L4 entity rules:
         - Create or reuse L4 stable entities for people, organizations, projects/work objects, products, locations, durable documents/artifacts, and durable concepts/frameworks/standards.
+        - The current user may be represented as a stable person entity with metadata.person_role = current_user when evidence supports it.
+        - Named collaborators, contacts, family members and other durable people may be represented as stable person entities with metadata.person_role = other_person.
+        - Do not create or merge stable person entities when identity is ambiguous; emit warnings or ambiguous metadata instead.
         - Create conceptEntities only when the concept has a stable name, useful summary, clear type, evidence, and future retrieval value.
         - Create conceptRelations only when the relation is durable, evidence-backed, and useful for reasoning or retrieval.
         - Do not create L4 entities for vague temporary phrases, one-off tasks, ephemeral UI wording, unsupported inferred categories, or purely stylistic wording.
