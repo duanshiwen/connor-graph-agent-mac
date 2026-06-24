@@ -15,6 +15,20 @@ public struct ICalendarEvent: Sendable, Equatable {
         }
     }
 
+    public struct Person: Sendable, Equatable {
+        public var name: String?
+        public var email: String?
+        public var role: String?
+        public var participationStatus: String?
+
+        public init(name: String? = nil, email: String? = nil, role: String? = nil, participationStatus: String? = nil) {
+            self.name = name
+            self.email = email
+            self.role = role
+            self.participationStatus = participationStatus
+        }
+    }
+
     public var uid: String
     public var summary: String
     public var start: DateTime
@@ -25,8 +39,11 @@ public struct ICalendarEvent: Sendable, Equatable {
     public var url: URL?
     public var recurrenceRule: String?
     public var lastModified: Date?
+    public var status: String?
+    public var organizer: Person?
+    public var attendees: [Person]
 
-    public init(uid: String, summary: String, start: DateTime, end: DateTime? = nil, isAllDay: Bool = false, location: String? = nil, description: String? = nil, url: URL? = nil, recurrenceRule: String? = nil, lastModified: Date? = nil) {
+    public init(uid: String, summary: String, start: DateTime, end: DateTime? = nil, isAllDay: Bool = false, location: String? = nil, description: String? = nil, url: URL? = nil, recurrenceRule: String? = nil, lastModified: Date? = nil, status: String? = nil, organizer: Person? = nil, attendees: [Person] = []) {
         self.uid = uid
         self.summary = summary
         self.start = start
@@ -37,6 +54,9 @@ public struct ICalendarEvent: Sendable, Equatable {
         self.url = url
         self.recurrenceRule = recurrenceRule
         self.lastModified = lastModified
+        self.status = status
+        self.organizer = organizer
+        self.attendees = attendees
     }
 }
 
@@ -85,7 +105,7 @@ public struct ICalendarParser: Sendable {
 
     private func buildEvent(from properties: [ICalendarProperty]) throws -> ICalendarEvent? {
         guard let uid = value("UID", in: properties) else { return nil }
-        let summary = value("SUMMARY", in: properties) ?? "Untitled"
+        let summary = value("SUMMARY", in: properties).map(unescapeText) ?? "Untitled"
         guard let startProperty = property("DTSTART", in: properties) else { return nil }
         let start = try parseDateTime(startProperty)
         let end = try property("DTEND", in: properties).map(parseDateTime)
@@ -95,12 +115,55 @@ public struct ICalendarParser: Sendable {
             start: start.value,
             end: end?.value,
             isAllDay: start.isAllDay,
-            location: value("LOCATION", in: properties),
-            description: value("DESCRIPTION", in: properties),
+            location: value("LOCATION", in: properties).map(unescapeText),
+            description: value("DESCRIPTION", in: properties).map(unescapeText),
             url: value("URL", in: properties).flatMap(URL.init(string:)),
             recurrenceRule: value("RRULE", in: properties),
-            lastModified: try property("LAST-MODIFIED", in: properties).map { try parseDateTime($0).value.date }
+            lastModified: try property("LAST-MODIFIED", in: properties).map { try parseDateTime($0).value.date },
+            status: value("STATUS", in: properties)?.uppercased(),
+            organizer: property("ORGANIZER", in: properties).map(person(from:)),
+            attendees: properties.filter { $0.name == "ATTENDEE" }.map(person(from:))
         )
+    }
+
+    private func person(from property: ICalendarProperty) -> ICalendarEvent.Person {
+        let rawEmail = property.value.lowercased().hasPrefix("mailto:") ? String(property.value.dropFirst("mailto:".count)) : property.value
+        return ICalendarEvent.Person(
+            name: property.parameters["CN"].map(unquote).map(unescapeText),
+            email: rawEmail.isEmpty ? nil : rawEmail,
+            role: property.parameters["ROLE"].map(unquote),
+            participationStatus: property.parameters["PARTSTAT"].map(unquote)
+        )
+    }
+
+    private func unquote(_ value: String) -> String {
+        var result = value
+        if result.hasPrefix("\"") { result.removeFirst() }
+        if result.hasSuffix("\"") { result.removeLast() }
+        return result
+    }
+
+    private func unescapeText(_ value: String) -> String {
+        var result = ""
+        var escaping = false
+        for character in value {
+            if escaping {
+                switch character {
+                case "n", "N": result.append("\n")
+                case "\\": result.append("\\")
+                case ",": result.append(",")
+                case ";": result.append(";")
+                default: result.append(character)
+                }
+                escaping = false
+            } else if character == "\\" {
+                escaping = true
+            } else {
+                result.append(character)
+            }
+        }
+        if escaping { result.append("\\") }
+        return result
     }
 
     private func property(_ name: String, in properties: [ICalendarProperty]) -> ICalendarProperty? {

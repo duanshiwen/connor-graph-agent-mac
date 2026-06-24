@@ -35,6 +35,37 @@ struct ICalendarParserTests {
         #expect(events[0].lastModified != nil)
     }
 
+    @Test func parserUnfoldsEscapedTextAndExtractsPeopleAndStatus() throws {
+        let ics = """
+        BEGIN:VCALENDAR
+        BEGIN:VEVENT
+        UID:event-escaped@example.com
+        SUMMARY:Long product
+          review\\, roadmap\\; calendar\\nengine
+        DTSTART:20260624T040000Z
+        DTEND:20260624T050000Z
+        STATUS:CANCELLED
+        ORGANIZER;CN=诗闻:mailto:shiwen@example.com
+        ATTENDEE;CN=Alice;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:alice@example.com
+        ATTENDEE;CN=Bob;ROLE=OPT-PARTICIPANT;PARTSTAT=TENTATIVE:mailto:bob@example.com
+        DESCRIPTION:Line one\\nLine two
+        END:VEVENT
+        END:VCALENDAR
+        """
+
+        let events = try ICalendarParser().events(from: ics)
+
+        #expect(events.count == 1)
+        #expect(events[0].summary == "Long product review, roadmap; calendar\nengine")
+        #expect(events[0].description == "Line one\nLine two")
+        #expect(events[0].status == "CANCELLED")
+        #expect(events[0].organizer?.email == "shiwen@example.com")
+        #expect(events[0].organizer?.name == "诗闻")
+        #expect(events[0].attendees.count == 2)
+        #expect(events[0].attendees.first?.email == "alice@example.com")
+        #expect(events[0].attendees.first?.participationStatus == "ACCEPTED")
+    }
+
     @Test func parserExtractsAllDayEventAndRecurrenceSummary() throws {
         let ics = """
         BEGIN:VCALENDAR
