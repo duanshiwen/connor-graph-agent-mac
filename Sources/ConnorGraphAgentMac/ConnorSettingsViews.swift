@@ -119,7 +119,7 @@ struct SettingsCalendarSection: View {
                 SettingsValueRow(title: "已添加源", value: "\(viewModel.calendarAccounts.count) 个")
                 SettingsValueRow(title: "日历", value: "\(viewModel.calendarCollections.count) 个")
                 SettingsValueRow(title: "当前事件", value: "\(viewModel.calendarBrowserPresentation.eventCount) 个")
-                Text("Calendar 可以独立添加和管理，也可以作为 Connected Account capability 被发现；MVP 保持轻量，不复制完整日历客户端、月视图、周视图或复杂 recurrence 编辑器。")
+                Text("你可以在这里添加和管理日历连接。当前版本专注于读取和同步日程，不提供完整日历客户端的月视图、周视图或复杂重复规则编辑。")
                     .font(SettingsListTypography.rowCaption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -298,7 +298,7 @@ struct SettingsAppSection: View {
             SettingsGroup(title: "关于") {
                 SettingsValueRow(title: "当前版本", value: appVersionDisplay)
                 Divider()
-                SettingsValueRow(title: "Bundle ID", value: bundleIdentifierDisplay)
+                SettingsValueRow(title: "应用标识", value: bundleIdentifierDisplay)
             }
         }
     }
@@ -493,7 +493,7 @@ struct SettingsRSSSection: View {
                 viewModel.pendingRSSSourceDeletion = nil
             }
         } message: { source in
-            Text("将删除“\(source.displayName)”及其本地文章缓存。此操作会写入 RSS source management audit。")
+            Text("将删除“\(source.displayName)”及其本地文章缓存。")
         }
     }
 
@@ -2383,27 +2383,27 @@ struct SettingsPermissionsSection: View {
                 PermissionModeSummaryRow(mode: viewModel.defaultPermissionMode)
             }
 
-            SettingsGroup(title: "当前真实生效") {
-                PermissionBoundaryRow(systemImage: "checkmark.shield", title: "权限模式会影响新会话", message: "这里选择的模式会写入 runtime-settings.json → loop.permissionMode，并用于创建或重建 NativeSessionManager。")
+            SettingsGroup(title: "生效范围") {
+                PermissionBoundaryRow(systemImage: "checkmark.shield", title: "权限模式会影响新会话", message: "这里选择的模式会作为之后新建会话的默认权限。已有会话可以在输入框下方临时切换。")
                 Divider()
-                PermissionBoundaryRow(systemImage: "network", title: "网络访问默认不单独审批", message: "在“询问”和“执行”模式下，externalNetwork 当前由 Policy Engine 默认通过；只读模式仍会拒绝外部网络。")
+                PermissionBoundaryRow(systemImage: "network", title: "网络访问默认不单独审批", message: "在“询问”和“执行”模式下，普通网络访问默认允许；只读模式会限制外部网络访问。")
                 Divider()
-                PermissionBoundaryRow(systemImage: "terminal", title: "Shell 由风险分类决定", message: "只读 shell、workspace shell、network shell 和 destructive shell 由 LocalShellCommandPolicy 分类后交给 Policy Engine 决策。")
+                PermissionBoundaryRow(systemImage: "terminal", title: "命令行操作按风险级别处理", message: "安全读取可直接执行，高风险或破坏性操作需要确认。")
             }
 
             SettingsGroup(title: "安全边界") {
-                PermissionBoundaryRow(systemImage: "lock.shield", title: "不提供全部允许", message: "allowAll 不在界面中开放。模型提供方只负责推理，Connor 统一接管工具审批与审计。")
+                PermissionBoundaryRow(systemImage: "lock.shield", title: "不提供全部允许", message: "不会开放不受限制的权限模式。需要高风险操作时，康纳同学会先请求确认。")
                 Divider()
-                PermissionBoundaryRow(systemImage: "folder", title: "Workspace 属于会话", message: "Primary root 和 additional roots 在会话顶部设置，不在全局权限页管理。")
+                PermissionBoundaryRow(systemImage: "folder", title: "工作目录按会话设置", message: "主目录和其他工作目录在会话顶部设置，不在全局权限页管理。")
                 Divider()
-                PermissionBoundaryRow(systemImage: "person.crop.circle.badge.xmark", title: "本地单用户边界", message: "Connor 当前是单一 Home / Runtime Root，不做团队成员、组织角色或多用户权限。")
+                PermissionBoundaryRow(systemImage: "person.crop.circle.badge.xmark", title: "本地单用户边界", message: "当前版本面向单人本机使用，暂不支持团队成员或组织角色权限。")
             }
 
             DisclosureGroup(isExpanded: $isShowingPolicyDetails) {
                 VStack(alignment: .leading, spacing: 10) {
-                    PermissionPolicyDetailRow(title: "只读", message: "允许读取图谱、会话、workspace 文件、搜索文件、只读 shell、模型调用和本地科学计算；拒绝写入、删除、外部网络和危险 shell。")
-                    PermissionPolicyDetailRow(title: "询问", message: "读取、普通模型调用、graph write proposal、外部网络默认允许；文件写入/编辑/删除、graph commit/删除、昂贵模型调用、workspace/network/destructive shell 进入审批。")
-                    PermissionPolicyDetailRow(title: "执行", message: "文件写入/编辑、graph commit、workspace shell 可自动通过；图谱删除、文件删除、network shell、destructive shell 和昂贵模型调用仍需审批。")
+                    PermissionPolicyDetailRow(title: "只读", message: "允许读取会话和文件、搜索本地内容、进行模型调用和本地计算；拒绝写入、删除、外部网络和高风险命令。")
+                    PermissionPolicyDetailRow(title: "询问", message: "读取、普通模型调用和外部网络默认允许；文件写入、编辑、删除、记忆写入、高成本模型调用和高风险命令需要确认。")
+                    PermissionPolicyDetailRow(title: "执行", message: "文件写入、编辑和常规命令可自动执行；删除文件、删除记忆、高风险命令和高成本模型调用仍需要确认。")
                 }
                 .padding(.top, SettingsListLayout.spaceS)
             } label: {
@@ -2433,7 +2433,7 @@ struct PermissionModePickerRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("权限模式")
                     .font(SettingsListTypography.rowTitleSelected)
-                Text("作为新会话和重建会话的默认 Policy Engine 模式。")
+                Text("作为新会话和重建会话的默认权限模式。")
                     .font(SettingsListTypography.rowCaption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
