@@ -23,6 +23,34 @@ struct BrowserAssistedWebToolTests {
         #expect(configuration.isConfigured)
     }
 
+    @Test func duckDuckGoWebSearchUsesNativeClientWithoutPythonRuntime() async throws {
+        let html = """
+        <html><body>
+          <div class="result">
+            <a class="result__a" href="https://example.com/native-search">Native Search Result</a>
+            <div class="result__snippet">Found by Swift search.</div>
+          </div>
+        </body></html>
+        """
+        let nativeClient = NativeWebSearchClient(httpClient: FakeNativeWebHTTPClient(response: .html(html, url: "https://duckduckgo.com/html/?q=native")))
+        let tool = SearchEngineMCPTool(nativeSearchClient: nativeClient)
+
+        let result = try await tool.execute(
+            arguments: AgentToolArguments(values: [
+                "query": .string("native"),
+                "engine": .string("duckduckgo"),
+                "max_results": .int(1)
+            ]),
+            context: Self.context()
+        )
+
+        #expect(result.contentText.contains("Native Search Result"))
+        #expect(result.contentText.contains("https://example.com/native-search"))
+        #expect(result.contentText.contains("Found by Swift search."))
+        #expect(result.contentJSON?.contains("native") == true)
+        #expect(result.citations == ["https://example.com/native-search"])
+    }
+
     @Test func googleWebSearchUsesBrowserAssistedHandler() async throws {
         try await assertSearchUsesBrowserAssistedHandler(
             engine: "google",
