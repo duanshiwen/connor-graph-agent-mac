@@ -74,6 +74,28 @@ struct BrowserAssistedWebToolTests {
         #expect(decoded.mojibakeRepaired == true)
     }
 
+    @Test func httpWebFetchUsesNativeClientWithoutPythonRuntime() async throws {
+        let html = """
+        <html><head><title>Native Fetch</title></head><body><h1>Native Fetch</h1><p>Fetched by Swift.</p></body></html>
+        """
+        let nativeClient = NativeWebFetchClient(httpClient: FakeNativeWebHTTPClient(response: .html(html, url: "https://example.com/native")))
+        let tool = SearchEngineMCPWebFetchTool(nativeFetchClient: nativeClient)
+
+        let result = try await tool.execute(
+            arguments: AgentToolArguments(values: [
+                "url": .string("https://example.com/native"),
+                "render_mode": .string("http"),
+                "extract_mode": .string("markdown")
+            ]),
+            context: Self.context()
+        )
+
+        #expect(result.contentText.contains("# Native Fetch"))
+        #expect(result.contentText.contains("Fetched by Swift."))
+        #expect(result.contentJSON?.contains("native-urlsession") == true)
+        #expect(result.citations == ["https://example.com/native"])
+    }
+
     @Test func javascriptWebFetchReturnsExtractedContentFromBrowserAssistedHandler() async throws {
         final class Recorder: @unchecked Sendable {
             var requests: [BrowserAssistedWebFetchRequest] = []
@@ -186,6 +208,14 @@ struct BrowserAssistedWebToolTests {
         #expect(result.contentText.contains("Task ID: task-\(engine)"))
     }
 
+    private struct FakeNativeWebHTTPClient: NativeWebHTTPClient {
+        var response: NativeWebHTTPResponse
+
+        func data(for request: URLRequest) async throws -> NativeWebHTTPResponse {
+            response
+        }
+    }
+
     private static func context() -> AgentToolExecutionContext {
         let audit = InMemoryAgentAuditLog()
         let policy = AgentPolicyEngine(permissionMode: .allowAll, auditLog: audit)
@@ -196,6 +226,18 @@ struct BrowserAssistedWebToolTests {
             userPrompt: "search",
             toolCallID: "tool-call-1",
             policyEngine: policy
+        )
+    }
+}
+
+private extension NativeWebHTTPResponse {
+    static func html(_ html: String, url: String) -> NativeWebHTTPResponse {
+        NativeWebHTTPResponse(
+            data: Data(html.utf8),
+            statusCode: 200,
+            mimeType: "text/html",
+            finalURL: URL(string: url),
+            textEncodingName: "utf-8"
         )
     }
 }
