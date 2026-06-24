@@ -124,25 +124,27 @@ public struct MailRuntime: Sendable {
 
     public func createDraft(accountID: MailAccountID, identityID: MailIdentityID, to: [MailAddress], subject: String, body: String, runID: String? = nil, sessionID: String? = nil) async throws -> MailDraft {
         let draft = MailDraft(id: MailDraftID(rawValue: UUID().uuidString), accountID: accountID, identityID: identityID, to: to, subject: subject, body: body)
-        await draftStore.save(draft)
+        try await draftStore.save(draft)
         try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: accountID, draftID: draft.id, kind: .draftCreated, riskClass: .mutation, redactedSummary: "Created mail draft to \(to.map(\.email).joined(separator: ", "))"))
         return draft
     }
 
     public func sendApprovalPayload(draftID: MailDraftID) async throws -> MailRuntimeSendApproval {
-        guard let draft = await draftStore.draft(id: draftID) else { throw MailRuntimeError.draftNotFound(draftID.rawValue) }
+        guard let draft = try await draftStore.draft(id: draftID) else { throw MailRuntimeError.draftNotFound(draftID.rawValue) }
         let account = try await repository.account(id: draft.accountID)
         let from = account?.identities.first { $0.id == draft.identityID }?.address.email ?? "unknown"
         return MailRuntimeSendApproval(draft: draft, from: from)
     }
 
     public func sendDraft(draftID: MailDraftID, approved: Bool, runID: String? = nil, sessionID: String? = nil) async throws -> MailSendReceipt {
-        guard let draft = await draftStore.draft(id: draftID) else { throw MailRuntimeError.draftNotFound(draftID.rawValue) }
+        guard let draft = try await draftStore.draft(id: draftID) else { throw MailRuntimeError.draftNotFound(draftID.rawValue) }
         guard approved else {
             try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: draft.accountID, draftID: draftID, kind: .sendApprovalRequested, riskClass: .send, redactedSummary: "Send approval required"))
             throw MailRuntimeError.approvalRequired(draftID.rawValue)
         }
-        let receipt = MailSendReceipt(draftID: draftID, providerMessageID: "fixture-sent-\(draftID.rawValue)", envelopeHash: String(abs(draft.subject.hashValue)))
+        let receipt = MailSendReceipt(draftID: draftID, providerMessageID: "fixture-sent-\(draftID.rawValue)", envelopeHash: draft.envelopeHash())
+        try await draftStore.recordSendAttempt(MailSendAttempt(draftID: draftID, status: .sent, providerMessageID: receipt.providerMessageID, envelopeHash: receipt.envelopeHash))
+        _ = try await draftStore.updateStatus(id: draftID, status: .sent, sentReceiptID: receipt.providerMessageID)
         try await auditLog.record(MailAuditRecord(runID: runID, sessionID: sessionID, accountID: draft.accountID, draftID: draftID, kind: .messageSent, riskClass: .send, redactedSummary: "Sent approved draft to \(draft.to.map(\.email).joined(separator: ", "))", payloadHash: receipt.envelopeHash))
         return receipt
     }
