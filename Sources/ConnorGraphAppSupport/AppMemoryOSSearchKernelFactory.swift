@@ -19,21 +19,33 @@ public enum AppMemoryOSSearchKernelFactory {
         return kernel
     }
 
-    public static func resolveLibraryURL(fileManager: FileManager = .default) throws -> URL {
-        if let override = ProcessInfo.processInfo.environment["CONNOR_MEMORY_SEARCH_KERNEL_DYLIB"], !override.isEmpty {
-            let url = URL(fileURLWithPath: override)
-            guard fileManager.fileExists(atPath: url.path) else { throw MemoryOSSearchKernelError.libraryNotFound(url) }
-            return url
+    public static func resolveLibraryURL(fileManager: FileManager = .default, bundle: Bundle = .main) throws -> URL {
+        for candidate in candidateLibraryURLs(fileManager: fileManager, bundle: bundle) where fileManager.fileExists(atPath: candidate.path) {
+            return candidate
         }
-        let repositoryCandidate = URL(fileURLWithPath: fileManager.currentDirectoryPath, isDirectory: true)
+        throw MemoryOSSearchKernelError.libraryNotFound(candidateLibraryURLs(fileManager: fileManager, bundle: bundle).last ?? URL(fileURLWithPath: "libconnor_memory_search_kernel.dylib"))
+    }
+
+    public static func candidateLibraryURLs(fileManager: FileManager = .default, bundle: Bundle = .main) -> [URL] {
+        var candidates: [URL] = []
+        if let override = ProcessInfo.processInfo.environment["CONNOR_MEMORY_SEARCH_KERNEL_DYLIB"], !override.isEmpty {
+            candidates.append(URL(fileURLWithPath: override))
+        }
+        if let privateFrameworksURL = bundle.privateFrameworksURL {
+            candidates.append(privateFrameworksURL.appendingPathComponent("libconnor_memory_search_kernel.dylib"))
+        }
+        if let resourceURL = bundle.resourceURL {
+            candidates.append(resourceURL.appendingPathComponent("SearchKernel", isDirectory: true).appendingPathComponent("libconnor_memory_search_kernel.dylib"))
+        }
+        if let executableURL = bundle.executableURL {
+            candidates.append(executableURL.deletingLastPathComponent().appendingPathComponent("libconnor_memory_search_kernel.dylib"))
+        }
+        candidates.append(URL(fileURLWithPath: fileManager.currentDirectoryPath, isDirectory: true)
             .appendingPathComponent("SearchKernel", isDirectory: true)
             .appendingPathComponent("target", isDirectory: true)
             .appendingPathComponent("release", isDirectory: true)
-            .appendingPathComponent("libconnor_memory_search_kernel.dylib")
-        guard fileManager.fileExists(atPath: repositoryCandidate.path) else {
-            throw MemoryOSSearchKernelError.libraryNotFound(repositoryCandidate)
-        }
-        return repositoryCandidate
+            .appendingPathComponent("libconnor_memory_search_kernel.dylib"))
+        return candidates.removingDuplicatesByPath()
     }
 
     private static func needsRebuild(indexDirectory: URL, fileManager: FileManager) -> Bool {
@@ -99,5 +111,12 @@ public enum AppMemoryOSSearchKernelFactory {
     private static func fileModifiedAt(_ url: URL, fileManager: FileManager) -> String? {
         guard let date = try? fileManager.attributesOfItem(atPath: url.path)[.modificationDate] as? Date else { return nil }
         return ISO8601DateFormatter().string(from: date)
+    }
+}
+
+private extension Array where Element == URL {
+    func removingDuplicatesByPath() -> [URL] {
+        var seen: Set<String> = []
+        return filter { seen.insert($0.standardizedFileURL.path).inserted }
     }
 }
