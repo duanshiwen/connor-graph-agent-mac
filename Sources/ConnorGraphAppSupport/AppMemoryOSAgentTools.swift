@@ -122,7 +122,7 @@ public struct MemoryOSProjectStructuredArtifactTool: AgentTool {
 
 public struct MemoryOSSearchTool: AgentTool {
     public let name = "memory_os_search"
-    public let description = "Search Connor Memory OS across L0/L1/L2/L3/L4. Returns ranked summaries and references only; retrieval hits are context, not memory truth. Use memory_os_expand_l4 for depth-limited entity/concept expansion."
+    public let description = "Search Connor Memory OS across L0/L1/L2/L3/L4 using the local embedded search path. Returns ranked candidate records and entry points only; retrieval hits are context, not graph-complete memory truth. For list/all/which/有哪些/所有/列出 class membership questions, resolve the class first and use memory_os_l4_instances. Use graph tools for relationships, evidence chains, timelines, and cross-layer context."
     public let permission: AgentPermissionCapability = .readGraph
     public let inputSchema = AgentToolInputSchema.object(properties: [
         "query": .string(description: "Search query text."),
@@ -250,7 +250,7 @@ public struct MemoryOSGetCurrentUserProfileTool: AgentTool {
 
 public struct MemoryOSExpandL4Tool: AgentTool {
     public let name = "memory_os_expand_l4"
-    public let description = "Expand a Memory OS L4 entity/concept by depth-limited traversal. Use this for multi-hop context; expansion hits are context and do not replace evidence validation."
+    public let description = "Expand a Memory OS L4 entity/concept by depth-limited traversal. Use this for neighborhood context around a known entity; for complete class membership/list questions, use memory_os_l4_instances instead. Expansion hits are context and do not replace evidence validation."
     public let permission: AgentPermissionCapability = .readGraph
     public let inputSchema = AgentToolInputSchema.object(properties: [
         "entityID": .string(description: "L4 entity id to expand from."),

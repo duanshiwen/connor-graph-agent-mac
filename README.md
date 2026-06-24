@@ -213,6 +213,8 @@ Connor/
 ├── graph/
 │   ├── connor.sqlite
 │   ├── indexes/
+│   ├── search-index/
+│   │   └── memory-os-tantivy/
 │   ├── exports/
 │   ├── snapshots/
 │   └── evaluations/
