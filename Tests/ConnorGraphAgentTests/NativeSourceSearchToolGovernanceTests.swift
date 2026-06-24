@@ -26,7 +26,7 @@ struct NativeSourceSearchToolGovernanceTests {
         #expect(registry.definition(named: "same_tool")?.description == "second")
     }
 
-    @Test func nativeSearchMethodsRemainInternalAndAreNotAgentCallable() {
+    @Test func nativeSearchGovernanceKeepsInternalIndexesPrivateWhileMailSearchIsCallable() {
         var registry = AgentToolRegistry()
         registry.registerNativeMailTools(runtime: MailRuntimeSearchFixture())
         registry.registerNativeRSSTools(runtime: RSSRuntimeSearchFixture())
@@ -35,7 +35,7 @@ struct NativeSourceSearchToolGovernanceTests {
         let names = registry.definitions.map(\.name)
         #expect(Set(names).count == names.count)
         #expect(registry.duplicateRegistrations.isEmpty)
-        #expect(!names.contains("mail_search_messages"))
+        #expect(names.contains("mail_search_messages"))
         #expect(!names.contains("rss_search_items"))
         #expect(names.contains("calendar_read"))
         #expect(!names.contains("mail_index_search"))
@@ -70,7 +70,7 @@ private struct MailRuntimeSearchFixture: AgentMailRuntime {
     func searchMessages(_ request: MailRuntimeSearchRequestBridge, runID: String?, sessionID: String?) async throws -> [MailMessageSummary] { [] }
     func getMessage(id: MailMessageID, includeBody: Bool, runID: String?, sessionID: String?) async throws -> MailMessageDetail { throw AgentToolError.invalidArguments("fixture") }
     func setReadState(messageIDs: [MailMessageID], isRead: Bool, runID: String?, sessionID: String?) async throws {}
-    func createDraft(accountID: MailAccountID, identityID: MailIdentityID, to: [MailAddress], subject: String, body: String, runID: String?, sessionID: String?) async throws -> MailDraft { MailDraft(id: MailDraftID(rawValue: "d"), accountID: accountID, identityID: identityID, to: to, subject: subject, body: body) }
+    func createDraft(accountID: MailAccountID, identityID: MailIdentityID, to: [MailAddress], cc: [MailAddress], bcc: [MailAddress], replyTo: [MailAddress], subject: String, body: String, htmlBody: String?, inReplyToMessageID: MailMessageID?, attachmentIDs: [MailAttachmentID], intentSummary: String?, runID: String?, sessionID: String?) async throws -> MailDraft { MailDraft(id: MailDraftID(rawValue: "d"), accountID: accountID, identityID: identityID, to: to, cc: cc, bcc: bcc, subject: subject, body: body, htmlBody: htmlBody, replyTo: replyTo, attachmentIDs: attachmentIDs, inReplyToMessageID: inReplyToMessageID, intentSummary: intentSummary) }
     func sendDraft(draftID: MailDraftID, approved: Bool, runID: String?, sessionID: String?) async throws -> MailSendReceipt { MailSendReceipt(draftID: draftID, providerMessageID: "p", envelopeHash: "h") }
 }
 
