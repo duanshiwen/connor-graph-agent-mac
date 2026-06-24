@@ -1,5 +1,6 @@
 import Foundation
 import ConnorGraphSearch
+import ConnorGraphStore
 
 public enum AppMemoryOSSearchKernelFactory {
     public static let connorMetaFilename = "connor-meta.json"
@@ -52,9 +53,51 @@ public enum AppMemoryOSSearchKernelFactory {
             "sourceDatabasePath": databaseURL.path,
             "indexedLayers": ["L0", "L1", "L2", "L3", "L4"],
             "documentCount": documentCount,
-            "builtAt": ISO8601DateFormatter().string(from: builtAt)
+            "builtAt": ISO8601DateFormatter().string(from: builtAt),
+            "sourceDatabaseFingerprint": sourceDatabaseFingerprint(databaseURL: databaseURL)
         ]
         let data = try JSONSerialization.data(withJSONObject: meta, options: [.prettyPrinted, .sortedKeys])
         try data.write(to: indexDirectory.appendingPathComponent(connorMetaFilename), options: [.atomic])
+    }
+
+    public static func sourceDatabaseFingerprint(databaseURL: URL, fileManager: FileManager = .default) -> [String: Any] {
+        var result: [String: Any] = [
+            "databaseFileSize": fileSize(databaseURL, fileManager: fileManager),
+            "databaseModifiedAt": fileModifiedAt(databaseURL, fileManager: fileManager) ?? "",
+            "walFileSize": fileSize(URL(fileURLWithPath: databaseURL.path + "-wal"), fileManager: fileManager),
+            "walModifiedAt": fileModifiedAt(URL(fileURLWithPath: databaseURL.path + "-wal"), fileManager: fileManager) ?? "",
+            "shmFileSize": fileSize(URL(fileURLWithPath: databaseURL.path + "-shm"), fileManager: fileManager),
+            "shmModifiedAt": fileModifiedAt(URL(fileURLWithPath: databaseURL.path + "-shm"), fileManager: fileManager) ?? ""
+        ]
+        if let counts = try? sourceTableCounts(databaseURL: databaseURL) {
+            result["tableCounts"] = counts
+        }
+        return result
+    }
+
+    private static func sourceTableCounts(databaseURL: URL) throws -> [String: Int] {
+        let store = try SQLiteMemoryOSStore(path: databaseURL.path)
+        let tables = [
+            "memory_l0_provenance_objects",
+            "memory_l1_capture_events",
+            "memory_l2_statements",
+            "memory_l3_beliefs",
+            "memory_l4_entities",
+            "memory_l4_entity_statements"
+        ]
+        var counts: [String: Int] = [:]
+        for table in tables {
+            counts[table] = Int(try store.query(sql: "SELECT COUNT(*) FROM \(table);").first?.first ?? "0") ?? 0
+        }
+        return counts
+    }
+
+    private static func fileSize(_ url: URL, fileManager: FileManager) -> Int64 {
+        (try? fileManager.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value ?? 0
+    }
+
+    private static func fileModifiedAt(_ url: URL, fileManager: FileManager) -> String? {
+        guard let date = try? fileManager.attributesOfItem(atPath: url.path)[.modificationDate] as? Date else { return nil }
+        return ISO8601DateFormatter().string(from: date)
     }
 }
