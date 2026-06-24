@@ -6,6 +6,11 @@ public enum MemoryOSBackgroundJobKind: String, Sendable, Codable, Equatable, Cas
     case l2SynthesizeKnowledge = "memory.l2.synthesize_knowledge"
 }
 
+public enum MemoryOSTriggerReason: String, Sendable, Codable, Equatable, CaseIterable {
+    case pendingCountThreshold = "pending_count_threshold"
+    case pendingAgeThreshold = "pending_age_threshold"
+}
+
 public struct MemoryOSL1ProcessingTriggerPolicy: Sendable, Codable, Equatable {
     public var minPendingCount: Int
     public var maxEventsPerBlock: Int
@@ -19,12 +24,16 @@ public struct MemoryOSL1ProcessingTriggerPolicy: Sendable, Codable, Equatable {
         self.maxPendingAge = maxPendingAge
     }
 
-    public func shouldTrigger(events: [MemoryOSCaptureEvent], now: Date = Date()) -> Bool {
+    public func triggerReason(events: [MemoryOSCaptureEvent], now: Date = Date()) -> MemoryOSTriggerReason? {
         let pending = events.filter { $0.processingState == .pending }
-        guard !pending.isEmpty else { return false }
-        if pending.count >= minPendingCount { return true }
-        if let maxPendingAge, let oldest = pending.map(\.occurredAt).min(), now.timeIntervalSince(oldest) >= maxPendingAge { return true }
-        return false
+        guard !pending.isEmpty else { return nil }
+        if pending.count >= minPendingCount { return .pendingCountThreshold }
+        if let maxPendingAge, let oldest = pending.map(\.occurredAt).min(), now.timeIntervalSince(oldest) >= maxPendingAge { return .pendingAgeThreshold }
+        return nil
+    }
+
+    public func shouldTrigger(events: [MemoryOSCaptureEvent], now: Date = Date()) -> Bool {
+        triggerReason(events: events, now: now) != nil
     }
 }
 
@@ -34,19 +43,23 @@ public struct MemoryOSL2KnowledgeSynthesisTriggerPolicy: Sendable, Codable, Equa
     public var maxTokensPerBlock: Int
     public var maxPendingAge: TimeInterval?
 
-    public init(minPendingStatementCount: Int = 80, maxStatementsPerBlock: Int = 30, maxTokensPerBlock: Int = 12_000, maxPendingAge: TimeInterval? = 24 * 60 * 60) {
+    public init(minPendingStatementCount: Int = 100, maxStatementsPerBlock: Int = 30, maxTokensPerBlock: Int = 12_000, maxPendingAge: TimeInterval? = 24 * 60 * 60) {
         self.minPendingStatementCount = minPendingStatementCount
         self.maxStatementsPerBlock = maxStatementsPerBlock
         self.maxTokensPerBlock = maxTokensPerBlock
         self.maxPendingAge = maxPendingAge
     }
 
-    public func shouldTrigger(statements: [MemoryOSStatement], now: Date = Date()) -> Bool {
+    public func triggerReason(statements: [MemoryOSStatement], now: Date = Date()) -> MemoryOSTriggerReason? {
         let pending = pendingStatements(from: statements)
-        guard !pending.isEmpty else { return false }
-        if pending.count >= minPendingStatementCount { return true }
-        if let maxPendingAge, let oldest = pending.map(\.committedAt).min(), now.timeIntervalSince(oldest) >= maxPendingAge { return true }
-        return false
+        guard !pending.isEmpty else { return nil }
+        if pending.count >= minPendingStatementCount { return .pendingCountThreshold }
+        if let maxPendingAge, let oldest = pending.map(\.committedAt).min(), now.timeIntervalSince(oldest) >= maxPendingAge { return .pendingAgeThreshold }
+        return nil
+    }
+
+    public func shouldTrigger(statements: [MemoryOSStatement], now: Date = Date()) -> Bool {
+        triggerReason(statements: statements, now: now) != nil
     }
 
     public func pendingStatements(from statements: [MemoryOSStatement]) -> [MemoryOSStatement] {
@@ -358,7 +371,7 @@ public struct MemoryOSL1ToL2JobPlanner: Sendable {
 
     public func planJobs(from events: [MemoryOSCaptureEvent], now: Date = Date()) -> [MemoryOSL1ToL2JobDraft] {
         let pending = events.filter { $0.processingState == .pending }.sorted { $0.occurredAt < $1.occurredAt }
-        guard policy.shouldTrigger(events: pending, now: now) else { return [] }
+        guard let triggerReason = policy.triggerReason(events: pending, now: now) else { return [] }
         let blocks = chunkEvents(pending)
         return blocks.map { block in
             MemoryOSL1ToL2JobDraft(
@@ -369,7 +382,8 @@ public struct MemoryOSL1ToL2JobPlanner: Sendable {
                 createdAt: now,
                 metadata: [
                     "event_count": String(block.count),
-                    "token_estimate": String(block.reduce(0) { $0 + $1.tokenEstimate })
+                    "token_estimate": String(block.reduce(0) { $0 + $1.tokenEstimate }),
+                    "trigger_reason": triggerReason.rawValue
                 ]
             )
         }
@@ -406,7 +420,7 @@ public struct MemoryOSL2ToKnowledgeJobPlanner: Sendable {
 
     public func planJobs(from statements: [MemoryOSStatement], now: Date = Date()) -> [MemoryOSL2ToKnowledgeJobDraft] {
         let pending = policy.pendingStatements(from: statements).sorted { $0.committedAt < $1.committedAt }
-        guard policy.shouldTrigger(statements: pending, now: now) else { return [] }
+        guard let triggerReason = policy.triggerReason(statements: pending, now: now) else { return [] }
         return chunkStatements(pending).map { block in
             MemoryOSL2ToKnowledgeJobDraft(
                 statementIDs: block.map(\.id),
@@ -415,7 +429,8 @@ public struct MemoryOSL2ToKnowledgeJobPlanner: Sendable {
                 createdAt: now,
                 metadata: [
                     "statement_count": String(block.count),
-                    "source": "l2_pending_knowledge_synthesis"
+                    "source": "l2_pending_knowledge_synthesis",
+                    "trigger_reason": triggerReason.rawValue
                 ]
             )
         }
