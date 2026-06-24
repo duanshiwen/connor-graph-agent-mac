@@ -316,6 +316,16 @@ API keys and provider credentials must not be stored in JSON settings files. The
 - Provider health checks and credential boundary
 - Connor owns sessions, tool execution, pending approvals, audit events and Memory OS projection gates; model providers never own Connor product state
 
+#### 5.3.1 Agent Prompt Runtime Contract
+
+Connor's default system prompt includes a task bootstrap workflow for every user task:
+
+1. Call `get_current_time` first and use that result as the only current date/time anchor for the turn.
+2. Retrieve internal context before external context: prefer `memory_os_get_current_user_profile`, then search relevant Memory OS L0/L1/L2/L3/L4 records with `memory_os_search`, deepening with `memory_os_read_record`, `memory_os_expand_l4`, or `memory_os_read_provenance` when evidence or identity matters.
+3. Search current web information with `web_search` when external grounding, freshness, documentation, facts, or best practices could affect the answer, and use `web_fetch` to read original pages before relying on snippets.
+4. Consider installed Connor skills before choosing the final strategy; when a request maps to a skill domain, load it through `connor_skill_activate`. Hidden built-in skills are used silently and are not exposed to users.
+5. Only after current time, internal memory, external evidence, and relevant skill instructions have been considered should the agent decide whether to answer, plan, edit, debug, research, or ask a clarification.
+
 ### 5.4 MCP Source Platform
 
 - Source registry and runtime repository
