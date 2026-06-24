@@ -134,8 +134,8 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         registry.registerNativeCalendarTools(runtime: InMemoryAgentCalendarRuntime())
         registry.registerNativeContactsAggregateTools(runtime: InMemoryAgentContactRuntime())
         registry.register(BrowserFetchTool())
-        registry.register(SearchEngineMCPTool(browserAssistedSearchHandler: browserAssistedSearchHandler))
-        registry.register(SearchEngineMCPWebFetchTool(browserAssistedSearchHandler: browserAssistedSearchHandler, browserAssistedWebFetchHandler: browserAssistedWebFetchHandler))
+        registry.register(NativeWebSearchTool(browserAssistedSearchHandler: browserAssistedSearchHandler))
+        registry.register(NativeWebFetchTool(browserAssistedWebFetchHandler: browserAssistedWebFetchHandler))
         registerPersistedMCPSourceTools(into: &registry, workingDirectory: resolvedWorkspace.primary.url)
         var skillCatalogSummary = ""
         if let storagePaths {
