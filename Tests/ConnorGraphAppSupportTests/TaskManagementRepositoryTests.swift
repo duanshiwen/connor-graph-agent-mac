@@ -28,7 +28,7 @@ struct TaskManagementRepositoryTests {
 
         #expect(l1Task.origin == .system)
         #expect(l1Task.trigger.kind == .scheduled)
-        #expect(l1Task.trigger.intervalSeconds == 300)
+        #expect(l1Task.trigger.intervalSeconds == 86_400)
         #expect(l1Task.trigger.recurrence == .interval)
         #expect(l1Task.target.targetKind == "memory_os.pipeline")
         #expect(l1Task.target.targetID == "default")
@@ -38,7 +38,7 @@ struct TaskManagementRepositoryTests {
 
         #expect(l2Task.origin == .system)
         #expect(l2Task.trigger.kind == .scheduled)
-        #expect(l2Task.trigger.intervalSeconds == 600)
+        #expect(l2Task.trigger.intervalSeconds == 86_400)
         #expect(l2Task.trigger.recurrence == .interval)
         #expect(l2Task.target.targetKind == "memory_os.pipeline")
         #expect(l2Task.target.targetID == "default")
