@@ -79,8 +79,8 @@ Media transcription is not part of the current `remove-browser-media-transcripti
 
 Current implementation now includes the first orchestration layer:
 
-1. `MemoryOSL1ProcessingTriggerPolicy` applies count / token / age thresholds.
-2. `MemoryOSL1ToL2JobPlanner` creates 20–30 item style processing blocks.
+1. `MemoryOSL1ProcessingTriggerPolicy` applies count / age thresholds and reports an explicit trigger reason; token policy remains a block sizing constraint.
+2. `MemoryOSL1ToL2JobPlanner` creates 20–30 item style processing blocks. Count-triggered planning is event-driven after L1 writes; Task Management only provides the daily age/fallback sweep.
 3. `MemoryOSL1ToL2PromptBuilder` builds the structured prompt contract for L1→L2 fact extraction, including ordered `l1_capture_events`, L0/L1/L2 layer semantics, evidence discipline, duplicate consolidation and the hard boundary against L3 creation.
 4. `AppMemoryOSFacade.enqueueL1ToL2BackgroundJobs(...)` writes queue items of kind `memory.l1.process_block_to_l2`.
 
@@ -190,8 +190,8 @@ MemoryOSKnowledgeExtractionOutput
 
 Current implementation now includes the first orchestration layer:
 
-1. `MemoryOSL2KnowledgeSynthesisTriggerPolicy` selects pending L2 statements.
-2. `MemoryOSL2ToKnowledgeJobPlanner` blocks them by count / token budget.
+1. `MemoryOSL2KnowledgeSynthesisTriggerPolicy` selects pending L2 statements, applies count / age thresholds, and reports an explicit trigger reason.
+2. `MemoryOSL2ToKnowledgeJobPlanner` blocks them by count / token budget. Count-triggered planning is event-driven after L2 pending-state writes; Task Management only provides the daily age/fallback sweep.
 3. `MemoryOSL2ToKnowledgePromptBuilder` builds the structured knowledge synthesis prompt, including ordered `l2_statements`, conservative L3 review policy, explicit four-filter judgment fields and L3/L4 no-duplicate rules.
 4. `AppMemoryOSFacade.enqueueL2ToKnowledgeBackgroundJobs(...)` writes queue items of kind `memory.l2.synthesize_knowledge`.
 
