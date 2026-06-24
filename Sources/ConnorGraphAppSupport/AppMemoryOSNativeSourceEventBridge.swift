@@ -73,16 +73,4 @@ public struct AppMemoryOSNativeSourceEventBridge: Sendable {
         )
     }
 
-    @discardableResult
-    public func ingestMediaTranscript(id: String, title: String, transcript: String, sessionID: String? = nil, occurredAt: Date = Date(), metadata: [String: String] = [:]) throws -> MemoryOSIngestionResult {
-        try facade.ingestSourceEvent(
-            sourceID: "media_transcription:\(id)",
-            title: title,
-            content: transcript,
-            occurredAt: occurredAt,
-            sourceKind: "media_transcription",
-            sessionID: sessionID,
-            metadata: metadata.merging(["media_transcription_id": id]) { current, _ in current }
-        )
-    }
 }
