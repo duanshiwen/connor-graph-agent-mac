@@ -121,6 +121,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
             metadata: metadata
         ))
         try repository.save(result)
+        _ = try AppMemoryOSPipelineTriggerCoordinator(facade: self).evaluateAfterL1Capture(now: occurredAt)
         return result
     }
 
@@ -142,6 +143,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
             metadata: metadata
         ))
         try repository.save(result)
+        _ = try AppMemoryOSPipelineTriggerCoordinator(facade: self).evaluateAfterL1Capture(now: occurredAt)
         return result
     }
 
@@ -171,6 +173,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
             metadata: eventMetadata
         ))
         try repository.save(result)
+        _ = try AppMemoryOSPipelineTriggerCoordinator(facade: self).evaluateAfterL1Capture(now: occurredAt)
         return result
     }
 
@@ -418,6 +421,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
                 metadata: ["created_by": "l1_to_l2_projection", "source_artifact_id": sourceArtifactID]
             ))
         }
+        _ = try AppMemoryOSPipelineTriggerCoordinator(facade: self).evaluateAfterL2PendingStatements(now: now)
     }
 
     private func markL2ProcessingStatesSucceeded(statementIDs: [String], artifactID: String, now: Date) throws {
