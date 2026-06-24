@@ -12,7 +12,7 @@ struct SettingsLabelsSection: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsHeroHeader(
                 title: "标签",
-                subtitle: "用颜色和名称整理会话。标签是纯标签：系统 UID、显示名、颜色和图标；不再承担值类型、图谱绑定或字段校验。",
+                subtitle: "用颜色、名称和图标整理会话。标签只用于分类和筛选，不影响会话内容。",
                 systemImage: "tag"
             ) {
                 Button("新建标签…") { presentNewLabelEditor() }
@@ -82,7 +82,7 @@ struct SettingsStatusesSection: View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsHeroHeader(
                 title: "状态",
-                subtitle: "管理会话状态的显示名和图标。状态 UID 由系统生成；排序、终态等治理字段不在设置页暴露。",
+                subtitle: "管理会话状态的名称和图标，用来标记会话当前进展。",
                 systemImage: "circle.dashed"
             ) {
                 Button("新建状态…") { presentNewStatusEditor() }
@@ -104,7 +104,7 @@ struct SettingsStatusesSection: View {
             }
 
             SettingsGroup(title: "删除限制") {
-                Text("至少保留一个状态；如果已有会话正在使用某个状态，该状态不能删除。当前底层会话状态仍受 AgentSessionStatus 枚举约束，自定义状态定义会保存到治理配置，完整自定义状态切换需要后续迁移到 string-backed status ID。")
+                Text("至少需要保留一个状态。正在被会话使用的状态不能删除。")
                     .font(SettingsListTypography.rowTitle)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
