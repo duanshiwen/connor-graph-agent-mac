@@ -64,14 +64,12 @@ public enum TaskTargetRunnerError: Error, Sendable, Equatable, CustomStringConve
 public struct TaskTargetRunner: Sendable {
     public typealias RefreshHandler = @Sendable (_ request: SourceRefreshTaskRequest) async throws -> String
     public typealias SessionMessageHandler = @Sendable (_ request: TaskSessionMessageRequest) async throws -> String
-    public typealias MediaTranscriptionHandler = @Sendable (_ request: MediaTranscriptionTaskRequest) async throws -> String
     public typealias MemoryOSPipelineHandler = @Sendable (_ request: MemoryOSPipelineTaskRequest) async throws -> String
 
     public var mailRefresher: RefreshHandler
     public var calendarRefresher: RefreshHandler
     public var rssRefresher: RefreshHandler
     public var sessionMessenger: SessionMessageHandler
-    public var mediaTranscriptionRunner: MediaTranscriptionHandler?
     public var memoryOSPipelineRunner: MemoryOSPipelineHandler?
 
     public init(
@@ -79,14 +77,12 @@ public struct TaskTargetRunner: Sendable {
         calendarRefresher: @escaping RefreshHandler,
         rssRefresher: @escaping RefreshHandler,
         sessionMessenger: @escaping SessionMessageHandler,
-        mediaTranscriptionRunner: MediaTranscriptionHandler? = nil,
         memoryOSPipelineRunner: MemoryOSPipelineHandler? = nil
     ) {
         self.mailRefresher = mailRefresher
         self.calendarRefresher = calendarRefresher
         self.rssRefresher = rssRefresher
         self.sessionMessenger = sessionMessenger
-        self.mediaTranscriptionRunner = mediaTranscriptionRunner
         self.memoryOSPipelineRunner = memoryOSPipelineRunner
     }
 
@@ -128,16 +124,6 @@ public struct TaskTargetRunner: Sendable {
             return TaskTargetRunResult(summary: summary)
         }
 
-        if task.target.targetKind == "media.transcription", task.target.operationName == "run" {
-            guard let mediaTranscriptionRunner else { throw TaskTargetRunnerError.unsupportedTarget(targetDescription(task)) }
-            let jobID = task.target.parameters["jobID"] ?? task.target.targetID
-            guard !jobID.isEmpty else { throw MediaTranscriptionTaskHandlerError.missingJobID }
-            let ownerSessionID = task.target.parameters["ownerSessionID"] ?? task.metadata.ownerSessionID
-            guard let ownerSessionID, !ownerSessionID.isEmpty else { throw MediaTranscriptionTaskHandlerError.missingOwnerSessionID }
-            let summary = try await mediaTranscriptionRunner(MediaTranscriptionTaskRequest(jobID: jobID, ownerSessionID: ownerSessionID, runID: runID))
-            return TaskTargetRunResult(summary: summary)
-        }
-
         throw TaskTargetRunnerError.unsupportedTarget(targetDescription(task))
     }
 
@@ -158,10 +144,9 @@ public extension TaskTargetRunner {
         calendarRefresh: @escaping RefreshHandler,
         rssRefresh: @escaping RefreshHandler,
         sessionMessage: @escaping SessionMessageHandler,
-        mediaTranscription: MediaTranscriptionHandler? = nil,
         memoryOSPipeline: MemoryOSPipelineHandler? = nil
     ) -> TaskTargetRunner {
-        TaskTargetRunner(mailRefresher: mailRefresh, calendarRefresher: calendarRefresh, rssRefresher: rssRefresh, sessionMessenger: sessionMessage, mediaTranscriptionRunner: mediaTranscription, memoryOSPipelineRunner: memoryOSPipeline)
+        TaskTargetRunner(mailRefresher: mailRefresh, calendarRefresher: calendarRefresh, rssRefresher: rssRefresh, sessionMessenger: sessionMessage, memoryOSPipelineRunner: memoryOSPipeline)
     }
 
 }
