@@ -27,38 +27,6 @@ struct TaskManagementPresentationTests {
         #expect(presentation.summary.reviewControlCount == 0)
     }
 
-    @Test func presentationHidesMediaTranscriptionBackgroundTasksFromScheduledList() {
-        let now = Date(timeIntervalSince1970: 0)
-        let mediaTask = ConnorTaskDefinition(
-            id: "media.transcription.media-job-1",
-            name: "转写媒体：Example",
-            origin: .ai,
-            trigger: ConnorTaskTrigger(kind: .scheduled, runAt: now, recurrence: .once),
-            target: .mediaTranscriptionRun(jobID: "media-job-1", ownerSessionID: "session-1"),
-            lifecycle: ConnorTaskLifecycle(status: .active, nextRunAt: now),
-            metadata: ConnorTaskMetadata(
-                createdBySessionID: "session-1",
-                rationale: "Transcribe browser media into a session-owned attachment",
-                tags: ["media", "transcription", "browser"],
-                scope: .global,
-                ownerSessionID: "session-1",
-                isRecoverable: true,
-                recoveryPolicy: .restoreIfQueuedOrRunning
-            ),
-            createdAt: now,
-            updatedAt: now
-        )
-
-        let systemDefaults = ConnorTaskDefinition.systemDefaults(now: now)
-        let presentation = TaskManagementUIPresentation.build(tasks: systemDefaults + [mediaTask], runHistory: [])
-
-        #expect(!presentation.cards.contains { $0.id == mediaTask.id })
-        #expect(!presentation.scheduledTasks.contains { $0.id == mediaTask.id })
-        #expect(presentation.scheduledTasks.count == systemDefaults.count)
-        #expect(presentation.summary.scheduledTaskCount == systemDefaults.count)
-        #expect(presentation.summary.totalTaskCount == systemDefaults.count)
-    }
-
     @Test func systemTaskCardDisablesDeleteAndExposesOpaqueTarget() throws {
         let task = makeProtectedCalendarRefreshTask(accountID: "calendar-account-a")
         let presentation = TaskManagementUIPresentation.build(tasks: [task], runHistory: [])

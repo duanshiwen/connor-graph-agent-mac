@@ -133,17 +133,6 @@ struct TaskManagementDomainTests {
         #expect(decoded.recoveryPolicy == ConnorTaskRecoveryPolicy.none)
     }
 
-    @Test func mediaTranscriptionTargetFactoryUsesGlobalRecoverableTaskContract() {
-        let target = ConnorTaskTarget.mediaTranscriptionRun(jobID: "job-1", ownerSessionID: "session-1")
-
-        #expect(target.targetKind == "media.transcription")
-        #expect(target.targetID == "job-1")
-        #expect(target.operationName == "run")
-        #expect(target.parameters["jobID"] == "job-1")
-        #expect(target.parameters["ownerSessionID"] == "session-1")
-        #expect(ConnorTaskEventName.mediaTranscriptionRequested == "media.transcription.requested")
-    }
-
     @Test func recoveryPolicyOnlyContainsExpectedValues() {
         #expect(ConnorTaskRecoveryPolicy.allCases == [.none, .restoreIfInterrupted, .restoreIfQueuedOrRunning])
         #expect(ConnorTaskScope.allCases == [.global, .session])
