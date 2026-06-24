@@ -23,7 +23,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         maxRunDurationSeconds: Int = 1800,
         maxToolResultBytes: Int = 32 * 1024,
         allowParallelToolCalls: Bool = false,
-        maxConsecutiveToolResultErrors: Int = 6,
+        maxConsecutiveToolResultErrors: Int = 0,
         stopAfterTurnWhenBudgetExceeded: Bool = false,
         promptProjectionMode: AgentPromptProjectionMode = .legacySingleUserMessage,
         promptMaxEstimatedTokens: Int = 8_000,
@@ -67,7 +67,7 @@ public struct AgentLoopConfiguration: Codable, Sendable, Equatable {
         self.maxRunDurationSeconds = try container.decodeIfPresent(Int.self, forKey: .maxRunDurationSeconds) ?? 1800
         self.maxToolResultBytes = try container.decodeIfPresent(Int.self, forKey: .maxToolResultBytes) ?? 32 * 1024
         self.allowParallelToolCalls = try container.decodeIfPresent(Bool.self, forKey: .allowParallelToolCalls) ?? false
-        self.maxConsecutiveToolResultErrors = try container.decodeIfPresent(Int.self, forKey: .maxConsecutiveToolResultErrors) ?? 6
+        self.maxConsecutiveToolResultErrors = try container.decodeIfPresent(Int.self, forKey: .maxConsecutiveToolResultErrors) ?? 0
         self.stopAfterTurnWhenBudgetExceeded = try container.decodeIfPresent(Bool.self, forKey: .stopAfterTurnWhenBudgetExceeded) ?? false
         self.promptProjectionMode = try container.decodeIfPresent(AgentPromptProjectionMode.self, forKey: .promptProjectionMode) ?? .legacySingleUserMessage
         self.promptMaxEstimatedTokens = try container.decodeIfPresent(Int.self, forKey: .promptMaxEstimatedTokens) ?? 8_000
@@ -331,20 +331,6 @@ public struct AgentLoopController<Provider: AgentModelProvider>: Sendable {
                             toolResultCount: batchResults.count,
                             stoppedAfterTurn: shouldStopAfterTurn
                         )), to: continuation, recorder: eventRecorder)
-
-                        if consecutiveToolResultErrors >= configuration.maxConsecutiveToolResultErrors {
-                            let failure = AgentRunFailure(
-                                runID: run.id,
-                                sessionID: run.sessionID,
-                                message: "Too many consecutive tool result errors (\(consecutiveToolResultErrors))."
-                            )
-                            run.status = .failed
-                            run.completedAt = Date()
-                            try? eventRecorder.recordRun(run)
-                            yield(.runFailed(failure), to: continuation, recorder: eventRecorder)
-                            continuation.finish(throwing: AgentLoopError.maxToolIterationsReached)
-                            return
-                        }
 
                         if shouldStopAfterTurn {
                             run.status = .completed
