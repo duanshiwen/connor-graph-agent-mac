@@ -4,23 +4,17 @@ import Testing
 
 @Suite("Browser Assisted Web Tool Tests")
 struct BrowserAssistedWebToolTests {
-    @Test func searchEngineMCPConfigurationDoesNotUseLocalCraftDefaults() {
-        let configuration = SearchEngineMCPConfiguration(environment: [:])
+    @Test func nativeWebToolsDoNotRequirePythonConfiguration() {
+        let searchTool = NativeWebSearchTool()
+        let fetchTool = NativeWebFetchTool()
 
-        #expect(configuration.pythonExecutable == nil)
-        #expect(configuration.sourceDirectory == nil)
-        #expect(!configuration.isConfigured)
-    }
-
-    @Test func searchEngineMCPConfigurationReadsExplicitEnvironment() {
-        let configuration = SearchEngineMCPConfiguration(environment: [
-            "CONNOR_SEARCH_ENGINE_MCP_PYTHON": "/opt/search-engine-mcp/venv/bin/python",
-            "CONNOR_SEARCH_ENGINE_MCP_DIR": "/opt/search-engine-mcp"
-        ])
-
-        #expect(configuration.pythonExecutable == "/opt/search-engine-mcp/venv/bin/python")
-        #expect(configuration.sourceDirectory == "/opt/search-engine-mcp")
-        #expect(configuration.isConfigured)
+        #expect(searchTool.name == "web_search")
+        #expect(fetchTool.name == "web_fetch")
+        #expect(searchTool.description.contains("native web search client"))
+        #expect(fetchTool.description.contains("native HTTP extractor"))
+        let legacySourceName = "search-engine" + "-mcp"
+        #expect(!searchTool.description.contains(legacySourceName))
+        #expect(!fetchTool.description.contains(legacySourceName))
     }
 
     @Test func duckDuckGoWebSearchUsesNativeClientWithoutPythonRuntime() async throws {
@@ -33,7 +27,7 @@ struct BrowserAssistedWebToolTests {
         </body></html>
         """
         let nativeClient = NativeWebSearchClient(httpClient: FakeNativeWebHTTPClient(response: .html(html, url: "https://duckduckgo.com/html/?q=native")))
-        let tool = SearchEngineMCPTool(nativeSearchClient: nativeClient)
+        let tool = NativeWebSearchTool(nativeSearchClient: nativeClient)
 
         let result = try await tool.execute(
             arguments: AgentToolArguments(values: [
@@ -107,7 +101,7 @@ struct BrowserAssistedWebToolTests {
         <html><head><title>Native Fetch</title></head><body><h1>Native Fetch</h1><p>Fetched by Swift.</p></body></html>
         """
         let nativeClient = NativeWebFetchClient(httpClient: FakeNativeWebHTTPClient(response: .html(html, url: "https://example.com/native")))
-        let tool = SearchEngineMCPWebFetchTool(nativeFetchClient: nativeClient)
+        let tool = NativeWebFetchTool(nativeFetchClient: nativeClient)
 
         let result = try await tool.execute(
             arguments: AgentToolArguments(values: [
@@ -129,7 +123,7 @@ struct BrowserAssistedWebToolTests {
             var requests: [BrowserAssistedWebFetchRequest] = []
         }
         let recorder = Recorder()
-        let tool = SearchEngineMCPWebFetchTool(browserAssistedWebFetchHandler: { request in
+        let tool = NativeWebFetchTool(browserAssistedWebFetchHandler: { request in
             recorder.requests.append(request)
             return BrowserAssistedWebFetchResult(
                 status: .fetched,
@@ -166,7 +160,7 @@ struct BrowserAssistedWebToolTests {
     }
 
     @Test func javascriptWebFetchReportsUserInterventionWhenBrowserRequiresChallenge() async throws {
-        let tool = SearchEngineMCPWebFetchTool(browserAssistedWebFetchHandler: { request in
+        let tool = NativeWebFetchTool(browserAssistedWebFetchHandler: { request in
             BrowserAssistedWebFetchResult(
                 status: .needsUserIntervention,
                 urlString: request.urlString,
@@ -207,7 +201,7 @@ struct BrowserAssistedWebToolTests {
             var requests: [BrowserAssistedSearchRequest] = []
         }
         let recorder = Recorder()
-        let tool = SearchEngineMCPTool(browserAssistedSearchHandler: { request in
+        let tool = NativeWebSearchTool(browserAssistedSearchHandler: { request in
             recorder.requests.append(request)
             return BrowserAssistedSearchResult(
                 taskID: "task-\(engine)",
