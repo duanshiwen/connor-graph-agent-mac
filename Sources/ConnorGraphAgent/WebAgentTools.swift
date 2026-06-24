@@ -243,35 +243,9 @@ public struct BrowserFetchTool: AgentTool {
     }
 }
 
-public struct SearchEngineMCPConfiguration: Sendable, Equatable {
-    public var pythonExecutable: String?
-    public var sourceDirectory: String?
-    public var timeoutSeconds: TimeInterval
-
-    public init(
-        pythonExecutable: String? = nil,
-        sourceDirectory: String? = nil,
-        timeoutSeconds: TimeInterval = 90,
-        environment: [String: String] = ProcessInfo.processInfo.environment
-    ) {
-        self.pythonExecutable = Self.nonEmpty(pythonExecutable) ?? Self.nonEmpty(environment["CONNOR_SEARCH_ENGINE_MCP_PYTHON"])
-        self.sourceDirectory = Self.nonEmpty(sourceDirectory) ?? Self.nonEmpty(environment["CONNOR_SEARCH_ENGINE_MCP_DIR"])
-        self.timeoutSeconds = timeoutSeconds
-    }
-
-    public var isConfigured: Bool {
-        pythonExecutable != nil && sourceDirectory != nil
-    }
-
-    private static func nonEmpty(_ value: String?) -> String? {
-        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return trimmed.isEmpty ? nil : trimmed
-    }
-}
-
-public struct SearchEngineMCPTool: AgentTool {
+public struct NativeWebSearchTool: AgentTool {
     public let name = "web_search"
-    public let description = "Search the web through the configured search-engine-mcp source. Use this for current information, external grounding, Wikipedia/Wikidata lookup, and discovery before fetching a page."
+    public let description = "Search the web using Connor's native web search client, with browser assistance for engines that require interactive rendering. Use this for current information, external grounding, Wikipedia/Wikidata lookup, and discovery before fetching a page."
     public let permission: AgentPermissionCapability = .externalNetwork
     public let inputSchema = AgentToolInputSchema.object(properties: [
         "query": .string(description: "Search query keywords."),
@@ -279,15 +253,15 @@ public struct SearchEngineMCPTool: AgentTool {
         "max_results": .integer(description: "Maximum number of results, 1-10. Defaults to 5.")
     ], required: ["query"])
 
-    private let configuration: SearchEngineMCPConfiguration
     private let browserAssistedSearchHandler: BrowserAssistedSearchHandler?
+    private let nativeSearchClient: NativeWebSearchClient
 
     public init(
-        configuration: SearchEngineMCPConfiguration = SearchEngineMCPConfiguration(),
-        browserAssistedSearchHandler: BrowserAssistedSearchHandler? = nil
+        browserAssistedSearchHandler: BrowserAssistedSearchHandler? = nil,
+        nativeSearchClient: NativeWebSearchClient = NativeWebSearchClient()
     ) {
-        self.configuration = configuration
         self.browserAssistedSearchHandler = browserAssistedSearchHandler
+        self.nativeSearchClient = nativeSearchClient
     }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
@@ -339,14 +313,19 @@ public struct SearchEngineMCPTool: AgentTool {
             }
         }
 
-        let payload: [String: Any] = ["query": query, "engine": engine, "max_results": maxResults]
-        let text = try await SearchEngineMCPSubprocess.call(tool: "search", arguments: payload, configuration: configuration)
+        let nativeResult = try await nativeSearchClient.search(query: query, engine: engine, maxResults: maxResults)
         return AgentToolResult(
             toolCallID: context.toolCallID,
             toolName: name,
-            contentText: text,
-            contentJSON: BrowserFetchTool.encodeJSONObject(["query": query, "engine": engine, "maxResults": maxResults, "text": text]),
-            citations: Self.extractURLs(from: text)
+            contentText: nativeResult.markdown,
+            contentJSON: BrowserFetchTool.encodeJSONObject([
+                "query": nativeResult.query,
+                "engine": nativeResult.engine,
+                "maxResults": maxResults,
+                "results": nativeResult.results.map { ["title": $0.title, "url": $0.url, "snippet": $0.snippet] },
+                "text": nativeResult.markdown
+            ]),
+            citations: nativeResult.results.map(\.url)
         )
     }
 
@@ -467,9 +446,9 @@ public struct BrowserAssistedWebFetchResult: Equatable, Sendable {
 
 public typealias BrowserAssistedWebFetchHandler = @Sendable (BrowserAssistedWebFetchRequest) async -> BrowserAssistedWebFetchResult?
 
-public struct SearchEngineMCPWebFetchTool: AgentTool {
+public struct NativeWebFetchTool: AgentTool {
     public let name = "web_fetch"
-    public let description = "Fetch and extract a web page through search-engine-mcp. Prefer this over browser_fetch when you want cleaned Markdown/text, tables, and optional JavaScript rendering."
+    public let description = "Fetch and extract a web page using Connor's native HTTP extractor, with WKWebView assistance for JavaScript rendering. Prefer this over browser_fetch when you want cleaned Markdown/text, tables, and optional JavaScript rendering."
     public let permission: AgentPermissionCapability = .externalNetwork
     public let inputSchema = AgentToolInputSchema.object(properties: [
         "url": .string(description: "The absolute URL to fetch."),
@@ -479,18 +458,15 @@ public struct SearchEngineMCPWebFetchTool: AgentTool {
         "timeout_ms": .integer(description: "Timeout in milliseconds. Defaults to 720000.")
     ], required: ["url"])
 
-    private let configuration: SearchEngineMCPConfiguration
-    private let browserAssistedSearchHandler: BrowserAssistedSearchHandler?
     private let browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler?
+    private let nativeFetchClient: NativeWebFetchClient
 
     public init(
-        configuration: SearchEngineMCPConfiguration = SearchEngineMCPConfiguration(),
-        browserAssistedSearchHandler: BrowserAssistedSearchHandler? = nil,
-        browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler? = nil
+        browserAssistedWebFetchHandler: BrowserAssistedWebFetchHandler? = nil,
+        nativeFetchClient: NativeWebFetchClient = NativeWebFetchClient()
     ) {
-        self.configuration = configuration
-        self.browserAssistedSearchHandler = browserAssistedSearchHandler
         self.browserAssistedWebFetchHandler = browserAssistedWebFetchHandler
+        self.nativeFetchClient = nativeFetchClient
     }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
@@ -558,99 +534,29 @@ public struct SearchEngineMCPWebFetchTool: AgentTool {
                 }
             }
         }
-        let payload: [String: Any] = [
-            "url": url,
-            "extract_mode": extractMode,
-            "render_mode": renderMode,
-            "wait_until": waitUntil,
-            "timeout_ms": timeoutMilliseconds
-        ]
-        let text = try await SearchEngineMCPSubprocess.call(tool: "web_fetch", arguments: payload, configuration: configuration)
+        let nativeResult = try await nativeFetchClient.fetch(
+            urlString: url,
+            extractMode: extractMode,
+            timeoutMilliseconds: timeoutMilliseconds
+        )
         return AgentToolResult(
             toolCallID: context.toolCallID,
             toolName: name,
-            contentText: text,
-            contentJSON: BrowserFetchTool.encodeJSONObject(["url": url, "text": text]),
-            citations: [url]
+            contentText: nativeResult.contentText,
+            contentJSON: BrowserFetchTool.encodeJSONObject([
+                "url": nativeResult.urlString,
+                "finalURL": nativeResult.finalURLString,
+                "title": nativeResult.title,
+                "renderMode": renderMode,
+                "extractMode": extractMode,
+                "engine": nativeResult.engine,
+                "statusCode": nativeResult.statusCode,
+                "mimeType": nativeResult.mimeType,
+                "truncated": nativeResult.truncated,
+                "originalCharacterCount": nativeResult.originalCharacterCount,
+                "text": nativeResult.contentText
+            ]),
+            citations: [nativeResult.finalURLString.isEmpty ? nativeResult.urlString : nativeResult.finalURLString]
         )
-    }
-}
-
-enum SearchEngineMCPSubprocess {
-    static func call(tool: String, arguments: [String: Any], configuration: SearchEngineMCPConfiguration) async throws -> String {
-        guard JSONSerialization.isValidJSONObject(arguments),
-              let jsonData = try? JSONSerialization.data(withJSONObject: arguments),
-              let json = String(data: jsonData, encoding: .utf8) else {
-            throw AgentToolError.invalidArguments("Arguments must be JSON serializable")
-        }
-
-        return try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: .utility).async {
-                do {
-                    let result = try run(tool: tool, argumentsJSON: json, configuration: configuration)
-                    continuation.resume(returning: result)
-                } catch {
-                    continuation.resume(throwing: error)
-                }
-            }
-        }
-    }
-
-    private static func run(tool: String, argumentsJSON json: String, configuration: SearchEngineMCPConfiguration) throws -> String {
-        let script = """
-import asyncio, json, sys
-from src.server import handle_call_tool
-
-async def main():
-    tool = sys.argv[1]
-    args = json.loads(sys.argv[2])
-    result = await handle_call_tool(tool, args)
-    print("\\n".join(getattr(item, "text", str(item)) for item in result))
-
-asyncio.run(main())
-"""
-
-        guard let pythonExecutable = configuration.pythonExecutable,
-              let sourceDirectory = configuration.sourceDirectory else {
-            throw AgentToolError.invalidArguments("search-engine-mcp is not configured. Set CONNOR_SEARCH_ENGINE_MCP_PYTHON and CONNOR_SEARCH_ENGINE_MCP_DIR, or inject SearchEngineMCPConfiguration explicitly.")
-        }
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: pythonExecutable)
-        process.arguments = ["-c", script, tool, json]
-        process.currentDirectoryURL = URL(fileURLWithPath: sourceDirectory)
-
-        var environment = ProcessInfo.processInfo.environment
-        let existingPythonPath = environment["PYTHONPATH"]
-        environment["PYTHONPATH"] = [sourceDirectory, existingPythonPath].compactMap { $0 }.joined(separator: ":")
-        process.environment = environment
-
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-
-        try process.run()
-        let deadline = Date().addingTimeInterval(configuration.timeoutSeconds)
-        while process.isRunning && Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.05)
-        }
-        if process.isRunning {
-            process.terminate()
-            throw AgentToolError.invalidArguments("search-engine-mcp call timed out after \(Int(configuration.timeoutSeconds))s")
-        }
-
-        let outputData = stdout.fileHandleForReading.readDataToEndOfFile()
-        let errorData = stderr.fileHandleForReading.readDataToEndOfFile()
-        let output = String(data: outputData, encoding: .utf8) ?? ""
-        let errorOutput = String(data: errorData, encoding: .utf8) ?? ""
-
-        guard process.terminationStatus == 0 else {
-            throw AgentToolError.invalidArguments("search-engine-mcp failed: \(errorOutput.isEmpty ? output : errorOutput)")
-        }
-        if output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !errorOutput.isEmpty {
-            return errorOutput
-        }
-        return output.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

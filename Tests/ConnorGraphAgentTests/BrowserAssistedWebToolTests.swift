@@ -4,23 +4,45 @@ import Testing
 
 @Suite("Browser Assisted Web Tool Tests")
 struct BrowserAssistedWebToolTests {
-    @Test func searchEngineMCPConfigurationDoesNotUseLocalCraftDefaults() {
-        let configuration = SearchEngineMCPConfiguration(environment: [:])
+    @Test func nativeWebToolsDoNotRequirePythonConfiguration() {
+        let searchTool = NativeWebSearchTool()
+        let fetchTool = NativeWebFetchTool()
 
-        #expect(configuration.pythonExecutable == nil)
-        #expect(configuration.sourceDirectory == nil)
-        #expect(!configuration.isConfigured)
+        #expect(searchTool.name == "web_search")
+        #expect(fetchTool.name == "web_fetch")
+        #expect(searchTool.description.contains("native web search client"))
+        #expect(fetchTool.description.contains("native HTTP extractor"))
+        let legacySourceName = "search-engine" + "-mcp"
+        #expect(!searchTool.description.contains(legacySourceName))
+        #expect(!fetchTool.description.contains(legacySourceName))
     }
 
-    @Test func searchEngineMCPConfigurationReadsExplicitEnvironment() {
-        let configuration = SearchEngineMCPConfiguration(environment: [
-            "CONNOR_SEARCH_ENGINE_MCP_PYTHON": "/opt/search-engine-mcp/venv/bin/python",
-            "CONNOR_SEARCH_ENGINE_MCP_DIR": "/opt/search-engine-mcp"
-        ])
+    @Test func duckDuckGoWebSearchUsesNativeClientWithoutPythonRuntime() async throws {
+        let html = """
+        <html><body>
+          <div class="result">
+            <a class="result__a" href="https://example.com/native-search">Native Search Result</a>
+            <div class="result__snippet">Found by Swift search.</div>
+          </div>
+        </body></html>
+        """
+        let nativeClient = NativeWebSearchClient(httpClient: FakeNativeWebHTTPClient(response: .html(html, url: "https://duckduckgo.com/html/?q=native")))
+        let tool = NativeWebSearchTool(nativeSearchClient: nativeClient)
 
-        #expect(configuration.pythonExecutable == "/opt/search-engine-mcp/venv/bin/python")
-        #expect(configuration.sourceDirectory == "/opt/search-engine-mcp")
-        #expect(configuration.isConfigured)
+        let result = try await tool.execute(
+            arguments: AgentToolArguments(values: [
+                "query": .string("native"),
+                "engine": .string("duckduckgo"),
+                "max_results": .int(1)
+            ]),
+            context: Self.context()
+        )
+
+        #expect(result.contentText.contains("Native Search Result"))
+        #expect(result.contentText.contains("https://example.com/native-search"))
+        #expect(result.contentText.contains("Found by Swift search."))
+        #expect(result.contentJSON?.contains("native") == true)
+        #expect(result.citations == ["https://example.com/native-search"])
     }
 
     @Test func googleWebSearchUsesBrowserAssistedHandler() async throws {
@@ -74,12 +96,34 @@ struct BrowserAssistedWebToolTests {
         #expect(decoded.mojibakeRepaired == true)
     }
 
+    @Test func httpWebFetchUsesNativeClientWithoutPythonRuntime() async throws {
+        let html = """
+        <html><head><title>Native Fetch</title></head><body><h1>Native Fetch</h1><p>Fetched by Swift.</p></body></html>
+        """
+        let nativeClient = NativeWebFetchClient(httpClient: FakeNativeWebHTTPClient(response: .html(html, url: "https://example.com/native")))
+        let tool = NativeWebFetchTool(nativeFetchClient: nativeClient)
+
+        let result = try await tool.execute(
+            arguments: AgentToolArguments(values: [
+                "url": .string("https://example.com/native"),
+                "render_mode": .string("http"),
+                "extract_mode": .string("markdown")
+            ]),
+            context: Self.context()
+        )
+
+        #expect(result.contentText.contains("# Native Fetch"))
+        #expect(result.contentText.contains("Fetched by Swift."))
+        #expect(result.contentJSON?.contains("native-urlsession") == true)
+        #expect(result.citations == ["https://example.com/native"])
+    }
+
     @Test func javascriptWebFetchReturnsExtractedContentFromBrowserAssistedHandler() async throws {
         final class Recorder: @unchecked Sendable {
             var requests: [BrowserAssistedWebFetchRequest] = []
         }
         let recorder = Recorder()
-        let tool = SearchEngineMCPWebFetchTool(browserAssistedWebFetchHandler: { request in
+        let tool = NativeWebFetchTool(browserAssistedWebFetchHandler: { request in
             recorder.requests.append(request)
             return BrowserAssistedWebFetchResult(
                 status: .fetched,
@@ -116,7 +160,7 @@ struct BrowserAssistedWebToolTests {
     }
 
     @Test func javascriptWebFetchReportsUserInterventionWhenBrowserRequiresChallenge() async throws {
-        let tool = SearchEngineMCPWebFetchTool(browserAssistedWebFetchHandler: { request in
+        let tool = NativeWebFetchTool(browserAssistedWebFetchHandler: { request in
             BrowserAssistedWebFetchResult(
                 status: .needsUserIntervention,
                 urlString: request.urlString,
@@ -157,7 +201,7 @@ struct BrowserAssistedWebToolTests {
             var requests: [BrowserAssistedSearchRequest] = []
         }
         let recorder = Recorder()
-        let tool = SearchEngineMCPTool(browserAssistedSearchHandler: { request in
+        let tool = NativeWebSearchTool(browserAssistedSearchHandler: { request in
             recorder.requests.append(request)
             return BrowserAssistedSearchResult(
                 taskID: "task-\(engine)",
@@ -186,6 +230,14 @@ struct BrowserAssistedWebToolTests {
         #expect(result.contentText.contains("Task ID: task-\(engine)"))
     }
 
+    private struct FakeNativeWebHTTPClient: NativeWebHTTPClient {
+        var response: NativeWebHTTPResponse
+
+        func data(for request: URLRequest) async throws -> NativeWebHTTPResponse {
+            response
+        }
+    }
+
     private static func context() -> AgentToolExecutionContext {
         let audit = InMemoryAgentAuditLog()
         let policy = AgentPolicyEngine(permissionMode: .allowAll, auditLog: audit)
@@ -196,6 +248,18 @@ struct BrowserAssistedWebToolTests {
             userPrompt: "search",
             toolCallID: "tool-call-1",
             policyEngine: policy
+        )
+    }
+}
+
+private extension NativeWebHTTPResponse {
+    static func html(_ html: String, url: String) -> NativeWebHTTPResponse {
+        NativeWebHTTPResponse(
+            data: Data(html.utf8),
+            statusCode: 200,
+            mimeType: "text/html",
+            finalURL: URL(string: url),
+            textEncodingName: "utf-8"
         )
     }
 }

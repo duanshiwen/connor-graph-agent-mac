@@ -4706,7 +4706,7 @@ final class AppViewModel: NSObject, ObservableObject {
         let recordID = record.id
         let url = record.url
         Task.detached(priority: .utility) {
-            let tool = SearchEngineMCPWebFetchTool()
+            let tool = NativeWebFetchTool()
             let arguments = AgentToolArguments(values: [
                 "url": .string(url),
                 "extract_mode": .string("markdown"),
