@@ -297,6 +297,19 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(output.contains("span-1"))
     }
 
+    @Test func memoryOSCLIRouterRoutesL3ExpandCommand() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        try seedMemoryOSCLIInspectorFixture(store: store)
+        let inspector = AppMemoryOSCLIInspector(store: store)
+        let encoder = memoryOSCLITestEncoder()
+
+        let output = try AppMemoryOSCLIRouter.route(args: ["l3", "expand", "observable", "--limit", "5"], inspector: inspector, encoder: encoder)
+
+        #expect(output.contains("belief-1"))
+        #expect(output.contains("stmt-1"))
+        #expect(output.contains("supported_by"))
+    }
+
     @Test func memoryOSCLIRouterRoutesL4FindAndNeighborsCommands() throws {
         let store = try makeMemoryOSCLIInspectorStore()
         try seedMemoryOSCLIInspectorFixture(store: store)

@@ -86,6 +86,20 @@ public struct MemoryOSL2StatementFindQuery: Sendable, Codable, Equatable {
     }
 }
 
+public struct MemoryOSL3BeliefExpandQuery: Sendable, Codable, Equatable {
+    public var beliefID: String?
+    public var topic: String?
+    public var text: String?
+    public var limit: Int
+
+    public init(beliefID: String? = nil, topic: String? = nil, text: String? = nil, limit: Int = 20) {
+        self.beliefID = beliefID
+        self.topic = topic
+        self.text = text
+        self.limit = limit
+    }
+}
+
 public struct MemoryOSL4EntityFindQuery: Sendable, Codable, Equatable {
     public var text: String
     public var limit: Int
@@ -180,6 +194,83 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
             evidenceRefs: Array(Set(evidenceRefs)).sorted(),
             provenanceRefs: [],
             explanation: "L2 statement query returned \(edges.count) statement edge(s)."
+        )
+    }
+
+    public func l3ExpandBelief(_ query: MemoryOSL3BeliefExpandQuery) throws -> MemoryOSGraphSubgraph {
+        let beliefID = query.beliefID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let topic = query.topic?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = query.text?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !(beliefID?.isEmpty ?? true) || !(topic?.isEmpty ?? true) || !(text?.isEmpty ?? true) else {
+            return MemoryOSGraphSubgraph(explanation: "No L3 belief id, topic, or text query was provided.")
+        }
+        let limit = min(max(query.limit, 1), 100)
+        var clauses: [String] = []
+        if let beliefID, !beliefID.isEmpty { clauses.append("b.id = \(store.quote(beliefID))") }
+        if let topic, !topic.isEmpty { clauses.append("b.topic LIKE \(store.quote("%\(topic)%"))") }
+        if let text, !text.isEmpty { clauses.append("(b.statement LIKE \(store.quote("%\(text)%")) OR b.topic LIKE \(store.quote("%\(text)%")))") }
+        let beliefRows = try store.query(sql: """
+        SELECT b.id, b.topic, b.statement, b.projection_kind, b.confidence, b.valid_at, b.projected_at, b.evidence_statement_ids_json
+        FROM memory_l3_beliefs b
+        WHERE \(clauses.joined(separator: " AND "))
+        ORDER BY b.projected_at DESC, b.confidence DESC, b.id ASC
+        LIMIT \(limit)
+        """)
+        var nodes: [MemoryOSGraphNode] = []
+        var edges: [MemoryOSGraphEdge] = []
+        var evidenceRefs: [String] = []
+        var statementIDs = Set<String>()
+        for row in beliefRows {
+            nodes.append(MemoryOSGraphNode(
+                id: row[0],
+                layer: .l3,
+                kind: row[3],
+                title: row[1],
+                summary: row[2],
+                metadata: ["confidence": row[4], "valid_at": row[5], "projected_at": row[6]]
+            ))
+            let ids = (try? store.decode([String].self, row[7])) ?? []
+            for statementID in ids where !statementID.isEmpty {
+                statementIDs.insert(statementID)
+                edges.append(MemoryOSGraphEdge(
+                    id: "\(row[0])->\(statementID)",
+                    layer: .l3,
+                    sourceID: row[0],
+                    targetID: statementID,
+                    predicate: "supported_by",
+                    confidence: Double(row[4]),
+                    validAt: row[5],
+                    metadata: ["projection_kind": row[3]]
+                ))
+            }
+        }
+        if !statementIDs.isEmpty {
+            let quoted = statementIDs.map(store.quote).joined(separator: ",")
+            let statementRows = try store.query(sql: """
+            SELECT s.id, s.subject_id, s.predicate, COALESCE(s.object_id, ''), s.text, s.assertion_kind, s.confidence, s.valid_at, s.evidence_span_ids_json
+            FROM memory_l2_statements s
+            WHERE s.id IN (\(quoted))
+            ORDER BY s.valid_at DESC, s.confidence DESC, s.id ASC
+            """)
+            for row in statementRows {
+                let spanIDs = (try? store.decode([String].self, row[8])) ?? []
+                evidenceRefs.append(contentsOf: spanIDs)
+                nodes.append(MemoryOSGraphNode(
+                    id: row[0],
+                    layer: .l2,
+                    kind: row[5],
+                    title: row[2],
+                    summary: row[4],
+                    metadata: ["subject_id": row[1], "object_id": row[3], "confidence": row[6], "valid_at": row[7]]
+                ))
+            }
+        }
+        return MemoryOSGraphSubgraph(
+            nodes: nodes,
+            edges: edges,
+            evidenceRefs: Array(Set(evidenceRefs)).sorted(),
+            provenanceRefs: [],
+            explanation: "L3 belief expansion returned \(beliefRows.count) belief node(s) and \(statementIDs.count) supporting L2 statement reference(s)."
         )
     }
 
