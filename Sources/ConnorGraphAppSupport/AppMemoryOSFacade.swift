@@ -163,6 +163,10 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         try SQLiteMemoryOSUnifiedRetrievalService(store: store).expandL4(entityID: entityID, depth: depth, limit: limit)
     }
 
+    public func findMemoryOSL2Statements(text: String = "", subjectID: String? = nil, predicates: [String] = [], limit: Int = 50) throws -> MemoryOSGraphSubgraph {
+        try SQLiteMemoryOSGraphRetrievalService(store: store).l2FindStatements(MemoryOSL2StatementFindQuery(text: text, subjectID: subjectID, predicates: predicates, limit: limit))
+    }
+
     public func findMemoryOSL4Entity(text: String, limit: Int = 20) throws -> MemoryOSGraphSubgraph {
         try SQLiteMemoryOSGraphRetrievalService(store: store).l4FindEntity(MemoryOSL4EntityFindQuery(text: text, limit: limit))
     }

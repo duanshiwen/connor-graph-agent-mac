@@ -78,7 +78,18 @@ public enum AppMemoryOSCLIRouter {
         switch args.first ?? "statements" {
         case "statements": return try encode(try inspector.listL2Statements(limit: intOption("--limit", in: args, default: 20)), encoder: encoder)
         case "pending-knowledge": return try encode(try inspector.listL2PendingKnowledge(limit: intOption("--limit", in: args, default: 20)), encoder: encoder)
-        default: return try encode(MemoryOSCLIError(error: "unknown_l2_command", usage: "connor memory l2 statements|pending-knowledge"), encoder: encoder)
+        case "find":
+            let text = args.dropFirst().first.flatMap { $0.hasPrefix("--") ? nil : $0 } ?? ""
+            return try encode(
+                try inspector.findL2Statements(
+                    text: text,
+                    subjectID: optionValue("--subject", in: args),
+                    predicates: optionValue("--predicate", in: args).map(splitCSV) ?? [],
+                    limit: intOption("--limit", in: args, default: 50)
+                ),
+                encoder: encoder
+            )
+        default: return try encode(MemoryOSCLIError(error: "unknown_l2_command", usage: "connor memory l2 statements|pending-knowledge|find [text] [--subject id] [--predicate p1,p2] [--limit N]"), encoder: encoder)
         }
     }
 
