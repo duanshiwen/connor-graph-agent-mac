@@ -260,7 +260,6 @@ ingestCalendarEvent(...)
 ingestRSSItem(...)
 ingestBrowserHistoryEvent(...)
 ingestAttachmentText(...)
-ingestMediaTranscript(...)
 ```
 
 Each writes a `source_event` into L0/L1 via `AppMemoryOSFacade.ingestSourceEvent(...)`.

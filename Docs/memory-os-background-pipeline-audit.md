@@ -63,7 +63,8 @@ L1 capture events already contain:
 | RSS | Adapter entry exists; runtime call sites still need wiring | `ingestSourceEvent(sourceKind: "rss", ...)` can be used by RSS refresh runtime |
 | Browser history | Adapter entry exists; history call sites still need wiring | `ingestSourceEvent(sourceKind: "browser_history", ...)` can be used by browser history store |
 | Attachments / extracted text | Adapter entry exists; attachment call sites still need wiring | `ingestSourceEvent(sourceKind: "attachment", ...)` can ingest extracted text summaries |
-| Media transcription | Adapter entry exists; transcription call sites still need wiring | `ingestSourceEvent(sourceKind: "media_transcription", ...)` can ingest transcript summaries |
+
+Media transcription is not part of the current `remove-browser-media-transcription` work tree. If browser/media transcription returns later, it should be reintroduced through a fresh design and a new `AppMemoryOSNativeSourceEventBridge` method instead of relying on stale `media_transcription` assumptions.
 
 ## 2. Current L1 threshold and queue mechanism
 
@@ -238,18 +239,14 @@ The user’s target architecture maps well onto the current Memory OS direction.
 The remaining missing product mechanism is now narrower:
 
 1. Real provider-backed `MemoryOSBackgroundModelExecutor` adapter with live tool-calling loop support.
-2. Deep call-site wiring from every Mail / Calendar / RSS / browser history / attachment extraction / media transcription runtime path into `AppMemoryOSNativeSourceEventBridge`; the common bridge exists and is tested.
+2. Deep call-site wiring from every Mail / Calendar / RSS / browser history / attachment extraction runtime path into `AppMemoryOSNativeSourceEventBridge`; the common bridge exists and is tested.
 3. Product policy for cleanup/quarantine of dead-lettered L1 buffers. Successful L1 processing already physically clears L1; failure paths keep L1 for retry.
 
 Completed since the previous audit: `memory_os_read_record`, `memory_os_read_provenance`, structured L1/L2 prompt packets, `MemoryOSBackgroundToolDescriptor`, `MemoryOSBackgroundToolCall`, and `MemoryOSBackgroundToolResult`.
 
 ## 8. Implementation principle
 
-Do not physically clear L1 after processing. Instead:
-
-```text
-mark processed / succeeded / archived from active queue
-```
+L1 is an active processing buffer, not the audit source of truth. L0 remains the durable raw provenance source. Therefore successful L1→L2 projection physically clears the accepted L1 capture events; executor failure, artifact rejection and dead-letter paths keep L1 available for retry.
 
 Do not overwrite L2 statements when improving them. Instead:
 
