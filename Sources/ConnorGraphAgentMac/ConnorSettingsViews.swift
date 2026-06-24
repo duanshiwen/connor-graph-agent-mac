@@ -2058,9 +2058,9 @@ struct AIConnectionSetupView: View {
         let modelList = modelIDs(in: effectiveModelListForSubmit())
         let endpointDescription = selectedProviderPresetID == "custom" ? customProtocol.modelValidationEndpointDescription : "连接校验"
         if modelList.count > 1 {
-            return "使用服务商自己的模型 ID。已填写多个模型时，康纳同学会使用其中一个模型测试连接，保存后可在会话中切换其他模型。"
+            return "使用服务商自己的模型 ID。已填写多个模型时，康纳同学会使用其中一个模型进行\(endpointDescription)，保存后可在会话中切换其他模型。"
         }
-        return "使用服务商自己的模型 ID。康纳同学会用该模型测试连接。"
+        return "使用服务商自己的模型 ID。康纳同学会用该模型进行\(endpointDescription)。"
     }
 
     private func firstConfiguredModelForSubmit() -> String {
