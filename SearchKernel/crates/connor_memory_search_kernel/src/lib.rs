@@ -4,6 +4,7 @@ pub mod ffi;
 pub mod indexer;
 pub mod query;
 pub mod schema;
+pub mod sqlite_import;
 pub mod tokenizer;
 
 pub use document::{MemorySearchDocument, SearchLayer, SearchRecordKind};
@@ -19,6 +20,7 @@ use tantivy::{Index, TantivyDocument};
 
 use crate::indexer::MemorySearchIndexer;
 use crate::schema::{memory_search_fields, memory_search_schema};
+use crate::sqlite_import::load_documents_from_sqlite;
 use crate::tokenizer::query_terms;
 
 #[derive(Debug)]
@@ -45,6 +47,11 @@ impl ConnorMemorySearchKernel {
 
     pub fn rebuild_from_documents(&self, documents: &[MemorySearchDocument]) -> KernelResult<usize> {
         MemorySearchIndexer::rebuild_from_documents(&self.index_dir, documents)
+    }
+
+    pub fn rebuild_from_sqlite(&self, database_path: impl AsRef<std::path::Path>, limit_per_layer: Option<usize>) -> KernelResult<usize> {
+        let documents = load_documents_from_sqlite(database_path.as_ref(), limit_per_layer)?;
+        self.rebuild_from_documents(&documents)
     }
 
     pub fn search(&self, request: MemorySearchRequest) -> KernelResult<MemorySearchResponse> {

@@ -22,6 +22,41 @@ pub extern "C" fn connor_search_close(handle: *mut ConnorMemorySearchKernel) {
 }
 
 #[no_mangle]
+pub extern "C" fn connor_search_rebuild_from_sqlite(
+    handle: *mut ConnorMemorySearchKernel,
+    database_path: *const c_char,
+    limit_per_layer: usize,
+    indexed_count: *mut usize,
+    error: *mut *mut c_char,
+) -> i32 {
+    if handle.is_null() {
+        set_error(error, "search handle is null");
+        return -1;
+    }
+    let database_path = match unsafe_string(database_path) {
+        Ok(value) => value,
+        Err(message) => {
+            set_error(error, message);
+            return -1;
+        }
+    };
+    let limit = if limit_per_layer == 0 { None } else { Some(limit_per_layer) };
+    let kernel = unsafe { &*handle };
+    match kernel.rebuild_from_sqlite(database_path, limit) {
+        Ok(count) => {
+            if !indexed_count.is_null() {
+                unsafe { *indexed_count = count; }
+            }
+            0
+        }
+        Err(err) => {
+            set_error(error, err.to_string());
+            -1
+        }
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn connor_search_query(
     handle: *mut ConnorMemorySearchKernel,
     request_json: *const c_char,
