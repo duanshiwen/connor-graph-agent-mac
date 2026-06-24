@@ -244,18 +244,28 @@ public struct BrowserFetchTool: AgentTool {
 }
 
 public struct SearchEngineMCPConfiguration: Sendable, Equatable {
-    public var pythonExecutable: String
-    public var sourceDirectory: String
+    public var pythonExecutable: String?
+    public var sourceDirectory: String?
     public var timeoutSeconds: TimeInterval
 
     public init(
-        pythonExecutable: String = ProcessInfo.processInfo.environment["CONNOR_SEARCH_ENGINE_MCP_PYTHON"] ?? "/Users/duanshiwen/.craft-agent/workspaces/shiwens-knowledge-base/sources/search-engine-mcp/venv_new/bin/python",
-        sourceDirectory: String = ProcessInfo.processInfo.environment["CONNOR_SEARCH_ENGINE_MCP_DIR"] ?? "/Users/duanshiwen/.craft-agent/workspaces/shiwens-knowledge-base/sources/search-engine-mcp",
-        timeoutSeconds: TimeInterval = 90
+        pythonExecutable: String? = nil,
+        sourceDirectory: String? = nil,
+        timeoutSeconds: TimeInterval = 90,
+        environment: [String: String] = ProcessInfo.processInfo.environment
     ) {
-        self.pythonExecutable = pythonExecutable
-        self.sourceDirectory = sourceDirectory
+        self.pythonExecutable = Self.nonEmpty(pythonExecutable) ?? Self.nonEmpty(environment["CONNOR_SEARCH_ENGINE_MCP_PYTHON"])
+        self.sourceDirectory = Self.nonEmpty(sourceDirectory) ?? Self.nonEmpty(environment["CONNOR_SEARCH_ENGINE_MCP_DIR"])
         self.timeoutSeconds = timeoutSeconds
+    }
+
+    public var isConfigured: Bool {
+        pythonExecutable != nil && sourceDirectory != nil
+    }
+
+    private static func nonEmpty(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
 
@@ -600,14 +610,19 @@ async def main():
 asyncio.run(main())
 """
 
+        guard let pythonExecutable = configuration.pythonExecutable,
+              let sourceDirectory = configuration.sourceDirectory else {
+            throw AgentToolError.invalidArguments("search-engine-mcp is not configured. Set CONNOR_SEARCH_ENGINE_MCP_PYTHON and CONNOR_SEARCH_ENGINE_MCP_DIR, or inject SearchEngineMCPConfiguration explicitly.")
+        }
+
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: configuration.pythonExecutable)
+        process.executableURL = URL(fileURLWithPath: pythonExecutable)
         process.arguments = ["-c", script, tool, json]
-        process.currentDirectoryURL = URL(fileURLWithPath: configuration.sourceDirectory)
+        process.currentDirectoryURL = URL(fileURLWithPath: sourceDirectory)
 
         var environment = ProcessInfo.processInfo.environment
         let existingPythonPath = environment["PYTHONPATH"]
-        environment["PYTHONPATH"] = [configuration.sourceDirectory, existingPythonPath].compactMap { $0 }.joined(separator: ":")
+        environment["PYTHONPATH"] = [sourceDirectory, existingPythonPath].compactMap { $0 }.joined(separator: ":")
         process.environment = environment
 
         let stdout = Pipe()
