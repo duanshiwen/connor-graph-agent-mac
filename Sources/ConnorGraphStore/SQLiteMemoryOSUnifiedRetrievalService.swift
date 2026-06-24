@@ -213,12 +213,50 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
     }
 
     private func ftsQuery(_ text: String) -> String {
-        text.split { $0.isWhitespace || $0.isPunctuation }.map { String($0) }.joined(separator: " OR ")
+        let normalized = normalizedFTSTerms(text)
+        return normalized.isEmpty ? text : normalized.joined(separator: " OR ")
+    }
+
+    private func normalizedFTSTerms(_ text: String) -> [String] {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
+        let weakChinesePhrases = ["有哪些", "所有", "全部", "列出", "关于", "相关", "哪些", "什么", "请问", "一下"]
+        var simplified = trimmed
+        for phrase in weakChinesePhrases {
+            simplified = simplified.replacingOccurrences(of: phrase, with: " ")
+        }
+        simplified = simplified.replacingOccurrences(of: "的", with: " ")
+
+        var terms = simplified
+            .split { $0.isWhitespace || $0.isPunctuation }
+            .map(String.init)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        let compact = trimmed.filter { !$0.isWhitespace && !$0.isPunctuation }
+        let domainExpansions: [(String, [String])] = [
+            ("国家", ["国家", "country", "主权国家", "主權國家"]),
+            ("中國", ["中国", "中國", "中华人民共和国", "中華人民共和國", "China", "PRC"]),
+            ("中国", ["中国", "中國", "中华人民共和国", "中華人民共和國", "China", "PRC"])
+        ]
+        for (needle, expansions) in domainExpansions where compact.contains(needle) || simplified.contains(needle) {
+            terms.append(contentsOf: expansions)
+        }
+
+        if terms.isEmpty, !compact.isEmpty {
+            terms.append(compact)
+        }
+        return Array(NSOrderedSet(array: terms).compactMap { $0 as? String })
     }
 
     private func score(fromFTSRank rank: String) -> Double {
         let value = Double(rank) ?? 0
-        return 1.0 / (1.0 + max(0, value))
+        // SQLite FTS5 bm25() returns smaller values for better matches and commonly returns negative values.
+        // Preserve that ordering by mapping more-negative ranks to scores above 1 instead of clamping all
+        // negative ranks to the same score.
+        if value < 0 { return 1.0 + min(100.0, -value) }
+        return 1.0 / (1.0 + value)
     }
 
     private func lexicalScore(_ query: String, haystack: String) -> Double {
