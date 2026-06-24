@@ -26,3 +26,9 @@ impl From<anyhow::Error> for KernelError {
         Self::new(value.to_string())
     }
 }
+
+impl From<serde_json::Error> for KernelError {
+    fn from(value: serde_json::Error) -> Self {
+        Self::new(value.to_string())
+    }
+}
