@@ -185,6 +185,71 @@ public struct AppMemoryOSCLIInspector: Sendable {
         return MemoryOSCLIPlanResult(plannedJobs: jobs.count, kind: MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue, jobIDs: jobs.map(\.id))
     }
 
+    public func searchIndexStats(fileManager: FileManager = .default) throws -> MemoryOSCLISearchIndexStats {
+        guard let searchKernel else { throw MemoryOSCLISearchIndexError.kernelUnavailable }
+        let meta = try readSearchIndexMeta(indexDirectory: searchKernel.indexDirectory, fileManager: fileManager)
+        let size = directorySize(searchKernel.indexDirectory, fileManager: fileManager)
+        let tantivyMetaURL = searchKernel.indexDirectory.appendingPathComponent("meta.json")
+        let segmentCount = tantivySegmentCount(tantivyMetaURL: tantivyMetaURL)
+        return MemoryOSCLISearchIndexStats(
+            libraryPath: searchKernel.libraryURL.path,
+            indexDirectory: searchKernel.indexDirectory.path,
+            connorMeta: meta,
+            indexSizeBytes: size,
+            tantivySegmentCount: segmentCount
+        )
+    }
+
+    public func rebuildSearchIndex(now: Date = Date()) throws -> MemoryOSCLISearchIndexRebuildResult {
+        guard let searchKernel else { throw MemoryOSCLISearchIndexError.kernelUnavailable }
+        let count = try searchKernel.rebuildFromSQLite(databaseURL: URL(fileURLWithPath: databasePath))
+        try AppMemoryOSSearchKernelFactory.writeMeta(indexDirectory: searchKernel.indexDirectory, databaseURL: URL(fileURLWithPath: databasePath), documentCount: count, builtAt: now)
+        return MemoryOSCLISearchIndexRebuildResult(
+            status: "rebuilt",
+            documentCount: count,
+            databasePath: databasePath,
+            indexDirectory: searchKernel.indexDirectory.path,
+            schemaVersion: AppMemoryOSSearchKernelFactory.currentIndexSchemaVersion
+        )
+    }
+
+    public func verifySearchIndex(fileManager: FileManager = .default) throws -> MemoryOSCLISearchIndexVerifyResult {
+        guard let searchKernel else { throw MemoryOSCLISearchIndexError.kernelUnavailable }
+        var checks: [MemoryOSCLISearchIndexCheck] = []
+        func check(_ name: String, _ passed: Bool, _ message: String) {
+            checks.append(MemoryOSCLISearchIndexCheck(name: name, passed: passed, message: message))
+        }
+
+        check("library_exists", fileManager.fileExists(atPath: searchKernel.libraryURL.path), searchKernel.libraryURL.path)
+        check("database_exists", fileManager.fileExists(atPath: databasePath), databasePath)
+        check("index_directory_exists", fileManager.fileExists(atPath: searchKernel.indexDirectory.path), searchKernel.indexDirectory.path)
+
+        let meta: MemoryOSCLISearchIndexMeta?
+        do {
+            meta = try readSearchIndexMeta(indexDirectory: searchKernel.indexDirectory, fileManager: fileManager)
+            check("connor_meta_exists", true, AppMemoryOSSearchKernelFactory.connorMetaFilename)
+            check("schema_version_current", meta?.indexSchemaVersion == AppMemoryOSSearchKernelFactory.currentIndexSchemaVersion, "expected \(AppMemoryOSSearchKernelFactory.currentIndexSchemaVersion), actual \(meta?.indexSchemaVersion ?? -1)")
+            check("document_count_positive", (meta?.documentCount ?? 0) > 0, "documentCount=\(meta?.documentCount ?? 0)")
+        } catch {
+            meta = nil
+            check("connor_meta_exists", false, error.localizedDescription)
+        }
+
+        let smokeQueries = (meta?.documentCount ?? 0) < 100 ? ["Memory"] : ["中国", "Q148", "国家", "有哪些国家", "P31"]
+        var smokeResults: [String: Int] = [:]
+        for query in smokeQueries {
+            do {
+                let response = try searchKernel.search(MemoryOSSearchKernelRequest(query: query, layers: [.l4], limit: 5))
+                smokeResults[query] = response.hits.count
+                check("smoke_\(query)", !response.hits.isEmpty, "hits=\(response.hits.count)")
+            } catch {
+                smokeResults[query] = 0
+                check("smoke_\(query)", false, error.localizedDescription)
+            }
+        }
+        return MemoryOSCLISearchIndexVerifyResult(status: checks.allSatisfy(\.passed) ? "ok" : "failed", checks: checks, smokeResults: smokeResults, meta: meta)
+    }
+
     public func search(query: String, layers: [String] = [], limit: Int = 20) throws -> MemoryOSCLISearchResult {
         let normalizedLayers = layers.compactMap(normalizedLayer)
         let retrievalLayers = normalizedLayers.isEmpty
@@ -238,6 +303,30 @@ public struct AppMemoryOSCLIInspector: Sendable {
         default:
             return nil
         }
+    }
+
+    private func readSearchIndexMeta(indexDirectory: URL, fileManager: FileManager) throws -> MemoryOSCLISearchIndexMeta {
+        let metaURL = indexDirectory.appendingPathComponent(AppMemoryOSSearchKernelFactory.connorMetaFilename)
+        let data = try Data(contentsOf: metaURL)
+        return try JSONDecoder().decode(MemoryOSCLISearchIndexMeta.self, from: data)
+    }
+
+    private func directorySize(_ url: URL, fileManager: FileManager) -> Int64 {
+        guard let enumerator = fileManager.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey], options: [.skipsHiddenFiles]) else { return 0 }
+        var total: Int64 = 0
+        for case let fileURL as URL in enumerator {
+            let size = (try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            total += Int64(size)
+        }
+        return total
+    }
+
+    private func tantivySegmentCount(tantivyMetaURL: URL) -> Int {
+        guard let data = try? Data(contentsOf: tantivyMetaURL),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let segments = object["segments"] as? [Any]
+        else { return 0 }
+        return segments.count
     }
 
     private func layerCounts() throws -> MemoryOSCLILayerSummary {
@@ -359,6 +448,80 @@ public struct MemoryOSCLIRecord: Codable, Sendable, Equatable {
 public struct MemoryOSCLISearchResult: Codable, Sendable, Equatable {
     public var query: String
     public var hits: [MemoryOSCLISearchHit]
+}
+
+public enum MemoryOSCLISearchIndexError: Error, Sendable {
+    case kernelUnavailable
+}
+
+public struct MemoryOSCLISearchIndexMeta: Codable, Sendable, Equatable {
+    public var indexSchemaVersion: Int
+    public var searchKernelVersion: String
+    public var sourceDatabasePath: String
+    public var indexedLayers: [String]
+    public var documentCount: Int
+    public var builtAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case indexSchemaVersion
+        case searchKernelVersion
+        case sourceDatabasePath
+        case indexedLayers
+        case documentCount
+        case builtAt
+    }
+}
+
+public struct MemoryOSCLISearchIndexStats: Codable, Sendable, Equatable {
+    public var libraryPath: String
+    public var indexDirectory: String
+    public var connorMeta: MemoryOSCLISearchIndexMeta
+    public var indexSizeBytes: Int64
+    public var tantivySegmentCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case libraryPath = "library_path"
+        case indexDirectory = "index_directory"
+        case connorMeta = "connor_meta"
+        case indexSizeBytes = "index_size_bytes"
+        case tantivySegmentCount = "tantivy_segment_count"
+    }
+}
+
+public struct MemoryOSCLISearchIndexRebuildResult: Codable, Sendable, Equatable {
+    public var status: String
+    public var documentCount: Int
+    public var databasePath: String
+    public var indexDirectory: String
+    public var schemaVersion: Int
+
+    enum CodingKeys: String, CodingKey {
+        case status
+        case documentCount = "document_count"
+        case databasePath = "database_path"
+        case indexDirectory = "index_directory"
+        case schemaVersion = "schema_version"
+    }
+}
+
+public struct MemoryOSCLISearchIndexCheck: Codable, Sendable, Equatable {
+    public var name: String
+    public var passed: Bool
+    public var message: String
+}
+
+public struct MemoryOSCLISearchIndexVerifyResult: Codable, Sendable, Equatable {
+    public var status: String
+    public var checks: [MemoryOSCLISearchIndexCheck]
+    public var smokeResults: [String: Int]
+    public var meta: MemoryOSCLISearchIndexMeta?
+
+    enum CodingKeys: String, CodingKey {
+        case status
+        case checks
+        case smokeResults = "smoke_results"
+        case meta
+    }
 }
 
 public struct MemoryOSCLISearchHit: Codable, Sendable, Equatable {

@@ -34,6 +34,8 @@ public enum AppMemoryOSCLIRouter {
                 return try encode(MemoryOSCLIError(error: "missing_query", usage: "connor memory search <query> [--layers L2,L3,L4] [--limit N]"), encoder: encoder)
             }
             return try encode(try inspector.search(query: query, layers: optionValue("--layers", in: args).map(splitCSV) ?? [], limit: intOption("--limit", in: args, default: 20)), encoder: encoder)
+        case "search-index":
+            return try routeSearchIndex(args: Array(args.dropFirst()), inspector: inspector, encoder: encoder)
         case "queue":
             return try encode(try inspector.queue(limit: intOption("--limit", in: args, default: 20), status: optionValue("--status", in: args), kind: optionValue("--kind", in: args)), encoder: encoder)
         case "debug-reset-foundation-kg":
@@ -105,6 +107,15 @@ public enum AppMemoryOSCLIRouter {
             )
         default:
             return try encode(MemoryOSCLIError(error: "unknown_l4_command", usage: "connor memory l4 entities|instances"), encoder: encoder)
+        }
+    }
+
+    private static func routeSearchIndex(args: [String], inspector: AppMemoryOSCLIInspector, encoder: JSONEncoder) throws -> String {
+        switch args.first ?? "stats" {
+        case "stats": return try encode(try inspector.searchIndexStats(), encoder: encoder)
+        case "verify": return try encode(try inspector.verifySearchIndex(), encoder: encoder)
+        case "rebuild": return try encode(try inspector.rebuildSearchIndex(), encoder: encoder)
+        default: return try encode(MemoryOSCLIError(error: "unknown_search_index_command", usage: "connor memory search-index stats|verify|rebuild"), encoder: encoder)
         }
     }
 

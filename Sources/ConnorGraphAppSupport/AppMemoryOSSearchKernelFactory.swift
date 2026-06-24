@@ -2,6 +2,10 @@ import Foundation
 import ConnorGraphSearch
 
 public enum AppMemoryOSSearchKernelFactory {
+    public static let connorMetaFilename = "connor-meta.json"
+    public static let currentIndexSchemaVersion = 4
+    public static let searchKernelVersion = "0.1.0"
+
     public static func makeLive(paths: AppStoragePaths, fileManager: FileManager = .default) throws -> MemoryOSSearchKernel {
         let libraryURL = try resolveLibraryURL(fileManager: fileManager)
         let indexDirectory = MemoryOSSearchKernelPaths.defaultIndexDirectory(graphDirectory: paths.graphDirectory)
@@ -32,25 +36,25 @@ public enum AppMemoryOSSearchKernelFactory {
     }
 
     private static func needsRebuild(indexDirectory: URL, fileManager: FileManager) -> Bool {
-        let metaURL = indexDirectory.appendingPathComponent("connor-meta.json")
+        let metaURL = indexDirectory.appendingPathComponent(connorMetaFilename)
         guard fileManager.fileExists(atPath: metaURL.path),
               let data = try? Data(contentsOf: metaURL),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let version = object["indexSchemaVersion"] as? Int
         else { return true }
-        return version != 4
+        return version != currentIndexSchemaVersion
     }
 
-    private static func writeMeta(indexDirectory: URL, databaseURL: URL, documentCount: Int) throws {
+    public static func writeMeta(indexDirectory: URL, databaseURL: URL, documentCount: Int, builtAt: Date = Date()) throws {
         let meta: [String: Any] = [
-            "indexSchemaVersion": 4,
-            "searchKernelVersion": "0.1.0",
+            "indexSchemaVersion": currentIndexSchemaVersion,
+            "searchKernelVersion": searchKernelVersion,
             "sourceDatabasePath": databaseURL.path,
             "indexedLayers": ["L0", "L1", "L2", "L3", "L4"],
             "documentCount": documentCount,
-            "builtAt": "2026-06-24T23:57:00+08:00"
+            "builtAt": ISO8601DateFormatter().string(from: builtAt)
         ]
         let data = try JSONSerialization.data(withJSONObject: meta, options: [.prettyPrinted, .sortedKeys])
-        try data.write(to: indexDirectory.appendingPathComponent("connor-meta.json"), options: [.atomic])
+        try data.write(to: indexDirectory.appendingPathComponent(connorMetaFilename), options: [.atomic])
     }
 }
