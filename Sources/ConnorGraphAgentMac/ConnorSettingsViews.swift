@@ -119,7 +119,7 @@ struct SettingsCalendarSection: View {
                 SettingsValueRow(title: "已添加源", value: "\(viewModel.calendarAccounts.count) 个")
                 SettingsValueRow(title: "日历", value: "\(viewModel.calendarCollections.count) 个")
                 SettingsValueRow(title: "当前事件", value: "\(viewModel.calendarBrowserPresentation.eventCount) 个")
-                Text("你可以在这里添加和管理日历连接。当前版本专注于读取和同步日程，不提供完整日历客户端的月视图、周视图或复杂重复规则编辑。")
+                Text("当前版本专注于只读同步日程：本机日历通过 macOS Calendar / EventKit 读取；CalDAV、Google、Microsoft 与 ICS/Webcal 原生日历来源平台正在接入中，暂不开放事件写入。")
                     .font(SettingsListTypography.rowCaption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
