@@ -238,28 +238,59 @@ struct SettingsBirthDatePickerRow: View {
     var onDateChange: (Date) -> Void
     var onClear: () -> Void
 
+    @State private var showCalendar = false
+
+    private static let displayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy / MM / dd"
+        f.locale = Locale(identifier: "zh_CN")
+        return f
+    }()
+
     var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(SettingsListTypography.rowTitleSelected)
-                Text(subtitle).font(SettingsListTypography.rowCaption).foregroundStyle(.secondary)
-            }
-            Spacer()
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(SettingsListTypography.rowTitleSelected)
+            Text(subtitle).font(SettingsListTypography.rowCaption).foregroundStyle(.secondary)
             HStack(spacing: 8) {
-                DatePicker(
-                    title,
-                    selection: Binding(
-                        get: { date },
-                        set: { newValue in
-                            date = newValue
-                            onDateChange(newValue)
-                        }
-                    ),
-                    displayedComponents: [.date]
-                )
-                .labelsHidden()
-                .controlSize(.large)
-                .frame(width: SettingsListLayout.pickerControlWidth, alignment: .trailing)
+                Button {
+                    showCalendar.toggle()
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(Self.displayFormatter.string(from: date))
+                            .font(SettingsListTypography.rowTitle)
+                            .foregroundStyle(hasValue ? Color.primary : Color.secondary)
+                        Spacer()
+                        Image(systemName: "calendar")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(Color(nsColor: .controlBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+                .popover(isPresented: $showCalendar) {
+                    DatePicker(
+                        "",
+                        selection: Binding(
+                            get: { date },
+                            set: { newValue in
+                                date = newValue
+                                onDateChange(newValue)
+                                showCalendar = false
+                            }
+                        ),
+                        displayedComponents: [.date]
+                    )
+                    .datePickerStyle(.graphical)
+                    .labelsHidden()
+                    .padding(8)
+                }
 
                 Button("清除", action: onClear)
                     .buttonStyle(.bordered)
@@ -267,7 +298,8 @@ struct SettingsBirthDatePickerRow: View {
                     .disabled(!hasValue)
             }
         }
-        .frame(minHeight: SettingsListLayout.rowMinHeight)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 4)
     }
 }
 
