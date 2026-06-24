@@ -261,7 +261,14 @@ public protocol AgentTool: Sendable {
     var permission: AgentPermissionCapability { get }
     var inputSchema: AgentToolInputSchema { get }
 
+    func approvalPayloadJSON(for call: AgentToolCall, context: AgentToolExecutionContext) async -> String
     func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult
+}
+
+public extension AgentTool {
+    func approvalPayloadJSON(for call: AgentToolCall, context: AgentToolExecutionContext) async -> String {
+        call.argumentsJSON
+    }
 }
 
 public enum AgentToolError: Error, Equatable, Sendable, CustomStringConvertible {
@@ -327,12 +334,13 @@ public struct AgentToolRegistry: Sendable {
             throw AgentToolError.unknownTool(call.name)
         }
         if !context.approvedCapabilities.contains(tool.permission) {
+            let approvalPayloadJSON = await tool.approvalPayloadJSON(for: call, context: context)
             let decision = await context.policyEngine.evaluate(
                 capability: tool.permission,
                 runID: context.runID,
                 sessionID: context.sessionID,
                 toolName: tool.name,
-                payloadJSON: call.argumentsJSON
+                payloadJSON: approvalPayloadJSON
             )
             switch decision.outcome {
             case .approved:
@@ -344,7 +352,7 @@ public struct AgentToolRegistry: Sendable {
                     sessionID: context.sessionID,
                     capability: tool.permission,
                     toolName: tool.name,
-                    payloadJSON: call.argumentsJSON
+                    payloadJSON: approvalPayloadJSON
                 ))
             case .denied:
                 throw AgentToolError.permissionDenied(decision.reason)

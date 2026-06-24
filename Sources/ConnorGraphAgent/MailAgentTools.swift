@@ -7,12 +7,17 @@ public protocol AgentMailRuntime: Sendable {
     func getMessage(id: MailMessageID, includeBody: Bool, runID: String?, sessionID: String?) async throws -> MailMessageDetail
     func setReadState(messageIDs: [MailMessageID], isRead: Bool, runID: String?, sessionID: String?) async throws
     func createDraft(accountID: MailAccountID, identityID: MailIdentityID, to: [MailAddress], cc: [MailAddress], bcc: [MailAddress], replyTo: [MailAddress], subject: String, body: String, htmlBody: String?, inReplyToMessageID: MailMessageID?, attachmentIDs: [MailAttachmentID], intentSummary: String?, runID: String?, sessionID: String?) async throws -> MailDraft
+    func sendApprovalBridgePayload(draftID: MailDraftID) async throws -> MailSendApprovalBridge
     func sendDraft(draftID: MailDraftID, approved: Bool, runID: String?, sessionID: String?) async throws -> MailSendReceipt
 }
 
 public extension AgentMailRuntime {
     func createDraft(accountID: MailAccountID, identityID: MailIdentityID, to: [MailAddress], cc: [MailAddress], bcc: [MailAddress], replyTo: [MailAddress], subject: String, body: String, htmlBody: String?, inReplyToMessageID: MailMessageID?, attachmentIDs: [MailAttachmentID], intentSummary: String?, runID: String?, sessionID: String?) async throws -> MailDraft {
         MailDraft(id: MailDraftID(rawValue: UUID().uuidString), accountID: accountID, identityID: identityID, to: to, cc: cc, bcc: bcc, subject: subject, body: body, htmlBody: htmlBody, replyTo: replyTo, attachmentIDs: attachmentIDs, inReplyToMessageID: inReplyToMessageID, intentSummary: intentSummary)
+    }
+
+    func sendApprovalBridgePayload(draftID: MailDraftID) async throws -> MailSendApprovalBridge {
+        MailSendApprovalBridge(draftID: draftID, title: "Send email approval", from: "unknown", to: [], cc: [], bcc: [], subject: "", bodyPreview: "", attachmentCount: 0, riskSummary: "Email sending is always approval-gated.", envelopeHash: "")
     }
 }
 
@@ -41,17 +46,25 @@ public struct MailSendApprovalBridge: Codable, Sendable, Equatable {
     public var title: String
     public var from: String
     public var to: [String]
+    public var cc: [String]
+    public var bcc: [String]
     public var subject: String
     public var bodyPreview: String
+    public var attachmentCount: Int
     public var riskSummary: String
-    public init(draftID: MailDraftID, title: String, from: String, to: [String], subject: String, bodyPreview: String, riskSummary: String) {
+    public var envelopeHash: String
+    public init(draftID: MailDraftID, title: String, from: String, to: [String], cc: [String] = [], bcc: [String] = [], subject: String, bodyPreview: String, attachmentCount: Int = 0, riskSummary: String, envelopeHash: String = "") {
         self.draftID = draftID
         self.title = title
         self.from = from
         self.to = to
+        self.cc = cc
+        self.bcc = bcc
         self.subject = subject
         self.bodyPreview = bodyPreview
+        self.attachmentCount = attachmentCount
         self.riskSummary = riskSummary
+        self.envelopeHash = envelopeHash
     }
 }
 
@@ -196,6 +209,12 @@ public struct MailSendDraftTool: AgentTool {
     public var permission: AgentPermissionCapability { .sendMail }
     public var inputSchema: AgentToolInputSchema { .object(properties: ["draftID": .string(description: "Draft ID")], required: ["draftID"]) }
     public init(runtime: any AgentMailRuntime) { self.runtime = runtime }
+    public func approvalPayloadJSON(for call: AgentToolCall, context: AgentToolExecutionContext) async -> String {
+        guard let args = try? AgentToolArguments(json: call.argumentsJSON), let draftID = args.string("draftID"), let payload = try? await runtime.sendApprovalBridgePayload(draftID: MailDraftID(rawValue: draftID)) else {
+            return call.argumentsJSON
+        }
+        return (try? MailJSON.encode(payload)) ?? call.argumentsJSON
+    }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         guard let draftID = arguments.string("draftID") else { throw AgentToolError.invalidArguments("draftID is required") }
         let isHumanApproved = context.approvedCapabilities.contains(.sendMail)
