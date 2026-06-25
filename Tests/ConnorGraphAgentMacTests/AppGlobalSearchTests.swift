@@ -78,12 +78,124 @@ struct AppGlobalSearchTests {
         #expect(fixture.viewModel.isBrowserHistoryPanelVisible)
     }
 
+    @Test func showAllBrowserHistoryCarriesGlobalSearchQueryIntoHistoryFilter() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        let sessionID = try #require(fixture.viewModel.selectedChatSessionID ?? fixture.viewModel.chatSessions.first?.id)
+        fixture.viewModel.recordBrowserHistory(url: "https://example.com/thailand", title: "泰国签证指南", sessionID: sessionID)
+        fixture.viewModel.recordBrowserHistory(url: "https://example.com/vietnam", title: "越南旅行记录", sessionID: sessionID)
+        fixture.viewModel.updateGlobalSearchQuery("泰国")
+
+        fixture.viewModel.showAllGlobalSearchResults(kind: .browserHistory)
+
+        #expect(fixture.viewModel.browserHistorySearchQuery == "泰国")
+        #expect(fixture.viewModel.filteredBrowserHistoryRecords.map(\.title) == ["泰国签证指南"])
+    }
+
     @Test func globalSearchSectionEmptyTitlesCoverEverySource() {
         #expect(GlobalSearchSectionKind.chatSessions.emptyTitle == "没有匹配的对话")
         #expect(GlobalSearchSectionKind.mail.emptyTitle == "没有匹配的邮件")
         #expect(GlobalSearchSectionKind.calendar.emptyTitle == "没有匹配的日程")
         #expect(GlobalSearchSectionKind.rss.emptyTitle == "没有匹配的 RSS")
         #expect(GlobalSearchSectionKind.browserHistory.emptyTitle == "没有匹配的浏览历史")
+    }
+
+    @Test func globalSearchProvidesDisplayTokensForChineseQueries() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        fixture.viewModel.updateGlobalSearchQuery("泰国数字游民签证")
+        await fixture.viewModel.refreshGlobalSearchPreview(for: "泰国数字游民签证")
+
+        #expect(fixture.viewModel.globalSearchPreviewState.searchTokens.contains("泰国数字游民签证"))
+        #expect(fixture.viewModel.globalSearchPreviewState.searchTokens.contains("泰国"))
+    }
+
+    @Test func globalSearchIncludesChatSessionTitleResults() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        let session = AgentSession(title: "泰国长期生活计划")
+        try fixture.repository.saveSession(session)
+        fixture.viewModel.reloadChatSessions()
+        fixture.viewModel.updateGlobalSearchQuery("泰国")
+
+        await fixture.viewModel.refreshGlobalSearchPreview(for: "泰国")
+
+        #expect(fixture.viewModel.globalSearchPreviewState.chatSessionResults.map(\.id).contains(session.id))
+        #expect(fixture.viewModel.globalSearchPreviewState.chatSessionResults.first(where: { $0.id == session.id })?.title == "泰国长期生活计划")
+    }
+
+    @Test func globalSearchIncludesChatSessionMessageBodyResults() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        let session = AgentSession(
+            title: "海外生活研究",
+            messages: [AgentMessage(role: .user, content: "请帮我整理泰国数字游民签证的资料")]
+        )
+        try fixture.repository.saveSession(session)
+        fixture.viewModel.reloadChatSessions()
+        fixture.viewModel.updateGlobalSearchQuery("泰国")
+
+        await fixture.viewModel.refreshGlobalSearchPreview(for: "泰国")
+
+        let result = try #require(fixture.viewModel.globalSearchPreviewState.chatSessionResults.first { $0.id == session.id })
+        #expect(result.snippet.contains("泰国"))
+        #expect(result.messageCount == 1)
+    }
+
+    @Test func openingChatSessionSearchResultSelectsSession() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        let session = AgentSession(title: "泰国行程")
+        try fixture.repository.saveSession(session)
+        fixture.viewModel.reloadChatSessions()
+
+        fixture.viewModel.openGlobalSearchChatSessionResult(session.id)
+
+        #expect(fixture.viewModel.selection == .agentChat)
+        #expect(fixture.viewModel.selectedChatSessionID == session.id)
+        #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
+    }
+
+    @Test func globalSearchKeyboardSelectionMovesAcrossActionsAndResults() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        let session = AgentSession(title: "泰国行程")
+        try fixture.repository.saveSession(session)
+        fixture.viewModel.reloadChatSessions()
+        fixture.viewModel.updateGlobalSearchQuery("泰国")
+        await fixture.viewModel.refreshGlobalSearchPreview(for: "泰国")
+
+        #expect(fixture.viewModel.globalSearchSelectedItem == .action(.newChat))
+        fixture.viewModel.moveGlobalSearchSelectionDown()
+        #expect(fixture.viewModel.globalSearchSelectedItem == .action(.webSearch))
+        fixture.viewModel.moveGlobalSearchSelectionDown()
+        #expect(fixture.viewModel.globalSearchSelectedItem == .chatSession(session.id))
+        fixture.viewModel.moveGlobalSearchSelectionUp()
+        #expect(fixture.viewModel.globalSearchSelectedItem == .action(.webSearch))
+    }
+
+    @Test func performingSelectedChatSessionSearchItemSelectsSession() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        let session = AgentSession(title: "泰国行程")
+        try fixture.repository.saveSession(session)
+        fixture.viewModel.reloadChatSessions()
+        fixture.viewModel.updateGlobalSearchQuery("泰国")
+        await fixture.viewModel.refreshGlobalSearchPreview(for: "泰国")
+        fixture.viewModel.moveGlobalSearchSelectionDown()
+        fixture.viewModel.moveGlobalSearchSelectionDown()
+
+        fixture.viewModel.performSelectedGlobalSearchItem()
+
+        #expect(fixture.viewModel.selectedChatSessionID == session.id)
+        #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
     }
 
     @Test func globalSearchIncludesBrowserHistoryResults() async throws {
@@ -176,12 +288,14 @@ struct AppGlobalSearchTests {
             databasePath: paths.databaseURL.path,
             storagePaths: paths
         )
-        return Fixture(root: root, viewModel: viewModel)
+        let repository = AppChatSessionRepository(store: graphRepository.store, storagePaths: paths)
+        return Fixture(root: root, viewModel: viewModel, repository: repository)
     }
 
     private struct Fixture {
         var root: URL
         var viewModel: AppViewModel
+        var repository: AppChatSessionRepository
 
         func cleanup() {
             try? FileManager.default.removeItem(at: root)

@@ -5,6 +5,38 @@ import ConnorGraphCore
 
 @Suite("Native Source Search Browser History Quality Tests")
 struct NativeSourceSearchBrowserHistoryQualityTests {
+    @Test func browserHistoryTitleMatchRanksAheadOfBodyOnlyMatch() async throws {
+        let backend = NativeSourceSearchService()
+        let visitedAt = Date(timeIntervalSince1970: 1_780_000_000)
+        let thailand = BrowserHistoryRecord(
+            id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
+            url: "https://example.com/thailand-visa",
+            title: "泰国签证指南",
+            sessionID: "travel",
+            sessionTitle: "东南亚研究",
+            visitedAt: visitedAt,
+            contentMarkdown: "申请材料与长期居留注意事项。"
+        )
+        let vietnam = BrowserHistoryRecord(
+            id: UUID(uuidString: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")!,
+            url: "https://example.com/vietnam-trip",
+            title: "越南旅行记录",
+            sessionID: "travel",
+            sessionTitle: "东南亚研究",
+            visitedAt: visitedAt.addingTimeInterval(60),
+            contentMarkdown: "这篇记录中顺带提到泰国的交通和边境体验。"
+        )
+        try await backend.upsert([thailand, vietnam].map { NativeSourceSearchAdapters.browserHistoryDocument(from: $0) })
+
+        let results = try await backend.search(NativeSearchQuery(text: "泰国", sourceKinds: [.browserHistory], limit: 5, includeBodySnippets: true))
+
+        #expect(results.map { $0.id.lowercased() }.prefix(2) == [
+            "browser-history:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            "browser-history:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+        ])
+        #expect(results[1].snippet.contains("泰国"))
+    }
+
     @Test func browserHistoryGoldenQueriesReuseNativeEvaluationSuite() async throws {
         let backend = NativeSourceSearchService()
         let visitedAt = Date(timeIntervalSince1970: 1_780_000_000)

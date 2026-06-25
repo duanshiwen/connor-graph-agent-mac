@@ -208,4 +208,17 @@ struct BrowserHistoryStoreTests {
         #expect(results.count == 1)
         #expect(results.first?.id == record.id)
     }
+
+    @Test("Search tokenizes Chinese sentence queries")
+    func searchTokenizesChineseSentenceQueries() {
+        let (store, url) = makeStore()
+        defer { cleanup(url) }
+
+        store.appendRecord(BrowserHistoryRecord(url: "https://example.com/thailand", title: "泰国数字游民签证指南", sessionID: "s1", sessionTitle: "东南亚研究"))
+        store.appendRecord(BrowserHistoryRecord(url: "https://example.com/vietnam", title: "越南旅行记录", sessionID: "s1", sessionTitle: "东南亚研究"))
+
+        let results = store.searchHistory(query: "帮我找泰国签证")
+
+        #expect(results.map(\.title) == ["泰国数字游民签证指南"])
+    }
 }
