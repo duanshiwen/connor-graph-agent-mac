@@ -39,14 +39,14 @@ struct NativeRSSSystemTests {
         registry.registerNativeRSSTools(runtime: runtime)
 
         let toolNames = registry.definitions.map(\.name)
-        #expect(!toolNames.contains("rss_search_items"))
+        #expect(toolNames.contains("rss_search_items"))
         #expect(!toolNames.contains("rss_import_opml"))
         #expect(!toolNames.contains("rss_export_opml"))
         #expect(registry.permission(named: "rss_get_item") == .readRSSContent)
         #expect(registry.permission(named: "rss_add_source") == .manageRSSSources)
 
         let context = AgentToolExecutionContext(runID: "run", sessionID: "session", groupID: "group", userPrompt: "rss", toolCallID: "call", policyEngine: AgentPolicyEngine(permissionMode: .readOnly))
-        let call = AgentToolCall(id: "call", runID: "run", sessionID: "session", name: "rss_list_items", argumentsJSON: "{\"limit\":1}")
+        let call = AgentToolCall(id: "call", runID: "run", sessionID: "session", name: "rss_search_items", argumentsJSON: "{\"query\":\"Memory\",\"limit\":1}")
         let result = try await registry.execute(call, context: context)
         #expect(result.contentText.contains("RSS item"))
     }

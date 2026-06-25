@@ -151,6 +151,11 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                 draftStore: mailDraftStore,
                 credentialStore: AppMailCredentialStore(credentialStore: settingsRepository.credentialStore)
             ))
+            registry.registerNativeRSSTools(runtime: RSSRuntime(
+                repository: FileBackedRSSSourceRepository(storagePaths: storagePaths),
+                cache: FileBackedRSSSourceCache(storagePaths: storagePaths)
+            ))
+            registry.registerBrowserHistoryTools(store: BrowserHistoryStore(historyURL: storagePaths.browserHistoryURL))
         } else {
             registry.registerNativeCalendarTools(runtime: InMemoryAgentCalendarRuntime())
         }

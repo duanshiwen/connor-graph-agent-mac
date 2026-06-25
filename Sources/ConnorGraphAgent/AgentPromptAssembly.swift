@@ -123,6 +123,15 @@ public struct AgentInstructionSection: Sendable, Equatable {
     - Cite or summarize memory only when it materially improves the answer.
     - If memory appears stale, uncertain, or conflicting, be explicit about the uncertainty.
 
+    ## Native Personal Source Tools
+    - Use native personal source tools when the task may depend on raw or fresh records that may not yet be in Memory OS, including mail, calendar, RSS, and browser history.
+    - Mail workflow: call `mail_search_messages` first to get message summaries, let yourself judge relevance from metadata/snippets, then call `mail_get_message` only for selected `messageID` records. Use `includeBody: true` only when the body is needed.
+    - Calendar workflow: call `calendar_search_events` for calendar questions. Calendar search results already return full event details including time, location, notes, attendees, and metadata, so do not call a separate calendar detail tool unless an explicit legacy `calendar_read` operation is required.
+    - RSS workflow: call `rss_search_items` first to get RSS item summaries, judge which items are relevant, then call `rss_get_item` only for selected `itemID` records. Use `includeContent: true` only when the article body is needed.
+    - Browser history workflow: call `browser_history_search` first to get saved history summaries and page previews, judge which pages are relevant, then call `browser_history_get` for selected `recordID` records. `browser_history_get` returns saved page markdown (`contentMarkdown`) when it is available, plus fetch status/error metadata when it is not.
+    - Do not fetch every full record by default. Search/list first, inspect returned summaries, then read only the few selected records needed to answer accurately.
+    - Treat native source results as operational source records, not durable Memory OS truth. If a selected source record should become long-term evidence, use the governed Memory OS evidence/ingestion path rather than assuming search results are already stored in L0.
+
     ## Mandatory Research Workflow
     - Before solving a user problem, you must search local Memory OS and must search current web information to obtain the most complete and up-to-date background knowledge.
     - Search local Memory OS first with `memory_os_context` across relevant L0/L1/L2/L3/L4 layers. Use focused queries derived from the user's request, project names, people, entities, concepts, constraints, and likely synonyms; this is the required internal context first phase. Treat the returned Memory Context Package as task-scoped context delivery, not as Memory OS truth itself.
@@ -138,6 +147,7 @@ public struct AgentInstructionSection: Sendable, Equatable {
     - Use `memory_os_expand_l4` to inspect stable entity/concept neighborhoods and relations when broader graph context affects the answer.
     - Use `memory_os_l4_instances` for L4 class membership/list questions after resolving the class entity id; do not answer these questions from search summaries alone.
     - Use `memory_os_read_provenance` only when directly reading a known L0 provenance object/span is enough; prefer `memory_os_trace_evidence` when starting from L2/L3 claims.
+    - Search native personal sources when the user's request may involve mail, calendar events, RSS articles, or browser history that are not guaranteed to be represented in Memory OS: use `mail_search_messages`/`mail_get_message`, `calendar_search_events`, `rss_search_items`/`rss_get_item`, and `browser_history_search`/`browser_history_get` according to the Native Personal Source Tools workflow.
     - Then search current web information with `web_search` for external grounding, recent developments, documentation, facts, and best practices.
     - Use `web_fetch` to read original pages before relying on web search snippets; use `browser_fetch` only when direct page fetching or a lightweight page snapshot is more appropriate.
     - Synthesize local memory, web evidence, and the current user request. If memory conflicts with current web information or the latest user request, explain the conflict and prioritize the latest user request plus verified current sources.

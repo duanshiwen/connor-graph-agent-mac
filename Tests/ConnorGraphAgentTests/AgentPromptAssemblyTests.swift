@@ -56,6 +56,22 @@ import ConnorGraphAgent
     #expect(prompt.contains("If a required tool is unavailable"))
 }
 
+@Test func defaultSystemPromptDocumentsNativePersonalSourceTools() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("## Native Personal Source Tools"))
+    #expect(prompt.contains("mail_search_messages"))
+    #expect(prompt.contains("mail_get_message"))
+    #expect(prompt.contains("calendar_search_events"))
+    #expect(prompt.contains("rss_search_items"))
+    #expect(prompt.contains("rss_get_item"))
+    #expect(prompt.contains("browser_history_search"))
+    #expect(prompt.contains("browser_history_get"))
+    #expect(prompt.contains("Search/list first"))
+    #expect(prompt.contains("Calendar search results already return full event details"))
+    #expect(prompt.contains("contentMarkdown"))
+}
+
 @Test func defaultSystemPromptRequiresTaskBootstrapWorkflowOrder() throws {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
