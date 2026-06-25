@@ -284,6 +284,22 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(output.contains("entity-1"))
     }
 
+    @Test func memoryOSCLIRouterRoutesQueryGraphCommand() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        try seedMemoryOSCLIInspectorFixture(store: store)
+        let inspector = AppMemoryOSCLIInspector(store: store)
+        let encoder = memoryOSCLITestEncoder()
+
+        let output = try AppMemoryOSCLIRouter.route(args: ["query-graph", "Connor", "--intent", "auto", "--include-evidence", "--limit", "10"], inspector: inspector, encoder: encoder)
+
+        #expect(output.contains("entity-1"))
+        #expect(output.contains("stmt-1"))
+        #expect(output.contains("belief-1"))
+        #expect(output.contains("span-1"))
+        #expect(output.contains("object-1"))
+        #expect(output.contains("query_graph"))
+    }
+
     @Test func memoryOSCLIRouterRoutesTraceEvidenceCommand() throws {
         let store = try makeMemoryOSCLIInspectorStore()
         try seedMemoryOSCLIInspectorFixture(store: store)
