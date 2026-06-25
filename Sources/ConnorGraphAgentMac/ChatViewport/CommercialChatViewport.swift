@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where Item.ID: Hashable {
+    var dataSetID: ChatViewportDataSetID
     var items: [Item]
     @ObservedObject var controller: ChatViewportController
     var configuration: ChatViewportConfiguration
@@ -9,16 +10,24 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
     @State private var viewportHeight: CGFloat = 0
     @State private var contentHeight: CGFloat = 0
     @State private var bottomSentinelMaxY: CGFloat = 0
-    private let topSentinelID = "commercial-chat-viewport-top-sentinel"
-    private let bottomSentinelID = "commercial-chat-viewport-bottom-sentinel"
     private let coordinateSpaceName = "commercial-chat-viewport-scroll-space"
 
+    private var topSentinelID: String {
+        dataSetID.namespacedElementID("commercial-chat-viewport-top-sentinel")
+    }
+
+    private var bottomSentinelID: String {
+        dataSetID.namespacedElementID("commercial-chat-viewport-bottom-sentinel")
+    }
+
     init(
+        dataSetID: ChatViewportDataSetID = ChatViewportDataSetID(namespace: "commercial-chat-viewport", rawID: "default"),
         items: [Item],
         controller: ChatViewportController,
         configuration: ChatViewportConfiguration = .init(),
         @ViewBuilder rowContent: @escaping (Item) -> RowContent
     ) {
+        self.dataSetID = dataSetID
         self.items = items
         self.controller = controller
         self.configuration = configuration
@@ -36,7 +45,7 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
 
                         ForEach(items) { item in
                             rowContent(item)
-                                .id(String(describing: item.id))
+                                .id(rowID(for: item))
                         }
 
                         Color.clear
@@ -102,6 +111,10 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                 }
             }
         }
+    }
+
+    private func rowID(for item: Item) -> String {
+        dataSetID.namespacedElementID(String(describing: item.id))
     }
 
     private func publishMetrics() {
