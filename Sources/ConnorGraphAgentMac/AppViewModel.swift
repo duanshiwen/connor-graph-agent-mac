@@ -1148,6 +1148,8 @@ final class AppViewModel: NSObject, ObservableObject {
             return presentationFallbackCalendarResults(query: trimmed, now: now, limit: limit)
         case .rss:
             return presentationFallbackRSSResults(query: trimmed, now: now, limit: limit)
+        case .browserHistory:
+            return presentationFallbackBrowserHistoryResults(query: trimmed, now: now, limit: limit)
         }
     }
 
@@ -1221,6 +1223,25 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
+    private func presentationFallbackBrowserHistoryResults(query: String, now: Date, limit: Int) -> [NativeSearchResult] {
+        searchBrowserHistory(query: query, limit: limit).map { record in
+            NativeSearchResult(
+                id: "browser-history:\(record.id.uuidString)",
+                sourceKind: .browserHistory,
+                externalID: record.id.uuidString,
+                sourceInstanceID: record.sessionID,
+                title: record.title.isEmpty ? record.url : record.title,
+                snippet: [record.sessionTitle, record.url].filter { !$0.isEmpty }.joined(separator: " · "),
+                score: 1,
+                lexicalScore: 1,
+                freshnessScore: 0,
+                fieldScore: 0,
+                temporal: NativeSearchTemporalMetadata(primaryTime: record.visitedAt, primaryTimeKind: .updatedAt, updatedAt: record.visitedAt, indexedAt: now),
+                resultTimeLabel: record.visitedAt.formatted(date: .abbreviated, time: .shortened)
+            )
+        }
+    }
+
     func performGlobalSearchNewChat() {
         let prompt = globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else { return }
@@ -1267,6 +1288,13 @@ final class AppViewModel: NSObject, ObservableObject {
                 selectRSSItem(item)
             } else {
                 selectedRSSItemID = RSSItemID(rawValue: result.externalID)
+            }
+        case .browserHistory:
+            if let id = UUID(uuidString: result.externalID), let record = browserHistoryRecords.first(where: { $0.id == id }) ?? browserHistoryStore?.record(id: id) {
+                navigateToHistoryRecord(record)
+            } else {
+                isBrowserHistoryPanelVisible = true
+                showBrowserWorkspace()
             }
         }
         dismissGlobalSearchOverlay()

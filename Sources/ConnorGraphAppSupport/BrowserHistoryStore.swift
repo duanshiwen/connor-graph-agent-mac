@@ -81,6 +81,11 @@ public final class BrowserHistoryStore: @unchecked Sendable {
         }
     }
 
+    /// Return a single history record by ID.
+    public func record(id: UUID) -> BrowserHistoryRecord? {
+        queue.sync { loadRecordsUnsafe().first { $0.id == id } }
+    }
+
     /// Update fetched content for a previously appended history record.
     public func updateContent(
         id: UUID,

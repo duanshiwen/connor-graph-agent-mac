@@ -314,13 +314,7 @@ public actor NativeSourceSearchService {
         var matchedFieldScores: [String: Double] = [:]
         var coveredTokens: Set<String> = []
         let uniqueTokens = Array(Set(tokens))
-        let fields: [(String, String, Double, Double)] = [
-            ("title", document.title, 8, 0.15),
-            ("participants", document.participants.joined(separator: " "), 5, 0.10),
-            ("summary", document.summary, 4, 0.08),
-            ("location", document.location ?? "", 3, 0.10),
-            ("body", document.body ?? "", 2, 0.03)
-        ]
+        let fields = weightedFields(for: document)
         for token in uniqueTokens {
             for (name, value, weight, lengthPenalty) in fields {
                 let lower = value.lowercased()
@@ -369,6 +363,27 @@ public actor NativeSourceSearchService {
         let freshness = freshnessScore(for: document, now: now, rankingProfile: rankingProfile)
         let total = lexical + freshness
         return (total, lexical, freshness, field, Array(matched).sorted(), matchedFieldScores)
+    }
+
+    static func weightedFields(for document: NativeSearchDocument) -> [(String, String, Double, Double)] {
+        switch document.sourceKind {
+        case .browserHistory:
+            return [
+                ("title", document.title, 12, 0.12),
+                ("summary", document.summary, 7, 0.08),
+                ("participants", document.participants.joined(separator: " "), 4, 0.10),
+                ("location", document.location ?? "", 0, 0.10),
+                ("body", document.body ?? "", 0.75, 0.08)
+            ]
+        default:
+            return [
+                ("title", document.title, 8, 0.15),
+                ("participants", document.participants.joined(separator: " "), 5, 0.10),
+                ("summary", document.summary, 4, 0.08),
+                ("location", document.location ?? "", 3, 0.10),
+                ("body", document.body ?? "", 2, 0.03)
+            ]
+        }
     }
 
     static func occurrenceCount(of needle: String, in haystack: String) -> Int {
