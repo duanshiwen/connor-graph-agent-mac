@@ -28,6 +28,8 @@ graph TD
     D --> G[SwiftUI ScrollView + LazyVStack backend]
     D --> H[Geometry measurement]
     D --> I[ChatJumpToLatestButton]
+    B --> J[Unread Boundary Marker]
+    B --> K[Date Section Separator]
 ```
 
 ### `ChatViewportStateMachine`
@@ -81,7 +83,14 @@ Converts existing `AgentChatTurnTimelineItem` into `CommercialChatItem`, preserv
 - process;
 - timestamp;
 - system;
-- unread separator, reserved for future use.
+- unread separator;
+- date separator.
+
+It also owns presentation-only timeline augmentation:
+
+- optional `CommercialChatUnreadBoundary` insertion before a stable timeline item ID;
+- optional date separator generation from message/timestamp dates;
+- preservation of the original timeline item ordering after presentation-only markers are removed.
 
 ## Current SwiftUI backend constraints
 
@@ -90,8 +99,9 @@ This first commercial version intentionally keeps a SwiftUI backend because exis
 Known constraints:
 
 - `ScrollViewReader.scrollTo` can be less precise for far-away variable-height rows in very large datasets;
-- prepend correction is represented in the state machine, but pixel-perfect offset preservation is not yet implemented;
-- dynamic row height changes are handled by pinned/free-browsing policy, but not with AppKit-level offset correction.
+- prepend correction currently provides stable anchor preservation by restoring the anchor item after a prepend; it does not guarantee pixel-perfect offset preservation for every dynamic-height row combination;
+- dynamic row height changes are handled by pinned/free-browsing policy, but not with AppKit-level offset correction;
+- date sections are currently rendered as stable date separator rows in the flat SwiftUI timeline. Sticky supplementary headers should be added in a backend-specific way only if they do not compromise scroll stability.
 
 These are backend limitations, not business model limitations.
 
@@ -111,11 +121,45 @@ Reasons:
 
 The business layer should not change when this backend is introduced.
 
+## Implemented timeline capabilities
+
+### Prepend anchor preservation
+
+History loading must be expressed explicitly:
+
+1. choose a stable visible anchor item ID;
+2. call `prepareForPrepend(anchorItemID:)` before inserting older items;
+3. notify `.prepend(...)` / `notifyPrepend(count:anchorItemID:)` after data changes;
+4. allow the backend to restore the anchor item.
+
+This keeps the logic testable and avoids the viewport guessing business events from array count changes.
+
+### Unread boundary marker
+
+Unread state is modeled as presentation metadata through `CommercialChatUnreadBoundary`.
+
+Rules:
+
+- marker IDs are derived from the target stable item ID;
+- marker insertion must not mutate message IDs;
+- read-state business decisions remain outside the viewport.
+
+### Date section separator
+
+Date grouping is owned by `AgentChatTimelineAdapter`.
+
+Rules:
+
+- group by calendar day using message or timestamp dates;
+- process/system items without their own dates follow the nearest generated section;
+- avoid duplicate separators for the same day;
+- keep date separators as presentation-only items.
+
 ## Social chat roadmap
 
 The current architecture prepares for:
 
-- unread separator;
+- sticky date headers;
 - new message notification count;
 - sender grouping;
 - multiple avatars;
@@ -136,6 +180,7 @@ Do not add these directly to `AgentChatConversationView`. Add them as `Commercia
 - Hit regions must remain at least 44×44 pt.
 - Stable IDs are mandatory; never use array indices as message identity.
 - Row rendering owns content; viewport owns scrolling and visibility behavior.
+- Timeline markers such as unread and date separators belong in `AgentChatTimelineAdapter`, not in ad-hoc `AgentChatView` array manipulation.
 
 ## Verification
 
