@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where Item.ID: Hashable {
+    var dataSetID: ChatViewportDataSetID
     var items: [Item]
     @ObservedObject var controller: ChatViewportController
     var configuration: ChatViewportConfiguration
@@ -9,16 +10,24 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
     @State private var viewportHeight: CGFloat = 0
     @State private var contentHeight: CGFloat = 0
     @State private var bottomSentinelMaxY: CGFloat = 0
-    private let topSentinelID = "commercial-chat-viewport-top-sentinel"
-    private let bottomSentinelID = "commercial-chat-viewport-bottom-sentinel"
     private let coordinateSpaceName = "commercial-chat-viewport-scroll-space"
 
+    private var topSentinelID: String {
+        dataSetID.namespacedElementID("commercial-chat-viewport-top-sentinel")
+    }
+
+    private var bottomSentinelID: String {
+        dataSetID.namespacedElementID("commercial-chat-viewport-bottom-sentinel")
+    }
+
     init(
+        dataSetID: ChatViewportDataSetID = ChatViewportDataSetID(namespace: "commercial-chat-viewport", rawID: "default"),
         items: [Item],
         controller: ChatViewportController,
         configuration: ChatViewportConfiguration = .init(),
         @ViewBuilder rowContent: @escaping (Item) -> RowContent
     ) {
+        self.dataSetID = dataSetID
         self.items = items
         self.controller = controller
         self.configuration = configuration
@@ -36,7 +45,7 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
 
                         ForEach(items) { item in
                             rowContent(item)
-                                .id(String(describing: item.id))
+                                .id(rowID(for: item))
                         }
 
                         Color.clear
@@ -63,6 +72,7 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                     )
                 }
                 .coordinateSpace(name: coordinateSpaceName)
+                .id(dataSetID)
                 .background(
                     GeometryReader { geometry in
                         Color.clear.preference(key: ChatViewportViewportHeightKey.self, value: geometry.size.height)
@@ -81,9 +91,13 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                     publishMetrics()
                 }
                 .onAppear {
-                    DispatchQueue.main.async {
-                        controller.scrollToBottom(animated: false)
-                    }
+                    controller.replaceDataSetIfNeeded(id: dataSetID, itemCount: items.count, initialAnchor: .bottom)
+                }
+                .onChange(of: dataSetID) { _, newDataSetID in
+                    controller.replaceDataSet(id: newDataSetID, itemCount: items.count, initialAnchor: .bottom)
+                }
+                .onChange(of: items.count) { _, newCount in
+                    controller.replaceDataSetIfNeeded(id: dataSetID, itemCount: newCount, initialAnchor: .bottom)
                 }
                 .onChange(of: controller.pendingScrollCommand?.id) { _, _ in
                     guard let command = controller.consumePendingScrollCommand() else { return }
@@ -102,6 +116,10 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                 }
             }
         }
+    }
+
+    private func rowID(for item: Item) -> String {
+        dataSetID.namespacedElementID(String(describing: item.id))
     }
 
     private func publishMetrics() {

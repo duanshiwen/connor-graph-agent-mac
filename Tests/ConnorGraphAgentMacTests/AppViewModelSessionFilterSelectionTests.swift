@@ -83,6 +83,44 @@ struct AppViewModelSessionFilterSelectionTests {
         #expect(fixture.viewModel.agentEventTimeline.isEmpty)
     }
 
+    @Test func selectingDifferentChatSessionsKeepsSelectedIDAndTranscriptInSync() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        var firstSession = try fixture.repository.createSession(title: "First", now: Date(timeIntervalSince1970: 2_000))
+        firstSession.messages = [
+            AgentMessage(role: .user, content: "First transcript")
+        ]
+        firstSession = try fixture.repository.saveSession(firstSession)
+
+        var secondSession = try fixture.repository.createSession(title: "Second", now: Date(timeIntervalSince1970: 3_000))
+        secondSession.messages = [
+            AgentMessage(role: .user, content: "Second transcript"),
+            AgentMessage(role: .assistant, content: "Second response")
+        ]
+        secondSession = try fixture.repository.saveSession(secondSession)
+
+        fixture.viewModel.reloadChatSessions()
+        let revisionAfterReload = fixture.viewModel.selectedChatTranscriptRevision
+
+        fixture.viewModel.selectChatSession(firstSession.id)
+        #expect(fixture.viewModel.selectedChatSessionID == firstSession.id)
+        #expect(fixture.viewModel.transcript.map(\.content) == ["First transcript"])
+        let revisionAfterFirstSelection = fixture.viewModel.selectedChatTranscriptRevision
+        #expect(revisionAfterFirstSelection > revisionAfterReload)
+
+        fixture.viewModel.selectChatSession(secondSession.id)
+        #expect(fixture.viewModel.selectedChatSessionID == secondSession.id)
+        #expect(fixture.viewModel.transcript.map(\.content) == ["Second transcript", "Second response"])
+        let revisionAfterSecondSelection = fixture.viewModel.selectedChatTranscriptRevision
+        #expect(revisionAfterSecondSelection > revisionAfterFirstSelection)
+
+        fixture.viewModel.selectChatSession(firstSession.id)
+        #expect(fixture.viewModel.selectedChatSessionID == firstSession.id)
+        #expect(fixture.viewModel.transcript.map(\.content) == ["First transcript"])
+        #expect(fixture.viewModel.selectedChatTranscriptRevision > revisionAfterSecondSelection)
+    }
+
     private func makeFixture() throws -> Fixture {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory

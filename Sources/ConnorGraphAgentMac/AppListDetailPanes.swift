@@ -1532,6 +1532,12 @@ private struct MailSmallUnavailableRow: View {
     }
 }
 
+enum AppDetailPaneIdentity {
+    static func agentChat(sessionID: String?) -> String {
+        "agent-chat-\(sessionID ?? "none")"
+    }
+}
+
 struct CraftDetailPaneView: View {
     @ObservedObject var viewModel: AppViewModel
     var selection: SidebarItem
@@ -1550,6 +1556,7 @@ struct CraftDetailPaneView: View {
                     AgentChatNoSelectionDetailView()
                 } else {
                     AgentChatView(viewModel: viewModel)
+                        .id(AppDetailPaneIdentity.agentChat(sessionID: viewModel.selectedChatSessionID))
                 }
             case .promotionQueue:
                 PromotionQueueView(viewModel: viewModel)

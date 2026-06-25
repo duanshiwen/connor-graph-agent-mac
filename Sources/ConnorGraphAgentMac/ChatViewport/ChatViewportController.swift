@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 struct ChatViewportScrollCommand: Equatable, Identifiable {
     let id: UUID
@@ -10,18 +11,32 @@ struct ChatViewportScrollCommand: Equatable, Identifiable {
     }
 }
 
+enum ChatViewportInitialAnchor: Equatable, Sendable {
+    case top
+    case bottom
+    case none
+}
+
 @MainActor
 final class ChatViewportController: ObservableObject {
+    private static let logger = Logger(subsystem: "ConnorGraphAgentMac", category: "ChatViewport")
     @Published private(set) var snapshot: ChatViewportSnapshot
     @Published private(set) var pendingScrollCommand: ChatViewportScrollCommand?
+    @Published private(set) var currentDataSetID: ChatViewportDataSetID?
+    @Published private(set) var replacementGeneration: Int
 
     let configuration: ChatViewportConfiguration
     private let stateMachine: ChatViewportStateMachine
+    private var pendingInitialAnchor: ChatViewportInitialAnchor?
+    private var currentDataSetItemCount: Int
+    private var latestMetrics: ChatViewportMetrics?
 
     init(configuration: ChatViewportConfiguration = .init()) {
         self.configuration = configuration
         self.stateMachine = ChatViewportStateMachine(configuration: configuration)
         self.snapshot = .initial
+        self.replacementGeneration = 0
+        self.currentDataSetItemCount = 0
     }
 
     var isPinnedToBottom: Bool { snapshot.isPinnedToBottom }
@@ -29,10 +44,43 @@ final class ChatViewportController: ObservableObject {
     var pendingNewItemCount: Int { snapshot.pendingNewItemCount }
 
     func updateMetrics(_ metrics: ChatViewportMetrics) {
+        latestMetrics = metrics
         apply(.metricsChanged(metrics))
+        completePendingInitialAnchorIfNeeded()
+    }
+
+    func replaceDataSet(
+        id: ChatViewportDataSetID,
+        itemCount: Int,
+        initialAnchor: ChatViewportInitialAnchor = .bottom
+    ) {
+        currentDataSetID = id
+        currentDataSetItemCount = itemCount
+        replacementGeneration += 1
+        latestMetrics = nil
+        pendingInitialAnchor = itemCount > 0 ? initialAnchor : nil
+        Self.logger.info("Chat viewport dataset replaced dataset=\(id.description, privacy: .public) generation=\(self.replacementGeneration, privacy: .public) itemCount=\(itemCount, privacy: .public) initialAnchor=\(String(describing: initialAnchor), privacy: .public)")
+        setSnapshot(.initial)
+    }
+
+    func replaceDataSetIfNeeded(
+        id: ChatViewportDataSetID,
+        itemCount: Int,
+        initialAnchor: ChatViewportInitialAnchor = .bottom
+    ) {
+        currentDataSetItemCount = itemCount
+        guard currentDataSetID != id else {
+            completePendingInitialAnchorIfNeeded()
+            return
+        }
+        replaceDataSet(id: id, itemCount: itemCount, initialAnchor: initialAnchor)
     }
 
     func notifyDataChange(_ change: ChatViewportDataChange) {
+        if case .replace = change {
+            latestMetrics = nil
+            pendingInitialAnchor = nil
+        }
         apply(.dataChanged(change))
     }
 
@@ -81,6 +129,31 @@ final class ChatViewportController: ObservableObject {
         return command
     }
 
+    func completePendingInitialAnchorIfNeeded() {
+        guard let pendingInitialAnchor,
+              latestMetrics != nil,
+              currentDataSetItemCount > 0
+        else { return }
+
+        self.pendingInitialAnchor = nil
+        Self.logger.debug("Chat viewport completing initial anchor dataset=\(String(describing: self.currentDataSetID?.description), privacy: .public) generation=\(self.replacementGeneration, privacy: .public) anchor=\(String(describing: pendingInitialAnchor), privacy: .public)")
+        switch pendingInitialAnchor {
+        case .top:
+            setSnapshot(
+                ChatViewportSnapshot(
+                    mode: .programmaticScroll(.top(animated: false)),
+                    isPinnedToBottom: false,
+                    shouldShowJumpToLatest: configuration.showsJumpToLatestButton,
+                    pendingNewItemCount: 0
+                )
+            )
+        case .bottom:
+            scrollToBottom(animated: false)
+        case .none:
+            break
+        }
+    }
+
     private func apply(_ event: ChatViewportEvent) {
         setSnapshot(stateMachine.reduce(snapshot: snapshot, event: event))
     }
@@ -89,6 +162,8 @@ final class ChatViewportController: ObservableObject {
         snapshot = nextSnapshot
         if case let .programmaticScroll(target) = nextSnapshot.mode {
             pendingScrollCommand = ChatViewportScrollCommand(target: target)
+        } else {
+            pendingScrollCommand = nil
         }
     }
 }
