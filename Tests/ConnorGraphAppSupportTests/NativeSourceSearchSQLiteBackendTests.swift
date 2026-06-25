@@ -76,6 +76,26 @@ struct NativeSourceSearchSQLiteBackendTests {
         #expect(results[0].highlights.contains("搜索性能") || results[0].highlights.contains("搜索"))
     }
 
+    @Test func sqliteBackendSearchesBrowserHistoryDocuments() async throws {
+        let backend = try SQLiteNativeSourceSearchBackend(databaseURL: temporaryDatabaseURL())
+        let record = BrowserHistoryRecord(
+            id: UUID(uuidString: "55555555-5555-5555-5555-555555555555")!,
+            url: "https://developer.apple.com/documentation/swift",
+            title: "Swift Documentation",
+            sessionID: "session-history",
+            sessionTitle: "Apple Docs",
+            visitedAt: Date(timeIntervalSince1970: 1_780_000_000),
+            contentMarkdown: "Language reference and API documentation."
+        )
+        try await backend.upsert([NativeSourceSearchAdapters.browserHistoryDocument(from: record)])
+
+        let results = try await backend.search(NativeSearchQuery(text: "apple swift", sourceKinds: [.browserHistory], limit: 10, includeBodySnippets: true))
+
+        #expect(results.map(\.id) == ["browser-history:55555555-5555-5555-5555-555555555555"])
+        #expect(results.first?.sourceKind == .browserHistory)
+        #expect(results.first?.diagnostics?.rankReason.contains("backend=sqlite-fts5") == true)
+    }
+
     @Test func sqliteBackendHealthReportsCounts() async throws {
         let backend = try SQLiteNativeSourceSearchBackend(databaseURL: temporaryDatabaseURL())
         try await backend.upsert([
