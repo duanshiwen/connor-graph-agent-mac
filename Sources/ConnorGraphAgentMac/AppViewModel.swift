@@ -1099,8 +1099,6 @@ final class AppViewModel: NSObject, ObservableObject {
             return presentationFallbackCalendarResults(query: trimmed, now: now, limit: limit)
         case .rss:
             return presentationFallbackRSSResults(query: trimmed, now: now, limit: limit)
-        default:
-            return []
         }
     }
 
@@ -1217,8 +1215,6 @@ final class AppViewModel: NSObject, ObservableObject {
             } else {
                 selectedRSSItemID = RSSItemID(rawValue: result.externalID)
             }
-        default:
-            break
         }
         dismissGlobalSearchOverlay()
     }
