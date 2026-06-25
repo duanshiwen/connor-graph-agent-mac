@@ -2,6 +2,30 @@ import Foundation
 import ConnorGraphSearch
 import ConnorGraphStore
 
+public enum AppMemoryOSSearchIndexHealthStatus: String, Codable, Sendable, Equatable {
+    case healthy
+    case degraded
+    case rebuilding
+}
+
+public struct AppMemoryOSSearchIndexHealthReport: Codable, Sendable, Equatable {
+    public var status: AppMemoryOSSearchIndexHealthStatus
+    public var libraryURL: URL?
+    public var indexDirectory: URL
+    public var databaseURL: URL
+    public var checks: [String: Bool]
+    public var messages: [String]
+
+    public init(status: AppMemoryOSSearchIndexHealthStatus, libraryURL: URL?, indexDirectory: URL, databaseURL: URL, checks: [String: Bool], messages: [String]) {
+        self.status = status
+        self.libraryURL = libraryURL
+        self.indexDirectory = indexDirectory
+        self.databaseURL = databaseURL
+        self.checks = checks
+        self.messages = messages
+    }
+}
+
 public enum AppMemoryOSSearchKernelFactory {
     public static let connorMetaFilename = "connor-meta.json"
     public static let currentIndexSchemaVersion = 4
@@ -12,11 +36,33 @@ public enum AppMemoryOSSearchKernelFactory {
         let indexDirectory = MemoryOSSearchKernelPaths.defaultIndexDirectory(graphDirectory: paths.graphDirectory)
         try fileManager.createDirectory(at: indexDirectory, withIntermediateDirectories: true)
         let kernel = try MemoryOSSearchKernel(libraryURL: libraryURL, indexDirectory: indexDirectory)
-        if needsRebuild(indexDirectory: indexDirectory, fileManager: fileManager) {
+        if needsRebuild(indexDirectory: indexDirectory, databaseURL: paths.memoryOSDatabaseURL, fileManager: fileManager) {
             let count = try kernel.rebuildFromSQLite(databaseURL: paths.memoryOSDatabaseURL)
             try writeMeta(indexDirectory: indexDirectory, databaseURL: paths.memoryOSDatabaseURL, documentCount: count)
         }
         return kernel
+    }
+
+    public static func healthReport(paths: AppStoragePaths, fileManager: FileManager = .default) -> AppMemoryOSSearchIndexHealthReport {
+        let indexDirectory = MemoryOSSearchKernelPaths.defaultIndexDirectory(graphDirectory: paths.graphDirectory)
+        var checks: [String: Bool] = [:]
+        var messages: [String] = []
+        let libraryURL = try? resolveLibraryURL(fileManager: fileManager)
+        checks["library_exists"] = libraryURL.map { fileManager.fileExists(atPath: $0.path) } ?? false
+        checks["database_exists"] = fileManager.fileExists(atPath: paths.memoryOSDatabaseURL.path)
+        checks["index_directory_exists"] = fileManager.fileExists(atPath: indexDirectory.path)
+        checks["connor_meta_exists"] = fileManager.fileExists(atPath: indexDirectory.appendingPathComponent(connorMetaFilename).path)
+        checks["index_schema_current"] = isSchemaCurrent(indexDirectory: indexDirectory, fileManager: fileManager)
+        checks["source_database_current"] = isSourceDatabaseFingerprintCurrent(indexDirectory: indexDirectory, databaseURL: paths.memoryOSDatabaseURL, fileManager: fileManager)
+        for key in checks.keys.sorted() where checks[key] != true { messages.append("\(key)=false") }
+        return AppMemoryOSSearchIndexHealthReport(
+            status: checks.values.allSatisfy { $0 } ? .healthy : .degraded,
+            libraryURL: libraryURL,
+            indexDirectory: indexDirectory,
+            databaseURL: paths.memoryOSDatabaseURL,
+            checks: checks,
+            messages: messages
+        )
     }
 
     public static func resolveLibraryURL(fileManager: FileManager = .default, bundle: Bundle = .main) throws -> URL {
@@ -48,14 +94,46 @@ public enum AppMemoryOSSearchKernelFactory {
         return candidates.removingDuplicatesByPath()
     }
 
-    private static func needsRebuild(indexDirectory: URL, fileManager: FileManager) -> Bool {
+    private static func needsRebuild(indexDirectory: URL, databaseURL: URL, fileManager: FileManager) -> Bool {
+        !isSchemaCurrent(indexDirectory: indexDirectory, fileManager: fileManager)
+            || !isSourceDatabaseFingerprintCurrent(indexDirectory: indexDirectory, databaseURL: databaseURL, fileManager: fileManager)
+    }
+
+    private static func isSchemaCurrent(indexDirectory: URL, fileManager: FileManager) -> Bool {
+        guard let object = readMetaObject(indexDirectory: indexDirectory, fileManager: fileManager),
+              let version = object["indexSchemaVersion"] as? Int
+        else { return false }
+        return version == currentIndexSchemaVersion
+    }
+
+    private static func isSourceDatabaseFingerprintCurrent(indexDirectory: URL, databaseURL: URL, fileManager: FileManager) -> Bool {
+        guard let object = readMetaObject(indexDirectory: indexDirectory, fileManager: fileManager),
+              let indexed = object["sourceDatabaseFingerprint"] as? [String: Any]
+        else { return false }
+        let current = sourceDatabaseFingerprint(databaseURL: databaseURL, fileManager: fileManager)
+        return comparableFingerprint(indexed) == comparableFingerprint(current)
+    }
+
+    private static func readMetaObject(indexDirectory: URL, fileManager: FileManager) -> [String: Any]? {
         let metaURL = indexDirectory.appendingPathComponent(connorMetaFilename)
         guard fileManager.fileExists(atPath: metaURL.path),
               let data = try? Data(contentsOf: metaURL),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let version = object["indexSchemaVersion"] as? Int
-        else { return true }
-        return version != currentIndexSchemaVersion
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return object
+    }
+
+    private static func comparableFingerprint(_ object: [String: Any]) -> [String: String] {
+        var result: [String: String] = [:]
+        for key in ["databaseFileSize", "walFileSize"] {
+            if let value = object[key] { result[key] = String(describing: value) }
+        }
+        if let counts = object["tableCounts"] as? [String: Any] {
+            for key in counts.keys.sorted() {
+                if let value = counts[key] { result["tableCounts.\(key)"] = String(describing: value) }
+            }
+        }
+        return result
     }
 
     public static func writeMeta(indexDirectory: URL, databaseURL: URL, documentCount: Int, builtAt: Date = Date()) throws {

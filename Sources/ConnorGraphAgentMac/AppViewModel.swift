@@ -495,6 +495,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var settingsSectionMessageStore = SettingsSectionMessageStore()
     @Published var pendingAttachmentRefs: [AgentMessageAttachmentRef] = []
     @Published var attachmentPreviewModel: AttachmentPreviewModel?
+    @Published var memoryOSSearchHealthSummary: String?
 
     private var repository: AppGraphRepository?
     private var promotionRepository: AppPromotionQueueRepository?
@@ -1387,7 +1388,15 @@ final class AppViewModel: NSObject, ObservableObject {
                 let store = try SQLiteMemoryOSStore(path: storagePaths.memoryOSDatabaseURL.path)
                 try store.migrate()
                 self.memoryOSStore = store
+                let initialSearchHealth = AppMemoryOSSearchKernelFactory.healthReport(paths: storagePaths)
+                if initialSearchHealth.status != .healthy {
+                    self.memoryOSSearchHealthSummary = "Memory OS SearchKernel 正在修复：\(initialSearchHealth.messages.joined(separator: ", "))"
+                }
                 let searchKernel = try AppMemoryOSSearchKernelFactory.makeLive(paths: storagePaths)
+                let finalSearchHealth = AppMemoryOSSearchKernelFactory.healthReport(paths: storagePaths)
+                self.memoryOSSearchHealthSummary = finalSearchHealth.status == .healthy
+                    ? "Memory OS SearchKernel 正常：索引已验证。"
+                    : "Memory OS SearchKernel 降级：\(finalSearchHealth.messages.joined(separator: ", "))"
                 self.memoryOSFacade = AppMemoryOSFacade(store: store, searchKernel: searchKernel)
             } catch {
                 self.errorMessage = "Memory OS 初始化失败：\(error)"
