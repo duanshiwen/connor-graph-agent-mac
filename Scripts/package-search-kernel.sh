@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Xcode build phases use a minimal PATH that omits Homebrew.
+for brew_dir in /opt/homebrew/bin /usr/local/bin; do
+  [[ -d "$brew_dir" ]] && export PATH="$brew_dir:$PATH"
+done
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 KERNEL_DIR="$ROOT_DIR/SearchKernel"
 CRATE_DYLIB="$KERNEL_DIR/target/release/libconnor_memory_search_kernel.dylib"
