@@ -31,7 +31,7 @@ struct TopSearchTextField: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSTextField, context: Context) {
-        if nsView.stringValue != text {
+        if nsView.stringValue != text, !context.coordinator.isComposingText(in: nsView) {
             nsView.stringValue = text
         }
         nsView.placeholderString = placeholder
@@ -81,6 +81,11 @@ struct TopSearchTextField: NSViewRepresentable {
         func controlTextDidChange(_ notification: Notification) {
             guard let field = notification.object as? NSTextField else { return }
             text = field.stringValue
+        }
+
+        @MainActor func isComposingText(in field: NSTextField) -> Bool {
+            guard let editor = field.currentEditor() as? NSTextView else { return false }
+            return editor.hasMarkedText()
         }
 
         func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
