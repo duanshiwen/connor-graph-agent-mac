@@ -192,54 +192,268 @@ public struct MemoryOSGetCurrentUserProfileTool: AgentTool {
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         let limit = max(1, min(arguments.int("limit") ?? 12, 50))
         let focus = arguments.string("focus")?.trimmingCharacters(in: .whitespacesAndNewlines)
-        var queries = [
-            "current_user current user profile",
-            "current_user user preferences user habits user personality traits user communication preferences",
-            "current_user current projects constraints interaction guidance knowledge background"
-        ]
-        if let focus, !focus.isEmpty {
-            queries.insert("current_user \(focus)", at: 0)
+        let profile = try facade.currentUserProfileContext(limit: limit, focus: focus)
+        let rows = profile.hits.map(Self.row)
+        let diagnostics = profile.diagnostics.map { diagnostic -> [String: Any] in
+            [
+                "id": diagnostic.id,
+                "kind": diagnostic.kind,
+                "severity": diagnostic.severity,
+                "message": diagnostic.message,
+                "candidateRecordIDs": diagnostic.candidateRecordIDs
+            ]
         }
-
-        var rows: [[String: Any]] = []
-        var seen = Set<String>()
-        for query in queries where rows.count < limit {
-            let hits = try facade.searchMemoryOS(MemoryOSRetrievalQuery(text: query, layers: [.l2, .l3, .l4], limit: limit, depth: 1))
-            for hit in hits where rows.count < limit {
-                let key = "\(hit.layer.rawValue):\(hit.recordID)"
-                guard seen.insert(key).inserted else { continue }
-                rows.append([
-                    "layer": hit.layer.rawValue,
-                    "recordID": hit.recordID,
-                    "title": hit.title,
-                    "summary": hit.summary,
-                    "matchedText": hit.matchedText,
-                    "score": hit.score,
-                    "evidenceRefs": hit.evidenceRefs,
-                    "provenanceRefs": hit.provenanceRefs,
-                    "entityRefs": hit.entityRefs,
-                    "canReadRaw": hit.canReadRaw,
-                    "canExpandDepth": hit.canExpandDepth,
-                    "metadata": hit.metadata
-                ])
-            }
-        }
-
         let payload: [String: Any] = [
-            "currentUserMarker": "current_user",
+            "currentUserMarker": profile.currentUserMarker,
+            "resolvedCurrentUserEntityIDs": profile.resolvedCurrentUserEntityIDs,
             "hitCount": rows.count,
-            "queries": queries,
             "hits": rows,
-            "identityPolicy": "Use current_user as the stable internal role marker. Treat display names and aliases as mutable metadata, never as identity keys."
+            "diagnostics": diagnostics,
+            "scopePolicy": profile.scopePolicy,
+            "identityPolicy": "Use current_user as the stable internal role marker. Never substitute generic user concepts, display names, aliases, or full-text search hits for the current user identity anchor."
         ]
         let json = try Self.renderJSON(payload)
         return AgentToolResult(
             toolCallID: context.toolCallID,
             toolName: name,
-            contentText: "Retrieved current_user profile context with \(rows.count) Memory OS hit(s).",
+            contentText: "Retrieved current_user profile context with \(rows.count) scoped Memory OS hit(s).",
             contentJSON: json,
-            citations: rows.compactMap { $0["recordID"] as? String }
+            citations: profile.hits.map(\.recordID)
         )
+    }
+
+    private static func row(_ hit: MemoryOSRetrievalHit) -> [String: Any] {
+        [
+            "layer": hit.layer.rawValue,
+            "recordID": hit.recordID,
+            "title": hit.title,
+            "summary": hit.summary,
+            "matchedText": hit.matchedText,
+            "score": hit.score,
+            "evidenceRefs": hit.evidenceRefs,
+            "provenanceRefs": hit.provenanceRefs,
+            "entityRefs": hit.entityRefs,
+            "canReadRaw": hit.canReadRaw,
+            "canExpandDepth": hit.canExpandDepth,
+            "metadata": hit.metadata
+        ]
+    }
+
+    private static func renderJSON(_ object: [String: Any]) throws -> String {
+        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        return String(data: data, encoding: .utf8) ?? "{}"
+    }
+}
+
+public struct MemoryOSUpdateCurrentUserProfileTool: AgentTool {
+    public let name = "memory_os_update_current_user_profile"
+    public let description = "Append evidence-backed current-user profile observations to Connor Memory OS. Ensures the protected current_user Person anchor, archives provenance, and projects scoped L2/L4 profile facts without using generic user search terms."
+    public let permission: AgentPermissionCapability = .proposeGraphWrite
+    public let inputSchema = AgentToolInputSchema.object(properties: [
+        "observations": .array(items: .object(properties: [
+            "profileDimension": .string(description: "Profile dimension such as preference, habit, stable_trait, communication_preference, knowledge_background, emotional_support_preference, goal, constraint, personal_context, or interaction_guidance."),
+            "statement": .string(description: "Evidence-backed profile statement about the current user."),
+            "evidence": .string(description: "Quoted or summarized evidence supporting the statement."),
+            "confidence": .number(description: "Confidence from 0.0 to 1.0."),
+            "source": .string(description: "Evidence source such as user_explicit, observed_behavior, repeated_pattern, or assistant_inference."),
+            "stability": .string(description: "one_off, emerging, or stable."),
+            "sensitivity": .string(description: "normal or sensitive."),
+            "validAt": .string(description: "Optional ISO8601 validity timestamp.")
+        ], required: ["profileDimension", "statement", "evidence"]), description: "Current user profile observations to append."),
+        "mode": .string(description: "append_observations or propose_profile_facts. Defaults to propose_profile_facts."),
+        "sessionID": .string(description: "Optional session id. Defaults to current session.")
+    ], required: ["observations"])
+
+    private let facade: AppMemoryOSFacade
+
+    public init(facade: AppMemoryOSFacade) { self.facade = facade }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        let observations = try parseObservations(arguments)
+        guard !observations.isEmpty else { throw AgentToolError.invalidArguments("observations must not be empty") }
+        let mode = arguments.string("mode") ?? "propose_profile_facts"
+        let sessionID = arguments.string("sessionID") ?? context.sessionID
+        let now = Date()
+        let anchor = try facade.ensureCurrentUserAnchor(now: now)
+
+        var statementIDs: [String] = []
+        var provenanceIDs: [String] = []
+        var artifactIDs: [String] = []
+        for (index, observation) in observations.enumerated() {
+            let sourceID = "current-user-profile-update:\(context.toolCallID):\(index)"
+            let ingestion = try facade.ingestChatMessage(
+                messageID: sourceID,
+                sessionID: sessionID,
+                role: "user",
+                content: observation.evidence,
+                occurredAt: now,
+                metadata: [
+                    "title": "Current user profile observation",
+                    "toolCallID": context.toolCallID,
+                    "runID": context.runID,
+                    "memory_os_update_mode": mode,
+                    "person_role": "current_user",
+                    "identity_anchor_id": anchor.id,
+                    "profile_dimension": observation.profileDimension,
+                    "evidence_quality": observation.source,
+                    "stability": observation.stability,
+                    "sensitivity": observation.sensitivity
+                ]
+            )
+            if let provenanceID = ingestion.provenanceObject?.id { provenanceIDs.append(provenanceID) }
+            let spanID = ingestion.span?.id ?? "span-current-user-profile-\(context.toolCallID)-\(index)"
+            let artifactJSON = try Self.currentUserProfileArtifactJSON(observation: observation, anchor: anchor, spanID: spanID, now: now)
+            let summary = try facade.projectAndRecordLLMArtifact(
+                rawContent: artifactJSON,
+                modelID: "memory_os_update_current_user_profile",
+                processingRunID: context.runID,
+                artifactType: "memory_os_current_user_profile_update",
+                schemaName: "MemoryOSL1UnifiedProjectionOutput",
+                now: now
+            )
+            artifactIDs.append(summary.artifactID)
+            guard summary.accepted else {
+                throw AgentToolError.invalidArguments("Current user profile update rejected: \(summary.issues.map(\.message).joined(separator: "; "))")
+            }
+            statementIDs.append(contentsOf: try facade.l2StatementIDs(sourceArtifactID: summary.artifactID))
+        }
+
+        let payload: [String: Any] = [
+            "accepted": true,
+            "mode": mode,
+            "currentUserMarker": "current_user",
+            "currentUserEntityID": anchor.id,
+            "statementIDs": statementIDs,
+            "provenanceObjectIDs": provenanceIDs,
+            "artifactIDs": artifactIDs,
+            "scopePolicy": "append_only_evidence_backed_current_user_anchor"
+        ]
+        let json = try Self.renderJSON(payload)
+        return AgentToolResult(
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: "Updated current_user profile with \(statementIDs.count) scoped Memory OS statement(s).",
+            contentJSON: json,
+            citations: statementIDs + provenanceIDs + artifactIDs
+        )
+    }
+
+    private struct Observation {
+        var profileDimension: String
+        var statement: String
+        var evidence: String
+        var confidence: Double
+        var source: String
+        var stability: String
+        var sensitivity: String
+        var validAt: Date?
+    }
+
+    private func parseObservations(_ arguments: AgentToolArguments) throws -> [Observation] {
+        guard let values = arguments.array("observations") else { throw AgentToolError.invalidArguments("observations is required") }
+        return try values.enumerated().map { index, value in
+            guard let object = value.objectValue else { throw AgentToolError.invalidArguments("observations[\(index)] must be an object") }
+            guard let dimension = object["profileDimension"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines), !dimension.isEmpty else { throw AgentToolError.invalidArguments("observations[\(index)].profileDimension is required") }
+            guard let statement = object["statement"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines), !statement.isEmpty else { throw AgentToolError.invalidArguments("observations[\(index)].statement is required") }
+            guard let evidence = object["evidence"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines), !evidence.isEmpty else { throw AgentToolError.invalidArguments("observations[\(index)].evidence is required") }
+            let confidence: Double
+            switch object["confidence"] {
+            case .double(let value): confidence = value
+            case .int(let value): confidence = Double(value)
+            default: confidence = 0.8
+            }
+            let validAt: Date?
+            if let raw = object["validAt"]?.stringValue, !raw.isEmpty {
+                validAt = ISO8601DateFormatter().date(from: raw)
+            } else {
+                validAt = nil
+            }
+            return Observation(
+                profileDimension: dimension,
+                statement: statement,
+                evidence: evidence,
+                confidence: max(0.0, min(confidence, 1.0)),
+                source: object["source"]?.stringValue ?? "user_explicit",
+                stability: object["stability"]?.stringValue ?? "emerging",
+                sensitivity: object["sensitivity"]?.stringValue ?? "normal",
+                validAt: validAt
+            )
+        }
+    }
+
+    private static func currentUserProfileArtifactJSON(observation: Observation, anchor: MemoryOSEntity, spanID: String, now: Date) throws -> String {
+        let predicate = predicate(for: observation.profileDimension)
+        let localID = "current_user"
+        let output = MemoryOSL1UnifiedProjectionOutput(
+            operationalEntities: [GraphStructuredExtractedEntity(
+                localID: localID,
+                name: "Current User",
+                entityKind: .personObject,
+                scope: .personal,
+                aliases: [],
+                summary: "The human currently operating this Connor installation.",
+                confidence: 0.99,
+                evidenceSpanIDs: [spanID],
+                metadata: [
+                    "stable_key": "current_user",
+                    "person_role": "current_user",
+                    "role": "current_user",
+                    "identity_anchor_id": anchor.id,
+                    "identity_scope": "local_app_owner",
+                    "system_owned": "true",
+                    "protected_identity_anchor": "true"
+                ]
+            )],
+            operationalStatements: [GraphStructuredExtractedStatement(
+                explicitID: "current-user-profile-\(UUID().uuidString)",
+                subjectLocalID: localID,
+                predicate: predicate,
+                objectLocalID: localID,
+                statementText: observation.statement,
+                confidence: observation.confidence,
+                validAt: observation.validAt ?? now,
+                referenceTime: now,
+                evidenceSpanIDs: [spanID],
+                metadata: [
+                    "l2_fact_type": "profile_preference",
+                    "person_role": "current_user",
+                    "person_resolution": "resolved",
+                    "identity_anchor": "current_user",
+                    "identity_anchor_id": anchor.id,
+                    "profile_dimension": observation.profileDimension,
+                    "evidence_quality": observation.source,
+                    "stability": observation.stability,
+                    "sensitivity": observation.sensitivity,
+                    "source_stage": "current_user_profile_update_tool"
+                ]
+            )],
+            evidenceSpans: [GraphStructuredEvidenceSpan(id: spanID, text: observation.evidence)],
+            knowledgeCandidates: [],
+            conceptEntities: [],
+            conceptRelations: [],
+            promotionDecisions: [],
+            warnings: [],
+            confidence: observation.confidence,
+            metadata: [
+                "schema_purpose": "current_user_profile_update",
+                "person_role": "current_user",
+                "identity_anchor_id": anchor.id
+            ]
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(output)
+        return String(data: data, encoding: .utf8) ?? "{}"
+    }
+
+    private static func predicate(for dimension: String) -> GraphPredicate {
+        switch dimension {
+        case "preference", "communication_preference", "interaction_guidance", "emotional_support_preference": return .prefers
+        case "dislike": return .dislikes
+        case "habit": return .hasHabit
+        case "goal": return .hasGoal
+        default: return .relatedTo
+        }
     }
 
     private static func renderJSON(_ object: [String: Any]) throws -> String {
@@ -591,6 +805,7 @@ public extension AgentToolRegistry {
         register(MemoryOSIngestObservationTool(facade: facade))
         register(MemoryOSProjectStructuredArtifactTool(facade: facade))
         register(MemoryOSGetCurrentUserProfileTool(facade: facade))
+        register(MemoryOSUpdateCurrentUserProfileTool(facade: facade))
         register(MemoryOSSearchTool(facade: facade))
         register(MemoryOSQueryGraphTool(facade: facade))
         register(MemoryOSTraceEvidenceTool(facade: facade))
