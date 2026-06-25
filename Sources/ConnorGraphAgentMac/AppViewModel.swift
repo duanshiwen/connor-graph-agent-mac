@@ -1062,10 +1062,16 @@ final class AppViewModel: NSObject, ObservableObject {
 
     private func scheduleGlobalSearchPreview(for query: String) {
         globalSearchPreviewTask?.cancel()
-        globalSearchPreviewState = GlobalSearchPreviewState(query: query, isLoading: true)
+        if globalSearchPreviewState == .empty {
+            globalSearchPreviewState = GlobalSearchPreviewState(query: query, isLoading: false)
+        }
         globalSearchPreviewTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 180_000_000)
             guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard self?.globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == query else { return }
+                self?.globalSearchPreviewState = GlobalSearchPreviewState(query: query, isLoading: true)
+            }
             await self?.refreshGlobalSearchPreview(for: query)
         }
     }

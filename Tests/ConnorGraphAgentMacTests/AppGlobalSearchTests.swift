@@ -19,7 +19,7 @@ struct AppGlobalSearchTests {
         #expect(fixture.viewModel.sessionSearchQuery == "existing session filter")
         #expect(fixture.viewModel.isGlobalSearchOverlayPresented)
         #expect(fixture.viewModel.globalSearchPreviewState.query == "quarterly planning")
-        #expect(fixture.viewModel.globalSearchPreviewState.isLoading)
+        #expect(!fixture.viewModel.globalSearchPreviewState.isLoading)
 
         fixture.viewModel.clearGlobalSearch()
 
