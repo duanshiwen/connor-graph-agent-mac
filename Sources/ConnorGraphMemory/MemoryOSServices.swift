@@ -191,13 +191,17 @@ public struct MemoryOSLLMArtifactValidator: Sendable {
             )
             try graphOutput.validate(requireStatementEvidence: true)
 
-            let issues = validateKnowledgeSections(
+            var issues = validatePersonProfileSections(
+                entities: output.operationalEntities,
+                statements: output.operationalStatements
+            )
+            issues.append(contentsOf: validateKnowledgeSections(
                 candidates: output.knowledgeCandidates,
                 conceptEntities: output.conceptEntities,
                 conceptRelations: output.conceptRelations,
                 evidenceSpanIDs: Set(output.evidenceSpans.map(\.id)),
                 allowedEvidenceStatementIDs: Set(output.operationalStatements.map(\.id))
-            )
+            ))
 
             return MemoryOSArtifactValidationResult(
                 artifactID: artifact.id,
@@ -210,6 +214,45 @@ public struct MemoryOSLLMArtifactValidator: Sendable {
         } catch {
             return MemoryOSArtifactValidationResult(artifactID: artifact.id, accepted: false, issues: [MemoryOSValidationIssue(code: "json_decode_failed", message: String(describing: error))])
         }
+    }
+
+    private func validatePersonProfileSections(entities: [GraphStructuredExtractedEntity], statements: [GraphStructuredExtractedStatement]) -> [MemoryOSValidationIssue] {
+        var issues: [MemoryOSValidationIssue] = []
+        let forbiddenCurrentUserAliases: Set<String> = ["user", "users", "用户", "当前用户", "current", "profile", "current user", "current_user"]
+
+        for entity in entities {
+            let isCurrentUser = entity.metadata["person_role"] == "current_user" || entity.metadata["role"] == "current_user" || entity.metadata["stable_key"] == "current_user"
+            if isCurrentUser {
+                for alias in entity.aliases {
+                    let normalized = alias.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    if forbiddenCurrentUserAliases.contains(normalized) {
+                        issues.append(MemoryOSValidationIssue(code: "current_user_generic_alias", message: "current_user entity must not use generic alias: \(alias)."))
+                    }
+                }
+            }
+        }
+
+        for statement in statements where statement.metadata["l2_fact_type"] == "profile_preference" {
+            let required = ["person_role", "person_resolution", "profile_dimension"]
+            let missing = required.filter { (statement.metadata[$0] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            if !missing.isEmpty {
+                issues.append(MemoryOSValidationIssue(code: "missing_profile_person_metadata", message: "profile_preference statement \(statement.id) is missing metadata keys: \(missing.joined(separator: ", "))."))
+            }
+            if statement.evidenceSpanIDs.isEmpty {
+                issues.append(MemoryOSValidationIssue(code: "missing_profile_evidence", message: "profile_preference statement \(statement.id) requires evidence spans."))
+            }
+            if statement.metadata["person_role"] == "current_user" {
+                let anchor = statement.metadata["identity_anchor"] ?? statement.metadata["identity_anchor_id"] ?? ""
+                if anchor.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    issues.append(MemoryOSValidationIssue(code: "missing_current_user_identity_anchor", message: "current_user profile statement \(statement.id) must include identity_anchor or identity_anchor_id metadata."))
+                }
+            }
+            if statement.metadata["person_role"] == "ambiguous_person" && statement.metadata["person_resolution"] != "needs_confirmation" {
+                issues.append(MemoryOSValidationIssue(code: "ambiguous_person_requires_confirmation", message: "ambiguous person profile statement \(statement.id) must set person_resolution = needs_confirmation."))
+            }
+        }
+
+        return issues
     }
 
     private func validateKnowledgeSections(candidates: [MemoryOSKnowledgeCandidate], conceptEntities: [MemoryOSExtractedConceptEntity], conceptRelations: [MemoryOSExtractedConceptRelation], evidenceSpanIDs: Set<String>, allowedEvidenceStatementIDs: Set<String>?) -> [MemoryOSValidationIssue] {
