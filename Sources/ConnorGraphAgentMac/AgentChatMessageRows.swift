@@ -21,7 +21,7 @@ struct AgentChatMessageRow: View {
     var persistentCacheContext: AgentMarkdownPersistentCacheContext? = nil
     var onAssistantMessageCollapsed: (() -> Void)? = nil
     var onPreviewAttachment: (AgentMessageAttachmentRef) -> Void = { _ in }
-    @State private var isAssistantMessageExpanded = false
+    @State private var isAssistantMessageExpanded = true
 
     @MainActor
     private final class BrowserPromptFoldingCache {
