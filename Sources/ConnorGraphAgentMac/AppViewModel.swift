@@ -1082,7 +1082,7 @@ final class AppViewModel: NSObject, ObservableObject {
             let mailResults = try await searchNativeSource(kind: .mail, query: trimmed, limit: 3)
             let calendarResults = try await searchNativeSource(kind: .calendar, query: trimmed, limit: 3)
             let rssResults = try await searchNativeSource(kind: .rss, query: trimmed, limit: 3)
-            let browserHistoryResults = searchBrowserHistory(query: trimmed, limit: 3)
+            let browserHistoryResults = searchBrowserHistory(query: trimmed, limit: 30)
             guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
             globalSearchPreviewState = GlobalSearchPreviewState(
                 query: trimmed,

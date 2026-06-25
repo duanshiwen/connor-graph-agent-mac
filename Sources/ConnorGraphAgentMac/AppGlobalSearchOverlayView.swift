@@ -4,7 +4,9 @@ import ConnorGraphAppSupport
 
 struct AppGlobalSearchOverlayView: View {
     @ObservedObject var viewModel: AppViewModel
+    @State private var browserHistoryPage: Int = 0
 
+    private let browserHistoryPageSize = 3
     private var state: GlobalSearchPreviewState { viewModel.globalSearchPreviewState }
     private var query: String { viewModel.globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var hasAnyNativeResults: Bool {
@@ -40,6 +42,9 @@ struct AppGlobalSearchOverlayView: View {
                 .stroke(AppShellColors.hairline, lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.12), radius: 18, x: 0, y: 10)
+        .onChange(of: state.query) { _, _ in
+            browserHistoryPage = 0
+        }
     }
 
     private var actionRows: some View {
@@ -86,7 +91,12 @@ struct AppGlobalSearchOverlayView: View {
     }
 
     private func browserHistorySection(results: [BrowserHistoryRecord]) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        let pageCount = max(1, Int(ceil(Double(results.count) / Double(browserHistoryPageSize))))
+        let currentPage = min(browserHistoryPage, pageCount - 1)
+        let startIndex = currentPage * browserHistoryPageSize
+        let pageResults = Array(results.dropFirst(startIndex).prefix(browserHistoryPageSize))
+
+        return VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: AppShellLayout.spaceXS) {
                 Image(systemName: GlobalSearchSectionKind.browserHistory.systemImage)
                     .font(.system(size: 11.5, weight: .medium))
@@ -95,7 +105,15 @@ struct AppGlobalSearchOverlayView: View {
                 Text(GlobalSearchSectionKind.browserHistory.title)
                     .font(AppListTypography.rowCaptionEmphasized)
                     .foregroundStyle(.secondary)
+                if !results.isEmpty {
+                    Text("\(results.count) 条")
+                        .font(AppListTypography.rowCaption)
+                        .foregroundStyle(.tertiary)
+                }
                 Spacer(minLength: 0)
+                if results.count > browserHistoryPageSize {
+                    browserHistoryPaginationControls(currentPage: currentPage, pageCount: pageCount)
+                }
                 Button {
                     viewModel.showAllGlobalSearchResults(kind: .browserHistory)
                 } label: {
@@ -109,9 +127,9 @@ struct AppGlobalSearchOverlayView: View {
             .padding(.horizontal, AppShellLayout.spaceS)
             .padding(.top, AppShellLayout.spaceXS)
 
-            if !results.isEmpty {
+            if !pageResults.isEmpty {
                 VStack(spacing: 1) {
-                    ForEach(results.prefix(3)) { record in
+                    ForEach(pageResults) { record in
                         Button {
                             viewModel.openGlobalSearchBrowserHistoryResult(record)
                         } label: {
@@ -121,6 +139,39 @@ struct AppGlobalSearchOverlayView: View {
                     }
                 }
             }
+        }
+    }
+
+    private func browserHistoryPaginationControls(currentPage: Int, pageCount: Int) -> some View {
+        HStack(spacing: 4) {
+            Button {
+                browserHistoryPage = max(0, currentPage - 1)
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 10, weight: .semibold))
+                    .frame(width: 18, height: 18)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(currentPage == 0 ? Color.secondary.opacity(0.35) : Color.accentColor)
+            .disabled(currentPage == 0)
+            .help("上一页浏览历史")
+
+            Text("\(currentPage + 1)/\(pageCount)")
+                .font(AppListTypography.rowCaption)
+                .foregroundStyle(.tertiary)
+                .monospacedDigit()
+
+            Button {
+                browserHistoryPage = min(pageCount - 1, currentPage + 1)
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .frame(width: 18, height: 18)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(currentPage >= pageCount - 1 ? Color.secondary.opacity(0.35) : Color.accentColor)
+            .disabled(currentPage >= pageCount - 1)
+            .help("下一页浏览历史")
         }
     }
 
