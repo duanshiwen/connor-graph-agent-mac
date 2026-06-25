@@ -68,8 +68,55 @@ private enum BrowserHistoryToolJSON {
     }
 }
 
+private extension NativeSourceReference {
+    static func browserHistory(_ record: BrowserHistoryRecord, query: String?, strength: ReferenceStrength, toolName: String, context: AgentToolExecutionContext, previewCharacterLimit: Int?) -> NativeSourceReference {
+        let markdown = record.contentMarkdown?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let body: String
+        if let markdown, !markdown.isEmpty {
+            if let previewCharacterLimit {
+                body = String(markdown.prefix(max(0, previewCharacterLimit)))
+            } else {
+                body = markdown
+            }
+        } else {
+            body = record.url
+        }
+        return NativeSourceReference(
+            sourceKind: .browserHistory,
+            sourceRecordID: record.id.uuidString,
+            title: record.title,
+            content: """
+            Title: \(record.title)
+            URL: \(record.url)
+            Visited At: \(ISO8601DateFormatter().string(from: record.visitedAt))
+            Session: \(record.sessionTitle) (\(record.sessionID))
+
+            Saved Page Markdown:
+            \(body)
+            """,
+            occurredAt: record.visitedAt,
+            sessionID: context.sessionID,
+            url: record.url,
+            referenceStrength: strength,
+            toolName: toolName,
+            toolCallID: context.toolCallID,
+            runID: context.runID,
+            query: query,
+            metadata: [
+                "browser_history_id": record.id.uuidString,
+                "browser_session_id": record.sessionID,
+                "browser_session_title": record.sessionTitle,
+                "content_fetch_status": record.contentFetchStatus?.rawValue ?? "",
+                "content_fetch_error": record.contentFetchError ?? "",
+                "has_content_markdown": String(!(markdown?.isEmpty ?? true))
+            ]
+        )
+    }
+}
+
 public struct BrowserHistorySearchTool: AgentTool {
     public let store: BrowserHistoryStore
+    public let recorder: (any NativeSourceReferenceRecording)?
     public var name: String { "browser_history_search" }
     public var description: String { "Search saved browser history records by URL, title, session title, or saved page markdown. Returns summaries/previews so the model can choose which page bodies to read." }
     public var permission: AgentPermissionCapability { .readSession }
@@ -81,8 +128,9 @@ public struct BrowserHistorySearchTool: AgentTool {
         ], required: ["query"])
     }
 
-    public init(store: BrowserHistoryStore) {
+    public init(store: BrowserHistoryStore, recorder: (any NativeSourceReferenceRecording)? = nil) {
         self.store = store
+        self.recorder = recorder
     }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
@@ -91,6 +139,7 @@ public struct BrowserHistorySearchTool: AgentTool {
         let previewCharacters = max(0, min(arguments.int("previewCharacters") ?? 500, 2_000))
         let records = Array(store.searchHistory(query: query).sorted { $0.visitedAt > $1.visitedAt }.prefix(limit))
         let results = records.map { BrowserHistorySearchResult(record: $0, previewCharacterLimit: previewCharacters) }
+        await recorder?.record(records.map { NativeSourceReference.browserHistory($0, query: query, strength: .summaryCandidate, toolName: name, context: context, previewCharacterLimit: previewCharacters) })
         return AgentToolResult(
             toolCallID: context.toolCallID,
             toolName: name,
@@ -102,6 +151,7 @@ public struct BrowserHistorySearchTool: AgentTool {
 
 public struct BrowserHistoryGetTool: AgentTool {
     public let store: BrowserHistoryStore
+    public let recorder: (any NativeSourceReferenceRecording)?
     public var name: String { "browser_history_get" }
     public var description: String { "Get a saved browser history record by ID, including saved page markdown content when available." }
     public var permission: AgentPermissionCapability { .readSession }
@@ -111,8 +161,9 @@ public struct BrowserHistoryGetTool: AgentTool {
         ], required: ["recordID"])
     }
 
-    public init(store: BrowserHistoryStore) {
+    public init(store: BrowserHistoryStore, recorder: (any NativeSourceReferenceRecording)? = nil) {
         self.store = store
+        self.recorder = recorder
     }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
@@ -124,6 +175,7 @@ public struct BrowserHistoryGetTool: AgentTool {
         }
         let detail = BrowserHistoryDetailResult(record: record)
         let hasMarkdown = !(detail.contentMarkdown?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        await recorder?.record([NativeSourceReference.browserHistory(record, query: nil, strength: .detailRead, toolName: name, context: context, previewCharacterLimit: nil)])
         return AgentToolResult(
             toolCallID: context.toolCallID,
             toolName: name,
@@ -134,8 +186,8 @@ public struct BrowserHistoryGetTool: AgentTool {
 }
 
 public extension AgentToolRegistry {
-    mutating func registerBrowserHistoryTools(store: BrowserHistoryStore) {
-        register(BrowserHistorySearchTool(store: store))
-        register(BrowserHistoryGetTool(store: store))
+    mutating func registerBrowserHistoryTools(store: BrowserHistoryStore, recorder: (any NativeSourceReferenceRecording)? = nil) {
+        register(BrowserHistorySearchTool(store: store, recorder: recorder))
+        register(BrowserHistoryGetTool(store: store, recorder: recorder))
     }
 }

@@ -90,24 +90,33 @@ public struct RSSSyncSourceTool: AgentTool {
 
 public struct RSSListItemsTool: AgentTool {
     public let runtime: any AgentRSSRuntime
+    public let recorder: (any NativeSourceReferenceRecording)?
     public var name: String { "rss_list_items" }
     public var description: String { "List RSS item summaries without reading full content." }
     public var permission: AgentPermissionCapability { .readRSS }
     public var inputSchema: AgentToolInputSchema { .object(properties: ["sourceID": .string(description: "Optional RSS source ID"), "includeHidden": .boolean(description: "Include hidden items"), "limit": .integer(description: "Maximum items")], required: []) }
-    public init(runtime: any AgentRSSRuntime) { self.runtime = runtime }
+    public init(runtime: any AgentRSSRuntime, recorder: (any NativeSourceReferenceRecording)? = nil) {
+        self.runtime = runtime
+        self.recorder = recorder
+    }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         let items = try await runtime.listItems(sourceID: arguments.string("sourceID").map(RSSSourceID.init(rawValue:)), includeHidden: arguments.bool("includeHidden") ?? false, limit: NativeSearchLimitPolicy.clampListLimit(arguments.int("limit") ?? NativeSearchLimitPolicy.defaultListLimit), runID: context.runID, sessionID: context.sessionID)
+        await recorder?.record(items.map { NativeSourceReference.rssSummary($0, query: nil, toolName: name, context: context) })
         return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Listed \(items.count) RSS item summaries", contentJSON: try RSSJSON.encode(items))
     }
 }
 
 public struct RSSSearchItemsTool: AgentTool {
     public let runtime: any AgentRSSRuntime
+    public let recorder: (any NativeSourceReferenceRecording)?
     public var name: String { "rss_search_items" }
     public var description: String { "Search Connor-owned RSS item summaries using indexed, time-aware retrieval by title, snippet, author, content, or source. Supports optional ISO-8601 startDate/endDate or timePreset; results include published/fetched time." }
     public var permission: AgentPermissionCapability { .readRSS }
     public var inputSchema: AgentToolInputSchema { .object(properties: ["query": .string(description: "Search query"), "sourceID": .string(description: "Optional RSS source ID"), "includeHidden": .boolean(description: "Include hidden"), "limit": .integer(description: "Maximum summaries"), "startDate": .string(description: "Optional ISO-8601 inclusive start timestamp for published/fetched time filtering"), "endDate": .string(description: "Optional ISO-8601 exclusive end timestamp for published/fetched time filtering"), "timePreset": .string(description: "Optional time preset such as today, last7Days, last30Days, thisWeek, lastMonth"), "timeSort": .string(description: "Optional sort: relevanceThenTimeDesc, relevanceThenTimeAsc, timeDescThenRelevance, timeAscThenRelevance")], required: ["query"]) }
-    public init(runtime: any AgentRSSRuntime) { self.runtime = runtime }
+    public init(runtime: any AgentRSSRuntime, recorder: (any NativeSourceReferenceRecording)? = nil) {
+        self.runtime = runtime
+        self.recorder = recorder
+    }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         let formatter = ISO8601DateFormatter()
         let request = RSSRuntimeSearchRequestBridge(
@@ -121,21 +130,27 @@ public struct RSSSearchItemsTool: AgentTool {
             timeSort: arguments.string("timeSort")
         )
         let items = try await runtime.searchItems(request, runID: context.runID, sessionID: context.sessionID)
+        await recorder?.record(items.map { NativeSourceReference.rssSummary($0, query: request.query, toolName: name, context: context) })
         return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(items.count) RSS item summaries", contentJSON: try RSSJSON.encode(items))
     }
 }
 
 public struct RSSGetItemTool: AgentTool {
     public let runtime: any AgentRSSRuntime
+    public let recorder: (any NativeSourceReferenceRecording)?
     public var name: String { "rss_get_item" }
     public var description: String { "Get RSS item detail; content is optional and audited separately." }
     public var permission: AgentPermissionCapability { .readRSSContent }
     public var inputSchema: AgentToolInputSchema { .object(properties: ["itemID": .string(description: "RSS item ID"), "includeContent": .boolean(description: "Include full safe content")], required: ["itemID"]) }
-    public init(runtime: any AgentRSSRuntime) { self.runtime = runtime }
+    public init(runtime: any AgentRSSRuntime, recorder: (any NativeSourceReferenceRecording)? = nil) {
+        self.runtime = runtime
+        self.recorder = recorder
+    }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         guard let itemID = arguments.string("itemID") else { throw AgentToolError.invalidArguments("itemID is required") }
         let includeContent = arguments.bool("includeContent") ?? false
         let item = try await runtime.getItem(id: RSSItemID(rawValue: itemID), includeContent: includeContent, runID: context.runID, sessionID: context.sessionID)
+        await recorder?.record([NativeSourceReference.rssDetail(item, includeContent: includeContent, toolName: name, context: context)])
         return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: includeContent ? "Read RSS item content" : "Read RSS item without content", contentJSON: try RSSJSON.encode(item))
     }
 }
@@ -223,13 +238,13 @@ public struct RSSCreateEvidenceCandidateTool: AgentTool {
 }
 
 public extension AgentToolRegistry {
-    mutating func registerNativeRSSTools(runtime: any AgentRSSRuntime) {
+    mutating func registerNativeRSSTools(runtime: any AgentRSSRuntime, recorder: (any NativeSourceReferenceRecording)? = nil) {
         register(RSSListSourcesTool(runtime: runtime))
         register(RSSAddSourceTool(runtime: runtime))
         register(RSSSyncSourceTool(runtime: runtime))
-        register(RSSListItemsTool(runtime: runtime))
-        register(RSSSearchItemsTool(runtime: runtime))
-        register(RSSGetItemTool(runtime: runtime))
+        register(RSSListItemsTool(runtime: runtime, recorder: recorder))
+        register(RSSSearchItemsTool(runtime: runtime, recorder: recorder))
+        register(RSSGetItemTool(runtime: runtime, recorder: recorder))
         register(RSSSetReadStateTool(runtime: runtime))
         register(RSSSetStarStateTool(runtime: runtime))
         register(RSSSetHiddenStateTool(runtime: runtime))
