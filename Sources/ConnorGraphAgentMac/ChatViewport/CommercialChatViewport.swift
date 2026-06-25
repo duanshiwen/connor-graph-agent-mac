@@ -125,8 +125,10 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                     controller.replaceDataSetIfNeeded(id: dataSetID, itemCount: newCount, initialAnchor: .bottom)
                 }
                 .onChange(of: controller.pendingScrollCommand?.id) { _, _ in
-                    guard let command = controller.consumePendingScrollCommand() else { return }
-                    perform(command, proxy: proxy)
+                    consumePendingScrollCommandIfAvailable(proxy: proxy)
+                }
+                .task(id: controller.pendingScrollCommand?.id) {
+                    consumePendingScrollCommandIfAvailable(proxy: proxy)
                 }
 
                 if configuration.showsJumpToLatestButton,
@@ -162,13 +164,20 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
     }
 
     private func requestOlderItemsIfNeeded() {
-        guard hasOlderItems,
-              !isLoadingOlderItems,
-              !didRequestOlderItemsForCurrentTopReach,
-              viewportHeight > 0,
-              max(0, -topSentinelMinY) <= configuration.topLoadTriggerOffset
-        else {
-            if max(0, -topSentinelMinY) > configuration.topLoadTriggerOffset * 2 {
+        let distanceToTop = max(0, -topSentinelMinY)
+        guard ChatViewportTopLoadPolicy.shouldRequestOlderItems(
+            hasOlderItems: hasOlderItems,
+            isLoadingOlderItems: isLoadingOlderItems,
+            didRequestOlderItemsForCurrentTopReach: didRequestOlderItemsForCurrentTopReach,
+            viewportHeight: viewportHeight,
+            distanceToTop: distanceToTop,
+            topLoadTriggerOffset: configuration.topLoadTriggerOffset,
+            isResolvingInitialAnchor: controller.isResolvingInitialAnchor
+        ) else {
+            if ChatViewportTopLoadPolicy.shouldResetTopReachRequest(
+                distanceToTop: distanceToTop,
+                topLoadTriggerOffset: configuration.topLoadTriggerOffset
+            ) {
                 didRequestOlderItemsForCurrentTopReach = false
             }
             return
@@ -176,6 +185,11 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
 
         didRequestOlderItemsForCurrentTopReach = true
         onTopReached?()
+    }
+
+    private func consumePendingScrollCommandIfAvailable(proxy: ScrollViewProxy) {
+        guard let command = controller.consumePendingScrollCommand() else { return }
+        perform(command, proxy: proxy)
     }
 
     private func perform(_ command: ChatViewportScrollCommand, proxy: ScrollViewProxy) {
