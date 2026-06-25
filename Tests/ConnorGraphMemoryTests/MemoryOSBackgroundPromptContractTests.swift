@@ -186,9 +186,42 @@ struct MemoryOSBackgroundPromptContractTests {
 
         let prompt = MemoryOSL1ToL2PromptBuilder().prompt(for: [event])
 
-        #expect(prompt.contains("Current-user preferences, habits, goals, stable traits, communication preferences and knowledge background are L2 profile_preference facts"))
+        #expect(prompt.contains("Current-user preferences, habits, goals, stable traits, constraints, emotional-support preferences, communication preferences, interaction guidance and knowledge background are L2 profile_preference facts"))
         #expect(prompt.contains("Other-person profile facts may also be L2 profile_preference or relationship facts"))
+        #expect(prompt.contains("Ambiguous people must be marked ambiguous_person / needs_confirmation"))
         #expect(prompt.contains("Do not promote ordinary person profile facts into L3 merely because confidence is high"))
+    }
+
+    @Test func l1PromptRequiresMaturePersonFeatureMetadataAndIdentitySignals() {
+        let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
+
+        let prompt = MemoryOSL1ToL2PromptBuilder().prompt(for: [event])
+
+        #expect(prompt.contains("Person feature extraction policy"))
+        #expect(prompt.contains("metadata.profile_dimension"))
+        #expect(prompt.contains("metadata.evidence_quality"))
+        #expect(prompt.contains("metadata.stability"))
+        #expect(prompt.contains("metadata.identity_anchor = current_user"))
+        #expect(prompt.contains("contact_id"))
+        #expect(prompt.contains("normalized_email"))
+        #expect(prompt.contains("mail senders/recipients"))
+        #expect(prompt.contains("calendar attendees/organizers"))
+        #expect(prompt.contains("Do not treat generic words such as user, users, 用户, 当前用户, profile"))
+        #expect(prompt.contains("Do not infer medical, psychological, or sensitive identity diagnoses"))
+    }
+
+    @Test func l2KnowledgePromptPreservesProfileMetadataAndRejectsGenericUserIdentity() {
+        let statement = MemoryOSStatement(id: "stmt-1", subjectID: "node-1", predicate: "PREFERS", text: "The current user prefers structured implementation plans.", confidence: 0.97, evidenceSpanIDs: ["span-1"], metadata: ["l2_fact_type": "profile_preference", "person_role": "current_user"])
+
+        let prompt = MemoryOSL2ToKnowledgePromptBuilder().prompt(for: [statement])
+
+        #expect(prompt.contains("Current user is the structured identity anchor current_user"))
+        #expect(prompt.contains("not generic terms such as user, 用户, profile"))
+        #expect(prompt.contains("metadata.profile_dimension"))
+        #expect(prompt.contains("metadata.evidence_quality"))
+        #expect(prompt.contains("metadata.stability"))
+        #expect(prompt.contains("metadata.person_role"))
+        #expect(prompt.contains("metadata.person_resolution"))
     }
 
     @Test func l2KnowledgePromptDoesNotPromoteOrdinaryPersonFacts() {

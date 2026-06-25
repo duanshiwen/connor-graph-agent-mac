@@ -19,9 +19,7 @@ struct AgentChatTurnTimestampRow: View {
 struct AgentChatMessageRow: View {
     var row: AgentChatMessagePresentation
     var persistentCacheContext: AgentMarkdownPersistentCacheContext? = nil
-    var onAssistantMessageCollapsed: (() -> Void)? = nil
     var onPreviewAttachment: (AgentMessageAttachmentRef) -> Void = { _ in }
-    @State private var isAssistantMessageExpanded = false
 
     @MainActor
     private final class BrowserPromptFoldingCache {
@@ -80,15 +78,6 @@ struct AgentChatMessageRow: View {
         return label.isEmpty ? nil : label
     }
 
-    private var shouldFoldAssistantMessage: Bool {
-        guard !isUser else { return false }
-        let content = row.message.content.trimmingCharacters(in: .whitespacesAndNewlines)
-        let lineCount = content.components(separatedBy: .newlines).count
-        return content.count > 1_200 || lineCount > 18
-    }
-
-    private var assistantCollapsedMaxHeight: CGFloat { 260 }
-
     private var browserPromptFoldingParts: BrowserPromptFoldingParts? {
         BrowserPromptFoldingCache.shared.parts(for: row.id, content: row.message.content)
     }
@@ -98,24 +87,26 @@ struct AgentChatMessageRow: View {
             if isUser { Spacer(minLength: AgentChatLayout.messageSideInset) }
 
             VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
-                if isUser, let activeSkillLabel {
-                    userActiveSkillChip(activeSkillLabel)
-                }
-                messageContent
-                if !row.attachments.isEmpty {
-                    AgentMessageAttachmentRefsView(attachments: row.attachments) { attachment in
-                        onPreviewAttachment(attachment)
+                VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+                    if isUser, let activeSkillLabel {
+                        userActiveSkillChip(activeSkillLabel)
+                    }
+                    messageContent
+                    if !row.attachments.isEmpty {
+                        AgentMessageAttachmentRefsView(attachments: row.attachments) { attachment in
+                            onPreviewAttachment(attachment)
+                        }
                     }
                 }
+                .foregroundStyle(Color.primary)
+                .padding(AgentChatLayout.spaceM)
+                .frame(maxWidth: isUser ? AgentChatLayout.userMessageMaxWidth : .infinity, alignment: .leading)
+                .background(messageBackground, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                        .stroke(isUser ? Color.clear : Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1)
+                )
             }
-            .foregroundStyle(Color.primary)
-            .padding(AgentChatLayout.spaceM)
-            .frame(maxWidth: isUser ? AgentChatLayout.userMessageMaxWidth : .infinity, alignment: .leading)
-            .background(messageBackground, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
-                    .stroke(isUser ? Color.clear : Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1)
-            )
         }
         .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
     }
@@ -152,51 +143,6 @@ struct AgentChatMessageRow: View {
                 AgentMarkdownPreviewText(markdown: row.message.content, font: AgentChatTypography.body)
             }
         } else {
-            assistantMessageContent
-        }
-    }
-
-    @ViewBuilder
-    private var assistantMessageContent: some View {
-        if shouldFoldAssistantMessage {
-            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
-                if isAssistantMessageExpanded {
-                    assistantMarkdownBody
-                } else {
-                    assistantCollapsedMarkdownBody
-                        .frame(maxHeight: assistantCollapsedMaxHeight, alignment: .top)
-                        .clipped()
-                        .overlay(alignment: .bottom) {
-                            LinearGradient(
-                                colors: [
-                                    Color(nsColor: .controlBackgroundColor).opacity(0),
-                                    Color(nsColor: .controlBackgroundColor).opacity(0.92)
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                            .frame(height: 56)
-                            .allowsHitTesting(false)
-                        }
-                }
-
-                Button {
-                    let wasExpanded = isAssistantMessageExpanded
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        isAssistantMessageExpanded.toggle()
-                    }
-                    if wasExpanded, !isAssistantMessageExpanded {
-                        onAssistantMessageCollapsed?()
-                    }
-                } label: {
-                    Label(isAssistantMessageExpanded ? "收起回答" : "展开完整回答", systemImage: isAssistantMessageExpanded ? "chevron.up" : "chevron.down")
-                        .font(AgentChatTypography.metaEmphasis)
-                        .foregroundStyle(ConnorCraftPalette.accent)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(isAssistantMessageExpanded ? "收起助手回答" : "展开助手完整回答")
-            }
-        } else {
             assistantMarkdownBody
         }
     }
@@ -205,17 +151,6 @@ struct AgentChatMessageRow: View {
         AgentMarkdownPreviewText(
             markdown: row.message.content,
             font: AgentChatTypography.body,
-            persistentCacheContext: persistentCacheContext
-        )
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.trailing, AgentChatLayout.spaceXS)
-    }
-
-    private var assistantCollapsedMarkdownBody: some View {
-        AgentMarkdownPreviewText(
-            markdown: row.message.content,
-            font: AgentChatTypography.body,
-            maxRenderedBlocks: 16,
             persistentCacheContext: persistentCacheContext
         )
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -263,6 +198,55 @@ struct AgentMessageAttachmentRefsView: View {
         case .audio: return "音频"
         case .video: return "视频"
         default: return "附件"
+        }
+    }
+}
+
+/// 助理消息上方的头像 + 昵称行。
+/// 现阶段固定为康纳同学；飞书接入后根据消息来源动态切换头像和名称。
+struct AgentAssistantHeaderView: View {
+    var displayName: String = "康纳同学"
+    var subtitle: String = "你的主动 AI 助理"
+    var slogan: String = "用知识图谱记住一切，连接邮件日历社交，知识市场共享智慧，可靠地完成任务。"
+    var avatarImage: NSImage? = nil
+
+    var body: some View {
+        HStack(alignment: .top, spacing: AgentChatLayout.spaceS) {
+            avatarView
+            VStack(alignment: .leading, spacing: 2) {
+                Text(displayName)
+                    .font(AgentChatTypography.microEmphasis)
+                    .foregroundStyle(.primary.opacity(0.85))
+                HStack(spacing: 4) {
+                    Text(subtitle)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                    Text("·")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.quaternary)
+                    Text(slogan)
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(2)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var avatarView: some View {
+        if let avatarImage {
+            Image(nsImage: avatarImage)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: AgentChatLayout.avatarSize, height: AgentChatLayout.avatarSize)
+                .clipShape(Circle())
+        } else {
+            Image("ConnorAvatar")
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: AgentChatLayout.avatarSize, height: AgentChatLayout.avatarSize)
+                .clipShape(Circle())
         }
     }
 }

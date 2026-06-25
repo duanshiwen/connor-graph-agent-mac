@@ -105,6 +105,59 @@ import ConnorGraphMemory
     #expect(validation.issues.contains { $0.code == "knowledge_promotion_rejected" })
 }
 
+@Test func memoryOSArtifactValidatorRejectsProfilePreferenceWithoutPersonMetadata() throws {
+    var output = makeAcceptedL1UnifiedProjectionOutput()
+    output.operationalStatements[0].metadata = ["l2_fact_type": "profile_preference"]
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    let raw = String(data: try encoder.encode(output), encoding: .utf8)!
+    let artifact = MemoryOSArtifactEnvelopeService().envelope(rawContent: raw, artifactType: "memory_os_l1_unified_projection", schemaName: "MemoryOSL1UnifiedProjectionOutput", modelID: "test-model")
+
+    let validation = MemoryOSLLMArtifactValidator().validateStructuredExtractionArtifact(artifact)
+
+    #expect(!validation.accepted)
+    #expect(validation.issues.contains { $0.code == "missing_profile_person_metadata" })
+}
+
+@Test func memoryOSArtifactValidatorRejectsCurrentUserGenericAliases() throws {
+    var output = makeAcceptedL1UnifiedProjectionOutput()
+    output.operationalEntities[0] = GraphStructuredExtractedEntity(
+        localID: "current_user",
+        name: "Current User",
+        entityKind: .personObject,
+        scope: .personal,
+        aliases: ["用户", "user"],
+        summary: "Current user anchor",
+        evidenceSpanIDs: ["span-1"],
+        metadata: ["stable_key": "current_user", "person_role": "current_user"]
+    )
+    output.operationalStatements[0] = GraphStructuredExtractedStatement(
+        explicitID: "stmt-1",
+        subjectLocalID: "current_user",
+        predicate: .prefers,
+        objectLocalID: "current_user",
+        statementText: "Current user prefers structured plans.",
+        evidenceSpanIDs: ["span-1"],
+        metadata: [
+            "l2_fact_type": "profile_preference",
+            "person_role": "current_user",
+            "person_resolution": "resolved",
+            "profile_dimension": "interaction_guidance",
+            "evidence_quality": "user_explicit",
+            "stability": "stable"
+        ]
+    )
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    let raw = String(data: try encoder.encode(output), encoding: .utf8)!
+    let artifact = MemoryOSArtifactEnvelopeService().envelope(rawContent: raw, artifactType: "memory_os_l1_unified_projection", schemaName: "MemoryOSL1UnifiedProjectionOutput", modelID: "test-model")
+
+    let validation = MemoryOSLLMArtifactValidator().validateStructuredExtractionArtifact(artifact)
+
+    #expect(!validation.accepted)
+    #expect(validation.issues.contains { $0.code == "current_user_generic_alias" })
+}
+
 @Test func memoryOSArtifactValidatorRejectsL1UnifiedConceptRelationWithUnknownEntity() throws {
     var output = makeAcceptedL1UnifiedProjectionOutput()
     output.conceptRelations[0].objectLocalID = "missing-concept"

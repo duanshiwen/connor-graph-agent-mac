@@ -159,6 +159,17 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         return try SQLiteMemoryOSUnifiedRetrievalService(store: store).search(query)
     }
 
+    @discardableResult
+    public func ensureCurrentUserAnchor(now: Date = Date()) throws -> MemoryOSEntity {
+        try MemoryOSPersonIdentityService().ensureCurrentUserAnchor(store: store, now: now)
+    }
+
+    public func currentUserProfileContext(limit: Int = 12, focus: String? = nil, now: Date = Date()) throws -> MemoryOSCurrentUserProfileContext {
+        let anchor = try ensureCurrentUserAnchor(now: now)
+        _ = anchor
+        return try MemoryOSPersonIdentityService().currentUserProfileContext(store: store, limit: limit, focus: focus, now: now)
+    }
+
     public func expandMemoryOSL4(entityID: String, depth: Int = 1, limit: Int = 20) throws -> [MemoryOSL4ExpansionHit] {
         try SQLiteMemoryOSUnifiedRetrievalService(store: store).expandL4(entityID: entityID, depth: depth, limit: limit)
     }
@@ -491,7 +502,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         try store.execute("DELETE FROM memory_l1_capture_events WHERE id IN (\(quoted));")
     }
 
-    private func l2StatementIDs(sourceArtifactID: String) throws -> [String] {
+    func l2StatementIDs(sourceArtifactID: String) throws -> [String] {
         try store.queryStrings(sql: """
         SELECT id
         FROM memory_l2_statements
