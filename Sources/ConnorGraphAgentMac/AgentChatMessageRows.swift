@@ -47,6 +47,26 @@ struct AgentChatUnreadMarkerRow: View {
     }
 }
 
+struct AgentChatDateSeparatorRow: View {
+    var title: String
+
+    var body: some View {
+        Text(title)
+            .font(AgentChatTypography.microEmphasis)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .padding(.horizontal, AgentChatLayout.spaceM)
+            .padding(.vertical, AgentChatLayout.spaceXS)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(ConnorCraftPalette.foreground.opacity(0.055))
+            )
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.vertical, AgentChatLayout.spaceXS)
+            .accessibilityLabel("对话日期 \(title)")
+    }
+}
+
 struct AgentChatMessageRow: View {
     var row: AgentChatMessagePresentation
     var persistentCacheContext: AgentMarkdownPersistentCacheContext? = nil
