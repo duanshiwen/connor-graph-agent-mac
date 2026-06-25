@@ -1,11 +1,15 @@
 {
-  "aliasesLoaded" : 142453,
-  "builtAt" : "2026-06-24T10:44:35Z",
-  "edgesImported" : 609256,
-  "externalIDsImported" : 169166,
-  "inputPath" : "\/Volumes\/Y_Disk_002\/wikidata-layer_T\/outputs\/foundation_kg_v1_remote",
-  "manifestPath" : "\/Users\/duanshiwen\/code\/agent-os\/agents\/connor-graph-agent-mac\/Sources\/ConnorGraphAgentMac\/Resources\/FoundationKG\/FoundationKG-Builtin-L4.manifest.json",
-  "nodesImported" : 75981,
-  "outputPath" : "\/Users\/duanshiwen\/code\/agent-os\/agents\/connor-graph-agent-mac\/Sources\/ConnorGraphAgentMac\/Resources\/FoundationKG\/FoundationKG-Builtin-L4.sqlite",
-  "skippedEdges" : 0
+  "aliasesLoaded" : 89261,
+  "builtAt" : "2026-06-25T00:43:42Z",
+  "buildMethod" : "curated-v2",
+  "edgesImported" : 292098,
+  "externalIDsImported" : 0,
+  "inputPath" : "/Users/duanshiwen/code/agent-os/evaluate/wikidata-lite-dump/output/foundation_kg_v2_curated",
+  "manifestPath" : "/Users/duanshiwen/code/agent-os/agents/connor-graph-agent-mac/Sources/ConnorGraphAgentMac/Resources/FoundationKG/FoundationKG-Builtin-L4.manifest.json",
+  "nodesImported" : 35173,
+  "outputPath" : "/Users/duanshiwen/code/agent-os/agents/connor-graph-agent-mac/Sources/ConnorGraphAgentMac/Resources/FoundationKG/FoundationKG-Builtin-L4.sqlite",
+  "skippedEdges" : 0,
+  "sqliteSizeMB" : 231.7,
+  "sqliteGzipSizeMB" : 62.2,
+  "curationNotes" : "Curated from 75,978 to 35,173 entities. Removed islands/mountains/lakes from places, low-notability companies, TV series. Added 21 verified persons via Wikidata API."
 }
