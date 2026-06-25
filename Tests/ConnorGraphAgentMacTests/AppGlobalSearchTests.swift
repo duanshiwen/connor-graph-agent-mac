@@ -69,6 +69,73 @@ struct AppGlobalSearchTests {
         fixture.viewModel.showAllGlobalSearchResults(kind: .rss)
 
         #expect(fixture.viewModel.selection == .rss)
+
+        fixture.viewModel.updateGlobalSearchQuery("docs")
+        fixture.viewModel.showAllGlobalSearchResults(kind: .browserHistory)
+
+        #expect(fixture.viewModel.selection == .agentChat)
+        #expect(fixture.viewModel.isBrowserVisible)
+        #expect(fixture.viewModel.isBrowserHistoryPanelVisible)
+    }
+
+    @Test func globalSearchIncludesBrowserHistoryResults() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        let sessionID = try #require(fixture.viewModel.selectedChatSessionID ?? fixture.viewModel.chatSessions.first?.id)
+        fixture.viewModel.recordBrowserHistory(url: "https://example.com/swift-history", title: "Swift History", sessionID: sessionID)
+        fixture.viewModel.updateGlobalSearchQuery("swift-history")
+
+        await fixture.viewModel.refreshGlobalSearchPreview(for: "swift-history")
+
+        #expect(fixture.viewModel.globalSearchPreviewState.browserHistoryResults.count == 1)
+        #expect(fixture.viewModel.globalSearchPreviewState.browserHistoryResults.first?.title == "Swift History")
+    }
+
+    @Test func openingBrowserHistoryResultFocusesExistingTab() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        let sessionID = try #require(fixture.viewModel.selectedChatSessionID ?? fixture.viewModel.chatSessions.first?.id)
+        let urlString = "https://example.com/open-tab"
+        let tabID = UUID()
+        fixture.viewModel.browserWorkspaceSnapshotsBySessionID[sessionID] = AppBrowserStateSnapshot(
+            tabs: [
+                AppBrowserTabSnapshot(
+                    id: tabID,
+                    initialURLString: urlString,
+                    title: "Open Tab",
+                    currentURLString: urlString
+                )
+            ],
+            selectedTabID: nil
+        )
+        let record = BrowserHistoryRecord(url: urlString, title: "Open Tab", sessionID: sessionID, sessionTitle: "Session")
+
+        fixture.viewModel.openGlobalSearchBrowserHistoryResult(record)
+
+        #expect(fixture.viewModel.selection == .agentChat)
+        #expect(fixture.viewModel.isBrowserVisible)
+        #expect(fixture.viewModel.browserWorkspaceSessionID == sessionID)
+        #expect(fixture.viewModel.browserWorkspaceSnapshotsBySessionID[sessionID]?.selectedTabID == tabID)
+    }
+
+    @Test func openingBrowserHistoryResultCreatesSessionWhenOriginalSessionIsMissing() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        let originalSessionID = try #require(fixture.viewModel.selectedChatSessionID ?? fixture.viewModel.chatSessions.first?.id)
+        let urlString = "https://example.com/deleted-session"
+        let record = BrowserHistoryRecord(url: urlString, title: "Deleted Session Page", sessionID: "missing-session", sessionTitle: "Deleted")
+
+        fixture.viewModel.openGlobalSearchBrowserHistoryResult(record)
+
+        let newSessionID = try #require(fixture.viewModel.selectedChatSessionID)
+        #expect(newSessionID != originalSessionID)
+        #expect(fixture.viewModel.selection == .agentChat)
+        #expect(fixture.viewModel.isBrowserVisible)
+        #expect(fixture.viewModel.browserWorkspaceSessionID == newSessionID)
+        #expect(fixture.viewModel.browserWorkspaceSnapshotsBySessionID[newSessionID]?.tabs.contains { $0.currentURLString == urlString || $0.initialURLString == urlString } == true)
     }
 
     private func makeFixture() throws -> Fixture {

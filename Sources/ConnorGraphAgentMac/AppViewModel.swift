@@ -1082,6 +1082,7 @@ final class AppViewModel: NSObject, ObservableObject {
             let mailResults = try await searchNativeSource(kind: .mail, query: trimmed, limit: 3)
             let calendarResults = try await searchNativeSource(kind: .calendar, query: trimmed, limit: 3)
             let rssResults = try await searchNativeSource(kind: .rss, query: trimmed, limit: 3)
+            let browserHistoryResults = searchBrowserHistory(query: trimmed, limit: 3)
             guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
             globalSearchPreviewState = GlobalSearchPreviewState(
                 query: trimmed,
@@ -1089,12 +1090,36 @@ final class AppViewModel: NSObject, ObservableObject {
                 mailResults: mailResults,
                 calendarResults: calendarResults,
                 rssResults: rssResults,
+                browserHistoryResults: browserHistoryResults,
                 errorMessage: nil
             )
         } catch {
             guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
             globalSearchPreviewState = GlobalSearchPreviewState(query: trimmed, isLoading: false, errorMessage: String(describing: error))
         }
+    }
+
+    private func searchBrowserHistory(query: String, limit: Int) -> [BrowserHistoryRecord] {
+        guard let browserHistoryStore else {
+            return browserHistoryRecords
+                .filter { browserHistoryRecord($0, matches: query) }
+                .sorted { $0.visitedAt > $1.visitedAt }
+                .prefix(limit)
+                .map { $0 }
+        }
+        return browserHistoryStore.searchHistory(query: query)
+            .sorted { $0.visitedAt > $1.visitedAt }
+            .prefix(limit)
+            .map { $0 }
+    }
+
+    private func browserHistoryRecord(_ record: BrowserHistoryRecord, matches query: String) -> Bool {
+        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return true }
+        return record.url.lowercased().contains(normalized)
+            || record.title.lowercased().contains(normalized)
+            || record.sessionTitle.lowercased().contains(normalized)
+            || (record.contentMarkdown?.lowercased().contains(normalized) ?? false)
     }
 
     private func searchNativeSource(kind: NativeSearchSourceKind, query: String, limit: Int) async throws -> [NativeSearchResult] {
@@ -1217,6 +1242,11 @@ final class AppViewModel: NSObject, ObservableObject {
         openURLInCurrentChatBrowser(url)
     }
 
+    func openGlobalSearchBrowserHistoryResult(_ record: BrowserHistoryRecord) {
+        dismissGlobalSearchOverlay()
+        navigateToHistoryRecord(record)
+    }
+
     func openGlobalSearchResult(_ result: NativeSearchResult) {
         switch result.sourceKind {
         case .mail:
@@ -1250,6 +1280,9 @@ final class AppViewModel: NSObject, ObservableObject {
             selection = .calendar
         case .rss:
             selection = .rss
+        case .browserHistory:
+            isBrowserHistoryPanelVisible = true
+            showBrowserWorkspace()
         }
         dismissGlobalSearchOverlay()
     }
@@ -4943,14 +4976,65 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func navigateToHistoryRecord(_ record: BrowserHistoryRecord) {
-        // Switch to the session that owns this history record
-        if record.sessionID != selectedChatSessionID {
-            selectChatSession(record.sessionID)
+        guard let url = URL(string: record.url) else {
+            errorMessage = "这条浏览历史没有可打开的 URL。"
+            return
         }
-        // Open URL in browser — the onChange handler in BrowserWorkspaceView
-        // will detect the URL change and navigate the active WKWebView
-        browserTargetURLString = record.url
-        showBrowserWorkspace()
+        let planner = BrowserExternalOpenPlanner()
+        if focusExistingBrowserTabIfPresent(urlString: record.url, preferredSessionID: record.sessionID, planner: planner) {
+            errorMessage = nil
+            return
+        }
+        if browserHistorySessionExists(record.sessionID) {
+            if record.sessionID != selectedChatSessionID {
+                selectChatSession(record.sessionID)
+            }
+            openURLInCurrentChatBrowser(url)
+        } else {
+            openBrowserHistoryRecordInNewSession(record, url: url)
+        }
+    }
+
+    private func browserHistorySessionExists(_ sessionID: String) -> Bool {
+        guard let chatSessionRepository else { return false }
+        return (try? chatSessionRepository.loadSession(id: sessionID)) != nil
+    }
+
+    private func openBrowserHistoryRecordInNewSession(_ record: BrowserHistoryRecord, url: URL) {
+        guard let chatSessionRepository else { return }
+        rememberCurrentWorkspaceMode()
+        do {
+            let session = try chatSessionRepository.createSession(title: browserHistorySessionTitle(for: record))
+            selectedChatSessionID = session.id
+            agentEventTimelinesByProcessKey.removeAll(keepingCapacity: true)
+            browserWorkspaceSessionID = nil
+            selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
+            try loadSessionCapsule(sessionID: session.id)
+            try loadBackgroundTasks(sessionID: session.id)
+            fallbackChatSession = session
+            nativeSessionManager = makeNativeSessionManager(for: session)
+            transcript = []
+            restoreChatInputDraft(for: session.id)
+            refreshSelectedSubmittingState()
+            agentEventTimeline = []
+            agentEventTimelinesBySessionID[session.id] = []
+            latestChatSummary = nil
+            chatSummaryMessage = nil
+            lastPromptInspection = nil
+            reloadChatSessions(restoreWorkspaceMode: false)
+            selectedChatSessionID = session.id
+            openURLInCurrentChatBrowser(url)
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    private func browserHistorySessionTitle(for record: BrowserHistoryRecord) -> String {
+        let rawTitle = record.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !rawTitle.isEmpty { return "浏览 \(rawTitle)" }
+        if let host = URL(string: record.url)?.host, !host.isEmpty { return "浏览 \(host)" }
+        return "浏览历史"
     }
 
     private func sessionTitleForHistory(sessionID: String) -> String {
