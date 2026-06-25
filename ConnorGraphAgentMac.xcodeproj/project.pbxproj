@@ -219,7 +219,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -euo pipefail\ncd \"$SRCROOT\"\nif [ \"${CODE_SIGNING_ALLOWED:-NO}\" = \"YES\" ] && [ -n \"${EXPANDED_CODE_SIGN_IDENTITY_NAME:-}\" ]; then\n  Scripts/package-search-kernel.sh --app-bundle \"$TARGET_BUILD_DIR/$WRAPPER_NAME\" --codesign-identity \"$EXPANDED_CODE_SIGN_IDENTITY_NAME\"\nelse\n  Scripts/package-search-kernel.sh --app-bundle \"$TARGET_BUILD_DIR/$WRAPPER_NAME\"\nfi\n";
+			shellScript = "set -euo pipefail\ncd \"$SRCROOT\"\nEXTRA_ARGS=\"\"\nif [ \"${CONFIGURATION:-Debug}\" = \"Debug\" ]; then\n  EXTRA_ARGS=\"--skip-tests\"\nfi\nif [ \"${CODE_SIGNING_ALLOWED:-NO}\" = \"YES\" ] && [ -n \"${EXPANDED_CODE_SIGN_IDENTITY_NAME:-}\" ]; then\n  Scripts/package-search-kernel.sh $EXTRA_ARGS --app-bundle \"$TARGET_BUILD_DIR/$WRAPPER_NAME\" --codesign-identity \"$EXPANDED_CODE_SIGN_IDENTITY_NAME\"\nelse\n  Scripts/package-search-kernel.sh $EXTRA_ARGS --app-bundle \"$TARGET_BUILD_DIR/$WRAPPER_NAME\"\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

@@ -144,7 +144,9 @@ private final class ConnorApplicationDelegate: NSObject, NSApplicationDelegate, 
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         registerCurrentApplicationBundleWithLaunchServices()
-        UNUserNotificationCenter.current().delegate = self
+        if Bundle.main.bundleURL.pathExtension == "app" {
+            UNUserNotificationCenter.current().delegate = self
+        }
 
         // SwiftUI owns the main menu's backing item views. Recursively mutating NSMenu
         // titles while SwiftUI is reconciling submenu contents can trip AppKit's

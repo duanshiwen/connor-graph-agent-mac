@@ -101,7 +101,7 @@ struct AppShellView: View {
             if viewModel.selection == nil {
                 viewModel.selection = .agentChat
             }
-            viewModel.reloadChatSessions()
+            viewModel.reloadChatSessionsIfNeededAfterInitialLoad()
             installTopSearchKeyMonitorIfNeeded()
             viewModel.activateRuntimeSettingsSideEffectsAfterLaunch()
         }
