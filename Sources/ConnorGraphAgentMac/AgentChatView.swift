@@ -10,6 +10,7 @@ struct AgentChatView: View {
     @ObservedObject var viewModel: AppViewModel
     @State private var isSessionInfoPresented = false
 
+
     var body: some View {
         Group {
             if viewModel.selectedChatSessionID == nil && !viewModel.isBrowserVisible {
@@ -428,6 +429,9 @@ private struct AgentChatConversationView: View {
     @State private var selectedToolInvocation: AgentToolInvocationPresentation?
     @State private var lastObservedSessionID: String?
     @State private var lastObservedTranscriptCount: Int = 0
+    @State private var visibleMessageLimit: Int = Self.initialVisibleMessageLimit
+    @State private var pendingPrependCorrection: PendingPrependCorrection?
+    @State private var isLoadingOlderMessages = false
     @StateObject private var chatViewportController = ChatViewportController(
         configuration: ChatViewportConfiguration(
             spacing: AgentChatLayout.chatViewportSpacing,
@@ -438,8 +442,25 @@ private struct AgentChatConversationView: View {
         )
     )
 
+    private static let initialVisibleMessageLimit = 80
+    private static let messagePageSize = 40
+
+    private struct PendingPrependCorrection: Equatable {
+        var previousFirstItemID: String
+        var addedMessageCount: Int
+    }
+
     private var chatViewportConfiguration: ChatViewportConfiguration {
         chatViewportController.configuration
+    }
+
+    private var visibleTranscript: [AgentMessage] {
+        guard viewModel.transcript.count > visibleMessageLimit else { return viewModel.transcript }
+        return Array(viewModel.transcript.suffix(visibleMessageLimit))
+    }
+
+    private var hasOlderMessages: Bool {
+        visibleMessageLimit < viewModel.transcript.count
     }
 
     @MainActor
@@ -488,7 +509,7 @@ private struct AgentChatConversationView: View {
     }
 
     private var timelineCacheKey: TimelineCache.Key {
-        let messageSignature = viewModel.transcript.reduce(into: 0) { result, message in
+        let messageSignature = visibleTranscript.reduce(into: 0) { result, message in
             result &+= message.id.hashValue
             result &*= 31
             result &+= message.content.count
@@ -502,7 +523,7 @@ private struct AgentChatConversationView: View {
         } ?? 0)
         return TimelineCache.Key(
             sessionID: viewModel.selectedChatSessionID,
-            messageCount: viewModel.transcript.count,
+            messageCount: visibleTranscript.count,
             messageSignature: messageSignature,
             contextSignature: contextSignature,
             isSubmitting: viewModel.isSubmittingChat,
@@ -513,11 +534,39 @@ private struct AgentChatConversationView: View {
     private var timelineItems: [AgentChatTurnTimelineItem] {
         TimelineCache.shared.items(
             key: timelineCacheKey,
-            messages: viewModel.transcript,
+            messages: visibleTranscript,
             lastContext: viewModel.lastContext,
             isSubmitting: viewModel.isSubmittingChat,
             preservesOpenProcess: shouldPreserveOpenProcess
         )
+    }
+
+
+
+    private func resetVisibleMessageWindow() {
+        visibleMessageLimit = Self.initialVisibleMessageLimit
+        pendingPrependCorrection = nil
+        isLoadingOlderMessages = false
+    }
+
+    private func loadOlderMessagesIfNeeded(firstVisibleItemID: String?, dataSetID: ChatViewportDataSetID) {
+        guard !isLoadingOlderMessages,
+              hasOlderMessages,
+              let firstVisibleItemID
+        else { return }
+
+        let previousLimit = visibleMessageLimit
+        let nextLimit = min(viewModel.transcript.count, previousLimit + Self.messagePageSize)
+        guard nextLimit > previousLimit else { return }
+
+        isLoadingOlderMessages = true
+        let anchorItemID = dataSetID.namespacedElementID(firstVisibleItemID)
+        chatViewportController.prepareForPrepend(anchorItemID: anchorItemID)
+        pendingPrependCorrection = PendingPrependCorrection(
+            previousFirstItemID: anchorItemID,
+            addedMessageCount: nextLimit - previousLimit
+        )
+        visibleMessageLimit = nextLimit
     }
 
     private func activityEvents(for process: AgentChatTurnProcessPresentation, latestProcessID: String?) -> [AgentEventPresentation] {
@@ -584,7 +633,12 @@ private struct AgentChatConversationView: View {
                         dataSetID: chatDataSetID,
                         items: chatItems,
                         controller: chatViewportController,
-                        configuration: chatViewportConfiguration
+                        configuration: chatViewportConfiguration,
+                        hasOlderItems: hasOlderMessages,
+                        isLoadingOlderItems: isLoadingOlderMessages,
+                        onTopReached: {
+                            loadOlderMessagesIfNeeded(firstVisibleItemID: chatItems.first?.id, dataSetID: chatDataSetID)
+                        }
                     ) { chatItem in
                         if let item = chatItem.timelineItem {
                             chatTimelineRow(item, latestProcessID: latestProcessID)
@@ -599,10 +653,12 @@ private struct AgentChatConversationView: View {
             .padding(.horizontal, AgentChatLayout.chatViewportHorizontalInset)
             .padding(.vertical, AgentChatLayout.chatViewportVerticalInset)
             .onAppear {
+                resetVisibleMessageWindow()
                 lastObservedSessionID = viewModel.selectedChatSessionID
                 lastObservedTranscriptCount = viewModel.transcript.count
             }
             .onChange(of: viewModel.selectedChatSessionID) { _, newSessionID in
+                resetVisibleMessageWindow()
                 lastObservedSessionID = newSessionID
                 lastObservedTranscriptCount = viewModel.transcript.count
             }
@@ -616,12 +672,23 @@ private struct AgentChatConversationView: View {
                       newCount > oldCount,
                       newCount > lastObservedTranscriptCount
                 else { return }
+                visibleMessageLimit += newCount - oldCount
                 chatViewportController.notifyDataChange(.append(count: newCount - oldCount))
+            }
+            .onChange(of: visibleMessageLimit) { _, _ in
+                guard let pendingPrependCorrection else { return }
+                chatViewportController.notifyPrepend(
+                    count: pendingPrependCorrection.addedMessageCount,
+                    anchorItemID: pendingPrependCorrection.previousFirstItemID
+                )
+                self.pendingPrependCorrection = nil
+                isLoadingOlderMessages = false
             }
             .onChange(of: viewModel.isSubmittingChat) { _, isSubmitting in
                 guard isSubmitting else { return }
                 chatViewportController.scrollToBottom()
             }
+
 
             AgentChatComposerView(
                 viewModel: viewModel,
