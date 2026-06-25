@@ -21,7 +21,7 @@ struct AgentChatView: View {
         }
         .task {
             viewModel.deferViewUpdate {
-                viewModel.reloadChatSessions()
+                viewModel.reloadChatSessionsIfNeededAfterInitialLoad()
                 viewModel.reloadPendingApprovals()
             }
         }

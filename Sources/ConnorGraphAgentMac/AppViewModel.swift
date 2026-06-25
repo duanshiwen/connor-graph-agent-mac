@@ -528,6 +528,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var hybridSearchService: (any GraphHybridSearchService)?
     private var isRunningBackgroundJobs: Bool = false
     private var hasScheduledMemoryOSSearchIndexRepair = false
+    private var hasLoadedInitialChatSessions = false
     // Product chat path: NativeSessionManager owns Connor session state and talks to replaceable AgentBackend implementations.
     // fallbackChatSession is UI-only for demo/no-runtime states.
     private var fallbackChatSession: AgentSession
@@ -4045,7 +4046,13 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
+    func reloadChatSessionsIfNeededAfterInitialLoad(restoreWorkspaceMode shouldRestoreWorkspaceMode: Bool = true) {
+        guard !hasLoadedInitialChatSessions else { return }
+        reloadChatSessions(restoreWorkspaceMode: shouldRestoreWorkspaceMode)
+    }
+
     func reloadChatSessions(restoreWorkspaceMode shouldRestoreWorkspaceMode: Bool = true) {
+        hasLoadedInitialChatSessions = true
         guard let chatSessionRepository else {
             transcript = activeChatTranscript
             chatSessions = [activeChatSession]
