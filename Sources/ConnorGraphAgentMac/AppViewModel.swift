@@ -368,6 +368,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var isGlobalSearchFieldFocused: Bool = false
     @Published var isGlobalSearchOverlayPresented: Bool = false
     @Published var globalSearchPreviewState: GlobalSearchPreviewState = .empty
+    @Published var globalSearchSelectedItem: GlobalSearchSelectableItem? = .action(.newChat)
     @Published var governanceConfig: AppSessionGovernanceConfig = .default
     @Published var productOSRegistry: ProductOSRegistrySnapshot = .default
     @Published var automationConfig: ProductOSAutomationConfig = .default
@@ -1045,6 +1046,7 @@ final class AppViewModel: NSObject, ObservableObject {
         guard !trimmed.isEmpty else {
             isGlobalSearchOverlayPresented = false
             globalSearchPreviewState = .empty
+            globalSearchSelectedItem = .action(.newChat)
             return
         }
         isGlobalSearchOverlayPresented = true
@@ -1056,10 +1058,70 @@ final class AppViewModel: NSObject, ObservableObject {
         globalSearchQuery = ""
         isGlobalSearchOverlayPresented = false
         globalSearchPreviewState = .empty
+        globalSearchSelectedItem = .action(.newChat)
     }
 
     func dismissGlobalSearchOverlay() {
         isGlobalSearchOverlayPresented = false
+    }
+
+    var globalSearchSelectableItems: [GlobalSearchSelectableItem] {
+        var items: [GlobalSearchSelectableItem] = [.action(.newChat), .action(.webSearch)]
+        items.append(contentsOf: globalSearchPreviewState.chatSessionResults.map { .chatSession($0.id) })
+        items.append(contentsOf: globalSearchPreviewState.mailResults.map { .nativeResult($0.id) })
+        items.append(contentsOf: globalSearchPreviewState.calendarResults.map { .nativeResult($0.id) })
+        items.append(contentsOf: globalSearchPreviewState.rssResults.map { .nativeResult($0.id) })
+        items.append(contentsOf: globalSearchPreviewState.browserHistoryResults.prefix(3).map { .nativeResult($0.id) })
+        return items
+    }
+
+    func moveGlobalSearchSelectionDown() {
+        moveGlobalSearchSelection(delta: 1)
+    }
+
+    func moveGlobalSearchSelectionUp() {
+        moveGlobalSearchSelection(delta: -1)
+    }
+
+    private func moveGlobalSearchSelection(delta: Int) {
+        let items = globalSearchSelectableItems
+        guard !items.isEmpty else {
+            globalSearchSelectedItem = nil
+            return
+        }
+        let currentIndex = globalSearchSelectedItem.flatMap { items.firstIndex(of: $0) } ?? 0
+        let nextIndex = (currentIndex + delta + items.count) % items.count
+        globalSearchSelectedItem = items[nextIndex]
+    }
+
+    private func normalizeGlobalSearchSelection() {
+        let items = globalSearchSelectableItems
+        guard !items.isEmpty else {
+            globalSearchSelectedItem = nil
+            return
+        }
+        if let selected = globalSearchSelectedItem, items.contains(selected) { return }
+        globalSearchSelectedItem = items.first
+    }
+
+    func performSelectedGlobalSearchItem() {
+        normalizeGlobalSearchSelection()
+        guard let selected = globalSearchSelectedItem else { return }
+        switch selected {
+        case .action(.newChat):
+            performGlobalSearchNewChat()
+        case .action(.webSearch):
+            performGlobalSearchWebSearch()
+        case .chatSession(let sessionID):
+            openGlobalSearchChatSessionResult(sessionID)
+        case .nativeResult(let resultID):
+            let results = globalSearchPreviewState.mailResults
+                + globalSearchPreviewState.calendarResults
+                + globalSearchPreviewState.rssResults
+                + globalSearchPreviewState.browserHistoryResults
+            guard let result = results.first(where: { $0.id == resultID }) else { return }
+            openGlobalSearchResult(result)
+        }
     }
 
     private func scheduleGlobalSearchPreview(for query: String) {
@@ -1098,6 +1160,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 browserHistoryResults: browserHistoryResults,
                 errorMessage: nil
             )
+            normalizeGlobalSearchSelection()
         } catch {
             guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
             globalSearchPreviewState = GlobalSearchPreviewState(query: trimmed, isLoading: false, errorMessage: String(describing: error))

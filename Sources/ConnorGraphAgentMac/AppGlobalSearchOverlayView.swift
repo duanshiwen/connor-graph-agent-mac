@@ -43,10 +43,10 @@ struct AppGlobalSearchOverlayView: View {
 
     private var actionRows: some View {
         VStack(spacing: 2) {
-            GlobalSearchActionRow(kind: .newChat, query: query) {
+            GlobalSearchActionRow(kind: .newChat, query: query, isSelected: stateSelected(.action(.newChat))) {
                 viewModel.performGlobalSearchNewChat()
             }
-            GlobalSearchActionRow(kind: .webSearch, query: query) {
+            GlobalSearchActionRow(kind: .webSearch, query: query, isSelected: stateSelected(.action(.webSearch))) {
                 viewModel.performGlobalSearchWebSearch()
             }
         }
@@ -107,7 +107,7 @@ struct AppGlobalSearchOverlayView: View {
                         Button {
                             viewModel.openGlobalSearchChatSessionResult(result.id)
                         } label: {
-                            GlobalSearchChatSessionRow(result: result)
+                            GlobalSearchChatSessionRow(result: result, isSelected: stateSelected(.chatSession(result.id)))
                         }
                         .buttonStyle(.plain)
                     }
@@ -163,7 +163,7 @@ struct AppGlobalSearchOverlayView: View {
                         Button {
                             viewModel.openGlobalSearchResult(result)
                         } label: {
-                            GlobalSearchResultRow(result: result)
+                            GlobalSearchResultRow(result: result, isSelected: stateSelected(.nativeResult(result.id)))
                         }
                         .buttonStyle(.plain)
                     }
@@ -172,6 +172,10 @@ struct AppGlobalSearchOverlayView: View {
         }
         .frame(minHeight: 58, alignment: .top)
         .padding(.bottom, 2)
+    }
+
+    private func stateSelected(_ item: GlobalSearchSelectableItem) -> Bool {
+        viewModel.globalSearchSelectedItem == item
     }
 
     private func browserHistoryPaginationControls(currentPage: Int, pageCount: Int) -> some View {
@@ -239,7 +243,7 @@ struct AppGlobalSearchOverlayView: View {
                         Button {
                             viewModel.openGlobalSearchResult(result)
                         } label: {
-                            GlobalSearchResultRow(result: result)
+                            GlobalSearchResultRow(result: result, isSelected: stateSelected(.nativeResult(result.id)))
                         }
                         .buttonStyle(.plain)
                     }
@@ -274,6 +278,7 @@ private struct GlobalSearchEmptySourceRow: View {
 private struct GlobalSearchActionRow: View {
     var kind: GlobalSearchActionKind
     var query: String
+    var isSelected: Bool = false
     var action: () -> Void
 
     @State private var isHovering = false
@@ -311,12 +316,14 @@ private struct GlobalSearchActionRow: View {
     }
 
     private var rowBackground: Color {
-        isHovering ? Color.accentColor.opacity(0.08) : Color.clear
+        if isSelected { return Color.accentColor.opacity(0.14) }
+        return isHovering ? Color.accentColor.opacity(0.08) : Color.clear
     }
 }
 
 private struct GlobalSearchChatSessionRow: View {
     var result: GlobalSearchSessionResult
+    var isSelected: Bool = false
 
     @State private var isHovering = false
 
@@ -355,7 +362,8 @@ private struct GlobalSearchChatSessionRow: View {
     }
 
     private var rowBackground: Color {
-        isHovering ? Color.accentColor.opacity(0.08) : Color.clear
+        if isSelected { return Color.accentColor.opacity(0.14) }
+        return isHovering ? Color.accentColor.opacity(0.08) : Color.clear
     }
 }
 
@@ -416,6 +424,7 @@ private struct GlobalSearchBrowserHistoryRow: View {
 
 private struct GlobalSearchResultRow: View {
     var result: NativeSearchResult
+    var isSelected: Bool = false
 
     @State private var isHovering = false
 
@@ -456,7 +465,8 @@ private struct GlobalSearchResultRow: View {
     }
 
     private var rowBackground: Color {
-        isHovering ? Color.accentColor.opacity(0.08) : Color.clear
+        if isSelected { return Color.accentColor.opacity(0.14) }
+        return isHovering ? Color.accentColor.opacity(0.08) : Color.clear
     }
 
     private var iconName: String {
