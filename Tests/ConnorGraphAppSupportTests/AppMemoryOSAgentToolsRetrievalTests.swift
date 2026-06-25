@@ -48,6 +48,106 @@ import ConnorGraphAppSupport
     #expect(!json.contains("shiwen"))
 }
 
+@Test func memoryOSGetCurrentUserProfileDoesNotReturnGenericUserConcepts() async throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
+    try store.migrate()
+    let facade = AppMemoryOSFacade(store: store)
+    let now = Date(timeIntervalSince1970: 10_000)
+    let genericUser = MemoryOSEntity(
+        id: "wikidata-user",
+        stableKey: "wikidata:Q278368",
+        entityType: "concept",
+        name: "用户",
+        aliases: ["user", "profile user"],
+        summary: "使用电脑或网络服务的人",
+        confidence: 0.95,
+        createdAt: now,
+        updatedAt: now,
+        metadata: ["source": "foundation_kg"]
+    )
+    try store.upsert(entity: genericUser)
+    try store.upsert(entityStatement: MemoryOSEntityStatement(
+        id: "generic-user-stmt",
+        entityID: genericUser.id,
+        predicate: "P279",
+        text: "communication user -- P279 --> 消费者",
+        confidence: 0.9,
+        validAt: now,
+        committedAt: now,
+        evidenceSpanIDs: []
+    ))
+
+    let tool = MemoryOSGetCurrentUserProfileTool(facade: facade)
+    let result = try await tool.execute(arguments: AgentToolArguments(json: #"{"limit":10}"#), context: memoryOSToolContext())
+
+    let payload = try memoryOSToolJSON(result)
+    #expect(result.toolName == "memory_os_get_current_user_profile")
+    #expect(payload["currentUserMarker"] as? String == "current_user")
+    #expect(payload["hitCount"] as? Int == 0)
+    let encoded = try String(data: JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]), encoding: .utf8) ?? ""
+    #expect(!encoded.contains("wikidata-user"))
+    #expect(!encoded.contains("communication user"))
+    #expect(!encoded.contains("使用电脑或网络服务的人"))
+}
+
+@Test func memoryOSGetCurrentUserProfileFocusDoesNotEscapeCurrentUserScope() async throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
+    try store.migrate()
+    let facade = AppMemoryOSFacade(store: store)
+    let now = Date(timeIntervalSince1970: 10_000)
+    let currentUser = MemoryOSEntity(id: "person-current", stableKey: "current_user", entityType: "person", name: "Current User", aliases: [], createdAt: now, updatedAt: now, metadata: ["person_role": "current_user"])
+    let otherPerson = MemoryOSEntity(id: "person-other", stableKey: "person:other:alice", entityType: "person", name: "Alice", aliases: ["user research expert"], createdAt: now, updatedAt: now, metadata: ["person_role": "other_person"])
+    try store.upsert(entity: currentUser)
+    try store.upsert(entity: otherPerson)
+    try store.upsert(entityStatement: MemoryOSEntityStatement(id: "current-pref", entityID: currentUser.id, predicate: "prefers", text: "Current user prefers architectural implementation plans.", confidence: 0.9, validAt: now, committedAt: now, evidenceSpanIDs: [], metadata: ["person_role": "current_user", "profile_dimension": "interaction_guidance"]))
+    try store.upsert(entityStatement: MemoryOSEntityStatement(id: "other-pref", entityID: otherPerson.id, predicate: "prefers", text: "Alice has deep focus expertise in quantum gardening and user profiles.", confidence: 0.99, validAt: now, committedAt: now, evidenceSpanIDs: [], metadata: ["person_role": "other_person", "profile_dimension": "knowledge_background"]))
+
+    let tool = MemoryOSGetCurrentUserProfileTool(facade: facade)
+    let result = try await tool.execute(arguments: AgentToolArguments(json: #"{"limit":10,"focus":"quantum gardening user profiles"}"#), context: memoryOSToolContext())
+
+    let json = try #require(result.contentJSON)
+    #expect(json.contains("Current user prefers architectural implementation plans"))
+    #expect(!json.contains("Alice"))
+    #expect(!json.contains("quantum gardening"))
+    #expect(!json.contains("other-pref"))
+}
+
+@Test func memoryOSUpdateCurrentUserProfileCreatesAnchorAndEvidenceBackedL2Fact() async throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
+    try store.migrate()
+    let facade = AppMemoryOSFacade(store: store)
+    let tool = MemoryOSUpdateCurrentUserProfileTool(facade: facade)
+    let result = try await tool.execute(arguments: AgentToolArguments(json: #"""
+    {
+      "observations": [
+        {
+          "profileDimension": "interaction_guidance",
+          "statement": "Current user prefers mature systemic plans over minimal patches for architectural issues.",
+          "evidence": "请不要做最小修改，一次性把它改造成成熟稳定的程序功能。",
+          "confidence": 0.95,
+          "source": "user_explicit",
+          "stability": "stable",
+          "sensitivity": "normal"
+        }
+      ],
+      "mode": "propose_profile_facts",
+      "sessionID": "session"
+    }
+    """#), context: memoryOSToolContext())
+
+    let payload = try memoryOSToolJSON(result)
+    #expect(result.toolName == "memory_os_update_current_user_profile")
+    #expect(payload["accepted"] as? Bool == true)
+    #expect(payload["currentUserEntityID"] as? String != nil)
+    let statementIDs = try #require(payload["statementIDs"] as? [String])
+    #expect(statementIDs.count == 1)
+
+    let profile = try facade.currentUserProfileContext(limit: 10)
+    #expect(profile.hitCount == 1)
+    #expect(profile.hits.first?.metadata["person_role"] == "current_user")
+    #expect(profile.hits.first?.metadata["profile_dimension"] == "interaction_guidance")
+}
+
 @Test func memoryOSExpandL4ToolReturnsDepthExpansion() async throws {
     let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
     try store.migrate()
@@ -67,6 +167,11 @@ import ConnorGraphAppSupport
     #expect(result.contentText.contains("L4 expansion returned"))
     #expect(json.contains("l4-stmt-1"))
     #expect(json.contains("entity-b"))
+}
+
+private func memoryOSToolJSON(_ result: AgentToolResult) throws -> [String: Any] {
+    let contentJSON = try #require(result.contentJSON)
+    return try #require(JSONSerialization.jsonObject(with: Data(contentJSON.utf8)) as? [String: Any])
 }
 
 private func memoryOSToolContext() -> AgentToolExecutionContext {
