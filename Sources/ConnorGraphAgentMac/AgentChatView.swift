@@ -564,6 +564,10 @@ private struct AgentChatConversationView: View {
         let timelineSnapshot = timelineItems
         let chatItems = AgentChatTimelineAdapter().items(from: timelineSnapshot, insertsDateSeparators: true)
         let latestProcessID = timelineSnapshot.last(where: { $0.process != nil })?.process?.id
+        let chatDataSetID = ChatViewportDataSetID.agentChatSession(
+            sessionID: viewModel.selectedChatSessionID,
+            revision: viewModel.selectedChatTranscriptRevision
+        )
 
         VStack(spacing: 0) {
             AgentChatConversationHeader(viewModel: viewModel)
@@ -577,6 +581,7 @@ private struct AgentChatConversationView: View {
                         .frame(maxWidth: .infinity, minHeight: 360, maxHeight: .infinity)
                 } else {
                     CommercialChatViewport(
+                        dataSetID: chatDataSetID,
                         items: chatItems,
                         controller: chatViewportController,
                         configuration: chatViewportConfiguration
@@ -600,7 +605,6 @@ private struct AgentChatConversationView: View {
             .onChange(of: viewModel.selectedChatSessionID) { _, newSessionID in
                 lastObservedSessionID = newSessionID
                 lastObservedTranscriptCount = viewModel.transcript.count
-                chatViewportController.scrollToBottom(animated: false)
             }
             .onChange(of: viewModel.transcript.count) { oldCount, newCount in
                 let currentSessionID = viewModel.selectedChatSessionID

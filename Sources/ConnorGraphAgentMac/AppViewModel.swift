@@ -320,6 +320,7 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
     @Published var transcript: [AgentMessage] = []
+    @Published var selectedChatTranscriptRevision: Int = 0
     @Published var lastContext: AgentContext?
     @Published var lastPromptInspection: AgentChatPromptInspection?
     @Published var errorMessage: String?
@@ -2718,7 +2719,7 @@ final class AppViewModel: NSObject, ObservableObject {
             try loadBackgroundTasks(sessionID: session.id)
             fallbackChatSession = session
             nativeSessionManager = makeNativeSessionManager(for: session)
-            transcript = []
+            replaceSelectedChatTranscript([])
             restoreChatInputDraft(for: session.id)
             refreshSelectedSubmittingState()
             agentEventTimeline = []
@@ -4400,7 +4401,7 @@ final class AppViewModel: NSObject, ObservableObject {
     func reloadChatSessions(restoreWorkspaceMode shouldRestoreWorkspaceMode: Bool = true) {
         hasLoadedInitialChatSessions = true
         guard let chatSessionRepository else {
-            transcript = activeChatTranscript
+            replaceSelectedChatTranscript(activeChatTranscript)
             chatSessions = [activeChatSession]
             allChatSessions = [activeChatSession]
             synchronizeSessionReadStates(from: allChatSessions)
@@ -4423,7 +4424,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 try loadBackgroundTasks(sessionID: selectedID)
                 fallbackChatSession = session
                 nativeSessionManager = makeNativeSessionManager(for: session)
-                transcript = session.messages
+                replaceSelectedChatTranscript(session.messages)
                 restoreChatInputDraft(for: selectedID)
                 refreshSelectedSubmittingState()
                 if let cachedTimeline = agentEventTimelinesBySessionID[selectedID] {
@@ -4453,10 +4454,15 @@ final class AppViewModel: NSObject, ObservableObject {
         return sessionListFilter == .all ? sessions.first?.id : nil
     }
 
+    private func replaceSelectedChatTranscript(_ messages: [AgentMessage]) {
+        transcript = messages
+        selectedChatTranscriptRevision += 1
+    }
+
     private func clearSelectedChatSessionDetail() {
         selectedChatSessionID = nil
         nativeSessionManager = nil
-        transcript = []
+        replaceSelectedChatTranscript([])
         agentEventTimeline = []
         latestChatSummary = nil
         selectedSessionArtifactDirectories = nil
@@ -4484,7 +4490,7 @@ final class AppViewModel: NSObject, ObservableObject {
             try loadBackgroundTasks(sessionID: session.id)
             fallbackChatSession = session
             nativeSessionManager = makeNativeSessionManager(for: session)
-            transcript = []
+            replaceSelectedChatTranscript([])
             restoreChatInputDraft(for: session.id)
             refreshSelectedSubmittingState()
             agentEventTimeline = []
@@ -4522,7 +4528,7 @@ final class AppViewModel: NSObject, ObservableObject {
         if selectedChatSessionID == updated.id {
             fallbackChatSession = updated
             nativeSessionManager = makeNativeSessionManager(for: updated)
-            transcript = updated.messages
+            replaceSelectedChatTranscript(updated.messages)
         }
     }
 
@@ -4806,7 +4812,7 @@ final class AppViewModel: NSObject, ObservableObject {
             agentEventTimelinesByProcessKey = agentEventTimelinesByProcessKey.filter { key, _ in !key.hasPrefix("\(sessionID):") }
             if selectedChatSessionID == sessionID {
                 selectedChatSessionID = nil
-                transcript = []
+                replaceSelectedChatTranscript([])
                 agentEventTimeline = []
                 latestChatSummary = nil
                 selectedSessionArtifactDirectories = nil
@@ -5085,7 +5091,7 @@ final class AppViewModel: NSObject, ObservableObject {
             try loadBackgroundTasks(sessionID: session.id)
             fallbackChatSession = session
             nativeSessionManager = makeNativeSessionManager(for: session)
-            transcript = []
+            replaceSelectedChatTranscript([])
             restoreChatInputDraft(for: session.id)
             refreshSelectedSubmittingState()
             agentEventTimeline = []
@@ -5295,7 +5301,7 @@ final class AppViewModel: NSObject, ObservableObject {
             _ = ensureSessionLLMOverride(sessionID: session.id)
             fallbackChatSession = session
             nativeSessionManager = makeNativeSessionManager(for: session)
-            transcript = session.messages
+            replaceSelectedChatTranscript(session.messages)
             restoreChatInputDraft(for: session.id)
             refreshSelectedSubmittingState()
             if let cachedTimeline = agentEventTimelinesBySessionID[session.id] {
