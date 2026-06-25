@@ -1,4 +1,4 @@
-import Foundation
+    import Foundation
 
 public final class MemoryOSSearchKernel: @unchecked Sendable {
     private let ffi: MemoryOSSearchKernelFFI
