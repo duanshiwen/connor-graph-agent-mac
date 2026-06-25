@@ -71,6 +71,42 @@ public actor InMemoryAgentCalendarRuntime: AgentCalendarRuntime {
     }
 }
 
+public struct CalendarSearchEventsTool: AgentTool {
+    public let runtime: any AgentCalendarRuntime
+    public var name: String { "calendar_search_events" }
+    public var description: String { "Search Connor-owned calendar events and return full event details directly; no separate calendar detail fetch is needed." }
+    public var permission: AgentPermissionCapability { .readCalendar }
+    public var inputSchema: AgentToolInputSchema {
+        .object(properties: [
+            "query": .string(description: "Search query; leave empty to search by time range only"),
+            "startDate": .string(description: "Optional ISO-8601 inclusive start timestamp"),
+            "endDate": .string(description: "Optional ISO-8601 exclusive end timestamp"),
+            "timePreset": .string(description: "Optional time preset such as today, tomorrow, last7Days, last30Days, thisWeek, next7Days"),
+            "timeFilterMode": .string(description: "Optional mode such as intervalOverlapsRange or startsInRange"),
+            "timeSort": .string(description: "Optional sort: relevanceThenTimeDesc, relevanceThenTimeAsc, timeDescThenRelevance, timeAscThenRelevance"),
+            "limit": .integer(description: "Maximum event details to return")
+        ], required: [])
+    }
+
+    public init(runtime: any AgentCalendarRuntime) { self.runtime = runtime }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        let formatter = ISO8601DateFormatter()
+        let events = try await runtime.searchEvents(
+            query: arguments.string("query") ?? "",
+            startDate: arguments.string("startDate").flatMap { formatter.date(from: $0) },
+            endDate: arguments.string("endDate").flatMap { formatter.date(from: $0) },
+            timePreset: arguments.string("timePreset"),
+            timeFilterMode: arguments.string("timeFilterMode"),
+            timeSort: arguments.string("timeSort"),
+            limit: NativeSearchLimitPolicy.clampSearchLimit(arguments.int("limit") ?? NativeSearchLimitPolicy.defaultSearchLimit),
+            runID: context.runID,
+            sessionID: context.sessionID
+        )
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(events.count) calendar event details; search results are already full event records", contentJSON: try MailJSON.encode(events))
+    }
+}
+
 public struct CalendarReadTool: AgentTool {
     public let runtime: any AgentCalendarRuntime
     public var name: String { "calendar_read" }
@@ -134,6 +170,7 @@ public struct CalendarWriteTool: AgentTool {
 
 public extension AgentToolRegistry {
     mutating func registerNativeCalendarTools(runtime: any AgentCalendarRuntime) {
+        register(CalendarSearchEventsTool(runtime: runtime))
         register(CalendarReadTool(runtime: runtime))
         register(CalendarWriteTool(runtime: runtime))
     }
