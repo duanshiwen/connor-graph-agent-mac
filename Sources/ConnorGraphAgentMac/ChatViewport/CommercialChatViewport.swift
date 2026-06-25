@@ -189,7 +189,9 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
 
     private func consumePendingScrollCommandIfAvailable(proxy: ScrollViewProxy) {
         guard let command = controller.consumePendingScrollCommand() else { return }
-        perform(command, proxy: proxy)
+        DispatchQueue.main.async {
+            perform(command, proxy: proxy)
+        }
     }
 
     private func perform(_ command: ChatViewportScrollCommand, proxy: ScrollViewProxy) {
@@ -198,7 +200,11 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
             case .top:
                 proxy.scrollTo(topSentinelID, anchor: .top)
             case .bottom:
-                proxy.scrollTo(bottomSentinelID, anchor: .bottom)
+                if let lastItem = items.last {
+                    proxy.scrollTo(rowID(for: lastItem), anchor: .bottom)
+                } else {
+                    proxy.scrollTo(bottomSentinelID, anchor: .bottom)
+                }
             case let .item(id, anchor, _):
                 proxy.scrollTo(id, anchor: anchor.unitPoint)
             }
