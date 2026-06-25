@@ -96,6 +96,8 @@ public extension NativeSearchTemporalFilter {
             return NativeSearchTemporalFilter(start: start, end: end, mode: .pointWithinRange, timeFieldPreference: [.publishedAt, .fetchedAt], timezoneIdentifier: timezoneIdentifier)
         case .calendar:
             return NativeSearchTemporalFilter(start: start, end: end, mode: .intervalOverlapsRange, timeFieldPreference: [.eventStartAt], timezoneIdentifier: timezoneIdentifier)
+        case .browserHistory:
+            return NativeSearchTemporalFilter(start: start, end: end, mode: .pointWithinRange, timeFieldPreference: [.updatedAt, .createdAt], timezoneIdentifier: timezoneIdentifier)
         }
     }
 }
