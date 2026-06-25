@@ -6,53 +6,42 @@ struct AppGlobalSearchOverlayView: View {
 
     private var state: GlobalSearchPreviewState { viewModel.globalSearchPreviewState }
     private var query: String { viewModel.globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var hasAnyNativeResults: Bool {
+        !state.mailResults.isEmpty || !state.calendarResults.isEmpty || !state.rssResults.isEmpty
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            header
+        VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
             actionRows
-            Divider()
+
+            if state.isLoading {
+                updatingRow
+            }
+
             resultSection(kind: .mail, results: state.mailResults)
             resultSection(kind: .calendar, results: state.calendarResults)
             resultSection(kind: .rss, results: state.rssResults)
-            if let errorMessage = state.errorMessage, !errorMessage.isEmpty {
-                Text(errorMessage)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.red)
-                    .lineLimit(2)
-                    .padding(.top, 2)
-            }
-        }
-        .padding(12)
-        .frame(width: 680, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color(nsColor: .separatorColor).opacity(0.5), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.18), radius: 24, x: 0, y: 14)
-    }
 
-    private var header: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "sparkle.magnifyingglass")
-                .foregroundStyle(Color.accentColor)
-            Text("搜索或发起：")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
-            Text(query)
-                .font(.system(size: 12, weight: .semibold))
-                .lineLimit(1)
-            Spacer()
-            if state.isLoading {
-                ProgressView()
-                    .controlSize(.small)
+            if !state.isLoading, !hasAnyNativeResults, state.errorMessage == nil {
+                emptyResultsRow
+            }
+
+            if let errorMessage = state.errorMessage, !errorMessage.isEmpty {
+                errorRow(errorMessage)
             }
         }
+        .padding(AppShellLayout.spaceS)
+        .frame(width: 640, alignment: .leading)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
+                .stroke(AppShellColors.hairline, lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.12), radius: 18, x: 0, y: 10)
     }
 
     private var actionRows: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 2) {
             GlobalSearchActionRow(kind: .newChat, query: query) {
                 viewModel.performGlobalSearchNewChat()
             }
@@ -62,34 +51,64 @@ struct AppGlobalSearchOverlayView: View {
         }
     }
 
+    private var updatingRow: some View {
+        HStack(spacing: AppShellLayout.spaceS) {
+            ProgressView()
+                .controlSize(.small)
+            Text("正在更新搜索结果…")
+                .font(AppListTypography.rowCaption)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, AppShellLayout.spaceS)
+        .padding(.vertical, AppShellLayout.spaceXS)
+    }
+
+    private var emptyResultsRow: some View {
+        Text("没有找到匹配的邮件、日历或 RSS 内容")
+            .font(AppListTypography.rowCaption)
+            .foregroundStyle(.tertiary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, AppShellLayout.spaceS)
+            .padding(.vertical, AppShellLayout.spaceXS)
+    }
+
+    private func errorRow(_ message: String) -> some View {
+        Text(message)
+            .font(AppListTypography.rowCaption)
+            .foregroundStyle(.red)
+            .lineLimit(2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, AppShellLayout.spaceS)
+            .padding(.vertical, AppShellLayout.spaceXS)
+    }
+
     private func resultSection(kind: GlobalSearchSectionKind, results: [NativeSearchResult]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: AppShellLayout.spaceXS) {
                 Image(systemName: kind.systemImage)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 11.5, weight: .medium))
                     .foregroundStyle(.secondary)
                     .frame(width: 16)
                 Text(kind.title)
-                    .font(.system(size: 12, weight: .semibold))
-                Spacer()
-                Button("查看全部") {
+                    .font(AppListTypography.rowCaptionEmphasized)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                Button {
                     viewModel.showAllGlobalSearchResults(kind: kind)
+                } label: {
+                    Text("查看全部 ›")
+                        .font(AppListTypography.rowCaptionEmphasized)
                 }
-                .font(.system(size: 11, weight: .semibold))
                 .buttonStyle(.plain)
-                .foregroundStyle(Color.accentColor)
-                .disabled(query.isEmpty)
+                .foregroundStyle(results.isEmpty ? Color.secondary.opacity(0.45) : Color.accentColor)
+                .disabled(query.isEmpty || results.isEmpty)
             }
+            .padding(.horizontal, AppShellLayout.spaceS)
+            .padding(.top, AppShellLayout.spaceXS)
 
-            if results.isEmpty {
-                Text(kind.emptyTitle)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 4)
-                    .padding(.horizontal, 22)
-            } else {
-                VStack(spacing: 4) {
+            if !results.isEmpty {
+                VStack(spacing: 1) {
                     ForEach(results.prefix(3)) { result in
                         Button {
                             viewModel.openGlobalSearchResult(result)
@@ -109,70 +128,88 @@ private struct GlobalSearchActionRow: View {
     var query: String
     var action: () -> Void
 
+    @State private var isHovering = false
+
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 10) {
+            HStack(spacing: AppShellLayout.spaceS) {
                 Image(systemName: kind.systemImage)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 13.5, weight: .medium))
                     .foregroundStyle(Color.accentColor)
                     .frame(width: 18)
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 1) {
                     Text(kind.title)
-                        .font(.system(size: 12.5, weight: .semibold))
+                        .font(AppListTypography.rowTitle)
+                        .foregroundStyle(.primary)
                     Text(kind.subtitle(for: query))
-                        .font(.system(size: 11))
+                        .font(AppListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
-                Spacer()
-                Image(systemName: "return")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-                    .opacity(kind == .newChat ? 1 : 0)
+                Spacer(minLength: 0)
+                if kind == .newChat {
+                    Image(systemName: "return")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .background(Color(nsColor: .controlBackgroundColor).opacity(0.72), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .padding(.horizontal, AppShellLayout.spaceS)
+            .padding(.vertical, 7)
+            .background(rowBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusS, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: AppShellLayout.radiusS, style: .continuous))
         }
         .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+    }
+
+    private var rowBackground: Color {
+        isHovering ? Color.accentColor.opacity(0.08) : Color.clear
     }
 }
 
 private struct GlobalSearchResultRow: View {
     var result: NativeSearchResult
 
+    @State private var isHovering = false
+
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: AppShellLayout.spaceS) {
             Image(systemName: iconName)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 12.5, weight: .medium))
                 .foregroundStyle(iconColor)
                 .frame(width: 18)
                 .padding(.top, 2)
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: AppShellLayout.spaceXS) {
                     Text(result.title.isEmpty ? "无标题" : result.title)
-                        .font(.system(size: 12.5, weight: .semibold))
+                        .font(AppListTypography.rowTitle)
+                        .foregroundStyle(.primary)
                         .lineLimit(1)
                     if !result.resultTimeLabel.isEmpty {
                         Text(result.resultTimeLabel)
-                            .font(.system(size: 10.5))
+                            .font(AppListTypography.rowCaption)
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
                     }
                 }
                 if !result.snippet.isEmpty {
                     Text(result.snippet)
-                        .font(.system(size: 11))
+                        .font(AppListTypography.rowSubtitle)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, AppShellLayout.spaceS)
         .padding(.vertical, 6)
-        .background(Color(nsColor: .windowBackgroundColor).opacity(0.45), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .background(rowBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusS, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: AppShellLayout.radiusS, style: .continuous))
+        .onHover { isHovering = $0 }
+    }
+
+    private var rowBackground: Color {
+        isHovering ? Color.accentColor.opacity(0.08) : Color.clear
     }
 
     private var iconName: String {
