@@ -1022,7 +1022,6 @@ final class AppViewModel: NSObject, ObservableObject {
 
     func updateGlobalSearchQuery(_ query: String) {
         globalSearchQuery = query
-        sessionSearchQuery = query
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         globalSearchPreviewTask?.cancel()
         guard !trimmed.isEmpty else {
@@ -1042,7 +1041,6 @@ final class AppViewModel: NSObject, ObservableObject {
     func clearGlobalSearch() {
         globalSearchPreviewTask?.cancel()
         globalSearchQuery = ""
-        sessionSearchQuery = ""
         isGlobalSearchOverlayPresented = false
         globalSearchPreviewState = .empty
     }
