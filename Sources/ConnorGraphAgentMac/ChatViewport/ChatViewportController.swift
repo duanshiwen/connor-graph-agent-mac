@@ -63,6 +63,14 @@ final class ChatViewportController: ObservableObject {
         apply(.prepareForPrepend(anchorItemID: anchorItemID))
     }
 
+    func notifyPrepend(count: Int, anchorItemID: String) {
+        notifyDataChange(.prepend(count: count, anchorItemID: anchorItemID))
+    }
+
+    func completePrependCorrection() {
+        completeProgrammaticScroll()
+    }
+
     func completeProgrammaticScroll() {
         apply(.programmaticScrollCompleted)
     }

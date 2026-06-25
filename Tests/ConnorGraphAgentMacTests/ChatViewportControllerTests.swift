@@ -44,4 +44,24 @@ struct ChatViewportControllerTests {
         #expect(controller.pendingScrollCommand?.target == .bottom(animated: true))
         #expect(controller.snapshot.pendingNewItemCount == 0)
     }
+
+    @Test func prependPublishesAnchorRestorationCommand() {
+        let controller = ChatViewportController(configuration: .init(bottomPinThreshold: 64))
+        controller.updateMetrics(.init(viewportHeight: 600, contentHeight: 1_200, distanceToBottom: 300, distanceToTop: 300))
+
+        controller.prepareForPrepend(anchorItemID: "message-42")
+        controller.notifyDataChange(.prepend(count: 20))
+
+        #expect(controller.pendingScrollCommand?.target == .item(id: "message-42", anchor: .top, animated: false))
+        #expect(controller.snapshot.pendingNewItemCount == 0)
+    }
+
+    @Test func explicitPrependPublishesAnchorRestorationCommand() {
+        let controller = ChatViewportController(configuration: .init(bottomPinThreshold: 64))
+        controller.updateMetrics(.init(viewportHeight: 600, contentHeight: 1_200, distanceToBottom: 300, distanceToTop: 300))
+
+        controller.notifyPrepend(count: 20, anchorItemID: "message-7")
+
+        #expect(controller.pendingScrollCommand?.target == .item(id: "message-7", anchor: .top, animated: false))
+    }
 }

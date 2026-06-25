@@ -91,4 +91,43 @@ struct ChatViewportStateMachineTests {
         #expect(!snapshot.isPinnedToBottom)
         #expect(snapshot.shouldShowJumpToLatest)
     }
+
+    @Test func prependAfterPreparationRequestsAnchorRestoration() {
+        let machine = ChatViewportStateMachine(configuration: .init())
+        let browsing = ChatViewportSnapshot(mode: .freeBrowsing, isPinnedToBottom: false, shouldShowJumpToLatest: true, pendingNewItemCount: 1)
+        let prepared = machine.reduce(snapshot: browsing, event: .prepareForPrepend(anchorItemID: "message-42"))
+
+        let snapshot = machine.reduce(snapshot: prepared, event: .dataChanged(.prepend(count: 20)))
+
+        #expect(snapshot.mode == .programmaticScroll(.item(id: "message-42", anchor: .top, animated: false)))
+        #expect(!snapshot.isPinnedToBottom)
+        #expect(snapshot.shouldShowJumpToLatest)
+        #expect(snapshot.pendingNewItemCount == 1)
+    }
+
+    @Test func explicitPrependAnchorRequestsAnchorRestoration() {
+        let machine = ChatViewportStateMachine(configuration: .init())
+        let browsing = ChatViewportSnapshot(mode: .freeBrowsing, isPinnedToBottom: false, shouldShowJumpToLatest: true, pendingNewItemCount: 0)
+
+        let snapshot = machine.reduce(snapshot: browsing, event: .dataChanged(.prepend(count: 10, anchorItemID: "message-7")))
+
+        #expect(snapshot.mode == .programmaticScroll(.item(id: "message-7", anchor: .top, animated: false)))
+    }
+
+    @Test func completedPrependCorrectionReturnsToFreeBrowsing() {
+        let machine = ChatViewportStateMachine(configuration: .init())
+        let correcting = ChatViewportSnapshot(
+            mode: .programmaticScroll(.item(id: "message-42", anchor: .top, animated: false)),
+            isPinnedToBottom: false,
+            shouldShowJumpToLatest: true,
+            pendingNewItemCount: 2
+        )
+
+        let snapshot = machine.reduce(snapshot: correcting, event: .programmaticScrollCompleted)
+
+        #expect(snapshot.mode == .freeBrowsing)
+        #expect(!snapshot.isPinnedToBottom)
+        #expect(snapshot.shouldShowJumpToLatest)
+        #expect(snapshot.pendingNewItemCount == 2)
+    }
 }
