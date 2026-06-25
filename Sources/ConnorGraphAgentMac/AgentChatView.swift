@@ -430,8 +430,8 @@ private struct AgentChatConversationView: View {
     @State private var lastObservedTranscriptCount: Int = 0
     @StateObject private var chatViewportController = ChatViewportController(
         configuration: ChatViewportConfiguration(
-            spacing: AgentChatLayout.spaceL,
-            bottomPinThreshold: 72,
+            spacing: AgentChatLayout.chatViewportSpacing,
+            bottomPinThreshold: AgentChatLayout.chatBottomPinnedThreshold,
             topLoadTriggerOffset: 96,
             preservesBottomAnchorForUnderfilledContent: true,
             showsJumpToLatestButton: true
@@ -587,7 +587,8 @@ private struct AgentChatConversationView: View {
                     }
                 }
             }
-            .padding(.vertical, AgentChatLayout.spaceXL)
+            .padding(.horizontal, AgentChatLayout.chatViewportHorizontalInset)
+            .padding(.vertical, AgentChatLayout.chatViewportVerticalInset)
             .onAppear {
                 lastObservedSessionID = viewModel.selectedChatSessionID
                 lastObservedTranscriptCount = viewModel.transcript.count
@@ -619,7 +620,8 @@ private struct AgentChatConversationView: View {
                 isSessionInfoPresented: $isSessionInfoPresented
             )
             .padding(.horizontal, 0)
-            .padding(.vertical, AgentChatLayout.spaceM)
+            .padding(.top, AgentChatLayout.spaceM)
+            .padding(.bottom, AgentChatLayout.spaceS)
         }
         .frame(maxWidth: AgentChatLayout.chatContentMaxWidth, maxHeight: .infinity)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
