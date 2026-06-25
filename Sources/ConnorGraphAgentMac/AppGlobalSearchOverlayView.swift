@@ -1,5 +1,6 @@
 import SwiftUI
 import ConnorGraphCore
+import ConnorGraphAppSupport
 
 struct AppGlobalSearchOverlayView: View {
     @ObservedObject var viewModel: AppViewModel
@@ -7,7 +8,7 @@ struct AppGlobalSearchOverlayView: View {
     private var state: GlobalSearchPreviewState { viewModel.globalSearchPreviewState }
     private var query: String { viewModel.globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var hasAnyNativeResults: Bool {
-        !state.mailResults.isEmpty || !state.calendarResults.isEmpty || !state.rssResults.isEmpty
+        !state.mailResults.isEmpty || !state.calendarResults.isEmpty || !state.rssResults.isEmpty || !state.browserHistoryResults.isEmpty
     }
 
     var body: some View {
@@ -21,6 +22,7 @@ struct AppGlobalSearchOverlayView: View {
             resultSection(kind: .mail, results: state.mailResults)
             resultSection(kind: .calendar, results: state.calendarResults)
             resultSection(kind: .rss, results: state.rssResults)
+            browserHistorySection(results: state.browserHistoryResults)
 
             if !state.isLoading, !hasAnyNativeResults, state.errorMessage == nil {
                 emptyResultsRow
@@ -65,7 +67,7 @@ struct AppGlobalSearchOverlayView: View {
     }
 
     private var emptyResultsRow: some View {
-        Text("没有找到匹配的邮件、日历或 RSS 内容")
+        Text("没有找到匹配的邮件、日历、RSS 或浏览历史")
             .font(AppListTypography.rowCaption)
             .foregroundStyle(.tertiary)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -81,6 +83,45 @@ struct AppGlobalSearchOverlayView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, AppShellLayout.spaceS)
             .padding(.vertical, AppShellLayout.spaceXS)
+    }
+
+    private func browserHistorySection(results: [BrowserHistoryRecord]) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: AppShellLayout.spaceXS) {
+                Image(systemName: GlobalSearchSectionKind.browserHistory.systemImage)
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16)
+                Text(GlobalSearchSectionKind.browserHistory.title)
+                    .font(AppListTypography.rowCaptionEmphasized)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                Button {
+                    viewModel.showAllGlobalSearchResults(kind: .browserHistory)
+                } label: {
+                    Text("查看全部 ›")
+                        .font(AppListTypography.rowCaptionEmphasized)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(results.isEmpty ? Color.secondary.opacity(0.45) : Color.accentColor)
+                .disabled(query.isEmpty || results.isEmpty)
+            }
+            .padding(.horizontal, AppShellLayout.spaceS)
+            .padding(.top, AppShellLayout.spaceXS)
+
+            if !results.isEmpty {
+                VStack(spacing: 1) {
+                    ForEach(results.prefix(3)) { record in
+                        Button {
+                            viewModel.openGlobalSearchBrowserHistoryResult(record)
+                        } label: {
+                            GlobalSearchBrowserHistoryRow(record: record)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
     }
 
     private func resultSection(kind: GlobalSearchSectionKind, results: [NativeSearchResult]) -> some View {
@@ -160,6 +201,61 @@ private struct GlobalSearchActionRow: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
+    }
+
+    private var rowBackground: Color {
+        isHovering ? Color.accentColor.opacity(0.08) : Color.clear
+    }
+}
+
+private struct GlobalSearchBrowserHistoryRow: View {
+    var record: BrowserHistoryRecord
+
+    @State private var isHovering = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: AppShellLayout.spaceS) {
+            Image(systemName: "clock.arrow.circlepath")
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(.teal)
+                .frame(width: 18)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: AppShellLayout.spaceXS) {
+                    Text(displayTitle)
+                        .font(AppListTypography.rowTitle)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text(record.visitedAt.formatted(date: .abbreviated, time: .shortened))
+                        .font(AppListTypography.rowCaption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+                Text(subtitle)
+                    .font(AppListTypography.rowSubtitle)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, AppShellLayout.spaceS)
+        .padding(.vertical, 6)
+        .background(rowBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusS, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: AppShellLayout.radiusS, style: .continuous))
+        .onHover { isHovering = $0 }
+    }
+
+    private var displayTitle: String {
+        let title = record.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !title.isEmpty { return title }
+        if let host = URL(string: record.url)?.host, !host.isEmpty { return host }
+        return record.url
+    }
+
+    private var subtitle: String {
+        let sessionTitle = record.sessionTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        if sessionTitle.isEmpty { return record.url }
+        return "\(record.url) · \(sessionTitle)"
     }
 
     private var rowBackground: Color {

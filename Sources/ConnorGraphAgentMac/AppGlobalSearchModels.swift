@@ -1,5 +1,6 @@
 import Foundation
 import ConnorGraphCore
+import ConnorGraphAppSupport
 
 struct GlobalSearchPreviewState: Equatable {
     var query: String = ""
@@ -7,12 +8,13 @@ struct GlobalSearchPreviewState: Equatable {
     var mailResults: [NativeSearchResult] = []
     var calendarResults: [NativeSearchResult] = []
     var rssResults: [NativeSearchResult] = []
+    var browserHistoryResults: [BrowserHistoryRecord] = []
     var errorMessage: String?
 
     static let empty = GlobalSearchPreviewState()
 
     var hasAnySourceResults: Bool {
-        !mailResults.isEmpty || !calendarResults.isEmpty || !rssResults.isEmpty
+        !mailResults.isEmpty || !calendarResults.isEmpty || !rssResults.isEmpty || !browserHistoryResults.isEmpty
     }
 }
 
@@ -20,6 +22,7 @@ enum GlobalSearchSectionKind: String, CaseIterable, Identifiable {
     case mail
     case calendar
     case rss
+    case browserHistory
 
     var id: String { rawValue }
 
@@ -28,6 +31,7 @@ enum GlobalSearchSectionKind: String, CaseIterable, Identifiable {
         case .mail: "邮件"
         case .calendar: "日历"
         case .rss: "RSS"
+        case .browserHistory: "浏览历史"
         }
     }
 
@@ -36,6 +40,7 @@ enum GlobalSearchSectionKind: String, CaseIterable, Identifiable {
         case .mail: "envelope"
         case .calendar: "calendar"
         case .rss: "dot.radiowaves.left.and.right"
+        case .browserHistory: "clock.arrow.circlepath"
         }
     }
 
@@ -44,6 +49,7 @@ enum GlobalSearchSectionKind: String, CaseIterable, Identifiable {
         case .mail: "没有匹配的邮件"
         case .calendar: "没有匹配的日程"
         case .rss: "没有匹配的 RSS"
+        case .browserHistory: "没有匹配的浏览历史"
         }
     }
 }
