@@ -247,6 +247,7 @@ public actor NativeSourceSearchService {
         case .mail: temporal.sentAt ?? temporal.receivedAt ?? temporal.updatedAt ?? temporal.createdAt ?? temporal.indexedAt
         case .rss: temporal.publishedAt ?? temporal.fetchedAt ?? temporal.updatedAt ?? temporal.indexedAt
         case .calendar: temporal.eventStartAt ?? temporal.updatedAt ?? temporal.createdAt ?? temporal.indexedAt
+        case .browserHistory: temporal.updatedAt ?? temporal.createdAt ?? temporal.indexedAt
         }
     }
 
@@ -260,6 +261,9 @@ public actor NativeSourceSearchService {
             if temporal.fetchedAt != nil { return .fetchedAt }
         case .calendar:
             if temporal.eventStartAt != nil { return .eventStartAt }
+        case .browserHistory:
+            if temporal.updatedAt != nil { return .updatedAt }
+            if temporal.createdAt != nil { return .createdAt }
         }
         if temporal.updatedAt != nil { return .updatedAt }
         if temporal.createdAt != nil { return .createdAt }
@@ -310,13 +314,7 @@ public actor NativeSourceSearchService {
         var matchedFieldScores: [String: Double] = [:]
         var coveredTokens: Set<String> = []
         let uniqueTokens = Array(Set(tokens))
-        let fields: [(String, String, Double, Double)] = [
-            ("title", document.title, 8, 0.15),
-            ("participants", document.participants.joined(separator: " "), 5, 0.10),
-            ("summary", document.summary, 4, 0.08),
-            ("location", document.location ?? "", 3, 0.10),
-            ("body", document.body ?? "", 2, 0.03)
-        ]
+        let fields = weightedFields(for: document)
         for token in uniqueTokens {
             for (name, value, weight, lengthPenalty) in fields {
                 let lower = value.lowercased()
@@ -365,6 +363,27 @@ public actor NativeSourceSearchService {
         let freshness = freshnessScore(for: document, now: now, rankingProfile: rankingProfile)
         let total = lexical + freshness
         return (total, lexical, freshness, field, Array(matched).sorted(), matchedFieldScores)
+    }
+
+    static func weightedFields(for document: NativeSearchDocument) -> [(String, String, Double, Double)] {
+        switch document.sourceKind {
+        case .browserHistory:
+            return [
+                ("title", document.title, 12, 0.12),
+                ("summary", document.summary, 7, 0.08),
+                ("participants", document.participants.joined(separator: " "), 4, 0.10),
+                ("location", document.location ?? "", 0, 0.10),
+                ("body", document.body ?? "", 0.75, 0.08)
+            ]
+        default:
+            return [
+                ("title", document.title, 8, 0.15),
+                ("participants", document.participants.joined(separator: " "), 5, 0.10),
+                ("summary", document.summary, 4, 0.08),
+                ("location", document.location ?? "", 3, 0.10),
+                ("body", document.body ?? "", 2, 0.03)
+            ]
+        }
     }
 
     static func occurrenceCount(of needle: String, in haystack: String) -> Int {
@@ -491,6 +510,7 @@ public actor NativeSourceSearchService {
             case .mail: "Message time"
             case .rss: "Item time"
             case .calendar: "Event time"
+            case .browserHistory: "Visited"
             }
         }
     }
