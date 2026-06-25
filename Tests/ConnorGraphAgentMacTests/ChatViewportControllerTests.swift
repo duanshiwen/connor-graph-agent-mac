@@ -142,6 +142,23 @@ struct ChatViewportControllerTests {
         #expect(controller.snapshot.mode == .programmaticScroll(.bottom(animated: false)))
     }
 
+    @Test func initialBottomAnchorWaitsForContentLayoutBeforePublishingScrollCommand() {
+        let controller = ChatViewportController(configuration: .init(bottomPinThreshold: 64))
+        let dataSet = ChatViewportDataSetID.agentChatSession(sessionID: "session", revision: 1)
+
+        controller.replaceDataSet(id: dataSet, itemCount: 80, initialAnchor: .bottom)
+
+        controller.updateMetrics(.init(viewportHeight: 600, contentHeight: 0, distanceToBottom: 0, distanceToTop: 0))
+
+        #expect(controller.pendingScrollCommand == nil)
+        #expect(controller.isResolvingInitialAnchor)
+
+        controller.updateMetrics(.init(viewportHeight: 600, contentHeight: 1_800, distanceToBottom: 1_200, distanceToTop: 0))
+
+        #expect(controller.pendingScrollCommand?.target == .bottom(animated: false))
+        #expect(controller.snapshot.mode == .programmaticScroll(.bottom(animated: false)))
+    }
+
     @Test func replaceDataSetIfNeededDoesNotIncrementGenerationForSameDataSet() {
         let controller = ChatViewportController(configuration: .init())
         let dataSet = ChatViewportDataSetID.agentChatSession(sessionID: "session", revision: 1)
