@@ -248,12 +248,18 @@ public struct AppMemoryOSCLIInspector: Sendable {
         check("database_exists", fileManager.fileExists(atPath: databasePath), databasePath)
         check("index_directory_exists", fileManager.fileExists(atPath: searchKernel.indexDirectory.path), searchKernel.indexDirectory.path)
 
-        let meta: MemoryOSCLISearchIndexMeta?
+        var meta: MemoryOSCLISearchIndexMeta?
         do {
             meta = try readSearchIndexMeta(indexDirectory: searchKernel.indexDirectory, fileManager: fileManager)
             check("connor_meta_exists", true, AppMemoryOSSearchKernelFactory.connorMetaFilename)
             check("schema_version_current", meta?.indexSchemaVersion == AppMemoryOSSearchKernelFactory.currentIndexSchemaVersion, "expected \(AppMemoryOSSearchKernelFactory.currentIndexSchemaVersion), actual \(meta?.indexSchemaVersion ?? -1)")
             check("document_count_positive", (meta?.documentCount ?? 0) > 0, "documentCount=\(meta?.documentCount ?? 0)")
+            if let indexed = meta?.sourceDatabaseFingerprint {
+                let current = try currentSearchIndexFingerprint(fileManager: fileManager)
+                check("source_database_fingerprint_current", indexed.isCurrentEnough(comparedTo: current), indexed.diffSummary(comparedTo: current))
+            } else {
+                check("source_database_fingerprint_current", false, "missing sourceDatabaseFingerprint in \(AppMemoryOSSearchKernelFactory.connorMetaFilename)")
+            }
         } catch {
             meta = nil
             check("connor_meta_exists", false, error.localizedDescription)
@@ -343,6 +349,12 @@ public struct AppMemoryOSCLIInspector: Sendable {
             total += Int64(size)
         }
         return total
+    }
+
+    private func currentSearchIndexFingerprint(fileManager: FileManager) throws -> MemoryOSCLISearchIndexFingerprint {
+        let object = AppMemoryOSSearchKernelFactory.sourceDatabaseFingerprint(databaseURL: URL(fileURLWithPath: databasePath), fileManager: fileManager)
+        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        return try JSONDecoder().decode(MemoryOSCLISearchIndexFingerprint.self, from: data)
     }
 
     private func tantivySegmentCount(tantivyMetaURL: URL) -> Int {
@@ -506,6 +518,27 @@ public struct MemoryOSCLISearchIndexFingerprint: Codable, Sendable, Equatable {
     public var shmFileSize: Int64
     public var shmModifiedAt: String
     public var tableCounts: [String: Int]?
+}
+
+private extension MemoryOSCLISearchIndexFingerprint {
+    func isCurrentEnough(comparedTo current: MemoryOSCLISearchIndexFingerprint) -> Bool {
+        databaseFileSize == current.databaseFileSize
+            && walFileSize == current.walFileSize
+            && tableCounts == current.tableCounts
+    }
+
+    func diffSummary(comparedTo current: MemoryOSCLISearchIndexFingerprint) -> String {
+        var diffs: [String] = []
+        if databaseFileSize != current.databaseFileSize { diffs.append("databaseFileSize indexed=\(databaseFileSize) current=\(current.databaseFileSize)") }
+        if walFileSize != current.walFileSize { diffs.append("walFileSize indexed=\(walFileSize) current=\(current.walFileSize)") }
+        let indexedCounts = tableCounts ?? [:]
+        let currentCounts = current.tableCounts ?? [:]
+        let keys = Set(indexedCounts.keys).union(currentCounts.keys).sorted()
+        for key in keys where indexedCounts[key] != currentCounts[key] {
+            diffs.append("\(key) indexed=\(indexedCounts[key] ?? -1) current=\(currentCounts[key] ?? -1)")
+        }
+        return diffs.isEmpty ? "source database fingerprint is current" : diffs.joined(separator: "; ")
+    }
 }
 
 public struct MemoryOSCLISearchIndexStats: Codable, Sendable, Equatable {
