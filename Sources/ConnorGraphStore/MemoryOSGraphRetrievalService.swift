@@ -72,6 +72,38 @@ public struct MemoryOSGraphSubgraph: Sendable, Codable, Equatable {
     }
 }
 
+public enum MemoryOSGraphQueryIntent: String, Sendable, Codable, Equatable, CaseIterable {
+    case auto
+    case l2Statements
+    case l3Beliefs
+    case l4Entity
+    case l4Neighbors
+    case l4Instances
+    case evidence
+}
+
+public struct MemoryOSGraphQuery: Sendable, Codable, Equatable {
+    public var text: String
+    public var intent: MemoryOSGraphQueryIntent
+    public var entityID: String?
+    public var classEntityIDs: [String]
+    public var predicates: [String]
+    public var direction: MemoryOSGraphDirection
+    public var includeEvidence: Bool
+    public var limit: Int
+
+    public init(text: String = "", intent: MemoryOSGraphQueryIntent = .auto, entityID: String? = nil, classEntityIDs: [String] = [], predicates: [String] = [], direction: MemoryOSGraphDirection = .both, includeEvidence: Bool = false, limit: Int = 50) {
+        self.text = text
+        self.intent = intent
+        self.entityID = entityID
+        self.classEntityIDs = classEntityIDs
+        self.predicates = predicates
+        self.direction = direction
+        self.includeEvidence = includeEvidence
+        self.limit = limit
+    }
+}
+
 public struct MemoryOSEvidenceTraceQuery: Sendable, Codable, Equatable {
     public var spanIDs: [String]
     public var statementIDs: [String]
@@ -155,6 +187,60 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
 
     public init(store: SQLiteMemoryOSStore) {
         self.store = store
+    }
+
+    public func queryGraph(_ query: MemoryOSGraphQuery) throws -> MemoryOSGraphSubgraph {
+        let text = query.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let limit = min(max(query.limit, 1), 500)
+        let predicates = query.predicates.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        var subgraphs: [MemoryOSGraphSubgraph] = []
+
+        switch query.intent {
+        case .l2Statements:
+            subgraphs.append(try l2FindStatements(MemoryOSL2StatementFindQuery(text: text, predicates: predicates, limit: limit)))
+        case .l3Beliefs:
+            subgraphs.append(try l3ExpandBelief(MemoryOSL3BeliefExpandQuery(text: text, limit: min(limit, 100))))
+        case .l4Entity:
+            if !text.isEmpty { subgraphs.append(try l4FindEntity(MemoryOSL4EntityFindQuery(text: text, limit: min(limit, 100)))) }
+        case .l4Neighbors:
+            let entityID = try resolvedEntityID(explicit: query.entityID, text: text)
+            if let entityID {
+                subgraphs.append(try l4Neighbors(MemoryOSL4NeighborsQuery(entityID: entityID, direction: query.direction, predicates: predicates, limit: limit)))
+            }
+        case .l4Instances:
+            var classIDs = query.classEntityIDs.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+            if classIDs.isEmpty, !text.isEmpty {
+                let resolved = try l4FindEntity(MemoryOSL4EntityFindQuery(text: text, limit: 5))
+                subgraphs.append(resolved)
+                classIDs = resolved.nodes.map(\.id)
+            }
+            if !classIDs.isEmpty {
+                subgraphs.append(try l4Instances(MemoryOSL4InstanceQuery(classEntityIDs: classIDs, predicates: predicates.isEmpty ? ["P31"] : predicates, limit: limit)))
+            }
+        case .evidence:
+            if !text.isEmpty {
+                let statements = try l2FindStatements(MemoryOSL2StatementFindQuery(text: text, predicates: predicates, limit: limit))
+                subgraphs.append(statements)
+            }
+        case .auto:
+            if !text.isEmpty {
+                subgraphs.append(try l4FindEntity(MemoryOSL4EntityFindQuery(text: text, limit: min(10, limit))))
+                subgraphs.append(try l2FindStatements(MemoryOSL2StatementFindQuery(text: text, predicates: predicates, limit: min(50, limit))))
+                subgraphs.append(try l3ExpandBelief(MemoryOSL3BeliefExpandQuery(text: text, limit: min(20, limit))))
+            }
+        }
+
+        var merged = mergeSubgraphs(subgraphs, explanationPrefix: "Memory OS query_graph intent \(query.intent.rawValue)")
+        if query.includeEvidence || query.intent == .evidence {
+            let statementIDs = Set(merged.edges.filter { $0.layer == .l2 }.map(\.id) + merged.nodes.filter { $0.layer == .l2 }.map(\.id))
+            let beliefIDs = Set(merged.nodes.filter { $0.layer == .l3 }.map(\.id))
+            let trace = try traceEvidence(MemoryOSEvidenceTraceQuery(spanIDs: merged.evidenceRefs, statementIDs: Array(statementIDs), beliefIDs: Array(beliefIDs), limit: limit))
+            merged = mergeSubgraphs([merged, trace], explanationPrefix: "Memory OS query_graph intent \(query.intent.rawValue) with evidence trace")
+        }
+        if merged.nodes.isEmpty && merged.edges.isEmpty {
+            merged.explanation = "Memory OS query_graph intent \(query.intent.rawValue) returned no graph results."
+        }
+        return merged
     }
 
     public func traceEvidence(_ query: MemoryOSEvidenceTraceQuery) throws -> MemoryOSGraphSubgraph {
@@ -513,6 +599,44 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
             evidenceRefs: Array(Set(evidenceRefs)).sorted(),
             provenanceRefs: [],
             explanation: "L4 instances query: predicates \(predicates.joined(separator: ",")) -> classes \(classIDs.joined(separator: ",")); returned \(rows.count) instance edge(s)."
+        )
+    }
+
+    private func resolvedEntityID(explicit: String?, text: String) throws -> String? {
+        let explicitID = explicit?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let explicitID, !explicitID.isEmpty { return explicitID }
+        guard !text.isEmpty else { return nil }
+        return try l4FindEntity(MemoryOSL4EntityFindQuery(text: text, limit: 1)).nodes.first?.id
+    }
+
+    private func mergeSubgraphs(_ subgraphs: [MemoryOSGraphSubgraph], explanationPrefix: String) -> MemoryOSGraphSubgraph {
+        var nodesByKey: [String: MemoryOSGraphNode] = [:]
+        var edgesByID: [String: MemoryOSGraphEdge] = [:]
+        var evidenceRefs = Set<String>()
+        var provenanceRefs = Set<String>()
+        var explanations: [String] = []
+        for subgraph in subgraphs {
+            for node in subgraph.nodes { nodesByKey["\(node.layer.rawValue):\(node.id)"] = node }
+            for edge in subgraph.edges { edgesByID[edge.id] = edge }
+            evidenceRefs.formUnion(subgraph.evidenceRefs)
+            provenanceRefs.formUnion(subgraph.provenanceRefs)
+            if !subgraph.explanation.isEmpty { explanations.append(subgraph.explanation) }
+        }
+        let nodes = nodesByKey.values.sorted { lhs, rhs in
+            if lhs.layer.rawValue != rhs.layer.rawValue { return lhs.layer.rawValue < rhs.layer.rawValue }
+            return lhs.id < rhs.id
+        }
+        let edges = edgesByID.values.sorted { lhs, rhs in
+            if lhs.layer.rawValue != rhs.layer.rawValue { return lhs.layer.rawValue < rhs.layer.rawValue }
+            return lhs.id < rhs.id
+        }
+        let suffix = explanations.isEmpty ? "" : " " + explanations.joined(separator: " ")
+        return MemoryOSGraphSubgraph(
+            nodes: nodes,
+            edges: edges,
+            evidenceRefs: Array(evidenceRefs).sorted(),
+            provenanceRefs: Array(provenanceRefs).sorted(),
+            explanation: "\(explanationPrefix) returned \(nodes.count) node(s), \(edges.count) edge(s).\(suffix)"
         )
     }
 

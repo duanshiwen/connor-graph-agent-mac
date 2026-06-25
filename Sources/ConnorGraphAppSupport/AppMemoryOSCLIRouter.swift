@@ -36,6 +36,24 @@ public enum AppMemoryOSCLIRouter {
             return try encode(try inspector.search(query: query, layers: optionValue("--layers", in: args).map(splitCSV) ?? [], limit: intOption("--limit", in: args, default: 20)), encoder: encoder)
         case "search-index":
             return try routeSearchIndex(args: Array(args.dropFirst()), inspector: inspector, encoder: encoder)
+        case "query-graph":
+            let values = Array(args.dropFirst())
+            let text = values.first.flatMap { $0.hasPrefix("--") ? nil : $0 } ?? ""
+            let intent = optionValue("--intent", in: args).flatMap(MemoryOSGraphQueryIntent.init(rawValue:)) ?? .auto
+            let direction = optionValue("--direction", in: args).flatMap(MemoryOSGraphDirection.init(rawValue:)) ?? .both
+            return try encode(
+                try inspector.queryGraph(
+                    text: text,
+                    intent: intent,
+                    entityID: optionValue("--entity", in: args),
+                    classEntityIDs: optionValue("--class", in: args).map(splitCSV) ?? [],
+                    predicates: optionValue("--predicate", in: args).map(splitCSV) ?? [],
+                    direction: direction,
+                    includeEvidence: args.contains("--include-evidence"),
+                    limit: intOption("--limit", in: args, default: 50)
+                ),
+                encoder: encoder
+            )
         case "trace":
             return try routeTrace(args: Array(args.dropFirst()), inspector: inspector, encoder: encoder)
         case "queue":
@@ -45,7 +63,7 @@ public enum AppMemoryOSCLIRouter {
         case "pipeline":
             return try routePipeline(args: Array(args.dropFirst()), inspector: inspector, encoder: encoder)
         default:
-            return try encode(MemoryOSCLIError(error: "unknown_memory_command", usage: "connor memory status"), encoder: encoder)
+            return try encode(MemoryOSCLIError(error: "unknown_memory_command", usage: "connor memory status|search|query-graph|l0|l1|l2|l3|l4|trace|search-index"), encoder: encoder)
         }
     }
 
