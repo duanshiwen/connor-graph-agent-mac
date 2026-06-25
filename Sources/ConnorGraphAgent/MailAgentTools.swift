@@ -93,6 +93,7 @@ public struct MailListAccountsTool: AgentTool {
 
 public struct MailSearchMessagesTool: AgentTool {
     public let runtime: any AgentMailRuntime
+    public let recorder: (any NativeSourceReferenceRecording)?
     public var name: String { "mail_search_messages" }
     public var description: String { "Search Connor-owned mail summaries using indexed, time-aware retrieval without marking messages as read. Supports optional ISO-8601 startDate/endDate or timePreset; results include message date/time." }
     public var permission: AgentPermissionCapability { .readMail }
@@ -107,7 +108,10 @@ public struct MailSearchMessagesTool: AgentTool {
             "timeSort": .string(description: "Optional sort: relevanceThenTimeDesc, relevanceThenTimeAsc, timeDescThenRelevance, timeAscThenRelevance")
         ], required: ["query"])
     }
-    public init(runtime: any AgentMailRuntime) { self.runtime = runtime }
+    public init(runtime: any AgentMailRuntime, recorder: (any NativeSourceReferenceRecording)? = nil) {
+        self.runtime = runtime
+        self.recorder = recorder
+    }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         let formatter = ISO8601DateFormatter()
         let request = MailRuntimeSearchRequestBridge(
@@ -120,12 +124,14 @@ public struct MailSearchMessagesTool: AgentTool {
             timeSort: arguments.string("timeSort")
         )
         let messages = try await runtime.searchMessages(request, runID: context.runID, sessionID: context.sessionID)
+        await recorder?.record(messages.map { NativeSourceReference.mailSummary($0, query: request.query, toolName: name, context: context) })
         return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(messages.count) mail message summaries; read state unchanged", contentJSON: try MailJSON.encode(messages))
     }
 }
 
 public struct MailGetMessageTool: AgentTool {
     public let runtime: any AgentMailRuntime
+    public let recorder: (any NativeSourceReferenceRecording)?
     public var name: String { "mail_get_message" }
     public var description: String { "Get a mail message; body is optional and read state is never mutated by default." }
     public var permission: AgentPermissionCapability { .readMailBody }
@@ -135,11 +141,15 @@ public struct MailGetMessageTool: AgentTool {
             "includeBody": .boolean(description: "Whether to include body")
         ], required: ["messageID"])
     }
-    public init(runtime: any AgentMailRuntime) { self.runtime = runtime }
+    public init(runtime: any AgentMailRuntime, recorder: (any NativeSourceReferenceRecording)? = nil) {
+        self.runtime = runtime
+        self.recorder = recorder
+    }
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         guard let messageID = arguments.string("messageID") else { throw AgentToolError.invalidArguments("messageID is required") }
         let includeBody = arguments.bool("includeBody") ?? false
         let detail = try await runtime.getMessage(id: MailMessageID(rawValue: messageID), includeBody: includeBody, runID: context.runID, sessionID: context.sessionID)
+        await recorder?.record([NativeSourceReference.mailDetail(detail, includeBody: includeBody, toolName: name, context: context)])
         return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: includeBody ? "Read message body; read state unchanged" : "Read message without body; read state unchanged", contentJSON: try MailJSON.encode(detail))
     }
 }
@@ -224,10 +234,10 @@ public struct MailSendDraftTool: AgentTool {
 }
 
 public extension AgentToolRegistry {
-    mutating func registerNativeMailTools(runtime: any AgentMailRuntime) {
+    mutating func registerNativeMailTools(runtime: any AgentMailRuntime, recorder: (any NativeSourceReferenceRecording)? = nil) {
         register(MailListAccountsTool(runtime: runtime))
-        register(MailSearchMessagesTool(runtime: runtime))
-        register(MailGetMessageTool(runtime: runtime))
+        register(MailSearchMessagesTool(runtime: runtime, recorder: recorder))
+        register(MailGetMessageTool(runtime: runtime, recorder: recorder))
         register(MailSetReadStateTool(runtime: runtime))
         register(MailCreateDraftTool(runtime: runtime))
         register(MailSendDraftTool(runtime: runtime))

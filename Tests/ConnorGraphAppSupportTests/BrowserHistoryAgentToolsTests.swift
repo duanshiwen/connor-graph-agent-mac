@@ -26,8 +26,9 @@ struct BrowserHistoryAgentToolsTests {
         )
         _ = store.appendRecord(record)
 
+        let recorder = BrowserHistorySpyNativeSourceReferenceRecorder()
         var registry = AgentToolRegistry()
-        registry.registerBrowserHistoryTools(store: store)
+        registry.registerBrowserHistoryTools(store: store, recorder: recorder)
         let names = Set(registry.definitions.map(\.name))
         #expect(names.contains("browser_history_search"))
         #expect(names.contains("browser_history_get"))
@@ -47,6 +48,11 @@ struct BrowserHistoryAgentToolsTests {
         #expect(search.contentText.contains("browser history summaries"))
         #expect(search.contentJSON?.contains("11111111-1111-1111-1111-111111111111") == true)
         #expect(search.contentJSON?.contains("Saved browser page body") == true)
+        var references = await recorder.references
+        #expect(references.count == 1)
+        #expect(references[0].sourceKind == .browserHistory)
+        #expect(references[0].referenceStrength == .summaryCandidate)
+        #expect(references[0].content.contains("Saved browser page body"))
 
         let get = try await registry.execute(
             AgentToolCall(id: "call-get", name: "browser_history_get", argumentsJSON: "{\"recordID\":\"11111111-1111-1111-1111-111111111111\"}"),
@@ -62,5 +68,16 @@ struct BrowserHistoryAgentToolsTests {
         #expect(get.contentText.contains("saved page markdown"))
         #expect(get.contentJSON?.contains("# Memory OS") == true)
         #expect(get.contentJSON?.contains("contentMarkdown") == true)
+        references = await recorder.references
+        #expect(references.count == 2)
+        #expect(references[1].referenceStrength == .detailRead)
+        #expect(references[1].content.contains("# Memory OS"))
+    }
+}
+
+private actor BrowserHistorySpyNativeSourceReferenceRecorder: NativeSourceReferenceRecording {
+    private(set) var references: [NativeSourceReference] = []
+    func record(_ references: [NativeSourceReference]) async {
+        self.references.append(contentsOf: references)
     }
 }
