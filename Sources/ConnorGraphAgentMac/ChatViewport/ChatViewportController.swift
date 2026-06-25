@@ -10,18 +10,31 @@ struct ChatViewportScrollCommand: Equatable, Identifiable {
     }
 }
 
+enum ChatViewportInitialAnchor: Equatable, Sendable {
+    case top
+    case bottom
+    case none
+}
+
 @MainActor
 final class ChatViewportController: ObservableObject {
     @Published private(set) var snapshot: ChatViewportSnapshot
     @Published private(set) var pendingScrollCommand: ChatViewportScrollCommand?
+    @Published private(set) var currentDataSetID: ChatViewportDataSetID?
+    @Published private(set) var replacementGeneration: Int
 
     let configuration: ChatViewportConfiguration
     private let stateMachine: ChatViewportStateMachine
+    private var pendingInitialAnchor: ChatViewportInitialAnchor?
+    private var currentDataSetItemCount: Int
+    private var latestMetrics: ChatViewportMetrics?
 
     init(configuration: ChatViewportConfiguration = .init()) {
         self.configuration = configuration
         self.stateMachine = ChatViewportStateMachine(configuration: configuration)
         self.snapshot = .initial
+        self.replacementGeneration = 0
+        self.currentDataSetItemCount = 0
     }
 
     var isPinnedToBottom: Bool { snapshot.isPinnedToBottom }
@@ -29,10 +42,42 @@ final class ChatViewportController: ObservableObject {
     var pendingNewItemCount: Int { snapshot.pendingNewItemCount }
 
     func updateMetrics(_ metrics: ChatViewportMetrics) {
+        latestMetrics = metrics
         apply(.metricsChanged(metrics))
+        completePendingInitialAnchorIfNeeded()
+    }
+
+    func replaceDataSet(
+        id: ChatViewportDataSetID,
+        itemCount: Int,
+        initialAnchor: ChatViewportInitialAnchor = .bottom
+    ) {
+        currentDataSetID = id
+        currentDataSetItemCount = itemCount
+        replacementGeneration += 1
+        latestMetrics = nil
+        pendingInitialAnchor = itemCount > 0 ? initialAnchor : nil
+        setSnapshot(.initial)
+    }
+
+    func replaceDataSetIfNeeded(
+        id: ChatViewportDataSetID,
+        itemCount: Int,
+        initialAnchor: ChatViewportInitialAnchor = .bottom
+    ) {
+        currentDataSetItemCount = itemCount
+        guard currentDataSetID != id else {
+            completePendingInitialAnchorIfNeeded()
+            return
+        }
+        replaceDataSet(id: id, itemCount: itemCount, initialAnchor: initialAnchor)
     }
 
     func notifyDataChange(_ change: ChatViewportDataChange) {
+        if case .replace = change {
+            latestMetrics = nil
+            pendingInitialAnchor = nil
+        }
         apply(.dataChanged(change))
     }
 
@@ -79,6 +124,30 @@ final class ChatViewportController: ObservableObject {
         let command = pendingScrollCommand
         pendingScrollCommand = nil
         return command
+    }
+
+    func completePendingInitialAnchorIfNeeded() {
+        guard let pendingInitialAnchor,
+              latestMetrics != nil,
+              currentDataSetItemCount > 0
+        else { return }
+
+        self.pendingInitialAnchor = nil
+        switch pendingInitialAnchor {
+        case .top:
+            setSnapshot(
+                ChatViewportSnapshot(
+                    mode: .programmaticScroll(.top(animated: false)),
+                    isPinnedToBottom: false,
+                    shouldShowJumpToLatest: configuration.showsJumpToLatestButton,
+                    pendingNewItemCount: 0
+                )
+            )
+        case .bottom:
+            scrollToBottom(animated: false)
+        case .none:
+            break
+        }
     }
 
     private func apply(_ event: ChatViewportEvent) {
