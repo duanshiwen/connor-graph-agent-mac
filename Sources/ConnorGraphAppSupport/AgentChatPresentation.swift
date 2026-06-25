@@ -149,7 +149,7 @@ public struct AgentChatTurnTimestampPresentation: Sendable, Equatable {
         }
         if let yesterday = calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: now)),
            calendar.isDate(date, inSameDayAs: yesterday) {
-            return "昨天"
+            return "昨天 " + dayPeriodTimeFormatter.string(from: date)
         }
         if calendar.component(.year, from: date) == calendar.component(.year, from: now) {
             return monthDayTimeFormatter.string(from: date)
@@ -180,6 +180,8 @@ public struct AgentChatTurnTimestampPresentation: Sendable, Equatable {
 }
 
 public struct AgentChatTurnTimelineItem: Sendable, Equatable, Identifiable {
+    private static let defaultTimestampDisplayInterval: TimeInterval = 5 * 60
+
     public var id: String
     public var message: AgentChatMessagePresentation?
     public var process: AgentChatTurnProcessPresentation?
@@ -212,11 +214,17 @@ public struct AgentChatTurnTimelineItem: Sendable, Equatable, Identifiable {
         let rows = AgentChatMessagePresentation.rows(messages: messages, lastContext: lastContext)
         var items: [AgentChatTurnTimelineItem] = []
         var conversationHistory: [AgentChatMessagePresentation] = []
-        var timestampedTurnNumbers = Set<Int>()
+        var lastTimestampDate: Date?
         for row in rows {
-            if row.message.role == .user, !timestampedTurnNumbers.contains(row.turnNumber) {
+            if row.message.role == .user,
+               shouldInsertTimestamp(
+                   for: row.message.createdAt,
+                   lastTimestampDate: lastTimestampDate,
+                   calendar: calendar,
+                   minimumInterval: defaultTimestampDisplayInterval
+               ) {
                 items.append(.timestamp(turnNumber: row.turnNumber, date: row.message.createdAt, now: now, calendar: calendar))
-                timestampedTurnNumbers.insert(row.turnNumber)
+                lastTimestampDate = row.message.createdAt
             }
             if row.message.role == .assistant {
                 items.append(.process(AgentChatTurnProcessPresentation(completedAssistant: row, conversationHistory: conversationHistory)))
@@ -229,6 +237,17 @@ public struct AgentChatTurnTimelineItem: Sendable, Equatable, Identifiable {
             items.append(.process(AgentChatTurnProcessPresentation(pending: AgentChatPendingAssistantPresentation(messages: messages), conversationHistory: conversationHistory, state: state)))
         }
         return items
+    }
+
+    private static func shouldInsertTimestamp(
+        for date: Date,
+        lastTimestampDate: Date?,
+        calendar: Calendar,
+        minimumInterval: TimeInterval
+    ) -> Bool {
+        guard let lastTimestampDate else { return true }
+        if !calendar.isDate(date, inSameDayAs: lastTimestampDate) { return true }
+        return date.timeIntervalSince(lastTimestampDate) >= minimumInterval
     }
 }
 

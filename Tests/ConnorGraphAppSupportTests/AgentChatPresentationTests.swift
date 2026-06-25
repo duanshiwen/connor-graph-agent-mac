@@ -137,7 +137,7 @@ import ConnorGraphAppSupport
     let items = AgentChatTurnTimelineItem.items(messages: messages, lastContext: nil, isSubmitting: false)
     let processes = items.compactMap(\.process)
 
-    #expect(items.map(\.id) == ["timestamp-turn-1", "user-1", "process-assistant-1", "assistant-1", "timestamp-turn-2", "user-2", "process-assistant-2", "assistant-2"])
+    #expect(items.map(\.id) == ["timestamp-turn-1", "user-1", "process-assistant-1", "assistant-1", "user-2", "process-assistant-2", "assistant-2"])
     #expect(processes[0].fullConversationMessageCount == 1)
     #expect(processes[0].conversationHistory.map(\.message.content) == ["你好"])
     #expect(processes[0].sourceUserMessageID == "user-1")
