@@ -68,3 +68,8 @@ playground.xcworkspace
 .DS_Store
 DerivedData/
 .swiftpm/
+
+# Rust / Cargo
+**/target/
+**/*.rs.bk
+Cargo.lock
