@@ -174,6 +174,10 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         try SQLiteMemoryOSUnifiedRetrievalService(store: store).expandL4(entityID: entityID, depth: depth, limit: limit)
     }
 
+    public func memoryOSContext(_ request: MemoryOSContextRequest, generatedAt: Date = Date()) throws -> MemoryOSContextPackage {
+        try MemoryOSContextDeliveryService(store: store).context(request, generatedAt: generatedAt)
+    }
+
     public func queryMemoryOSGraph(_ query: MemoryOSGraphQuery) throws -> MemoryOSGraphSubgraph {
         try SQLiteMemoryOSGraphRetrievalService(store: store).queryGraph(query)
     }

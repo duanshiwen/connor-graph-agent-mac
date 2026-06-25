@@ -95,9 +95,11 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         var registry = AgentToolRegistry()
         registry.registerSessionStatusTools(repository: AppChatSessionRepository(store: store, storagePaths: storagePaths))
         registry.register(GraphSearchTool(searchService: searchService))
-        if let memoryOSFacade = makeMemoryOSFacade() {
+        let memoryOSFacade = makeMemoryOSFacade()
+        if let memoryOSFacade {
             registry.registerMemoryOSTools(facade: memoryOSFacade)
         }
+        let nativeSourceReferenceRecorder = memoryOSFacade.map { AppMemoryOSNativeSourceReferenceRecorder(facade: $0) }
         let settings = (try? settingsRepository.loadSettings()) ?? .default
         let runtimeSettings = loadRuntimeSettings()
         let resolvedWorkspace = AppProjectWorkingDirectoryResolver.resolveWorkspace(
@@ -138,7 +140,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         registry.register(ScienceTableComputeTool())
         registry.registerTimeAnalysisTool()
         if let storagePaths {
-            registry.registerNativeCalendarTools(runtime: CalendarSourceAgentRuntimeBridge(store: FileBackedCalendarSourceRuntimeStore(storagePaths: storagePaths)))
+            registry.registerNativeCalendarTools(runtime: CalendarSourceAgentRuntimeBridge(store: FileBackedCalendarSourceRuntimeStore(storagePaths: storagePaths)), recorder: nativeSourceReferenceRecorder)
             let mailStore = FileBackedMailSourceStore(storagePaths: storagePaths)
             let mailDraftStore = FileBackedMailDraftRepository(
                 storeURL: storagePaths.applicationSupportDirectory
@@ -150,7 +152,12 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
                 cache: mailStore,
                 draftStore: mailDraftStore,
                 credentialStore: AppMailCredentialStore(credentialStore: settingsRepository.credentialStore)
-            ))
+            ), recorder: nativeSourceReferenceRecorder)
+            registry.registerNativeRSSTools(runtime: RSSRuntime(
+                repository: FileBackedRSSSourceRepository(storagePaths: storagePaths),
+                cache: FileBackedRSSSourceCache(storagePaths: storagePaths)
+            ), recorder: nativeSourceReferenceRecorder)
+            registry.registerBrowserHistoryTools(store: BrowserHistoryStore(historyURL: storagePaths.browserHistoryURL), recorder: nativeSourceReferenceRecorder)
         } else {
             registry.registerNativeCalendarTools(runtime: InMemoryAgentCalendarRuntime())
         }

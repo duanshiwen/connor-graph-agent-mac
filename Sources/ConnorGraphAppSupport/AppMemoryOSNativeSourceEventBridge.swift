@@ -49,14 +49,15 @@ public struct AppMemoryOSNativeSourceEventBridge: Sendable {
     }
 
     @discardableResult
-    public func ingestBrowserHistoryEvent(id: String, title: String, urlString: String, occurredAt: Date = Date(), metadata: [String: String] = [:]) throws -> MemoryOSIngestionResult {
-        try facade.ingestSourceEvent(
+    public func ingestBrowserHistoryEvent(id: String, title: String, urlString: String, contentMarkdown: String? = nil, occurredAt: Date = Date(), metadata: [String: String] = [:]) throws -> MemoryOSIngestionResult {
+        let content = contentMarkdown?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? contentMarkdown! : urlString
+        return try facade.ingestSourceEvent(
             sourceID: "browser_history:\(id)",
             title: title,
-            content: urlString,
+            content: content,
             occurredAt: occurredAt,
             sourceKind: "browser_history",
-            metadata: metadata.merging(["browser_history_id": id, "url": urlString]) { current, _ in current }
+            metadata: metadata.merging(["browser_history_id": id, "url": urlString, "has_content_markdown": String(contentMarkdown?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)]) { current, _ in current }
         )
     }
 
