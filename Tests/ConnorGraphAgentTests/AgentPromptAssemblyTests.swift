@@ -37,6 +37,7 @@ import ConnorGraphAgent
     #expect(prompt.contains("internal context first"))
     #expect(prompt.contains("Then search current web information"))
     #expect(prompt.contains("Use `web_fetch` to read original pages"))
+    #expect(prompt.contains("memory_os_context"))
     #expect(prompt.contains("memory_os_search"))
     #expect(prompt.contains("memory_os_read_record"))
     #expect(prompt.contains("memory_os_expand_l4"))
@@ -60,7 +61,7 @@ import ConnorGraphAgent
 
     let currentTimeIndex = try #require(prompt.range(of: "At the start of every user task")?.lowerBound)
     let profileIndex = try #require(prompt.range(of: "memory_os_get_current_user_profile", range: currentTimeIndex..<prompt.endIndex)?.lowerBound)
-    let memorySearchIndex = try #require(prompt.range(of: "memory_os_search", range: profileIndex..<prompt.endIndex)?.lowerBound)
+    let memorySearchIndex = try #require(prompt.range(of: "memory_os_context", range: profileIndex..<prompt.endIndex)?.lowerBound)
     let webSearchIndex = try #require(prompt.range(of: "web_search", range: memorySearchIndex..<prompt.endIndex)?.lowerBound)
     let skillIndex = try #require(prompt.range(of: "connor_skill_activate", range: webSearchIndex..<prompt.endIndex)?.lowerBound)
     let synthesizeIndex = try #require(prompt.range(of: "Only after current time, internal memory, external evidence, and relevant skill instructions", range: skillIndex..<prompt.endIndex)?.lowerBound)
@@ -68,6 +69,7 @@ import ConnorGraphAgent
     #expect(currentTimeIndex < profileIndex)
     #expect(profileIndex < memorySearchIndex)
     #expect(memorySearchIndex < webSearchIndex)
+    #expect(prompt.contains("Use low-level `memory_os_search` when you specifically need candidate entry-point rows"))
     #expect(webSearchIndex < skillIndex)
     #expect(skillIndex < synthesizeIndex)
 }
@@ -198,7 +200,7 @@ import ConnorGraphAgent
     )
     let assembly = AgentPromptAssembler().assemble(request: request, memoryContract: nil)
 
-    let transformed = try await AgentPromptBudgetTransformer(maxEstimatedTokens: 3_200).transform(
+    let transformed = try await AgentPromptBudgetTransformer(maxEstimatedTokens: 4_200).transform(
         assembly,
         projectionMode: .structuredContextMessages
     )
