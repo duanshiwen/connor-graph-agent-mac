@@ -1,4 +1,5 @@
 import SwiftUI
+import ConnorGraphAppSupport
 
 struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where Item.ID: Hashable {
     var dataSetID: ChatViewportDataSetID
@@ -142,9 +143,7 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                 }
                 .task(id: initialLatestAnchorTaskID) {
                     guard hasLaidOutInitialItems else { return }
-                    await Task.yield()
-                    await Task.yield()
-                    scrollToLatestRenderedItem(proxy: proxy, animated: false)
+                    scheduleInitialLatestAnchorRetries(proxy: proxy)
                 }
 
                 if configuration.showsJumpToLatestButton,
@@ -207,6 +206,18 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
         guard let command = controller.consumePendingScrollCommand() else { return }
         DispatchQueue.main.async {
             perform(command, proxy: proxy)
+        }
+    }
+
+    private func scheduleInitialLatestAnchorRetries(proxy: ScrollViewProxy) {
+        let scheduledDataSetID = dataSetID
+        for delay in AgentChatCollapseScrollSchedule.decisionDelays {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                guard dataSetID == scheduledDataSetID,
+                      hasLaidOutInitialItems
+                else { return }
+                scrollToLatestRenderedItem(proxy: proxy, animated: false)
+            }
         }
     }
 
