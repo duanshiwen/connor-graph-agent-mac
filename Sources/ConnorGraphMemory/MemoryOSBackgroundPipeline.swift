@@ -159,12 +159,21 @@ public struct MemoryOSL1ToL2PromptBuilder: Sendable {
         - Output only MemoryOSL1UnifiedProjectionOutput JSON.
 
         Current user and person boundary:
-        - The current user is the human operating this Connor installation/session.
-        - Treat first-person references from user-authored chat/session evidence (I, me, my, 我, 我的, 用户) as the current user when source metadata supports that authorship.
+        - The current user is the human operating this Connor installation/session and must be represented through the structured current_user identity anchor, not through generic natural-language words.
+        - Treat first-person references from user-authored chat/session evidence (I, me, my, 我, 我的) as the current user when source metadata supports that authorship.
+        - Do not treat generic words such as user, users, 用户, 当前用户, profile, or generic Foundation KG/Wikidata user concepts as the current user.
         - Other named or described people are other_person entities, not the current user.
+        - Contacts, mail senders/recipients, calendar attendees/organizers, project contributors, decision owners, and people mentioned by name/nickname/role are person identity signals. Use available contact_id, email, message sender/recipient, attendee, organization, project, and role metadata as disambiguation evidence.
         - Do not merge other people into the current user.
         - Do not assign another person's preferences, habits, goals, traits, location, family, relationships or commitments to the current user unless explicitly supported by evidence.
-        - If person identity is ambiguous, preserve the ambiguity in metadata/warnings instead of guessing or merging.
+        - If person identity is ambiguous, preserve the ambiguity in metadata/warnings with metadata.person_role = ambiguous_person and metadata.person_resolution = needs_confirmation instead of guessing, merging, or creating a stable person entity.
+
+        Person feature extraction policy:
+        - Extract explicitly evidenced current-user and other-person features when they are useful future operational memory: preference, dislike, habit, goal, stable_trait, communication_preference, knowledge_background, emotional_support_preference, interaction_guidance, personal_context, relationship_context, constraint.
+        - For current-user profile facts, set metadata.l2_fact_type = profile_preference, metadata.person_role = current_user, metadata.person_resolution = resolved, metadata.identity_anchor = current_user, metadata.profile_dimension to one of the profile dimensions above, metadata.evidence_quality to user_explicit / observed_behavior / repeated_pattern / assistant_inference, and metadata.stability to one_off / emerging / stable.
+        - For other-person profile facts, set metadata.person_role = other_person and include the strongest available identity evidence such as contact_id, normalized_email, source_message_id, organization, project, role, or name_context.
+        - Weak one-off observations, jokes, transient emotions, and assistant guesses should remain low-confidence operational observations; do not write them as stable traits.
+        - Do not infer medical, psychological, or sensitive identity diagnoses. Record only evidence-backed operational facts and mark sensitive facts with metadata.sensitivity.
 
         L1 unified output contract:
         - Output schema is MemoryOSL1UnifiedProjectionOutput JSON with operationalEntities, operationalStatements, evidenceSpans, knowledgeCandidates, conceptEntities, conceptRelations, promotionDecisions, warnings, confidence and metadata.
@@ -208,9 +217,11 @@ public struct MemoryOSL1ToL2PromptBuilder: Sendable {
         - The taxonomy is for L2 operational routing only; it is not a reason to promote a fact into L3.
 
         Person/profile routing rules:
-        - Current-user preferences, habits, goals, stable traits, communication preferences and knowledge background are L2 profile_preference facts unless they encode reusable knowledge.
-        - Other-person profile facts may also be L2 profile_preference or relationship facts, but must be clearly marked as other_person.
+        - Current-user preferences, habits, goals, stable traits, constraints, emotional-support preferences, communication preferences, interaction guidance and knowledge background are L2 profile_preference facts unless they encode reusable knowledge.
+        - Other-person profile facts may also be L2 profile_preference or relationship facts, but must be clearly marked as other_person and identity-resolved with evidence.
+        - Ambiguous people must be marked ambiguous_person / needs_confirmation and should not produce stable L4 person entities.
         - Do not promote ordinary person profile facts into L3 merely because confidence is high.
+        - Append refined profile facts; do not overwrite older profile facts in the projection artifact.
 
         L3 promotion filters:
         - signal_quality: pass only if the material is substantial knowledge rather than noise, style, or a one-off detail.
@@ -224,8 +235,8 @@ public struct MemoryOSL1ToL2PromptBuilder: Sendable {
 
         Stable L4 entity rules:
         - Create or reuse L4 stable entities for people, organizations, projects/work objects, products, locations, durable documents/artifacts, and durable concepts/frameworks/standards.
-        - The current user may be represented as a stable person entity with metadata.person_role = current_user when evidence supports it.
-        - Named collaborators, contacts, family members and other durable people may be represented as stable person entities with metadata.person_role = other_person.
+        - The current user may be represented only through the protected stable_key current_user / metadata.person_role = current_user identity anchor. Do not add aliases such as user, 用户, 当前用户, profile, or current to this entity.
+        - Named collaborators, contacts, family members and other durable people may be represented as stable person entities with metadata.person_role = other_person when identity evidence is sufficient.
         - Do not create or merge stable person entities when identity is ambiguous; emit warnings or ambiguous metadata instead.
         - Create conceptEntities only when the concept has a stable name, useful summary, clear type, evidence, and future retrieval value.
         - Create conceptRelations only when the relation is durable, evidence-backed, and useful for reasoning or retrieval.
@@ -330,11 +341,13 @@ public struct MemoryOSL2ToKnowledgePromptBuilder: Sendable {
         - structurability: pass/fail plus reason
 
         Person/profile knowledge boundary:
-        - Ordinary current-user profile facts, preferences, habits, goals, traits and communication preferences should remain L2 operational memory by default.
+        - Ordinary current-user profile facts, preferences, habits, goals, traits, constraints, emotional-support preferences, knowledge background, interaction guidance and communication preferences should remain L2 operational memory by default.
         - Ordinary other-person profile facts and relationships should also remain L2 by default.
-        - Do not create L3 knowledge candidates for facts like “X likes Y”, “the user prefers Z”, or “person A knows person B” unless the material is abstracted into a reusable principle, standard, process, framework or decision basis.
-        - If a person/profile L2 fact is inaccurate or too coarse, propose refined L2 facts as append-only follow-up material rather than promoting it to L3.
-        - Person-related L3 candidates must explain their reusable scope, such as interaction policy, persona modeling standard, collaboration process or decision basis.
+        - Do not create L3 knowledge candidates for facts like “X likes Y”, “the user prefers Z”, “person A knows person B”, or “current_user has trait T” unless the material is abstracted into a reusable principle, standard, process, framework or decision basis.
+        - If a person/profile L2 fact is inaccurate, stale, contradictory or too coarse, propose refined L2 facts as append-only follow-up material rather than promoting it to L3 or overwriting history.
+        - Person-related L3 candidates must explain their reusable scope, such as interaction policy, persona modeling standard, collaboration process, relationship reasoning standard or decision basis.
+        - Current user is the structured identity anchor current_user, not generic terms such as user, 用户, profile, or Foundation KG/Wikidata user concepts.
+        - Preserve metadata.profile_dimension, metadata.evidence_quality, metadata.stability, metadata.person_role and metadata.person_resolution when reviewing or refining person/profile facts.
 
         You must search L2, L3 and L4 before deciding whether to produce knowledge candidates, concept entities, concept relations or refined L2 facts.
         You must record the search-backed judgment for every accepted or rejected candidate: searched layers, duplicate/novelty outcome, reuse/rejection reason, and reused entity/concept ids when applicable.

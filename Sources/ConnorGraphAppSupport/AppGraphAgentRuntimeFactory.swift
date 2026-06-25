@@ -68,7 +68,9 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
             let store = try SQLiteMemoryOSStore(path: storagePaths.memoryOSDatabaseURL.path)
             try store.migrate()
             let searchKernel = try AppMemoryOSSearchKernelFactory.makeLiveIfHealthy(paths: storagePaths)
-            return AppMemoryOSFacade(store: store, searchKernel: searchKernel)
+            let facade = AppMemoryOSFacade(store: store, searchKernel: searchKernel)
+            try facade.ensureCurrentUserAnchor()
+            return facade
         } catch {
             return nil
         }
