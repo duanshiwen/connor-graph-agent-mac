@@ -25,6 +25,12 @@ struct MemoryOSSearchQualityGoldenTests {
             let top = response.hits.prefix(item.topN).map(\.recordID)
             #expect(top.contains(item.expected), "Expected \(item.expected) in top \(item.topN) for query \(item.query), got \(top)")
         }
+        let explanationResponse = try kernel.search(.init(query: "中国", layers: [.l4], limit: 1))
+        let explanation = try #require(explanationResponse.hits.first)
+        #expect(explanation.rankReason.contains("matched_fields="))
+        #expect(explanation.rankReason.contains("aliases"))
+        #expect(explanation.rankReason.contains("boosts="))
+        #expect(explanation.matchedChannel.contains("tantivy"))
     }
 }
 

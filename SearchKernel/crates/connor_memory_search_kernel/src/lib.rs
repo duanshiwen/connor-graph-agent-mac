@@ -93,13 +93,29 @@ impl ConnorMemorySearchKernel {
             let record_id = stored_text(&doc, fields.record_id).unwrap_or_default();
             let record_kind = stored_text(&doc, fields.record_kind).unwrap_or_default();
             let title = stored_text(&doc, fields.title).unwrap_or_else(|| record_id.clone());
+            let aliases = stored_text(&doc, fields.aliases).unwrap_or_default();
             let exact_terms = stored_text(&doc, fields.exact_terms).unwrap_or_default();
             let summary = stored_text(&doc, fields.summary).unwrap_or_default();
             let body = stored_text(&doc, fields.body).unwrap_or_default();
-            let snippet = if !summary.is_empty() { summary } else { body.chars().take(240).collect() };
+            let keywords = stored_text(&doc, fields.keywords).unwrap_or_default();
+            let ids = stored_text(&doc, fields.ids).unwrap_or_default();
+            let snippet = if !summary.is_empty() { summary.clone() } else { body.chars().take(240).collect() };
             let metadata_json = stored_text(&doc, fields.metadata_json).unwrap_or_else(|| "{}".to_string());
             let layer_enum = serde_json::from_str(&format!("\"{}\"", layer)).unwrap_or(SearchLayer::L4);
-            let boosted_score = score + exact_match_boost(&request.query, &record_id, &record_kind, &title, &exact_terms);
+            let boost_explanation = exact_match_boost(&request.query, &record_id, &record_kind, &title, &exact_terms);
+            let field_matches = field_match_explanation(
+                &request.query,
+                &[("record_id", &record_id), ("title", &title), ("aliases", &aliases), ("summary", &summary), ("body", &body), ("keywords", &keywords), ("ids", &ids), ("exact_terms", &exact_terms)],
+            );
+            let boosted_score = score + boost_explanation.boost;
+            let matched_channel = if score >= 10_000.0 { "exact_raw+tantivy" } else { "tantivy" };
+            let rank_reason = format!(
+                "base_score={:.3}; matched_fields={}; boosts={}; query_terms={}",
+                score,
+                if field_matches.is_empty() { "none".to_string() } else { field_matches.join(",") },
+                if boost_explanation.reasons.is_empty() { "none".to_string() } else { boost_explanation.reasons.join(",") },
+                query_terms(&request.query).join(",")
+            );
             hits.push(MemorySearchHit {
                 layer: layer_enum,
                 record_id,
@@ -107,8 +123,8 @@ impl ConnorMemorySearchKernel {
                 title,
                 snippet,
                 score: boosted_score,
-                matched_channel: "tantivy".to_string(),
-                rank_reason: format!("BM25 over embedded Tantivy fields for query `{}`", request.query),
+                matched_channel: matched_channel.to_string(),
+                rank_reason,
                 metadata_json,
             });
         }
@@ -123,18 +139,58 @@ fn dedupe_doc_addresses(items: &mut Vec<(f32, DocAddress)>) {
     items.retain(|(_, address)| seen.insert(*address));
 }
 
-fn exact_match_boost(query: &str, record_id: &str, record_kind: &str, title: &str, exact_terms: &str) -> f32 {
+struct BoostExplanation {
+    boost: f32,
+    reasons: Vec<String>,
+}
+
+fn exact_match_boost(query: &str, record_id: &str, record_kind: &str, title: &str, exact_terms: &str) -> BoostExplanation {
     let q = query.trim().to_lowercase();
-    if q.is_empty() { return 0.0; }
+    if q.is_empty() { return BoostExplanation { boost: 0.0, reasons: vec![] }; }
     let exact = exact_terms.lines().map(|term| term.trim().to_lowercase()).collect::<Vec<_>>();
     let mut boost = 0.0;
-    if record_id.to_lowercase() == q { boost += 1_200.0; }
-    if exact.iter().any(|term| term == &q) { boost += 1_000.0; }
-    if title.to_lowercase() == q { boost += 1_000.0; }
-    if exact.iter().any(|term| term == &q) && matches!(record_kind, "entity" | "Entity") { boost += 500.0; }
-    if matches!(record_kind, "entity_statement" | "EntityStatement") { boost -= 50.0; }
-    if title.to_lowercase().contains(&q) { boost += 10.0; }
-    boost
+    let mut reasons = Vec::new();
+    if record_id.to_lowercase() == q {
+        boost += 1_200.0;
+        reasons.push("record_id_exact:+1200".to_string());
+    }
+    if exact.iter().any(|term| term == &q) {
+        boost += 1_000.0;
+        reasons.push("exact_raw:+1000".to_string());
+    }
+    if title.to_lowercase() == q {
+        boost += 1_000.0;
+        reasons.push("title_exact:+1000".to_string());
+    }
+    if exact.iter().any(|term| term == &q) && matches!(record_kind, "entity" | "Entity") {
+        boost += 500.0;
+        reasons.push("entity_exact:+500".to_string());
+    }
+    if matches!(record_kind, "entity_statement" | "EntityStatement") {
+        boost -= 50.0;
+        reasons.push("entity_statement_penalty:-50".to_string());
+    }
+    if title.to_lowercase().contains(&q) {
+        boost += 10.0;
+        reasons.push("title_contains:+10".to_string());
+    }
+    BoostExplanation { boost, reasons }
+}
+
+fn field_match_explanation(query: &str, fields: &[(&str, &String)]) -> Vec<String> {
+    let mut needles = query_terms(query);
+    let raw = query.trim().to_lowercase();
+    if !raw.is_empty() && !needles.contains(&raw) { needles.push(raw); }
+    let mut matched = Vec::new();
+    for (field, value) in fields {
+        let haystack = value.to_lowercase();
+        if !haystack.is_empty() && needles.iter().any(|needle| !needle.is_empty() && haystack.contains(needle)) {
+            matched.push((*field).to_string());
+        }
+    }
+    matched.sort();
+    matched.dedup();
+    matched
 }
 
 fn stored_text(doc: &TantivyDocument, field: tantivy::schema::Field) -> Option<String> {
@@ -171,6 +227,11 @@ mod tests {
             .search(MemorySearchRequest { query: "中国".to_string(), layers: vec![SearchLayer::L4], limit: 10 })
             .expect("search");
         assert_eq!(response.backend, "tantivy-embedded");
-        assert_eq!(response.hits.first().map(|hit| hit.record_id.as_str()), Some("wikidata:Q148"));
+        let first = response.hits.first().expect("first hit");
+        assert_eq!(first.record_id.as_str(), "wikidata:Q148");
+        assert!(first.rank_reason.contains("matched_fields="));
+        assert!(first.rank_reason.contains("aliases"));
+        assert!(first.rank_reason.contains("boosts="));
+        assert!(first.rank_reason.contains("exact_raw:+1000"));
     }
 }
