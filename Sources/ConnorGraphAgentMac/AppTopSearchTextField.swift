@@ -12,6 +12,8 @@ struct TopSearchTextField: NSViewRepresentable {
     var placeholder: String
     var focusRequestID: UUID?
     var onSubmit: (() -> Void)? = nil
+    var onMoveUp: (() -> Void)? = nil
+    var onMoveDown: (() -> Void)? = nil
     var onCancel: (() -> Void)? = nil
     var onFocus: (() -> Void)? = nil
     var onBlur: (() -> Void)? = nil
@@ -50,7 +52,7 @@ struct TopSearchTextField: NSViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text, onSubmit: onSubmit, onCancel: onCancel, onFocus: onFocus, onBlur: onBlur)
+        Coordinator(text: $text, onSubmit: onSubmit, onMoveUp: onMoveUp, onMoveDown: onMoveDown, onCancel: onCancel, onFocus: onFocus, onBlur: onBlur)
     }
 
     final class Coordinator: NSObject, NSTextFieldDelegate {
@@ -58,13 +60,17 @@ struct TopSearchTextField: NSViewRepresentable {
         var lastFocusRequestID: UUID?
         var shouldSelectAllOnNextFocus = false
         var onSubmit: (() -> Void)?
+        var onMoveUp: (() -> Void)?
+        var onMoveDown: (() -> Void)?
         var onCancel: (() -> Void)?
         var onFocus: (() -> Void)?
         var onBlur: (() -> Void)?
 
-        init(text: Binding<String>, onSubmit: (() -> Void)?, onCancel: (() -> Void)?, onFocus: (() -> Void)?, onBlur: (() -> Void)?) {
+        init(text: Binding<String>, onSubmit: (() -> Void)?, onMoveUp: (() -> Void)?, onMoveDown: (() -> Void)?, onCancel: (() -> Void)?, onFocus: (() -> Void)?, onBlur: (() -> Void)?) {
             _text = text
             self.onSubmit = onSubmit
+            self.onMoveUp = onMoveUp
+            self.onMoveDown = onMoveDown
             self.onCancel = onCancel
             self.onFocus = onFocus
             self.onBlur = onBlur
@@ -91,6 +97,14 @@ struct TopSearchTextField: NSViewRepresentable {
         func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {
                 onSubmit?()
+                return true
+            }
+            if commandSelector == #selector(NSResponder.moveUp(_:)) {
+                onMoveUp?()
+                return true
+            }
+            if commandSelector == #selector(NSResponder.moveDown(_:)) {
+                onMoveDown?()
                 return true
             }
             if commandSelector == #selector(NSResponder.cancelOperation(_:)) {

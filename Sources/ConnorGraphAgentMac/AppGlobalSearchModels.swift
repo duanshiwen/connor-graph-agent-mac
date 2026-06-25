@@ -22,6 +22,7 @@ struct GlobalSearchPreviewState: Equatable {
     var calendarResults: [NativeSearchResult] = []
     var rssResults: [NativeSearchResult] = []
     var browserHistoryResults: [NativeSearchResult] = []
+    var searchTokens: [String] = []
     var errorMessage: String?
 
     static let empty = GlobalSearchPreviewState()
@@ -69,6 +70,12 @@ enum GlobalSearchSectionKind: String, CaseIterable, Identifiable {
         case .browserHistory: "没有匹配的浏览历史"
         }
     }
+}
+
+enum GlobalSearchSelectableItem: Equatable {
+    case action(GlobalSearchActionKind)
+    case chatSession(String)
+    case nativeResult(String)
 }
 
 enum GlobalSearchActionKind: String, CaseIterable, Identifiable {
