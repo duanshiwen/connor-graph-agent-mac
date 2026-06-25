@@ -4,6 +4,7 @@ public enum NativeSearchSourceKind: String, Codable, Sendable, Equatable, Hashab
     case mail
     case calendar
     case rss
+    case browserHistory
 }
 
 public enum NativeSearchTimeKind: String, Codable, Sendable, Equatable, Hashable {
@@ -168,6 +169,8 @@ public struct NativeSearchTemporalFilter: Codable, Sendable, Equatable, Hashable
                 fallback = temporal.publishedAt ?? temporal.fetchedAt ?? temporal.primaryTime
             case .calendar:
                 fallback = temporal.eventStartAt ?? temporal.primaryTime
+            case .browserHistory:
+                fallback = temporal.updatedAt ?? temporal.createdAt ?? temporal.primaryTime
             }
             return Self.point(preferred ?? fallback, isWithinStart: start, end: end)
         }

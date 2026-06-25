@@ -247,6 +247,7 @@ public actor NativeSourceSearchService {
         case .mail: temporal.sentAt ?? temporal.receivedAt ?? temporal.updatedAt ?? temporal.createdAt ?? temporal.indexedAt
         case .rss: temporal.publishedAt ?? temporal.fetchedAt ?? temporal.updatedAt ?? temporal.indexedAt
         case .calendar: temporal.eventStartAt ?? temporal.updatedAt ?? temporal.createdAt ?? temporal.indexedAt
+        case .browserHistory: temporal.updatedAt ?? temporal.createdAt ?? temporal.indexedAt
         }
     }
 
@@ -260,6 +261,9 @@ public actor NativeSourceSearchService {
             if temporal.fetchedAt != nil { return .fetchedAt }
         case .calendar:
             if temporal.eventStartAt != nil { return .eventStartAt }
+        case .browserHistory:
+            if temporal.updatedAt != nil { return .updatedAt }
+            if temporal.createdAt != nil { return .createdAt }
         }
         if temporal.updatedAt != nil { return .updatedAt }
         if temporal.createdAt != nil { return .createdAt }
@@ -491,6 +495,7 @@ public actor NativeSourceSearchService {
             case .mail: "Message time"
             case .rss: "Item time"
             case .calendar: "Event time"
+            case .browserHistory: "Visited"
             }
         }
     }
