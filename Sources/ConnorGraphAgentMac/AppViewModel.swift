@@ -1123,11 +1123,6 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func searchNativeSource(kind: NativeSearchSourceKind, query: String, limit: Int) async throws -> [NativeSearchResult] {
-        if kind == .calendar {
-            try await rebuildCalendarSearchIndexIfNeeded()
-        } else if kind == .browserHistory {
-            try await rebuildBrowserHistorySearchIndexIfNeeded()
-        }
         if let nativeSourceSearchService {
             return try await nativeSourceSearchService.search(NativeSearchQuery(
                 text: query,
@@ -1323,6 +1318,13 @@ final class AppViewModel: NSObject, ObservableObject {
     private func rebuildCalendarSearchIndexIfNeeded() async throws {
         guard let nativeSourceSearchService else { return }
         try await nativeSourceSearchService.rebuildSource(kind: .calendar, documents: calendarEvents.map(NativeSourceSearchAdapters.calendarDocument(from:)))
+    }
+
+    private func scheduleCalendarSearchIndexRefresh() {
+        guard nativeSourceSearchService != nil else { return }
+        Task { @MainActor in
+            try? await rebuildCalendarSearchIndexIfNeeded()
+        }
     }
 
     private func rebuildBrowserHistorySearchIndexIfNeeded() async throws {
@@ -2088,6 +2090,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 calendarCollections = mergeCollections(calendarCollections, snapshot.collections)
                 calendarEvents = mergeEvents(calendarEvents, snapshot.events)
                 reloadCalendarBrowserPresentation()
+                scheduleCalendarSearchIndexRefresh()
                 await persistCalendarSnapshot()
                 return "Calendar refreshed account \(sourceInstanceID); synced \(result.events.count) events across \(result.collections.count) calendars"
             } catch {
@@ -2354,6 +2357,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 calendarCollections = mergeCollections(legacySnapshot?.collections ?? [], runtimeSnapshot?.collections ?? [])
                 calendarEvents = mergeEvents(legacySnapshot?.events ?? [], runtimeSnapshot?.events ?? [])
                 reloadCalendarBrowserPresentation()
+                scheduleCalendarSearchIndexRefresh()
             }
             if let records = try await contactStore?.loadRecords() {
                 contactRecords = records
@@ -2493,6 +2497,7 @@ final class AppViewModel: NSObject, ObservableObject {
         calendarCollections = nextCollections
         calendarEvents = nextEvents
         reloadCalendarBrowserPresentation()
+        scheduleCalendarSearchIndexRefresh()
     }
 
     func addCalendarSource(
@@ -2561,6 +2566,7 @@ final class AppViewModel: NSObject, ObservableObject {
             self.selectedCalendarEventID = nil
         }
         reloadCalendarBrowserPresentation()
+        scheduleCalendarSearchIndexRefresh()
         calendarSyncMessage = "已移除日历源：\(account.displayName)"
         Task { @MainActor in
             await persistCalendarSnapshot()
