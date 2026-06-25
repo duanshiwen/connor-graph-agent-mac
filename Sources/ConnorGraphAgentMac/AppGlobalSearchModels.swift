@@ -8,7 +8,7 @@ struct GlobalSearchPreviewState: Equatable {
     var mailResults: [NativeSearchResult] = []
     var calendarResults: [NativeSearchResult] = []
     var rssResults: [NativeSearchResult] = []
-    var browserHistoryResults: [BrowserHistoryRecord] = []
+    var browserHistoryResults: [NativeSearchResult] = []
     var errorMessage: String?
 
     static let empty = GlobalSearchPreviewState()
