@@ -13,6 +13,8 @@ struct TopSearchTextField: NSViewRepresentable {
     var focusRequestID: UUID?
     var onSubmit: (() -> Void)? = nil
     var onCancel: (() -> Void)? = nil
+    var onFocus: (() -> Void)? = nil
+    var onBlur: (() -> Void)? = nil
 
     func makeNSView(context: Context) -> NSTextField {
         let textField = TopSearchSelectAllOnFocusTextField()
@@ -37,26 +39,43 @@ struct TopSearchTextField: NSViewRepresentable {
             context.coordinator.lastFocusRequestID = focusRequestID
             guard focusRequestID != nil else { return }
             DispatchQueue.main.async {
+                context.coordinator.shouldSelectAllOnNextFocus = true
                 nsView.window?.makeFirstResponder(nsView)
-                nsView.selectText(nil)
+                if let editor = nsView.currentEditor() as? NSTextView, !editor.hasMarkedText() {
+                    nsView.selectText(nil)
+                    context.coordinator.shouldSelectAllOnNextFocus = false
+                }
             }
         }
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text, onSubmit: onSubmit, onCancel: onCancel)
+        Coordinator(text: $text, onSubmit: onSubmit, onCancel: onCancel, onFocus: onFocus, onBlur: onBlur)
     }
 
     final class Coordinator: NSObject, NSTextFieldDelegate {
         @Binding var text: String
         var lastFocusRequestID: UUID?
+        var shouldSelectAllOnNextFocus = false
         var onSubmit: (() -> Void)?
         var onCancel: (() -> Void)?
+        var onFocus: (() -> Void)?
+        var onBlur: (() -> Void)?
 
-        init(text: Binding<String>, onSubmit: (() -> Void)?, onCancel: (() -> Void)?) {
+        init(text: Binding<String>, onSubmit: (() -> Void)?, onCancel: (() -> Void)?, onFocus: (() -> Void)?, onBlur: (() -> Void)?) {
             _text = text
             self.onSubmit = onSubmit
             self.onCancel = onCancel
+            self.onFocus = onFocus
+            self.onBlur = onBlur
+        }
+
+        func controlTextDidBeginEditing(_ notification: Notification) {
+            onFocus?()
+        }
+
+        func controlTextDidEndEditing(_ notification: Notification) {
+            onBlur?()
         }
 
         func controlTextDidChange(_ notification: Notification) {
@@ -78,15 +97,5 @@ struct TopSearchTextField: NSViewRepresentable {
     }
 }
 
-final class TopSearchSelectAllOnFocusTextField: NSTextField {
-    override func becomeFirstResponder() -> Bool {
-        let didBecomeFirstResponder = super.becomeFirstResponder()
-        if didBecomeFirstResponder {
-            DispatchQueue.main.async { [weak self] in
-                self?.selectText(nil)
-            }
-        }
-        return didBecomeFirstResponder
-    }
-}
+final class TopSearchSelectAllOnFocusTextField: NSTextField {}
 
