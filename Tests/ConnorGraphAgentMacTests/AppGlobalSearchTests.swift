@@ -92,6 +92,21 @@ struct AppGlobalSearchTests {
         #expect(fixture.viewModel.globalSearchPreviewState.browserHistoryResults.first?.title == "Swift History")
     }
 
+    @Test func globalSearchKeepsMultipleBrowserHistoryPages() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        let sessionID = try #require(fixture.viewModel.selectedChatSessionID ?? fixture.viewModel.chatSessions.first?.id)
+        for index in 0..<5 {
+            fixture.viewModel.recordBrowserHistory(url: "https://example.com/paged-history-\(index)", title: "Paged History \(index)", sessionID: sessionID)
+        }
+        fixture.viewModel.updateGlobalSearchQuery("paged-history")
+
+        await fixture.viewModel.refreshGlobalSearchPreview(for: "paged-history")
+
+        #expect(fixture.viewModel.globalSearchPreviewState.browserHistoryResults.count == 5)
+    }
+
     @Test func openingBrowserHistoryResultFocusesExistingTab() throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
