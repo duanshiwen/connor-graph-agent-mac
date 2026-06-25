@@ -31,16 +31,33 @@ public enum AppMemoryOSSearchKernelFactory {
     public static let currentIndexSchemaVersion = 4
     public static let searchKernelVersion = "0.1.0"
 
+    /// Opens the live SearchKernel without rebuilding the index.
+    ///
+    /// Startup and read-only flows must not perform expensive index rebuilds synchronously.
+    /// Use `rebuildLiveIndex(paths:fileManager:)` for the explicit repair/rework path.
     public static func makeLive(paths: AppStoragePaths, fileManager: FileManager = .default) throws -> MemoryOSSearchKernel {
+        try makeLiveWithoutRebuild(paths: paths, fileManager: fileManager)
+    }
+
+    public static func makeLiveIfHealthy(paths: AppStoragePaths, fileManager: FileManager = .default) throws -> MemoryOSSearchKernel? {
+        let report = healthReport(paths: paths, fileManager: fileManager)
+        guard report.status == .healthy else { return nil }
+        return try makeLiveWithoutRebuild(paths: paths, fileManager: fileManager)
+    }
+
+    public static func makeLiveWithoutRebuild(paths: AppStoragePaths, fileManager: FileManager = .default) throws -> MemoryOSSearchKernel {
         let libraryURL = try resolveLibraryURL(fileManager: fileManager)
         let indexDirectory = MemoryOSSearchKernelPaths.defaultIndexDirectory(graphDirectory: paths.graphDirectory)
         try fileManager.createDirectory(at: indexDirectory, withIntermediateDirectories: true)
-        let kernel = try MemoryOSSearchKernel(libraryURL: libraryURL, indexDirectory: indexDirectory)
-        if needsRebuild(indexDirectory: indexDirectory, databaseURL: paths.memoryOSDatabaseURL, fileManager: fileManager) {
-            let count = try kernel.rebuildFromSQLite(databaseURL: paths.memoryOSDatabaseURL)
-            try writeMeta(indexDirectory: indexDirectory, databaseURL: paths.memoryOSDatabaseURL, documentCount: count)
-        }
-        return kernel
+        return try MemoryOSSearchKernel(libraryURL: libraryURL, indexDirectory: indexDirectory)
+    }
+
+    @discardableResult
+    public static func rebuildLiveIndex(paths: AppStoragePaths, fileManager: FileManager = .default) throws -> Int {
+        let kernel = try makeLiveWithoutRebuild(paths: paths, fileManager: fileManager)
+        let count = try kernel.rebuildFromSQLite(databaseURL: paths.memoryOSDatabaseURL)
+        try writeMeta(indexDirectory: kernel.indexDirectory, databaseURL: paths.memoryOSDatabaseURL, documentCount: count)
+        return count
     }
 
     public static func healthReport(paths: AppStoragePaths, fileManager: FileManager = .default) -> AppMemoryOSSearchIndexHealthReport {
