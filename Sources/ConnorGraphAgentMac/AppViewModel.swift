@@ -496,6 +496,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var pendingAttachmentRefs: [AgentMessageAttachmentRef] = []
     @Published var attachmentPreviewModel: AttachmentPreviewModel?
     @Published var memoryOSSearchHealthSummary: String?
+    @Published private(set) var isMemoryOSSearchIndexRepairing = false
 
     private var repository: AppGraphRepository?
     private var promotionRepository: AppPromotionQueueRepository?
@@ -526,6 +527,8 @@ final class AppViewModel: NSObject, ObservableObject {
     private var agentRuntimeFactory: AppGraphAgentRuntimeFactory?
     private var hybridSearchService: (any GraphHybridSearchService)?
     private var isRunningBackgroundJobs: Bool = false
+    private var hasScheduledMemoryOSSearchIndexRepair = false
+    private var hasLoadedInitialChatSessions = false
     // Product chat path: NativeSessionManager owns Connor session state and talks to replaceable AgentBackend implementations.
     // fallbackChatSession is UI-only for demo/no-runtime states.
     private var fallbackChatSession: AgentSession
@@ -1389,14 +1392,10 @@ final class AppViewModel: NSObject, ObservableObject {
                 try store.migrate()
                 self.memoryOSStore = store
                 let initialSearchHealth = AppMemoryOSSearchKernelFactory.healthReport(paths: storagePaths)
-                if initialSearchHealth.status != .healthy {
-                    self.memoryOSSearchHealthSummary = "Memory OS SearchKernel 正在修复：\(initialSearchHealth.messages.joined(separator: ", "))"
-                }
-                let searchKernel = try AppMemoryOSSearchKernelFactory.makeLive(paths: storagePaths)
-                let finalSearchHealth = AppMemoryOSSearchKernelFactory.healthReport(paths: storagePaths)
-                self.memoryOSSearchHealthSummary = finalSearchHealth.status == .healthy
+                let searchKernel = try AppMemoryOSSearchKernelFactory.makeLiveIfHealthy(paths: storagePaths)
+                self.memoryOSSearchHealthSummary = initialSearchHealth.status == .healthy
                     ? "Memory OS SearchKernel 正常：索引已验证。"
-                    : "Memory OS SearchKernel 降级：\(finalSearchHealth.messages.joined(separator: ", "))"
+                    : "Memory OS SearchKernel 降级启动，后台将修复索引：\(initialSearchHealth.messages.joined(separator: ", "))"
                 self.memoryOSFacade = AppMemoryOSFacade(store: store, searchKernel: searchKernel)
             } catch {
                 self.errorMessage = "Memory OS 初始化失败：\(error)"
@@ -1459,6 +1458,7 @@ final class AppViewModel: NSObject, ObservableObject {
         reloadChatSessions()
         loadBrowserHistory()
         reloadSchemaHealthReport()
+        scheduleMemoryOSSearchIndexRepairIfNeeded()
     }
 
     private func apply(snapshot: GraphStoreSnapshot) {
@@ -1472,6 +1472,37 @@ final class AppViewModel: NSObject, ObservableObject {
         Task { await runSearch() }
         reloadPromotionCandidates()
         reloadPendingApprovals()
+    }
+
+    private func scheduleMemoryOSSearchIndexRepairIfNeeded() {
+        guard !hasScheduledMemoryOSSearchIndexRepair else { return }
+        guard let storagePaths else { return }
+        let report = AppMemoryOSSearchKernelFactory.healthReport(paths: storagePaths)
+        guard report.status != .healthy else { return }
+        hasScheduledMemoryOSSearchIndexRepair = true
+        isMemoryOSSearchIndexRepairing = true
+        memoryOSSearchHealthSummary = "Memory OS SearchKernel 后台修复中：\(report.messages.joined(separator: ", "))"
+        Task.detached(priority: .utility) { [storagePaths] in
+            do {
+                let documentCount = try AppMemoryOSSearchKernelFactory.rebuildLiveIndex(paths: storagePaths)
+                let repairedKernel = try AppMemoryOSSearchKernelFactory.makeLiveIfHealthy(paths: storagePaths)
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    self.isMemoryOSSearchIndexRepairing = false
+                    self.memoryOSSearchHealthSummary = "Memory OS SearchKernel 正常：后台索引已重建（\(documentCount) 条文档）。"
+                    if let store = self.memoryOSStore {
+                        self.memoryOSFacade = AppMemoryOSFacade(store: store, searchKernel: repairedKernel)
+                    }
+                    self.rebuildNativeSessionManagerForActiveSession()
+                }
+            } catch {
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    self.isMemoryOSSearchIndexRepairing = false
+                    self.memoryOSSearchHealthSummary = "Memory OS SearchKernel 后台修复失败：\(error)"
+                }
+            }
+        }
     }
 
     func runBackgroundJobs() async {
@@ -4015,7 +4046,13 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
+    func reloadChatSessionsIfNeededAfterInitialLoad(restoreWorkspaceMode shouldRestoreWorkspaceMode: Bool = true) {
+        guard !hasLoadedInitialChatSessions else { return }
+        reloadChatSessions(restoreWorkspaceMode: shouldRestoreWorkspaceMode)
+    }
+
     func reloadChatSessions(restoreWorkspaceMode shouldRestoreWorkspaceMode: Bool = true) {
+        hasLoadedInitialChatSessions = true
         guard let chatSessionRepository else {
             transcript = activeChatTranscript
             chatSessions = [activeChatSession]

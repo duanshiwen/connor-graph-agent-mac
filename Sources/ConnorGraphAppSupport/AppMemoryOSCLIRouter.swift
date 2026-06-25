@@ -75,7 +75,10 @@ public enum AppMemoryOSCLIRouter {
         }
         let store = try SQLiteMemoryOSStore(path: paths.memoryOSDatabaseURL.path)
         try store.migrate()
-        let searchKernel = try AppMemoryOSSearchKernelFactory.makeLive(paths: paths)
+        let isExplicitSearchIndexRebuild = CommandLine.arguments.dropFirst().elementsEqual(["memory", "search-index", "rebuild"])
+        let searchKernel = isExplicitSearchIndexRebuild
+            ? try AppMemoryOSSearchKernelFactory.makeLiveWithoutRebuild(paths: paths)
+            : try AppMemoryOSSearchKernelFactory.makeLiveIfHealthy(paths: paths)
         return AppMemoryOSCLIInspector(store: store, databasePath: paths.memoryOSDatabaseURL.path, searchKernel: searchKernel)
     }
 
