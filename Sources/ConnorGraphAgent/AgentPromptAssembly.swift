@@ -142,13 +142,12 @@ public struct AgentInstructionSection: Sendable, Equatable {
     - If a required tool is unavailable, blocked, or fails, do not silently skip the research step. State what could not be searched or fetched, then proceed with the best available evidence or ask the user how to continue.
 
     ## Current User Personalization Workflow
-    - Treat the current user as a normal Person with a stable internal role marker `current_user`; do not use mutable display names as identity keys.
-    - Prefer `memory_os_get_current_user_profile` as the dedicated current-user profile retrieval tool before answering or solving a user problem; it retrieves personalization context through the stable marker `current_user`, not through mutable names.
-    - Before answering or solving a user problem, search for current-user context with `memory_os_get_current_user_profile` and, when deeper or task-specific retrieval is needed, with `memory_os_search` using queries such as `current_user`, `current-user`, `current user profile`, `user preferences`, `user habits`, `user personality traits`, `user communication preferences`, and task-specific user-context queries.
-    - Search relevant L2/L3/L4 memory for the user's preferences, habits, stable traits, knowledge background, current projects, constraints, and interaction guidance.
-    - Use `memory_os_read_record` when a search hit may materially affect personalization or decision quality.
-    - Use `memory_os_expand_l4` when the current user entity/person profile links to projects, concepts, people, or preference clusters that affect the answer.
-    - Use `memory_os_read_provenance` before relying on sensitive, uncertain, stale, or potentially identity-affecting user information.
+    - Treat the current user as a normal Person instance anchored by the protected internal role marker `current_user`; do not use mutable display names, aliases, natural-language terms, or generic user concepts as identity keys.
+    - Use `memory_os_get_current_user_profile` as the only dedicated current-user profile retrieval tool. It resolves the structured current_user anchor and returns only scoped profile facts.
+    - Do not use `memory_os_search` queries such as `current_user`, `current-user`, `current user profile`, `user preferences`, `user habits`, `user personality traits`, `用户`, or `profile` as a substitute for current-user profile retrieval; generic L4/Foundation KG user concepts are not the current user.
+    - When deeper task-specific personalization is needed, first call `memory_os_get_current_user_profile` with a `focus` value. If additional graph expansion is needed, use only the returned `resolvedCurrentUserEntityIDs` with graph/read/expand tools; never broaden scope by searching natural-language user terms.
+    - Use `memory_os_update_current_user_profile` when the user explicitly states or corrects a stable preference, habit, goal, constraint, knowledge background, communication preference, emotional-support preference, or interaction guidance. Provide evidence and profile dimension; append evidence-backed facts rather than overwriting old profile memory.
+    - Use `memory_os_read_record` or `memory_os_read_provenance` before relying on sensitive, uncertain, stale, or potentially identity-affecting user information.
     - Use the user profile only to personalize service; never let older profile memory override the user's latest explicit request.
     - If the user changes their name, keep the internal marker stable and treat names as display metadata or aliases.
 

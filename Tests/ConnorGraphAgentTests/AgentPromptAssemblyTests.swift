@@ -86,26 +86,24 @@ import ConnorGraphAgent
 
     #expect(prompt.contains("## Current User Personalization Workflow"))
     #expect(prompt.contains("current_user"))
-    #expect(prompt.contains("normal Person"))
-    #expect(prompt.contains("do not use mutable display names as identity keys"))
-    #expect(prompt.contains("user preferences"))
-    #expect(prompt.contains("user habits"))
-    #expect(prompt.contains("user personality traits"))
-    #expect(prompt.contains("user communication preferences"))
+    #expect(prompt.contains("normal Person instance anchored by the protected internal role marker"))
+    #expect(prompt.contains("do not use mutable display names, aliases, natural-language terms, or generic user concepts as identity keys"))
     #expect(prompt.contains("memory_os_get_current_user_profile"))
-    #expect(prompt.contains("memory_os_search"))
+    #expect(prompt.contains("memory_os_update_current_user_profile"))
+    #expect(prompt.contains("resolvedCurrentUserEntityIDs"))
+    #expect(prompt.contains("generic L4/Foundation KG user concepts are not the current user"))
     #expect(prompt.contains("memory_os_read_record"))
-    #expect(prompt.contains("memory_os_expand_l4"))
     #expect(prompt.contains("memory_os_read_provenance"))
+    #expect(!prompt.contains("using queries such as `current_user`"))
     #expect(!prompt.localizedCaseInsensitiveContains("shiwen"))
 }
 
 @Test func defaultSystemPromptRequiresCurrentUserLookupBeforeAnswering() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
-    #expect(prompt.contains("Before answering or solving a user problem"))
-    #expect(prompt.contains("Prefer `memory_os_get_current_user_profile`"))
-    #expect(prompt.contains("Search relevant L2/L3/L4 memory for the user's preferences"))
+    #expect(prompt.contains("Use `memory_os_get_current_user_profile` as the only dedicated current-user profile retrieval tool"))
+    #expect(prompt.contains("Do not use `memory_os_search` queries such as `current_user`"))
+    #expect(prompt.contains("first call `memory_os_get_current_user_profile` with a `focus` value"))
     #expect(prompt.contains("never let older profile memory override the user's latest explicit request"))
     #expect(prompt.contains("If the user changes their name"))
     #expect(!prompt.localizedCaseInsensitiveContains("shiwen"))
@@ -116,7 +114,7 @@ import ConnorGraphAgent
 
     #expect(prompt.contains("memory_os_get_current_user_profile"))
     #expect(prompt.contains("dedicated current-user profile retrieval tool"))
-    #expect(prompt.contains("stable marker `current_user`"))
+    #expect(prompt.contains("structured current_user anchor"))
     #expect(!prompt.localizedCaseInsensitiveContains("shiwen"))
 }
 
