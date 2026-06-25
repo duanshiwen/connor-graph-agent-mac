@@ -49,11 +49,6 @@ struct AppShellView: View {
                 .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
                 .controlSize(.small)
         }
-        .simultaneousGesture(
-            TapGesture().onEnded {
-                dismissGlobalSearchFocus()
-            }
-        )
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Button {
@@ -160,11 +155,6 @@ struct AppShellView: View {
             NSEvent.removeMonitor(topSearchKeyMonitor)
             self.topSearchKeyMonitor = nil
         }
-    }
-
-    private func dismissGlobalSearchFocus() {
-        viewModel.deactivateGlobalSearchField()
-        NSApp.keyWindow?.makeFirstResponder(nil)
     }
 
 }
