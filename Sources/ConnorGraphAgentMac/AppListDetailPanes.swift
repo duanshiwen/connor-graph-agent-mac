@@ -65,12 +65,24 @@ struct CraftCalendarListPane: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
 
+            if !viewModel.calendarBrowserPresentation.daySections.isEmpty {
+                SourceListSearchField(
+                    placeholder: "筛选标题、地点或备注",
+                    text: $viewModel.nativeSourceListFilterQuery
+                )
+                .padding(.horizontal, 14)
+                .padding(.bottom, 8)
+            }
+
             if viewModel.calendarBrowserPresentation.daySections.isEmpty {
                 ContentUnavailableView("暂无日程", systemImage: "calendar", description: Text("添加支持 Calendar capability 的账户后，日程会显示在这里。"))
                     .padding(.top, 80)
+            } else if filteredCalendarSections.isEmpty {
+                ContentUnavailableView("没有匹配的日程", systemImage: "magnifyingglass", description: Text("筛选会匹配标题、地点和时间。"))
+                    .padding(.top, 80)
             } else {
                 CalendarSectionScrollView(
-                    sections: viewModel.calendarBrowserPresentation.daySections,
+                    sections: filteredCalendarSections,
                     selectedID: viewModel.selectedCalendarEventID,
                     onSelect: { viewModel.selectedCalendarEventID = $0 }
                 )
@@ -79,6 +91,20 @@ struct CraftCalendarListPane: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .sheet(isPresented: $viewModel.isPresentingAddCalendarSourceSheet) {
             AddCalendarSourceSheet(viewModel: viewModel)
+        }
+    }
+
+    private var filteredCalendarSections: [NativeCalendarDaySectionPresentation] {
+        let query = viewModel.nativeSourceListFilterQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return viewModel.calendarBrowserPresentation.daySections }
+        return viewModel.calendarBrowserPresentation.daySections.compactMap { section in
+            let events = section.events.filter { event in
+                event.title.lowercased().contains(query)
+                    || event.timeText.lowercased().contains(query)
+                    || (event.location?.lowercased().contains(query) ?? false)
+            }
+            guard !events.isEmpty else { return nil }
+            return NativeCalendarDaySectionPresentation(id: section.id, title: section.title, events: events)
         }
     }
 }
@@ -358,14 +384,13 @@ struct CraftSessionListPane: View {
 
 struct CraftMailListPane: View {
     @ObservedObject var viewModel: AppViewModel
-    @State private var searchQuery: String = ""
 
     private var presentation: NativeMailBrowserPresentation {
         viewModel.mailBrowserPresentation
     }
 
     private var visibleMessages: [MailMessageSummary] {
-        presentation.messages(accountID: nil, mailboxID: nil, query: searchQuery)
+        presentation.messages(accountID: nil, mailboxID: nil, query: viewModel.nativeSourceListFilterQuery)
     }
 
     var body: some View {
@@ -387,27 +412,9 @@ struct CraftMailListPane: View {
             .padding(.vertical, 13)
 
             if !presentation.messages.isEmpty {
-                HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                    TextField("筛选标题、正文或发件人", text: $searchQuery)
-                        .textFieldStyle(.plain)
-                    if !searchQuery.isEmpty {
-                        Button { searchQuery = "" } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 9)
-                .frame(height: 28)
-                .background(Color(nsColor: .textBackgroundColor).opacity(0.62), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(AppShellColors.hairline, lineWidth: 1)
+                SourceListSearchField(
+                    placeholder: "筛选标题、正文或发件人",
+                    text: $viewModel.nativeSourceListFilterQuery
                 )
                 .padding(.horizontal, 14)
                 .padding(.bottom, 8)
@@ -454,6 +461,36 @@ private extension View {
             .listRowInsets(EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8))
             .listRowSeparator(.hidden)
             .listRowBackground(Color.clear)
+    }
+}
+
+private struct SourceListSearchField: View {
+    var placeholder: String
+    @Binding var text: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+            TextField(placeholder, text: $text)
+                .textFieldStyle(.plain)
+            if !text.isEmpty {
+                Button { text = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 9)
+        .frame(height: 28)
+        .background(Color(nsColor: .textBackgroundColor).opacity(0.62), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(AppShellColors.hairline, lineWidth: 1)
+        )
     }
 }
 
@@ -1278,7 +1315,7 @@ struct CraftRSSListPane: View {
     @ObservedObject var viewModel: AppViewModel
 
     private var presentation: NativeRSSBrowserPresentation { viewModel.rssBrowserPresentation }
-    private var visibleItems: [RSSItemSummary] { presentation.items(sourceID: nil, query: "") }
+    private var visibleItems: [RSSItemSummary] { presentation.items(sourceID: nil, query: viewModel.nativeSourceListFilterQuery) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1298,12 +1335,23 @@ struct CraftRSSListPane: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
 
+            if !presentation.items.isEmpty {
+                SourceListSearchField(
+                    placeholder: "筛选标题、摘要或作者",
+                    text: $viewModel.nativeSourceListFilterQuery
+                )
+                .padding(.horizontal, 14)
+                .padding(.bottom, 8)
+            }
 
             if presentation.sources.isEmpty {
                 ContentUnavailableView("暂无 RSS 订阅源", systemImage: "dot.radiowaves.left.and.right", description: Text("点击右上角 + 添加 RSS / Atom / JSON Feed。"))
                     .padding(.top, 80)
             } else if presentation.items.isEmpty {
                 ContentUnavailableView("暂无文章", systemImage: "newspaper", description: Text("订阅源同步后的文章会在这里按时间显示。"))
+                    .padding(.top, 80)
+            } else if visibleItems.isEmpty {
+                ContentUnavailableView("没有匹配的 RSS 文章", systemImage: "magnifyingglass", description: Text("筛选会匹配标题、摘要、作者和订阅源。"))
                     .padding(.top, 80)
             } else {
                 List(visibleItems) { item in
