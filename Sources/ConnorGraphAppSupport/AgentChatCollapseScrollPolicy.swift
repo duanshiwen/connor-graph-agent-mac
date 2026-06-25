@@ -40,10 +40,6 @@ public struct AgentChatCollapseScrollPolicy: Sendable {
         contentHeight: Double,
         viewportHeight: Double
     ) -> Decision {
-        guard hasValidDimensions(contentHeight: contentHeight, viewportHeight: viewportHeight) else {
-            return .doNotScroll
-        }
-
         return .scrollToBottom
     }
 
