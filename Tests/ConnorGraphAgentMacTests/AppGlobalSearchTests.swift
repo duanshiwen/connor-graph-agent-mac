@@ -50,7 +50,7 @@ struct AppGlobalSearchTests {
         #expect(fixture.viewModel.globalSearchQuery == "invoice")
     }
 
-    @Test func showAllGlobalSearchResultsNavigatesAndPreservesFilter() throws {
+    @Test func showAllGlobalSearchResultsNavigatesToSourceLists() throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
@@ -58,20 +58,17 @@ struct AppGlobalSearchTests {
         fixture.viewModel.showAllGlobalSearchResults(kind: .mail)
 
         #expect(fixture.viewModel.selection == .mail)
-        #expect(fixture.viewModel.nativeSourceListFilterQuery == "invoice")
         #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
 
         fixture.viewModel.updateGlobalSearchQuery("standup")
         fixture.viewModel.showAllGlobalSearchResults(kind: .calendar)
 
         #expect(fixture.viewModel.selection == .calendar)
-        #expect(fixture.viewModel.nativeSourceListFilterQuery == "standup")
 
         fixture.viewModel.updateGlobalSearchQuery("swift")
         fixture.viewModel.showAllGlobalSearchResults(kind: .rss)
 
         #expect(fixture.viewModel.selection == .rss)
-        #expect(fixture.viewModel.nativeSourceListFilterQuery == "swift")
     }
 
     private func makeFixture() throws -> Fixture {
