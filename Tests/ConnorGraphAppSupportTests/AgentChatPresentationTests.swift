@@ -69,9 +69,43 @@ import ConnorGraphAppSupport
     let olderPreviousYear = DateComponents(calendar: calendar, timeZone: calendar.timeZone, year: 2025, month: 12, day: 31, hour: 23, minute: 59).date!
 
     #expect(AgentChatTurnTimestampPresentation.text(for: today, now: now, calendar: calendar) == "上午 9:05")
-    #expect(AgentChatTurnTimestampPresentation.text(for: yesterday, now: now, calendar: calendar) == "昨天")
+    #expect(AgentChatTurnTimestampPresentation.text(for: yesterday, now: now, calendar: calendar) == "昨天 下午 10:30")
     #expect(AgentChatTurnTimestampPresentation.text(for: olderSameYear, now: now, calendar: calendar) == "6月10日 下午 3:08")
     #expect(AgentChatTurnTimestampPresentation.text(for: olderPreviousYear, now: now, calendar: calendar) == "2025年12月31日 下午 11:59")
+}
+
+@Test func agentChatTurnTimelineThrottlesTimestampsForShortConsecutiveUserTurns() {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 8 * 3_600)!
+    let now = DateComponents(calendar: calendar, timeZone: calendar.timeZone, year: 2026, month: 6, day: 25, hour: 12).date!
+    let messages = [
+        AgentMessage(id: "user-1", role: .user, content: "第一条", createdAt: DateComponents(calendar: calendar, timeZone: calendar.timeZone, year: 2026, month: 6, day: 25, hour: 10, minute: 0).date!),
+        AgentMessage(id: "assistant-1", role: .assistant, content: "回复 1", createdAt: DateComponents(calendar: calendar, timeZone: calendar.timeZone, year: 2026, month: 6, day: 25, hour: 10, minute: 1).date!),
+        AgentMessage(id: "user-2", role: .user, content: "连续追问", createdAt: DateComponents(calendar: calendar, timeZone: calendar.timeZone, year: 2026, month: 6, day: 25, hour: 10, minute: 3).date!),
+        AgentMessage(id: "assistant-2", role: .assistant, content: "回复 2", createdAt: DateComponents(calendar: calendar, timeZone: calendar.timeZone, year: 2026, month: 6, day: 25, hour: 10, minute: 4).date!),
+        AgentMessage(id: "user-3", role: .user, content: "间隔后再问", createdAt: DateComponents(calendar: calendar, timeZone: calendar.timeZone, year: 2026, month: 6, day: 25, hour: 10, minute: 8).date!)
+    ]
+
+    let items = AgentChatTurnTimelineItem.items(messages: messages, lastContext: nil, isSubmitting: false, now: now, calendar: calendar)
+
+    #expect(items.compactMap(\.timestamp?.text) == ["上午 10:00", "上午 10:08"])
+    #expect(items.map(\.id) == ["timestamp-turn-1", "user-1", "process-assistant-1", "assistant-1", "user-2", "process-assistant-2", "assistant-2", "timestamp-turn-3", "user-3"])
+}
+
+@Test func agentChatTurnTimelineShowsTimestampWhenUserTurnCrossesDayEvenWithinInterval() {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 8 * 3_600)!
+    let now = DateComponents(calendar: calendar, timeZone: calendar.timeZone, year: 2026, month: 6, day: 25, hour: 1).date!
+    let messages = [
+        AgentMessage(id: "user-1", role: .user, content: "前一天", createdAt: DateComponents(calendar: calendar, timeZone: calendar.timeZone, year: 2026, month: 6, day: 24, hour: 23, minute: 59).date!),
+        AgentMessage(id: "assistant-1", role: .assistant, content: "回复", createdAt: DateComponents(calendar: calendar, timeZone: calendar.timeZone, year: 2026, month: 6, day: 24, hour: 23, minute: 59, second: 30).date!),
+        AgentMessage(id: "user-2", role: .user, content: "跨日后", createdAt: DateComponents(calendar: calendar, timeZone: calendar.timeZone, year: 2026, month: 6, day: 25, hour: 0, minute: 1).date!)
+    ]
+
+    let items = AgentChatTurnTimelineItem.items(messages: messages, lastContext: nil, isSubmitting: false, now: now, calendar: calendar)
+
+    #expect(items.compactMap(\.timestamp?.text) == ["昨天 下午 11:59", "上午 12:01"])
+    #expect(items.map(\.id) == ["timestamp-turn-1", "user-1", "process-assistant-1", "assistant-1", "timestamp-turn-2", "user-2"])
 }
 
 @Test func agentChatTurnTimelineCarriesFullConversationHistoryForEachProcess() {
