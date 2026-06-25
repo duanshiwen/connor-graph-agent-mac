@@ -14,10 +14,6 @@ struct AppGlobalSearchOverlayView: View {
         VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
             actionRows
 
-            if state.isLoading {
-                updatingRow
-            }
-
             chatSessionSection(results: state.chatSessionResults)
             resultSection(kind: .mail, results: state.mailResults)
             resultSection(kind: .calendar, results: state.calendarResults)
@@ -50,19 +46,6 @@ struct AppGlobalSearchOverlayView: View {
                 viewModel.performGlobalSearchWebSearch()
             }
         }
-    }
-
-    private var updatingRow: some View {
-        HStack(spacing: AppShellLayout.spaceS) {
-            ProgressView()
-                .controlSize(.small)
-            Text("正在更新搜索结果…")
-                .font(AppListTypography.rowCaption)
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, AppShellLayout.spaceS)
-        .padding(.vertical, AppShellLayout.spaceXS)
     }
 
     private func errorRow(_ message: String) -> some View {
@@ -99,7 +82,9 @@ struct AppGlobalSearchOverlayView: View {
             .padding(.horizontal, AppShellLayout.spaceS)
             .padding(.top, AppShellLayout.spaceXS)
 
-            if results.isEmpty, !state.isLoading {
+            if state.isLoading, results.isEmpty {
+                GlobalSearchLoadingSourceRow()
+            } else if results.isEmpty {
                 GlobalSearchEmptySourceRow(title: GlobalSearchSectionKind.chatSessions.emptyTitle)
             } else if !results.isEmpty {
                 VStack(spacing: 1) {
@@ -155,7 +140,9 @@ struct AppGlobalSearchOverlayView: View {
             .padding(.horizontal, AppShellLayout.spaceS)
             .padding(.top, AppShellLayout.spaceXS)
 
-            if pageResults.isEmpty, !state.isLoading {
+            if state.isLoading, pageResults.isEmpty {
+                GlobalSearchLoadingSourceRow()
+            } else if pageResults.isEmpty {
                 GlobalSearchEmptySourceRow(title: GlobalSearchSectionKind.browserHistory.emptyTitle)
             } else if !pageResults.isEmpty {
                 VStack(spacing: 1) {
@@ -235,7 +222,9 @@ struct AppGlobalSearchOverlayView: View {
             .padding(.horizontal, AppShellLayout.spaceS)
             .padding(.top, AppShellLayout.spaceXS)
 
-            if results.isEmpty, !state.isLoading {
+            if state.isLoading, results.isEmpty {
+                GlobalSearchLoadingSourceRow()
+            } else if results.isEmpty {
                 GlobalSearchEmptySourceRow(title: kind.emptyTitle)
             } else if !results.isEmpty {
                 VStack(spacing: 1) {
@@ -252,6 +241,23 @@ struct AppGlobalSearchOverlayView: View {
         }
         .frame(minHeight: 58, alignment: .top)
         .padding(.bottom, 2)
+    }
+}
+
+private struct GlobalSearchLoadingSourceRow: View {
+    var body: some View {
+        HStack(spacing: AppShellLayout.spaceS) {
+            ProgressView()
+                .controlSize(.small)
+                .frame(width: 18)
+            Text("搜索中…")
+                .font(AppListTypography.rowCaption)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, AppShellLayout.spaceS)
+        .padding(.vertical, 8)
     }
 }
 
