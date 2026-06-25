@@ -18,6 +18,7 @@ struct AppGlobalSearchOverlayView: View {
                 updatingRow
             }
 
+            chatSessionSection(results: state.chatSessionResults)
             resultSection(kind: .mail, results: state.mailResults)
             resultSection(kind: .calendar, results: state.calendarResults)
             resultSection(kind: .rss, results: state.rssResults)
@@ -72,6 +73,49 @@ struct AppGlobalSearchOverlayView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, AppShellLayout.spaceS)
             .padding(.vertical, AppShellLayout.spaceXS)
+    }
+
+    private func chatSessionSection(results: [GlobalSearchSessionResult]) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: AppShellLayout.spaceXS) {
+                Image(systemName: GlobalSearchSectionKind.chatSessions.systemImage)
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16)
+                Text(GlobalSearchSectionKind.chatSessions.title)
+                    .font(AppListTypography.rowCaptionEmphasized)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                Button {
+                    viewModel.showAllGlobalSearchResults(kind: .chatSessions)
+                } label: {
+                    Text("查看全部 ›")
+                        .font(AppListTypography.rowCaptionEmphasized)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(results.isEmpty ? Color.secondary.opacity(0.45) : Color.accentColor)
+                .disabled(query.isEmpty || results.isEmpty)
+            }
+            .padding(.horizontal, AppShellLayout.spaceS)
+            .padding(.top, AppShellLayout.spaceXS)
+
+            if results.isEmpty, !state.isLoading {
+                GlobalSearchEmptySourceRow(title: GlobalSearchSectionKind.chatSessions.emptyTitle)
+            } else if !results.isEmpty {
+                VStack(spacing: 1) {
+                    ForEach(results.prefix(3)) { result in
+                        Button {
+                            viewModel.openGlobalSearchChatSessionResult(result.id)
+                        } label: {
+                            GlobalSearchChatSessionRow(result: result)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .frame(minHeight: 58, alignment: .top)
+        .padding(.bottom, 2)
     }
 
     private func browserHistorySection(results: [NativeSearchResult]) -> some View {
@@ -263,6 +307,50 @@ private struct GlobalSearchActionRow: View {
             .contentShape(RoundedRectangle(cornerRadius: AppShellLayout.radiusS, style: .continuous))
         }
         .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+    }
+
+    private var rowBackground: Color {
+        isHovering ? Color.accentColor.opacity(0.08) : Color.clear
+    }
+}
+
+private struct GlobalSearchChatSessionRow: View {
+    var result: GlobalSearchSessionResult
+
+    @State private var isHovering = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: AppShellLayout.spaceS) {
+            Image(systemName: "bubble.left.and.bubble.right")
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(.indigo)
+                .frame(width: 18)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: AppShellLayout.spaceXS) {
+                    Text(result.title.isEmpty ? "新对话" : result.title)
+                        .font(AppListTypography.rowTitle)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text("\(result.messageCount) 条消息")
+                        .font(AppListTypography.rowCaption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+                if !result.snippet.isEmpty {
+                    Text(result.snippet)
+                        .font(AppListTypography.rowSubtitle)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, AppShellLayout.spaceS)
+        .padding(.vertical, 6)
+        .background(rowBackground, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusS, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: AppShellLayout.radiusS, style: .continuous))
         .onHover { isHovering = $0 }
     }
 
