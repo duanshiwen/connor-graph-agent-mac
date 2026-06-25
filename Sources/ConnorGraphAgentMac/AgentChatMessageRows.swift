@@ -99,7 +99,8 @@ struct AgentChatMessageRow: View {
                     }
                 }
                 .foregroundStyle(Color.primary)
-                .padding(AgentChatLayout.spaceM)
+                .padding(.horizontal, AgentChatLayout.messageBubbleHorizontalPadding)
+                .padding(.vertical, AgentChatLayout.messageBubbleVerticalPadding)
                 .frame(maxWidth: isUser ? AgentChatLayout.userMessageMaxWidth : .infinity, alignment: .leading)
                 .background(messageBackground, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
                 .overlay(
@@ -154,7 +155,7 @@ struct AgentChatMessageRow: View {
             persistentCacheContext: persistentCacheContext
         )
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.trailing, AgentChatLayout.spaceXS)
+        .padding(.trailing, AgentChatLayout.assistantMessageTrailingPadding)
     }
 
     private var messageBackground: Color {

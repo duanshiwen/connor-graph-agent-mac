@@ -96,8 +96,8 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                     ChatJumpToLatestButton(pendingCount: controller.pendingNewItemCount) {
                         controller.jumpToLatest()
                     }
-                    .padding(.trailing, AgentChatLayout.spaceM)
-                    .padding(.bottom, AgentChatLayout.spaceM)
+                    .padding(.trailing, AgentChatLayout.jumpToLatestButtonTrailingInset)
+                    .padding(.bottom, AgentChatLayout.jumpToLatestButtonBottomInset)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
