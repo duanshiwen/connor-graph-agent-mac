@@ -1082,6 +1082,7 @@ final class AppViewModel: NSObject, ObservableObject {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         do {
+            let chatSessionResults = searchChatSessions(query: trimmed, limit: 3)
             let mailResults = try await searchNativeSource(kind: .mail, query: trimmed, limit: 3)
             let calendarResults = try await searchNativeSource(kind: .calendar, query: trimmed, limit: 3)
             let rssResults = try await searchNativeSource(kind: .rss, query: trimmed, limit: 3)
@@ -1090,6 +1091,7 @@ final class AppViewModel: NSObject, ObservableObject {
             globalSearchPreviewState = GlobalSearchPreviewState(
                 query: trimmed,
                 isLoading: false,
+                chatSessionResults: chatSessionResults,
                 mailResults: mailResults,
                 calendarResults: calendarResults,
                 rssResults: rssResults,
@@ -1100,6 +1102,75 @@ final class AppViewModel: NSObject, ObservableObject {
             guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
             globalSearchPreviewState = GlobalSearchPreviewState(query: trimmed, isLoading: false, errorMessage: String(describing: error))
         }
+    }
+
+    private func searchChatSessions(query: String, limit: Int) -> [GlobalSearchSessionResult] {
+        let terms = query
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(whereSeparator: { $0.isWhitespace || $0.isNewline })
+            .map(String.init)
+            .filter { !$0.isEmpty }
+        guard !terms.isEmpty else { return [] }
+        return allChatSessions
+            .compactMap { session -> (result: GlobalSearchSessionResult, score: Double)? in
+                let titleScore = Self.globalSearchMatchScore(text: session.title, terms: terms, weight: 20)
+                var bestMessageScore = 0.0
+                var bestSnippet = session.messages.last?.content ?? session.title
+                for message in session.messages {
+                    let weight: Double = message.role == .user ? 8 : 5
+                    let score = Self.globalSearchMatchScore(text: message.content, terms: terms, weight: weight)
+                    if score > bestMessageScore {
+                        bestMessageScore = score
+                        bestSnippet = Self.globalSearchSnippet(text: message.content, terms: terms)
+                    }
+                }
+                let totalScore = titleScore + bestMessageScore
+                guard totalScore > 0 else { return nil }
+                let snippet = titleScore > 0 && bestMessageScore == 0
+                    ? "最近更新：\(session.updatedAt.formatted(date: .abbreviated, time: .shortened))"
+                    : bestSnippet
+                return (
+                    GlobalSearchSessionResult(
+                        id: session.id,
+                        title: session.title.isEmpty ? "新对话" : session.title,
+                        snippet: snippet,
+                        updatedAt: session.updatedAt,
+                        messageCount: session.messages.count
+                    ),
+                    totalScore + min(3, Date().timeIntervalSince(session.updatedAt) / -86_400_000)
+                )
+            }
+            .sorted { lhs, rhs in
+                if lhs.score != rhs.score { return lhs.score > rhs.score }
+                return lhs.result.updatedAt > rhs.result.updatedAt
+            }
+            .prefix(limit)
+            .map(\.result)
+    }
+
+    private static func globalSearchMatchScore(text: String, terms: [String], weight: Double) -> Double {
+        let lower = text.lowercased()
+        guard terms.allSatisfy({ lower.localizedCaseInsensitiveContains($0) }) else { return 0 }
+        let exactBonus = terms.reduce(0.0) { partial, term in
+            partial + (lower == term.lowercased() ? 2.0 : 0.0)
+        }
+        return weight + exactBonus
+    }
+
+    private static func globalSearchSnippet(text: String, terms: [String], maxLength: Int = 120) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        let lower = trimmed.lowercased()
+        guard let firstTerm = terms.first(where: { lower.localizedCaseInsensitiveContains($0) }),
+              let range = lower.range(of: firstTerm.lowercased()) else {
+            return String(trimmed.prefix(maxLength))
+        }
+        let startDistance = lower.distance(from: lower.startIndex, to: range.lowerBound)
+        let snippetStart = max(0, startDistance - 36)
+        let snippetEnd = min(trimmed.count, snippetStart + maxLength)
+        let startIndex = trimmed.index(trimmed.startIndex, offsetBy: snippetStart)
+        let endIndex = trimmed.index(trimmed.startIndex, offsetBy: snippetEnd)
+        return String(trimmed[startIndex..<endIndex])
     }
 
     private func searchBrowserHistory(query: String, limit: Int) -> [BrowserHistoryRecord] {
@@ -1266,6 +1337,12 @@ final class AppViewModel: NSObject, ObservableObject {
     func openGlobalSearchBrowserHistoryResult(_ record: BrowserHistoryRecord) {
         dismissGlobalSearchOverlay()
         navigateToHistoryRecord(record)
+    }
+
+    func openGlobalSearchChatSessionResult(_ sessionID: String) {
+        selection = .agentChat
+        dismissGlobalSearchOverlay()
+        selectChatSession(sessionID)
     }
 
     func openGlobalSearchResult(_ result: NativeSearchResult) {
