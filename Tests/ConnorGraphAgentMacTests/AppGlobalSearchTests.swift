@@ -12,10 +12,11 @@ struct AppGlobalSearchTests {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
+        fixture.viewModel.sessionSearchQuery = "existing session filter"
         fixture.viewModel.updateGlobalSearchQuery(" quarterly planning ")
 
         #expect(fixture.viewModel.globalSearchQuery == " quarterly planning ")
-        #expect(fixture.viewModel.sessionSearchQuery == " quarterly planning ")
+        #expect(fixture.viewModel.sessionSearchQuery == "existing session filter")
         #expect(fixture.viewModel.isGlobalSearchOverlayPresented)
         #expect(fixture.viewModel.globalSearchPreviewState.query == "quarterly planning")
         #expect(fixture.viewModel.globalSearchPreviewState.isLoading)
@@ -23,7 +24,7 @@ struct AppGlobalSearchTests {
         fixture.viewModel.clearGlobalSearch()
 
         #expect(fixture.viewModel.globalSearchQuery.isEmpty)
-        #expect(fixture.viewModel.sessionSearchQuery.isEmpty)
+        #expect(fixture.viewModel.sessionSearchQuery == "existing session filter")
         #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
         #expect(fixture.viewModel.globalSearchPreviewState == .empty)
     }

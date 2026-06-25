@@ -322,18 +322,13 @@ struct CraftSessionListPane: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
 
-            if filteredSessions.isEmpty {
-                if viewModel.sessionSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    ContentUnavailableView("暂无会话", systemImage: "bubble.left", description: Text("点击左上角新建会话开始。"))
-                        .padding(.top, 80)
-                } else {
-                    ContentUnavailableView("没有匹配的会话", systemImage: "magnifyingglass", description: Text("搜索会匹配会话标题和消息内容。"))
-                        .padding(.top, 80)
-                }
+            if visibleSessions.isEmpty {
+                ContentUnavailableView("暂无会话", systemImage: "bubble.left", description: Text("点击左上角新建会话开始。"))
+                    .padding(.top, 80)
             } else {
                 ScrollView {
                     LazyVStack(spacing: 2) {
-                        ForEach(filteredSessions) { session in
+                        ForEach(visibleSessions) { session in
                             CraftSessionRow(
                                 row: AgentChatSessionPresentation(session: session),
                                 readState: viewModel.sessionReadStates[session.id],
@@ -369,8 +364,8 @@ struct CraftSessionListPane: View {
         .task { viewModel.reloadChatSessions() }
     }
 
-    private var filteredSessions: [AgentSession] {
-        AgentSessionTextSearchFilter().filter(viewModel.chatSessions, query: viewModel.sessionSearchQuery)
+    private var visibleSessions: [AgentSession] {
+        viewModel.chatSessions
     }
 
     private var sessionListTitle: String {
