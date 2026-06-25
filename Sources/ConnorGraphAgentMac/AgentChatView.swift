@@ -562,7 +562,7 @@ private struct AgentChatConversationView: View {
 
     var body: some View {
         let timelineSnapshot = timelineItems
-        let chatItems = AgentChatTimelineAdapter().items(from: timelineSnapshot)
+        let chatItems = AgentChatTimelineAdapter().items(from: timelineSnapshot, insertsDateSeparators: true)
         let latestProcessID = timelineSnapshot.last(where: { $0.process != nil })?.process?.id
 
         VStack(spacing: 0) {
@@ -585,6 +585,8 @@ private struct AgentChatConversationView: View {
                             chatTimelineRow(item, latestProcessID: latestProcessID)
                         } else if let unreadMarker = chatItem.unreadMarker {
                             AgentChatUnreadMarkerRow(unreadCount: unreadMarker.unreadCount)
+                        } else if let dateSeparator = chatItem.dateSeparator {
+                            AgentChatDateSeparatorRow(title: dateSeparator.title)
                         }
                     }
                 }
