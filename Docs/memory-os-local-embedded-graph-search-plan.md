@@ -25,19 +25,21 @@ SQLite Memory OS remains the source of truth. The Tantivy index is a derived loc
 ~/Library/Application Support/Connor/graph/search-index/memory-os-tantivy/
 ```
 
-## Layer Graph Semantics
+## Layer Semantics
 
-- **L0 Evidence Graph**: provenance objects and spans.
-- **L1 Event/Time Graph**: capture events, time blocks, processing queue links.
-- **L2 Statement Graph**: nodes, edges, statements, evidence, projections.
-- **L3 Belief Graph**: beliefs, belief evidence, belief relations, promotion paths.
+- **L0 Evidence Layer**: durable provenance objects and spans. L0 is the evidence endpoint for tracing and direct provenance reading, not a standalone Graph Retrieval Kernel tool surface.
+- **L1 Capture/Event Layer**: capture events, time blocks, processing queue links, and background pipeline state. L1 is primarily operational/pipeline context, not a standalone Graph Retrieval Kernel tool surface.
+- **L2 Statement Graph**: nodes, edges, statements, evidence refs, and projections.
+- **L3 Belief Graph**: beliefs, belief evidence, belief relations, and promotion paths.
 - **L4 Entity/Ontology Graph**: entities, aliases, statements, class/property/ontology relations.
+
+The product-facing Graph Retrieval Kernel is intentionally centered on **L2/L3/L4**. L0 is reached through evidence tracing or direct provenance read by known id; L1 remains a background ingestion/processing layer.
 
 ## Required Tool Semantics
 
 `memory_os_search` returns candidate records and entry points only. Search hits are not graph-complete answers.
 
-Graph/list/evidence/timeline/cross-layer questions must use graph retrieval tools. Implemented tools now include:
+Graph/list/evidence/cross-layer questions must use graph retrieval tools. Implemented tools now include:
 
 - `memory_os_query_graph`: orchestrates layered graph retrieval across L2/L3/L4 and optional L0 evidence tracing.
 - `memory_os_trace_evidence`: traces L3 beliefs or L2 statements to L0 provenance spans/objects.
@@ -48,7 +50,7 @@ Graph/list/evidence/timeline/cross-layer questions must use graph retrieval tool
 - `memory_os_l4_neighbors`: traverses L4 outgoing/incoming/both-direction relationship neighborhoods.
 - `memory_os_expand_l4`: legacy/baseline stable entity context expansion.
 
-Planned but not yet implemented tools include focused L1 event/time querying and broader record-level graph expansion.
+Standalone L0/L1 Graph Retrieval Kernel tools are intentionally out of scope. Future work should deepen L2/L3/L4 orchestration and evidence tracing rather than exposing L1 event/time or L0 provenance as graph-query tools.
 
 ## CLI and Release Operations
 
@@ -71,7 +73,7 @@ connor memory search-index rebuild
 - source database fingerprint is current enough by key table counts and file sizes;
 - smoke queries for Chinese, Wikidata ids, class terms, and properties return hits.
 
-Unified graph query CLI:
+Unified L2/L3/L4 graph query CLI:
 
 ```bash
 connor memory query-graph <text> \
