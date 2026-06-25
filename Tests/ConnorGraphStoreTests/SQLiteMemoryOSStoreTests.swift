@@ -108,6 +108,17 @@ private func temporaryMemoryOSDatabaseURL(_ name: String = UUID().uuidString) ->
     #expect(try store.searchStatementsFTS(query: "storage").contains(statement.id))
     #expect(try store.entity(id: entity.id)?.aliases == ["Connor Memory OS"])
     #expect(try store.searchEntitiesFTS(query: "Connor").contains(entity.id))
+
+    let indexQueue = try store.pendingSearchIndexQueueItems(limit: 20)
+    #expect(indexQueue.contains { $0["layer"] == "L0" && $0["record_id"] == provenance.id })
+    #expect(indexQueue.contains { $0["layer"] == "L1" && $0["record_id"] == capture.id })
+    #expect(indexQueue.contains { $0["layer"] == "L2" && $0["record_id"] == node.id })
+    #expect(indexQueue.contains { $0["layer"] == "L2" && $0["record_id"] == statement.id })
+    #expect(indexQueue.contains { $0["layer"] == "L3" && $0["record_id"] == belief.id })
+    #expect(indexQueue.contains { $0["layer"] == "L4" && $0["record_id"] == entity.id })
+    let firstQueueID = try #require(indexQueue.first?["id"])
+    try store.markSearchIndexQueueItemProcessed(id: firstQueueID, now: now)
+    #expect(try store.pendingSearchIndexQueueItems(limit: 20).allSatisfy { $0["id"] != firstQueueID })
 }
 
 @Test func sqliteMemoryOSStoreMigrationIsIdempotent() throws {

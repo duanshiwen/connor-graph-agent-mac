@@ -173,7 +173,8 @@ public enum AppMemoryOSSearchKernelFactory {
             "memory_l2_statements",
             "memory_l3_beliefs",
             "memory_l4_entities",
-            "memory_l4_entity_statements"
+            "memory_l4_entity_statements",
+            "memory_search_index_queue"
         ]
         var counts: [String: Int] = [:]
         for table in tables {
