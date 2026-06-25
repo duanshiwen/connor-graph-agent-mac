@@ -433,6 +433,7 @@ private struct AgentChatConversationView: View {
     @State private var transcriptViewportHeight: CGFloat = 0
     @State private var transcriptScrollResetID = UUID()
     @State private var showScrollToBottom: Bool = false
+    @State private var scrollToBottomAction: (() -> Void)? = nil
     private let collapseScrollPolicy = AgentChatCollapseScrollPolicy()
     private let transcriptTopAnchorID = "agent-chat-transcript-top-anchor"
     private let transcriptBottomAnchorID = "agent-chat-transcript-bottom-anchor"
@@ -539,15 +540,16 @@ private struct AgentChatConversationView: View {
     private func updateScrollToBottomVisibility(isBottomVisible: Bool) {
         let contentOverflows = transcriptContentHeight > transcriptViewportHeight + 1
         let shouldShow = contentOverflows && !isBottomVisible
-        if showScrollToBottom != shouldShow {
-            showScrollToBottom = shouldShow
-        }
+        showScrollToBottom = shouldShow
     }
 
     private func checkScrollToBottomVisibility() {
         let contentOverflows = transcriptContentHeight > transcriptViewportHeight + 1
         if !contentOverflows {
             showScrollToBottom = false
+        } else {
+            // Show button when content overflows (user needs to scroll down)
+            showScrollToBottom = true
         }
     }
 
@@ -699,31 +701,32 @@ private struct AgentChatConversationView: View {
                 .padding(.horizontal, 0)
                 .padding(.vertical, AgentChatLayout.spaceM)
 
-                // Floating scroll to bottom button
-                if showScrollToBottom {
-                    VStack {
-                        Spacer()
-                        HStack {
-                            Spacer()
-                            Button {
-                                withAnimation(.easeOut(duration: 0.2)) {
-                                    proxy.scrollTo(transcriptBottomAnchorID, anchor: .bottom)
-                                    showScrollToBottom = false
-                                }
-                            } label: {
-                                Image(systemName: "arrow.down.circle.fill")
-                                    .font(.system(size: 24))
-                                    .foregroundStyle(.secondary)
-                                    .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
-                            }
-                            .buttonStyle(.plain)
-                            .padding(.trailing, 16)
-                            .padding(.bottom, 80)
+                // Store scroll action for overlay button
+                .onAppear {
+                    scrollToBottomAction = {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            proxy.scrollTo(transcriptBottomAnchorID, anchor: .bottom)
                         }
+                        showScrollToBottom = false
                     }
-                    .transition(.opacity)
-                    .animation(.easeInOut(duration: 0.2), value: showScrollToBottom)
                 }
+            }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            if showScrollToBottom {
+                Button {
+                    scrollToBottomAction?()
+                } label: {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.system(size: 24))
+                        .foregroundStyle(.secondary)
+                        .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, 16)
+                .padding(.bottom, 80)
+                .transition(.opacity)
+                .animation(.easeInOut(duration: 0.2), value: showScrollToBottom)
             }
         }
         .frame(maxWidth: AgentChatLayout.chatContentMaxWidth, maxHeight: .infinity)
