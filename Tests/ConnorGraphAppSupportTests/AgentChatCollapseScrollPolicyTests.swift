@@ -23,7 +23,7 @@ import Testing
     #expect(decision == .scrollToBottom)
 }
 
-@Test func sessionSwitchResetsToTopWhenTranscriptFitsViewport() {
+@Test func sessionSwitchScrollsToBottomWhenTranscriptFitsViewport() {
     let policy = AgentChatCollapseScrollPolicy()
 
     let decision = policy.decisionAfterSessionSwitch(
@@ -31,7 +31,7 @@ import Testing
         viewportHeight: 700
     )
 
-    #expect(decision == .scrollToTop)
+    #expect(decision == .scrollToBottom)
 }
 
 @Test func collapseScrollScheduleIncludesPostAnimationLayoutProbe() {
