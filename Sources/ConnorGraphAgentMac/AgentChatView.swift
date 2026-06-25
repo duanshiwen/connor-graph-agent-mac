@@ -432,8 +432,6 @@ private struct AgentChatConversationView: View {
     @State private var transcriptContentHeight: CGFloat = 0
     @State private var transcriptViewportHeight: CGFloat = 0
     @State private var transcriptScrollResetID = UUID()
-    @State private var pendingAssistantCollapseScrollReset = false
-    @State private var assistantCollapsePreviousContentHeight: CGFloat?
     private let collapseScrollPolicy = AgentChatCollapseScrollPolicy()
     private let transcriptTopAnchorID = "agent-chat-transcript-top-anchor"
 
@@ -529,45 +527,6 @@ private struct AgentChatConversationView: View {
         }
     }
 
-    private func scrollAfterCollapsedMessageLayout(proxy: ScrollViewProxy) {
-        pendingAssistantCollapseScrollReset = true
-        assistantCollapsePreviousContentHeight = transcriptContentHeight
-        let cleanupDelay = (AgentChatCollapseScrollSchedule.decisionDelays.max() ?? 0.65) + 0.5
-        DispatchQueue.main.asyncAfter(deadline: .now() + cleanupDelay) {
-            pendingAssistantCollapseScrollReset = false
-            assistantCollapsePreviousContentHeight = nil
-        }
-        scheduleCollapseResetAfterLayout()
-        scheduleScrollDecisionAfterLayout(proxy: proxy) {
-            collapseScrollPolicy.decisionAfterAssistantMessageCollapse(
-                contentHeight: Double(transcriptContentHeight),
-                viewportHeight: Double(transcriptViewportHeight)
-            )
-        }
-    }
-
-    private func resetScrollIdentityIfNeededAfterCollapse() {
-        guard pendingAssistantCollapseScrollReset,
-              let previousHeight = assistantCollapsePreviousContentHeight,
-              collapseScrollPolicy.shouldResetScrollIdentityAfterCollapse(
-                  previousContentHeight: Double(previousHeight),
-                  newContentHeight: Double(transcriptContentHeight),
-                  viewportHeight: Double(transcriptViewportHeight)
-              )
-        else { return }
-        pendingAssistantCollapseScrollReset = false
-        assistantCollapsePreviousContentHeight = nil
-        transcriptScrollResetID = UUID()
-    }
-
-    private func scheduleCollapseResetAfterLayout() {
-        for delay in AgentChatCollapseScrollSchedule.decisionDelays {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                resetScrollIdentityIfNeededAfterCollapse()
-            }
-        }
-    }
-
     private func scrollAfterSessionSwitchLayout(proxy: ScrollViewProxy, sessionID: String?) {
         scheduleScrollDecisionAfterLayout(proxy: proxy) {
             guard sessionID == viewModel.selectedChatSessionID else { return .doNotScroll }
@@ -633,9 +592,6 @@ private struct AgentChatConversationView: View {
                                     AgentChatMessageRow(
                                         row: message,
                                         persistentCacheContext: viewModel.markdownPersistentCacheContext(messageID: message.message.id),
-                                        onAssistantMessageCollapsed: {
-                                            scrollAfterCollapsedMessageLayout(proxy: proxy)
-                                        },
                                         onPreviewAttachment: { attachment in
                                             viewModel.previewAttachment(attachment)
                                         }
@@ -677,7 +633,6 @@ private struct AgentChatConversationView: View {
                 .id(transcriptScrollResetID)
                 .onPreferenceChange(AgentChatTranscriptContentHeightKey.self) { height in
                     transcriptContentHeight = height
-                    resetScrollIdentityIfNeededAfterCollapse()
                 }
                 .onPreferenceChange(AgentChatTranscriptViewportHeightKey.self) { height in
                     transcriptViewportHeight = height
