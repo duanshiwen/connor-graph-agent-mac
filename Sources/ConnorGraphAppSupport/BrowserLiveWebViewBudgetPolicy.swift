@@ -46,15 +46,18 @@ public struct BrowserLiveWebViewBudgetConfig: Codable, Sendable, Equatable {
     public var maxHiddenLiveWebViews: Int
     public var minHiddenLiveWebViewsToKeep: Int
     public var softProcessMemoryLimitMegabytes: Int?
+    public var hiddenEvictionGracePeriodSeconds: TimeInterval
 
     public init(
         maxHiddenLiveWebViews: Int = 4,
         minHiddenLiveWebViewsToKeep: Int = 1,
-        softProcessMemoryLimitMegabytes: Int? = 1024
+        softProcessMemoryLimitMegabytes: Int? = 1024,
+        hiddenEvictionGracePeriodSeconds: TimeInterval = 30
     ) {
         self.maxHiddenLiveWebViews = max(0, maxHiddenLiveWebViews)
         self.minHiddenLiveWebViewsToKeep = max(0, minHiddenLiveWebViewsToKeep)
         self.softProcessMemoryLimitMegabytes = softProcessMemoryLimitMegabytes
+        self.hiddenEvictionGracePeriodSeconds = max(0, hiddenEvictionGracePeriodSeconds)
     }
 }
 
@@ -83,17 +86,23 @@ public struct BrowserLiveWebViewBudgetPolicy: Sendable, Equatable {
 
     public func evictionDecision(
         entries: [BrowserLiveWebViewBudgetEntry],
-        processMemoryMegabytes: Int?
+        processMemoryMegabytes: Int?,
+        now: Date = Date()
     ) -> BrowserLiveWebViewEvictionDecision {
         let hiddenEntries = entries.filter { !$0.isVisible }
         let sortedHiddenEntries = hiddenEntries.sorted(by: Self.evictionSort)
 
         let hiddenOverflow = max(0, hiddenEntries.count - config.maxHiddenLiveWebViews)
         if hiddenOverflow > 0 {
+            let graceCutoff = now.addingTimeInterval(-config.hiddenEvictionGracePeriodSeconds)
+            let sortedEvictableHiddenEntries = sortedHiddenEntries.filter { entry in
+                guard let lastVisibleAt = entry.lastVisibleAt else { return true }
+                return lastVisibleAt <= graceCutoff
+            }
             let evictableCount = max(0, hiddenEntries.count - config.minHiddenLiveWebViewsToKeep)
-            let count = min(hiddenOverflow, evictableCount)
+            let count = min(hiddenOverflow, evictableCount, sortedEvictableHiddenEntries.count)
             return BrowserLiveWebViewEvictionDecision(
-                keysToEvict: Array(sortedHiddenEntries.prefix(count)).map(\.key),
+                keysToEvict: Array(sortedEvictableHiddenEntries.prefix(count)).map(\.key),
                 reason: count > 0 ? .hiddenCountExceeded : .withinBudget
             )
         }
