@@ -23,12 +23,12 @@ public enum SQLiteMemoryOSStoreError: Error, Sendable, Equatable, CustomStringCo
 }
 
 public final class SQLiteMemoryOSStore: @unchecked Sendable {
-    public static let currentSchemaVersion = 4
+    public static let currentSchemaVersion = 5
 
     public static let requiredSchemaTables: Set<String> = [
         "memory_schema_migrations", "memory_legacy_import_runs", "memory_store_health_checks", "memory_builtin_datasets",
         "memory_audit_events", "memory_processing_metrics", "memory_error_events", "memory_recovery_actions",
-        "memory_discard_events",
+        "memory_discard_events", "memory_search_index_queue",
         "memory_l0_provenance_objects", "memory_l0_provenance_spans", "memory_l0_derivations", "memory_l0_content_hashes",
         "memory_l1_capture_events", "memory_l1_time_blocks", "memory_l1_time_block_events", "memory_l1_processing_queue", "memory_l1_queue_attempts", "memory_l1_dead_letter_queue",
         "memory_l2_nodes", "memory_l2_edges", "memory_l2_statements", "memory_l2_statement_evidence", "memory_l2_statement_processing_state", "memory_l2_episodes", "memory_l2_processing_runs", "memory_l2_processing_artifacts", "memory_l2_projections", "memory_l2_projection_items",
@@ -43,7 +43,7 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         "idx_memory_l2_nodes_key", "idx_memory_l2_statements_subject", "idx_memory_l2_statements_temporal", "idx_memory_l2_statement_evidence_statement", "idx_memory_l2_processing_state",
         "idx_memory_l3_beliefs_topic", "idx_memory_l3_beliefs_temporal", "idx_memory_l3_belief_evidence_belief",
         "idx_memory_l4_entities_key", "idx_memory_l4_aliases_entity", "idx_memory_l4_statements_entity", "idx_memory_l4_statement_evidence_statement",
-        "idx_memory_audit_events_time", "idx_memory_error_events_time"
+        "idx_memory_audit_events_time", "idx_memory_error_events_time", "idx_memory_search_index_queue_pending"
     ]
 
     public let databasePath: String
@@ -147,6 +147,46 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         return result
     }
 
+    // MARK: - Search index queue
+
+    public func enqueueSearchIndexChange(layer: String, recordID: String, operation: String = "upsert", now: Date = Date()) throws {
+        let id = "\(layer):\(recordID):\(operation)"
+        try execute("""
+        INSERT OR REPLACE INTO memory_search_index_queue
+        (id, layer, record_id, operation, created_at, processed_at, status, error)
+        VALUES (\(quote(id)), \(quote(layer)), \(quote(recordID)), \(quote(operation)), \(quote(iso(now))), NULL, 'pending', NULL)
+        """)
+    }
+
+    public func pendingSearchIndexQueueItems(limit: Int = 100) throws -> [[String: String]] {
+        let columns = ["id", "layer", "record_id", "operation", "created_at", "processed_at", "status", "error"]
+        return try query(sql: """
+        SELECT id, layer, record_id, operation, created_at, processed_at, status, error
+        FROM memory_search_index_queue
+        WHERE status = 'pending'
+        ORDER BY created_at ASC
+        LIMIT \(max(1, min(limit, 1_000)))
+        """).map { row in
+            Dictionary(uniqueKeysWithValues: zip(columns, row))
+        }
+    }
+
+    public func markSearchIndexQueueItemProcessed(id: String, now: Date = Date()) throws {
+        try execute("""
+        UPDATE memory_search_index_queue
+        SET status = 'processed', processed_at = \(quote(iso(now))), error = NULL
+        WHERE id = \(quote(id))
+        """)
+    }
+
+    public func markSearchIndexQueueItemFailed(id: String, error: String, now: Date = Date()) throws {
+        try execute("""
+        UPDATE memory_search_index_queue
+        SET status = 'failed', processed_at = \(quote(iso(now))), error = \(quote(error))
+        WHERE id = \(quote(id))
+        """)
+    }
+
     // MARK: - L0
 
     public func upsert(provenance object: MemoryOSProvenanceObject) throws {
@@ -160,6 +200,7 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         INSERT INTO memory_l0_provenance_fts(object_id, source_type, title, content)
         VALUES (\(quote(object.id)), \(quote(object.sourceType.rawValue)), \(quote(object.title)), \(quote(object.content)))
         """)
+        try enqueueSearchIndexChange(layer: "L0", recordID: object.id)
     }
 
     public func provenanceObject(id: String) throws -> MemoryOSProvenanceObject? {
@@ -185,6 +226,7 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         (id, provenance_object_id, event_type, occurred_at, token_estimate, processing_state, metadata_json)
         VALUES (\(quote(event.id)), \(quote(event.provenanceObjectID)), \(quote(event.eventType)), \(quote(iso(event.occurredAt))), \(event.tokenEstimate), \(quote(event.processingState.rawValue)), \(quote(json(event.metadata))))
         """)
+        try enqueueSearchIndexChange(layer: "L1", recordID: event.id)
     }
 
     public func upsert(timeBlock block: MemoryOSTimeBlock) throws {
@@ -259,6 +301,7 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         """)
         try execute("DELETE FROM memory_l2_nodes_fts WHERE node_id = \(quote(node.id));")
         try execute("INSERT INTO memory_l2_nodes_fts(node_id, node_type, name, summary) VALUES (\(quote(node.id)), \(quote(node.nodeType)), \(quote(node.name)), \(quote(node.summary)))")
+        try enqueueSearchIndexChange(layer: "L2", recordID: node.id)
     }
 
     public func upsert(statement: MemoryOSStatement) throws {
@@ -277,6 +320,7 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         }
         try execute("DELETE FROM memory_l2_statements_fts WHERE statement_id = \(quote(statement.id));")
         try execute("INSERT INTO memory_l2_statements_fts(statement_id, predicate, text) VALUES (\(quote(statement.id)), \(quote(statement.predicate)), \(quote(statement.text)))")
+        try enqueueSearchIndexChange(layer: "L2", recordID: statement.id)
     }
 
     public func saveProjectionBatch(_ batch: MemoryOSProjectionBatch) throws {
@@ -311,6 +355,7 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         """)
         try execute("DELETE FROM memory_l3_beliefs_fts WHERE belief_id = \(quote(belief.id));")
         try execute("INSERT INTO memory_l3_beliefs_fts(belief_id, topic, statement) VALUES (\(quote(belief.id)), \(quote(belief.topic)), \(quote(belief.statement)))")
+        try enqueueSearchIndexChange(layer: "L3", recordID: belief.id)
     }
 
     // MARK: - L4
@@ -329,6 +374,7 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         }
         try execute("DELETE FROM memory_l4_entities_fts WHERE entity_id = \(quote(entity.id));")
         try execute("INSERT INTO memory_l4_entities_fts(entity_id, entity_type, name, aliases, summary) VALUES (\(quote(entity.id)), \(quote(entity.entityType)), \(quote(entity.name)), \(quote(entity.aliases.joined(separator: " "))), \(quote(entity.summary)))")
+        try enqueueSearchIndexChange(layer: "L4", recordID: entity.id)
     }
 
     public func entity(id: String) throws -> MemoryOSEntity? {
@@ -354,6 +400,7 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         }
         try execute("DELETE FROM memory_l4_statements_fts WHERE statement_id = \(quote(statement.id));")
         try execute("INSERT INTO memory_l4_statements_fts(statement_id, predicate, text) VALUES (\(quote(statement.id)), \(quote(statement.predicate)), \(quote(statement.text)))")
+        try enqueueSearchIndexChange(layer: "L4", recordID: statement.id)
     }
 
     public func searchEntitiesFTS(query: String, limit: Int = 20) throws -> [String] {
@@ -520,6 +567,8 @@ public extension SQLiteMemoryOSStore {
     CREATE INDEX IF NOT EXISTS idx_memory_error_events_time ON memory_error_events(created_at DESC);
     CREATE TABLE IF NOT EXISTS memory_recovery_actions (id TEXT PRIMARY KEY, action_type TEXT NOT NULL, target_id TEXT, status TEXT NOT NULL, created_at TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}');
     CREATE TABLE IF NOT EXISTS memory_discard_events (id TEXT PRIMARY KEY, source_type TEXT NOT NULL, source_id TEXT, reason TEXT NOT NULL, occurred_at TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}');
+    CREATE TABLE IF NOT EXISTS memory_search_index_queue (id TEXT PRIMARY KEY, layer TEXT NOT NULL, record_id TEXT NOT NULL, operation TEXT NOT NULL, created_at TEXT NOT NULL, processed_at TEXT, status TEXT NOT NULL, error TEXT);
+    CREATE INDEX IF NOT EXISTS idx_memory_search_index_queue_pending ON memory_search_index_queue(status, created_at);
 
     CREATE TABLE IF NOT EXISTS memory_l0_provenance_objects (id TEXT PRIMARY KEY, source_type TEXT NOT NULL, source_id TEXT, title TEXT NOT NULL, content TEXT NOT NULL, content_hash TEXT NOT NULL, occurred_at TEXT NOT NULL, ingested_at TEXT NOT NULL, session_id TEXT, work_object_id TEXT, confidentiality TEXT NOT NULL, status TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}');
     CREATE INDEX IF NOT EXISTS idx_memory_l0_provenance_source ON memory_l0_provenance_objects(source_type, source_id);
