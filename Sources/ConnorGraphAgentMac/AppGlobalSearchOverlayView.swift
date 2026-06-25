@@ -9,9 +9,6 @@ struct AppGlobalSearchOverlayView: View {
     private let browserHistoryPageSize = 3
     private var state: GlobalSearchPreviewState { viewModel.globalSearchPreviewState }
     private var query: String { viewModel.globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) }
-    private var hasAnyNativeResults: Bool {
-        !state.mailResults.isEmpty || !state.calendarResults.isEmpty || !state.rssResults.isEmpty || !state.browserHistoryResults.isEmpty
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
@@ -25,10 +22,6 @@ struct AppGlobalSearchOverlayView: View {
             resultSection(kind: .calendar, results: state.calendarResults)
             resultSection(kind: .rss, results: state.rssResults)
             browserHistorySection(results: state.browserHistoryResults)
-
-            if !state.isLoading, !hasAnyNativeResults, state.errorMessage == nil {
-                emptyResultsRow
-            }
 
             if let errorMessage = state.errorMessage, !errorMessage.isEmpty {
                 errorRow(errorMessage)
@@ -69,15 +62,6 @@ struct AppGlobalSearchOverlayView: View {
         }
         .padding(.horizontal, AppShellLayout.spaceS)
         .padding(.vertical, AppShellLayout.spaceXS)
-    }
-
-    private var emptyResultsRow: some View {
-        Text("没有找到匹配的邮件、日历、RSS 或浏览历史")
-            .font(AppListTypography.rowCaption)
-            .foregroundStyle(.tertiary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, AppShellLayout.spaceS)
-            .padding(.vertical, AppShellLayout.spaceXS)
     }
 
     private func errorRow(_ message: String) -> some View {
@@ -127,7 +111,9 @@ struct AppGlobalSearchOverlayView: View {
             .padding(.horizontal, AppShellLayout.spaceS)
             .padding(.top, AppShellLayout.spaceXS)
 
-            if !pageResults.isEmpty {
+            if pageResults.isEmpty, !state.isLoading {
+                GlobalSearchEmptySourceRow(title: GlobalSearchSectionKind.browserHistory.emptyTitle)
+            } else if !pageResults.isEmpty {
                 VStack(spacing: 1) {
                     ForEach(pageResults) { result in
                         Button {
@@ -140,6 +126,8 @@ struct AppGlobalSearchOverlayView: View {
                 }
             }
         }
+        .frame(minHeight: 58, alignment: .top)
+        .padding(.bottom, 2)
     }
 
     private func browserHistoryPaginationControls(currentPage: Int, pageCount: Int) -> some View {
@@ -199,7 +187,9 @@ struct AppGlobalSearchOverlayView: View {
             .padding(.horizontal, AppShellLayout.spaceS)
             .padding(.top, AppShellLayout.spaceXS)
 
-            if !results.isEmpty {
+            if results.isEmpty, !state.isLoading {
+                GlobalSearchEmptySourceRow(title: kind.emptyTitle)
+            } else if !results.isEmpty {
                 VStack(spacing: 1) {
                     ForEach(results.prefix(3)) { result in
                         Button {
@@ -212,6 +202,28 @@ struct AppGlobalSearchOverlayView: View {
                 }
             }
         }
+        .frame(minHeight: 58, alignment: .top)
+        .padding(.bottom, 2)
+    }
+}
+
+private struct GlobalSearchEmptySourceRow: View {
+    var title: String
+
+    var body: some View {
+        HStack(spacing: AppShellLayout.spaceS) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.tertiary)
+                .frame(width: 18)
+            Text(title)
+                .font(AppListTypography.rowCaption)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, AppShellLayout.spaceS)
+        .padding(.vertical, 8)
     }
 }
 
