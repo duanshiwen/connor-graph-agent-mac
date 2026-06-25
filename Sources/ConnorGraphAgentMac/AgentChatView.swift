@@ -530,10 +530,15 @@ private struct AgentChatConversationView: View {
     private func scrollAfterSessionSwitchLayout(proxy: ScrollViewProxy, sessionID: String?) {
         scheduleScrollDecisionAfterLayout(proxy: proxy) {
             guard sessionID == viewModel.selectedChatSessionID else { return .doNotScroll }
-            return collapseScrollPolicy.decisionAfterSessionSwitch(
-                contentHeight: Double(transcriptContentHeight),
-                viewportHeight: Double(transcriptViewportHeight)
-            )
+            let contentHeight = Double(self.transcriptContentHeight)
+            let viewportHeight = Double(self.transcriptViewportHeight)
+            let dimensionsReady = contentHeight.isFinite && viewportHeight.isFinite && contentHeight > 0 && viewportHeight > 0
+            // Dimensions not yet measured → try scrolling (next probe will retry if it fails)
+            guard dimensionsReady else { return .scrollToBottom }
+            // Content fits viewport → no scroll needed (avoids white screen)
+            guard contentHeight > viewportHeight + 1 else { return .doNotScroll }
+            // Content overflows → scroll to latest messages
+            return .scrollToBottom
         }
     }
 
