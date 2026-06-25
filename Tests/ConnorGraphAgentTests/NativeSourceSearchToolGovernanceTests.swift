@@ -26,7 +26,7 @@ struct NativeSourceSearchToolGovernanceTests {
         #expect(registry.definition(named: "same_tool")?.description == "second")
     }
 
-    @Test func nativeSearchGovernanceKeepsInternalIndexesPrivateWhileMailSearchIsCallable() {
+    @Test func nativeSearchGovernanceKeepsInternalIndexesPrivateWhileNativeSourceToolsAreCallable() {
         var registry = AgentToolRegistry()
         registry.registerNativeMailTools(runtime: MailRuntimeSearchFixture())
         registry.registerNativeRSSTools(runtime: RSSRuntimeSearchFixture())
@@ -36,26 +36,33 @@ struct NativeSourceSearchToolGovernanceTests {
         #expect(Set(names).count == names.count)
         #expect(registry.duplicateRegistrations.isEmpty)
         #expect(names.contains("mail_search_messages"))
-        #expect(!names.contains("rss_search_items"))
+        #expect(names.contains("mail_get_message"))
+        #expect(names.contains("rss_search_items"))
+        #expect(names.contains("rss_get_item"))
+        #expect(names.contains("calendar_search_events"))
         #expect(names.contains("calendar_read"))
         #expect(!names.contains("mail_index_search"))
         #expect(!names.contains("rss_index_search"))
         #expect(!names.contains("calendar_index_search"))
 
-        let calendarSchema = registry.definition(named: "calendar_read")?.inputSchema
-        #expect(!schema(calendarSchema, contains: "query"))
-        #expect(!schema(calendarSchema, contains: "startDate"))
-        #expect(!schema(calendarSchema, contains: "timePreset"))
-        #expect(!schema(calendarSchema, contains: "timeFilterMode"))
+        let calendarReadSchema = registry.definition(named: "calendar_read")?.inputSchema
+        #expect(!schema(calendarReadSchema, contains: "query"))
+        let calendarSearchSchema = registry.definition(named: "calendar_search_events")?.inputSchema
+        #expect(schema(calendarSearchSchema, contains: "query"))
+        #expect(schema(calendarSearchSchema, contains: "startDate"))
+        #expect(schema(calendarSearchSchema, contains: "timePreset"))
+        #expect(schema(calendarSearchSchema, contains: "timeFilterMode"))
     }
 
-    @Test func systemPromptDoesNotExposeInternalNativeSearchMethods() {
+    @Test func systemPromptExposesNativeSourceToolsButNotInternalIndexMethods() {
         let prompt = AgentInstructionSection.defaultConnorInstruction
-        #expect(!prompt.contains("mail_search_messages"))
-        #expect(!prompt.contains("rss_search_items"))
-        #expect(!prompt.contains("search_events"))
-        #expect(!prompt.localizedCaseInsensitiveContains("timePreset"))
-        #expect(!prompt.localizedCaseInsensitiveContains("startDate"))
+        #expect(prompt.contains("mail_search_messages"))
+        #expect(prompt.contains("rss_search_items"))
+        #expect(prompt.contains("calendar_search_events"))
+        #expect(prompt.contains("browser_history_search"))
+        #expect(!prompt.contains("mail_index_search"))
+        #expect(!prompt.contains("rss_index_search"))
+        #expect(!prompt.contains("calendar_index_search"))
         #expect(!prompt.localizedCaseInsensitiveContains("Native Source Search"))
     }
 
