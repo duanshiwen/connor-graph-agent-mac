@@ -97,25 +97,31 @@ struct AgentChatMessageRow: View {
         HStack(alignment: .top) {
             if isUser { Spacer(minLength: AgentChatLayout.messageSideInset) }
 
-            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
-                if isUser, let activeSkillLabel {
-                    userActiveSkillChip(activeSkillLabel)
+            VStack(alignment: .leading, spacing: isUser ? AgentChatLayout.spaceS : AgentChatLayout.avatarBubbleSpacing) {
+                if !isUser {
+                    AgentAssistantHeaderView()
                 }
-                messageContent
-                if !row.attachments.isEmpty {
-                    AgentMessageAttachmentRefsView(attachments: row.attachments) { attachment in
-                        onPreviewAttachment(attachment)
+
+                VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+                    if isUser, let activeSkillLabel {
+                        userActiveSkillChip(activeSkillLabel)
+                    }
+                    messageContent
+                    if !row.attachments.isEmpty {
+                        AgentMessageAttachmentRefsView(attachments: row.attachments) { attachment in
+                            onPreviewAttachment(attachment)
+                        }
                     }
                 }
+                .foregroundStyle(Color.primary)
+                .padding(AgentChatLayout.spaceM)
+                .frame(maxWidth: isUser ? AgentChatLayout.userMessageMaxWidth : .infinity, alignment: .leading)
+                .background(messageBackground, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
+                        .stroke(isUser ? Color.clear : Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1)
+                )
             }
-            .foregroundStyle(Color.primary)
-            .padding(AgentChatLayout.spaceM)
-            .frame(maxWidth: isUser ? AgentChatLayout.userMessageMaxWidth : .infinity, alignment: .leading)
-            .background(messageBackground, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous)
-                    .stroke(isUser ? Color.clear : Color.secondary.opacity(AgentChatLayout.hairlineOpacity), lineWidth: 1)
-            )
         }
         .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
     }
@@ -263,6 +269,38 @@ struct AgentMessageAttachmentRefsView: View {
         case .audio: return "音频"
         case .video: return "视频"
         default: return "附件"
+        }
+    }
+}
+
+/// 助理消息上方的头像 + 昵称行。
+/// 现阶段固定为康纳同学；飞书接入后根据消息来源动态切换头像和名称。
+struct AgentAssistantHeaderView: View {
+    var displayName: String = "康纳同学"
+    var avatarImage: NSImage? = nil
+
+    var body: some View {
+        HStack(spacing: AgentChatLayout.spaceS) {
+            avatarView
+            Text(displayName)
+                .font(AgentChatTypography.microEmphasis)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var avatarView: some View {
+        if let avatarImage {
+            Image(nsImage: avatarImage)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: AgentChatLayout.avatarSize, height: AgentChatLayout.avatarSize)
+                .clipShape(Circle())
+        } else {
+            Image(systemName: "person.circle.fill")
+                .font(.system(size: AgentChatLayout.avatarSize))
+                .foregroundStyle(ConnorCraftPalette.accent.opacity(0.7))
+                .frame(width: AgentChatLayout.avatarSize, height: AgentChatLayout.avatarSize)
         }
     }
 }

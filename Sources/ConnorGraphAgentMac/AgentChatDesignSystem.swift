@@ -95,4 +95,7 @@ enum AgentChatLayout {
     static let userMessageMaxWidth: CGFloat = chatContentMaxWidth * 0.72
     static let processMaxWidth: CGFloat = chatContentMaxWidth
     static let messageSideInset: CGFloat = 0
+
+    static let avatarSize: CGFloat = 28
+    static let avatarBubbleSpacing: CGFloat = 8
 }
