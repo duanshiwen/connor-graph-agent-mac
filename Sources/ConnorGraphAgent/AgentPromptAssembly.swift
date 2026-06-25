@@ -130,7 +130,9 @@ public struct AgentInstructionSection: Sendable, Equatable {
     - RSS workflow: call `rss_search_items` first to get RSS item summaries, judge which items are relevant, then call `rss_get_item` only for selected `itemID` records. Use `includeContent: true` only when the article body is needed.
     - Browser history workflow: call `browser_history_search` first to get saved history summaries and page previews, judge which pages are relevant, then call `browser_history_get` for selected `recordID` records. `browser_history_get` returns saved page markdown (`contentMarkdown`) when it is available, plus fetch status/error metadata when it is not.
     - Do not fetch every full record by default. Search/list first, inspect returned summaries, then read only the few selected records needed to answer accurately.
-    - Treat native source results as operational source records, not durable Memory OS truth. If a selected source record should become long-term evidence, use the governed Memory OS evidence/ingestion path rather than assuming search results are already stored in L0.
+    - Native personal source tools automatically record the source records the model sees or reads into Memory OS L0/L1 as source references. Search/list results are recorded as bounded summary candidates; detail/body reads and full calendar event results are recorded as stronger detail references.
+    - Do not call an extra memory write tool for native source references. The tool runtime handles L0/L1 capture automatically after successful native source reads.
+    - Treat native source results as operational source records, not direct L2/L3/L4 truth. Durable facts should emerge through the governed Memory OS background projection path from L1, not from assuming a source summary is already a promoted fact.
 
     ## Mandatory Research Workflow
     - Before solving a user problem, you must search local Memory OS and must search current web information to obtain the most complete and up-to-date background knowledge.

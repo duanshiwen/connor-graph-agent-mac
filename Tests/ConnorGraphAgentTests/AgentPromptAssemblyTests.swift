@@ -70,6 +70,10 @@ import ConnorGraphAgent
     #expect(prompt.contains("Search/list first"))
     #expect(prompt.contains("Calendar search results already return full event details"))
     #expect(prompt.contains("contentMarkdown"))
+    #expect(prompt.contains("automatically record the source records the model sees or reads into Memory OS L0/L1"))
+    #expect(prompt.contains("bounded summary candidates"))
+    #expect(prompt.contains("detail references"))
+    #expect(prompt.contains("Do not call an extra memory write tool for native source references"))
 }
 
 @Test func defaultSystemPromptRequiresTaskBootstrapWorkflowOrder() throws {
