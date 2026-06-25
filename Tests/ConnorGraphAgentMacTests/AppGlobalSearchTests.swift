@@ -29,6 +29,27 @@ struct AppGlobalSearchTests {
         #expect(fixture.viewModel.globalSearchPreviewState == .empty)
     }
 
+    @Test func focusRestoresOverlayForExistingQueryAndBlurDismissesIt() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        fixture.viewModel.updateGlobalSearchQuery("invoice")
+        fixture.viewModel.dismissGlobalSearchOverlay()
+
+        #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
+
+        fixture.viewModel.activateGlobalSearchField()
+
+        #expect(fixture.viewModel.isGlobalSearchFieldFocused)
+        #expect(fixture.viewModel.isGlobalSearchOverlayPresented)
+
+        fixture.viewModel.deactivateGlobalSearchField()
+
+        #expect(!fixture.viewModel.isGlobalSearchFieldFocused)
+        #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
+        #expect(fixture.viewModel.globalSearchQuery == "invoice")
+    }
+
     @Test func showAllGlobalSearchResultsNavigatesAndPreservesFilter() throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }

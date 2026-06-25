@@ -363,6 +363,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var sessionListFilter: AgentSessionListFilter = .all
     @Published var sessionSearchQuery: String = ""
     @Published var globalSearchQuery: String = ""
+    @Published var isGlobalSearchFieldFocused: Bool = false
     @Published var isGlobalSearchOverlayPresented: Bool = false
     @Published var globalSearchPreviewState: GlobalSearchPreviewState = .empty
     @Published var nativeSourceListFilterQuery: String = ""
@@ -1020,6 +1021,21 @@ final class AppViewModel: NSObject, ObservableObject {
         showBrowserWorkspace(for: sessionID)
     }
 
+    func activateGlobalSearchField() {
+        isGlobalSearchFieldFocused = true
+        let trimmed = globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        isGlobalSearchOverlayPresented = true
+        if globalSearchPreviewState.query != trimmed {
+            scheduleGlobalSearchPreview(for: trimmed)
+        }
+    }
+
+    func deactivateGlobalSearchField() {
+        isGlobalSearchFieldFocused = false
+        isGlobalSearchOverlayPresented = false
+    }
+
     func updateGlobalSearchQuery(_ query: String) {
         globalSearchQuery = query
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1030,12 +1046,7 @@ final class AppViewModel: NSObject, ObservableObject {
             return
         }
         isGlobalSearchOverlayPresented = true
-        globalSearchPreviewState = GlobalSearchPreviewState(query: trimmed, isLoading: true)
-        globalSearchPreviewTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 180_000_000)
-            guard !Task.isCancelled else { return }
-            await self?.refreshGlobalSearchPreview(for: trimmed)
-        }
+        scheduleGlobalSearchPreview(for: trimmed)
     }
 
     func clearGlobalSearch() {
@@ -1047,6 +1058,16 @@ final class AppViewModel: NSObject, ObservableObject {
 
     func dismissGlobalSearchOverlay() {
         isGlobalSearchOverlayPresented = false
+    }
+
+    private func scheduleGlobalSearchPreview(for query: String) {
+        globalSearchPreviewTask?.cancel()
+        globalSearchPreviewState = GlobalSearchPreviewState(query: query, isLoading: true)
+        globalSearchPreviewTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 180_000_000)
+            guard !Task.isCancelled else { return }
+            await self?.refreshGlobalSearchPreview(for: query)
+        }
     }
 
     func refreshGlobalSearchPreview(for query: String) async {
