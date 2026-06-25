@@ -120,6 +120,83 @@ public struct MemoryOSProjectStructuredArtifactTool: AgentTool {
     }
 }
 
+public struct MemoryOSContextTool: AgentTool {
+    public let name = "memory_os_context"
+    public let description = "Build a commercial-grade Memory OS context package for the LLM by orchestrating L0-L4 retrieval, optional L4 graph expansion, deterministic organization, verbalization, diagnostics, and budget reporting. Prefer this over low-level memory_os_search when answering user questions from memory."
+    public let permission: AgentPermissionCapability = .readGraph
+    public let inputSchema = AgentToolInputSchema.object(properties: [
+        "query": .string(description: "Natural-language memory context query."),
+        "taskIntent": .string(description: "auto, answerQuestion, planWork, verifyClaim, explainRelationship, listInstances, currentUserPersonalization, etc. Defaults to auto."),
+        "subjectHints": .array(items: .string(description: "Entity, project, person, or concept hint."), description: "Optional subject hints."),
+        "layers": .array(items: .string(description: "Layer name: L0, L1, L2, L3 or L4."), description: "Optional Memory OS layers. Defaults to all layers."),
+        "requireEvidence": .boolean(description: "Whether evidence should be required and diagnostics exposed. Defaults to false."),
+        "graphDepth": .number(description: "Optional L4 graph expansion depth. Defaults to 1, capped at 5."),
+        "maxContextCharacters": .number(description: "Maximum contextText characters. Defaults to commercial policy."),
+        "outputMode": .string(description: "compact, balanced, evidenceHeavy, or graphHeavy. Defaults to balanced."),
+        "language": .string(description: "zhHans, en, or bilingual. Defaults to zhHans.")
+    ], required: ["query"])
+
+    private let facade: AppMemoryOSFacade
+
+    public init(facade: AppMemoryOSFacade) { self.facade = facade }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        guard let queryText = arguments.string("query")?.trimmingCharacters(in: .whitespacesAndNewlines), !queryText.isEmpty else {
+            throw AgentToolError.invalidArguments("query is required")
+        }
+        let intent = arguments.string("taskIntent").flatMap(MemoryOSTaskIntent.init(rawValue:)) ?? .auto
+        let layers = parseLayers(arguments.array("layers"))
+        let subjectHints = parseStringArray(arguments.array("subjectHints"))
+        let graphDepth = max(0, min(arguments.int("graphDepth") ?? 1, 5))
+        let budget = budget(maxContextCharacters: arguments.int("maxContextCharacters"))
+        let request = MemoryOSContextRequest(
+            query: queryText,
+            taskIntent: intent,
+            subjectHints: subjectHints,
+            layers: layers,
+            evidencePolicy: MemoryOSEvidencePolicy(required: arguments.bool("requireEvidence") ?? false),
+            graphPolicy: MemoryOSGraphExpansionPolicy(enabled: graphDepth > 0, maxDepth: graphDepth, maxEdgesPerSeed: 8, expansionStrategy: graphDepth > 0 ? .mixed : .none),
+            budget: budget,
+            outputMode: arguments.string("outputMode").flatMap(MemoryOSContextOutputMode.init(rawValue:)) ?? .balanced,
+            referenceTime: Date(),
+            language: arguments.string("language").flatMap(MemoryOSContextLanguage.init(rawValue:)) ?? .zhHans
+        )
+        let package = try facade.memoryOSContext(request)
+        let json = try Self.renderJSON(package)
+        return AgentToolResult(
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: "Memory OS context package returned \(package.blocks.count) block(s), \(package.entities.count) entity card(s), and \(package.relations.count) relation card(s).",
+            contentJSON: json,
+            citations: package.blocks.flatMap(\.recordIDs) + package.entities.map(\.entityID) + package.relations.map(\.id) + package.evidence.map(\.evidenceRef)
+        )
+    }
+
+    private func parseLayers(_ values: [SendableJSONValue]?) -> [MemoryOSRetrievalLayer] {
+        guard let values else { return MemoryOSRetrievalLayer.allCases }
+        let parsed = values.compactMap { $0.stringValue }.compactMap(MemoryOSRetrievalLayer.init(rawValue:))
+        return parsed.isEmpty ? MemoryOSRetrievalLayer.allCases : parsed
+    }
+
+    private func parseStringArray(_ values: [SendableJSONValue]?) -> [String] {
+        values?.compactMap { $0.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty } ?? []
+    }
+
+    private func budget(maxContextCharacters: Int?) -> MemoryOSContextBudget {
+        var budget = MemoryOSContextBudget.commercialDefault
+        if let maxContextCharacters { budget.maxContextCharacters = max(500, min(maxContextCharacters, 50_000)) }
+        return budget
+    }
+
+    private static func renderJSON(_ object: MemoryOSContextPackage) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(object)
+        return String(data: data, encoding: .utf8) ?? "{}"
+    }
+}
+
 public struct MemoryOSSearchTool: AgentTool {
     public let name = "memory_os_search"
     public let description = "Search Connor Memory OS across L0/L1/L2/L3/L4 using the local embedded search path. Returns ranked candidate records and entry points only; retrieval hits are context, not graph-complete memory truth. For list/all/which/有哪些/所有/列出 class membership questions, resolve the class first and use memory_os_l4_instances. Use graph tools for relationships, evidence chains, timelines, and cross-layer context."
@@ -806,6 +883,7 @@ public extension AgentToolRegistry {
         register(MemoryOSProjectStructuredArtifactTool(facade: facade))
         register(MemoryOSGetCurrentUserProfileTool(facade: facade))
         register(MemoryOSUpdateCurrentUserProfileTool(facade: facade))
+        register(MemoryOSContextTool(facade: facade))
         register(MemoryOSSearchTool(facade: facade))
         register(MemoryOSQueryGraphTool(facade: facade))
         register(MemoryOSTraceEvidenceTool(facade: facade))
