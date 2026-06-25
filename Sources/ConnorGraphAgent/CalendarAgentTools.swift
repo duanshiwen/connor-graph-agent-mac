@@ -71,8 +71,50 @@ public actor InMemoryAgentCalendarRuntime: AgentCalendarRuntime {
     }
 }
 
+public struct CalendarSearchEventsTool: AgentTool {
+    public let runtime: any AgentCalendarRuntime
+    public let recorder: (any NativeSourceReferenceRecording)?
+    public var name: String { "calendar_search_events" }
+    public var description: String { "Search Connor-owned calendar events and return full event details directly; no separate calendar detail fetch is needed." }
+    public var permission: AgentPermissionCapability { .readCalendar }
+    public var inputSchema: AgentToolInputSchema {
+        .object(properties: [
+            "query": .string(description: "Search query; leave empty to search by time range only"),
+            "startDate": .string(description: "Optional ISO-8601 inclusive start timestamp"),
+            "endDate": .string(description: "Optional ISO-8601 exclusive end timestamp"),
+            "timePreset": .string(description: "Optional time preset such as today, tomorrow, last7Days, last30Days, thisWeek, next7Days"),
+            "timeFilterMode": .string(description: "Optional mode such as intervalOverlapsRange or startsInRange"),
+            "timeSort": .string(description: "Optional sort: relevanceThenTimeDesc, relevanceThenTimeAsc, timeDescThenRelevance, timeAscThenRelevance"),
+            "limit": .integer(description: "Maximum event details to return")
+        ], required: [])
+    }
+
+    public init(runtime: any AgentCalendarRuntime, recorder: (any NativeSourceReferenceRecording)? = nil) {
+        self.runtime = runtime
+        self.recorder = recorder
+    }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        let formatter = ISO8601DateFormatter()
+        let events = try await runtime.searchEvents(
+            query: arguments.string("query") ?? "",
+            startDate: arguments.string("startDate").flatMap { formatter.date(from: $0) },
+            endDate: arguments.string("endDate").flatMap { formatter.date(from: $0) },
+            timePreset: arguments.string("timePreset"),
+            timeFilterMode: arguments.string("timeFilterMode"),
+            timeSort: arguments.string("timeSort"),
+            limit: NativeSearchLimitPolicy.clampSearchLimit(arguments.int("limit") ?? NativeSearchLimitPolicy.defaultSearchLimit),
+            runID: context.runID,
+            sessionID: context.sessionID
+        )
+        await recorder?.record(events.map { NativeSourceReference.calendarEvent($0, query: arguments.string("query"), strength: .fullEventResult, toolName: name, context: context) })
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(events.count) calendar event details; search results are already full event records", contentJSON: try MailJSON.encode(events))
+    }
+}
+
 public struct CalendarReadTool: AgentTool {
     public let runtime: any AgentCalendarRuntime
+    public let recorder: (any NativeSourceReferenceRecording)?
     public var name: String { "calendar_read" }
     public var description: String { "Read Connor-owned calendar data using operations: list_calendars, list_events, get_event, get_agenda, get_free_busy." }
     public var permission: AgentPermissionCapability { .readCalendar }
@@ -84,7 +126,10 @@ public struct CalendarReadTool: AgentTool {
         ], required: ["operation"])
     }
 
-    public init(runtime: any AgentCalendarRuntime) { self.runtime = runtime }
+    public init(runtime: any AgentCalendarRuntime, recorder: (any NativeSourceReferenceRecording)? = nil) {
+        self.runtime = runtime
+        self.recorder = recorder
+    }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         let operation = arguments.string("operation") ?? "list_events"
@@ -94,10 +139,14 @@ public struct CalendarReadTool: AgentTool {
             return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Listed \(calendars.count) calendars", contentJSON: try MailJSON.encode(calendars))
         case "list_events", "get_agenda":
             let events = try await runtime.listEvents(calendarID: arguments.string("calendarID").map(CalendarID.init(rawValue:)), runID: context.runID, sessionID: context.sessionID)
+            await recorder?.record(events.map { NativeSourceReference.calendarEvent($0, query: nil, strength: .fullEventResult, toolName: name, context: context) })
             return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Listed \(events.count) calendar events", contentJSON: try MailJSON.encode(events))
         case "get_event":
             guard let eventID = arguments.string("eventID") else { throw AgentToolError.invalidArguments("eventID is required") }
             let event = try await runtime.getEvent(id: CalendarEventID(rawValue: eventID), runID: context.runID, sessionID: context.sessionID)
+            if let event {
+                await recorder?.record([NativeSourceReference.calendarEvent(event, query: nil, strength: .detailRead, toolName: name, context: context)])
+            }
             return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: event == nil ? "Calendar event not found" : "Loaded calendar event", contentJSON: try MailJSON.encode(event))
         case "get_free_busy":
             let events = try await runtime.listEvents(calendarID: arguments.string("calendarID").map(CalendarID.init(rawValue:)), runID: context.runID, sessionID: context.sessionID)
@@ -133,8 +182,9 @@ public struct CalendarWriteTool: AgentTool {
 }
 
 public extension AgentToolRegistry {
-    mutating func registerNativeCalendarTools(runtime: any AgentCalendarRuntime) {
-        register(CalendarReadTool(runtime: runtime))
+    mutating func registerNativeCalendarTools(runtime: any AgentCalendarRuntime, recorder: (any NativeSourceReferenceRecording)? = nil) {
+        register(CalendarSearchEventsTool(runtime: runtime, recorder: recorder))
+        register(CalendarReadTool(runtime: runtime, recorder: recorder))
         register(CalendarWriteTool(runtime: runtime))
     }
 }

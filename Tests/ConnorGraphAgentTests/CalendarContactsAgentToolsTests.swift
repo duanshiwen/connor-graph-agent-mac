@@ -39,6 +39,31 @@ struct CalendarContactsAgentToolsTests {
         #expect(result.contentJSON?.contains("产品讨论") == true)
     }
 
+    @Test func calendarSearchEventsToolReturnsFullEventDetails() async throws {
+        let event = CalendarEvent(
+            id: CalendarEventID(rawValue: "event-design-review"),
+            calendarID: CalendarID(rawValue: "calendar-work"),
+            title: "Memory OS 设计评审",
+            start: CalendarEventDateTime(date: Date(timeIntervalSince1970: 2_000)),
+            end: CalendarEventDateTime(date: Date(timeIntervalSince1970: 5_600)),
+            location: "会议室 A",
+            notes: "讨论 RSS 和浏览历史工具暴露",
+            attendees: [CalendarAttendee(id: CalendarAttendeeID(rawValue: "attendee-1"), name: "诗闻", email: "shiwen@example.com")]
+        )
+        let runtime = InMemoryAgentCalendarRuntime(events: [event])
+        let tool = CalendarSearchEventsTool(runtime: runtime)
+        let result = try await tool.execute(
+            arguments: try AgentToolArguments(json: "{\"query\":\"RSS\",\"limit\":10}"),
+            context: Self.context(toolCallID: "call-calendar-search")
+        )
+
+        #expect(result.toolName == "calendar_search_events")
+        #expect(result.contentText.contains("full event records"))
+        #expect(result.contentJSON?.contains("Memory OS 设计评审") == true)
+        #expect(result.contentJSON?.contains("会议室 A") == true)
+        #expect(result.contentJSON?.contains("shiwen@example.com") == true)
+    }
+
     @Test func calendarWriteToolIsCurrentlyDisabledEvenWithApproval() async throws {
         let runtime = InMemoryAgentCalendarRuntime(events: [])
         let tool = CalendarWriteTool(runtime: runtime)
@@ -94,6 +119,7 @@ struct CalendarContactsAgentToolsTests {
 
         let names = Set(registry.definitions.map(\.name))
         #expect(names.contains("time_analyze_ranges"))
+        #expect(names.contains("calendar_search_events"))
         #expect(names.contains("calendar_read"))
         #expect(names.contains("calendar_write"))
         #expect(names.contains("contacts_read"))

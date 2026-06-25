@@ -37,6 +37,7 @@ import ConnorGraphAgent
     #expect(prompt.contains("internal context first"))
     #expect(prompt.contains("Then search current web information"))
     #expect(prompt.contains("Use `web_fetch` to read original pages"))
+    #expect(prompt.contains("memory_os_context"))
     #expect(prompt.contains("memory_os_search"))
     #expect(prompt.contains("memory_os_read_record"))
     #expect(prompt.contains("memory_os_expand_l4"))
@@ -55,12 +56,32 @@ import ConnorGraphAgent
     #expect(prompt.contains("If a required tool is unavailable"))
 }
 
+@Test func defaultSystemPromptDocumentsNativePersonalSourceTools() {
+    let prompt = AgentInstructionSection.defaultConnorInstruction
+
+    #expect(prompt.contains("## Native Personal Source Tools"))
+    #expect(prompt.contains("mail_search_messages"))
+    #expect(prompt.contains("mail_get_message"))
+    #expect(prompt.contains("calendar_search_events"))
+    #expect(prompt.contains("rss_search_items"))
+    #expect(prompt.contains("rss_get_item"))
+    #expect(prompt.contains("browser_history_search"))
+    #expect(prompt.contains("browser_history_get"))
+    #expect(prompt.contains("Search/list first"))
+    #expect(prompt.contains("Calendar search results already return full event details"))
+    #expect(prompt.contains("contentMarkdown"))
+    #expect(prompt.contains("automatically record the source records the model sees or reads into Memory OS L0/L1"))
+    #expect(prompt.contains("bounded summary candidates"))
+    #expect(prompt.contains("detail references"))
+    #expect(prompt.contains("Do not call an extra memory write tool for native source references"))
+}
+
 @Test func defaultSystemPromptRequiresTaskBootstrapWorkflowOrder() throws {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
     let currentTimeIndex = try #require(prompt.range(of: "At the start of every user task")?.lowerBound)
     let profileIndex = try #require(prompt.range(of: "memory_os_get_current_user_profile", range: currentTimeIndex..<prompt.endIndex)?.lowerBound)
-    let memorySearchIndex = try #require(prompt.range(of: "memory_os_search", range: profileIndex..<prompt.endIndex)?.lowerBound)
+    let memorySearchIndex = try #require(prompt.range(of: "memory_os_context", range: profileIndex..<prompt.endIndex)?.lowerBound)
     let webSearchIndex = try #require(prompt.range(of: "web_search", range: memorySearchIndex..<prompt.endIndex)?.lowerBound)
     let skillIndex = try #require(prompt.range(of: "connor_skill_activate", range: webSearchIndex..<prompt.endIndex)?.lowerBound)
     let synthesizeIndex = try #require(prompt.range(of: "Only after current time, internal memory, external evidence, and relevant skill instructions", range: skillIndex..<prompt.endIndex)?.lowerBound)
@@ -68,6 +89,7 @@ import ConnorGraphAgent
     #expect(currentTimeIndex < profileIndex)
     #expect(profileIndex < memorySearchIndex)
     #expect(memorySearchIndex < webSearchIndex)
+    #expect(prompt.contains("Use low-level `memory_os_search` when you specifically need candidate entry-point rows"))
     #expect(webSearchIndex < skillIndex)
     #expect(skillIndex < synthesizeIndex)
 }
@@ -198,7 +220,7 @@ import ConnorGraphAgent
     )
     let assembly = AgentPromptAssembler().assemble(request: request, memoryContract: nil)
 
-    let transformed = try await AgentPromptBudgetTransformer(maxEstimatedTokens: 3_200).transform(
+    let transformed = try await AgentPromptBudgetTransformer(maxEstimatedTokens: 4_200).transform(
         assembly,
         projectionMode: .structuredContextMessages
     )

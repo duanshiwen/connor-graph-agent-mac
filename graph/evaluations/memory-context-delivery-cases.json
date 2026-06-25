@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "name": "memory-context-delivery-commercial-baselines",
+  "description": "Evaluation cases for Memory OS Context Delivery: relevance, relation coverage, evidence binding, budget hygiene, stale/conflict surfacing, and answer supportability.",
+  "metrics": [
+    "relevant_entity_retrieved",
+    "relevant_relation_included",
+    "evidence_attached",
+    "conflict_surfaced",
+    "stale_memory_labeled_or_suppressed",
+    "context_budget_respected",
+    "duplicate_blocks_absent",
+    "answer_supportability"
+  ],
+  "cases": [
+    {
+      "id": "memory-context-l4-relationship-001",
+      "query": "Explain how Connor Memory OS relates to L4 stable entities.",
+      "taskIntent": "explainRelationship",
+      "layers": ["L2", "L3", "L4"],
+      "expected": {
+        "mustIncludeEntityHints": ["Connor Memory OS", "L4"],
+        "mustIncludeRelationPredicates": ["contains_layer"],
+        "mustIncludeContextRoles": ["stableEntity", "relation"],
+        "requiresEvidence": false
+      }
+    },
+    {
+      "id": "memory-context-evidence-claim-001",
+      "query": "Verify the claim that Memory OS context is separate from truth records.",
+      "taskIntent": "verifyClaim",
+      "layers": ["L0", "L2", "L3", "L4"],
+      "expected": {
+        "mustIncludeContextRoles": ["operationalFact", "evidence"],
+        "requiresEvidence": true,
+        "mustExposeDiagnosticsWhenEvidenceMissing": true
+      }
+    },
+    {
+      "id": "memory-context-budget-001",
+      "query": "Summarize all Memory OS context delivery design material under a tight context budget.",
+      "taskIntent": "summarizeMemory",
+      "layers": ["L2", "L3", "L4"],
+      "budget": {
+        "maxContextCharacters": 1200
+      },
+      "expected": {
+        "contextBudgetRespected": true,
+        "duplicateBlocksAbsent": true,
+        "budgetReportRequired": true
+      }
+    }
+  ]
+}
