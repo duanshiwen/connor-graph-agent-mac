@@ -291,6 +291,43 @@ public struct MemoryOSExpandL4Tool: AgentTool {
     }
 }
 
+public struct MemoryOSQueryGraphTool: AgentTool {
+    public let name = "memory_os_query_graph"
+    public let description = "Orchestrate Memory OS layered graph retrieval across L2 statements, L3 beliefs, L4 entity/relationship/membership queries, and optional L0 evidence tracing. Use this for graph-complete questions when one low-level graph tool is not enough."
+    public let permission: AgentPermissionCapability = .readGraph
+    public let inputSchema = AgentToolInputSchema.object(properties: [
+        "text": .string(description: "Natural-language query or entity/class text to resolve."),
+        "intent": .string(description: "auto, l2Statements, l3Beliefs, l4Entity, l4Neighbors, l4Instances, or evidence. Defaults to auto."),
+        "entityID": .string(description: "Optional known L4 entity id for neighbor queries."),
+        "classEntityIDs": .array(items: .string(description: "Optional L4 class ids for instance queries."), description: "Optional class ids."),
+        "predicates": .array(items: .string(description: "Optional predicate filter."), description: "Optional predicate filters such as P31 or P17."),
+        "direction": .string(description: "outgoing, incoming, or both for neighbor queries. Defaults to both."),
+        "includeEvidence": .boolean(description: "Trace returned L2/L3 evidence to L0 provenance. Defaults to false."),
+        "limit": .number(description: "Maximum graph records. Defaults to 50.")
+    ], required: [])
+
+    private let facade: AppMemoryOSFacade
+    public init(facade: AppMemoryOSFacade) { self.facade = facade }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        let text = arguments.string("text") ?? ""
+        let intent = arguments.string("intent").flatMap(MemoryOSGraphQueryIntent.init(rawValue:)) ?? .auto
+        let direction = arguments.string("direction").flatMap(MemoryOSGraphDirection.init(rawValue:)) ?? .both
+        let classIDs = Self.parseStringArray(arguments.array("classEntityIDs"))
+        let predicates = Self.parseStringArray(arguments.array("predicates"))
+        let includeEvidence = arguments.bool("includeEvidence") ?? false
+        let limit = max(1, min(arguments.int("limit") ?? 50, 500))
+        let subgraph = try facade.queryMemoryOSGraph(MemoryOSGraphQuery(text: text, intent: intent, entityID: arguments.string("entityID"), classEntityIDs: classIDs, predicates: predicates, direction: direction, includeEvidence: includeEvidence, limit: limit))
+        let payload = MemoryOSL4GraphToolPayload.render(subgraph: subgraph, extra: ["query": text, "intent": intent.rawValue, "entityID": arguments.string("entityID") ?? "", "classEntityIDs": classIDs, "predicates": predicates, "direction": direction.rawValue, "includeEvidence": includeEvidence])
+        let json = try MemoryOSL4GraphToolPayload.renderJSON(payload)
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Memory OS query_graph returned \(subgraph.nodes.count) node(s) and \(subgraph.edges.count) edge(s).", contentJSON: json, citations: subgraph.nodes.map(\.id) + subgraph.edges.map(\.id) + subgraph.evidenceRefs + subgraph.provenanceRefs)
+    }
+
+    private static func parseStringArray(_ values: [SendableJSONValue]?) -> [String] {
+        values?.compactMap { $0.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty } ?? []
+    }
+}
+
 public struct MemoryOSTraceEvidenceTool: AgentTool {
     public let name = "memory_os_trace_evidence"
     public let description = "Trace Memory OS evidence from L3 beliefs or L2 statements down to exact L0 provenance spans and objects. Use this when answer quality depends on source verification."
@@ -555,6 +592,7 @@ public extension AgentToolRegistry {
         register(MemoryOSProjectStructuredArtifactTool(facade: facade))
         register(MemoryOSGetCurrentUserProfileTool(facade: facade))
         register(MemoryOSSearchTool(facade: facade))
+        register(MemoryOSQueryGraphTool(facade: facade))
         register(MemoryOSTraceEvidenceTool(facade: facade))
         register(MemoryOSL2FindStatementsTool(facade: facade))
         register(MemoryOSL3ExpandBeliefTool(facade: facade))
