@@ -46,7 +46,7 @@ enum ChatViewportMode: Equatable {
 
 enum ChatViewportDataChange: Equatable {
     case append(count: Int)
-    case prepend(count: Int)
+    case prepend(count: Int, anchorItemID: String? = nil)
     case replace
     case itemHeightChanged(id: String)
 }
@@ -125,6 +125,14 @@ struct ChatViewportStateMachine {
                     pendingNewItemCount: 0
                 )
             }
+            if case .programmaticScroll = snapshot.mode {
+                return ChatViewportSnapshot(
+                    mode: .freeBrowsing,
+                    isPinnedToBottom: false,
+                    shouldShowJumpToLatest: configuration.showsJumpToLatestButton,
+                    pendingNewItemCount: snapshot.pendingNewItemCount
+                )
+            }
             return snapshot
         }
     }
@@ -170,8 +178,23 @@ struct ChatViewportStateMachine {
                 shouldShowJumpToLatest: configuration.showsJumpToLatestButton,
                 pendingNewItemCount: snapshot.pendingNewItemCount + max(0, count)
             )
-        case .prepend:
-            return snapshot
+        case let .prepend(_, explicitAnchorItemID):
+            let correctionAnchorItemID: String?
+            if let explicitAnchorItemID {
+                correctionAnchorItemID = explicitAnchorItemID
+            } else if case let .correctingAfterDataChange(.prepend(anchorItemID)) = snapshot.mode {
+                correctionAnchorItemID = anchorItemID
+            } else {
+                correctionAnchorItemID = nil
+            }
+
+            guard let correctionAnchorItemID else { return snapshot }
+            return ChatViewportSnapshot(
+                mode: .programmaticScroll(.item(id: correctionAnchorItemID, anchor: .top, animated: false)),
+                isPinnedToBottom: snapshot.isPinnedToBottom,
+                shouldShowJumpToLatest: snapshot.shouldShowJumpToLatest,
+                pendingNewItemCount: snapshot.pendingNewItemCount
+            )
         case .replace:
             return ChatViewportSnapshot.initial
         case .itemHeightChanged:
