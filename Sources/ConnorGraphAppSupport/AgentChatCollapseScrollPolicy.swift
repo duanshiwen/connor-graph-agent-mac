@@ -44,7 +44,7 @@ public struct AgentChatCollapseScrollPolicy: Sendable {
             return .doNotScroll
         }
 
-        return contentHeight > viewportHeight + overflowTolerance ? .doNotScroll : .scrollToTop
+        return .scrollToBottom
     }
 
     public func shouldResetScrollIdentityAfterCollapse(
