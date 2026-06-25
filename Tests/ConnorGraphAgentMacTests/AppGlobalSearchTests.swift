@@ -101,6 +101,17 @@ struct AppGlobalSearchTests {
         #expect(GlobalSearchSectionKind.browserHistory.emptyTitle == "没有匹配的浏览历史")
     }
 
+    @Test func globalSearchProvidesDisplayTokensForChineseQueries() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        fixture.viewModel.updateGlobalSearchQuery("泰国数字游民签证")
+        await fixture.viewModel.refreshGlobalSearchPreview(for: "泰国数字游民签证")
+
+        #expect(fixture.viewModel.globalSearchPreviewState.searchTokens.contains("泰国数字游民签证"))
+        #expect(fixture.viewModel.globalSearchPreviewState.searchTokens.contains("泰国"))
+    }
+
     @Test func globalSearchIncludesChatSessionTitleResults() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }

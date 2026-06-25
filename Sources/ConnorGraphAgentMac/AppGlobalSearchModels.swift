@@ -22,6 +22,7 @@ struct GlobalSearchPreviewState: Equatable {
     var calendarResults: [NativeSearchResult] = []
     var rssResults: [NativeSearchResult] = []
     var browserHistoryResults: [NativeSearchResult] = []
+    var searchTokens: [String] = []
     var errorMessage: String?
 
     static let empty = GlobalSearchPreviewState()

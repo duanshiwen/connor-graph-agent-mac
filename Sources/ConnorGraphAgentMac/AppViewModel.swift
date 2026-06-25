@@ -1128,7 +1128,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private func scheduleGlobalSearchPreview(for query: String) {
         globalSearchPreviewTask?.cancel()
         if globalSearchPreviewState == .empty {
-            globalSearchPreviewState = GlobalSearchPreviewState(query: query, isLoading: false)
+            globalSearchPreviewState = GlobalSearchPreviewState(query: query, isLoading: false, searchTokens: globalSearchDisplayTokens(for: query))
         }
         globalSearchPreviewTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 180_000_000)
@@ -1159,13 +1159,25 @@ final class AppViewModel: NSObject, ObservableObject {
                 calendarResults: calendarResults,
                 rssResults: rssResults,
                 browserHistoryResults: browserHistoryResults,
+                searchTokens: globalSearchDisplayTokens(for: trimmed),
                 errorMessage: nil
             )
             normalizeGlobalSearchSelection()
         } catch {
             guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
-            globalSearchPreviewState = GlobalSearchPreviewState(query: trimmed, isLoading: false, errorMessage: String(describing: error))
+            globalSearchPreviewState = GlobalSearchPreviewState(query: trimmed, isLoading: false, searchTokens: globalSearchDisplayTokens(for: trimmed), errorMessage: String(describing: error))
         }
+    }
+
+    private func globalSearchDisplayTokens(for query: String) -> [String] {
+        let normalized = NativeSearchQueryNormalizer.normalize(query)
+        var seen: Set<String> = []
+        let tokens = normalized.scoringTokens
+            .map(\.value)
+            .filter { !$0.isEmpty }
+            .filter { $0.count >= 2 || query.count <= 2 }
+            .filter { seen.insert($0).inserted }
+        return Array(tokens.prefix(8))
     }
 
     private func searchChatSessions(query: String, limit: Int) -> [GlobalSearchSessionResult] {
