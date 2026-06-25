@@ -583,6 +583,8 @@ private struct AgentChatConversationView: View {
                     ) { chatItem in
                         if let item = chatItem.timelineItem {
                             chatTimelineRow(item, latestProcessID: latestProcessID)
+                        } else if let unreadMarker = chatItem.unreadMarker {
+                            AgentChatUnreadMarkerRow(unreadCount: unreadMarker.unreadCount)
                         }
                     }
                 }
