@@ -366,7 +366,6 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var isGlobalSearchFieldFocused: Bool = false
     @Published var isGlobalSearchOverlayPresented: Bool = false
     @Published var globalSearchPreviewState: GlobalSearchPreviewState = .empty
-    @Published var nativeSourceListFilterQuery: String = ""
     @Published var governanceConfig: AppSessionGovernanceConfig = .default
     @Published var productOSRegistry: ProductOSRegistrySnapshot = .default
     @Published var automationConfig: ProductOSAutomationConfig = .default
@@ -1219,7 +1218,6 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func openGlobalSearchResult(_ result: NativeSearchResult) {
-        nativeSourceListFilterQuery = ""
         switch result.sourceKind {
         case .mail:
             selection = .mail
@@ -1245,8 +1243,6 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func showAllGlobalSearchResults(kind: GlobalSearchSectionKind) {
-        let query = globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        nativeSourceListFilterQuery = query
         switch kind {
         case .mail:
             selection = .mail
