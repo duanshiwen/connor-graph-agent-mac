@@ -25,6 +25,15 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
         dataSetID.namespacedElementID("commercial-chat-viewport-bottom-sentinel")
     }
 
+    private var hasLaidOutInitialItems: Bool {
+        !items.isEmpty && viewportHeight > 0 && contentHeight > 0
+    }
+
+    private var initialLatestAnchorTaskID: String {
+        let phase = items.isEmpty ? "empty" : (hasLaidOutInitialItems ? "ready" : "pending")
+        return "\(dataSetID.description)::\(phase)"
+    }
+
     init(
         dataSetID: ChatViewportDataSetID = ChatViewportDataSetID(namespace: "commercial-chat-viewport", rawID: "default"),
         items: [Item],
@@ -90,6 +99,7 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                         }
                     )
                 }
+                .defaultScrollAnchor(.bottom)
                 .coordinateSpace(name: coordinateSpaceName)
                 .id(dataSetID)
                 .background(
@@ -129,6 +139,12 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                 }
                 .task(id: controller.pendingScrollCommand?.id) {
                     consumePendingScrollCommandIfAvailable(proxy: proxy)
+                }
+                .task(id: initialLatestAnchorTaskID) {
+                    guard hasLaidOutInitialItems else { return }
+                    await Task.yield()
+                    await Task.yield()
+                    scrollToLatestRenderedItem(proxy: proxy, animated: false)
                 }
 
                 if configuration.showsJumpToLatestButton,
@@ -194,17 +210,29 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
         }
     }
 
+    private func scrollToLatestRenderedItem(proxy: ScrollViewProxy, animated: Bool) {
+        let operation = {
+            if let lastItem = items.last {
+                proxy.scrollTo(rowID(for: lastItem), anchor: .bottom)
+            } else {
+                proxy.scrollTo(bottomSentinelID, anchor: .bottom)
+            }
+        }
+
+        if animated {
+            withAnimation(.easeOut(duration: 0.22), operation)
+        } else {
+            operation()
+        }
+    }
+
     private func perform(_ command: ChatViewportScrollCommand, proxy: ScrollViewProxy) {
         let operation = {
             switch command.target {
             case .top:
                 proxy.scrollTo(topSentinelID, anchor: .top)
             case .bottom:
-                if let lastItem = items.last {
-                    proxy.scrollTo(rowID(for: lastItem), anchor: .bottom)
-                } else {
-                    proxy.scrollTo(bottomSentinelID, anchor: .bottom)
-                }
+                scrollToLatestRenderedItem(proxy: proxy, animated: false)
             case let .item(id, anchor, _):
                 proxy.scrollTo(id, anchor: anchor.unitPoint)
             }
