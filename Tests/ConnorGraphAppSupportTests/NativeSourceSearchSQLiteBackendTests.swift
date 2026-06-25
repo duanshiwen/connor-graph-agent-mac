@@ -120,6 +120,10 @@ struct NativeSourceSearchSQLiteBackendTests {
             temporal.eventEndAt = time.addingTimeInterval(3600)
             temporal.primaryTime = time
             temporal.primaryTimeKind = .eventStartAt
+        case .browserHistory:
+            temporal.updatedAt = time
+            temporal.primaryTime = time
+            temporal.primaryTimeKind = .updatedAt
         }
         return NativeSearchDocument(
             id: id,

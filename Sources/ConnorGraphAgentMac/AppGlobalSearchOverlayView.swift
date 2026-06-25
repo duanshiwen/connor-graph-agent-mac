@@ -364,6 +364,7 @@ private struct GlobalSearchResultRow: View {
         case .mail: "envelope"
         case .calendar: "calendar"
         case .rss: "dot.radiowaves.left.and.right"
+        case .browserHistory: "clock.arrow.circlepath"
         }
     }
 
@@ -372,6 +373,7 @@ private struct GlobalSearchResultRow: View {
         case .mail: .blue
         case .calendar: .purple
         case .rss: .orange
+        case .browserHistory: .teal
         }
     }
 }
