@@ -206,19 +206,24 @@ struct AgentMessageAttachmentRefsView: View {
 /// 现阶段固定为康纳同学；飞书接入后根据消息来源动态切换头像和名称。
 struct AgentAssistantHeaderView: View {
     var displayName: String = "康纳同学"
-    var subtitle: String = "知识图谱助手"
+    var subtitle: String = "你的主动 AI 助理"
+    var slogan: String = "用知识图谱记住一切，连接邮件日历社交，知识市场共享智慧，可靠地完成任务。"
     var avatarImage: NSImage? = nil
 
     var body: some View {
-        HStack(alignment: .center, spacing: AgentChatLayout.spaceS) {
+        HStack(alignment: .top, spacing: AgentChatLayout.spaceS) {
             avatarView
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(displayName)
                     .font(AgentChatTypography.microEmphasis)
                     .foregroundStyle(.primary.opacity(0.85))
                 Text(subtitle)
                     .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                Text(slogan)
+                    .font(.system(size: 9))
                     .foregroundStyle(.tertiary)
+                    .lineLimit(2)
             }
         }
     }
