@@ -13,6 +13,7 @@ struct AppGlobalSearchOverlayView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
             actionRows
+            tokenChips
 
             chatSessionSection(results: state.chatSessionResults)
             resultSection(kind: .mail, results: state.mailResults)
@@ -34,6 +35,30 @@ struct AppGlobalSearchOverlayView: View {
         .shadow(color: .black.opacity(0.12), radius: 18, x: 0, y: 10)
         .onChange(of: state.query) { _, _ in
             browserHistoryPage = 0
+        }
+    }
+
+    private var tokenChips: some View {
+        Group {
+            if !state.searchTokens.isEmpty {
+                HStack(spacing: 5) {
+                    Text("搜索词")
+                        .font(AppListTypography.rowCaption)
+                        .foregroundStyle(.tertiary)
+                    ForEach(state.searchTokens, id: \.self) { token in
+                        Text(token)
+                            .font(AppListTypography.rowCaptionEmphasized)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.secondary.opacity(0.10), in: Capsule())
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, AppShellLayout.spaceS)
+                .padding(.vertical, 2)
+            }
         }
     }
 
