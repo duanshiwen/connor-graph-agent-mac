@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 struct ChatViewportScrollCommand: Equatable, Identifiable {
     let id: UUID
@@ -18,6 +19,7 @@ enum ChatViewportInitialAnchor: Equatable, Sendable {
 
 @MainActor
 final class ChatViewportController: ObservableObject {
+    private static let logger = Logger(subsystem: "ConnorGraphAgentMac", category: "ChatViewport")
     @Published private(set) var snapshot: ChatViewportSnapshot
     @Published private(set) var pendingScrollCommand: ChatViewportScrollCommand?
     @Published private(set) var currentDataSetID: ChatViewportDataSetID?
@@ -57,6 +59,7 @@ final class ChatViewportController: ObservableObject {
         replacementGeneration += 1
         latestMetrics = nil
         pendingInitialAnchor = itemCount > 0 ? initialAnchor : nil
+        Self.logger.info("Chat viewport dataset replaced dataset=\(id.description, privacy: .public) generation=\(self.replacementGeneration, privacy: .public) itemCount=\(itemCount, privacy: .public) initialAnchor=\(String(describing: initialAnchor), privacy: .public)")
         setSnapshot(.initial)
     }
 
@@ -133,6 +136,7 @@ final class ChatViewportController: ObservableObject {
         else { return }
 
         self.pendingInitialAnchor = nil
+        Self.logger.debug("Chat viewport completing initial anchor dataset=\(String(describing: self.currentDataSetID?.description), privacy: .public) generation=\(self.replacementGeneration, privacy: .public) anchor=\(String(describing: pendingInitialAnchor), privacy: .public)")
         switch pendingInitialAnchor {
         case .top:
             setSnapshot(
