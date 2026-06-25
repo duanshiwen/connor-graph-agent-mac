@@ -78,6 +78,14 @@ struct AppGlobalSearchTests {
         #expect(fixture.viewModel.isBrowserHistoryPanelVisible)
     }
 
+    @Test func globalSearchSectionEmptyTitlesCoverEverySource() {
+        #expect(GlobalSearchSectionKind.chatSessions.emptyTitle == "没有匹配的对话")
+        #expect(GlobalSearchSectionKind.mail.emptyTitle == "没有匹配的邮件")
+        #expect(GlobalSearchSectionKind.calendar.emptyTitle == "没有匹配的日程")
+        #expect(GlobalSearchSectionKind.rss.emptyTitle == "没有匹配的 RSS")
+        #expect(GlobalSearchSectionKind.browserHistory.emptyTitle == "没有匹配的浏览历史")
+    }
+
     @Test func globalSearchIncludesBrowserHistoryResults() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
