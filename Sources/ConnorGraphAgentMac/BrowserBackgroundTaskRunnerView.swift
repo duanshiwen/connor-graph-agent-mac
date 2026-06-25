@@ -63,6 +63,12 @@ private struct BrowserBackgroundTaskWebView: NSViewRepresentable {
         context.coordinator.load(task: task, in: nsView)
     }
 
+    static func dismantleNSView(_ nsView: WKWebView, coordinator: Coordinator) {
+        if nsView.isLoading { nsView.stopLoading() }
+        nsView.navigationDelegate = nil
+        nsView.removeFromSuperview()
+    }
+
     final class Coordinator: NSObject, WKNavigationDelegate {
         var task: BrowserAssistedTaskState
         var onCompleted: (BrowserAssistedTaskState) -> Void
