@@ -48,6 +48,21 @@ import ConnorGraphAppSupport
     #expect(!json.contains("shiwen"))
 }
 
+@Test func memoryOSBootstrapEnsuresCurrentUserAnchorWithoutGenericAliases() throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
+    try store.migrate()
+    let facade = AppMemoryOSFacade(store: store)
+
+    let anchor = try facade.ensureCurrentUserAnchor(now: Date(timeIntervalSince1970: 10_000))
+
+    #expect(anchor.stableKey == "current_user")
+    #expect(anchor.entityType == "person")
+    #expect(anchor.metadata["person_role"] == "current_user")
+    #expect(anchor.metadata["protected_identity_anchor"] == "true")
+    let forbidden = Set(["user", "users", "用户", "当前用户", "current", "profile", "current user", "current_user"])
+    #expect(anchor.aliases.allSatisfy { !forbidden.contains($0.lowercased()) })
+}
+
 @Test func memoryOSGetCurrentUserProfileDoesNotReturnGenericUserConcepts() async throws {
     let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
     try store.migrate()
