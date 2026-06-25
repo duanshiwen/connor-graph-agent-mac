@@ -60,11 +60,31 @@ struct BrowserTabState: Identifiable {
     var initialURLString: String
     var webView: WKWebView?
     var navigationState: WebNavigationState
+    var lastAccessedAt: Date?
+    var lastVisibleAt: Date?
+    var scrollX: Double?
+    var scrollY: Double?
+    var viewportWidth: Double?
+    var viewportHeight: Double?
+    var contentFingerprint: String?
+    var focusedElementHint: String?
+    var formDrafts: [AppBrowserFormDraftSnapshot]?
+    var restorationStatus: AppBrowserTabRestorationStatus?
 
     init(id: UUID = UUID(), initialURLString: String) {
         self.id = id
         self.initialURLString = initialURLString
         self.navigationState = WebNavigationState(canGoBack: false, canGoForward: false, title: "", url: initialURLString)
+        self.lastAccessedAt = Date()
+        self.lastVisibleAt = nil
+        self.scrollX = nil
+        self.scrollY = nil
+        self.viewportWidth = nil
+        self.viewportHeight = nil
+        self.contentFingerprint = nil
+        self.focusedElementHint = nil
+        self.formDrafts = nil
+        self.restorationStatus = .live
     }
 
     init(snapshot: BrowserTabSnapshot, webView: WKWebView?) {
@@ -78,6 +98,16 @@ struct BrowserTabState: Identifiable {
             url: snapshot.currentURLString,
             isLoading: snapshot.isLoading
         )
+        self.lastAccessedAt = snapshot.lastAccessedAt
+        self.lastVisibleAt = snapshot.lastVisibleAt
+        self.scrollX = snapshot.scrollX
+        self.scrollY = snapshot.scrollY
+        self.viewportWidth = snapshot.viewportWidth
+        self.viewportHeight = snapshot.viewportHeight
+        self.contentFingerprint = snapshot.contentFingerprint
+        self.focusedElementHint = snapshot.focusedElementHint
+        self.formDrafts = snapshot.formDrafts
+        self.restorationStatus = snapshot.restorationStatus
     }
 
     var snapshot: BrowserTabSnapshot {
@@ -88,7 +118,17 @@ struct BrowserTabState: Identifiable {
             currentURLString: displayURL,
             isLoading: navigationState.isLoading,
             canGoBack: navigationState.canGoBack,
-            canGoForward: navigationState.canGoForward
+            canGoForward: navigationState.canGoForward,
+            lastAccessedAt: lastAccessedAt,
+            lastVisibleAt: lastVisibleAt,
+            scrollX: scrollX,
+            scrollY: scrollY,
+            viewportWidth: viewportWidth,
+            viewportHeight: viewportHeight,
+            contentFingerprint: contentFingerprint,
+            focusedElementHint: focusedElementHint,
+            formDrafts: formDrafts,
+            restorationStatus: restorationStatus
         )
     }
 
