@@ -1,6 +1,6 @@
 # Memory OS Local Embedded Graph-first Search Kernel
 
-Updated: 2026-06-24 22:39 GMT+8
+Updated: 2026-06-25 08:20 GMT+8
 
 ## Decision
 
@@ -37,18 +37,62 @@ SQLite Memory OS remains the source of truth. The Tantivy index is a derived loc
 
 `memory_os_search` returns candidate records and entry points only. Search hits are not graph-complete answers.
 
-Graph/list/evidence/timeline/cross-layer questions must use graph retrieval tools, including:
+Graph/list/evidence/timeline/cross-layer questions must use graph retrieval tools. Implemented tools now include:
 
-- `memory_os_query_graph`
-- `memory_os_trace_evidence`
-- `memory_os_expand_record_graph`
-- `memory_os_l1_query_events`
-- `memory_os_l2_find_statements`
-- `memory_os_l2_neighbors`
-- `memory_os_l3_expand_belief`
-- `memory_os_l4_find_entity`
-- `memory_os_l4_instances`
-- `memory_os_l4_neighbors`
+- `memory_os_query_graph`: orchestrates layered graph retrieval across L2/L3/L4 and optional L0 evidence tracing.
+- `memory_os_trace_evidence`: traces L3 beliefs or L2 statements to L0 provenance spans/objects.
+- `memory_os_l2_find_statements`: queries the L2 statement graph by text, subject, and predicate.
+- `memory_os_l3_expand_belief`: expands L3 beliefs into supporting L2 statements.
+- `memory_os_l4_find_entity`: resolves L4 entities/classes/properties by id, name, stable key, or alias.
+- `memory_os_l4_instances`: enumerates class membership, especially P31 instance-of questions.
+- `memory_os_l4_neighbors`: traverses L4 outgoing/incoming/both-direction relationship neighborhoods.
+- `memory_os_expand_l4`: legacy/baseline stable entity context expansion.
+
+Planned but not yet implemented tools include focused L1 event/time querying and broader record-level graph expansion.
+
+## CLI and Release Operations
+
+Search index lifecycle commands:
+
+```bash
+connor memory search-index stats
+connor memory search-index verify
+connor memory search-index rebuild
+```
+
+`search-index verify` checks:
+
+- embedded dylib exists and can be used;
+- source SQLite database exists;
+- Tantivy index directory exists;
+- Connor `connor-meta.json` exists;
+- index schema version is current;
+- document count is positive;
+- source database fingerprint is current enough by key table counts and file sizes;
+- smoke queries for Chinese, Wikidata ids, class terms, and properties return hits.
+
+Unified graph query CLI:
+
+```bash
+connor memory query-graph <text> \
+  [--intent auto|l2Statements|l3Beliefs|l4Entity|l4Neighbors|l4Instances|evidence] \
+  [--entity wikidata:Q148] \
+  [--class wikidata:Q6256,wikidata:Q3624078] \
+  [--predicate P31,P17] \
+  [--direction outgoing|incoming|both] \
+  [--include-evidence] \
+  [--limit N]
+```
+
+Release packaging and validation:
+
+```bash
+Scripts/package-search-kernel.sh --app-bundle /path/to/Connor.app
+Scripts/package-search-kernel.sh --output-dir .build/search-kernel-release
+Scripts/verify-memory-os-release.sh
+```
+
+The release gate packages the Rust/Tantivy dylib, runs SearchKernel FFI/search quality/graph CLI/tool registry/prompt contract tests, and performs live `search-index verify` unless `--skip-live-verify` is supplied.
 
 ## Acceptance Examples
 
