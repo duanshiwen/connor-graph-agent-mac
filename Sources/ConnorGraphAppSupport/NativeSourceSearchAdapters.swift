@@ -76,6 +76,47 @@ public enum NativeSourceSearchAdapters {
         )
     }
 
+    public static func browserHistoryDocument(from record: BrowserHistoryRecord, indexedAt: Date = Date()) -> NativeSearchDocument {
+        let url = URL(string: record.url)
+        let host = url?.host ?? ""
+        let path = url?.path ?? ""
+        let summary = [host, path].filter { !$0.isEmpty }.joined(separator: " ").isEmpty ? record.url : [host, path].filter { !$0.isEmpty }.joined(separator: " ")
+        let title = record.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? record.url : record.title
+        let hash = [
+            record.url,
+            title,
+            record.sessionID,
+            record.sessionTitle,
+            record.visitedAt.timeIntervalSince1970.description,
+            record.contentMarkdown ?? "",
+            record.contentFetchStatus?.rawValue ?? ""
+        ].joined(separator: "|")
+        return NativeSearchDocument(
+            id: "browser-history:\(record.id.uuidString)",
+            sourceKind: .browserHistory,
+            sourceInstanceID: record.sessionID,
+            externalID: record.id.uuidString,
+            title: title,
+            summary: summary,
+            body: record.contentMarkdown,
+            participants: [record.sessionTitle].filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty },
+            url: url,
+            temporal: NativeSearchTemporalMetadata(primaryTime: record.visitedAt, primaryTimeKind: .updatedAt, updatedAt: record.visitedAt, indexedAt: indexedAt),
+            visibility: "visible",
+            state: ["contentFetchStatus": record.contentFetchStatus?.rawValue ?? ""],
+            metadata: [
+                "sessionID": record.sessionID,
+                "sessionTitle": record.sessionTitle,
+                "url": record.url,
+                "host": host,
+                "path": path,
+                "contentFetchedAt": record.contentFetchedAt.map { ISO8601DateFormatter().string(from: $0) } ?? "",
+                "contentFetchError": record.contentFetchError ?? ""
+            ],
+            contentHash: stableHash(hash)
+        )
+    }
+
     public static func stableHash(_ value: String) -> String {
         var hash: UInt64 = 0xcbf29ce484222325
         for byte in value.utf8 {
@@ -96,6 +137,8 @@ public extension NativeSearchTemporalFilter {
             return NativeSearchTemporalFilter(start: start, end: end, mode: .pointWithinRange, timeFieldPreference: [.publishedAt, .fetchedAt], timezoneIdentifier: timezoneIdentifier)
         case .calendar:
             return NativeSearchTemporalFilter(start: start, end: end, mode: .intervalOverlapsRange, timeFieldPreference: [.eventStartAt], timezoneIdentifier: timezoneIdentifier)
+        case .browserHistory:
+            return NativeSearchTemporalFilter(start: start, end: end, mode: .pointWithinRange, timeFieldPreference: [.updatedAt, .createdAt], timezoneIdentifier: timezoneIdentifier)
         }
     }
 }

@@ -362,6 +362,10 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var isBackgroundTasksPresented: Bool = false
     @Published var sessionListFilter: AgentSessionListFilter = .all
     @Published var sessionSearchQuery: String = ""
+    @Published var globalSearchQuery: String = ""
+    @Published var isGlobalSearchFieldFocused: Bool = false
+    @Published var isGlobalSearchOverlayPresented: Bool = false
+    @Published var globalSearchPreviewState: GlobalSearchPreviewState = .empty
     @Published var governanceConfig: AppSessionGovernanceConfig = .default
     @Published var productOSRegistry: ProductOSRegistrySnapshot = .default
     @Published var automationConfig: ProductOSAutomationConfig = .default
@@ -518,6 +522,8 @@ final class AppViewModel: NSObject, ObservableObject {
     private var llmSettingsRepository: AppLLMSettingsRepository
     private var llmProviderHealthChecker: AppLLMProviderHealthChecker
     private var rssRuntime = RSSRuntime(repository: InMemoryRSSSourceRepository(), cache: InMemoryRSSSourceCache())
+    private var nativeSourceSearchService: NativeSourceSearchService?
+    private var globalSearchPreviewTask: Task<Void, Never>?
     private var mailStore: FileBackedMailSourceStore?
     private var calendarStore: FileBackedCalendarSourceStore?
     private var calendarRuntimeStore: FileBackedCalendarSourceRuntimeStore?
@@ -1014,6 +1020,335 @@ final class AppViewModel: NSObject, ObservableObject {
         showBrowserWorkspace(for: sessionID)
     }
 
+    func activateGlobalSearchField() {
+        isGlobalSearchFieldFocused = true
+        let trimmed = globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        isGlobalSearchOverlayPresented = true
+        if globalSearchPreviewState.query != trimmed {
+            scheduleGlobalSearchPreview(for: trimmed)
+        }
+    }
+
+    func deactivateGlobalSearchField() {
+        isGlobalSearchFieldFocused = false
+        isGlobalSearchOverlayPresented = false
+    }
+
+    func updateGlobalSearchQuery(_ query: String) {
+        globalSearchQuery = query
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        globalSearchPreviewTask?.cancel()
+        guard !trimmed.isEmpty else {
+            isGlobalSearchOverlayPresented = false
+            globalSearchPreviewState = .empty
+            return
+        }
+        isGlobalSearchOverlayPresented = true
+        scheduleGlobalSearchPreview(for: trimmed)
+    }
+
+    func clearGlobalSearch() {
+        globalSearchPreviewTask?.cancel()
+        globalSearchQuery = ""
+        isGlobalSearchOverlayPresented = false
+        globalSearchPreviewState = .empty
+    }
+
+    func dismissGlobalSearchOverlay() {
+        isGlobalSearchOverlayPresented = false
+    }
+
+    private func scheduleGlobalSearchPreview(for query: String) {
+        globalSearchPreviewTask?.cancel()
+        if globalSearchPreviewState == .empty {
+            globalSearchPreviewState = GlobalSearchPreviewState(query: query, isLoading: false)
+        }
+        globalSearchPreviewTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 180_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard self?.globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == query else { return }
+                self?.globalSearchPreviewState = GlobalSearchPreviewState(query: query, isLoading: true)
+            }
+            await self?.refreshGlobalSearchPreview(for: query)
+        }
+    }
+
+    func refreshGlobalSearchPreview(for query: String) async {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        do {
+            let mailResults = try await searchNativeSource(kind: .mail, query: trimmed, limit: 3)
+            let calendarResults = try await searchNativeSource(kind: .calendar, query: trimmed, limit: 3)
+            let rssResults = try await searchNativeSource(kind: .rss, query: trimmed, limit: 3)
+            let browserHistoryResults = try await searchNativeSource(kind: .browserHistory, query: trimmed, limit: 30)
+            guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
+            globalSearchPreviewState = GlobalSearchPreviewState(
+                query: trimmed,
+                isLoading: false,
+                mailResults: mailResults,
+                calendarResults: calendarResults,
+                rssResults: rssResults,
+                browserHistoryResults: browserHistoryResults,
+                errorMessage: nil
+            )
+        } catch {
+            guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
+            globalSearchPreviewState = GlobalSearchPreviewState(query: trimmed, isLoading: false, errorMessage: String(describing: error))
+        }
+    }
+
+    private func searchBrowserHistory(query: String, limit: Int) -> [BrowserHistoryRecord] {
+        guard let browserHistoryStore else {
+            return browserHistoryRecords
+                .filter { browserHistoryRecord($0, matches: query) }
+                .sorted { $0.visitedAt > $1.visitedAt }
+                .prefix(limit)
+                .map { $0 }
+        }
+        return browserHistoryStore.searchHistory(query: query)
+            .sorted { $0.visitedAt > $1.visitedAt }
+            .prefix(limit)
+            .map { $0 }
+    }
+
+    private func browserHistoryRecord(_ record: BrowserHistoryRecord, matches query: String) -> Bool {
+        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return true }
+        return record.url.lowercased().contains(normalized)
+            || record.title.lowercased().contains(normalized)
+            || record.sessionTitle.lowercased().contains(normalized)
+            || (record.contentMarkdown?.lowercased().contains(normalized) ?? false)
+    }
+
+    private func searchNativeSource(kind: NativeSearchSourceKind, query: String, limit: Int) async throws -> [NativeSearchResult] {
+        if kind == .calendar {
+            try await rebuildCalendarSearchIndexIfNeeded()
+        } else if kind == .browserHistory {
+            try await rebuildBrowserHistorySearchIndexIfNeeded()
+        }
+        if let nativeSourceSearchService {
+            return try await nativeSourceSearchService.search(NativeSearchQuery(
+                text: query,
+                sourceKinds: [kind],
+                limit: limit,
+                includeBodySnippets: true,
+                rankingProfile: .recentFirst
+            ))
+        }
+        return fallbackNativeSearchResults(kind: kind, query: query, limit: limit)
+    }
+
+    private func fallbackNativeSearchResults(kind: NativeSearchSourceKind, query: String, limit: Int) -> [NativeSearchResult] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let now = Date()
+        switch kind {
+        case .mail:
+            return presentationFallbackMailResults(query: trimmed, now: now, limit: limit)
+        case .calendar:
+            return presentationFallbackCalendarResults(query: trimmed, now: now, limit: limit)
+        case .rss:
+            return presentationFallbackRSSResults(query: trimmed, now: now, limit: limit)
+        case .browserHistory:
+            return presentationFallbackBrowserHistoryResults(query: trimmed, now: now, limit: limit)
+        }
+    }
+
+    private func presentationFallbackMailResults(query: String, now: Date, limit: Int) -> [NativeSearchResult] {
+        mailBrowserPresentation.messages(accountID: nil, mailboxID: nil, query: query).prefix(limit).map { message in
+            NativeSearchResult(
+                id: "mail:\(message.id.rawValue)",
+                sourceKind: .mail,
+                externalID: message.id.rawValue,
+                sourceInstanceID: message.accountID.rawValue,
+                title: message.subject,
+                snippet: message.snippet,
+                score: 1,
+                lexicalScore: 1,
+                freshnessScore: 0,
+                fieldScore: 0,
+                temporal: NativeSearchTemporalMetadata(primaryTime: message.date, primaryTimeKind: .sentAt, sentAt: message.date, indexedAt: now),
+                resultTimeLabel: message.date.formatted(date: .abbreviated, time: .shortened)
+            )
+        }
+    }
+
+    private func presentationFallbackCalendarResults(query: String, now: Date, limit: Int) -> [NativeSearchResult] {
+        let normalized = query.lowercased()
+        return calendarEvents
+            .filter { event in
+                guard !normalized.isEmpty else { return true }
+                return event.title.lowercased().contains(normalized)
+                    || (event.location?.lowercased().contains(normalized) ?? false)
+                    || (event.notes?.lowercased().contains(normalized) ?? false)
+                    || event.attendees.contains { attendee in
+                        (attendee.name?.lowercased().contains(normalized) ?? false) || (attendee.email?.lowercased().contains(normalized) ?? false)
+                    }
+            }
+            .sorted { $0.start.date < $1.start.date }
+            .prefix(limit)
+            .map { event in
+                NativeSearchResult(
+                    id: "calendar:\(event.id.rawValue)",
+                    sourceKind: .calendar,
+                    externalID: event.id.rawValue,
+                    sourceInstanceID: event.calendarID.rawValue,
+                    title: event.title,
+                    snippet: [event.location, event.notes].compactMap { $0 }.joined(separator: " · "),
+                    score: 1,
+                    lexicalScore: 1,
+                    freshnessScore: 0,
+                    fieldScore: 0,
+                    temporal: NativeSearchTemporalMetadata(primaryTime: event.start.date, primaryTimeKind: .eventStartAt, eventStartAt: event.start.date, eventEndAt: event.end.date, indexedAt: now),
+                    resultTimeLabel: event.start.date.formatted(date: .abbreviated, time: .shortened)
+                )
+            }
+    }
+
+    private func presentationFallbackRSSResults(query: String, now: Date, limit: Int) -> [NativeSearchResult] {
+        rssBrowserPresentation.items(sourceID: nil, query: query).prefix(limit).map { item in
+            NativeSearchResult(
+                id: "rss:\(item.id.rawValue)",
+                sourceKind: .rss,
+                externalID: item.id.rawValue,
+                sourceInstanceID: item.sourceID.rawValue,
+                title: item.title,
+                snippet: item.snippet,
+                score: 1,
+                lexicalScore: 1,
+                freshnessScore: 0,
+                fieldScore: 0,
+                temporal: NativeSearchTemporalMetadata(primaryTime: item.publishedAt, primaryTimeKind: .publishedAt, publishedAt: item.publishedAt, fetchedAt: item.fetchedAt, indexedAt: now),
+                resultTimeLabel: item.publishedAt.formatted(date: .abbreviated, time: .shortened)
+            )
+        }
+    }
+
+    private func presentationFallbackBrowserHistoryResults(query: String, now: Date, limit: Int) -> [NativeSearchResult] {
+        searchBrowserHistory(query: query, limit: limit).map { record in
+            NativeSearchResult(
+                id: "browser-history:\(record.id.uuidString)",
+                sourceKind: .browserHistory,
+                externalID: record.id.uuidString,
+                sourceInstanceID: record.sessionID,
+                title: record.title.isEmpty ? record.url : record.title,
+                snippet: [record.sessionTitle, record.url].filter { !$0.isEmpty }.joined(separator: " · "),
+                score: 1,
+                lexicalScore: 1,
+                freshnessScore: 0,
+                fieldScore: 0,
+                temporal: NativeSearchTemporalMetadata(primaryTime: record.visitedAt, primaryTimeKind: .updatedAt, updatedAt: record.visitedAt, indexedAt: now),
+                resultTimeLabel: record.visitedAt.formatted(date: .abbreviated, time: .shortened)
+            )
+        }
+    }
+
+    func performGlobalSearchNewChat() {
+        let prompt = globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty else { return }
+        clearGlobalSearch()
+        newChatSession()
+        selection = .agentChat
+        Task { @MainActor in
+            _ = await submitChat(prompt: prompt, clearComposer: false, displayPrompt: prompt)
+        }
+    }
+
+    func performGlobalSearchWebSearch() {
+        let query = globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return }
+        guard var components = URLComponents(string: "https://www.google.com/search") else { return }
+        components.queryItems = [URLQueryItem(name: "q", value: query)]
+        guard let url = components.url else { return }
+        dismissGlobalSearchOverlay()
+        openURLInCurrentChatBrowser(url)
+    }
+
+    func openGlobalSearchBrowserHistoryResult(_ record: BrowserHistoryRecord) {
+        dismissGlobalSearchOverlay()
+        navigateToHistoryRecord(record)
+    }
+
+    func openGlobalSearchResult(_ result: NativeSearchResult) {
+        switch result.sourceKind {
+        case .mail:
+            selection = .mail
+            if let message = mailBrowserPresentation.message(id: MailMessageID(rawValue: result.externalID)) {
+                selectedMailAccountID = message.accountID
+                selectedMailMailboxID = message.mailboxID
+                selectedMailMessageID = message.id
+            } else {
+                selectedMailMessageID = MailMessageID(rawValue: result.externalID)
+            }
+        case .calendar:
+            selection = .calendar
+            selectedCalendarEventID = CalendarEventID(rawValue: result.externalID)
+        case .rss:
+            selection = .rss
+            if let item = rssBrowserPresentation.item(id: RSSItemID(rawValue: result.externalID)) {
+                selectRSSItem(item)
+            } else {
+                selectedRSSItemID = RSSItemID(rawValue: result.externalID)
+            }
+        case .browserHistory:
+            if let id = UUID(uuidString: result.externalID), let record = browserHistoryRecords.first(where: { $0.id == id }) ?? browserHistoryStore?.record(id: id) {
+                navigateToHistoryRecord(record)
+            } else {
+                isBrowserHistoryPanelVisible = true
+                showBrowserWorkspace()
+            }
+        }
+        dismissGlobalSearchOverlay()
+    }
+
+    func showAllGlobalSearchResults(kind: GlobalSearchSectionKind) {
+        switch kind {
+        case .mail:
+            selection = .mail
+        case .calendar:
+            selection = .calendar
+        case .rss:
+            selection = .rss
+        case .browserHistory:
+            isBrowserHistoryPanelVisible = true
+            showBrowserWorkspace()
+        }
+        dismissGlobalSearchOverlay()
+    }
+
+    private func rebuildCalendarSearchIndexIfNeeded() async throws {
+        guard let nativeSourceSearchService else { return }
+        try await nativeSourceSearchService.rebuildSource(kind: .calendar, documents: calendarEvents.map(NativeSourceSearchAdapters.calendarDocument(from:)))
+    }
+
+    private func rebuildBrowserHistorySearchIndexIfNeeded() async throws {
+        guard let nativeSourceSearchService else { return }
+        let records = browserHistoryStore?.loadHistory() ?? browserHistoryRecords
+        try await nativeSourceSearchService.rebuildSource(kind: .browserHistory, documents: records.map { NativeSourceSearchAdapters.browserHistoryDocument(from: $0) })
+    }
+
+    private func indexBrowserHistoryRecord(_ record: BrowserHistoryRecord) {
+        guard let nativeSourceSearchService else { return }
+        Task { @MainActor in
+            try? await nativeSourceSearchService.upsert([NativeSourceSearchAdapters.browserHistoryDocument(from: record)])
+        }
+    }
+
+    private func deleteBrowserHistorySearchRecord(id: UUID) {
+        guard let nativeSourceSearchService else { return }
+        Task { @MainActor in
+            try? await nativeSourceSearchService.delete(documentIDs: ["browser-history:\(id.uuidString)"])
+        }
+    }
+
+    private func clearBrowserHistorySearchIndex() {
+        guard let nativeSourceSearchService else { return }
+        Task { @MainActor in
+            try? await nativeSourceSearchService.deleteBySource(kind: .browserHistory)
+        }
+    }
+
     func openURLInSystemDefaultBrowser(_ url: URL) {
         NSWorkspace.shared.open(url)
     }
@@ -1360,6 +1695,8 @@ final class AppViewModel: NSObject, ObservableObject {
         self.llmSettingsRepository = llmSettingsRepository
         self.llmProviderHealthChecker = AppLLMProviderHealthChecker(settingsRepository: llmSettingsRepository)
         if let storagePaths {
+            let nativeSourceSearchService = NativeSourceSearchService(storagePaths: storagePaths)
+            self.nativeSourceSearchService = nativeSourceSearchService
             self.governanceConfigRepository = AppSessionGovernanceConfigRepository(configDirectory: storagePaths.configDirectory)
             self.productOSRegistryRepository = AppProductOSRegistryRepository(storagePaths: storagePaths)
             self.automationRepository = AppProductOSAutomationRepository(storagePaths: storagePaths)
@@ -1370,9 +1707,9 @@ final class AppViewModel: NSObject, ObservableObject {
             self.browserBookmarkStore = BrowserBookmarkStore(bookmarksURL: storagePaths.browserBookmarksURL)
             self.rssRuntime = RSSRuntime(
                 repository: FileBackedRSSSourceRepository(storagePaths: storagePaths),
-                cache: FileBackedRSSSourceCache(storagePaths: storagePaths)
+                cache: FileBackedRSSSourceCache(storagePaths: storagePaths, searchService: nativeSourceSearchService)
             )
-            self.mailStore = FileBackedMailSourceStore(storagePaths: storagePaths)
+            self.mailStore = FileBackedMailSourceStore(storagePaths: storagePaths, searchService: nativeSourceSearchService)
             self.calendarStore = FileBackedCalendarSourceStore(storagePaths: storagePaths)
             self.calendarRuntimeStore = FileBackedCalendarSourceRuntimeStore(storagePaths: storagePaths)
             self.contactStore = FileBackedContactSourceStore(storagePaths: storagePaths)
@@ -4607,6 +4944,9 @@ final class AppViewModel: NSObject, ObservableObject {
         guard let store = browserHistoryStore else { return }
         browserHistoryRecords = store.loadHistory()
         filteredBrowserHistoryRecords = browserHistoryRecords
+        Task { @MainActor in
+            try? await rebuildBrowserHistorySearchIndexIfNeeded()
+        }
     }
 
     func recordBrowserHistory(url: String, title: String, sessionID: String) {
@@ -4628,6 +4968,7 @@ final class AppViewModel: NSObject, ObservableObject {
         guard let appendedRecord = store.appendRecord(record) else { return }
         browserHistoryRecords = store.loadHistory()
         applyBrowserHistoryFilter()
+        indexBrowserHistoryRecord(appendedRecord)
         fetchContentForBrowserHistoryRecord(appendedRecord)
     }
 
@@ -4686,24 +5027,77 @@ final class AppViewModel: NSObject, ObservableObject {
 
     func deleteBrowserHistoryRecord(_ id: UUID) {
         browserHistoryStore?.deleteRecord(id: id)
+        deleteBrowserHistorySearchRecord(id: id)
         loadBrowserHistory()
     }
 
     func clearBrowserHistory() {
         browserHistoryStore?.clearHistory()
+        clearBrowserHistorySearchIndex()
         browserHistoryRecords = []
         filteredBrowserHistoryRecords = []
     }
 
     func navigateToHistoryRecord(_ record: BrowserHistoryRecord) {
-        // Switch to the session that owns this history record
-        if record.sessionID != selectedChatSessionID {
-            selectChatSession(record.sessionID)
+        guard let url = URL(string: record.url) else {
+            errorMessage = "这条浏览历史没有可打开的 URL。"
+            return
         }
-        // Open URL in browser — the onChange handler in BrowserWorkspaceView
-        // will detect the URL change and navigate the active WKWebView
-        browserTargetURLString = record.url
-        showBrowserWorkspace()
+        let planner = BrowserExternalOpenPlanner()
+        if focusExistingBrowserTabIfPresent(urlString: record.url, preferredSessionID: record.sessionID, planner: planner) {
+            errorMessage = nil
+            return
+        }
+        if browserHistorySessionExists(record.sessionID) {
+            if record.sessionID != selectedChatSessionID {
+                selectChatSession(record.sessionID)
+            }
+            openURLInCurrentChatBrowser(url)
+        } else {
+            openBrowserHistoryRecordInNewSession(record, url: url)
+        }
+    }
+
+    private func browserHistorySessionExists(_ sessionID: String) -> Bool {
+        guard let chatSessionRepository else { return false }
+        return (try? chatSessionRepository.loadSession(id: sessionID)) != nil
+    }
+
+    private func openBrowserHistoryRecordInNewSession(_ record: BrowserHistoryRecord, url: URL) {
+        guard let chatSessionRepository else { return }
+        rememberCurrentWorkspaceMode()
+        do {
+            let session = try chatSessionRepository.createSession(title: browserHistorySessionTitle(for: record))
+            selectedChatSessionID = session.id
+            agentEventTimelinesByProcessKey.removeAll(keepingCapacity: true)
+            browserWorkspaceSessionID = nil
+            selectedSessionArtifactDirectories = try chatSessionRepository.artifactDirectories(sessionID: session.id)
+            try loadSessionCapsule(sessionID: session.id)
+            try loadBackgroundTasks(sessionID: session.id)
+            fallbackChatSession = session
+            nativeSessionManager = makeNativeSessionManager(for: session)
+            transcript = []
+            restoreChatInputDraft(for: session.id)
+            refreshSelectedSubmittingState()
+            agentEventTimeline = []
+            agentEventTimelinesBySessionID[session.id] = []
+            latestChatSummary = nil
+            chatSummaryMessage = nil
+            lastPromptInspection = nil
+            reloadChatSessions(restoreWorkspaceMode: false)
+            selectedChatSessionID = session.id
+            openURLInCurrentChatBrowser(url)
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    private func browserHistorySessionTitle(for record: BrowserHistoryRecord) -> String {
+        let rawTitle = record.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !rawTitle.isEmpty { return "浏览 \(rawTitle)" }
+        if let host = URL(string: record.url)?.host, !host.isEmpty { return "浏览 \(host)" }
+        return "浏览历史"
     }
 
     private func sessionTitleForHistory(sessionID: String) -> String {

@@ -296,18 +296,13 @@ struct CraftSessionListPane: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
 
-            if filteredSessions.isEmpty {
-                if viewModel.sessionSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    ContentUnavailableView("暂无会话", systemImage: "bubble.left", description: Text("点击左上角新建会话开始。"))
-                        .padding(.top, 80)
-                } else {
-                    ContentUnavailableView("没有匹配的会话", systemImage: "magnifyingglass", description: Text("搜索会匹配会话标题和消息内容。"))
-                        .padding(.top, 80)
-                }
+            if visibleSessions.isEmpty {
+                ContentUnavailableView("暂无会话", systemImage: "bubble.left", description: Text("点击左上角新建会话开始。"))
+                    .padding(.top, 80)
             } else {
                 ScrollView {
                     LazyVStack(spacing: 2) {
-                        ForEach(filteredSessions) { session in
+                        ForEach(visibleSessions) { session in
                             CraftSessionRow(
                                 row: AgentChatSessionPresentation(session: session),
                                 readState: viewModel.sessionReadStates[session.id],
@@ -343,8 +338,8 @@ struct CraftSessionListPane: View {
         .task { viewModel.reloadChatSessions() }
     }
 
-    private var filteredSessions: [AgentSession] {
-        AgentSessionTextSearchFilter().filter(viewModel.chatSessions, query: viewModel.sessionSearchQuery)
+    private var visibleSessions: [AgentSession] {
+        viewModel.chatSessions
     }
 
     private var sessionListTitle: String {
@@ -358,14 +353,13 @@ struct CraftSessionListPane: View {
 
 struct CraftMailListPane: View {
     @ObservedObject var viewModel: AppViewModel
-    @State private var searchQuery: String = ""
 
     private var presentation: NativeMailBrowserPresentation {
         viewModel.mailBrowserPresentation
     }
 
     private var visibleMessages: [MailMessageSummary] {
-        presentation.messages(accountID: nil, mailboxID: nil, query: searchQuery)
+        presentation.messages(accountID: nil, mailboxID: nil, query: "")
     }
 
     var body: some View {
@@ -386,41 +380,11 @@ struct CraftMailListPane: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
 
-            if !presentation.messages.isEmpty {
-                HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                    TextField("筛选标题、正文或发件人", text: $searchQuery)
-                        .textFieldStyle(.plain)
-                    if !searchQuery.isEmpty {
-                        Button { searchQuery = "" } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 9)
-                .frame(height: 28)
-                .background(Color(nsColor: .textBackgroundColor).opacity(0.62), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(AppShellColors.hairline, lineWidth: 1)
-                )
-                .padding(.horizontal, 14)
-                .padding(.bottom, 8)
-            }
-
             if presentation.accounts.isEmpty {
                 ContentUnavailableView("暂无邮件账户", systemImage: "envelope.badge", description: Text("点击右上角 + 添加邮件账户。"))
                     .padding(.top, 80)
             } else if presentation.messages.isEmpty {
                 ContentUnavailableView("尚未同步邮件", systemImage: "tray", description: Text("账户已添加，但当前 Mail Runtime 尚未完成远端邮箱发现和邮件拉取。同步完成后邮件会按时间显示在这里。"))
-                    .padding(.top, 80)
-            } else if visibleMessages.isEmpty {
-                ContentUnavailableView("没有匹配的邮件", systemImage: "magnifyingglass", description: Text("筛选会匹配标题、正文摘要和发件人。"))
                     .padding(.top, 80)
             } else {
                 List(visibleMessages) { message in
@@ -1297,7 +1261,6 @@ struct CraftRSSListPane: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
-
 
             if presentation.sources.isEmpty {
                 ContentUnavailableView("暂无 RSS 订阅源", systemImage: "dot.radiowaves.left.and.right", description: Text("点击右上角 + 添加 RSS / Atom / JSON Feed。"))

@@ -1,0 +1,182 @@
+import AppKit
+import Foundation
+import Testing
+import ConnorGraphCore
+import ConnorGraphStore
+import ConnorGraphAppSupport
+@testable import ConnorGraphAgentMac
+
+@MainActor
+struct AppGlobalSearchTests {
+    @Test func updateGlobalSearchQueryShowsAndClearsOverlay() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        fixture.viewModel.sessionSearchQuery = "existing session filter"
+        fixture.viewModel.updateGlobalSearchQuery(" quarterly planning ")
+
+        #expect(fixture.viewModel.globalSearchQuery == " quarterly planning ")
+        #expect(fixture.viewModel.sessionSearchQuery == "existing session filter")
+        #expect(fixture.viewModel.isGlobalSearchOverlayPresented)
+        #expect(fixture.viewModel.globalSearchPreviewState.query == "quarterly planning")
+        #expect(!fixture.viewModel.globalSearchPreviewState.isLoading)
+
+        fixture.viewModel.clearGlobalSearch()
+
+        #expect(fixture.viewModel.globalSearchQuery.isEmpty)
+        #expect(fixture.viewModel.sessionSearchQuery == "existing session filter")
+        #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
+        #expect(fixture.viewModel.globalSearchPreviewState == .empty)
+    }
+
+    @Test func focusRestoresOverlayForExistingQueryAndBlurDismissesIt() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        fixture.viewModel.updateGlobalSearchQuery("invoice")
+        fixture.viewModel.dismissGlobalSearchOverlay()
+
+        #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
+
+        fixture.viewModel.activateGlobalSearchField()
+
+        #expect(fixture.viewModel.isGlobalSearchFieldFocused)
+        #expect(fixture.viewModel.isGlobalSearchOverlayPresented)
+
+        fixture.viewModel.deactivateGlobalSearchField()
+
+        #expect(!fixture.viewModel.isGlobalSearchFieldFocused)
+        #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
+        #expect(fixture.viewModel.globalSearchQuery == "invoice")
+    }
+
+    @Test func showAllGlobalSearchResultsNavigatesToSourceLists() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        fixture.viewModel.updateGlobalSearchQuery("invoice")
+        fixture.viewModel.showAllGlobalSearchResults(kind: .mail)
+
+        #expect(fixture.viewModel.selection == .mail)
+        #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
+
+        fixture.viewModel.updateGlobalSearchQuery("standup")
+        fixture.viewModel.showAllGlobalSearchResults(kind: .calendar)
+
+        #expect(fixture.viewModel.selection == .calendar)
+
+        fixture.viewModel.updateGlobalSearchQuery("swift")
+        fixture.viewModel.showAllGlobalSearchResults(kind: .rss)
+
+        #expect(fixture.viewModel.selection == .rss)
+
+        fixture.viewModel.updateGlobalSearchQuery("docs")
+        fixture.viewModel.showAllGlobalSearchResults(kind: .browserHistory)
+
+        #expect(fixture.viewModel.selection == .agentChat)
+        #expect(fixture.viewModel.isBrowserVisible)
+        #expect(fixture.viewModel.isBrowserHistoryPanelVisible)
+    }
+
+    @Test func globalSearchIncludesBrowserHistoryResults() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        let sessionID = try #require(fixture.viewModel.selectedChatSessionID ?? fixture.viewModel.chatSessions.first?.id)
+        fixture.viewModel.recordBrowserHistory(url: "https://example.com/swift-history", title: "Swift History", sessionID: sessionID)
+        fixture.viewModel.updateGlobalSearchQuery("swift-history")
+
+        await fixture.viewModel.refreshGlobalSearchPreview(for: "swift-history")
+
+        #expect(fixture.viewModel.globalSearchPreviewState.browserHistoryResults.count == 1)
+        #expect(fixture.viewModel.globalSearchPreviewState.browserHistoryResults.first?.title == "Swift History")
+    }
+
+    @Test func globalSearchKeepsMultipleBrowserHistoryPages() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        let sessionID = try #require(fixture.viewModel.selectedChatSessionID ?? fixture.viewModel.chatSessions.first?.id)
+        for index in 0..<5 {
+            fixture.viewModel.recordBrowserHistory(url: "https://example.com/paged-history-\(index)", title: "Paged History \(index)", sessionID: sessionID)
+        }
+        fixture.viewModel.updateGlobalSearchQuery("paged-history")
+
+        await fixture.viewModel.refreshGlobalSearchPreview(for: "paged-history")
+
+        #expect(fixture.viewModel.globalSearchPreviewState.browserHistoryResults.count == 5)
+    }
+
+    @Test func openingBrowserHistoryResultFocusesExistingTab() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        let sessionID = try #require(fixture.viewModel.selectedChatSessionID ?? fixture.viewModel.chatSessions.first?.id)
+        let urlString = "https://example.com/open-tab"
+        let tabID = UUID()
+        fixture.viewModel.browserWorkspaceSnapshotsBySessionID[sessionID] = AppBrowserStateSnapshot(
+            tabs: [
+                AppBrowserTabSnapshot(
+                    id: tabID,
+                    initialURLString: urlString,
+                    title: "Open Tab",
+                    currentURLString: urlString
+                )
+            ],
+            selectedTabID: nil
+        )
+        let record = BrowserHistoryRecord(url: urlString, title: "Open Tab", sessionID: sessionID, sessionTitle: "Session")
+
+        fixture.viewModel.openGlobalSearchBrowserHistoryResult(record)
+
+        #expect(fixture.viewModel.selection == .agentChat)
+        #expect(fixture.viewModel.isBrowserVisible)
+        #expect(fixture.viewModel.browserWorkspaceSessionID == sessionID)
+        #expect(fixture.viewModel.browserWorkspaceSnapshotsBySessionID[sessionID]?.selectedTabID == tabID)
+    }
+
+    @Test func openingBrowserHistoryResultCreatesSessionWhenOriginalSessionIsMissing() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        let originalSessionID = try #require(fixture.viewModel.selectedChatSessionID ?? fixture.viewModel.chatSessions.first?.id)
+        let urlString = "https://example.com/deleted-session"
+        let record = BrowserHistoryRecord(url: urlString, title: "Deleted Session Page", sessionID: "missing-session", sessionTitle: "Deleted")
+
+        fixture.viewModel.openGlobalSearchBrowserHistoryResult(record)
+
+        let newSessionID = try #require(fixture.viewModel.selectedChatSessionID)
+        #expect(newSessionID != originalSessionID)
+        #expect(fixture.viewModel.selection == .agentChat)
+        #expect(fixture.viewModel.isBrowserVisible)
+        #expect(fixture.viewModel.browserWorkspaceSessionID == newSessionID)
+        #expect(fixture.viewModel.browserWorkspaceSnapshotsBySessionID[newSessionID]?.tabs.contains { $0.currentURLString == urlString || $0.initialURLString == urlString } == true)
+    }
+
+    private func makeFixture() throws -> Fixture {
+        _ = NSApplication.shared
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("connor-app-global-search-\(UUID().uuidString)", isDirectory: true)
+        let paths = AppStoragePaths.resolving(applicationSupportBaseDirectory: root)
+        try paths.ensureDirectoryHierarchy(fileManager: .default)
+        let graphRepository = try AppGraphRepository.bootstrap(paths: paths)
+        let viewModel = AppViewModel(
+            entities: [],
+            statements: [],
+            observeLogEntries: [],
+            repository: graphRepository,
+            databasePath: paths.databaseURL.path,
+            storagePaths: paths
+        )
+        return Fixture(root: root, viewModel: viewModel)
+    }
+
+    private struct Fixture {
+        var root: URL
+        var viewModel: AppViewModel
+
+        func cleanup() {
+            try? FileManager.default.removeItem(at: root)
+        }
+    }
+}
