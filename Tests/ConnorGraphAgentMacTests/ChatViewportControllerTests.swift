@@ -64,4 +64,21 @@ struct ChatViewportControllerTests {
 
         #expect(controller.pendingScrollCommand?.target == .item(id: "message-7", anchor: .top, animated: false))
     }
+
+    @Test func replaceDataResetsSnapshotAndPendingCommand() {
+        let controller = ChatViewportController(configuration: .init(bottomPinThreshold: 64))
+        controller.updateMetrics(.init(viewportHeight: 600, contentHeight: 1_200, distanceToBottom: 160, distanceToTop: 440))
+        controller.notifyDataChange(.append(count: 2))
+
+        #expect(controller.snapshot.mode == .freeBrowsing)
+        #expect(controller.snapshot.pendingNewItemCount == 2)
+
+        controller.jumpToLatest()
+        #expect(controller.pendingScrollCommand != nil)
+
+        controller.notifyDataChange(.replace)
+
+        #expect(controller.snapshot == .initial)
+        #expect(controller.pendingScrollCommand == nil)
+    }
 }

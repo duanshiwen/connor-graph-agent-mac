@@ -89,6 +89,8 @@ final class ChatViewportController: ObservableObject {
         snapshot = nextSnapshot
         if case let .programmaticScroll(target) = nextSnapshot.mode {
             pendingScrollCommand = ChatViewportScrollCommand(target: target)
+        } else {
+            pendingScrollCommand = nil
         }
     }
 }
