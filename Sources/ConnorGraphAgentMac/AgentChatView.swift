@@ -432,8 +432,10 @@ private struct AgentChatConversationView: View {
     @State private var transcriptContentHeight: CGFloat = 0
     @State private var transcriptViewportHeight: CGFloat = 0
     @State private var transcriptScrollResetID = UUID()
+    @State private var showScrollToBottom: Bool = false
     private let collapseScrollPolicy = AgentChatCollapseScrollPolicy()
     private let transcriptTopAnchorID = "agent-chat-transcript-top-anchor"
+    private let transcriptBottomAnchorID = "agent-chat-transcript-bottom-anchor"
 
     @MainActor
     private final class TimelineCache {
@@ -530,15 +532,22 @@ private struct AgentChatConversationView: View {
     private func scrollAfterSessionSwitchLayout(proxy: ScrollViewProxy, sessionID: String?) {
         scheduleScrollDecisionAfterLayout(proxy: proxy) {
             guard sessionID == viewModel.selectedChatSessionID else { return .doNotScroll }
-            let contentHeight = Double(self.transcriptContentHeight)
-            let viewportHeight = Double(self.transcriptViewportHeight)
-            let dimensionsReady = contentHeight.isFinite && viewportHeight.isFinite && contentHeight > 0 && viewportHeight > 0
-            // Dimensions not yet measured → try scrolling (next probe will retry if it fails)
-            guard dimensionsReady else { return .scrollToBottom }
-            // Content fits viewport → no scroll needed (avoids white screen)
-            guard contentHeight > viewportHeight + 1 else { return .doNotScroll }
-            // Content overflows → scroll to latest messages
-            return .scrollToBottom
+            return .doNotScroll
+        }
+    }
+
+    private func updateScrollToBottomVisibility(isBottomVisible: Bool) {
+        let contentOverflows = transcriptContentHeight > transcriptViewportHeight + 1
+        let shouldShow = contentOverflows && !isBottomVisible
+        if showScrollToBottom != shouldShow {
+            showScrollToBottom = shouldShow
+        }
+    }
+
+    private func checkScrollToBottomVisibility() {
+        let contentOverflows = transcriptContentHeight > transcriptViewportHeight + 1
+        if !contentOverflows {
+            showScrollToBottom = false
         }
     }
 
@@ -621,6 +630,9 @@ private struct AgentChatConversationView: View {
                                 }
                             }
                         }
+                        Color.clear
+                            .frame(height: 0)
+                            .id(transcriptBottomAnchorID)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 0)
@@ -639,6 +651,7 @@ private struct AgentChatConversationView: View {
                 .id(transcriptScrollResetID)
                 .onPreferenceChange(AgentChatTranscriptContentHeightKey.self) { height in
                     transcriptContentHeight = height
+                    checkScrollToBottomVisibility()
                 }
                 .onPreferenceChange(AgentChatTranscriptViewportHeightKey.self) { height in
                     transcriptViewportHeight = height
@@ -667,7 +680,12 @@ private struct AgentChatConversationView: View {
                           newCount > oldCount,
                           newCount > lastObservedTranscriptCount
                     else { return }
-                    scrollToBottom(proxy: proxy)
+                    // If already at bottom, auto-scroll; otherwise show button
+                    if showScrollToBottom {
+                        // Already showing button, keep it visible
+                    } else {
+                        scrollToBottom(proxy: proxy)
+                    }
                 }
                 .onChange(of: viewModel.isSubmittingChat) { _, isSubmitting in
                     guard isSubmitting else { return }
@@ -680,6 +698,32 @@ private struct AgentChatConversationView: View {
                 )
                 .padding(.horizontal, 0)
                 .padding(.vertical, AgentChatLayout.spaceM)
+
+                // Floating scroll to bottom button
+                if showScrollToBottom {
+                    VStack {
+                        Spacer()
+                        HStack {
+                            Spacer()
+                            Button {
+                                withAnimation(.easeOut(duration: 0.2)) {
+                                    proxy.scrollTo(transcriptBottomAnchorID, anchor: .bottom)
+                                    showScrollToBottom = false
+                                }
+                            } label: {
+                                Image(systemName: "arrow.down.circle.fill")
+                                    .font(.system(size: 24))
+                                    .foregroundStyle(.secondary)
+                                    .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.trailing, 16)
+                            .padding(.bottom, 80)
+                        }
+                    }
+                    .transition(.opacity)
+                    .animation(.easeInOut(duration: 0.2), value: showScrollToBottom)
+                }
             }
         }
         .frame(maxWidth: AgentChatLayout.chatContentMaxWidth, maxHeight: .infinity)
