@@ -90,7 +90,7 @@ struct AppGlobalSearchOverlayView: View {
             .padding(.vertical, AppShellLayout.spaceXS)
     }
 
-    private func browserHistorySection(results: [BrowserHistoryRecord]) -> some View {
+    private func browserHistorySection(results: [NativeSearchResult]) -> some View {
         let pageCount = max(1, Int(ceil(Double(results.count) / Double(browserHistoryPageSize))))
         let currentPage = min(browserHistoryPage, pageCount - 1)
         let startIndex = currentPage * browserHistoryPageSize
@@ -129,11 +129,11 @@ struct AppGlobalSearchOverlayView: View {
 
             if !pageResults.isEmpty {
                 VStack(spacing: 1) {
-                    ForEach(pageResults) { record in
+                    ForEach(pageResults) { result in
                         Button {
-                            viewModel.openGlobalSearchBrowserHistoryResult(record)
+                            viewModel.openGlobalSearchResult(result)
                         } label: {
-                            GlobalSearchBrowserHistoryRow(record: record)
+                            GlobalSearchResultRow(result: result)
                         }
                         .buttonStyle(.plain)
                     }

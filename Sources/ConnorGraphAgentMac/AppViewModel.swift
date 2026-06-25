@@ -1082,7 +1082,7 @@ final class AppViewModel: NSObject, ObservableObject {
             let mailResults = try await searchNativeSource(kind: .mail, query: trimmed, limit: 3)
             let calendarResults = try await searchNativeSource(kind: .calendar, query: trimmed, limit: 3)
             let rssResults = try await searchNativeSource(kind: .rss, query: trimmed, limit: 3)
-            let browserHistoryResults = searchBrowserHistory(query: trimmed, limit: 30)
+            let browserHistoryResults = try await searchNativeSource(kind: .browserHistory, query: trimmed, limit: 30)
             guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
             globalSearchPreviewState = GlobalSearchPreviewState(
                 query: trimmed,
@@ -1125,6 +1125,8 @@ final class AppViewModel: NSObject, ObservableObject {
     private func searchNativeSource(kind: NativeSearchSourceKind, query: String, limit: Int) async throws -> [NativeSearchResult] {
         if kind == .calendar {
             try await rebuildCalendarSearchIndexIfNeeded()
+        } else if kind == .browserHistory {
+            try await rebuildBrowserHistorySearchIndexIfNeeded()
         }
         if let nativeSourceSearchService {
             return try await nativeSourceSearchService.search(NativeSearchQuery(
@@ -1318,6 +1320,33 @@ final class AppViewModel: NSObject, ObservableObject {
     private func rebuildCalendarSearchIndexIfNeeded() async throws {
         guard let nativeSourceSearchService else { return }
         try await nativeSourceSearchService.rebuildSource(kind: .calendar, documents: calendarEvents.map(NativeSourceSearchAdapters.calendarDocument(from:)))
+    }
+
+    private func rebuildBrowserHistorySearchIndexIfNeeded() async throws {
+        guard let nativeSourceSearchService else { return }
+        let records = browserHistoryStore?.loadHistory() ?? browserHistoryRecords
+        try await nativeSourceSearchService.rebuildSource(kind: .browserHistory, documents: records.map { NativeSourceSearchAdapters.browserHistoryDocument(from: $0) })
+    }
+
+    private func indexBrowserHistoryRecord(_ record: BrowserHistoryRecord) {
+        guard let nativeSourceSearchService else { return }
+        Task { @MainActor in
+            try? await nativeSourceSearchService.upsert([NativeSourceSearchAdapters.browserHistoryDocument(from: record)])
+        }
+    }
+
+    private func deleteBrowserHistorySearchRecord(id: UUID) {
+        guard let nativeSourceSearchService else { return }
+        Task { @MainActor in
+            try? await nativeSourceSearchService.delete(documentIDs: ["browser-history:\(id.uuidString)"])
+        }
+    }
+
+    private func clearBrowserHistorySearchIndex() {
+        guard let nativeSourceSearchService else { return }
+        Task { @MainActor in
+            try? await nativeSourceSearchService.deleteBySource(kind: .browserHistory)
+        }
     }
 
     func openURLInSystemDefaultBrowser(_ url: URL) {
@@ -4915,6 +4944,9 @@ final class AppViewModel: NSObject, ObservableObject {
         guard let store = browserHistoryStore else { return }
         browserHistoryRecords = store.loadHistory()
         filteredBrowserHistoryRecords = browserHistoryRecords
+        Task { @MainActor in
+            try? await rebuildBrowserHistorySearchIndexIfNeeded()
+        }
     }
 
     func recordBrowserHistory(url: String, title: String, sessionID: String) {
@@ -4936,6 +4968,7 @@ final class AppViewModel: NSObject, ObservableObject {
         guard let appendedRecord = store.appendRecord(record) else { return }
         browserHistoryRecords = store.loadHistory()
         applyBrowserHistoryFilter()
+        indexBrowserHistoryRecord(appendedRecord)
         fetchContentForBrowserHistoryRecord(appendedRecord)
     }
 
@@ -4994,11 +5027,13 @@ final class AppViewModel: NSObject, ObservableObject {
 
     func deleteBrowserHistoryRecord(_ id: UUID) {
         browserHistoryStore?.deleteRecord(id: id)
+        deleteBrowserHistorySearchRecord(id: id)
         loadBrowserHistory()
     }
 
     func clearBrowserHistory() {
         browserHistoryStore?.clearHistory()
+        clearBrowserHistorySearchIndex()
         browserHistoryRecords = []
         filteredBrowserHistoryRecords = []
     }
