@@ -9,8 +9,6 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
     @State private var viewportHeight: CGFloat = 0
     @State private var contentHeight: CGFloat = 0
     @State private var bottomSentinelMaxY: CGFloat = 0
-    @State private var lastItemCount: Int = 0
-
     private let topSentinelID = "commercial-chat-viewport-top-sentinel"
     private let bottomSentinelID = "commercial-chat-viewport-bottom-sentinel"
     private let coordinateSpaceName = "commercial-chat-viewport-scroll-space"
@@ -83,17 +81,8 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                     publishMetrics()
                 }
                 .onAppear {
-                    lastItemCount = items.count
                     DispatchQueue.main.async {
                         controller.scrollToBottom(animated: false)
-                    }
-                }
-                .onChange(of: items.count) { oldCount, newCount in
-                    defer { lastItemCount = newCount }
-                    if newCount > oldCount {
-                        controller.notifyDataChange(.append(count: newCount - oldCount))
-                    } else if newCount < oldCount {
-                        controller.notifyDataChange(.replace)
                     }
                 }
                 .onChange(of: controller.pendingScrollCommand?.id) { _, _ in

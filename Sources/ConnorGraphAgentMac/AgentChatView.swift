@@ -428,12 +428,19 @@ private struct AgentChatConversationView: View {
     @State private var selectedToolInvocation: AgentToolInvocationPresentation?
     @State private var lastObservedSessionID: String?
     @State private var lastObservedTranscriptCount: Int = 0
-    @State private var pendingSessionTranscriptReloadID: String?
-    @State private var transcriptContentHeight: CGFloat = 0
-    @State private var transcriptViewportHeight: CGFloat = 0
-    @State private var transcriptScrollResetID = UUID()
-    private let collapseScrollPolicy = AgentChatCollapseScrollPolicy()
-    private let transcriptTopAnchorID = "agent-chat-transcript-top-anchor"
+    @StateObject private var chatViewportController = ChatViewportController(
+        configuration: ChatViewportConfiguration(
+            spacing: AgentChatLayout.spaceL,
+            bottomPinThreshold: 72,
+            topLoadTriggerOffset: 96,
+            preservesBottomAnchorForUnderfilledContent: true,
+            showsJumpToLatestButton: true
+        )
+    )
+
+    private var chatViewportConfiguration: ChatViewportConfiguration {
+        chatViewportController.configuration
+    }
 
     @MainActor
     private final class TimelineCache {
@@ -513,45 +520,6 @@ private struct AgentChatConversationView: View {
         )
     }
 
-    private func scrollToBottom(proxy: ScrollViewProxy) {
-        let targetID = timelineItems.last?.id
-        guard let targetID else { return }
-        withAnimation(.easeOut(duration: 0.2)) {
-            proxy.scrollTo(targetID, anchor: .bottom)
-        }
-    }
-
-    private func scrollToTop(proxy: ScrollViewProxy) {
-        withAnimation(.easeOut(duration: 0.2)) {
-            proxy.scrollTo(transcriptTopAnchorID, anchor: .top)
-        }
-    }
-
-    private func scrollAfterSessionSwitchLayout(proxy: ScrollViewProxy, sessionID: String?) {
-        scheduleScrollDecisionAfterLayout(proxy: proxy) {
-            guard sessionID == viewModel.selectedChatSessionID else { return .doNotScroll }
-            return .doNotScroll
-        }
-    }
-
-    private func scheduleScrollDecisionAfterLayout(
-        proxy: ScrollViewProxy,
-        decision: @escaping () -> AgentChatCollapseScrollPolicy.Decision
-    ) {
-        for delay in AgentChatCollapseScrollSchedule.decisionDelays {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                switch decision() {
-                case .scrollToTop:
-                    scrollToTop(proxy: proxy)
-                case .scrollToBottom:
-                    scrollToBottom(proxy: proxy)
-                case .doNotScroll:
-                    return
-                }
-            }
-        }
-    }
-
     private func activityEvents(for process: AgentChatTurnProcessPresentation, latestProcessID: String?) -> [AgentEventPresentation] {
         if process.id == latestProcessID, !viewModel.agentEventTimeline.isEmpty {
             return viewModel.agentEventTimeline
@@ -563,8 +531,38 @@ private struct AgentChatConversationView: View {
         return AgentActivityFallbackEvents.events(for: process)
     }
 
+    @ViewBuilder
+    private func chatTimelineRow(_ item: AgentChatTurnTimelineItem, latestProcessID: String?) -> some View {
+        if let message = item.message {
+            AgentChatMessageRow(
+                row: message,
+                persistentCacheContext: viewModel.markdownPersistentCacheContext(messageID: message.message.id),
+                onPreviewAttachment: { attachment in
+                    viewModel.previewAttachment(attachment)
+                }
+            )
+        } else if let process = item.process {
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
+                AgentAssistantHeaderView()
+                AgentChatTurnProcessRow(
+                    process: process,
+                    events: activityEvents(for: process, latestProcessID: latestProcessID),
+                    onOpenDetail: { event in
+                        activityDetailEvent = event
+                    },
+                    onOpenToolInvocation: { invocation in
+                        selectedToolInvocation = invocation
+                    }
+                )
+            }
+        } else if let timestamp = item.timestamp {
+            AgentChatTurnTimestampRow(timestamp: timestamp)
+        }
+    }
+
     var body: some View {
         let timelineSnapshot = timelineItems
+        let chatItems = AgentChatTimelineAdapter().items(from: timelineSnapshot)
         let latestProcessID = timelineSnapshot.last(where: { $0.process != nil })?.process?.id
 
         VStack(spacing: 0) {
@@ -573,107 +571,55 @@ private struct AgentChatConversationView: View {
                 .padding(.top, AgentChatLayout.spaceS)
                 .padding(.bottom, AgentChatLayout.spaceL)
 
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
-                        Color.clear
-                            .frame(height: 0)
-                            .id(transcriptTopAnchorID)
-
-                        if timelineSnapshot.isEmpty {
-                            AgentChatEmptyStateView()
-                                .frame(maxWidth: .infinity, minHeight: 360)
-                        } else {
-                            ForEach(timelineSnapshot) { item in
-                                if let message = item.message {
-                                    AgentChatMessageRow(
-                                        row: message,
-                                        persistentCacheContext: viewModel.markdownPersistentCacheContext(messageID: message.message.id),
-                                        onPreviewAttachment: { attachment in
-                                            viewModel.previewAttachment(attachment)
-                                        }
-                                    )
-                                    .id(item.id)
-                                } else if let process = item.process {
-                                    AgentAssistantHeaderView()
-                                    AgentChatTurnProcessRow(
-                                        process: process,
-                                        events: activityEvents(for: process, latestProcessID: latestProcessID),
-                                        onOpenDetail: { event in
-                                            activityDetailEvent = event
-                                        },
-                                        onOpenToolInvocation: { invocation in
-                                            selectedToolInvocation = invocation
-                                        }
-                                    )
-                                    .id(item.id)
-                                } else if let timestamp = item.timestamp {
-                                    AgentChatTurnTimestampRow(timestamp: timestamp)
-                                        .id(item.id)
-                                }
-                            }
+            Group {
+                if chatItems.isEmpty {
+                    AgentChatEmptyStateView()
+                        .frame(maxWidth: .infinity, minHeight: 360, maxHeight: .infinity)
+                } else {
+                    CommercialChatViewport(
+                        items: chatItems,
+                        controller: chatViewportController,
+                        configuration: chatViewportConfiguration
+                    ) { chatItem in
+                        if let item = chatItem.timelineItem {
+                            chatTimelineRow(item, latestProcessID: latestProcessID)
                         }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 0)
-                    .padding(.vertical, AgentChatLayout.spaceXL)
-                    .background(
-                        GeometryReader { geometry in
-                            Color.clear.preference(key: AgentChatTranscriptContentHeightKey.self, value: geometry.size.height)
-                        }
-                    )
                 }
-                .background(
-                    GeometryReader { geometry in
-                        Color.clear.preference(key: AgentChatTranscriptViewportHeightKey.self, value: geometry.size.height)
-                    }
-                )
-                .id(transcriptScrollResetID)
-                .onPreferenceChange(AgentChatTranscriptContentHeightKey.self) { height in
-                    transcriptContentHeight = height
-                }
-                .onPreferenceChange(AgentChatTranscriptViewportHeightKey.self) { height in
-                    transcriptViewportHeight = height
-                }
-                .onAppear {
-                    lastObservedSessionID = viewModel.selectedChatSessionID
-                    lastObservedTranscriptCount = viewModel.transcript.count
-                }
-                .onChange(of: viewModel.selectedChatSessionID) { _, newSessionID in
-                    pendingSessionTranscriptReloadID = newSessionID
-                    lastObservedSessionID = newSessionID
-                    lastObservedTranscriptCount = viewModel.transcript.count
-                }
-                .onChange(of: viewModel.transcript.count) { oldCount, newCount in
-                    let currentSessionID = viewModel.selectedChatSessionID
-                    defer {
-                        lastObservedSessionID = currentSessionID
-                        lastObservedTranscriptCount = newCount
-                    }
-                    if pendingSessionTranscriptReloadID == currentSessionID {
-                        pendingSessionTranscriptReloadID = nil
-                        scrollAfterSessionSwitchLayout(proxy: proxy, sessionID: currentSessionID)
-                        return
-                    }
-                    guard currentSessionID == lastObservedSessionID,
-                          newCount > oldCount,
-                          newCount > lastObservedTranscriptCount
-                    else { return }
-                    scrollToBottom(proxy: proxy)
-                }
-                .onChange(of: viewModel.isSubmittingChat) { _, isSubmitting in
-                    guard isSubmitting else { return }
-                    scrollToBottom(proxy: proxy)
-                }
-
-                AgentChatComposerView(
-                    viewModel: viewModel,
-                    isSessionInfoPresented: $isSessionInfoPresented
-                )
-                .padding(.horizontal, 0)
-                .padding(.vertical, AgentChatLayout.spaceM)
-
             }
+            .padding(.vertical, AgentChatLayout.spaceXL)
+            .onAppear {
+                lastObservedSessionID = viewModel.selectedChatSessionID
+                lastObservedTranscriptCount = viewModel.transcript.count
+            }
+            .onChange(of: viewModel.selectedChatSessionID) { _, newSessionID in
+                lastObservedSessionID = newSessionID
+                lastObservedTranscriptCount = viewModel.transcript.count
+                chatViewportController.scrollToBottom(animated: false)
+            }
+            .onChange(of: viewModel.transcript.count) { oldCount, newCount in
+                let currentSessionID = viewModel.selectedChatSessionID
+                defer {
+                    lastObservedSessionID = currentSessionID
+                    lastObservedTranscriptCount = newCount
+                }
+                guard currentSessionID == lastObservedSessionID,
+                      newCount > oldCount,
+                      newCount > lastObservedTranscriptCount
+                else { return }
+                chatViewportController.notifyDataChange(.append(count: newCount - oldCount))
+            }
+            .onChange(of: viewModel.isSubmittingChat) { _, isSubmitting in
+                guard isSubmitting else { return }
+                chatViewportController.scrollToBottom()
+            }
+
+            AgentChatComposerView(
+                viewModel: viewModel,
+                isSessionInfoPresented: $isSessionInfoPresented
+            )
+            .padding(.horizontal, 0)
+            .padding(.vertical, AgentChatLayout.spaceM)
         }
         .frame(maxWidth: AgentChatLayout.chatContentMaxWidth, maxHeight: .infinity)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
