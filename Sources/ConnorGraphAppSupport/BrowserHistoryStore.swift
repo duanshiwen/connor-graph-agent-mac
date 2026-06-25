@@ -1,4 +1,5 @@
 import Foundation
+import ConnorGraphCore
 
 /// Persists browser history as a JSONL file at `browser/history.jsonl`.
 /// Global across all sessions — history is a browser-level concern, not session-scoped.
@@ -71,14 +72,42 @@ public final class BrowserHistoryStore: @unchecked Sendable {
     public func searchHistory(query: String) -> [BrowserHistoryRecord] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !trimmed.isEmpty else { return loadHistory() }
+        let tokens = Self.searchTokens(for: trimmed)
         return queue.sync {
-            loadRecordsUnsafe().filter { record in
-                record.url.lowercased().contains(trimmed)
-                    || record.title.lowercased().contains(trimmed)
-                    || record.sessionTitle.lowercased().contains(trimmed)
-                    || (record.contentMarkdown?.lowercased().contains(trimmed) ?? false)
-            }
+            loadRecordsUnsafe()
+                .compactMap { record -> (BrowserHistoryRecord, Int)? in
+                    let searchable = Self.searchableText(for: record)
+                    if searchable.contains(trimmed) { return (record, max(tokens.count + 2, 3)) }
+                    let tokenMatches = tokens.filter { searchable.localizedCaseInsensitiveContains($0) }.count
+                    let requiredMatches = min(max(tokens.count, 1), 2)
+                    guard tokenMatches >= requiredMatches else { return nil }
+                    return (record, tokenMatches)
+                }
+                .sorted { lhs, rhs in
+                    if lhs.1 != rhs.1 { return lhs.1 > rhs.1 }
+                    return lhs.0.visitedAt > rhs.0.visitedAt
+                }
+                .map(\.0)
         }
+    }
+
+    private static func searchTokens(for query: String) -> [String] {
+        let normalized = NativeSearchQueryNormalizer.normalize(query)
+        let tokens = normalized.scoringTokens
+            .map(\.value)
+            .filter { $0.count >= 2 }
+            .filter { query != $0 }
+        var seen: Set<String> = []
+        return tokens.filter { seen.insert($0).inserted }
+    }
+
+    private static func searchableText(for record: BrowserHistoryRecord) -> String {
+        [
+            record.url,
+            record.title,
+            record.sessionTitle,
+            record.contentMarkdown ?? ""
+        ].joined(separator: "\n").lowercased()
     }
 
     /// Return a single history record by ID.

@@ -78,6 +78,21 @@ struct AppGlobalSearchTests {
         #expect(fixture.viewModel.isBrowserHistoryPanelVisible)
     }
 
+    @Test func showAllBrowserHistoryCarriesGlobalSearchQueryIntoHistoryFilter() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        let sessionID = try #require(fixture.viewModel.selectedChatSessionID ?? fixture.viewModel.chatSessions.first?.id)
+        fixture.viewModel.recordBrowserHistory(url: "https://example.com/thailand", title: "泰国签证指南", sessionID: sessionID)
+        fixture.viewModel.recordBrowserHistory(url: "https://example.com/vietnam", title: "越南旅行记录", sessionID: sessionID)
+        fixture.viewModel.updateGlobalSearchQuery("泰国")
+
+        fixture.viewModel.showAllGlobalSearchResults(kind: .browserHistory)
+
+        #expect(fixture.viewModel.browserHistorySearchQuery == "泰国")
+        #expect(fixture.viewModel.filteredBrowserHistoryRecords.map(\.title) == ["泰国签证指南"])
+    }
+
     @Test func globalSearchSectionEmptyTitlesCoverEverySource() {
         #expect(GlobalSearchSectionKind.chatSessions.emptyTitle == "没有匹配的对话")
         #expect(GlobalSearchSectionKind.mail.emptyTitle == "没有匹配的邮件")

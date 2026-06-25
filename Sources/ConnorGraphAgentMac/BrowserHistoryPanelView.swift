@@ -6,8 +6,14 @@ import ConnorGraphAppSupport
 
 struct BrowserHistoryPanelView: View {
     @ObservedObject var viewModel: AppViewModel
-    @State private var searchText: String = ""
     @State private var clearConfirmation: Bool = false
+
+    private var searchText: Binding<String> {
+        Binding(
+            get: { viewModel.browserHistorySearchQuery },
+            set: { viewModel.filterBrowserHistory(query: $0) }
+        )
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -61,15 +67,11 @@ struct BrowserHistoryPanelView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 12))
                 .foregroundStyle(.tertiary)
-            TextField("搜索网址或标题", text: $searchText)
+            TextField("搜索网址、标题或正文", text: searchText)
                 .textFieldStyle(.plain)
                 .font(BrowserFloatingTypography.input)
-                .onChange(of: searchText) { _, newValue in
-                    viewModel.filterBrowserHistory(query: newValue)
-                }
-            if !searchText.isEmpty {
+            if !viewModel.browserHistorySearchQuery.isEmpty {
                 Button(action: {
-                    searchText = ""
                     viewModel.filterBrowserHistory(query: "")
                 }) {
                     Image(systemName: "xmark.circle.fill")
@@ -93,7 +95,7 @@ struct BrowserHistoryPanelView: View {
             Image(systemName: "clock")
                 .font(.system(size: 32))
                 .foregroundStyle(.tertiary)
-            Text(searchText.isEmpty ? "暂无浏览记录" : "没有匹配的记录")
+            Text(viewModel.browserHistorySearchQuery.isEmpty ? "暂无浏览记录" : "没有匹配的记录")
                 .font(BrowserFloatingTypography.hint)
                 .foregroundStyle(.secondary)
             Spacer()
@@ -156,7 +158,7 @@ struct BrowserHistoryPanelView: View {
         .confirmationDialog("确认清空所有浏览历史？", isPresented: $clearConfirmation, titleVisibility: .visible) {
             Button("清空所有历史", role: .destructive) {
                 viewModel.clearBrowserHistory()
-                searchText = ""
+                viewModel.filterBrowserHistory(query: "")
             }
             Button("取消", role: .cancel) {}
         } message: {

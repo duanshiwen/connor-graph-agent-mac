@@ -459,6 +459,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var isBrowserHistoryPanelVisible: Bool = false
     @Published var browserHistoryRecords: [BrowserHistoryRecord] = []
     @Published var filteredBrowserHistoryRecords: [BrowserHistoryRecord] = []
+    @Published var browserHistorySearchQuery: String = ""
     @Published var selectedSettingsSection: ConnorSettingsSection = .app
     @Published var desktopNotificationsEnabled: Bool = true
     @Published var sessionNewMessageNotificationLevel: SessionAttentionLevel = .actionable
@@ -1452,8 +1453,11 @@ final class AppViewModel: NSObject, ObservableObject {
         case .rss:
             selection = .rss
         case .browserHistory:
+            browserHistorySearchQuery = globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
             isBrowserHistoryPanelVisible = true
             showBrowserWorkspace()
+            loadBrowserHistory()
+            filterBrowserHistory(query: browserHistorySearchQuery)
         }
         dismissGlobalSearchOverlay()
     }
@@ -5198,12 +5202,14 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func filterBrowserHistory(query: String) {
-        guard let store = browserHistoryStore else { return }
+        browserHistorySearchQuery = query
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
             filteredBrowserHistoryRecords = browserHistoryRecords
-        } else {
+        } else if let store = browserHistoryStore {
             filteredBrowserHistoryRecords = store.searchHistory(query: trimmed)
+        } else {
+            filteredBrowserHistoryRecords = browserHistoryRecords.filter { browserHistoryRecord($0, matches: trimmed) }
         }
     }
 
@@ -5218,6 +5224,7 @@ final class AppViewModel: NSObject, ObservableObject {
         clearBrowserHistorySearchIndex()
         browserHistoryRecords = []
         filteredBrowserHistoryRecords = []
+        browserHistorySearchQuery = ""
     }
 
     func navigateToHistoryRecord(_ record: BrowserHistoryRecord) {
@@ -5293,7 +5300,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func applyBrowserHistoryFilter() {
-        filteredBrowserHistoryRecords = browserHistoryRecords
+        filterBrowserHistory(query: browserHistorySearchQuery)
     }
 
     private func rememberCurrentWorkspaceMode() {
