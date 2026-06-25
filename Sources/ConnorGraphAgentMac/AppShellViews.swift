@@ -77,7 +77,7 @@ struct AppShellView: View {
                         onFocus: { viewModel.activateGlobalSearchField() },
                         onBlur: { viewModel.deactivateGlobalSearchField() }
                     )
-                    .frame(minWidth: 220, idealWidth: 320, maxWidth: 420, minHeight: 20, idealHeight: 22, maxHeight: 24)
+                    .frame(minWidth: 220, idealWidth: 320, maxWidth: 420, minHeight: 18, idealHeight: 20, maxHeight: 22)
                     if !viewModel.globalSearchQuery.isEmpty {
                         Button(action: { viewModel.clearGlobalSearch() }) {
                             Image(systemName: "xmark.circle.fill")
@@ -88,7 +88,8 @@ struct AppShellView: View {
                     }
                 }
                 .padding(.horizontal, 8)
-                .padding(.vertical, 5)
+                .padding(.vertical, 3)
+                .frame(height: 28)
                 .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
 

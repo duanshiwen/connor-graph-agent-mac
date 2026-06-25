@@ -5,11 +5,16 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
     var items: [Item]
     @ObservedObject var controller: ChatViewportController
     var configuration: ChatViewportConfiguration
+    var hasOlderItems: Bool
+    var isLoadingOlderItems: Bool
+    var onTopReached: (() -> Void)?
     var rowContent: (Item) -> RowContent
 
     @State private var viewportHeight: CGFloat = 0
     @State private var contentHeight: CGFloat = 0
+    @State private var topSentinelMinY: CGFloat = 0
     @State private var bottomSentinelMaxY: CGFloat = 0
+    @State private var didRequestOlderItemsForCurrentTopReach = false
     private let coordinateSpaceName = "commercial-chat-viewport-scroll-space"
 
     private var topSentinelID: String {
@@ -25,12 +30,18 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
         items: [Item],
         controller: ChatViewportController,
         configuration: ChatViewportConfiguration = .init(),
+        hasOlderItems: Bool = false,
+        isLoadingOlderItems: Bool = false,
+        onTopReached: (() -> Void)? = nil,
         @ViewBuilder rowContent: @escaping (Item) -> RowContent
     ) {
         self.dataSetID = dataSetID
         self.items = items
         self.controller = controller
         self.configuration = configuration
+        self.hasOlderItems = hasOlderItems
+        self.isLoadingOlderItems = isLoadingOlderItems
+        self.onTopReached = onTopReached
         self.rowContent = rowContent
     }
 
@@ -40,8 +51,16 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: configuration.spacing) {
                         Color.clear
-                            .frame(height: 0)
+                            .frame(height: 1)
                             .id(topSentinelID)
+                            .background(
+                                GeometryReader { geometry in
+                                    Color.clear.preference(
+                                        key: ChatViewportTopSentinelMinYKey.self,
+                                        value: geometry.frame(in: .named(coordinateSpaceName)).minY
+                                    )
+                                }
+                            )
 
                         ForEach(items) { item in
                             rowContent(item)
@@ -86,6 +105,11 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                     contentHeight = height
                     publishMetrics()
                 }
+                .onPreferenceChange(ChatViewportTopSentinelMinYKey.self) { minY in
+                    topSentinelMinY = minY
+                    publishMetrics()
+                    requestOlderItemsIfNeeded()
+                }
                 .onPreferenceChange(ChatViewportBottomSentinelMaxYKey.self) { maxY in
                     bottomSentinelMaxY = maxY
                     publishMetrics()
@@ -94,6 +118,7 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                     controller.replaceDataSetIfNeeded(id: dataSetID, itemCount: items.count, initialAnchor: .bottom)
                 }
                 .onChange(of: dataSetID) { _, newDataSetID in
+                    didRequestOlderItemsForCurrentTopReach = false
                     controller.replaceDataSet(id: newDataSetID, itemCount: items.count, initialAnchor: .bottom)
                 }
                 .onChange(of: items.count) { _, newCount in
@@ -125,7 +150,7 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
     private func publishMetrics() {
         guard viewportHeight > 0 else { return }
         let distanceToBottom = max(0, bottomSentinelMaxY - viewportHeight)
-        let distanceToTop = max(0, -min(0, bottomSentinelMaxY - contentHeight))
+        let distanceToTop = max(0, -topSentinelMinY)
         controller.updateMetrics(
             ChatViewportMetrics(
                 viewportHeight: viewportHeight,
@@ -134,6 +159,23 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                 distanceToTop: distanceToTop
             )
         )
+    }
+
+    private func requestOlderItemsIfNeeded() {
+        guard hasOlderItems,
+              !isLoadingOlderItems,
+              !didRequestOlderItemsForCurrentTopReach,
+              viewportHeight > 0,
+              max(0, -topSentinelMinY) <= configuration.topLoadTriggerOffset
+        else {
+            if max(0, -topSentinelMinY) > configuration.topLoadTriggerOffset * 2 {
+                didRequestOlderItemsForCurrentTopReach = false
+            }
+            return
+        }
+
+        didRequestOlderItemsForCurrentTopReach = true
+        onTopReached?()
     }
 
     private func perform(_ command: ChatViewportScrollCommand, proxy: ScrollViewProxy) {
@@ -177,6 +219,11 @@ private extension ChatViewportAnchor {
         case .bottom: return .bottom
         }
     }
+}
+
+private struct ChatViewportTopSentinelMinYKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 private struct ChatViewportViewportHeightKey: PreferenceKey {

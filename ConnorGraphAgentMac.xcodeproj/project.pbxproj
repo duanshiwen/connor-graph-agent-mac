@@ -37,6 +37,7 @@
 		D0000000000000000000000A /* Sources/ConnorGraphAgentMac/AppViewModelLLMProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0000000000000000000000A /* Sources/ConnorGraphAgentMac/AppViewModelLLMProvider.swift */; };
 		D0000000000000000000000B /* Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0000000000000000000000B /* Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftEditor.swift */; };
 		D0000000000000000000000C /* Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0000000000000000000000C /* Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftMapper.swift */; };
+		D00000000000000000000013 /* Sources/ConnorGraphAgentMac/BrowserLiveWebViewStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000012 /* Sources/ConnorGraphAgentMac/BrowserLiveWebViewStore.swift */; };
 		D0000000000000000000000D /* Sources/ConnorGraphAgentMac/BrowserWorkspaceFloatingViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0000000000000000000000D /* Sources/ConnorGraphAgentMac/BrowserWorkspaceFloatingViews.swift */; };
 		D0000000000000000000000E /* Sources/ConnorGraphAgentMac/BrowserWorkspaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0000000000000000000000E /* Sources/ConnorGraphAgentMac/BrowserWorkspaceModels.swift */; };
 		D0000000000000000000000F /* Sources/ConnorGraphAgentMac/ConnorSettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0000000000000000000000F /* Sources/ConnorGraphAgentMac/ConnorSettingsViews.swift */; };
@@ -91,6 +92,7 @@
 		C7A710000000000000000002 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatJumpToLatestButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7A700000000000000000002 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatJumpToLatestButton.swift */; };
 		C7A710000000000000000003 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7A700000000000000000003 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportController.swift */; };
 		C7A710000000000000000004 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportStateMachine.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7A700000000000000000004 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportStateMachine.swift */; };
+		C7A710000000000000000006 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportDataSetIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7A700000000000000000006 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportDataSetIdentity.swift */; };
 		C7A710000000000000000005 /* Sources/ConnorGraphAgentMac/ChatViewport/CommercialChatViewport.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7A700000000000000000005 /* Sources/ConnorGraphAgentMac/ChatViewport/CommercialChatViewport.swift */; };
 /* End PBXBuildFile section */
 
@@ -121,6 +123,7 @@
 		C0000000000000000000000A /* Sources/ConnorGraphAgentMac/AppViewModelLLMProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AppViewModelLLMProvider.swift; sourceTree = "<group>"; };
 		C0000000000000000000000B /* Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftEditor.swift; sourceTree = "<group>"; };
 		C0000000000000000000000C /* Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftMapper.swift; sourceTree = "<group>"; };
+		C00000000000000000000012 /* Sources/ConnorGraphAgentMac/BrowserLiveWebViewStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/BrowserLiveWebViewStore.swift; sourceTree = "<group>"; };
 		C0000000000000000000000D /* Sources/ConnorGraphAgentMac/BrowserWorkspaceFloatingViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/BrowserWorkspaceFloatingViews.swift; sourceTree = "<group>"; };
 		C0000000000000000000000E /* Sources/ConnorGraphAgentMac/BrowserWorkspaceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/BrowserWorkspaceModels.swift; sourceTree = "<group>"; };
 		C0000000000000000000000F /* Sources/ConnorGraphAgentMac/ConnorSettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ConnorSettingsViews.swift; sourceTree = "<group>"; };
@@ -175,6 +178,7 @@
 		C7A700000000000000000002 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatJumpToLatestButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ChatViewport/ChatJumpToLatestButton.swift; sourceTree = "<group>"; };
 		C7A700000000000000000003 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportController.swift; sourceTree = "<group>"; };
 		C7A700000000000000000004 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportStateMachine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportStateMachine.swift; sourceTree = "<group>"; };
+		C7A700000000000000000006 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportDataSetIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportDataSetIdentity.swift; sourceTree = "<group>"; };
 		C7A700000000000000000005 /* Sources/ConnorGraphAgentMac/ChatViewport/CommercialChatViewport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ChatViewport/CommercialChatViewport.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -270,6 +274,7 @@
 				C0000000000000000000000B /* Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftEditor.swift */,
 				C0000000000000000000000C /* Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftMapper.swift */,
 				C0000000000000000000000D /* Sources/ConnorGraphAgentMac/BrowserWorkspaceFloatingViews.swift */,
+				C00000000000000000000012 /* Sources/ConnorGraphAgentMac/BrowserLiveWebViewStore.swift */,
 				C0000000000000000000000E /* Sources/ConnorGraphAgentMac/BrowserWorkspaceModels.swift */,
 				C0000000000000000000000F /* Sources/ConnorGraphAgentMac/ConnorSettingsViews.swift */,
 				C00000000000000000000010 /* Sources/ConnorGraphAgentMac/ProductOSRegistryViews.swift */,
@@ -283,6 +288,7 @@
 				C7A700000000000000000003 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportController.swift */,
 				C7A700000000000000000004 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportStateMachine.swift */,
 				C7A700000000000000000005 /* Sources/ConnorGraphAgentMac/ChatViewport/CommercialChatViewport.swift */,
+				C7A700000000000000000006 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportDataSetIdentity.swift */,
 				9A17D0B000000000000005 /* Sources/ConnorGraphAgentMac/AgentComposerOptionBadge.swift */,
 				7C0C0DE00000000000000005 /* Sources/ConnorGraphAgentMac/Composer/AgentComposerAction.swift */,
 				7C0C0DE00000000000000006 /* Sources/ConnorGraphAgentMac/Composer/AgentComposerState.swift */,
@@ -462,6 +468,7 @@
 				D0000000000000000000000B /* Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftEditor.swift in Sources */,
 				D0000000000000000000000C /* Sources/ConnorGraphAgentMac/AppWorkspaceRootDraftMapper.swift in Sources */,
 				D0000000000000000000000D /* Sources/ConnorGraphAgentMac/BrowserWorkspaceFloatingViews.swift in Sources */,
+				D00000000000000000000013 /* Sources/ConnorGraphAgentMac/BrowserLiveWebViewStore.swift in Sources */,
 				D0000000000000000000000E /* Sources/ConnorGraphAgentMac/BrowserWorkspaceModels.swift in Sources */,
 				D0000000000000000000000F /* Sources/ConnorGraphAgentMac/ConnorSettingsViews.swift in Sources */,
 				D00000000000000000000010 /* Sources/ConnorGraphAgentMac/ProductOSRegistryViews.swift in Sources */,
@@ -475,6 +482,7 @@
 				C7A710000000000000000003 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportController.swift in Sources */,
 				C7A710000000000000000004 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportStateMachine.swift in Sources */,
 				C7A710000000000000000005 /* Sources/ConnorGraphAgentMac/ChatViewport/CommercialChatViewport.swift in Sources */,
+				C7A710000000000000000006 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportDataSetIdentity.swift in Sources */,
 				9A17D0B100000000000005 /* Sources/ConnorGraphAgentMac/AgentComposerOptionBadge.swift in Sources */,
 				7C0C0DE10000000000000005 /* Sources/ConnorGraphAgentMac/Composer/AgentComposerAction.swift in Sources */,
 				7C0C0DE10000000000000006 /* Sources/ConnorGraphAgentMac/Composer/AgentComposerState.swift in Sources */,
