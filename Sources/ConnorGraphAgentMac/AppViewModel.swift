@@ -1304,6 +1304,9 @@ final class AppViewModel: NSObject, ObservableObject {
 
     func showAllGlobalSearchResults(kind: GlobalSearchSectionKind) {
         switch kind {
+        case .chatSessions:
+            isBrowserVisible = false
+            selection = .agentChat
         case .mail:
             selection = .mail
         case .calendar:

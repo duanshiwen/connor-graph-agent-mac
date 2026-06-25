@@ -446,7 +446,8 @@ Connor is a native macOS app. UI changes should follow these rules：
 3. `NSViewRepresentable` / WebKit / PDFKit bridges should preserve platform accessibility semantics or expose explicit labels when the wrapped control does not.
 4. Avoid duplicate sources of truth for sidebar selection, detail selection and settings navigation.
 5. Use design-system tokens already present in `AgentChatDesignSystem` / `AppShellDesignSystem` instead of ad-hoc colors and dimensions where possible.
-6. Avoid nested navigation titles that can leak into macOS window/menu state.
+6. Keep chat scrolling, prepend pagination, unread markers and date sections inside the commercial Chat Viewport infrastructure; see `Docs/commercial-chat-viewport-architecture.md` before changing message list, jump-to-latest, pagination or future social-chat behavior.
+7. Avoid nested navigation titles that can leak into macOS window/menu state.
 7. Do not make destructive or governance actions one-key direct execution; shortcuts may open review surfaces, but execution must still go through Connor policy/review gates.
 
 ---

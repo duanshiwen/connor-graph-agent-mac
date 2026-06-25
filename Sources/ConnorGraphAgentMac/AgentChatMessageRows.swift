@@ -16,6 +16,57 @@ struct AgentChatTurnTimestampRow: View {
     }
 }
 
+struct AgentChatUnreadMarkerRow: View {
+    var unreadCount: Int
+
+    private var title: String {
+        unreadCount > 0 ? "\(unreadCount) 条未读消息" : "未读消息"
+    }
+
+    var body: some View {
+        HStack(spacing: AgentChatLayout.spaceM) {
+            Rectangle()
+                .fill(ConnorCraftPalette.accent.opacity(0.32))
+                .frame(height: 1)
+            Text(title)
+                .font(AgentChatTypography.microEmphasis)
+                .foregroundStyle(ConnorCraftPalette.accent)
+                .lineLimit(1)
+                .padding(.horizontal, AgentChatLayout.spaceM)
+                .padding(.vertical, AgentChatLayout.spaceXS)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(ConnorCraftPalette.accentSubtleFill)
+                )
+            Rectangle()
+                .fill(ConnorCraftPalette.accent.opacity(0.32))
+                .frame(height: 1)
+        }
+        .padding(.vertical, AgentChatLayout.spaceXS)
+        .accessibilityLabel(title)
+    }
+}
+
+struct AgentChatDateSeparatorRow: View {
+    var title: String
+
+    var body: some View {
+        Text(title)
+            .font(AgentChatTypography.microEmphasis)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .padding(.horizontal, AgentChatLayout.spaceM)
+            .padding(.vertical, AgentChatLayout.spaceXS)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(ConnorCraftPalette.foreground.opacity(0.055))
+            )
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.vertical, AgentChatLayout.spaceXS)
+            .accessibilityLabel("对话日期 \(title)")
+    }
+}
+
 struct AgentChatMessageRow: View {
     var row: AgentChatMessagePresentation
     var persistentCacheContext: AgentMarkdownPersistentCacheContext? = nil
@@ -99,7 +150,8 @@ struct AgentChatMessageRow: View {
                     }
                 }
                 .foregroundStyle(Color.primary)
-                .padding(AgentChatLayout.spaceM)
+                .padding(.horizontal, AgentChatLayout.messageBubbleHorizontalPadding)
+                .padding(.vertical, AgentChatLayout.messageBubbleVerticalPadding)
                 .frame(maxWidth: isUser ? AgentChatLayout.userMessageMaxWidth : .infinity, alignment: .leading)
                 .background(messageBackground, in: RoundedRectangle(cornerRadius: AgentChatLayout.radiusL, style: .continuous))
                 .overlay(
@@ -154,7 +206,7 @@ struct AgentChatMessageRow: View {
             persistentCacheContext: persistentCacheContext
         )
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.trailing, AgentChatLayout.spaceXS)
+        .padding(.trailing, AgentChatLayout.assistantMessageTrailingPadding)
     }
 
     private var messageBackground: Color {

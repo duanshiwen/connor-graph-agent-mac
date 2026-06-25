@@ -90,11 +90,20 @@ enum AgentChatLayout {
     static let composerInfoButtonWidth: CGFloat = 78
     static let modelMenuMaxWidth: CGFloat = 176
 
-    static let chatContentMaxWidth: CGFloat = 720
+    static let chatContentMaxWidth: CGFloat = 740
+    static let chatViewportSpacing: CGFloat = 16
+    static let chatViewportVerticalInset: CGFloat = 20
+    static let chatViewportHorizontalInset: CGFloat = 0
+    static let chatBottomPinnedThreshold: CGFloat = 72
+    static let jumpToLatestButtonBottomInset: CGFloat = 12
+    static let jumpToLatestButtonTrailingInset: CGFloat = 12
     static let messageMaxWidth: CGFloat = chatContentMaxWidth
-    static let userMessageMaxWidth: CGFloat = chatContentMaxWidth * 0.72
+    static let userMessageMaxWidth: CGFloat = chatContentMaxWidth * 0.70
     static let processMaxWidth: CGFloat = chatContentMaxWidth
     static let messageSideInset: CGFloat = 0
+    static let messageBubbleHorizontalPadding: CGFloat = 14
+    static let messageBubbleVerticalPadding: CGFloat = 11
+    static let assistantMessageTrailingPadding: CGFloat = 4
 
     static let avatarSize: CGFloat = 28
 }
