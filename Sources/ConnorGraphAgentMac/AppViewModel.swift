@@ -3,6 +3,7 @@ import AppKit
 import CoreLocation
 import IOKit.pwr_mgt
 import UserNotifications
+import WebKit
 import ConnorGraphCore
 import ConnorGraphMemory
 import ConnorGraphSearch
@@ -447,6 +448,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var sessionStateSnapshotsBySessionID: [String: AppSessionStateSnapshot] = [:]
     @Published var sessionRecordsBySessionID: [String: [AppSessionRecord]] = [:]
     @Published var browserWorkspaceSnapshotsBySessionID: [String: AppBrowserStateSnapshot] = [:]
+    let browserLiveWebViewStore = BrowserLiveWebViewStore()
     @Published var browserAssistedTasksByID: [UUID: BrowserAssistedTaskState] = [:]
     @Published var browserAssistedWebFetchRequestsByTaskID: [UUID: BrowserAssistedWebFetchRequest] = [:]
     @Published var isBrowserBookmarksPanelVisible: Bool = false
@@ -1748,6 +1750,10 @@ final class AppViewModel: NSObject, ObservableObject {
         let initialSession = AgentSession(id: "app-session")
         self.fallbackChatSession = initialSession
         super.init()
+        browserLiveWebViewStore.onWillEvict = { [weak self] key, webView, metadata in
+            guard let self else { return }
+            self.recordBrowserWebViewEviction(key: key, webView: webView, metadata: metadata)
+        }
         if let repository {
             self.agentRuntimeFactory = AppGraphAgentRuntimeFactory(
                 store: repository.store,
@@ -4846,6 +4852,27 @@ final class AppViewModel: NSObject, ObservableObject {
         _ = try chatSessionRepository.refreshSessionManifest(sessionID: sessionID)
     }
 
+    private func recordBrowserWebViewEviction(key: BrowserLiveWebViewKey, webView: WKWebView, metadata: BrowserLiveWebViewStore.SnapshotMetadata) {
+        var snapshot = browserWorkspaceSnapshotsBySessionID[key.sessionID] ?? AppBrowserStateSnapshot()
+        guard let index = snapshot.tabs.firstIndex(where: { $0.id == key.tabID }) else { return }
+        var tab = snapshot.tabs[index]
+        tab.title = webView.title ?? tab.title
+        tab.currentURLString = webView.url?.absoluteString ?? tab.currentURLString
+        tab.isLoading = false
+        tab.canGoBack = webView.canGoBack
+        tab.canGoForward = webView.canGoForward
+        tab.lastAccessedAt = Date()
+        tab.scrollX = metadata.scrollX ?? tab.scrollX
+        tab.scrollY = metadata.scrollY ?? tab.scrollY
+        tab.viewportWidth = metadata.viewportWidth ?? tab.viewportWidth
+        tab.viewportHeight = metadata.viewportHeight ?? tab.viewportHeight
+        tab.contentFingerprint = metadata.contentFingerprint ?? tab.contentFingerprint
+        tab.focusedElementHint = metadata.focusedElementHint ?? tab.focusedElementHint
+        tab.restorationStatus = .evicted
+        snapshot.tabs[index] = tab
+        saveBrowserWorkspaceSnapshot(snapshot, for: key.sessionID)
+    }
+
     func saveBrowserWorkspaceSnapshot(_ snapshot: AppBrowserStateSnapshot, for sessionID: String) {
         var normalized = snapshot
         normalized.updatedAt = Date()
@@ -4936,8 +4963,8 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func navigateToBookmark(_ bookmark: BrowserBookmarkRecord) {
-        browserTargetURLString = bookmark.url
-        showBrowserWorkspace()
+        guard let url = URL(string: bookmark.url) else { return }
+        openURLInCurrentChatBrowser(url)
     }
 
     private func applyBrowserBookmarkFilter(query: String = "") {

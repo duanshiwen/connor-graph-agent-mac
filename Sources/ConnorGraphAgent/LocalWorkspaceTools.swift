@@ -445,13 +445,19 @@ enum LocalShellExecutor {
 
         try process.run()
 
-        let deadline = Date().addingTimeInterval(TimeInterval(timeoutSeconds))
+        let startedAt = Date()
+        let timeoutInterval = TimeInterval(timeoutSeconds)
+        let timeoutLeeway: TimeInterval = 0.1
+        let deadline = startedAt.addingTimeInterval(timeoutInterval)
         while process.isRunning && Date() < deadline {
             try? await Task.sleep(nanoseconds: 20_000_000)
         }
         if process.isRunning {
             process.terminate()
             process.waitUntilExit()
+            throw LocalWorkspacePolicyError.commandTimedOut(command)
+        }
+        if Date().timeIntervalSince(startedAt) >= timeoutInterval + timeoutLeeway {
             throw LocalWorkspacePolicyError.commandTimedOut(command)
         }
         let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()

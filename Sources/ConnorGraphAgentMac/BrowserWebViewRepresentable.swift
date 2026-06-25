@@ -5,42 +5,20 @@ import ConnorGraphCore
 import ConnorGraphAppSupport
 
 struct EmbeddedWebView: NSViewRepresentable {
+    var webView: WKWebView
     var initialURLString: String
     var onWebViewCreated: (WKWebView) -> Void
-    var onNavigationStateChanged: (WebNavigationState) -> Void
-    var onOpenInNewTab: (URL) -> Void
-    var onSelectionChanged: (BrowserSelectionPayload) -> Void
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(
-            onNavigationStateChanged: onNavigationStateChanged,
-            onOpenInNewTab: onOpenInNewTab,
-            onSelectionChanged: onSelectionChanged
-        )
-    }
-
-    func makeNSView(context: Context) -> WKWebView {
-        let configuration = WKWebViewConfiguration()
-        configuration.defaultWebpagePreferences.allowsContentJavaScript = true
-        configuration.userContentController.addUserScript(WKUserScript(source: Self.selectionObserverScript, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
-        configuration.userContentController.add(context.coordinator, name: Coordinator.selectionMessageName)
-
-        let webView = WKWebView(frame: .zero, configuration: configuration)
-        webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
-        webView.navigationDelegate = context.coordinator
-        webView.uiDelegate = context.coordinator
-        webView.allowsBackForwardNavigationGestures = true
-        context.coordinator.webView = webView
+    func makeNSView(context: Context) -> BrowserWebViewContainerView {
+        let container = BrowserWebViewContainerView()
+        container.attach(webView)
         onWebViewCreated(webView)
-
-        webView.loadBrowserURLString(initialURLString)
-        return webView
+        return container
     }
 
-    func updateNSView(_ nsView: WKWebView, context: Context) {
-        context.coordinator.onNavigationStateChanged = onNavigationStateChanged
-        context.coordinator.onOpenInNewTab = onOpenInNewTab
-        context.coordinator.onSelectionChanged = onSelectionChanged
+    func updateNSView(_ nsView: BrowserWebViewContainerView, context: Context) {
+        nsView.attach(webView)
+        onWebViewCreated(webView)
     }
 
     static let selectionObserverScript = """
@@ -90,76 +68,6 @@ struct EmbeddedWebView: NSViewRepresentable {
     })();
     """
 
-    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
-        static let selectionMessageName = "connorSelection"
-        weak var webView: WKWebView?
-        var onNavigationStateChanged: (WebNavigationState) -> Void
-        var onOpenInNewTab: (URL) -> Void
-        var onSelectionChanged: (BrowserSelectionPayload) -> Void
-
-        init(
-            onNavigationStateChanged: @escaping (WebNavigationState) -> Void,
-            onOpenInNewTab: @escaping (URL) -> Void,
-            onSelectionChanged: @escaping (BrowserSelectionPayload) -> Void
-        ) {
-            self.onNavigationStateChanged = onNavigationStateChanged
-            self.onOpenInNewTab = onOpenInNewTab
-            self.onSelectionChanged = onSelectionChanged
-        }
-
-        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-            guard let json = message.body as? String,
-                  let data = json.data(using: .utf8)
-            else { return }
-            if message.name == Self.selectionMessageName,
-               let payload = try? JSONDecoder().decode(BrowserSelectionPayload.self, from: data) {
-                DispatchQueue.main.async { self.onSelectionChanged(payload) }
-                return
-            }
-        }
-
-        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { publishNavigationState(webView) }
-        func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) { publishNavigationState(webView) }
-        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { publishNavigationState(webView) }
-        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { handleNavigationFailure(in: webView, error: error) }
-        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { handleNavigationFailure(in: webView, error: error) }
-
-        func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-            if navigationAction.targetFrame == nil, let url = navigationAction.request.url {
-                DispatchQueue.main.async { self.onOpenInNewTab(url) }
-            }
-            return nil
-        }
-
-        private func handleNavigationFailure(in webView: WKWebView, error: Error) {
-            if (error as NSError).code == NSURLErrorCancelled {
-                publishNavigationState(webView, isLoadingOverride: false)
-                return
-            }
-            showErrorPage(in: webView, error: error)
-        }
-
-        private func showErrorPage(in webView: WKWebView, error: Error) {
-            let failedURLString = webView.url?.absoluteString ?? ""
-            webView.loadHTMLString(
-                BrowserBuiltInPage.errorHTML(failedURLString: failedURLString, message: error.localizedDescription),
-                baseURL: BrowserBuiltInPage.webViewBaseURL
-            )
-            publishNavigationState(webView, errorMessage: error.localizedDescription, isLoadingOverride: false)
-        }
-
-        private func publishNavigationState(_ webView: WKWebView, errorMessage: String? = nil, isLoadingOverride: Bool? = nil) {
-            let state = WebNavigationState(
-                canGoBack: webView.canGoBack,
-                canGoForward: webView.canGoForward,
-                title: webView.title ?? "",
-                url: webView.url?.absoluteString ?? "",
-                isLoading: isLoadingOverride ?? webView.isLoading,
-                errorMessage: errorMessage
-            )
-            DispatchQueue.main.async { self.onNavigationStateChanged(state) }
-        }
-    }
 }
 
 extension WKWebView {

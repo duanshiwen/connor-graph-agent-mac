@@ -286,6 +286,29 @@ public struct AppBrowserStateSnapshot: Codable, Equatable, Sendable {
     }
 }
 
+public struct AppBrowserFormDraftSnapshot: Codable, Equatable, Sendable {
+    public var selectorHint: String
+    public var name: String?
+    public var type: String?
+    public var valuePreview: String
+    public var valueHash: String
+
+    public init(selectorHint: String, name: String? = nil, type: String? = nil, valuePreview: String, valueHash: String) {
+        self.selectorHint = selectorHint
+        self.name = name
+        self.type = type
+        self.valuePreview = valuePreview
+        self.valueHash = valueHash
+    }
+}
+
+public enum AppBrowserTabRestorationStatus: String, Codable, Equatable, Sendable {
+    case live
+    case evicted
+    case restoredFromSnapshot
+    case restoreFailed
+}
+
 public struct AppBrowserTabSnapshot: Codable, Equatable, Identifiable, Sendable {
     public var id: UUID
     public var initialURLString: String
@@ -294,6 +317,16 @@ public struct AppBrowserTabSnapshot: Codable, Equatable, Identifiable, Sendable 
     public var isLoading: Bool
     public var canGoBack: Bool
     public var canGoForward: Bool
+    public var lastAccessedAt: Date?
+    public var lastVisibleAt: Date?
+    public var scrollX: Double?
+    public var scrollY: Double?
+    public var viewportWidth: Double?
+    public var viewportHeight: Double?
+    public var contentFingerprint: String?
+    public var focusedElementHint: String?
+    public var formDrafts: [AppBrowserFormDraftSnapshot]?
+    public var restorationStatus: AppBrowserTabRestorationStatus?
 
     public init(
         id: UUID = UUID(),
@@ -302,7 +335,17 @@ public struct AppBrowserTabSnapshot: Codable, Equatable, Identifiable, Sendable 
         currentURLString: String,
         isLoading: Bool = false,
         canGoBack: Bool = false,
-        canGoForward: Bool = false
+        canGoForward: Bool = false,
+        lastAccessedAt: Date? = nil,
+        lastVisibleAt: Date? = nil,
+        scrollX: Double? = nil,
+        scrollY: Double? = nil,
+        viewportWidth: Double? = nil,
+        viewportHeight: Double? = nil,
+        contentFingerprint: String? = nil,
+        focusedElementHint: String? = nil,
+        formDrafts: [AppBrowserFormDraftSnapshot]? = nil,
+        restorationStatus: AppBrowserTabRestorationStatus? = nil
     ) {
         self.id = id
         self.initialURLString = initialURLString
@@ -311,6 +354,16 @@ public struct AppBrowserTabSnapshot: Codable, Equatable, Identifiable, Sendable 
         self.isLoading = isLoading
         self.canGoBack = canGoBack
         self.canGoForward = canGoForward
+        self.lastAccessedAt = lastAccessedAt
+        self.lastVisibleAt = lastVisibleAt
+        self.scrollX = scrollX
+        self.scrollY = scrollY
+        self.viewportWidth = viewportWidth
+        self.viewportHeight = viewportHeight
+        self.contentFingerprint = contentFingerprint
+        self.focusedElementHint = focusedElementHint
+        self.formDrafts = formDrafts
+        self.restorationStatus = restorationStatus
     }
 }
 
