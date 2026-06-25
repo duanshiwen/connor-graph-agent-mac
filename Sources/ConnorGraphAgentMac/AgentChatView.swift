@@ -619,7 +619,7 @@ private struct AgentChatConversationView: View {
 
             ScrollViewReader { proxy in
                 ScrollView {
-                    VStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
+                    LazyVStack(alignment: .leading, spacing: AgentChatLayout.spaceL) {
                         Color.clear
                             .frame(height: 0)
                             .id(transcriptTopAnchorID)
