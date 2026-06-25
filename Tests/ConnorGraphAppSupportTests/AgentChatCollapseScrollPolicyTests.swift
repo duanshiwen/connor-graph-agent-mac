@@ -23,11 +23,22 @@ import Testing
     #expect(decision == .scrollToBottom)
 }
 
-@Test func sessionSwitchScrollsToBottomWhenTranscriptFitsViewport() {
+@Test func sessionSwitchDoesNotScrollWhenTranscriptFitsViewport() {
     let policy = AgentChatCollapseScrollPolicy()
 
     let decision = policy.decisionAfterSessionSwitch(
         contentHeight: 520,
+        viewportHeight: 700
+    )
+
+    #expect(decision == .doNotScroll)
+}
+
+@Test func sessionSwitchScrollsToBottomWhenTranscriptOverflowsViewport() {
+    let policy = AgentChatCollapseScrollPolicy()
+
+    let decision = policy.decisionAfterSessionSwitch(
+        contentHeight: 1200,
         viewportHeight: 700
     )
 
