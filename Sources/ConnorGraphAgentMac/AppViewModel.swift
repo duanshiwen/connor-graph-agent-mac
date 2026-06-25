@@ -362,6 +362,10 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var isBackgroundTasksPresented: Bool = false
     @Published var sessionListFilter: AgentSessionListFilter = .all
     @Published var sessionSearchQuery: String = ""
+    @Published var globalSearchQuery: String = ""
+    @Published var isGlobalSearchOverlayPresented: Bool = false
+    @Published var globalSearchPreviewState: GlobalSearchPreviewState = .empty
+    @Published var nativeSourceListFilterQuery: String = ""
     @Published var governanceConfig: AppSessionGovernanceConfig = .default
     @Published var productOSRegistry: ProductOSRegistrySnapshot = .default
     @Published var automationConfig: ProductOSAutomationConfig = .default
@@ -518,6 +522,8 @@ final class AppViewModel: NSObject, ObservableObject {
     private var llmSettingsRepository: AppLLMSettingsRepository
     private var llmProviderHealthChecker: AppLLMProviderHealthChecker
     private var rssRuntime = RSSRuntime(repository: InMemoryRSSSourceRepository(), cache: InMemoryRSSSourceCache())
+    private var nativeSourceSearchService: NativeSourceSearchService?
+    private var globalSearchPreviewTask: Task<Void, Never>?
     private var mailStore: FileBackedMailSourceStore?
     private var calendarStore: FileBackedCalendarSourceStore?
     private var calendarRuntimeStore: FileBackedCalendarSourceRuntimeStore?
@@ -1014,6 +1020,228 @@ final class AppViewModel: NSObject, ObservableObject {
         showBrowserWorkspace(for: sessionID)
     }
 
+    func updateGlobalSearchQuery(_ query: String) {
+        globalSearchQuery = query
+        sessionSearchQuery = query
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        globalSearchPreviewTask?.cancel()
+        guard !trimmed.isEmpty else {
+            isGlobalSearchOverlayPresented = false
+            globalSearchPreviewState = .empty
+            return
+        }
+        isGlobalSearchOverlayPresented = true
+        globalSearchPreviewState = GlobalSearchPreviewState(query: trimmed, isLoading: true)
+        globalSearchPreviewTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 180_000_000)
+            guard !Task.isCancelled else { return }
+            await self?.refreshGlobalSearchPreview(for: trimmed)
+        }
+    }
+
+    func clearGlobalSearch() {
+        globalSearchPreviewTask?.cancel()
+        globalSearchQuery = ""
+        sessionSearchQuery = ""
+        isGlobalSearchOverlayPresented = false
+        globalSearchPreviewState = .empty
+    }
+
+    func dismissGlobalSearchOverlay() {
+        isGlobalSearchOverlayPresented = false
+    }
+
+    func refreshGlobalSearchPreview(for query: String) async {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        do {
+            let mailResults = try await searchNativeSource(kind: .mail, query: trimmed, limit: 3)
+            let calendarResults = try await searchNativeSource(kind: .calendar, query: trimmed, limit: 3)
+            let rssResults = try await searchNativeSource(kind: .rss, query: trimmed, limit: 3)
+            guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
+            globalSearchPreviewState = GlobalSearchPreviewState(
+                query: trimmed,
+                isLoading: false,
+                mailResults: mailResults,
+                calendarResults: calendarResults,
+                rssResults: rssResults,
+                errorMessage: nil
+            )
+        } catch {
+            guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
+            globalSearchPreviewState = GlobalSearchPreviewState(query: trimmed, isLoading: false, errorMessage: String(describing: error))
+        }
+    }
+
+    private func searchNativeSource(kind: NativeSearchSourceKind, query: String, limit: Int) async throws -> [NativeSearchResult] {
+        if kind == .calendar {
+            try await rebuildCalendarSearchIndexIfNeeded()
+        }
+        if let nativeSourceSearchService {
+            return try await nativeSourceSearchService.search(NativeSearchQuery(
+                text: query,
+                sourceKinds: [kind],
+                limit: limit,
+                includeBodySnippets: true,
+                rankingProfile: .recentFirst
+            ))
+        }
+        return fallbackNativeSearchResults(kind: kind, query: query, limit: limit)
+    }
+
+    private func fallbackNativeSearchResults(kind: NativeSearchSourceKind, query: String, limit: Int) -> [NativeSearchResult] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let now = Date()
+        switch kind {
+        case .mail:
+            return presentationFallbackMailResults(query: trimmed, now: now, limit: limit)
+        case .calendar:
+            return presentationFallbackCalendarResults(query: trimmed, now: now, limit: limit)
+        case .rss:
+            return presentationFallbackRSSResults(query: trimmed, now: now, limit: limit)
+        default:
+            return []
+        }
+    }
+
+    private func presentationFallbackMailResults(query: String, now: Date, limit: Int) -> [NativeSearchResult] {
+        mailBrowserPresentation.messages(accountID: nil, mailboxID: nil, query: query).prefix(limit).map { message in
+            NativeSearchResult(
+                id: "mail:\(message.id.rawValue)",
+                sourceKind: .mail,
+                externalID: message.id.rawValue,
+                sourceInstanceID: message.accountID.rawValue,
+                title: message.subject,
+                snippet: message.snippet,
+                score: 1,
+                lexicalScore: 1,
+                freshnessScore: 0,
+                fieldScore: 0,
+                temporal: NativeSearchTemporalMetadata(primaryTime: message.date, primaryTimeKind: .sentAt, sentAt: message.date, indexedAt: now),
+                resultTimeLabel: message.date.formatted(date: .abbreviated, time: .shortened)
+            )
+        }
+    }
+
+    private func presentationFallbackCalendarResults(query: String, now: Date, limit: Int) -> [NativeSearchResult] {
+        let normalized = query.lowercased()
+        return calendarEvents
+            .filter { event in
+                guard !normalized.isEmpty else { return true }
+                return event.title.lowercased().contains(normalized)
+                    || (event.location?.lowercased().contains(normalized) ?? false)
+                    || (event.notes?.lowercased().contains(normalized) ?? false)
+                    || event.attendees.contains { attendee in
+                        (attendee.name?.lowercased().contains(normalized) ?? false) || (attendee.email?.lowercased().contains(normalized) ?? false)
+                    }
+            }
+            .sorted { $0.start.date < $1.start.date }
+            .prefix(limit)
+            .map { event in
+                NativeSearchResult(
+                    id: "calendar:\(event.id.rawValue)",
+                    sourceKind: .calendar,
+                    externalID: event.id.rawValue,
+                    sourceInstanceID: event.calendarID.rawValue,
+                    title: event.title,
+                    snippet: [event.location, event.notes].compactMap { $0 }.joined(separator: " · "),
+                    score: 1,
+                    lexicalScore: 1,
+                    freshnessScore: 0,
+                    fieldScore: 0,
+                    temporal: NativeSearchTemporalMetadata(primaryTime: event.start.date, primaryTimeKind: .eventStartAt, eventStartAt: event.start.date, eventEndAt: event.end.date, indexedAt: now),
+                    resultTimeLabel: event.start.date.formatted(date: .abbreviated, time: .shortened)
+                )
+            }
+    }
+
+    private func presentationFallbackRSSResults(query: String, now: Date, limit: Int) -> [NativeSearchResult] {
+        rssBrowserPresentation.items(sourceID: nil, query: query).prefix(limit).map { item in
+            NativeSearchResult(
+                id: "rss:\(item.id.rawValue)",
+                sourceKind: .rss,
+                externalID: item.id.rawValue,
+                sourceInstanceID: item.sourceID.rawValue,
+                title: item.title,
+                snippet: item.snippet,
+                score: 1,
+                lexicalScore: 1,
+                freshnessScore: 0,
+                fieldScore: 0,
+                temporal: NativeSearchTemporalMetadata(primaryTime: item.publishedAt, primaryTimeKind: .publishedAt, publishedAt: item.publishedAt, fetchedAt: item.fetchedAt, indexedAt: now),
+                resultTimeLabel: item.publishedAt.formatted(date: .abbreviated, time: .shortened)
+            )
+        }
+    }
+
+    func performGlobalSearchNewChat() {
+        let prompt = globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty else { return }
+        clearGlobalSearch()
+        newChatSession()
+        selection = .agentChat
+        Task { @MainActor in
+            _ = await submitChat(prompt: prompt, clearComposer: false, displayPrompt: prompt)
+        }
+    }
+
+    func performGlobalSearchWebSearch() {
+        let query = globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return }
+        guard var components = URLComponents(string: "https://www.google.com/search") else { return }
+        components.queryItems = [URLQueryItem(name: "q", value: query)]
+        guard let url = components.url else { return }
+        dismissGlobalSearchOverlay()
+        openURLInCurrentChatBrowser(url)
+    }
+
+    func openGlobalSearchResult(_ result: NativeSearchResult) {
+        nativeSourceListFilterQuery = ""
+        switch result.sourceKind {
+        case .mail:
+            selection = .mail
+            if let message = mailBrowserPresentation.message(id: MailMessageID(rawValue: result.externalID)) {
+                selectedMailAccountID = message.accountID
+                selectedMailMailboxID = message.mailboxID
+                selectedMailMessageID = message.id
+            } else {
+                selectedMailMessageID = MailMessageID(rawValue: result.externalID)
+            }
+        case .calendar:
+            selection = .calendar
+            selectedCalendarEventID = CalendarEventID(rawValue: result.externalID)
+        case .rss:
+            selection = .rss
+            if let item = rssBrowserPresentation.item(id: RSSItemID(rawValue: result.externalID)) {
+                selectRSSItem(item)
+            } else {
+                selectedRSSItemID = RSSItemID(rawValue: result.externalID)
+            }
+        default:
+            break
+        }
+        dismissGlobalSearchOverlay()
+    }
+
+    func showAllGlobalSearchResults(kind: GlobalSearchSectionKind) {
+        let query = globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        nativeSourceListFilterQuery = query
+        switch kind {
+        case .mail:
+            selection = .mail
+        case .calendar:
+            selection = .calendar
+        case .rss:
+            selection = .rss
+        }
+        dismissGlobalSearchOverlay()
+    }
+
+    private func rebuildCalendarSearchIndexIfNeeded() async throws {
+        guard let nativeSourceSearchService else { return }
+        try await nativeSourceSearchService.rebuildSource(kind: .calendar, documents: calendarEvents.map(NativeSourceSearchAdapters.calendarDocument(from:)))
+    }
+
     func openURLInSystemDefaultBrowser(_ url: URL) {
         NSWorkspace.shared.open(url)
     }
@@ -1360,6 +1588,8 @@ final class AppViewModel: NSObject, ObservableObject {
         self.llmSettingsRepository = llmSettingsRepository
         self.llmProviderHealthChecker = AppLLMProviderHealthChecker(settingsRepository: llmSettingsRepository)
         if let storagePaths {
+            let nativeSourceSearchService = NativeSourceSearchService(storagePaths: storagePaths)
+            self.nativeSourceSearchService = nativeSourceSearchService
             self.governanceConfigRepository = AppSessionGovernanceConfigRepository(configDirectory: storagePaths.configDirectory)
             self.productOSRegistryRepository = AppProductOSRegistryRepository(storagePaths: storagePaths)
             self.automationRepository = AppProductOSAutomationRepository(storagePaths: storagePaths)
@@ -1370,9 +1600,9 @@ final class AppViewModel: NSObject, ObservableObject {
             self.browserBookmarkStore = BrowserBookmarkStore(bookmarksURL: storagePaths.browserBookmarksURL)
             self.rssRuntime = RSSRuntime(
                 repository: FileBackedRSSSourceRepository(storagePaths: storagePaths),
-                cache: FileBackedRSSSourceCache(storagePaths: storagePaths)
+                cache: FileBackedRSSSourceCache(storagePaths: storagePaths, searchService: nativeSourceSearchService)
             )
-            self.mailStore = FileBackedMailSourceStore(storagePaths: storagePaths)
+            self.mailStore = FileBackedMailSourceStore(storagePaths: storagePaths, searchService: nativeSourceSearchService)
             self.calendarStore = FileBackedCalendarSourceStore(storagePaths: storagePaths)
             self.calendarRuntimeStore = FileBackedCalendarSourceRuntimeStore(storagePaths: storagePaths)
             self.contactStore = FileBackedContactSourceStore(storagePaths: storagePaths)
