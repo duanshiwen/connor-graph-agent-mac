@@ -217,13 +217,18 @@ struct AgentAssistantHeaderView: View {
                 Text(displayName)
                     .font(AgentChatTypography.microEmphasis)
                     .foregroundStyle(.primary.opacity(0.85))
-                Text(subtitle)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                Text(slogan)
-                    .font(.system(size: 9))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(2)
+                HStack(spacing: 4) {
+                    Text(subtitle)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                    Text("·")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.quaternary)
+                    Text(slogan)
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(2)
+                }
             }
         }
     }
