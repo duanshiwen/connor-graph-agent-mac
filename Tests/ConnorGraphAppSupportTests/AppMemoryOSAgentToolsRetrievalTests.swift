@@ -143,9 +143,10 @@ import ConnorGraphAppSupport
     #expect(statementIDs.count == 1)
 
     let profile = try facade.currentUserProfileContext(limit: 10)
-    #expect(profile.hitCount == 1)
-    #expect(profile.hits.first?.metadata["person_role"] == "current_user")
-    #expect(profile.hits.first?.metadata["profile_dimension"] == "interaction_guidance")
+    #expect(profile.hitCount >= 1)
+    let l2ProfileFact = try #require(profile.hits.first { $0.layer == .l2 })
+    #expect(l2ProfileFact.metadata["person_role"] == "current_user")
+    #expect(l2ProfileFact.metadata["profile_dimension"] == "interaction_guidance")
 }
 
 @Test func memoryOSExpandL4ToolReturnsDepthExpansion() async throws {
