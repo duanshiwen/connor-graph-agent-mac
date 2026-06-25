@@ -97,5 +97,4 @@ enum AgentChatLayout {
     static let messageSideInset: CGFloat = 0
 
     static let avatarSize: CGFloat = 28
-    static let avatarBubbleSpacing: CGFloat = 8
 }
