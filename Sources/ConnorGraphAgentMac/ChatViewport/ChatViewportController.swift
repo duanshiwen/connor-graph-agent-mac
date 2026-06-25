@@ -147,7 +147,9 @@ final class ChatViewportController: ObservableObject {
 
     func completePendingInitialAnchorIfNeeded() {
         guard let pendingInitialAnchor,
-              latestMetrics != nil,
+              let latestMetrics,
+              latestMetrics.viewportHeight > 0,
+              latestMetrics.contentHeight > 0,
               currentDataSetItemCount > 0
         else { return }
 
