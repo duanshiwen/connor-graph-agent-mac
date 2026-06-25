@@ -11,6 +11,8 @@ struct TopSearchTextField: NSViewRepresentable {
     @Binding var text: String
     var placeholder: String
     var focusRequestID: UUID?
+    var onSubmit: (() -> Void)? = nil
+    var onCancel: (() -> Void)? = nil
 
     func makeNSView(context: Context) -> NSTextField {
         let textField = TopSearchSelectAllOnFocusTextField()
@@ -42,20 +44,36 @@ struct TopSearchTextField: NSViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text)
+        Coordinator(text: $text, onSubmit: onSubmit, onCancel: onCancel)
     }
 
     final class Coordinator: NSObject, NSTextFieldDelegate {
         @Binding var text: String
         var lastFocusRequestID: UUID?
+        var onSubmit: (() -> Void)?
+        var onCancel: (() -> Void)?
 
-        init(text: Binding<String>) {
+        init(text: Binding<String>, onSubmit: (() -> Void)?, onCancel: (() -> Void)?) {
             _text = text
+            self.onSubmit = onSubmit
+            self.onCancel = onCancel
         }
 
         func controlTextDidChange(_ notification: Notification) {
             guard let field = notification.object as? NSTextField else { return }
             text = field.stringValue
+        }
+
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+                onSubmit?()
+                return true
+            }
+            if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+                onCancel?()
+                return true
+            }
+            return false
         }
     }
 }
