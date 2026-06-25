@@ -49,6 +49,11 @@ struct AppShellView: View {
                 .background(Color(nsColor: .textBackgroundColor).opacity(0.12))
                 .controlSize(.small)
         }
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                dismissGlobalSearchFocus()
+            }
+        )
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Button {
@@ -73,7 +78,9 @@ struct AppShellView: View {
                         placeholder: "搜索或发起对话",
                         focusRequestID: viewModel.focusTopSearchRequestID,
                         onSubmit: { viewModel.performGlobalSearchNewChat() },
-                        onCancel: { viewModel.dismissGlobalSearchOverlay() }
+                        onCancel: { viewModel.dismissGlobalSearchOverlay() },
+                        onFocus: { viewModel.activateGlobalSearchField() },
+                        onBlur: { viewModel.deactivateGlobalSearchField() }
                     )
                     .frame(minWidth: 220, idealWidth: 320, maxWidth: 420, minHeight: 20, idealHeight: 22, maxHeight: 24)
                     if !viewModel.globalSearchQuery.isEmpty {
@@ -153,6 +160,11 @@ struct AppShellView: View {
             NSEvent.removeMonitor(topSearchKeyMonitor)
             self.topSearchKeyMonitor = nil
         }
+    }
+
+    private func dismissGlobalSearchFocus() {
+        viewModel.deactivateGlobalSearchField()
+        NSApp.keyWindow?.makeFirstResponder(nil)
     }
 
 }
