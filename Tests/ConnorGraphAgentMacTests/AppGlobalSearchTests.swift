@@ -135,6 +135,43 @@ struct AppGlobalSearchTests {
         #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
     }
 
+    @Test func globalSearchKeyboardSelectionMovesAcrossActionsAndResults() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        let session = AgentSession(title: "泰国行程")
+        try fixture.repository.saveSession(session)
+        fixture.viewModel.reloadChatSessions()
+        fixture.viewModel.updateGlobalSearchQuery("泰国")
+        await fixture.viewModel.refreshGlobalSearchPreview(for: "泰国")
+
+        #expect(fixture.viewModel.globalSearchSelectedItem == .action(.newChat))
+        fixture.viewModel.moveGlobalSearchSelectionDown()
+        #expect(fixture.viewModel.globalSearchSelectedItem == .action(.webSearch))
+        fixture.viewModel.moveGlobalSearchSelectionDown()
+        #expect(fixture.viewModel.globalSearchSelectedItem == .chatSession(session.id))
+        fixture.viewModel.moveGlobalSearchSelectionUp()
+        #expect(fixture.viewModel.globalSearchSelectedItem == .action(.webSearch))
+    }
+
+    @Test func performingSelectedChatSessionSearchItemSelectsSession() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        let session = AgentSession(title: "泰国行程")
+        try fixture.repository.saveSession(session)
+        fixture.viewModel.reloadChatSessions()
+        fixture.viewModel.updateGlobalSearchQuery("泰国")
+        await fixture.viewModel.refreshGlobalSearchPreview(for: "泰国")
+        fixture.viewModel.moveGlobalSearchSelectionDown()
+        fixture.viewModel.moveGlobalSearchSelectionDown()
+
+        fixture.viewModel.performSelectedGlobalSearchItem()
+
+        #expect(fixture.viewModel.selectedChatSessionID == session.id)
+        #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
+    }
+
     @Test func globalSearchIncludesBrowserHistoryResults() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }

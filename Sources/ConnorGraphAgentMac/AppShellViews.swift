@@ -72,7 +72,9 @@ struct AppShellView: View {
                         ),
                         placeholder: "搜索或发起对话",
                         focusRequestID: viewModel.focusTopSearchRequestID,
-                        onSubmit: { viewModel.performGlobalSearchNewChat() },
+                        onSubmit: { viewModel.performSelectedGlobalSearchItem() },
+                        onMoveUp: { viewModel.moveGlobalSearchSelectionUp() },
+                        onMoveDown: { viewModel.moveGlobalSearchSelectionDown() },
                         onCancel: { viewModel.dismissGlobalSearchOverlay() },
                         onFocus: { viewModel.activateGlobalSearchField() },
                         onBlur: { viewModel.deactivateGlobalSearchField() }
