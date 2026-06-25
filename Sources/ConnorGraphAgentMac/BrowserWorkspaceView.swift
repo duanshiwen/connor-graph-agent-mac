@@ -47,18 +47,10 @@ struct BrowserWorkspaceView: View {
                         ZStack {
                             ForEach(activeTabs) { tab in
                                 EmbeddedWebView(
+                                    webView: liveWebView(for: tab),
                                     initialURLString: tab.restoredURLString,
                                     onWebViewCreated: { webView in
                                         DispatchQueue.main.async { setWebView(webView, for: tab.id) }
-                                    },
-                                    onNavigationStateChanged: { state in
-                                        updateNavigationState(state, for: tab.id)
-                                    },
-                                    onOpenInNewTab: { url in
-                                        openNewTab(urlString: url.absoluteString, select: true)
-                                    },
-                                    onSelectionChanged: { selection in
-                                        showSelectionPopover(selection, tabID: tab.id)
                                     }
                                 )
                                 .id(tab.id)
@@ -130,11 +122,16 @@ struct BrowserWorkspaceView: View {
         .onAppear {
             ensureInitialTab()
             viewModel.loadBrowserBookmarks()
-            navigate(to: viewModel.browserTargetURLString)
+            markVisibleTabInLiveStore()
             installBrowserKeyMonitorIfNeeded()
         }
         .onDisappear {
+            captureRestorationSnapshotsForLiveTabs()
             pauseAllBrowserMedia()
+            markAllBrowserTabsHidden()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                viewModel.browserLiveWebViewStore.enforceBudget()
+            }
             removeBrowserKeyMonitor()
         }
         .onChange(of: viewModel.browserTargetURLString) { _, newValue in
@@ -149,6 +146,7 @@ struct BrowserWorkspaceView: View {
         }
         .onChange(of: activeSelectedTabID) { _, _ in
             syncAddressTextWithActiveTab()
+            markVisibleTabInLiveStore()
             questionText = ""
         }
     }
@@ -193,9 +191,49 @@ struct BrowserWorkspaceView: View {
         return viewModel.isBrowserBookmarked(url: url)
     }
 
+    private func liveWebViewKey(for tabID: BrowserTabState.ID) -> BrowserLiveWebViewKey {
+        BrowserLiveWebViewKey(sessionID: activeSessionID, tabID: tabID)
+    }
+
+    private func liveWebView(for tab: BrowserTabState) -> WKWebView {
+        let isSelected = tab.id == activeSelectedTabID
+        let lease = viewModel.browserLiveWebViewStore.leaseWebView(
+            key: liveWebViewKey(for: tab.id),
+            initialURLString: tab.restoredURLString,
+            onNavigationStateChanged: { state in updateNavigationState(state, for: tab.id) },
+            onOpenInNewTab: { url in openNewTab(urlString: url.absoluteString, select: true) },
+            onSelectionChanged: { selection in showSelectionPopover(selection, tabID: tab.id) },
+            onRestorationReady: { webView in restoreSnapshotIfNeeded(for: tab.id, in: webView) },
+            isVisible: isSelected
+        )
+        if lease.isNewlyCreated {
+            lease.webView.loadBrowserURLString(tab.restoredURLString)
+            DispatchQueue.main.async { setWebView(lease.webView, for: tab.id) }
+        }
+        return lease.webView
+    }
+
     private func pauseAllBrowserMedia() {
         webViewsByTabID.values.forEach { webView in
             webView.pauseBrowserMediaPlayback()
+        }
+    }
+
+    private func markVisibleTabInLiveStore() {
+        guard let selectedID = activeSelectedTabID else { return }
+        for tab in activeTabs {
+            let key = liveWebViewKey(for: tab.id)
+            if tab.id == selectedID {
+                viewModel.browserLiveWebViewStore.markVisible(key)
+            } else {
+                viewModel.browserLiveWebViewStore.markHidden(key)
+            }
+        }
+    }
+
+    private func markAllBrowserTabsHidden() {
+        for tab in activeTabs {
+            viewModel.browserLiveWebViewStore.markHidden(liveWebViewKey(for: tab.id))
         }
     }
 
@@ -364,6 +402,7 @@ struct BrowserWorkspaceView: View {
         var shouldReturnToConversation = false
         let closingWebView = webViewsByTabID[id]
         prepareWebViewForTabClose(closingWebView)
+        viewModel.browserLiveWebViewStore.remove(liveWebViewKey(for: id))
         mutateActiveSession { session in
             guard let index = session.tabs.firstIndex(where: { $0.id == id }) else { return }
             let wasSelected = session.selectedTabID == id
@@ -409,6 +448,8 @@ struct BrowserWorkspaceView: View {
             }
             displayURL = normalizedState.url
             session.tabs[index].navigationState = normalizedState
+            session.tabs[index].lastAccessedAt = Date()
+            session.tabs[index].restorationStatus = .live
         }
         if tabID == activeSelectedTabID, !displayURL.isEmpty { addressText = displayURL }
 
@@ -478,6 +519,47 @@ struct BrowserWorkspaceView: View {
         if trimmed.contains(".") && !trimmed.contains(" ") { return "https://\(trimmed)" }
         let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? trimmed
         return "https://cn.bing.com/search?q=\(encoded)"
+    }
+
+    private func captureRestorationSnapshotsForLiveTabs() {
+        for tab in activeTabs {
+            guard let webView = webViewsByTabID[tab.id] else { continue }
+            webView.evaluateJavaScript(Self.pageRestorationSnapshotScript) { result, _ in
+                guard let json = result as? String,
+                      let data = json.data(using: .utf8),
+                      let snapshot = try? JSONDecoder().decode(BrowserPageRestorationSnapshot.self, from: data)
+                else { return }
+                DispatchQueue.main.async {
+                    mutateActiveSession { session in
+                        guard let index = session.tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+                        session.tabs[index].scrollX = snapshot.scrollX
+                        session.tabs[index].scrollY = snapshot.scrollY
+                        session.tabs[index].viewportWidth = snapshot.viewportWidth
+                        session.tabs[index].viewportHeight = snapshot.viewportHeight
+                        session.tabs[index].contentFingerprint = snapshot.contentFingerprint
+                        session.tabs[index].focusedElementHint = snapshot.focusedElementHint
+                        session.tabs[index].lastAccessedAt = Date()
+                    }
+                }
+            }
+        }
+    }
+
+    private func restoreSnapshotIfNeeded(for tabID: BrowserTabState.ID, in webView: WKWebView) {
+        guard let tab = activeTabs.first(where: { $0.id == tabID }),
+              tab.restorationStatus == .evicted || tab.restorationStatus == .restoreFailed,
+              let scrollY = tab.scrollY
+        else { return }
+        let scrollX = tab.scrollX ?? 0
+        let script = "window.scrollTo(\(scrollX), \(scrollY));"
+        webView.evaluateJavaScript(script) { _, error in
+            DispatchQueue.main.async {
+                mutateActiveSession { session in
+                    guard let index = session.tabs.firstIndex(where: { $0.id == tabID }) else { return }
+                    session.tabs[index].restorationStatus = error == nil ? .restoredFromSnapshot : .restoreFailed
+                }
+            }
+        }
     }
 
     private func showSelectionPopover(_ payload: BrowserSelectionPayload, tabID: BrowserTabState.ID) {
@@ -684,6 +766,27 @@ struct BrowserWorkspaceView: View {
         )
     }
 
+    private static let pageRestorationSnapshotScript = """
+    (function() {
+      var bodyText = (document.body && document.body.innerText) ? document.body.innerText : '';
+      var active = document.activeElement;
+      function elementHint(element) {
+        if (!element) { return ''; }
+        if (element.id) { return '#' + element.id; }
+        if (element.name) { return element.tagName.toLowerCase() + '[name="' + element.name + '"]'; }
+        return element.tagName ? element.tagName.toLowerCase() : '';
+      }
+      return JSON.stringify({
+        scrollX: window.scrollX || window.pageXOffset || 0,
+        scrollY: window.scrollY || window.pageYOffset || 0,
+        viewportWidth: window.innerWidth || 0,
+        viewportHeight: window.innerHeight || 0,
+        contentFingerprint: String((location.href || '') + '|' + (document.title || '') + '|' + bodyText.length + '|' + bodyText.slice(0, 200)),
+        focusedElementHint: elementHint(active)
+      });
+    })();
+    """
+
     private static let pageContextScript = """
     (function() {
       function readablePageText() {
@@ -703,6 +806,15 @@ struct BrowserWorkspaceView: View {
       });
     })();
     """
+}
+
+private struct BrowserPageRestorationSnapshot: Decodable {
+    var scrollX: Double?
+    var scrollY: Double?
+    var viewportWidth: Double?
+    var viewportHeight: Double?
+    var contentFingerprint: String?
+    var focusedElementHint: String?
 }
 
 private struct BrowserAddressTextField: NSViewRepresentable {
