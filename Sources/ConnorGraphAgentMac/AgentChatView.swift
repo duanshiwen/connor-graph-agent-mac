@@ -603,6 +603,7 @@ private struct AgentChatConversationView: View {
                                     )
                                     .id(item.id)
                                 } else if let process = item.process {
+                                    AgentAssistantHeaderView()
                                     AgentChatTurnProcessRow(
                                         process: process,
                                         events: activityEvents(for: process, latestProcessID: latestProcessID),

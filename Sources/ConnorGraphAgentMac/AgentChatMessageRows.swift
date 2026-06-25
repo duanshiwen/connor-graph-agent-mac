@@ -86,11 +86,7 @@ struct AgentChatMessageRow: View {
         HStack(alignment: .top) {
             if isUser { Spacer(minLength: AgentChatLayout.messageSideInset) }
 
-            VStack(alignment: .leading, spacing: isUser ? AgentChatLayout.spaceS : AgentChatLayout.avatarBubbleSpacing) {
-                if !isUser {
-                    AgentAssistantHeaderView()
-                }
-
+            VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                 VStack(alignment: .leading, spacing: AgentChatLayout.spaceS) {
                     if isUser, let activeSkillLabel {
                         userActiveSkillChip(activeSkillLabel)
