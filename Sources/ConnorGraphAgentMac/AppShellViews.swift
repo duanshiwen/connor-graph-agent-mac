@@ -66,13 +66,18 @@ struct AppShellView: View {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary)
                     TopSearchTextField(
-                        text: $viewModel.sessionSearchQuery,
-                        placeholder: "搜索会话标题和内容",
-                        focusRequestID: viewModel.focusTopSearchRequestID
+                        text: Binding(
+                            get: { viewModel.globalSearchQuery },
+                            set: { viewModel.updateGlobalSearchQuery($0) }
+                        ),
+                        placeholder: "搜索或发起对话",
+                        focusRequestID: viewModel.focusTopSearchRequestID,
+                        onSubmit: { viewModel.performGlobalSearchNewChat() },
+                        onCancel: { viewModel.dismissGlobalSearchOverlay() }
                     )
                     .frame(minWidth: 220, idealWidth: 320, maxWidth: 420, minHeight: 20, idealHeight: 22, maxHeight: 24)
-                    if !viewModel.sessionSearchQuery.isEmpty {
-                        Button(action: { viewModel.sessionSearchQuery = "" }) {
+                    if !viewModel.globalSearchQuery.isEmpty {
+                        Button(action: { viewModel.clearGlobalSearch() }) {
                             Image(systemName: "xmark.circle.fill")
                                 .foregroundStyle(.secondary)
                         }
@@ -94,6 +99,14 @@ struct AppShellView: View {
         }
         .overlay(alignment: .topLeading) {
             BrowserBackgroundTaskRunnerView(viewModel: viewModel)
+        }
+        .overlay(alignment: .top) {
+            if viewModel.isGlobalSearchOverlayPresented && !viewModel.globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                AppGlobalSearchOverlayView(viewModel: viewModel)
+                    .padding(.top, 8)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(20)
+            }
         }
         .background(WindowTitlebarConfigurator())
         .frame(minWidth: AppShellLayout.shellMinWidth, minHeight: AppShellLayout.shellMinHeight)
