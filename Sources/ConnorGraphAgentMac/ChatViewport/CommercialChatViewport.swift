@@ -72,6 +72,7 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                     )
                 }
                 .coordinateSpace(name: coordinateSpaceName)
+                .id(dataSetID)
                 .background(
                     GeometryReader { geometry in
                         Color.clear.preference(key: ChatViewportViewportHeightKey.self, value: geometry.size.height)
@@ -90,9 +91,13 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                     publishMetrics()
                 }
                 .onAppear {
-                    DispatchQueue.main.async {
-                        controller.scrollToBottom(animated: false)
-                    }
+                    controller.replaceDataSetIfNeeded(id: dataSetID, itemCount: items.count, initialAnchor: .bottom)
+                }
+                .onChange(of: dataSetID) { _, newDataSetID in
+                    controller.replaceDataSet(id: newDataSetID, itemCount: items.count, initialAnchor: .bottom)
+                }
+                .onChange(of: items.count) { _, newCount in
+                    controller.replaceDataSetIfNeeded(id: dataSetID, itemCount: newCount, initialAnchor: .bottom)
                 }
                 .onChange(of: controller.pendingScrollCommand?.id) { _, _ in
                     guard let command = controller.consumePendingScrollCommand() else { return }

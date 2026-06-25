@@ -101,18 +101,24 @@ struct AppViewModelSessionFilterSelectionTests {
         secondSession = try fixture.repository.saveSession(secondSession)
 
         fixture.viewModel.reloadChatSessions()
+        let revisionAfterReload = fixture.viewModel.selectedChatTranscriptRevision
 
         fixture.viewModel.selectChatSession(firstSession.id)
         #expect(fixture.viewModel.selectedChatSessionID == firstSession.id)
         #expect(fixture.viewModel.transcript.map(\.content) == ["First transcript"])
+        let revisionAfterFirstSelection = fixture.viewModel.selectedChatTranscriptRevision
+        #expect(revisionAfterFirstSelection > revisionAfterReload)
 
         fixture.viewModel.selectChatSession(secondSession.id)
         #expect(fixture.viewModel.selectedChatSessionID == secondSession.id)
         #expect(fixture.viewModel.transcript.map(\.content) == ["Second transcript", "Second response"])
+        let revisionAfterSecondSelection = fixture.viewModel.selectedChatTranscriptRevision
+        #expect(revisionAfterSecondSelection > revisionAfterFirstSelection)
 
         fixture.viewModel.selectChatSession(firstSession.id)
         #expect(fixture.viewModel.selectedChatSessionID == firstSession.id)
         #expect(fixture.viewModel.transcript.map(\.content) == ["First transcript"])
+        #expect(fixture.viewModel.selectedChatTranscriptRevision > revisionAfterSecondSelection)
     }
 
     private func makeFixture() throws -> Fixture {
