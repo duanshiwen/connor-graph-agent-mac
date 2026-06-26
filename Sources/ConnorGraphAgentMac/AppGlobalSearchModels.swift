@@ -65,6 +65,19 @@ struct GlobalSearchNativeSectionResult: Sendable {
     var kind: GlobalSearchSectionKind
     var results: [NativeSearchResult]
     var errorMessage: String?
+    var timing: GlobalSearchSectionTiming?
+
+    init(
+        kind: GlobalSearchSectionKind,
+        results: [NativeSearchResult],
+        errorMessage: String? = nil,
+        timing: GlobalSearchSectionTiming? = nil
+    ) {
+        self.kind = kind
+        self.results = results
+        self.errorMessage = errorMessage
+        self.timing = timing
+    }
 }
 
 enum GlobalSearchSectionKind: String, CaseIterable, Identifiable, Sendable {
