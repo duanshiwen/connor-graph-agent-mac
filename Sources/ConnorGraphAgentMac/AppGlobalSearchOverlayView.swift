@@ -117,7 +117,7 @@ struct AppGlobalSearchOverlayView: View {
                 HStack(spacing: 5) {
                     Text("搜索词")
                         .font(AppListTypography.rowCaption)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary.opacity(0.72))
                     ForEach(state.searchTokens, id: \.self) { token in
                         Text(token)
                             .font(AppListTypography.rowCaptionEmphasized)
@@ -125,7 +125,11 @@ struct AppGlobalSearchOverlayView: View {
                             .lineLimit(1)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(Color.secondary.opacity(0.10), in: Capsule())
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .overlay {
+                                Capsule()
+                                    .stroke(Color.primary.opacity(GlobalSearchOverlayGlassStyle.chipStrokeOpacity), lineWidth: 1)
+                            }
                     }
                     Spacer(minLength: 0)
                 }
@@ -420,8 +424,8 @@ private struct GlobalSearchActionRow: View {
     }
 
     private var rowBackground: Color {
-        if isSelected { return Color.accentColor.opacity(0.14) }
-        return isHovering ? Color.accentColor.opacity(0.08) : Color.clear
+        if isSelected { return Color.accentColor.opacity(GlobalSearchOverlayGlassStyle.selectedAccentOpacity) }
+        return isHovering ? Color.accentColor.opacity(GlobalSearchOverlayGlassStyle.hoverAccentOpacity) : Color.clear
     }
 }
 
@@ -466,8 +470,8 @@ private struct GlobalSearchChatSessionRow: View {
     }
 
     private var rowBackground: Color {
-        if isSelected { return Color.accentColor.opacity(0.14) }
-        return isHovering ? Color.accentColor.opacity(0.08) : Color.clear
+        if isSelected { return Color.accentColor.opacity(GlobalSearchOverlayGlassStyle.selectedAccentOpacity) }
+        return isHovering ? Color.accentColor.opacity(GlobalSearchOverlayGlassStyle.hoverAccentOpacity) : Color.clear
     }
 }
 
@@ -522,7 +526,7 @@ private struct GlobalSearchBrowserHistoryRow: View {
     }
 
     private var rowBackground: Color {
-        isHovering ? Color.accentColor.opacity(0.08) : Color.clear
+        isHovering ? Color.accentColor.opacity(GlobalSearchOverlayGlassStyle.hoverAccentOpacity) : Color.clear
     }
 }
 
@@ -569,8 +573,8 @@ private struct GlobalSearchResultRow: View {
     }
 
     private var rowBackground: Color {
-        if isSelected { return Color.accentColor.opacity(0.14) }
-        return isHovering ? Color.accentColor.opacity(0.08) : Color.clear
+        if isSelected { return Color.accentColor.opacity(GlobalSearchOverlayGlassStyle.selectedAccentOpacity) }
+        return isHovering ? Color.accentColor.opacity(GlobalSearchOverlayGlassStyle.hoverAccentOpacity) : Color.clear
     }
 
     private var iconName: String {
