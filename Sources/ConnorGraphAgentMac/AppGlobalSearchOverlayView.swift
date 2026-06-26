@@ -4,6 +4,7 @@ import ConnorGraphAppSupport
 
 struct AppGlobalSearchOverlayView: View {
     @ObservedObject var viewModel: AppViewModel
+    @Environment(\.colorScheme) private var colorScheme
     @State private var browserHistoryPage: Int = 0
     @State private var contentHeight: CGFloat = 0
 
@@ -33,18 +34,49 @@ struct AppGlobalSearchOverlayView: View {
         .background(alignment: .topLeading) {
             measuredOverlayContent
         }
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
-                .stroke(AppShellColors.hairline, lineWidth: 1)
+        .background(.regularMaterial, in: overlayShape)
+        .overlay(glassEdgeHighlight)
+        .overlay(glassEdgeLowlight)
+        .shadow(
+            color: .black.opacity(GlobalSearchOverlayGlassStyle.outerShadowOpacity),
+            radius: GlobalSearchOverlayGlassStyle.outerShadowRadius,
+            x: 0,
+            y: GlobalSearchOverlayGlassStyle.outerShadowY
         )
-        .shadow(color: .black.opacity(0.12), radius: 18, x: 0, y: 10)
         .onPreferenceChange(GlobalSearchOverlayContentHeightKey.self) { height in
             contentHeight = height
         }
         .onChange(of: state.query) { _, _ in
             browserHistoryPage = 0
         }
+    }
+
+    private var overlayShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
+    }
+
+    private var glassEdgeHighlight: some View {
+        overlayShape
+            .stroke(Color.white.opacity(edgeHighlightOpacity), lineWidth: 1)
+            .blendMode(.overlay)
+    }
+
+    private var glassEdgeLowlight: some View {
+        overlayShape
+            .stroke(Color.black.opacity(edgeLowlightOpacity), lineWidth: 1)
+            .blendMode(.softLight)
+    }
+
+    private var edgeHighlightOpacity: Double {
+        colorScheme == .dark
+            ? GlobalSearchOverlayGlassStyle.edgeHighlightOpacityDark
+            : GlobalSearchOverlayGlassStyle.edgeHighlightOpacityLight
+    }
+
+    private var edgeLowlightOpacity: Double {
+        colorScheme == .dark
+            ? GlobalSearchOverlayGlassStyle.edgeLowlightOpacityDark
+            : GlobalSearchOverlayGlassStyle.edgeLowlightOpacityLight
     }
 
     private var overlayContent: some View {
