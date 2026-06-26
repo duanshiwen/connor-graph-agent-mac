@@ -48,6 +48,29 @@ struct MemoryOSHeadlessKnowledgeLoopExecutorTests {
         #expect(try store.backgroundToolCalls(runID: "run-1").count == 1)
     }
 
+    @Test func facadeQueueRunnerInjectsQueueMetadataIntoHeadlessRun() throws {
+        let store = try SQLiteMemoryOSStore(path: temporaryHeadlessLoopDatabaseURL().path)
+        try store.migrate()
+        let facade = AppMemoryOSFacade(store: store)
+        let now = Date(timeIntervalSince1970: 3_000)
+        _ = try facade.ingestChatMessage(messageID: "message-1", sessionID: "session", role: "user", content: "Memory OS needs a headless run.", occurredAt: now)
+        let jobs = try facade.enqueueL1UnifiedProjectionBackgroundJobs(policy: MemoryOSL1ProcessingTriggerPolicy(minPendingCount: 1, maxEventsPerBlock: 10), now: now)
+        let queueID = try #require(jobs.first?.id)
+        let model = CapturingLoopModel()
+        let executor = MemoryOSHeadlessKnowledgeLoopExecutor(
+            model: model,
+            toolExecutor: MemoryOSBackgroundToolExecutor(facade: facade),
+            store: store
+        )
+
+        _ = try facade.runBackgroundAIQueueOnce(executor: executor, limit: 1, now: now)
+
+        let run = try #require(try store.backgroundRuns(limit: 10).first { $0.queueItemID == queueID })
+        #expect(run.id == "memory-run:\(queueID)")
+        #expect(run.statelessBatch)
+        #expect(run.metadata["queue_item_id"] == queueID)
+    }
+
     @Test func secondRunDoesNotInheritFirstRunMessagesOrToolResults() throws {
         let store = try SQLiteMemoryOSStore(path: temporaryHeadlessLoopDatabaseURL().path)
         try store.migrate()
