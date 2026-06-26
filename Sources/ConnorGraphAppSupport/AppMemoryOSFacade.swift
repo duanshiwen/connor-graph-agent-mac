@@ -381,9 +381,9 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         )
     }
 
-    public func enqueueL1ToL2BackgroundJobs(policy: MemoryOSL1ProcessingTriggerPolicy = MemoryOSL1ProcessingTriggerPolicy(), now: Date = Date()) throws -> [MemoryOSQueueItem] {
+    public func enqueueL1UnifiedProjectionBackgroundJobs(policy: MemoryOSL1ProcessingTriggerPolicy = MemoryOSL1ProcessingTriggerPolicy(), now: Date = Date()) throws -> [MemoryOSQueueItem] {
         let events = try pendingCaptureEvents(limit: max(policy.minPendingCount * 2, policy.maxEventsPerBlock * 4))
-        let drafts = MemoryOSL1ToL2JobPlanner(policy: policy).planJobs(from: events, now: now)
+        let drafts = MemoryOSL1UnifiedProjectionJobPlanner(policy: policy).planJobs(from: events, now: now)
         return try drafts.map { draft in
             let payload = store.json(draft)
             let item = MemoryOSQueueItem(
@@ -423,7 +423,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
     }
 
     public func runBackgroundAIQueueOnce<Executor: MemoryOSBackgroundModelExecutor>(executor: Executor, workerID: String = "memory-os-background-ai-worker", limit: Int = 5, now: Date = Date()) throws -> [MemoryOSProjectionRunSummary] {
-        let kinds = [MemoryOSBackgroundJobKind.l1ProcessBlockToL2.rawValue, MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue]
+        let kinds = [MemoryOSBackgroundJobKind.l1UnifiedProjection.rawValue, MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue]
         let candidates = try kinds.flatMap { kind in
             try store.runnableQueueItems(kind: kind, limit: limit, now: now)
         }.sorted { lhs, rhs in
@@ -436,8 +436,8 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
             guard let leased = try store.leaseQueueItem(id: candidate.id, workerID: workerID, now: now) else { continue }
             do {
                 switch leased.kind {
-                case MemoryOSBackgroundJobKind.l1ProcessBlockToL2.rawValue:
-                    let draft = try store.decode(MemoryOSL1ToL2JobDraft.self, leased.payloadJSON)
+                case MemoryOSBackgroundJobKind.l1UnifiedProjection.rawValue:
+                    let draft = try store.decode(MemoryOSL1UnifiedProjectionJobDraft.self, leased.payloadJSON)
                     let result = try MemoryOSBackgroundJobWorker(executor: executor).run(draft)
                     let summary = try projectAndRecordLLMArtifact(rawContent: result.rawArtifactJSON, modelID: result.metadata["model_id"] ?? workerID, queueItem: leased, processingRunID: result.jobID, artifactType: result.artifactType, schemaName: result.schemaName, now: now)
                     if summary.accepted {

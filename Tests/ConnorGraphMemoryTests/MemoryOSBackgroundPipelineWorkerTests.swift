@@ -3,8 +3,8 @@ import Testing
 import ConnorGraphCore
 import ConnorGraphMemory
 
-@Test func l1ToL2WorkerBuildsModelRequestFromJobDraft() throws {
-    let draft = MemoryOSL1ToL2JobDraft(
+@Test func l1UnifiedProjectionWorkerBuildsModelRequestFromJobDraft() throws {
+    let draft = MemoryOSL1UnifiedProjectionJobDraft(
         id: "job-l1",
         captureEventIDs: ["capture-1", "capture-2"],
         provenanceObjectIDs: ["prov-1", "prov-2"],
@@ -22,7 +22,7 @@ import ConnorGraphMemory
     #expect(executor.requests.count == 1)
     let request = try #require(executor.requests.first)
     #expect(request.jobID == "job-l1")
-    #expect(request.kind == MemoryOSBackgroundJobKind.l1ProcessBlockToL2.rawValue)
+    #expect(request.kind == MemoryOSBackgroundJobKind.l1UnifiedProjection.rawValue)
     #expect(request.schemaName == "MemoryOSL1UnifiedProjectionOutput")
     #expect(request.artifactType == "memory_os_l1_unified_projection")
     #expect(request.prompt.contains("capture-1"))

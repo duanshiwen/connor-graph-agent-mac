@@ -2,7 +2,7 @@ import Foundation
 import ConnorGraphCore
 
 public enum MemoryOSBackgroundJobKind: String, Sendable, Codable, Equatable, CaseIterable {
-    case l1ProcessBlockToL2 = "memory.l1.process_block_to_l2"
+    case l1UnifiedProjection = "memory.l1.unified_projection"
     case l2SynthesizeKnowledge = "memory.l2.synthesize_knowledge"
 }
 
@@ -70,7 +70,7 @@ public struct MemoryOSL2KnowledgeSynthesisTriggerPolicy: Sendable, Codable, Equa
     }
 }
 
-public struct MemoryOSL1ToL2JobDraft: Sendable, Codable, Equatable, Identifiable {
+public struct MemoryOSL1UnifiedProjectionJobDraft: Sendable, Codable, Equatable, Identifiable {
     public var id: String
     public var kind: String
     public var captureEventIDs: [String]
@@ -81,7 +81,7 @@ public struct MemoryOSL1ToL2JobDraft: Sendable, Codable, Equatable, Identifiable
     public var createdAt: Date
     public var metadata: [String: String]
 
-    public init(id: String = UUID().uuidString, kind: String = MemoryOSBackgroundJobKind.l1ProcessBlockToL2.rawValue, captureEventIDs: [String], provenanceObjectIDs: [String], sourceSpanIDs: [String], schemaName: String = "MemoryOSL1UnifiedProjectionOutput", prompt: String, createdAt: Date = Date(), metadata: [String: String] = [:]) {
+    public init(id: String = UUID().uuidString, kind: String = MemoryOSBackgroundJobKind.l1UnifiedProjection.rawValue, captureEventIDs: [String], provenanceObjectIDs: [String], sourceSpanIDs: [String], schemaName: String = "MemoryOSL1UnifiedProjectionOutput", prompt: String, createdAt: Date = Date(), metadata: [String: String] = [:]) {
         self.id = id
         self.kind = kind
         self.captureEventIDs = captureEventIDs
@@ -116,7 +116,7 @@ public struct MemoryOSL2ToKnowledgeJobDraft: Sendable, Codable, Equatable, Ident
     }
 }
 
-public struct MemoryOSL1ToL2PromptBuilder: Sendable {
+public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
     public init() {}
 
     public func prompt(for events: [MemoryOSCaptureEvent]) -> String {
@@ -373,21 +373,21 @@ public struct MemoryOSL2ToKnowledgePromptBuilder: Sendable {
     }
 }
 
-public struct MemoryOSL1ToL2JobPlanner: Sendable {
+public struct MemoryOSL1UnifiedProjectionJobPlanner: Sendable {
     public var policy: MemoryOSL1ProcessingTriggerPolicy
-    public var promptBuilder: MemoryOSL1ToL2PromptBuilder
+    public var promptBuilder: MemoryOSL1UnifiedProjectionPromptBuilder
 
-    public init(policy: MemoryOSL1ProcessingTriggerPolicy = MemoryOSL1ProcessingTriggerPolicy(), promptBuilder: MemoryOSL1ToL2PromptBuilder = MemoryOSL1ToL2PromptBuilder()) {
+    public init(policy: MemoryOSL1ProcessingTriggerPolicy = MemoryOSL1ProcessingTriggerPolicy(), promptBuilder: MemoryOSL1UnifiedProjectionPromptBuilder = MemoryOSL1UnifiedProjectionPromptBuilder()) {
         self.policy = policy
         self.promptBuilder = promptBuilder
     }
 
-    public func planJobs(from events: [MemoryOSCaptureEvent], now: Date = Date()) -> [MemoryOSL1ToL2JobDraft] {
+    public func planJobs(from events: [MemoryOSCaptureEvent], now: Date = Date()) -> [MemoryOSL1UnifiedProjectionJobDraft] {
         let pending = events.filter { $0.processingState == .pending }.sorted { $0.occurredAt < $1.occurredAt }
         guard let triggerReason = policy.triggerReason(events: pending, now: now) else { return [] }
         let blocks = chunkEvents(pending)
         return blocks.map { block in
-            MemoryOSL1ToL2JobDraft(
+            MemoryOSL1UnifiedProjectionJobDraft(
                 captureEventIDs: block.map(\.id),
                 provenanceObjectIDs: block.map(\.provenanceObjectID),
                 sourceSpanIDs: block.compactMap { $0.metadata["span_id"] },
@@ -514,7 +514,7 @@ public struct MemoryOSBackgroundToolResult: Sendable, Codable, Equatable {
 }
 
 public enum MemoryOSBackgroundToolCatalog {
-    public static func l1ToL2Tools() -> [MemoryOSBackgroundToolDescriptor] {
+    public static func l1UnifiedProjectionTools() -> [MemoryOSBackgroundToolDescriptor] {
         [searchTool(layers: ["L2", "L3", "L4"], usage: "Must use memory_os_search before deciding whether emitted L2 facts are new/refinements and before creating or reusing L3/L4 candidates; record duplicate/novelty judgment in metadata or promotionDecisions."), readProvenanceTool(), expandL4Tool(usage: "Use memory_os_expand_l4 when L4 entity identity, duplicate concept detection, or relation context is necessary for grounded L1 projection.")]
     }
 
@@ -647,9 +647,9 @@ public struct MemoryOSBackgroundJobWorker<Executor: MemoryOSBackgroundModelExecu
         self.executor = executor
     }
 
-    public func run(_ draft: MemoryOSL1ToL2JobDraft) throws -> MemoryOSBackgroundJobExecutionResult {
+    public func run(_ draft: MemoryOSL1UnifiedProjectionJobDraft) throws -> MemoryOSBackgroundJobExecutionResult {
         let artifactType = "memory_os_l1_unified_projection"
-        let tools = MemoryOSBackgroundToolCatalog.l1ToL2Tools()
+        let tools = MemoryOSBackgroundToolCatalog.l1UnifiedProjectionTools()
         let prompt = enrichedL1Prompt(draft, tools: tools)
         let request = MemoryOSBackgroundModelRequest(
             jobID: draft.id,
@@ -685,7 +685,7 @@ public struct MemoryOSBackgroundJobWorker<Executor: MemoryOSBackgroundModelExecu
         return MemoryOSBackgroundJobExecutionResult(jobID: draft.id, kind: draft.kind, rawArtifactJSON: response.rawArtifactJSON, schemaName: draft.schemaName, artifactType: artifactType, metadata: draft.metadata.merging(response.metadata) { _, new in new })
     }
 
-    private func enrichedL1Prompt(_ draft: MemoryOSL1ToL2JobDraft, tools: [MemoryOSBackgroundToolDescriptor]) -> String {
+    private func enrichedL1Prompt(_ draft: MemoryOSL1UnifiedProjectionJobDraft, tools: [MemoryOSBackgroundToolDescriptor]) -> String {
         """
         \(draft.prompt)
 

@@ -6,7 +6,7 @@ import ConnorGraphMemory
 @Suite("Memory OS Background Tool Contract Tests")
 struct MemoryOSBackgroundToolContractTests {
     @Test func l1WorkerRequestIncludesSearchAndReadProvenanceTools() throws {
-        let draft = MemoryOSL1ToL2JobDraft(
+        let draft = MemoryOSL1UnifiedProjectionJobDraft(
             id: "job-l1-tools",
             captureEventIDs: ["cap-1"],
             provenanceObjectIDs: ["prov-1"],
