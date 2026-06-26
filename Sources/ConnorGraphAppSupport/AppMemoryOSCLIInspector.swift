@@ -620,7 +620,7 @@ public struct MemoryOSCLIPipelinePolicy: Codable, Sendable, Equatable {
     public var l2ToKnowledge: MemoryOSCLIL2PipelinePolicy
 
     enum CodingKeys: String, CodingKey {
-        case l1UnifiedProjection = "l1_to_l2"
+        case l1UnifiedProjection = "l1_unified_projection"
         case l2ToKnowledge = "l2_to_knowledge"
     }
 }
