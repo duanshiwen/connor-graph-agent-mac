@@ -166,6 +166,25 @@ struct AppGlobalSearchTests {
         #expect(AppViewModel.userFacingGlobalSearchErrorMessage(for: NSError(domain: "test", code: 1)) != nil)
     }
 
+    @Test func globalSearchSectionStatusMessagesReflectIndexHealth() throws {
+        #expect(AppViewModel.globalSearchSectionStatusMessage(
+            for: .mail,
+            health: NativeSourceSearchHealthSnapshot(documentCountBySource: [:])
+        ) == "尚未建立索引")
+        #expect(AppViewModel.globalSearchSectionStatusMessage(
+            for: .rss,
+            health: NativeSourceSearchHealthSnapshot(documentCountBySource: [.rss: 12], pendingUpdateCount: 2)
+        ) == "后台正在更新索引，先显示已索引结果")
+        #expect(AppViewModel.globalSearchSectionStatusMessage(
+            for: .browserHistory,
+            health: NativeSourceSearchHealthSnapshot(documentCountBySource: [.browserHistory: 4], staleSourceKinds: [.browserHistory])
+        ) == "索引可能过期，先显示上次索引结果")
+        #expect(AppViewModel.globalSearchSectionStatusMessage(
+            for: .calendar,
+            health: NativeSourceSearchHealthSnapshot(documentCountBySource: [.calendar: 3])
+        ) == nil)
+    }
+
     @Test func globalSearchMatchesChineseSentenceQueriesInChatSessions() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }

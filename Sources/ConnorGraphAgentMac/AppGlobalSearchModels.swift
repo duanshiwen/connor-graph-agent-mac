@@ -23,6 +23,7 @@ struct GlobalSearchPreviewState: Equatable {
     var rssResults: [NativeSearchResult] = []
     var browserHistoryResults: [NativeSearchResult] = []
     var searchTokens: [String] = []
+    var sectionStatusMessages: [GlobalSearchSectionKind: String] = [:]
     var errorMessage: String?
 
     init(
@@ -35,6 +36,7 @@ struct GlobalSearchPreviewState: Equatable {
         rssResults: [NativeSearchResult] = [],
         browserHistoryResults: [NativeSearchResult] = [],
         searchTokens: [String] = [],
+        sectionStatusMessages: [GlobalSearchSectionKind: String] = [:],
         errorMessage: String? = nil
     ) {
         self.query = query
@@ -45,6 +47,7 @@ struct GlobalSearchPreviewState: Equatable {
         self.rssResults = rssResults
         self.browserHistoryResults = browserHistoryResults
         self.searchTokens = searchTokens
+        self.sectionStatusMessages = sectionStatusMessages
         self.errorMessage = errorMessage
     }
 
@@ -54,6 +57,10 @@ struct GlobalSearchPreviewState: Equatable {
 
     func isSectionLoading(_ kind: GlobalSearchSectionKind) -> Bool {
         loadingSections.contains(kind)
+    }
+
+    func sectionStatusMessage(_ kind: GlobalSearchSectionKind) -> String? {
+        sectionStatusMessages[kind]
     }
 
     var hasAnySourceResults: Bool {
