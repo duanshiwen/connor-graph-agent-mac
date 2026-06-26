@@ -23,7 +23,7 @@ public enum SQLiteMemoryOSStoreError: Error, Sendable, Equatable, CustomStringCo
 }
 
 public final class SQLiteMemoryOSStore: @unchecked Sendable {
-    public static let currentSchemaVersion = 5
+    public static let currentSchemaVersion = 6
 
     public static let requiredSchemaTables: Set<String> = [
         "memory_schema_migrations", "memory_legacy_import_runs", "memory_store_health_checks", "memory_builtin_datasets",
@@ -31,6 +31,7 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         "memory_discard_events", "memory_search_index_queue",
         "memory_l0_provenance_objects", "memory_l0_provenance_spans", "memory_l0_derivations", "memory_l0_content_hashes",
         "memory_l1_capture_events", "memory_l1_time_blocks", "memory_l1_time_block_events", "memory_l1_processing_queue", "memory_l1_queue_attempts", "memory_l1_dead_letter_queue",
+        "memory_background_runs", "memory_background_messages", "memory_background_tool_calls",
         "memory_l2_nodes", "memory_l2_edges", "memory_l2_statements", "memory_l2_statement_evidence", "memory_l2_statement_processing_state", "memory_l2_episodes", "memory_l2_processing_runs", "memory_l2_processing_artifacts", "memory_l2_projections", "memory_l2_projection_items",
         "memory_l3_beliefs", "memory_l3_belief_evidence", "memory_l3_belief_relations", "memory_l3_promotion_records",
         "memory_l4_entities", "memory_l4_entity_aliases", "memory_l4_entity_statements", "memory_l4_entity_statement_evidence", "memory_l4_archive_runs", "memory_l4_archive_statement_links", "memory_l4_merge_events", "memory_l4_split_events",
@@ -40,6 +41,7 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
     public static let requiredSchemaIndexes: Set<String> = [
         "idx_memory_l0_provenance_source", "idx_memory_l0_provenance_time", "idx_memory_l0_spans_object",
         "idx_memory_l1_capture_state", "idx_memory_l1_time_blocks_status", "idx_memory_l1_queue_runnable", "idx_memory_l1_queue_idempotency",
+        "idx_memory_background_runs_queue", "idx_memory_background_messages_run", "idx_memory_background_tool_calls_run",
         "idx_memory_l2_nodes_key", "idx_memory_l2_statements_subject", "idx_memory_l2_statements_temporal", "idx_memory_l2_statement_evidence_statement", "idx_memory_l2_processing_state",
         "idx_memory_l3_beliefs_topic", "idx_memory_l3_beliefs_temporal", "idx_memory_l3_belief_evidence_belief",
         "idx_memory_l4_entities_key", "idx_memory_l4_aliases_entity", "idx_memory_l4_statements_entity", "idx_memory_l4_statement_evidence_statement",
@@ -82,7 +84,7 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         try execute("PRAGMA user_version = \(Self.currentSchemaVersion);")
         try execute("""
         INSERT OR REPLACE INTO memory_schema_migrations(version, name, applied_at, metadata_json)
-        VALUES (\(Self.currentSchemaVersion), 'memory_os_background_pipeline_schema', \(quote(iso(Date()))), '{}')
+        VALUES (\(Self.currentSchemaVersion), 'memory_os_background_run_trace_schema', \(quote(iso(Date()))), '{}')
         """)
     }
 
@@ -439,6 +441,57 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         """)
     }
 
+    public func save(backgroundRun run: MemoryOSBackgroundRunRecord) throws {
+        try execute("""
+        INSERT OR REPLACE INTO memory_background_runs
+        (id, queue_item_id, kind, source, status, started_at, finished_at, model_id, iteration_count, tool_call_count, stateless_batch, error_code, error_message, metadata_json)
+        VALUES (\(quote(run.id)), \(quote(run.queueItemID)), \(quote(run.kind)), \(quote(run.source)), \(quote(run.status.rawValue)), \(quote(iso(run.startedAt))), \(quote(run.finishedAt.map(iso))), \(quote(run.modelID)), \(run.iterationCount), \(run.toolCallCount), \(run.statelessBatch ? 1 : 0), \(quote(run.errorCode)), \(quote(run.errorMessage)), \(quote(json(run.metadata))))
+        """)
+    }
+
+    public func save(backgroundMessage message: MemoryOSBackgroundMessageRecord) throws {
+        try execute("""
+        INSERT OR REPLACE INTO memory_background_messages
+        (id, run_id, sequence, role, content, tool_call_id, tool_name, metadata_json)
+        VALUES (\(quote(message.id)), \(quote(message.runID)), \(message.sequence), \(quote(message.role.rawValue)), \(quote(message.content)), \(quote(message.toolCallID)), \(quote(message.toolName)), \(quote(json(message.metadata))))
+        """)
+    }
+
+    public func save(backgroundToolCall call: MemoryOSBackgroundToolCallRecord) throws {
+        try execute("""
+        INSERT OR REPLACE INTO memory_background_tool_calls
+        (id, run_id, iteration, tool_name, arguments_json, result_json, status, started_at, finished_at, error_message, metadata_json)
+        VALUES (\(quote(call.id)), \(quote(call.runID)), \(call.iteration), \(quote(call.toolName)), \(quote(call.argumentsJSON)), \(quote(call.resultJSON)), \(quote(call.status.rawValue)), \(quote(iso(call.startedAt))), \(quote(call.finishedAt.map(iso))), \(quote(call.errorMessage)), \(quote(json(call.metadata))))
+        """)
+    }
+
+    public func backgroundRuns(limit: Int = 20) throws -> [MemoryOSBackgroundRunRecord] {
+        try query(sql: """
+        SELECT id, queue_item_id, kind, source, status, started_at, finished_at, model_id, iteration_count, tool_call_count, stateless_batch, error_code, error_message, metadata_json
+        FROM memory_background_runs
+        ORDER BY started_at DESC
+        LIMIT \(limit)
+        """).map(decodeBackgroundRun)
+    }
+
+    public func backgroundMessages(runID: String) throws -> [MemoryOSBackgroundMessageRecord] {
+        try query(sql: """
+        SELECT id, run_id, sequence, role, content, tool_call_id, tool_name, metadata_json
+        FROM memory_background_messages
+        WHERE run_id = \(quote(runID))
+        ORDER BY sequence ASC
+        """).map(decodeBackgroundMessage)
+    }
+
+    public func backgroundToolCalls(runID: String) throws -> [MemoryOSBackgroundToolCallRecord] {
+        try query(sql: """
+        SELECT id, run_id, iteration, tool_name, arguments_json, result_json, status, started_at, finished_at, error_message, metadata_json
+        FROM memory_background_tool_calls
+        WHERE run_id = \(quote(runID))
+        ORDER BY iteration ASC, started_at ASC
+        """).map(decodeBackgroundToolCall)
+    }
+
     public func saveHealthReport(_ report: MemoryOSStoreHealthReport) throws {
         try execute("""
         INSERT OR REPLACE INTO memory_store_health_checks
@@ -511,6 +564,54 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
 
     private func decodeEntity(_ row: [String]) throws -> MemoryOSEntity {
         MemoryOSEntity(id: row[0], stableKey: row[1], entityType: row[2], name: row[3], aliases: try decode([String].self, row[4]), summary: row[5], confidence: Double(row[6]) ?? 0, createdAt: try date(row[7]), updatedAt: try date(row[8]), validFrom: try optionalDate(row[9]), metadata: try decode([String: String].self, row[10]))
+    }
+
+    private func decodeBackgroundRun(_ row: [String]) throws -> MemoryOSBackgroundRunRecord {
+        MemoryOSBackgroundRunRecord(
+            id: row[0],
+            queueItemID: nilIfEmpty(row[1]),
+            kind: row[2],
+            source: row[3],
+            status: MemoryOSBackgroundRunStatus(rawValue: row[4]) ?? .failed,
+            startedAt: try date(row[5]),
+            finishedAt: try optionalDate(row[6]),
+            modelID: nilIfEmpty(row[7]),
+            iterationCount: Int(row[8]) ?? 0,
+            toolCallCount: Int(row[9]) ?? 0,
+            statelessBatch: row[10] != "0",
+            errorCode: nilIfEmpty(row[11]),
+            errorMessage: nilIfEmpty(row[12]),
+            metadata: try decode([String: String].self, row[13])
+        )
+    }
+
+    private func decodeBackgroundMessage(_ row: [String]) throws -> MemoryOSBackgroundMessageRecord {
+        MemoryOSBackgroundMessageRecord(
+            id: row[0],
+            runID: row[1],
+            sequence: Int(row[2]) ?? 0,
+            role: MemoryOSBackgroundMessageRole(rawValue: row[3]) ?? .user,
+            content: row[4],
+            toolCallID: nilIfEmpty(row[5]),
+            toolName: nilIfEmpty(row[6]),
+            metadata: try decode([String: String].self, row[7])
+        )
+    }
+
+    private func decodeBackgroundToolCall(_ row: [String]) throws -> MemoryOSBackgroundToolCallRecord {
+        MemoryOSBackgroundToolCallRecord(
+            id: row[0],
+            runID: row[1],
+            iteration: Int(row[2]) ?? 0,
+            toolName: row[3],
+            argumentsJSON: row[4],
+            resultJSON: nilIfEmpty(row[5]),
+            status: MemoryOSBackgroundToolCallStatus(rawValue: row[6]) ?? .failed,
+            startedAt: try date(row[7]),
+            finishedAt: try optionalDate(row[8]),
+            errorMessage: nilIfEmpty(row[9]),
+            metadata: try decode([String: String].self, row[10])
+        )
     }
 
     public func json<T: Encodable>(_ value: T) -> String {
@@ -589,6 +690,13 @@ public extension SQLiteMemoryOSStore {
     CREATE INDEX IF NOT EXISTS idx_memory_l1_queue_idempotency ON memory_l1_processing_queue(idempotency_key);
     CREATE TABLE IF NOT EXISTS memory_l1_queue_attempts (id TEXT PRIMARY KEY, queue_item_id TEXT NOT NULL, attempt_number INTEGER NOT NULL, status TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT, error_code TEXT, error_message TEXT, metadata_json TEXT NOT NULL DEFAULT '{}', FOREIGN KEY(queue_item_id) REFERENCES memory_l1_processing_queue(id));
     CREATE TABLE IF NOT EXISTS memory_l1_dead_letter_queue (id TEXT PRIMARY KEY, queue_item_id TEXT NOT NULL, failed_payload_json TEXT NOT NULL, error_code TEXT NOT NULL, error_message TEXT NOT NULL, created_at TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}');
+
+    CREATE TABLE IF NOT EXISTS memory_background_runs (id TEXT PRIMARY KEY, queue_item_id TEXT, kind TEXT NOT NULL, source TEXT NOT NULL, status TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT, model_id TEXT, iteration_count INTEGER NOT NULL DEFAULT 0, tool_call_count INTEGER NOT NULL DEFAULT 0, stateless_batch INTEGER NOT NULL DEFAULT 1, error_code TEXT, error_message TEXT, metadata_json TEXT NOT NULL DEFAULT '{}');
+    CREATE TABLE IF NOT EXISTS memory_background_messages (id TEXT PRIMARY KEY, run_id TEXT NOT NULL, sequence INTEGER NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, tool_call_id TEXT, tool_name TEXT, metadata_json TEXT NOT NULL DEFAULT '{}');
+    CREATE TABLE IF NOT EXISTS memory_background_tool_calls (id TEXT PRIMARY KEY, run_id TEXT NOT NULL, iteration INTEGER NOT NULL, tool_name TEXT NOT NULL, arguments_json TEXT NOT NULL, result_json TEXT, status TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT, error_message TEXT, metadata_json TEXT NOT NULL DEFAULT '{}');
+    CREATE INDEX IF NOT EXISTS idx_memory_background_runs_queue ON memory_background_runs(queue_item_id, kind, status, started_at);
+    CREATE INDEX IF NOT EXISTS idx_memory_background_messages_run ON memory_background_messages(run_id, sequence);
+    CREATE INDEX IF NOT EXISTS idx_memory_background_tool_calls_run ON memory_background_tool_calls(run_id, iteration);
 
     CREATE TABLE IF NOT EXISTS memory_l2_nodes (id TEXT PRIMARY KEY, stable_key TEXT NOT NULL UNIQUE, node_type TEXT NOT NULL, name TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}');
     CREATE INDEX IF NOT EXISTS idx_memory_l2_nodes_key ON memory_l2_nodes(stable_key);
