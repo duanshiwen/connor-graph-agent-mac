@@ -292,28 +292,6 @@ struct SettingsPreferencesSection: View {
                         .controlSize(.regular)
                 }
             }
-            SettingsGroup(title: "搜索") {
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("默认搜索引擎")
-                            .font(SettingsListTypography.rowTitleSelected)
-                        Text("浏览器地址栏关键词搜索和统一搜索框的 Web 搜索都会使用此搜索引擎。")
-                            .font(SettingsListTypography.rowCaption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Picker("默认搜索引擎", selection: $viewModel.defaultSearchEngine) {
-                        ForEach(DefaultSearchEngine.allCases) { engine in
-                            Text(engine.displayName).tag(engine)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .controlSize(.large)
-                    .frame(width: SettingsListLayout.pickerControlWidth, alignment: .trailing)
-                }
-                .frame(minHeight: SettingsListLayout.rowMinHeight)
-            }
             SettingsGroup(title: "位置") {
                 SettingsTextFieldRow(title: "城市", subtitle: "用于本地信息和上下文。不会在启动时自动请求定位权限，可手动填写或主动授权读取。", text: $viewModel.userCity)
                 Divider()
