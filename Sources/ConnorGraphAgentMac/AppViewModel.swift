@@ -1162,36 +1162,96 @@ final class AppViewModel: NSObject, ObservableObject {
         normalizeGlobalSearchSelection()
 
         let limits: [NativeSearchSourceKind: Int] = [.mail: 3, .calendar: 3, .rss: 3, .browserHistory: 3]
-        do {
-            let nativeStartedAt = Date()
-            let grouped = try await withGlobalSearchTimeout(milliseconds: 800) {
-                try await self.searchNativeSourcesForPreview(query: trimmed, limitsBySource: limits)
-            }
-            recordGlobalSearchTiming(query: trimmed, section: "nativeGrouped", startedAt: nativeStartedAt, returnedCount: grouped.values.reduce(0) { $0 + $1.count }, backend: nativeSourceSearchBackend.map { String(describing: type(of: $0)) } ?? "fallback")
-            guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
-            for kind in NativeSearchSourceKind.allCases {
-                applyGlobalSearchNativeSectionResult(
-                    GlobalSearchNativeSectionResult(kind: GlobalSearchSectionKind(nativeSourceKind: kind), results: grouped[kind] ?? [], errorMessage: nil),
-                    query: trimmed,
-                    tokens: tokens
-                )
-            }
-        } catch {
-            recordGlobalSearchTiming(query: trimmed, section: "nativeGrouped", startedAt: Date(), returnedCount: 0, backend: "error:\(String(describing: error))")
-            let userFacingErrorMessage = Self.userFacingGlobalSearchErrorMessage(for: error)
-            for kind in NativeSearchSourceKind.allCases {
-                applyGlobalSearchNativeSectionResult(
-                    GlobalSearchNativeSectionResult(kind: GlobalSearchSectionKind(nativeSourceKind: kind), results: [], errorMessage: userFacingErrorMessage),
-                    query: trimmed,
-                    tokens: tokens
-                )
-            }
+        await refreshGlobalSearchNativePreviewSections(query: trimmed, tokens: tokens, limitsBySource: limits)
+    }
+
+    nonisolated static func userFacingGlobalSearchErrorMessage(for error: Error) -> String? {
+        if error is GlobalSearchTimeoutError { return nil }
+        return String(describing: error)
+    }
+
+    private func refreshGlobalSearchNativePreviewSections(query: String, tokens: [String], limitsBySource: [NativeSearchSourceKind: Int]) async {
+        if let nativeSourceSearchBackend {
+            await refreshIndexedGlobalSearchNativePreviewSections(query: query, tokens: tokens, limitsBySource: limitsBySource, backend: nativeSourceSearchBackend)
+            return
+        }
+
+        for kind in NativeSearchSourceKind.allCases {
+            guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == query else { return }
+            let startedAt = Date()
+            let limit = limitsBySource[kind] ?? 3
+            let results = fallbackNativeSearchResults(kind: kind, query: query, limit: limit)
+            recordGlobalSearchTiming(query: query, section: GlobalSearchSectionKind(nativeSourceKind: kind).rawValue, startedAt: startedAt, returnedCount: results.count, backend: "fallback")
+            applyGlobalSearchNativeSectionResult(
+                GlobalSearchNativeSectionResult(kind: GlobalSearchSectionKind(nativeSourceKind: kind), results: results, errorMessage: nil),
+                query: query,
+                tokens: tokens
+            )
         }
     }
 
-    static func userFacingGlobalSearchErrorMessage(for error: Error) -> String? {
-        if error is GlobalSearchTimeoutError { return nil }
-        return String(describing: error)
+    private func refreshIndexedGlobalSearchNativePreviewSections(query: String, tokens: [String], limitsBySource: [NativeSearchSourceKind: Int], backend: any NativeSourceSearchBackend) async {
+        let backendName = String(describing: type(of: backend))
+        await withTaskGroup(of: GlobalSearchNativeSectionResult.self) { group in
+            for kind in NativeSearchSourceKind.allCases {
+                let limit = limitsBySource[kind] ?? 3
+                group.addTask {
+                    let startedAt = Date()
+                    do {
+                        let results = try await Self.withGlobalSearchTimeout(milliseconds: 250) {
+                            try await backend.search(NativeSearchQuery(
+                                text: query,
+                                sourceKinds: [kind],
+                                limit: limit,
+                                includeBodySnippets: true,
+                                rankingProfile: .recentFirst
+                            ))
+                        }
+                        return GlobalSearchNativeSectionResult(
+                            kind: GlobalSearchSectionKind(nativeSourceKind: kind),
+                            results: results,
+                            errorMessage: nil,
+                            timing: GlobalSearchSectionTiming(
+                                query: query,
+                                section: GlobalSearchSectionKind(nativeSourceKind: kind).rawValue,
+                                startedAt: startedAt,
+                                endedAt: Date(),
+                                candidateCount: results.count,
+                                returnedCount: results.count,
+                                backend: backendName
+                            )
+                        )
+                    } catch {
+                        let userFacingErrorMessage = Self.userFacingGlobalSearchErrorMessage(for: error)
+                        return GlobalSearchNativeSectionResult(
+                            kind: GlobalSearchSectionKind(nativeSourceKind: kind),
+                            results: [],
+                            errorMessage: userFacingErrorMessage,
+                            timing: GlobalSearchSectionTiming(
+                                query: query,
+                                section: GlobalSearchSectionKind(nativeSourceKind: kind).rawValue,
+                                startedAt: startedAt,
+                                endedAt: Date(),
+                                candidateCount: 0,
+                                returnedCount: 0,
+                                backend: "error:\(String(describing: error))"
+                            )
+                        )
+                    }
+                }
+            }
+
+            for await sectionResult in group {
+                guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == query else {
+                    group.cancelAll()
+                    return
+                }
+                if let timing = sectionResult.timing {
+                    globalSearchTimings.append(timing)
+                }
+                applyGlobalSearchNativeSectionResult(sectionResult, query: query, tokens: tokens)
+            }
+        }
     }
 
     private func recordGlobalSearchTiming(query: String, section: String, startedAt: Date, returnedCount: Int, backend: String) {
@@ -1206,7 +1266,7 @@ final class AppViewModel: NSObject, ObservableObject {
         ))
     }
 
-    private func withGlobalSearchTimeout<T: Sendable>(milliseconds: Int, operation: @escaping @Sendable () async throws -> T) async throws -> T {
+    nonisolated private static func withGlobalSearchTimeout<T: Sendable>(milliseconds: Int, operation: @escaping @Sendable () async throws -> T) async throws -> T {
         try await withThrowingTaskGroup(of: T.self) { group in
             group.addTask { try await operation() }
             group.addTask {
