@@ -122,7 +122,7 @@ public struct MemoryOSProjectStructuredArtifactTool: AgentTool {
 
 public struct MemoryOSContextTool: AgentTool {
     public let name = "memory_os_context"
-    public let description = "Build a commercial-grade Memory OS context package for the LLM by orchestrating L0-L4 retrieval, optional L4 graph expansion, deterministic organization, verbalization, diagnostics, and budget reporting. Prefer this over low-level memory_os_search when answering user questions from memory."
+    public let description = "Build a commercial-grade Memory OS context package for the AI by orchestrating L0-L4 retrieval, optional L4 graph expansion, deterministic organization, verbalization, diagnostics, and budget reporting. Prefer this over low-level memory_os_search when answering user questions from memory."
     public let permission: AgentPermissionCapability = .readGraph
     public let inputSchema = AgentToolInputSchema.object(properties: [
         "query": .string(description: "Natural-language memory context query."),

@@ -102,14 +102,14 @@ private func temporaryAppChatStoragePaths(_ name: String = UUID().uuidString) ->
         taskID: "task-1",
         status: .failed,
         detail: "生成失败",
-        errorMessage: "LLM unavailable",
+        errorMessage: "AI unavailable",
         updatedAt: Date(timeIntervalSince1970: 1_100)
     )
 
     let task = try #require(try repository.loadBackgroundTasks(sessionID: "session-1").first)
     #expect(task.status == .failed)
     #expect(task.detail == "生成失败")
-    #expect(task.errorMessage == "LLM unavailable")
+    #expect(task.errorMessage == "AI unavailable")
     #expect(task.updatedAt == Date(timeIntervalSince1970: 1_100))
 }
 

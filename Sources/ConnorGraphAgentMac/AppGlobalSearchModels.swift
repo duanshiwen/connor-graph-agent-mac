@@ -165,7 +165,7 @@ enum GlobalSearchActionKind: String, CaseIterable, Identifiable {
     func subtitle(for query: String) -> String {
         switch self {
         case .newChat:
-            "把“\(query)”发送给 LLM"
+            "把“\(query)”发送给 AI"
         case .webSearch:
             "用内置浏览器搜索“\(query)”"
         }
