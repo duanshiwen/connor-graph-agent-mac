@@ -11,22 +11,27 @@ struct AppGlobalSearchOverlayView: View {
     private var query: String { viewModel.globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
-            actionRows
-            tokenChips
+        ScrollView(.vertical) {
+            VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
+                actionRows
+                tokenChips
 
-            chatSessionSection(results: state.chatSessionResults)
-            resultSection(kind: .mail, results: state.mailResults)
-            resultSection(kind: .calendar, results: state.calendarResults)
-            resultSection(kind: .rss, results: state.rssResults)
-            browserHistorySection(results: state.browserHistoryResults)
+                chatSessionSection(results: state.chatSessionResults)
+                resultSection(kind: .mail, results: state.mailResults)
+                resultSection(kind: .calendar, results: state.calendarResults)
+                resultSection(kind: .rss, results: state.rssResults)
+                browserHistorySection(results: state.browserHistoryResults)
 
-            if let errorMessage = state.errorMessage, !errorMessage.isEmpty {
-                errorRow(errorMessage)
+                if let errorMessage = state.errorMessage, !errorMessage.isEmpty {
+                    errorRow(errorMessage)
+                }
             }
+            .padding(AppShellLayout.spaceS)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(AppShellLayout.spaceS)
-        .frame(width: 640, alignment: .leading)
+        .scrollIndicators(.visible)
+        .frame(width: 640, alignment: .topLeading)
+        .frame(maxHeight: 760, alignment: .topLeading)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
