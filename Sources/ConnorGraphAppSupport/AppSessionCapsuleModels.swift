@@ -207,10 +207,10 @@ public enum BrowserBuiltInPage: Sendable {
         </head>
         <body>
           <main>
-            <div class="eyebrow">Connor Browser</div>
-            <h1>新的浏览页</h1>
-            <p>这是 Connor 的内置空白页。你可以在上方地址栏输入网址或搜索词，也可以从会话、资料和网页选区继续展开工作。</p>
-            <div class="hint">提示：每个会话都有独立的浏览器标签和网页选区状态。</div>
+            <div class="eyebrow">康纳同学 · 浏览器</div>
+            <h1>康纳同学的浏览起点</h1>
+            <p>你可以在这里打开网页、搜索资料，或者把当前页面作为会话里的工作上下文。康纳同学会把浏览、选区和对话放在同一个会话里，方便你继续追问、整理和行动。</p>
+            <div class="hint">提示：每个会话都有独立的浏览标签、网页选区和工作上下文，不会和其他会话混在一起。</div>
           </main>
         </body>
         </html>
@@ -240,9 +240,10 @@ public enum BrowserBuiltInPage: Sendable {
         </head>
         <body>
           <main>
-            <div class="eyebrow">Navigation Error</div>
-            <h1>页面无法打开</h1>
-            <p>Connor 没有成功加载这个页面。你可以检查网址、网络连接或稍后重试。</p>
+            <div class="eyebrow">康纳同学 · 页面状态</div>
+            <h1>这个页面暂时打不开</h1>
+            <p>康纳同学没能成功加载这个地址。可能是网址有误、网络暂时不可用，或者目标网站拒绝了访问。</p>
+            <p class="message">你可以检查地址后重试，也可以复制这个链接回到会话里，让康纳同学帮你换一种方式查找资料。</p>
             <code>\(failedURL)</code>
             <p class="message">\(escapedMessage)</p>
           </main>
