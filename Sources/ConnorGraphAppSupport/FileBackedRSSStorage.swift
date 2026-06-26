@@ -63,10 +63,10 @@ public actor FileBackedRSSSourceCache: TimeAwareRSSSourceCache {
     private let fileManager: FileManager
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
-    private let searchService: NativeSourceSearchService?
+    private let searchService: (any NativeSourceSearchBackend)?
     private var hasPrimedSearchIndex: Bool
 
-    public init(storageDirectory: URL, fileManager: FileManager = .default, searchService: NativeSourceSearchService? = nil) {
+    public init(storageDirectory: URL, fileManager: FileManager = .default, searchService: (any NativeSourceSearchBackend)? = nil) {
         self.storageURL = storageDirectory.appendingPathComponent("items.json")
         self.fileManager = fileManager
         self.encoder = rssStorageJSONEncoder()
@@ -75,7 +75,7 @@ public actor FileBackedRSSSourceCache: TimeAwareRSSSourceCache {
         self.hasPrimedSearchIndex = false
     }
 
-    public init(storagePaths: AppStoragePaths, fileManager: FileManager = .default, searchService: NativeSourceSearchService? = nil) {
+    public init(storagePaths: AppStoragePaths, fileManager: FileManager = .default, searchService: (any NativeSourceSearchBackend)? = nil) {
         self.storageURL = storagePaths.sourcesDirectory.appendingPathComponent("rss", isDirectory: true).appendingPathComponent("items.json")
         self.fileManager = fileManager
         self.encoder = rssStorageJSONEncoder()
@@ -169,7 +169,7 @@ public actor FileBackedRSSSourceCache: TimeAwareRSSSourceCache {
 
     private func primeSearchIndexIfNeeded(items: [RSSItemDetail]) async throws {
         guard let searchService, !hasPrimedSearchIndex else { return }
-        try await searchService.rebuildSource(kind: .rss, documents: items.map(NativeSourceSearchAdapters.rssDocument(from:)))
+        try await searchService.rebuildSource(kind: .rss, sourceInstanceID: nil, documents: items.map(NativeSourceSearchAdapters.rssDocument(from:)))
         hasPrimedSearchIndex = true
     }
 

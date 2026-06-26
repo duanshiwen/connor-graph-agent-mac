@@ -124,6 +124,18 @@ public struct AppStoragePaths: Sendable, Equatable {
         browserDirectory.appendingPathComponent("bookmarks.jsonl")
     }
 
+    public var nativeSourceSearchDatabaseURL: URL {
+        applicationSupportDirectory
+            .appendingPathComponent("search", isDirectory: true)
+            .appendingPathComponent("native-source-search.sqlite")
+    }
+
+    public var sessionSearchDatabaseURL: URL {
+        applicationSupportDirectory
+            .appendingPathComponent("search", isDirectory: true)
+            .appendingPathComponent("session-search.sqlite")
+    }
+
     public func sessionArtifactDirectories(sessionID: String) -> AgentSessionArtifactDirectories {
         AgentSessionArtifactDirectories(root: sessionsDirectory.appendingPathComponent(sessionID, isDirectory: true))
     }

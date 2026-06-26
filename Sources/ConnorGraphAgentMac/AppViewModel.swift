@@ -530,7 +530,8 @@ final class AppViewModel: NSObject, ObservableObject {
     private var llmSettingsRepository: AppLLMSettingsRepository
     private var llmProviderHealthChecker: AppLLMProviderHealthChecker
     private var rssRuntime = RSSRuntime(repository: InMemoryRSSSourceRepository(), cache: InMemoryRSSSourceCache())
-    private var nativeSourceSearchService: NativeSourceSearchService?
+    private var nativeSourceSearchBackend: (any NativeSourceSearchBackend)?
+    private var sessionSearchIndexService: SessionSearchIndexService?
     private var globalSearchPreviewTask: Task<Void, Never>?
     private var mailStore: FileBackedMailSourceStore?
     private var calendarStore: FileBackedCalendarSourceStore?
@@ -1144,7 +1145,7 @@ final class AppViewModel: NSObject, ObservableObject {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         let tokens = globalSearchDisplayTokens(for: trimmed)
-        let chatSessionResults = searchChatSessions(query: trimmed, limit: 3)
+        let chatSessionResults = await searchChatSessions(query: trimmed, limit: 3)
         guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
 
         globalSearchPreviewState = GlobalSearchPreviewState(
@@ -1156,38 +1157,46 @@ final class AppViewModel: NSObject, ObservableObject {
         )
         normalizeGlobalSearchSelection()
 
-        await withTaskGroup(of: GlobalSearchNativeSectionResult.self) { group in
-            group.addTask { [weak self] in
-                guard let self else { return .init(kind: .mail, results: [], errorMessage: nil) }
-                return await self.searchNativeSourceForPreview(kind: .mail, query: trimmed, limit: 3)
+        let limits: [NativeSearchSourceKind: Int] = [.mail: 3, .calendar: 3, .rss: 3, .browserHistory: 3]
+        do {
+            let grouped = try await searchNativeSourcesForPreview(query: trimmed, limitsBySource: limits)
+            guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
+            for kind in NativeSearchSourceKind.allCases {
+                applyGlobalSearchNativeSectionResult(
+                    GlobalSearchNativeSectionResult(kind: GlobalSearchSectionKind(nativeSourceKind: kind), results: grouped[kind] ?? [], errorMessage: nil),
+                    query: trimmed,
+                    tokens: tokens
+                )
             }
-            group.addTask { [weak self] in
-                guard let self else { return .init(kind: .calendar, results: [], errorMessage: nil) }
-                return await self.searchNativeSourceForPreview(kind: .calendar, query: trimmed, limit: 3)
-            }
-            group.addTask { [weak self] in
-                guard let self else { return .init(kind: .rss, results: [], errorMessage: nil) }
-                return await self.searchNativeSourceForPreview(kind: .rss, query: trimmed, limit: 3)
-            }
-            group.addTask { [weak self] in
-                guard let self else { return .init(kind: .browserHistory, results: [], errorMessage: nil) }
-                return await self.searchNativeSourceForPreview(kind: .browserHistory, query: trimmed, limit: 30)
-            }
-
-            for await sectionResult in group {
-                guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { continue }
-                applyGlobalSearchNativeSectionResult(sectionResult, query: trimmed, tokens: tokens)
+        } catch {
+            for kind in NativeSearchSourceKind.allCases {
+                applyGlobalSearchNativeSectionResult(
+                    GlobalSearchNativeSectionResult(kind: GlobalSearchSectionKind(nativeSourceKind: kind), results: [], errorMessage: String(describing: error)),
+                    query: trimmed,
+                    tokens: tokens
+                )
             }
         }
     }
 
-    private func searchNativeSourceForPreview(kind: NativeSearchSourceKind, query: String, limit: Int) async -> GlobalSearchNativeSectionResult {
-        do {
-            let results = try await searchNativeSource(kind: kind, query: query, limit: limit)
-            return GlobalSearchNativeSectionResult(kind: GlobalSearchSectionKind(nativeSourceKind: kind), results: results, errorMessage: nil)
-        } catch {
-            return GlobalSearchNativeSectionResult(kind: GlobalSearchSectionKind(nativeSourceKind: kind), results: [], errorMessage: String(describing: error))
+    private func searchNativeSourcesForPreview(query: String, limitsBySource: [NativeSearchSourceKind: Int]) async throws -> [NativeSearchSourceKind: [NativeSearchResult]] {
+        if let nativeSourceSearchBackend {
+            return try await nativeSourceSearchBackend.searchGrouped(
+                NativeSearchQuery(
+                    text: query,
+                    sourceKinds: Set(limitsBySource.keys),
+                    limit: limitsBySource.values.reduce(0, +),
+                    includeBodySnippets: true,
+                    rankingProfile: .recentFirst
+                ),
+                limitsBySource: limitsBySource
+            )
         }
+        var grouped: [NativeSearchSourceKind: [NativeSearchResult]] = [:]
+        for (kind, limit) in limitsBySource {
+            grouped[kind] = fallbackNativeSearchResults(kind: kind, query: query, limit: limit)
+        }
+        return grouped
     }
 
     private func applyGlobalSearchNativeSectionResult(_ sectionResult: GlobalSearchNativeSectionResult, query: String, tokens: [String]) {
@@ -1224,7 +1233,20 @@ final class AppViewModel: NSObject, ObservableObject {
         return Array(tokens.prefix(8))
     }
 
-    private func searchChatSessions(query: String, limit: Int) -> [GlobalSearchSessionResult] {
+    private func searchChatSessions(query: String, limit: Int) async -> [GlobalSearchSessionResult] {
+        if let sessionSearchIndexService,
+           let indexed = try? await sessionSearchIndexService.search(query: query, limit: limit),
+           !indexed.isEmpty {
+            return indexed.map { result in
+                GlobalSearchSessionResult(
+                    id: result.id,
+                    title: result.title,
+                    snippet: result.snippet,
+                    updatedAt: result.updatedAt,
+                    messageCount: result.messageCount
+                )
+            }
+        }
         let terms = Self.globalSearchMatchTerms(for: query)
         guard !terms.isEmpty else { return [] }
         return allChatSessions
@@ -1333,8 +1355,8 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func searchNativeSource(kind: NativeSearchSourceKind, query: String, limit: Int) async throws -> [NativeSearchResult] {
-        if let nativeSourceSearchService {
-            return try await nativeSourceSearchService.search(NativeSearchQuery(
+        if let nativeSourceSearchBackend {
+            return try await nativeSourceSearchBackend.search(NativeSearchQuery(
                 text: query,
                 sourceKinds: [kind],
                 limit: limit,
@@ -1540,41 +1562,41 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func rebuildCalendarSearchIndexIfNeeded() async throws {
-        guard let nativeSourceSearchService else { return }
-        try await nativeSourceSearchService.rebuildSource(kind: .calendar, documents: calendarEvents.map(NativeSourceSearchAdapters.calendarDocument(from:)))
+        guard let nativeSourceSearchBackend else { return }
+        try await nativeSourceSearchBackend.rebuildSource(kind: .calendar, sourceInstanceID: nil, documents: calendarEvents.map(NativeSourceSearchAdapters.calendarDocument(from:)))
     }
 
     private func scheduleCalendarSearchIndexRefresh() {
-        guard nativeSourceSearchService != nil else { return }
+        guard nativeSourceSearchBackend != nil else { return }
         Task { @MainActor in
             try? await rebuildCalendarSearchIndexIfNeeded()
         }
     }
 
     private func rebuildBrowserHistorySearchIndexIfNeeded() async throws {
-        guard let nativeSourceSearchService else { return }
+        guard let nativeSourceSearchBackend else { return }
         let records = browserHistoryStore?.loadHistory() ?? browserHistoryRecords
-        try await nativeSourceSearchService.rebuildSource(kind: .browserHistory, documents: records.map { NativeSourceSearchAdapters.browserHistoryDocument(from: $0) })
+        try await nativeSourceSearchBackend.rebuildSource(kind: .browserHistory, sourceInstanceID: nil, documents: records.map { NativeSourceSearchAdapters.browserHistoryDocument(from: $0) })
     }
 
     private func indexBrowserHistoryRecord(_ record: BrowserHistoryRecord) {
-        guard let nativeSourceSearchService else { return }
+        guard let nativeSourceSearchBackend else { return }
         Task { @MainActor in
-            try? await nativeSourceSearchService.upsert([NativeSourceSearchAdapters.browserHistoryDocument(from: record)])
+            try? await nativeSourceSearchBackend.upsert([NativeSourceSearchAdapters.browserHistoryDocument(from: record)])
         }
     }
 
     private func deleteBrowserHistorySearchRecord(id: UUID) {
-        guard let nativeSourceSearchService else { return }
+        guard let nativeSourceSearchBackend else { return }
         Task { @MainActor in
-            try? await nativeSourceSearchService.delete(documentIDs: ["browser-history:\(id.uuidString)"])
+            try? await nativeSourceSearchBackend.delete(documentIDs: ["browser-history:\(id.uuidString)"])
         }
     }
 
     private func clearBrowserHistorySearchIndex() {
-        guard let nativeSourceSearchService else { return }
+        guard let nativeSourceSearchBackend else { return }
         Task { @MainActor in
-            try? await nativeSourceSearchService.deleteBySource(kind: .browserHistory)
+            try? await nativeSourceSearchBackend.deleteBySource(kind: .browserHistory, sourceInstanceID: nil)
         }
     }
 
@@ -1924,8 +1946,9 @@ final class AppViewModel: NSObject, ObservableObject {
         self.llmSettingsRepository = llmSettingsRepository
         self.llmProviderHealthChecker = AppLLMProviderHealthChecker(settingsRepository: llmSettingsRepository)
         if let storagePaths {
-            let nativeSourceSearchService = NativeSourceSearchService(storagePaths: storagePaths)
-            self.nativeSourceSearchService = nativeSourceSearchService
+            let nativeSourceSearchBackend: any NativeSourceSearchBackend = (try? SQLiteNativeSourceSearchBackend(databaseURL: storagePaths.nativeSourceSearchDatabaseURL)) ?? NativeSourceSearchService(storagePaths: storagePaths)
+            self.nativeSourceSearchBackend = nativeSourceSearchBackend
+            self.sessionSearchIndexService = try? SessionSearchIndexService(databaseURL: storagePaths.sessionSearchDatabaseURL)
             self.governanceConfigRepository = AppSessionGovernanceConfigRepository(configDirectory: storagePaths.configDirectory)
             self.productOSRegistryRepository = AppProductOSRegistryRepository(storagePaths: storagePaths)
             self.automationRepository = AppProductOSAutomationRepository(storagePaths: storagePaths)
@@ -1936,9 +1959,9 @@ final class AppViewModel: NSObject, ObservableObject {
             self.browserBookmarkStore = BrowserBookmarkStore(bookmarksURL: storagePaths.browserBookmarksURL)
             self.rssRuntime = RSSRuntime(
                 repository: FileBackedRSSSourceRepository(storagePaths: storagePaths),
-                cache: FileBackedRSSSourceCache(storagePaths: storagePaths, searchService: nativeSourceSearchService)
+                cache: FileBackedRSSSourceCache(storagePaths: storagePaths, searchService: nativeSourceSearchBackend)
             )
-            self.mailStore = FileBackedMailSourceStore(storagePaths: storagePaths, searchService: nativeSourceSearchService)
+            self.mailStore = FileBackedMailSourceStore(storagePaths: storagePaths, searchService: nativeSourceSearchBackend)
             self.calendarStore = FileBackedCalendarSourceStore(storagePaths: storagePaths)
             self.calendarRuntimeStore = FileBackedCalendarSourceRuntimeStore(storagePaths: storagePaths)
             self.contactStore = FileBackedContactSourceStore(storagePaths: storagePaths)
@@ -4625,6 +4648,11 @@ final class AppViewModel: NSObject, ObservableObject {
         reloadChatSessions(restoreWorkspaceMode: shouldRestoreWorkspaceMode)
     }
 
+    private func rebuildSessionSearchIndexSoon(sessions: [AgentSession]) {
+        guard let sessionSearchIndexService else { return }
+        Task { try? await sessionSearchIndexService.rebuild(sessions: sessions) }
+    }
+
     func reloadChatSessions(restoreWorkspaceMode shouldRestoreWorkspaceMode: Bool = true) {
         hasLoadedInitialChatSessions = true
         guard let chatSessionRepository else {
@@ -4643,6 +4671,7 @@ final class AppViewModel: NSObject, ObservableObject {
             }
             chatSessions = sessions
             allChatSessions = try chatSessionRepository.loadSessions(filter: .all)
+            rebuildSessionSearchIndexSoon(sessions: allChatSessions)
             synchronizeSessionReadStates(from: allChatSessions)
             let selectedID = selectedChatSessionIDVisibleInCurrentFilter(sessions: sessions)
             selectedChatSessionID = selectedID
