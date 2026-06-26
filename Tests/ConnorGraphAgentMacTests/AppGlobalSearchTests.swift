@@ -112,6 +112,38 @@ struct AppGlobalSearchTests {
         #expect(fixture.viewModel.globalSearchPreviewState.searchTokens.contains("泰国"))
     }
 
+    @Test func globalSearchMarksLoadingBySectionInsteadOfGlobally() throws {
+        var state = GlobalSearchPreviewState(query: "泰国", loadingSections: [.mail, .rss], searchTokens: ["泰国"])
+
+        #expect(state.isSectionLoading(.mail))
+        #expect(state.isSectionLoading(.rss))
+        #expect(!state.isSectionLoading(.chatSessions))
+        #expect(state.isLoading)
+
+        state.loadingSections.remove(.mail)
+        state.loadingSections.remove(.rss)
+
+        #expect(!state.isLoading)
+    }
+
+    @Test func globalSearchMatchesChineseSentenceQueriesInChatSessions() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        let session = AgentSession(
+            title: "海外生活研究",
+            messages: [AgentMessage(role: .user, content: "请帮我整理泰国数字游民签证的资料")]
+        )
+        try fixture.repository.saveSession(session)
+        fixture.viewModel.reloadChatSessions()
+        fixture.viewModel.updateGlobalSearchQuery("帮我找泰国签证")
+
+        await fixture.viewModel.refreshGlobalSearchPreview(for: "帮我找泰国签证")
+
+        let result = try #require(fixture.viewModel.globalSearchPreviewState.chatSessionResults.first { $0.id == session.id })
+        #expect(result.snippet.contains("泰国"))
+    }
+
     @Test func globalSearchIncludesChatSessionTitleResults() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
