@@ -15,36 +15,24 @@ struct AppGlobalSearchOverlayView: View {
     private let browserHistoryPageSize = 3
     private var state: GlobalSearchPreviewState { viewModel.globalSearchPreviewState }
     private var query: String { viewModel.globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) }
-    private var overlayHeight: CGFloat? {
-        contentHeight > 0 ? min(contentHeight, Layout.maxHeight) : nil
-    }
+    private var shouldScroll: Bool { contentHeight > Layout.maxHeight }
 
     var body: some View {
-        ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
-                actionRows
-                tokenChips
-
-                chatSessionSection(results: state.chatSessionResults)
-                resultSection(kind: .mail, results: state.mailResults)
-                resultSection(kind: .calendar, results: state.calendarResults)
-                resultSection(kind: .rss, results: state.rssResults)
-                browserHistorySection(results: state.browserHistoryResults)
-
-                if let errorMessage = state.errorMessage, !errorMessage.isEmpty {
-                    errorRow(errorMessage)
+        Group {
+            if shouldScroll {
+                ScrollView(.vertical) {
+                    overlayContent
                 }
+                .scrollIndicators(.visible)
+                .frame(width: Layout.width, height: Layout.maxHeight, alignment: .topLeading)
+            } else {
+                overlayContent
+                    .frame(width: Layout.width, alignment: .topLeading)
             }
-            .padding(AppShellLayout.spaceS)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                GeometryReader { proxy in
-                    Color.clear.preference(key: GlobalSearchOverlayContentHeightKey.self, value: proxy.size.height)
-                }
-            )
         }
-        .scrollIndicators(contentHeight > Layout.maxHeight ? .visible : .hidden)
-        .frame(width: Layout.width, height: overlayHeight, alignment: .topLeading)
+        .background(alignment: .topLeading) {
+            measuredOverlayContent
+        }
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
@@ -57,6 +45,38 @@ struct AppGlobalSearchOverlayView: View {
         .onChange(of: state.query) { _, _ in
             browserHistoryPage = 0
         }
+    }
+
+    private var overlayContent: some View {
+        VStack(alignment: .leading, spacing: AppShellLayout.spaceS) {
+            actionRows
+            tokenChips
+
+            chatSessionSection(results: state.chatSessionResults)
+            resultSection(kind: .mail, results: state.mailResults)
+            resultSection(kind: .calendar, results: state.calendarResults)
+            resultSection(kind: .rss, results: state.rssResults)
+            browserHistorySection(results: state.browserHistoryResults)
+
+            if let errorMessage = state.errorMessage, !errorMessage.isEmpty {
+                errorRow(errorMessage)
+            }
+        }
+        .padding(AppShellLayout.spaceS)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var measuredOverlayContent: some View {
+        overlayContent
+            .frame(width: Layout.width, alignment: .topLeading)
+            .fixedSize(horizontal: false, vertical: true)
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(key: GlobalSearchOverlayContentHeightKey.self, value: proxy.size.height)
+                }
+            )
+            .hidden()
+            .allowsHitTesting(false)
     }
 
     private var tokenChips: some View {
