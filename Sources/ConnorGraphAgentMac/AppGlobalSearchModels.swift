@@ -61,12 +61,27 @@ struct GlobalSearchPreviewState: Equatable {
     }
 }
 
-enum GlobalSearchSectionKind: String, CaseIterable, Identifiable {
+struct GlobalSearchNativeSectionResult: Sendable {
+    var kind: GlobalSearchSectionKind
+    var results: [NativeSearchResult]
+    var errorMessage: String?
+}
+
+enum GlobalSearchSectionKind: String, CaseIterable, Identifiable, Sendable {
     case chatSessions
     case mail
     case calendar
     case rss
     case browserHistory
+
+    init(nativeSourceKind: NativeSearchSourceKind) {
+        switch nativeSourceKind {
+        case .mail: self = .mail
+        case .calendar: self = .calendar
+        case .rss: self = .rss
+        case .browserHistory: self = .browserHistory
+        }
+    }
 
     var id: String { rawValue }
 

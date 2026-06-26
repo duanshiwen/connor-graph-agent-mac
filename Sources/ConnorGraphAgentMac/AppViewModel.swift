@@ -1133,10 +1133,6 @@ final class AppViewModel: NSObject, ObservableObject {
         globalSearchPreviewTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 180_000_000)
             guard !Task.isCancelled else { return }
-            await MainActor.run {
-                guard self?.globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == query else { return }
-                self?.globalSearchPreviewState = GlobalSearchPreviewState(query: query, isLoading: true)
-            }
             await self?.refreshGlobalSearchPreview(for: query)
         }
     }
@@ -1144,29 +1140,75 @@ final class AppViewModel: NSObject, ObservableObject {
     func refreshGlobalSearchPreview(for query: String) async {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        do {
-            let chatSessionResults = searchChatSessions(query: trimmed, limit: 3)
-            let mailResults = try await searchNativeSource(kind: .mail, query: trimmed, limit: 3)
-            let calendarResults = try await searchNativeSource(kind: .calendar, query: trimmed, limit: 3)
-            let rssResults = try await searchNativeSource(kind: .rss, query: trimmed, limit: 3)
-            let browserHistoryResults = try await searchNativeSource(kind: .browserHistory, query: trimmed, limit: 30)
-            guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
-            globalSearchPreviewState = GlobalSearchPreviewState(
-                query: trimmed,
-                isLoading: false,
-                chatSessionResults: chatSessionResults,
-                mailResults: mailResults,
-                calendarResults: calendarResults,
-                rssResults: rssResults,
-                browserHistoryResults: browserHistoryResults,
-                searchTokens: globalSearchDisplayTokens(for: trimmed),
-                errorMessage: nil
-            )
-            normalizeGlobalSearchSelection()
-        } catch {
-            guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
-            globalSearchPreviewState = GlobalSearchPreviewState(query: trimmed, isLoading: false, searchTokens: globalSearchDisplayTokens(for: trimmed), errorMessage: String(describing: error))
+        let tokens = globalSearchDisplayTokens(for: trimmed)
+        let chatSessionResults = searchChatSessions(query: trimmed, limit: 3)
+        guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
+
+        globalSearchPreviewState = GlobalSearchPreviewState(
+            query: trimmed,
+            loadingSections: [.mail, .calendar, .rss, .browserHistory],
+            chatSessionResults: chatSessionResults,
+            searchTokens: tokens,
+            errorMessage: nil
+        )
+        normalizeGlobalSearchSelection()
+
+        await withTaskGroup(of: GlobalSearchNativeSectionResult.self) { group in
+            group.addTask { [weak self] in
+                guard let self else { return .init(kind: .mail, results: [], errorMessage: nil) }
+                return await self.searchNativeSourceForPreview(kind: .mail, query: trimmed, limit: 3)
+            }
+            group.addTask { [weak self] in
+                guard let self else { return .init(kind: .calendar, results: [], errorMessage: nil) }
+                return await self.searchNativeSourceForPreview(kind: .calendar, query: trimmed, limit: 3)
+            }
+            group.addTask { [weak self] in
+                guard let self else { return .init(kind: .rss, results: [], errorMessage: nil) }
+                return await self.searchNativeSourceForPreview(kind: .rss, query: trimmed, limit: 3)
+            }
+            group.addTask { [weak self] in
+                guard let self else { return .init(kind: .browserHistory, results: [], errorMessage: nil) }
+                return await self.searchNativeSourceForPreview(kind: .browserHistory, query: trimmed, limit: 30)
+            }
+
+            for await sectionResult in group {
+                guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { continue }
+                applyGlobalSearchNativeSectionResult(sectionResult, query: trimmed, tokens: tokens)
+            }
         }
+    }
+
+    private func searchNativeSourceForPreview(kind: NativeSearchSourceKind, query: String, limit: Int) async -> GlobalSearchNativeSectionResult {
+        do {
+            let results = try await searchNativeSource(kind: kind, query: query, limit: limit)
+            return GlobalSearchNativeSectionResult(kind: GlobalSearchSectionKind(nativeSourceKind: kind), results: results, errorMessage: nil)
+        } catch {
+            return GlobalSearchNativeSectionResult(kind: GlobalSearchSectionKind(nativeSourceKind: kind), results: [], errorMessage: String(describing: error))
+        }
+    }
+
+    private func applyGlobalSearchNativeSectionResult(_ sectionResult: GlobalSearchNativeSectionResult, query: String, tokens: [String]) {
+        var state = globalSearchPreviewState
+        state.query = query
+        state.searchTokens = tokens
+        state.loadingSections.remove(sectionResult.kind)
+        if let errorMessage = sectionResult.errorMessage, state.errorMessage == nil {
+            state.errorMessage = errorMessage
+        }
+        switch sectionResult.kind {
+        case .chatSessions:
+            break
+        case .mail:
+            state.mailResults = sectionResult.results
+        case .calendar:
+            state.calendarResults = sectionResult.results
+        case .rss:
+            state.rssResults = sectionResult.results
+        case .browserHistory:
+            state.browserHistoryResults = sectionResult.results
+        }
+        globalSearchPreviewState = state
+        normalizeGlobalSearchSelection()
     }
 
     private func globalSearchDisplayTokens(for query: String) -> [String] {
