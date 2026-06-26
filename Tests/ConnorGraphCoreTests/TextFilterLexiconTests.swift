@@ -38,4 +38,18 @@ struct TextFilterLexiconTests {
         #expect(lexicon.action(for: "雅加达", context: .searchQuery) == .keep)
         #expect(lexicon.weightMultiplier(for: "雅加达", context: .searchQuery) == 1)
     }
+
+    @Test func expandedChineseLexiconCoversCommonFunctionQuantifierTemporalAndQuestionWords() {
+        let lexicon = TextFilterLexicon.default
+
+        for term in ["请", "帮忙", "大概", "还是", "或者", "之后", "之前", "每个", "大约", "左右", "附近", "最近", "周五", "礼拜", "多少钱", "多长时间"] {
+            #expect(lexicon.contains(term), "Expected default lexicon to contain \(term)")
+        }
+
+        #expect(lexicon.entry(for: "周五")?.categories.contains(.temporalFiller) == true)
+        #expect(lexicon.entry(for: "多少钱")?.categories.contains(.questionWord) == true)
+        #expect(lexicon.action(for: "周五", context: .indexing) == .keep)
+        #expect(lexicon.action(for: "多少钱", context: .searchDisplay) == .dropForDisplay)
+    }
 }
+
