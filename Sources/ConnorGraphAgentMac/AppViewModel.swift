@@ -504,6 +504,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var userCity: String = ""
     @Published var userCountry: String = ""
     @Published var userPreferenceNotes: String = ""
+    @Published var defaultSearchEngine: DefaultSearchEngine = .default
     @Published var userLocationStatusMessage: String?
     @Published var settingsSectionMessageStore = SettingsSectionMessageStore()
     @Published var pendingAttachmentRefs: [AgentMessageAttachmentRef] = []
@@ -610,7 +611,8 @@ final class AppViewModel: NSObject, ObservableObject {
             userBirthDatePickerDate.timeIntervalSince1970.description,
             userCity,
             userCountry,
-            userPreferenceNotes
+            userPreferenceNotes,
+            defaultSearchEngine.rawValue
         ].joined(separator: "\u{1F}")
     }
 
@@ -1547,12 +1549,18 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
+    func defaultSearchURL(for query: String) -> URL? {
+        defaultSearchEngine.searchURL(for: query)
+    }
+
+    func defaultSearchURLString(for query: String) -> String? {
+        defaultSearchEngine.searchURLString(for: query)
+    }
+
     func performGlobalSearchWebSearch() {
         let query = globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return }
-        guard var components = URLComponents(string: "https://www.google.com/search") else { return }
-        components.queryItems = [URLQueryItem(name: "q", value: query)]
-        guard let url = components.url else { return }
+        guard let url = defaultSearchURL(for: query) else { return }
         dismissGlobalSearchOverlay()
         openURLInCurrentChatBrowser(url)
     }
@@ -4165,6 +4173,7 @@ final class AppViewModel: NSObject, ObservableObject {
             userCity = settings.preferences.city
             userCountry = settings.preferences.country
             userPreferenceNotes = settings.preferences.notes
+            defaultSearchEngine = settings.preferences.defaultSearchEngine
             settingsSectionMessageStore = SettingsSectionMessageStore()
             errorMessage = nil
         } catch {
@@ -4204,6 +4213,7 @@ final class AppViewModel: NSObject, ObservableObject {
             settings.preferences.city = userCity.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.country = userCountry.trimmingCharacters(in: .whitespacesAndNewlines)
             settings.preferences.notes = userPreferenceNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+            settings.preferences.defaultSearchEngine = defaultSearchEngine
             try runtimeSettingsRepository?.save(settings)
             applyRuntimeSettingsSideEffects()
             if submittingChatSessionIDs.isEmpty {

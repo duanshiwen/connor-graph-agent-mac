@@ -50,6 +50,36 @@ struct AppGlobalSearchTests {
         #expect(fixture.viewModel.globalSearchQuery == "invoice")
     }
 
+    @Test func defaultSearchURLUsesSelectedSearchEngine() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        fixture.viewModel.defaultSearchEngine = .google
+
+        let url = try #require(fixture.viewModel.defaultSearchURL(for: "connor search"))
+
+        #expect(url.host == "www.google.com")
+        #expect(url.path == "/search")
+        #expect(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "q" })?.value == "connor search")
+    }
+
+    @Test func globalSearchWebSearchUsesSelectedDefaultSearchEngine() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        fixture.viewModel.defaultSearchEngine = .baidu
+        fixture.viewModel.updateGlobalSearchQuery("康纳 搜索")
+        fixture.viewModel.performGlobalSearchWebSearch()
+
+        let url = try #require(URL(string: fixture.viewModel.browserTargetURLString))
+        let components = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false))
+
+        #expect(url.host == "www.baidu.com")
+        #expect(url.path == "/s")
+        #expect(components.queryItems?.first(where: { $0.name == "wd" })?.value == "康纳 搜索")
+        #expect(!fixture.viewModel.isGlobalSearchOverlayPresented)
+    }
+
     @Test func showAllGlobalSearchResultsNavigatesToSourceLists() throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }

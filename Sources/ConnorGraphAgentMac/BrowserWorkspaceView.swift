@@ -526,13 +526,7 @@ struct BrowserWorkspaceView: View {
     }
 
     private func normalizedURLString(from value: String) -> String? {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        if trimmed == BrowserBuiltInPage.blankURLString { return trimmed }
-        if trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") { return trimmed }
-        if trimmed.contains(".") && !trimmed.contains(" ") { return "https://\(trimmed)" }
-        let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? trimmed
-        return "https://cn.bing.com/search?q=\(encoded)"
+        BrowserNavigationURLResolver.normalizedURLString(from: value, defaultSearchEngine: viewModel.defaultSearchEngine)
     }
 
     private func captureRestorationSnapshotsForLiveTabs() {
