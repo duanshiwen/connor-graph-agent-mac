@@ -2,8 +2,17 @@ import Foundation
 import ConnorGraphCore
 
 public enum MemoryOSBackgroundJobKind: String, Sendable, Codable, Equatable, CaseIterable {
+    case l1SynthesizeKnowledge = "memory.l1.synthesize_knowledge"
     case l1UnifiedProjection = "memory.l1.unified_projection"
     case l2SynthesizeKnowledge = "memory.l2.synthesize_knowledge"
+
+    public static var l1ExecutableRawValues: [String] {
+        [Self.l1SynthesizeKnowledge.rawValue, Self.l1UnifiedProjection.rawValue]
+    }
+
+    public static func isL1KnowledgeKind(_ rawValue: String) -> Bool {
+        l1ExecutableRawValues.contains(rawValue)
+    }
 }
 
 public enum MemoryOSTriggerReason: String, Sendable, Codable, Equatable, CaseIterable {
@@ -81,7 +90,7 @@ public struct MemoryOSL1UnifiedProjectionJobDraft: Sendable, Codable, Equatable,
     public var createdAt: Date
     public var metadata: [String: String]
 
-    public init(id: String = UUID().uuidString, kind: String = MemoryOSBackgroundJobKind.l1UnifiedProjection.rawValue, captureEventIDs: [String], provenanceObjectIDs: [String], sourceSpanIDs: [String], schemaName: String = "MemoryOSL1UnifiedProjectionOutput", prompt: String, createdAt: Date = Date(), metadata: [String: String] = [:]) {
+    public init(id: String = UUID().uuidString, kind: String = MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue, captureEventIDs: [String], provenanceObjectIDs: [String], sourceSpanIDs: [String], schemaName: String = "MemoryOSL1UnifiedProjectionOutput", prompt: String, createdAt: Date = Date(), metadata: [String: String] = [:]) {
         self.id = id
         self.kind = kind
         self.captureEventIDs = captureEventIDs

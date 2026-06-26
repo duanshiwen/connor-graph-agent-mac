@@ -201,7 +201,7 @@ public struct AppMemoryOSCLIInspector: Sendable {
 
     public func planL1(policy: MemoryOSL1ProcessingTriggerPolicy = MemoryOSL1ProcessingTriggerPolicy(), now: Date = Date()) throws -> MemoryOSCLIPlanResult {
         let jobs = try AppMemoryOSFacade(store: store).enqueueL1UnifiedProjectionBackgroundJobs(policy: policy, now: now)
-        return MemoryOSCLIPlanResult(plannedJobs: jobs.count, kind: MemoryOSBackgroundJobKind.l1UnifiedProjection.rawValue, jobIDs: jobs.map(\.id))
+        return MemoryOSCLIPlanResult(plannedJobs: jobs.count, kind: MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue, jobIDs: jobs.map(\.id))
     }
 
     public func planL2(policy: MemoryOSL2KnowledgeSynthesisTriggerPolicy = MemoryOSL2KnowledgeSynthesisTriggerPolicy(), now: Date = Date()) throws -> MemoryOSCLIPlanResult {
@@ -411,7 +411,7 @@ public struct AppMemoryOSCLIInspector: Sendable {
     private func queueContextText(for row: MemoryOSCLIRow) throws -> String {
         guard let kind = row.values["kind"], let payload = row.values["payload_json"] else { return "" }
         switch kind {
-        case MemoryOSBackgroundJobKind.l1UnifiedProjection.rawValue:
+        case let rawKind where MemoryOSBackgroundJobKind.isL1KnowledgeKind(rawKind):
             let draft = try? store.decode(MemoryOSL1UnifiedProjectionJobDraft.self, payload)
             return try provenanceContent(forCaptureEventIDs: draft?.captureEventIDs ?? [])
         case MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue:

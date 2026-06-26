@@ -423,7 +423,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
     }
 
     public func runBackgroundAIQueueOnce<Executor: MemoryOSBackgroundModelExecutor>(executor: Executor, workerID: String = "memory-os-background-ai-worker", limit: Int = 5, now: Date = Date()) throws -> [MemoryOSProjectionRunSummary] {
-        let kinds = [MemoryOSBackgroundJobKind.l1UnifiedProjection.rawValue, MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue]
+        let kinds = MemoryOSBackgroundJobKind.l1ExecutableRawValues + [MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue]
         let candidates = try kinds.flatMap { kind in
             try store.runnableQueueItems(kind: kind, limit: limit, now: now)
         }.sorted { lhs, rhs in
@@ -436,7 +436,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
             guard let leased = try store.leaseQueueItem(id: candidate.id, workerID: workerID, now: now) else { continue }
             do {
                 switch leased.kind {
-                case MemoryOSBackgroundJobKind.l1UnifiedProjection.rawValue:
+                case let kind where MemoryOSBackgroundJobKind.isL1KnowledgeKind(kind):
                     let draft = try store.decode(MemoryOSL1UnifiedProjectionJobDraft.self, leased.payloadJSON)
                     let result = try MemoryOSBackgroundJobWorker(executor: executor).run(draft)
                     let summary = try projectAndRecordLLMArtifact(rawContent: result.rawArtifactJSON, modelID: result.metadata["model_id"] ?? workerID, queueItem: leased, processingRunID: result.jobID, artifactType: result.artifactType, schemaName: result.schemaName, now: now)
