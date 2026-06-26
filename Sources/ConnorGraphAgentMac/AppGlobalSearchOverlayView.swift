@@ -325,7 +325,9 @@ struct AppGlobalSearchOverlayView: View {
             .padding(.top, AppShellLayout.spaceXS)
 
             if state.isSectionLoading(kind), results.isEmpty {
-                GlobalSearchLoadingSourceRow()
+                GlobalSearchLoadingSourceRow(title: state.sectionStatusMessage(kind) ?? "搜索中…")
+            } else if let statusMessage = state.sectionStatusMessage(kind), results.isEmpty {
+                GlobalSearchEmptySourceRow(title: statusMessage, systemImage: "info.circle")
             } else if results.isEmpty {
                 GlobalSearchEmptySourceRow(title: kind.emptyTitle)
             } else if !results.isEmpty {
@@ -347,12 +349,14 @@ struct AppGlobalSearchOverlayView: View {
 }
 
 private struct GlobalSearchLoadingSourceRow: View {
+    var title: String = "搜索中…"
+
     var body: some View {
         HStack(spacing: AppShellLayout.spaceS) {
             ProgressView()
                 .controlSize(.small)
                 .frame(width: 18)
-            Text("搜索中…")
+            Text(title)
                 .font(AppListTypography.rowCaption)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
@@ -365,10 +369,11 @@ private struct GlobalSearchLoadingSourceRow: View {
 
 private struct GlobalSearchEmptySourceRow: View {
     var title: String
+    var systemImage: String = "magnifyingglass"
 
     var body: some View {
         HStack(spacing: AppShellLayout.spaceS) {
-            Image(systemName: "magnifyingglass")
+            Image(systemName: systemImage)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.tertiary)
                 .frame(width: 18)

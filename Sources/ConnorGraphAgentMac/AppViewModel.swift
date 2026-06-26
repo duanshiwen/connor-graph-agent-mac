@@ -1191,6 +1191,8 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func refreshIndexedGlobalSearchNativePreviewSections(query: String, tokens: [String], limitsBySource: [NativeSearchSourceKind: Int], backend: any NativeSourceSearchBackend) async {
+        let health = await backend.health()
+        applyGlobalSearchNativeHealth(health, query: query, tokens: tokens)
         let coordinator = GlobalSearchPreviewCoordinator(
             backend: backend,
             timeoutMilliseconds: 250,
@@ -1257,6 +1259,34 @@ final class AppViewModel: NSObject, ObservableObject {
         return grouped
     }
 
+    private func applyGlobalSearchNativeHealth(_ health: NativeSourceSearchHealthSnapshot, query: String, tokens: [String]) {
+        guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == query else { return }
+        var state = globalSearchPreviewState
+        state.query = query
+        state.searchTokens = tokens
+        for kind in NativeSearchSourceKind.allCases {
+            let sectionKind = GlobalSearchSectionKind(nativeSourceKind: kind)
+            state.sectionStatusMessages[sectionKind] = Self.globalSearchSectionStatusMessage(for: kind, health: health)
+        }
+        globalSearchPreviewState = state
+    }
+
+    nonisolated static func globalSearchSectionStatusMessage(for kind: NativeSearchSourceKind, health: NativeSourceSearchHealthSnapshot) -> String? {
+        if let lastError = health.lastError, !lastError.isEmpty {
+            return "索引暂不可用"
+        }
+        if health.pendingUpdateCount > 0 {
+            return "后台正在更新索引，先显示已索引结果"
+        }
+        if health.staleSourceKinds.contains(kind) {
+            return "索引可能过期，先显示上次索引结果"
+        }
+        if health.documentCountBySource[kind, default: 0] == 0 {
+            return "尚未建立索引"
+        }
+        return nil
+    }
+
     private func applyGlobalSearchNativeSectionResult(_ sectionResult: GlobalSearchNativeSectionResult, query: String, tokens: [String]) {
         var state = globalSearchPreviewState
         state.query = query
@@ -1264,6 +1294,9 @@ final class AppViewModel: NSObject, ObservableObject {
         state.loadingSections.remove(sectionResult.kind)
         if let errorMessage = sectionResult.errorMessage, state.errorMessage == nil {
             state.errorMessage = errorMessage
+        }
+        if !sectionResult.results.isEmpty || sectionResult.errorMessage != nil {
+            state.sectionStatusMessages[sectionResult.kind] = nil
         }
         switch sectionResult.kind {
         case .chatSessions:
