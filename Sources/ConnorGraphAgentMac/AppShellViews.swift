@@ -70,6 +70,16 @@ struct AppShellView: View {
                             get: { viewModel.globalSearchQuery },
                             set: { viewModel.updateGlobalSearchQuery($0) }
                         ),
+                        isFocused: Binding(
+                            get: { viewModel.isGlobalSearchFieldFocused },
+                            set: { focused in
+                                if focused {
+                                    viewModel.activateGlobalSearchField()
+                                } else {
+                                    viewModel.deactivateGlobalSearchField()
+                                }
+                            }
+                        ),
                         placeholder: "搜索或发起对话",
                         focusRequestID: viewModel.focusTopSearchRequestID,
                         onSubmit: { viewModel.performSelectedGlobalSearchItem() },
@@ -113,6 +123,13 @@ struct AppShellView: View {
                     .zIndex(20)
             }
         }
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                if viewModel.isGlobalSearchFieldFocused {
+                    viewModel.deactivateGlobalSearchField()
+                }
+            }
+        )
         .background(WindowTitlebarConfigurator())
         .frame(minWidth: AppShellLayout.shellMinWidth, minHeight: AppShellLayout.shellMinHeight)
         .onAppear {
