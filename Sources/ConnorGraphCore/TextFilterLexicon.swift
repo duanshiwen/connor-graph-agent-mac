@@ -119,6 +119,19 @@ public struct TextFilterLexicon: Sendable {
         return action(for: term, context: context) == .keep ? 1 : entry.weightMultiplier
     }
 
+    public func entries(containedIn text: String, language: TextFilterLanguage? = nil) -> [TextFilterEntry] {
+        let normalizedText = Self.normalized(text)
+        guard !normalizedText.isEmpty else { return [] }
+        return entriesByTerm.values
+            .filter { entry in
+                (language == nil || entry.language == language) && normalizedText.contains(entry.term)
+            }
+            .sorted { lhs, rhs in
+                if lhs.term.count == rhs.term.count { return lhs.term < rhs.term }
+                return lhs.term.count > rhs.term.count
+            }
+    }
+
     private static func normalized(_ term: String) -> String {
         term.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }

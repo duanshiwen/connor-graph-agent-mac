@@ -56,19 +56,7 @@ public struct NativeSearchNormalizedQuery: Codable, Sendable, Equatable, Hashabl
 }
 
 public enum NativeSearchQueryNormalizer {
-    private static let englishSoftStopWords: Set<String> = [
-        "a", "an", "the",
-        "and", "or", "but",
-        "of", "to", "in", "on", "for", "with", "by", "at", "from",
-        "is", "are", "was", "were", "be", "been", "being",
-        "this", "that", "these", "those",
-        "about", "into", "as"
-    ]
-
-    private static let chineseSoftStopWords: [String] = [
-        "关于", "里面", "一下", "一个", "一些", "这个", "那个",
-        "的", "了", "是", "在", "和", "与", "或", "我", "你", "他", "她", "它"
-    ]
+    private static let filterLexicon = TextFilterLexicon.default
 
     public static func normalize(_ rawText: String) -> NativeSearchNormalizedQuery {
         let normalizedText = rawText
@@ -85,8 +73,9 @@ public enum NativeSearchQueryNormalizer {
             case .cjk:
                 tokens.append(contentsOf: tokenizeCJK(run.text))
             case .word, .number, .cjkGram, .phrase:
-                let isStop = englishSoftStopWords.contains(run.text)
-                tokens.append(NativeSearchQueryToken(value: run.text, kind: run.kind, weight: isStop ? 0.1 : 1, isSoftStopWord: isStop))
+                let action = filterLexicon.action(for: run.text, context: .searchQuery)
+                let isStop = action != .keep
+                tokens.append(NativeSearchQueryToken(value: run.text, kind: run.kind, weight: filterLexicon.weightMultiplier(for: run.text, context: .searchQuery), isSoftStopWord: isStop))
             }
         }
         return NativeSearchNormalizedQuery(rawText: rawText, normalizedText: normalizedText, tokens: dedupe(tokens))
@@ -111,16 +100,30 @@ public enum NativeSearchQueryNormalizer {
         tokenizer.enumerateTokens(in: fullRange) { range, _ in
             let value = String(text[range]).trimmingCharacters(in: .whitespacesAndNewlines)
             guard !value.isEmpty else { return true }
-            let isStop = chineseSoftStopWords.contains(value)
-            tokens.append(NativeSearchQueryToken(value: value, kind: .cjk, weight: isStop ? 0.1 : 1, isSoftStopWord: isStop))
+            tokens.append(token(value, kind: .cjk))
             return true
         }
 
+        for entry in filterLexicon.entries(containedIn: text, language: .chinese) {
+            guard filterLexicon.action(for: entry.term, context: .searchQuery) != .keep else { continue }
+            tokens.append(NativeSearchQueryToken(value: entry.term, kind: .cjk, weight: entry.weightMultiplier, isSoftStopWord: true))
+        }
+
         if tokens.isEmpty {
-            let isStop = chineseSoftStopWords.contains(text)
-            return [NativeSearchQueryToken(value: text, kind: .cjk, weight: isStop ? 0.1 : 1, isSoftStopWord: isStop)]
+            return [token(text, kind: .cjk)]
         }
         return tokens
+    }
+
+    private static func token(_ value: String, kind: NativeSearchQueryTokenKind) -> NativeSearchQueryToken {
+        let action = filterLexicon.action(for: value, context: .searchQuery)
+        let isStop = action != .keep
+        return NativeSearchQueryToken(
+            value: value,
+            kind: kind,
+            weight: filterLexicon.weightMultiplier(for: value, context: .searchQuery),
+            isSoftStopWord: isStop
+        )
     }
 
     private static func fallbackCJKGrams(_ text: String) -> [NativeSearchQueryToken] {
