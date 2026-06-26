@@ -354,6 +354,16 @@ Connor's default system prompt includes a task bootstrap workflow for every user
 - Selection/page prompt folding for Agent questions
 - Local keyboard shortcut resolver for browser-specific actions
 
+#### 5.6.1 Connor State Copy Guidelines
+
+User-facing empty, error and hint states are part of the Connor product contract. They should use the “康纳同学” voice: warm, precise, local-first and action-oriented, without becoming childish or overly chatty.
+
+- Empty states should say what is currently absent, what will appear here later, and what the user can do next. Avoid bare labels such as `暂无数据` when the surface has enough space for guidance.
+- Error states should explain that Connor could not complete the action, name likely causes when safe, preserve technical details for debugging, and offer a recovery path such as retrying, checking input, or returning to the conversation.
+- Hint states should teach a durable product mechanism, such as session-scoped browser context or source sync boundaries, rather than repeating obvious button behavior.
+- Browser/source states should emphasize that pages, selections, mail, RSS, calendar and contacts can become session context under Connor-owned local boundaries.
+- Developer-only diagnostics may keep terse technical strings, but end-user surfaces should prefer Chinese Connor copy and avoid generic `Something went wrong` / `No data` / raw error-code-only messages.
+
 ### 5.7 Native Mail / RSS / Contacts / Calendar
 
 - Native source domains and app-support repositories
