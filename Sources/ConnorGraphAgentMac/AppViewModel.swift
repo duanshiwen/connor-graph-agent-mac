@@ -558,6 +558,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private var chatInputDraftsBySessionID: [String: String] = [:]
     private var pendingAttachmentRefsBySessionID: [String: [AgentMessageAttachmentRef]] = [:]
     private var browserAssistedWebFetchContinuationsByTaskID: [UUID: CheckedContinuation<BrowserAssistedWebFetchResult, Never>] = [:]
+    private var browserHistoryContentFetchTasksByID: [UUID: Task<Void, Never>] = [:]
     private var isRestoringChatInputDraft = false
     private var agentEventTimelinesBySessionID: [String: [AgentEventPresentation]] = [:]
     private var agentEventTimelinesByProcessKey: [String: [AgentEventPresentation]] = [:]
@@ -2125,6 +2126,64 @@ final class AppViewModel: NSObject, ObservableObject {
         loadBrowserHistory()
         reloadSchemaHealthReport()
         scheduleMemoryOSSearchIndexRepairIfNeeded()
+    }
+
+    deinit {
+        MainActor.assumeIsolated {
+            shutdownRuntimeResources()
+        }
+    }
+
+    func shutdownRuntimeResourcesForTests() {
+        shutdownRuntimeResources()
+    }
+
+    private func shutdownRuntimeResources() {
+        stopTaskSchedulerTimer()
+        globalSearchPreviewTask?.cancel()
+        globalSearchPreviewTask = nil
+        runtimeSettingsAutosaveTask?.cancel()
+        runtimeSettingsAutosaveTask = nil
+        cancelBrowserHistoryContentFetchTasks()
+        resumePendingBrowserAssistedWebFetchContinuationsForShutdown()
+        releaseIdleSleepAssertion()
+    }
+
+    private func cancelBrowserHistoryContentFetchTasks() {
+        for task in browserHistoryContentFetchTasksByID.values {
+            task.cancel()
+        }
+        browserHistoryContentFetchTasksByID.removeAll()
+    }
+
+    private func resumePendingBrowserAssistedWebFetchContinuationsForShutdown() {
+        let pendingContinuations = browserAssistedWebFetchContinuationsByTaskID
+        browserAssistedWebFetchContinuationsByTaskID.removeAll()
+        for (taskID, continuation) in pendingContinuations {
+            let request = browserAssistedWebFetchRequestsByTaskID[taskID]
+            let task = browserAssistedTasksByID[taskID]
+            continuation.resume(returning: BrowserAssistedWebFetchResult(
+                status: .failed,
+                urlString: request?.urlString ?? task?.urlString ?? "",
+                finalURLString: task?.urlString ?? request?.urlString ?? "",
+                title: task?.title ?? "",
+                contentText: "",
+                taskID: taskID.uuidString,
+                sessionID: task?.sessionID ?? "",
+                tabID: task?.tabID.uuidString ?? "",
+                errorMessage: "Browser assisted web fetch cancelled during shutdown",
+                interventionReason: nil,
+                truncated: false,
+                originalCharacterCount: 0
+            ))
+        }
+        browserAssistedWebFetchRequestsByTaskID.removeAll()
+    }
+
+    private func releaseIdleSleepAssertion() {
+        guard idleSleepAssertionID != 0 else { return }
+        IOPMAssertionRelease(idleSleepAssertionID)
+        idleSleepAssertionID = 0
     }
 
     private func apply(snapshot: GraphStoreSnapshot) {
@@ -4267,9 +4326,8 @@ final class AppViewModel: NSObject, ObservableObject {
             if result == kIOReturnSuccess {
                 idleSleepAssertionID = assertionID
             }
-        } else if idleSleepAssertionID != 0 {
-            IOPMAssertionRelease(idleSleepAssertionID)
-            idleSleepAssertionID = 0
+        } else {
+            releaseIdleSleepAssertion()
         }
     }
 
@@ -5342,8 +5400,9 @@ final class AppViewModel: NSObject, ObservableObject {
     private func fetchContentForBrowserHistoryRecord(_ record: BrowserHistoryRecord) {
         guard let store = browserHistoryStore else { return }
         let recordID = record.id
+        guard browserHistoryContentFetchTasksByID[recordID] == nil else { return }
         let url = record.url
-        Task.detached(priority: .utility) {
+        let task = Task.detached(priority: .utility) {
             let tool = NativeWebFetchTool()
             let arguments = AgentToolArguments(values: [
                 "url": .string(url),
@@ -5362,14 +5421,20 @@ final class AppViewModel: NSObject, ObservableObject {
             )
             do {
                 let result = try await tool.execute(arguments: arguments, context: context)
+                guard !Task.isCancelled else { return }
                 store.updateContent(id: recordID, markdown: result.contentText, status: .fetched)
             } catch {
+                guard !Task.isCancelled else { return }
                 store.updateContent(id: recordID, markdown: nil, status: .failed, error: String(describing: error))
             }
+            guard !Task.isCancelled else { return }
             await MainActor.run { [weak self] in
-                self?.loadBrowserHistory()
+                guard let self else { return }
+                self.browserHistoryContentFetchTasksByID[recordID] = nil
+                self.loadBrowserHistory()
             }
         }
+        browserHistoryContentFetchTasksByID[recordID] = task
     }
 
     func toggleBrowserHistoryPanel() {
