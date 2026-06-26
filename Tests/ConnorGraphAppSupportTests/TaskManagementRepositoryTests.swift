@@ -32,7 +32,7 @@ struct TaskManagementRepositoryTests {
         #expect(l1Task.trigger.recurrence == .interval)
         #expect(l1Task.target.targetKind == "memory_os.pipeline")
         #expect(l1Task.target.targetID == "default")
-        #expect(l1Task.target.operationName == "plan_l1_to_l2_jobs")
+        #expect(l1Task.target.operationName == "plan_l1_unified_projection_jobs")
         #expect(l1Task.lifecycle.status == .active)
         #expect(l1Task.metadata.isProtectedSystemTask)
 

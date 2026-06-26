@@ -5,14 +5,14 @@ import ConnorGraphMemory
 import ConnorGraphStore
 import ConnorGraphAppSupport
 
-@Test func appMemoryOSFacadeRunsL1ToL2BackgroundJobProjectsArtifactAndPhysicallyClearsL1() throws {
+@Test func appMemoryOSFacadeRunsL1UnifiedProjectionBackgroundJobProjectsArtifactAndPhysicallyClearsL1() throws {
     let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSBackgroundWorkerDatabaseURL().path)
     try store.migrate()
     let facade = AppMemoryOSFacade(store: store)
     let now = Date(timeIntervalSince1970: 8_000)
     _ = try facade.ingestChatMessage(messageID: "message-1", sessionID: "session", role: "user", content: "诗闻正在推进 Connor Memory OS。", occurredAt: now)
     _ = try facade.ingestChatMessage(messageID: "message-2", sessionID: "session", role: "user", content: "Memory OS 需要后台 L1 到 L2。", occurredAt: now.addingTimeInterval(1))
-    _ = try facade.enqueueL1ToL2BackgroundJobs(policy: MemoryOSL1ProcessingTriggerPolicy(minPendingCount: 2, maxEventsPerBlock: 10), now: now)
+    _ = try facade.enqueueL1UnifiedProjectionBackgroundJobs(policy: MemoryOSL1ProcessingTriggerPolicy(minPendingCount: 2, maxEventsPerBlock: 10), now: now)
 
     let summaries = try facade.runBackgroundAIQueueOnce(executor: StaticMemoryOSBackgroundExecutor(rawArtifactJSON: try encodedGraphArtifact()), now: now)
 
@@ -21,7 +21,7 @@ import ConnorGraphAppSupport
     #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l2_statements;").first?.first == "1")
     #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l1_capture_events;").first?.first == "0")
     #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l0_provenance_objects;").first?.first == "2")
-    #expect(try store.runnableQueueItems(kind: MemoryOSBackgroundJobKind.l1ProcessBlockToL2.rawValue, limit: 10, now: now).isEmpty)
+    #expect(try store.runnableQueueItems(kind: MemoryOSBackgroundJobKind.l1UnifiedProjection.rawValue, limit: 10, now: now).isEmpty)
     let states = try store.l2ProcessingStates(processingKind: .knowledgeSynthesis, status: .pending, limit: 10)
     let state = try #require(states.first)
     #expect(states.count == 1)
@@ -29,14 +29,14 @@ import ConnorGraphAppSupport
     #expect(state.sourceArtifactID == summaries[0].artifactID)
 }
 
-@Test func appMemoryOSFacadeChainsL1ToL2AcceptedStatementsIntoL2KnowledgePlanning() throws {
+@Test func appMemoryOSFacadeChainsL1UnifiedProjectionAcceptedStatementsIntoL2KnowledgePlanning() throws {
     let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSBackgroundWorkerDatabaseURL().path)
     try store.migrate()
     let facade = AppMemoryOSFacade(store: store)
     let now = Date(timeIntervalSince1970: 8_000)
     _ = try facade.ingestChatMessage(messageID: "message-1", sessionID: "session", role: "user", content: "诗闻正在推进 Connor Memory OS。", occurredAt: now)
     _ = try facade.ingestChatMessage(messageID: "message-2", sessionID: "session", role: "user", content: "Memory OS 需要后台 L1 到 L2。", occurredAt: now.addingTimeInterval(1))
-    _ = try facade.enqueueL1ToL2BackgroundJobs(policy: MemoryOSL1ProcessingTriggerPolicy(minPendingCount: 2, maxEventsPerBlock: 10), now: now)
+    _ = try facade.enqueueL1UnifiedProjectionBackgroundJobs(policy: MemoryOSL1ProcessingTriggerPolicy(minPendingCount: 2, maxEventsPerBlock: 10), now: now)
     let summaries = try facade.runBackgroundAIQueueOnce(executor: StaticMemoryOSBackgroundExecutor(rawArtifactJSON: try encodedGraphArtifact()), now: now)
     #expect(summaries.count == 1)
     #expect(summaries[0].accepted)

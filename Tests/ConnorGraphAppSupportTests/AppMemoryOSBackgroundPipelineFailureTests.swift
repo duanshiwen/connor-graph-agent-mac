@@ -5,20 +5,20 @@ import ConnorGraphMemory
 import ConnorGraphStore
 import ConnorGraphAppSupport
 
-@Test func l1ToL2BackgroundJobRetriesWhenModelExecutorThrowsAndKeepsL1Buffer() throws {
+@Test func l1UnifiedProjectionBackgroundJobRetriesWhenModelExecutorThrowsAndKeepsL1Buffer() throws {
     let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSBackgroundFailureDatabaseURL().path)
     try store.migrate()
     let facade = AppMemoryOSFacade(store: store)
     let now = Date(timeIntervalSince1970: 9_000)
     _ = try facade.ingestChatMessage(messageID: "message-1", sessionID: "session", role: "user", content: "Important memory.", occurredAt: now)
-    _ = try facade.enqueueL1ToL2BackgroundJobs(policy: MemoryOSL1ProcessingTriggerPolicy(minPendingCount: 1), now: now)
+    _ = try facade.enqueueL1UnifiedProjectionBackgroundJobs(policy: MemoryOSL1ProcessingTriggerPolicy(minPendingCount: 1), now: now)
 
     let summaries = try facade.runBackgroundAIQueueOnce(executor: ThrowingMemoryOSBackgroundExecutor(), now: now)
 
     #expect(summaries.count == 1)
     #expect(!summaries[0].accepted)
     #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l1_capture_events;").first?.first == "1")
-    let queued = try store.query(sql: "SELECT status, attempt_count FROM memory_l1_processing_queue WHERE kind = '\(MemoryOSBackgroundJobKind.l1ProcessBlockToL2.rawValue)';")
+    let queued = try store.query(sql: "SELECT status, attempt_count FROM memory_l1_processing_queue WHERE kind = '\(MemoryOSBackgroundJobKind.l1UnifiedProjection.rawValue)';")
     #expect(queued.first?[0] == MemoryOSQueueStatus.retryScheduled.rawValue)
     #expect(queued.first?[1] == "1")
     #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l1_queue_attempts;").first?.first == "1")
@@ -54,7 +54,7 @@ import ConnorGraphAppSupport
     let facade = AppMemoryOSFacade(store: store)
     let now = Date(timeIntervalSince1970: 9_000)
     _ = try facade.ingestChatMessage(messageID: "message-1", sessionID: "session", role: "user", content: "Important memory.", occurredAt: now)
-    let enqueued = try facade.enqueueL1ToL2BackgroundJobs(policy: MemoryOSL1ProcessingTriggerPolicy(minPendingCount: 1), now: now)
+    let enqueued = try facade.enqueueL1UnifiedProjectionBackgroundJobs(policy: MemoryOSL1ProcessingTriggerPolicy(minPendingCount: 1), now: now)
     var item = try #require(enqueued.first)
     item.maxAttempts = 1
     try store.enqueue(item)
