@@ -125,6 +125,45 @@ public struct MemoryOSL2ToKnowledgeJobDraft: Sendable, Codable, Equatable, Ident
     }
 }
 
+public enum MemoryOSKnowledgeJobSource: String, Sendable, Codable, Equatable, CaseIterable {
+    case l1CaptureEvents = "l1_capture_events"
+    case l2Statements = "l2_statements"
+}
+
+public struct MemoryOSKnowledgeSynthesisJobDraft: Sendable, Codable, Equatable, Identifiable {
+    public var id: String
+    public var kind: String
+    public var source: MemoryOSKnowledgeJobSource
+    public var schemaName: String
+    public var artifactType: String
+    public var prompt: String
+    public var sourceRecordIDs: [String]
+    public var evidenceSpanIDs: [String]
+    public var createdAt: Date
+    public var metadata: [String: String]
+
+    public init(id: String, kind: String, source: MemoryOSKnowledgeJobSource, schemaName: String, artifactType: String, prompt: String, sourceRecordIDs: [String], evidenceSpanIDs: [String], createdAt: Date, metadata: [String: String] = [:]) {
+        self.id = id
+        self.kind = kind
+        self.source = source
+        self.schemaName = schemaName
+        self.artifactType = artifactType
+        self.prompt = prompt
+        self.sourceRecordIDs = sourceRecordIDs
+        self.evidenceSpanIDs = evidenceSpanIDs
+        self.createdAt = createdAt
+        self.metadata = metadata
+    }
+
+    public init(l1 draft: MemoryOSL1UnifiedProjectionJobDraft) {
+        self.init(id: draft.id, kind: draft.kind, source: .l1CaptureEvents, schemaName: draft.schemaName, artifactType: "memory_os_l1_unified_projection", prompt: draft.prompt, sourceRecordIDs: draft.captureEventIDs, evidenceSpanIDs: draft.sourceSpanIDs, createdAt: draft.createdAt, metadata: draft.metadata)
+    }
+
+    public init(l2 draft: MemoryOSL2ToKnowledgeJobDraft) {
+        self.init(id: draft.id, kind: draft.kind, source: .l2Statements, schemaName: draft.schemaName, artifactType: "memory_os_knowledge_extraction", prompt: draft.prompt, sourceRecordIDs: draft.statementIDs, evidenceSpanIDs: draft.evidenceSpanIDs, createdAt: draft.createdAt, metadata: draft.metadata)
+    }
+}
+
 public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
     public init() {}
 
