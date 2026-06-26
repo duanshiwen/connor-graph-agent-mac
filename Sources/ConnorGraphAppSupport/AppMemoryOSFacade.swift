@@ -437,7 +437,8 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
             do {
                 switch leased.kind {
                 case let kind where MemoryOSBackgroundJobKind.isL1KnowledgeKind(kind):
-                    let draft = try store.decode(MemoryOSL1UnifiedProjectionJobDraft.self, leased.payloadJSON)
+                    var draft = try store.decode(MemoryOSL1UnifiedProjectionJobDraft.self, leased.payloadJSON)
+                    draft.metadata = backgroundRunMetadata(draft.metadata, queueItem: leased)
                     let result = try MemoryOSBackgroundJobWorker(executor: executor).run(draft)
                     let summary = try projectAndRecordLLMArtifact(rawContent: result.rawArtifactJSON, modelID: result.metadata["model_id"] ?? workerID, queueItem: leased, processingRunID: result.jobID, artifactType: result.artifactType, schemaName: result.schemaName, now: now)
                     if summary.accepted {
@@ -450,7 +451,8 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
                     }
                     summaries.append(summary)
                 case MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue:
-                    let draft = try store.decode(MemoryOSL2ToKnowledgeJobDraft.self, leased.payloadJSON)
+                    var draft = try store.decode(MemoryOSL2ToKnowledgeJobDraft.self, leased.payloadJSON)
+                    draft.metadata = backgroundRunMetadata(draft.metadata, queueItem: leased)
                     let result = try MemoryOSBackgroundJobWorker(executor: executor).run(draft)
                     let summary = try projectAndRecordLLMArtifact(rawContent: result.rawArtifactJSON, modelID: result.metadata["model_id"] ?? workerID, queueItem: leased, processingRunID: result.jobID, artifactType: result.artifactType, schemaName: result.schemaName, now: now)
                     if summary.accepted {
@@ -475,6 +477,13 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
             }
         }
         return summaries
+    }
+
+    private func backgroundRunMetadata(_ metadata: [String: String], queueItem: MemoryOSQueueItem) -> [String: String] {
+        metadata.merging([
+            "queue_item_id": queueItem.id,
+            "background_run_id": "memory-run:\(queueItem.id)"
+        ]) { current, _ in current }
     }
 
     public func recordQueueSuccess(_ item: MemoryOSQueueItem, now: Date = Date()) throws -> MemoryOSQueueItem {

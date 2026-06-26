@@ -17,7 +17,7 @@ import ConnorGraphAppSupport
     let enqueued = try facade.enqueueL1UnifiedProjectionBackgroundJobs(policy: MemoryOSL1ProcessingTriggerPolicy(minPendingCount: 2, maxEventsPerBlock: 2, maxTokensPerBlock: 1000), now: now)
 
     #expect(enqueued.count == 2)
-    let runnable = try store.runnableQueueItems(kind: MemoryOSBackgroundJobKind.l1UnifiedProjection.rawValue, limit: 10, now: now)
+    let runnable = try store.runnableQueueItems(kind: MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue, limit: 10, now: now)
     #expect(runnable.count == 2)
     let payload = try store.decode(MemoryOSL1UnifiedProjectionJobDraft.self, runnable[0].payloadJSON)
     #expect(payload.schemaName == "MemoryOSL1UnifiedProjectionOutput")
