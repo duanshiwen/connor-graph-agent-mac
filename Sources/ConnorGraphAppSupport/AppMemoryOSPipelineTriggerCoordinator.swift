@@ -24,7 +24,7 @@ public struct AppMemoryOSPipelineTriggerCoordinator: @unchecked Sendable {
     }
 
     public func evaluateAfterL1Capture(now: Date = Date()) throws -> [MemoryOSQueueItem] {
-        try facade.enqueueL1ToL2BackgroundJobs(policy: l1CountPolicy, now: now)
+        try facade.enqueueL1UnifiedProjectionBackgroundJobs(policy: l1CountPolicy, now: now)
     }
 
     public func evaluateAfterL2PendingStatements(now: Date = Date()) throws -> [MemoryOSQueueItem] {
@@ -32,7 +32,7 @@ public struct AppMemoryOSPipelineTriggerCoordinator: @unchecked Sendable {
     }
 
     public func runDailySweep(now: Date = Date()) throws -> [MemoryOSQueueItem] {
-        let l1 = try facade.enqueueL1ToL2BackgroundJobs(policy: l1AgePolicy, now: now)
+        let l1 = try facade.enqueueL1UnifiedProjectionBackgroundJobs(policy: l1AgePolicy, now: now)
         let l2 = try facade.enqueueL2ToKnowledgeBackgroundJobs(policy: l2AgePolicy, now: now)
         return l1 + l2
     }

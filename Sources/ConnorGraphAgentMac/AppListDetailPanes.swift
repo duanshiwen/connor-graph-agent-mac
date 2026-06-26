@@ -133,10 +133,10 @@ struct CraftCalendarListPane: View {
             }
 
             if viewModel.calendarBrowserPresentation.daySections.isEmpty {
-                ContentUnavailableView("暂无日程", systemImage: "calendar", description: Text("添加支持 Calendar capability 的账户后，日程会显示在这里。"))
+                ContentUnavailableView("还没有可显示的日程", systemImage: "calendar", description: Text("连接或同步日历后，康纳同学会把近期日程放在这里，方便你从时间安排继续展开工作。"))
                     .padding(.top, 80)
             } else if filteredCalendarSections.isEmpty {
-                ContentUnavailableView("没有匹配的日程", systemImage: "calendar.badge.exclamationmark", description: Text("清除筛选后可查看全部日程。"))
+                ContentUnavailableView("没有找到匹配的日程", systemImage: "calendar.badge.exclamationmark", description: Text("换个关键词试试，或者清除筛选查看全部日程。"))
                     .padding(.top, 80)
             } else {
                 CalendarSectionScrollView(
@@ -318,8 +318,8 @@ struct CraftContactsListPane: View {
                 .padding(.vertical, 13)
 
             if viewModel.contactsBrowserPresentation.rows.isEmpty {
-                Color.clear
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                ContentUnavailableView("还没有可显示的联系人", systemImage: "person.crop.circle.badge", description: Text("连接通讯录或邮箱后，康纳同学会把可用联系人整理在这里，方便之后写信、检索和关联会话。"))
+                    .padding(.top, 80)
             } else {
                 ContactsRowsScrollView(rows: viewModel.contactsBrowserPresentation.rows, selectedID: viewModel.selectedContactID, onSelect: { viewModel.selectedContactID = $0 })
             }
@@ -489,13 +489,13 @@ struct CraftMailListPane: View {
             }
 
             if presentation.accounts.isEmpty {
-                ContentUnavailableView("暂无邮件账户", systemImage: "envelope.badge", description: Text("点击右上角 + 添加邮件账户。"))
+                ContentUnavailableView("还没有连接邮箱", systemImage: "envelope.badge", description: Text("点击右上角 + 添加邮箱账户。之后康纳同学可以在本地读取邮件，并把相关邮件作为会话上下文。"))
                     .padding(.top, 80)
             } else if presentation.messages.isEmpty {
-                ContentUnavailableView("尚未同步邮件", systemImage: "tray", description: Text("账户已添加，但当前 Mail Runtime 尚未完成远端邮箱发现和邮件拉取。同步完成后邮件会按时间显示在这里。"))
+                ContentUnavailableView("邮件还在等待同步", systemImage: "tray", description: Text("账户已经添加，康纳同学正在等待邮箱发现和邮件拉取完成。同步后，邮件会按时间显示在这里。"))
                     .padding(.top, 80)
             } else if visibleMessages.isEmpty {
-                ContentUnavailableView("没有匹配的邮件", systemImage: "envelope.badge", description: Text("清除筛选后可查看全部邮件。"))
+                ContentUnavailableView("没有找到匹配的邮件", systemImage: "envelope.badge", description: Text("换个关键词试试，或者清除筛选查看全部邮件。"))
                     .padding(.top, 80)
             } else {
                 List(visibleMessages) { message in
@@ -1378,13 +1378,13 @@ struct CraftRSSListPane: View {
             }
 
             if presentation.sources.isEmpty {
-                ContentUnavailableView("暂无 RSS 订阅源", systemImage: "dot.radiowaves.left.and.right", description: Text("点击右上角 + 添加 RSS / Atom / JSON Feed。"))
+                ContentUnavailableView("还没有添加 RSS 源", systemImage: "dot.radiowaves.left.and.right", description: Text("点击右上角 + 添加 RSS、Atom 或 JSON Feed。康纳同学会把订阅文章放进本地资料流。"))
                     .padding(.top, 80)
             } else if presentation.items.isEmpty {
-                ContentUnavailableView("暂无文章", systemImage: "newspaper", description: Text("订阅源同步后的文章会在这里按时间显示。"))
+                ContentUnavailableView("还没有同步到文章", systemImage: "newspaper", description: Text("订阅源添加后，康纳同学会在同步完成时把文章按时间放在这里。"))
                     .padding(.top, 80)
             } else if visibleItems.isEmpty {
-                ContentUnavailableView("没有匹配的 RSS", systemImage: "newspaper", description: Text("清除筛选后可查看全部 RSS。"))
+                ContentUnavailableView("没有找到匹配的 RSS 文章", systemImage: "newspaper", description: Text("换个关键词试试，或者清除筛选查看全部订阅文章。"))
                     .padding(.top, 80)
             } else {
                 List(visibleItems) { item in

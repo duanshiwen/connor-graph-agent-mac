@@ -5,7 +5,7 @@ import ConnorGraphMemory
 import ConnorGraphStore
 import ConnorGraphAppSupport
 
-@Test func coordinatorEnqueuesL1ToL2WhenPendingCaptureCountReaches100() throws {
+@Test func coordinatorEnqueuesL1UnifiedProjectionWhenPendingCaptureCountReaches100() throws {
     let store = try SQLiteMemoryOSStore(path: temporaryCoordinatorDatabaseURL().path)
     try store.migrate()
     let facade = AppMemoryOSFacade(store: store)
@@ -21,11 +21,11 @@ import ConnorGraphAppSupport
     let enqueued = try coordinator.evaluateAfterL1Capture(now: now)
 
     #expect(enqueued.count == 4)
-    let runnable = try store.runnableQueueItems(kind: MemoryOSBackgroundJobKind.l1ProcessBlockToL2.rawValue, limit: 10, now: now)
+    let runnable = try store.runnableQueueItems(kind: MemoryOSBackgroundJobKind.l1UnifiedProjection.rawValue, limit: 10, now: now)
     #expect(runnable.count == 4)
 }
 
-@Test func coordinatorDailySweepEnqueuesL1ToL2WhenOldestPendingCaptureIs24HoursOld() throws {
+@Test func coordinatorDailySweepEnqueuesL1UnifiedProjectionWhenOldestPendingCaptureIs24HoursOld() throws {
     let store = try SQLiteMemoryOSStore(path: temporaryCoordinatorDatabaseURL().path)
     try store.migrate()
     let facade = AppMemoryOSFacade(store: store)
@@ -37,7 +37,7 @@ import ConnorGraphAppSupport
     let enqueued = try coordinator.runDailySweep(now: occurredAt.addingTimeInterval(24 * 60 * 60))
 
     #expect(enqueued.count == 1)
-    #expect(enqueued.first?.kind == MemoryOSBackgroundJobKind.l1ProcessBlockToL2.rawValue)
+    #expect(enqueued.first?.kind == MemoryOSBackgroundJobKind.l1UnifiedProjection.rawValue)
 }
 
 @Test func coordinatorEnqueuesL2ToKnowledgeWhenPendingStatementCountReaches100() throws {

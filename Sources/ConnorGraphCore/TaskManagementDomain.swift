@@ -275,7 +275,7 @@ public struct ConnorTaskDefinition: Codable, Sendable, Equatable, Identifiable {
                 name: "Memory OS：每日检查 L1 到 L2",
                 origin: .system,
                 trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 86_400, recurrence: .interval),
-                target: ConnorTaskTarget(targetKind: "memory_os.pipeline", targetID: "default", operationName: "plan_l1_to_l2_jobs"),
+                target: ConnorTaskTarget(targetKind: "memory_os.pipeline", targetID: "default", operationName: "plan_l1_unified_projection_jobs"),
                 lifecycle: ConnorTaskLifecycle(status: .active),
                 metadata: .protectedSystem,
                 createdAt: now,
