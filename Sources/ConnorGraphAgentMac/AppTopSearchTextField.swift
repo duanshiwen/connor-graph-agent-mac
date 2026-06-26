@@ -9,6 +9,7 @@ import ConnorGraphAppSupport
 
 struct TopSearchTextField: NSViewRepresentable {
     @Binding var text: String
+    @Binding var isFocused: Bool
     var placeholder: String
     var focusRequestID: UUID?
     var onSubmit: (() -> Void)? = nil
@@ -37,11 +38,25 @@ struct TopSearchTextField: NSViewRepresentable {
             nsView.stringValue = text
         }
         nsView.placeholderString = placeholder
+        context.coordinator.isFocused = $isFocused
+        let fieldEditor = nsView.currentEditor()
+        let hasAppKitFocus = nsView.window?.firstResponder === nsView || nsView.window?.firstResponder === fieldEditor
+        if !isFocused, hasAppKitFocus {
+            DispatchQueue.main.async {
+                guard nsView.window?.firstResponder === nsView || nsView.window?.firstResponder === nsView.currentEditor() else { return }
+                nsView.window?.makeFirstResponder(nil)
+            }
+        } else if isFocused, !hasAppKitFocus {
+            DispatchQueue.main.async {
+                nsView.window?.makeFirstResponder(nsView)
+            }
+        }
         if context.coordinator.lastFocusRequestID != focusRequestID {
             context.coordinator.lastFocusRequestID = focusRequestID
             guard focusRequestID != nil else { return }
             DispatchQueue.main.async {
                 context.coordinator.shouldSelectAllOnNextFocus = true
+                context.coordinator.isFocused.wrappedValue = true
                 nsView.window?.makeFirstResponder(nsView)
                 if let editor = nsView.currentEditor() as? NSTextView, !editor.hasMarkedText() {
                     nsView.selectText(nil)
@@ -52,11 +67,12 @@ struct TopSearchTextField: NSViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text, onSubmit: onSubmit, onMoveUp: onMoveUp, onMoveDown: onMoveDown, onCancel: onCancel, onFocus: onFocus, onBlur: onBlur)
+        Coordinator(text: $text, isFocused: $isFocused, onSubmit: onSubmit, onMoveUp: onMoveUp, onMoveDown: onMoveDown, onCancel: onCancel, onFocus: onFocus, onBlur: onBlur)
     }
 
     final class Coordinator: NSObject, NSTextFieldDelegate {
         @Binding var text: String
+        var isFocused: Binding<Bool>
         var lastFocusRequestID: UUID?
         var shouldSelectAllOnNextFocus = false
         var onSubmit: (() -> Void)?
@@ -66,8 +82,9 @@ struct TopSearchTextField: NSViewRepresentable {
         var onFocus: (() -> Void)?
         var onBlur: (() -> Void)?
 
-        init(text: Binding<String>, onSubmit: (() -> Void)?, onMoveUp: (() -> Void)?, onMoveDown: (() -> Void)?, onCancel: (() -> Void)?, onFocus: (() -> Void)?, onBlur: (() -> Void)?) {
+        init(text: Binding<String>, isFocused: Binding<Bool>, onSubmit: (() -> Void)?, onMoveUp: (() -> Void)?, onMoveDown: (() -> Void)?, onCancel: (() -> Void)?, onFocus: (() -> Void)?, onBlur: (() -> Void)?) {
             _text = text
+            self.isFocused = isFocused
             self.onSubmit = onSubmit
             self.onMoveUp = onMoveUp
             self.onMoveDown = onMoveDown
@@ -77,10 +94,12 @@ struct TopSearchTextField: NSViewRepresentable {
         }
 
         func controlTextDidBeginEditing(_ notification: Notification) {
+            isFocused.wrappedValue = true
             onFocus?()
         }
 
         func controlTextDidEndEditing(_ notification: Notification) {
+            isFocused.wrappedValue = false
             onBlur?()
         }
 

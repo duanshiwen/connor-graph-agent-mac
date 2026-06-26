@@ -1133,10 +1133,6 @@ final class AppViewModel: NSObject, ObservableObject {
         globalSearchPreviewTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 180_000_000)
             guard !Task.isCancelled else { return }
-            await MainActor.run {
-                guard self?.globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == query else { return }
-                self?.globalSearchPreviewState = GlobalSearchPreviewState(query: query, isLoading: true)
-            }
             await self?.refreshGlobalSearchPreview(for: query)
         }
     }
@@ -1144,29 +1140,75 @@ final class AppViewModel: NSObject, ObservableObject {
     func refreshGlobalSearchPreview(for query: String) async {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        do {
-            let chatSessionResults = searchChatSessions(query: trimmed, limit: 3)
-            let mailResults = try await searchNativeSource(kind: .mail, query: trimmed, limit: 3)
-            let calendarResults = try await searchNativeSource(kind: .calendar, query: trimmed, limit: 3)
-            let rssResults = try await searchNativeSource(kind: .rss, query: trimmed, limit: 3)
-            let browserHistoryResults = try await searchNativeSource(kind: .browserHistory, query: trimmed, limit: 30)
-            guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
-            globalSearchPreviewState = GlobalSearchPreviewState(
-                query: trimmed,
-                isLoading: false,
-                chatSessionResults: chatSessionResults,
-                mailResults: mailResults,
-                calendarResults: calendarResults,
-                rssResults: rssResults,
-                browserHistoryResults: browserHistoryResults,
-                searchTokens: globalSearchDisplayTokens(for: trimmed),
-                errorMessage: nil
-            )
-            normalizeGlobalSearchSelection()
-        } catch {
-            guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
-            globalSearchPreviewState = GlobalSearchPreviewState(query: trimmed, isLoading: false, searchTokens: globalSearchDisplayTokens(for: trimmed), errorMessage: String(describing: error))
+        let tokens = globalSearchDisplayTokens(for: trimmed)
+        let chatSessionResults = searchChatSessions(query: trimmed, limit: 3)
+        guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
+
+        globalSearchPreviewState = GlobalSearchPreviewState(
+            query: trimmed,
+            loadingSections: [.mail, .calendar, .rss, .browserHistory],
+            chatSessionResults: chatSessionResults,
+            searchTokens: tokens,
+            errorMessage: nil
+        )
+        normalizeGlobalSearchSelection()
+
+        await withTaskGroup(of: GlobalSearchNativeSectionResult.self) { group in
+            group.addTask { [weak self] in
+                guard let self else { return .init(kind: .mail, results: [], errorMessage: nil) }
+                return await self.searchNativeSourceForPreview(kind: .mail, query: trimmed, limit: 3)
+            }
+            group.addTask { [weak self] in
+                guard let self else { return .init(kind: .calendar, results: [], errorMessage: nil) }
+                return await self.searchNativeSourceForPreview(kind: .calendar, query: trimmed, limit: 3)
+            }
+            group.addTask { [weak self] in
+                guard let self else { return .init(kind: .rss, results: [], errorMessage: nil) }
+                return await self.searchNativeSourceForPreview(kind: .rss, query: trimmed, limit: 3)
+            }
+            group.addTask { [weak self] in
+                guard let self else { return .init(kind: .browserHistory, results: [], errorMessage: nil) }
+                return await self.searchNativeSourceForPreview(kind: .browserHistory, query: trimmed, limit: 30)
+            }
+
+            for await sectionResult in group {
+                guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { continue }
+                applyGlobalSearchNativeSectionResult(sectionResult, query: trimmed, tokens: tokens)
+            }
         }
+    }
+
+    private func searchNativeSourceForPreview(kind: NativeSearchSourceKind, query: String, limit: Int) async -> GlobalSearchNativeSectionResult {
+        do {
+            let results = try await searchNativeSource(kind: kind, query: query, limit: limit)
+            return GlobalSearchNativeSectionResult(kind: GlobalSearchSectionKind(nativeSourceKind: kind), results: results, errorMessage: nil)
+        } catch {
+            return GlobalSearchNativeSectionResult(kind: GlobalSearchSectionKind(nativeSourceKind: kind), results: [], errorMessage: String(describing: error))
+        }
+    }
+
+    private func applyGlobalSearchNativeSectionResult(_ sectionResult: GlobalSearchNativeSectionResult, query: String, tokens: [String]) {
+        var state = globalSearchPreviewState
+        state.query = query
+        state.searchTokens = tokens
+        state.loadingSections.remove(sectionResult.kind)
+        if let errorMessage = sectionResult.errorMessage, state.errorMessage == nil {
+            state.errorMessage = errorMessage
+        }
+        switch sectionResult.kind {
+        case .chatSessions:
+            break
+        case .mail:
+            state.mailResults = sectionResult.results
+        case .calendar:
+            state.calendarResults = sectionResult.results
+        case .rss:
+            state.rssResults = sectionResult.results
+        case .browserHistory:
+            state.browserHistoryResults = sectionResult.results
+        }
+        globalSearchPreviewState = state
+        normalizeGlobalSearchSelection()
     }
 
     private func globalSearchDisplayTokens(for query: String) -> [String] {
@@ -1181,11 +1223,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func searchChatSessions(query: String, limit: Int) -> [GlobalSearchSessionResult] {
-        let terms = query
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .split(whereSeparator: { $0.isWhitespace || $0.isNewline })
-            .map(String.init)
-            .filter { !$0.isEmpty }
+        let terms = Self.globalSearchMatchTerms(for: query)
         guard !terms.isEmpty else { return [] }
         return allChatSessions
             .compactMap { session -> (result: GlobalSearchSessionResult, score: Double)? in
@@ -1224,13 +1262,33 @@ final class AppViewModel: NSObject, ObservableObject {
             .map(\.result)
     }
 
+    private static func globalSearchMatchTerms(for query: String) -> [String] {
+        let normalized = NativeSearchQueryNormalizer.normalize(query)
+        var seen: Set<String> = []
+        let normalizedTerms = normalized.scoringTokens
+            .map(\.value)
+            .filter { !$0.isEmpty }
+            .filter { $0.count >= 2 || query.count <= 2 }
+            .filter { seen.insert($0).inserted }
+        if !normalizedTerms.isEmpty { return normalizedTerms }
+        return query
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(whereSeparator: { $0.isWhitespace || $0.isNewline })
+            .map(String.init)
+            .filter { !$0.isEmpty }
+    }
+
     private static func globalSearchMatchScore(text: String, terms: [String], weight: Double) -> Double {
         let lower = text.lowercased()
-        guard terms.allSatisfy({ lower.localizedCaseInsensitiveContains($0) }) else { return 0 }
-        let exactBonus = terms.reduce(0.0) { partial, term in
+        let matchedTerms = terms.filter { lower.localizedCaseInsensitiveContains($0) }
+        guard !matchedTerms.isEmpty else { return 0 }
+        let requiredMatches = min(max(terms.count, 1), 2)
+        guard matchedTerms.count >= requiredMatches else { return 0 }
+        let coverage = Double(matchedTerms.count) / Double(max(terms.count, 1))
+        let exactBonus = matchedTerms.reduce(0.0) { partial, term in
             partial + (lower == term.lowercased() ? 2.0 : 0.0)
         }
-        return weight + exactBonus
+        return weight * (0.75 + coverage) + exactBonus
     }
 
     private static func globalSearchSnippet(text: String, terms: [String], maxLength: Int = 120) -> String {
