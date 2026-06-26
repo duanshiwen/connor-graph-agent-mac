@@ -16,7 +16,7 @@ struct GlobalSearchSessionResult: Identifiable, Equatable {
 
 struct GlobalSearchPreviewState: Equatable {
     var query: String = ""
-    var isLoading: Bool = false
+    var loadingSections: Set<GlobalSearchSectionKind> = []
     var chatSessionResults: [GlobalSearchSessionResult] = []
     var mailResults: [NativeSearchResult] = []
     var calendarResults: [NativeSearchResult] = []
@@ -25,7 +25,36 @@ struct GlobalSearchPreviewState: Equatable {
     var searchTokens: [String] = []
     var errorMessage: String?
 
+    init(
+        query: String = "",
+        isLoading: Bool = false,
+        loadingSections: Set<GlobalSearchSectionKind>? = nil,
+        chatSessionResults: [GlobalSearchSessionResult] = [],
+        mailResults: [NativeSearchResult] = [],
+        calendarResults: [NativeSearchResult] = [],
+        rssResults: [NativeSearchResult] = [],
+        browserHistoryResults: [NativeSearchResult] = [],
+        searchTokens: [String] = [],
+        errorMessage: String? = nil
+    ) {
+        self.query = query
+        self.loadingSections = loadingSections ?? (isLoading ? Set(GlobalSearchSectionKind.allCases) : [])
+        self.chatSessionResults = chatSessionResults
+        self.mailResults = mailResults
+        self.calendarResults = calendarResults
+        self.rssResults = rssResults
+        self.browserHistoryResults = browserHistoryResults
+        self.searchTokens = searchTokens
+        self.errorMessage = errorMessage
+    }
+
     static let empty = GlobalSearchPreviewState()
+
+    var isLoading: Bool { !loadingSections.isEmpty }
+
+    func isSectionLoading(_ kind: GlobalSearchSectionKind) -> Bool {
+        loadingSections.contains(kind)
+    }
 
     var hasAnySourceResults: Bool {
         !chatSessionResults.isEmpty || !mailResults.isEmpty || !calendarResults.isEmpty || !rssResults.isEmpty || !browserHistoryResults.isEmpty
