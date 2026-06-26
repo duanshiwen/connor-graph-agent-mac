@@ -1217,8 +1217,7 @@ final class AppViewModel: NSObject, ObservableObject {
     private func globalSearchDisplayTokens(for query: String) -> [String] {
         let normalized = NativeSearchQueryNormalizer.normalize(query)
         var seen: Set<String> = []
-        let tokens = normalized.scoringTokens
-            .map(\.value)
+        let tokens = normalized.displayTokenValues
             .filter { !$0.isEmpty }
             .filter { $0.count >= 2 || query.count <= 2 }
             .filter { seen.insert($0).inserted }

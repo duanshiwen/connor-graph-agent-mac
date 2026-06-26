@@ -79,6 +79,27 @@ struct NativeSourceSearchQueryNormalizationTests {
         #expect(results.first?.snippet.contains("搜索性能优化") == true)
     }
 
+    @Test func cjkQueryUsesSemanticWordTokensBeforeFallbackGrams() {
+        let normalized = NativeSearchQueryNormalizer.normalize("西雅图不相信眼泪")
+
+        #expect(normalized.displayTokenValues.contains("西雅图"))
+        #expect(normalized.displayTokenValues.contains("相信"))
+        #expect(normalized.displayTokenValues.contains("眼泪"))
+        #expect(!normalized.displayTokenValues.contains("雅图"))
+        #expect(!normalized.displayTokenValues.contains("图不"))
+        #expect(!normalized.displayTokenValues.contains("不相"))
+        #expect(!normalized.displayTokenValues.contains("信眼"))
+    }
+
+    @Test func cjkSearchKeepsPhraseAndSemanticTokens() {
+        let normalized = NativeSearchQueryNormalizer.normalize("泰国数字游民签证")
+
+        #expect(normalized.strongTokenValues.contains("泰国数字游民签证"))
+        #expect(normalized.displayTokenValues.contains("泰国"))
+        #expect(normalized.displayTokenValues.contains("数字"))
+        #expect(normalized.displayTokenValues.contains("签证"))
+    }
+
     @Test func mixedEnglishChineseQueryPreservesBothTokenFamilies() {
         let normalized = NativeSearchQueryNormalizer.normalize("RSS 搜索优化")
 

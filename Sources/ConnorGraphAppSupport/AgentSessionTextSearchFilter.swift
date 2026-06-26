@@ -15,7 +15,16 @@ public struct AgentSessionTextSearchFilter: Sendable, Equatable {
     }
 
     private func normalizedTerms(from query: String) -> [String] {
-        query
+        let normalized = NativeSearchQueryNormalizer.normalize(query)
+        let semanticTerms = normalized.displayTokens
+            .filter { $0.kind != .phrase }
+            .map(\.value)
+            .filter { !$0.isEmpty }
+        if !semanticTerms.isEmpty { return semanticTerms }
+        let displayTerms = normalized.displayTokenValues
+            .filter { !$0.isEmpty }
+        if !displayTerms.isEmpty { return displayTerms }
+        return query
             .split(whereSeparator: { $0.isWhitespace || $0.isNewline })
             .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }

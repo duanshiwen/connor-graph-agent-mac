@@ -112,6 +112,24 @@ struct AppGlobalSearchTests {
         #expect(fixture.viewModel.globalSearchPreviewState.searchTokens.contains("泰国"))
     }
 
+    @Test func globalSearchDisplayTokensHideFallbackCJKGrams() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        fixture.viewModel.updateGlobalSearchQuery("西雅图不相信眼泪")
+        await fixture.viewModel.refreshGlobalSearchPreview(for: "西雅图不相信眼泪")
+
+        let tokens = fixture.viewModel.globalSearchPreviewState.searchTokens
+        #expect(tokens.contains("西雅图不相信眼泪"))
+        #expect(tokens.contains("西雅图"))
+        #expect(tokens.contains("相信"))
+        #expect(tokens.contains("眼泪"))
+        #expect(!tokens.contains("雅图"))
+        #expect(!tokens.contains("图不"))
+        #expect(!tokens.contains("不相"))
+        #expect(!tokens.contains("信眼"))
+    }
+
     @Test func globalSearchMarksLoadingBySectionInsteadOfGlobally() throws {
         var state = GlobalSearchPreviewState(query: "泰国", loadingSections: [.mail, .rss], searchTokens: ["泰国"])
 
