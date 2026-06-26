@@ -63,6 +63,7 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
             entityIDs: matchedEntityIDs,
             referenceTime: query.referenceTime,
             beliefStatusFilter: query.beliefStatusFilter,
+            queryTerms: queryTerms,
             depth: query.reranking.graphExpansionDepth,
             limit: perScopeLimit
         )
@@ -170,6 +171,7 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
         entityIDs: Set<String>,
         referenceTime: Date?,
         beliefStatusFilter: Set<GraphBeliefStatus>,
+        queryTerms: Set<String>,
         depth: Int,
         limit: Int
     ) throws -> [GraphSearchHit] {
@@ -197,6 +199,7 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
                 hit.metadata["graph_hop"] = "\(hop)"
                 hit.metadata["graph_expansion_depth"] = "\(depth)"
                 hit.metadata["graph_context_entity_ids"] = [statement.subjectEntityID, statement.objectEntityID].joined(separator: ",")
+                annotateLexicalEvidence(&hit, queryTerms: queryTerms)
                 hits.append(hit)
                 rank += 1
             }
@@ -356,7 +359,11 @@ public struct SQLiteGraphHybridSearchService: GraphHybridSearchService, Sendable
     }
 
     private func normalizedTerms(_ text: String) -> Set<String> {
-        Set(text.lowercased().split(separator: " ").map(String.init).filter { $0.count >= 2 })
+        let normalized = NativeSearchQueryNormalizer.normalize(text)
+        var values = normalized.displayTokenValues
+        values.append(contentsOf: normalized.strongTokens.map(\.value))
+        values.append(contentsOf: normalized.scoringTokens.filter { !$0.isSoftStopWord }.map(\.value))
+        return Set(values.filter { $0.count >= 2 || text.count <= 2 })
     }
 
     private func score(forRank rank: Int, weight: Double = 1.0) -> Double {
