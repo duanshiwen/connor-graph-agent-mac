@@ -107,6 +107,22 @@ enum AppShellColors {
     static let hairline = Color.secondary.opacity(AppShellLayout.hairlineOpacity)
 }
 
+enum GlobalSearchOverlayGlassStyle {
+    static let selectedAccentOpacity: Double = 0.20
+    static let hoverAccentOpacity: Double = 0.12
+
+    static let outerShadowOpacity: Double = 0.24
+    static let outerShadowRadius: CGFloat = 28
+    static let outerShadowY: CGFloat = 16
+
+    static let edgeHighlightOpacityLight: Double = 0.22
+    static let edgeHighlightOpacityDark: Double = 0.10
+    static let edgeLowlightOpacityLight: Double = 0.10
+    static let edgeLowlightOpacityDark: Double = 0.22
+
+    static let chipStrokeOpacity: Double = 0.10
+}
+
 struct AppPill: View {
     var text: String
     var color: Color = .secondary
