@@ -192,6 +192,7 @@ struct AppSessionCapsuleRepositoryTests {
         #expect(BrowserBuiltInPage.blankHTML.contains("每个会话都有独立的浏览标签、网页选区和工作上下文"))
 
         let errorHTML = BrowserBuiltInPage.errorHTML(failedURLString: "https://bad.example?q=<x>", message: "offline & blocked")
+        #expect(errorHTML.contains("<title>这个页面暂时打不开</title>"))
         #expect(errorHTML.contains("康纳同学 · 页面状态"))
         #expect(errorHTML.contains("这个页面暂时打不开"))
         #expect(errorHTML.contains("换一种方式查找资料"))
