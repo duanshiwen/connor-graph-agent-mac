@@ -393,11 +393,13 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var pendingSourceRuntimeDeletionID: String?
     @Published var pendingSourceRuntimeDeletionName: String?
     @Published var mailBrowserPresentation: NativeMailBrowserPresentation = .empty
+    @Published var mailSearchQuery: String = ""
     @Published var selectedMailAccountID: MailAccountID?
     @Published var selectedMailMailboxID: MailMailboxID?
     @Published var selectedMailMessageID: MailMessageID?
     @Published var isPresentingAddMailAccountSheet: Bool = false
     @Published var calendarBrowserPresentation: NativeCalendarBrowserPresentation = .empty
+    @Published var calendarSearchQuery: String = ""
     @Published var calendarAccounts: [CalendarAccount] = []
     @Published var calendarCollections: [CalendarCollection] = []
     @Published var calendarEvents: [CalendarEvent] = []
@@ -411,6 +413,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var isSyncingSystemContacts: Bool = false
     @Published var contactsSyncMessage: String?
     @Published var rssBrowserPresentation: NativeRSSBrowserPresentation = .empty
+    @Published var rssSearchQuery: String = ""
     @Published var selectedRSSSourceID: RSSSourceID?
     @Published var selectedRSSItemID: RSSItemID?
     @Published var isPresentingAddRSSSourceSheet: Bool = false
@@ -1512,18 +1515,23 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     func showAllGlobalSearchResults(kind: GlobalSearchSectionKind) {
+        let query = globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         switch kind {
         case .chatSessions:
+            sessionSearchQuery = query
             isBrowserVisible = false
             selection = .agentChat
         case .mail:
+            mailSearchQuery = query
             selection = .mail
         case .calendar:
+            calendarSearchQuery = query
             selection = .calendar
         case .rss:
+            rssSearchQuery = query
             selection = .rss
         case .browserHistory:
-            browserHistorySearchQuery = globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+            browserHistorySearchQuery = query
             isBrowserHistoryPanelVisible = true
             showBrowserWorkspace()
             loadBrowserHistory()
