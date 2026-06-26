@@ -95,6 +95,7 @@
 		C7A710000000000000000006 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportDataSetIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7A700000000000000000006 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportDataSetIdentity.swift */; };
 		C7A710000000000000000005 /* Sources/ConnorGraphAgentMac/ChatViewport/CommercialChatViewport.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7A700000000000000000005 /* Sources/ConnorGraphAgentMac/ChatViewport/CommercialChatViewport.swift */; };
 		C7A710000000000000000007 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportTopLoadPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7A700000000000000000007 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportTopLoadPolicy.swift */; };
+		C7A710000000000000000008 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportInitialAnchorPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7A700000000000000000008 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportInitialAnchorPolicy.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -182,6 +183,7 @@
 		C7A700000000000000000006 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportDataSetIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportDataSetIdentity.swift; sourceTree = "<group>"; };
 		C7A700000000000000000005 /* Sources/ConnorGraphAgentMac/ChatViewport/CommercialChatViewport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ChatViewport/CommercialChatViewport.swift; sourceTree = "<group>"; };
 		C7A700000000000000000007 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportTopLoadPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportTopLoadPolicy.swift; sourceTree = "<group>"; };
+		C7A700000000000000000008 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportInitialAnchorPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportInitialAnchorPolicy.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -292,6 +294,7 @@
 				C7A700000000000000000005 /* Sources/ConnorGraphAgentMac/ChatViewport/CommercialChatViewport.swift */,
 				C7A700000000000000000006 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportDataSetIdentity.swift */,
 				C7A700000000000000000007 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportTopLoadPolicy.swift */,
+				C7A700000000000000000008 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportInitialAnchorPolicy.swift */,
 				9A17D0B000000000000005 /* Sources/ConnorGraphAgentMac/AgentComposerOptionBadge.swift */,
 				7C0C0DE00000000000000005 /* Sources/ConnorGraphAgentMac/Composer/AgentComposerAction.swift */,
 				7C0C0DE00000000000000006 /* Sources/ConnorGraphAgentMac/Composer/AgentComposerState.swift */,
@@ -487,6 +490,7 @@
 				C7A710000000000000000005 /* Sources/ConnorGraphAgentMac/ChatViewport/CommercialChatViewport.swift in Sources */,
 				C7A710000000000000000006 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportDataSetIdentity.swift in Sources */,
 				C7A710000000000000000007 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportTopLoadPolicy.swift in Sources */,
+				C7A710000000000000000008 /* Sources/ConnorGraphAgentMac/ChatViewport/ChatViewportInitialAnchorPolicy.swift in Sources */,
 				9A17D0B100000000000005 /* Sources/ConnorGraphAgentMac/AgentComposerOptionBadge.swift in Sources */,
 				7C0C0DE10000000000000005 /* Sources/ConnorGraphAgentMac/Composer/AgentComposerAction.swift in Sources */,
 				7C0C0DE10000000000000006 /* Sources/ConnorGraphAgentMac/Composer/AgentComposerState.swift in Sources */,

@@ -100,7 +100,6 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                         }
                     )
                 }
-                .defaultScrollAnchor(.bottom)
                 .coordinateSpace(name: coordinateSpaceName)
                 .id(dataSetID)
                 .background(
@@ -213,12 +212,36 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
         let scheduledDataSetID = dataSetID
         for delay in AgentChatCollapseScrollSchedule.decisionDelays {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                guard dataSetID == scheduledDataSetID,
-                      hasLaidOutInitialItems
-                else { return }
-                scrollToLatestRenderedItem(proxy: proxy, animated: false)
+                guard dataSetID == scheduledDataSetID else { return }
+                switch initialLatestAnchorDecision() {
+                case .scrollToLatest:
+                    scrollToLatestRenderedItem(proxy: proxy, animated: false)
+                case .wait, .settleWithoutScroll, .stop:
+                    return
+                }
             }
         }
+    }
+
+    private func initialLatestAnchorDecision() -> ChatViewportInitialAnchorDecision {
+        ChatViewportInitialAnchorPolicy.decision(
+            itemCount: items.count,
+            viewportHeight: viewportHeight,
+            contentHeight: contentHeight,
+            distanceToBottom: max(0, bottomSentinelMaxY - viewportHeight),
+            bottomPinThreshold: configuration.bottomPinThreshold,
+            isLoadingOlderItems: isLoadingOlderItems,
+            isPrependingOlderItems: isPrependingOlderItems,
+            isResolvingInitialAnchor: controller.isResolvingInitialAnchor,
+            isPinnedToBottom: controller.isPinnedToBottom
+        )
+    }
+
+    private var isPrependingOlderItems: Bool {
+        if case .correctingAfterDataChange(.prepend) = controller.snapshot.mode {
+            return true
+        }
+        return false
     }
 
     private func scrollToLatestRenderedItem(proxy: ScrollViewProxy, animated: Bool) {
