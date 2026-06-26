@@ -19,35 +19,17 @@ struct TaskManagementRepositoryTests {
         #expect(repository.taskDefinitionsURL.path.contains("/tasks/task-definitions.json"))
     }
 
-    @Test func systemDefaultsIncludeProtectedMemoryOSPipelineTasks() throws {
+    @Test func systemDefaultsDoNotExposeMemoryOSPipelineTasks() throws {
         let now = Date(timeIntervalSince1970: 100)
 
         let tasks = ConnorTaskDefinition.systemDefaults(now: now)
-        let l1Task = try #require(tasks.first { $0.id == "system.memory-os.plan-l1-to-l2" })
-        let l2Task = try #require(tasks.first { $0.id == "system.memory-os.plan-l2-to-knowledge" })
 
-        #expect(l1Task.origin == .system)
-        #expect(l1Task.trigger.kind == .scheduled)
-        #expect(l1Task.trigger.intervalSeconds == 86_400)
-        #expect(l1Task.trigger.recurrence == .interval)
-        #expect(l1Task.target.targetKind == "memory_os.pipeline")
-        #expect(l1Task.target.targetID == "default")
-        #expect(l1Task.target.operationName == "plan_l1_unified_projection_jobs")
-        #expect(l1Task.lifecycle.status == .active)
-        #expect(l1Task.metadata.isProtectedSystemTask)
-
-        #expect(l2Task.origin == .system)
-        #expect(l2Task.trigger.kind == .scheduled)
-        #expect(l2Task.trigger.intervalSeconds == 86_400)
-        #expect(l2Task.trigger.recurrence == .interval)
-        #expect(l2Task.target.targetKind == "memory_os.pipeline")
-        #expect(l2Task.target.targetID == "default")
-        #expect(l2Task.target.operationName == "plan_l2_to_knowledge_jobs")
-        #expect(l2Task.lifecycle.status == .active)
-        #expect(l2Task.metadata.isProtectedSystemTask)
+        #expect(tasks.contains { $0.id == "system.memory-os.plan-l1-to-l2" } == false)
+        #expect(tasks.contains { $0.id == "system.memory-os.plan-l2-to-knowledge" } == false)
+        #expect(tasks.contains { $0.target.targetKind == "memory_os.pipeline" } == false)
     }
 
-    @Test func repositoryBackfillsMemoryOSPipelineDefaults() throws {
+    @Test func repositoryDoesNotBackfillMemoryOSPipelineDefaults() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let repository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
@@ -55,16 +37,17 @@ struct TaskManagementRepositoryTests {
 
         let tasks = try repository.loadOrCreateDefault(now: Date(timeIntervalSince1970: 100))
 
-        #expect(tasks.contains { $0.id == "system.memory-os.plan-l1-to-l2" })
-        #expect(tasks.contains { $0.id == "system.memory-os.plan-l2-to-knowledge" })
+        #expect(tasks.contains { $0.id == "system.memory-os.plan-l1-to-l2" } == false)
+        #expect(tasks.contains { $0.id == "system.memory-os.plan-l2-to-knowledge" } == false)
+        #expect(tasks.contains { $0.target.targetKind == "memory_os.pipeline" } == false)
         #expect(tasks.contains { $0.id == "system.calendar.account.calendar-account-a.refresh" })
     }
 
-    @Test func repositoryReactivatesStoppedProtectedSystemTasksWhenDefaultsLoad() throws {
+    @Test func repositoryDoesNotReactivateNonDefaultProtectedSystemTasksWhenDefaultsLoad() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let repository = AppTaskManagementRepository(storagePaths: AppStoragePaths(applicationSupportDirectory: root))
-        var defaultTask = try #require(ConnorTaskDefinition.systemDefaults(now: Date(timeIntervalSince1970: 0)).first)
+        var defaultTask = makeProtectedCalendarRefreshTask(accountID: "calendar-account-a")
         defaultTask.lifecycle.status = .stopped
         defaultTask.lifecycle.lastErrorMessage = "legacy pause"
         try repository.saveTask(defaultTask)
@@ -72,8 +55,8 @@ struct TaskManagementRepositoryTests {
         let tasks = try repository.loadOrCreateDefault(now: Date(timeIntervalSince1970: 10))
         let reloadedTask = try #require(tasks.first { $0.id == defaultTask.id })
 
-        #expect(reloadedTask.lifecycle.status == .active)
-        #expect(reloadedTask.lifecycle.lastErrorMessage == nil)
+        #expect(reloadedTask.lifecycle.status == .stopped)
+        #expect(reloadedTask.lifecycle.lastErrorMessage == "legacy pause")
         #expect(FileManager.default.fileExists(atPath: repository.taskDefinitionsURL.path))
     }
 

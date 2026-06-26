@@ -195,9 +195,9 @@ public enum AppMemoryOSCLIRouter {
     private static func routePipeline(args: [String], inspector: AppMemoryOSCLIInspector, encoder: JSONEncoder) throws -> String {
         switch args.first ?? "policy" {
         case "policy": return try encode(inspector.pipelinePolicy(), encoder: encoder)
-        case "plan-l1": return try encode(try inspector.planL1(), encoder: encoder)
-        case "plan-l2": return try encode(try inspector.planL2(), encoder: encoder)
-        default: return try encode(MemoryOSCLIError(error: "unknown_pipeline_command", usage: "connor memory pipeline policy|plan-l1|plan-l2"), encoder: encoder)
+        case "plan-l1", "plan-l1-knowledge": return try encode(try inspector.planL1(), encoder: encoder)
+        case "plan-l2", "plan-l2-knowledge": return try encode(try inspector.planL2(), encoder: encoder)
+        default: return try encode(MemoryOSCLIError(error: "unknown_pipeline_command", usage: "connor memory pipeline policy|plan-l1-knowledge|plan-l2-knowledge"), encoder: encoder)
         }
     }
 
