@@ -129,3 +129,59 @@ private func temporaryMemoryOSDatabaseURL(_ name: String = UUID().uuidString) ->
 
     #expect(try store.schemaHealthReport().status == .healthy)
 }
+
+@Test func sqliteMemoryOSStoreRoundTripsBackgroundRunTrace() throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryMemoryOSDatabaseURL().path)
+    try store.migrate()
+    let now = Date(timeIntervalSince1970: 2_000)
+
+    let run = MemoryOSBackgroundRunRecord(
+        id: "run-1",
+        queueItemID: "queue-1",
+        kind: "memory.l1.synthesize_knowledge",
+        source: "l1_capture_events",
+        status: .running,
+        startedAt: now,
+        modelID: "test-model",
+        iterationCount: 1,
+        toolCallCount: 1,
+        statelessBatch: true,
+        metadata: ["batch": "current"]
+    )
+    try store.save(backgroundRun: run)
+    try store.save(backgroundMessage: MemoryOSBackgroundMessageRecord(
+        id: "message-1",
+        runID: run.id,
+        sequence: 0,
+        role: .user,
+        content: "Preset prompt + current batch only",
+        metadata: ["scope": "initial"]
+    ))
+    try store.save(backgroundToolCall: MemoryOSBackgroundToolCallRecord(
+        id: "tool-1",
+        runID: run.id,
+        iteration: 1,
+        toolName: "memory_os_search",
+        argumentsJSON: #"{"query":"current user","layers":["L3","L4"]}"#,
+        resultJSON: #"{"results":[]}"#,
+        status: .succeeded,
+        startedAt: now,
+        finishedAt: now.addingTimeInterval(1),
+        metadata: ["trace": "run-local"]
+    ))
+
+    let runs = try store.backgroundRuns(limit: 10)
+    let loadedRun = try #require(runs.first { $0.id == run.id })
+    #expect(loadedRun.statelessBatch)
+    #expect(loadedRun.queueItemID == "queue-1")
+    #expect(loadedRun.metadata["batch"] == "current")
+
+    let messages = try store.backgroundMessages(runID: run.id)
+    #expect(messages.map(\.content) == ["Preset prompt + current batch only"])
+    #expect(messages.first?.metadata["scope"] == "initial")
+
+    let toolCalls = try store.backgroundToolCalls(runID: run.id)
+    #expect(toolCalls.count == 1)
+    #expect(toolCalls.first?.toolName == "memory_os_search")
+    #expect(toolCalls.first?.metadata["trace"] == "run-local")
+}
