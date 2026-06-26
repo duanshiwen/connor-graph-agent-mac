@@ -1178,14 +1178,20 @@ final class AppViewModel: NSObject, ObservableObject {
             }
         } catch {
             recordGlobalSearchTiming(query: trimmed, section: "nativeGrouped", startedAt: Date(), returnedCount: 0, backend: "error:\(String(describing: error))")
+            let userFacingErrorMessage = Self.userFacingGlobalSearchErrorMessage(for: error)
             for kind in NativeSearchSourceKind.allCases {
                 applyGlobalSearchNativeSectionResult(
-                    GlobalSearchNativeSectionResult(kind: GlobalSearchSectionKind(nativeSourceKind: kind), results: [], errorMessage: String(describing: error)),
+                    GlobalSearchNativeSectionResult(kind: GlobalSearchSectionKind(nativeSourceKind: kind), results: [], errorMessage: userFacingErrorMessage),
                     query: trimmed,
                     tokens: tokens
                 )
             }
         }
+    }
+
+    static func userFacingGlobalSearchErrorMessage(for error: Error) -> String? {
+        if error is GlobalSearchTimeoutError { return nil }
+        return String(describing: error)
     }
 
     private func recordGlobalSearchTiming(query: String, section: String, startedAt: Date, returnedCount: Int, backend: String) {

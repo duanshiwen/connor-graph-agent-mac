@@ -35,4 +35,16 @@ struct NativeSourceSearchFTSQueryBuilderTests {
         #expect(!query.contains("("))
         #expect(!query.contains(")"))
     }
+
+    @Test func chineseQueriesPreferSemanticTermsOverBroadFallbackGrams() {
+        let normalized = NativeSearchQueryNormalizer.normalize("越南有什么好玩的嘛")
+        let query = NativeSourceSearchFTSQueryBuilder.query(for: normalized)
+
+        #expect(query.contains("越南"))
+        #expect(query.contains("好玩"))
+        #expect(!query.contains("南有"))
+        #expect(!query.contains("什么"))
+        #expect(!query.contains("么好"))
+    }
 }
+

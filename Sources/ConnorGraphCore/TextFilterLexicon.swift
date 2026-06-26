@@ -146,7 +146,7 @@ public struct TextFilterLexicon: Sendable {
         }
 
         add(["a", "an", "the", "and", "or", "but", "of", "to", "in", "on", "for", "with", "by", "at", "from", "is", "are", "was", "were", "be", "been", "being", "this", "that", "these", "those", "about", "into", "as"], language: .english, categories: [.englishStopWord])
-        add(["的", "了", "着", "过", "吗", "呢", "啊", "呀", "吧", "么", "得", "地", "所", "请", "请问", "大概", "大约", "左右", "基本", "比较", "非常", "特别", "其实", "就是", "还有", "另外"], language: .chinese, categories: [.functionWord])
+        add(["的", "了", "着", "过", "吗", "嘛", "呢", "啊", "呀", "吧", "啦", "么", "得", "地", "所", "请", "请问", "大概", "大约", "左右", "基本", "比较", "非常", "特别", "其实", "就是", "还有", "另外"], language: .chinese, categories: [.functionWord])
         add(["我", "你", "他", "她", "它", "我们", "你们", "他们", "她们", "它们", "这个", "那个", "这些", "那些", "这里", "那里", "自己", "别人", "大家"], language: .chinese, categories: [.pronoun])
         add(["和", "与", "或", "以及", "并且", "但是", "然后", "因为", "所以", "如果", "还是", "或者", "而且", "不过", "虽然", "因此"], language: .chinese, categories: [.conjunction])
         add(["在", "从", "到", "对", "向", "把", "被", "给", "关于", "对于", "里面", "之间", "附近", "之前", "之后", "以内", "以上", "以下"], language: .chinese, categories: [.preposition])
@@ -154,7 +154,7 @@ public struct TextFilterLexicon: Sendable {
         add(["什么", "为什么", "怎么", "怎样", "如何", "哪里", "哪个", "哪些", "多少", "几", "几个", "是否", "有没有", "多少钱", "多长时间", "多久", "多远", "多大", "多贵", "便宜吗", "贵不贵"], language: .chinese, categories: [.questionWord], weight: 0.2)
         add(["个", "些", "种", "条", "件", "本", "次", "家", "位", "名", "份", "张", "只", "项", "段", "篇", "组", "批", "类", "一个", "一些", "一下", "一点", "每个", "每条", "每件", "每次", "每位", "每份", "一段", "一篇", "一张"], language: .chinese, categories: [.quantifier], weight: 0.15)
         add(["今天", "明天", "后天", "昨天", "前天", "现在", "当前", "时候", "时间", "日期", "星期", "周", "月份", "年份", "上午", "下午", "晚上", "中午", "最近", "刚才", "刚刚", "以后", "以前", "礼拜", "周一", "周二", "周三", "周四", "周五", "周六", "周日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日", "星期天"], language: .chinese, categories: [.temporalFiller], weight: 0.25)
-        add(["去", "来", "做", "看", "找", "查", "搜", "问", "帮", "帮我", "帮忙", "告诉", "介绍", "想", "知道", "查询", "搜索", "整理", "推荐", "规划"], language: .chinese, categories: [.genericVerb], weight: 0.25)
+        add(["有", "去", "来", "做", "看", "找", "查", "搜", "问", "帮", "帮我", "帮忙", "告诉", "介绍", "想", "知道", "查询", "搜索", "整理", "推荐", "规划"], language: .chinese, categories: [.genericVerb], weight: 0.25)
         return entries
     }()
 }
