@@ -100,6 +100,7 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                         }
                     )
                 }
+                .defaultScrollAnchor(.bottom)
                 .coordinateSpace(name: coordinateSpaceName)
                 .id(dataSetID)
                 .background(
@@ -228,13 +229,20 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
             itemCount: items.count,
             viewportHeight: viewportHeight,
             contentHeight: contentHeight,
-            distanceToBottom: max(0, bottomSentinelMaxY - viewportHeight),
+            distanceToBottom: measuredDistanceToBottom,
             bottomPinThreshold: configuration.bottomPinThreshold,
             isLoadingOlderItems: isLoadingOlderItems,
             isPrependingOlderItems: isPrependingOlderItems,
             isResolvingInitialAnchor: controller.isResolvingInitialAnchor,
             isPinnedToBottom: controller.isPinnedToBottom
         )
+    }
+
+    private var measuredDistanceToBottom: CGFloat {
+        if bottomSentinelMaxY > 0 {
+            return max(0, bottomSentinelMaxY - viewportHeight)
+        }
+        return max(0, contentHeight - viewportHeight)
     }
 
     private var isPrependingOlderItems: Bool {
