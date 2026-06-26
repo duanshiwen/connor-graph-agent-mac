@@ -15,6 +15,7 @@ struct BrowserWorkspaceView: View {
     @ObservedObject var viewModel: AppViewModel
     @State private var webViewsByTabID: [UUID: WKWebView] = [:]
     @State private var addressText: String = ""
+    @State private var isAddressEditing = false
     @State private var focusAddressRequestID = UUID()
     @State private var questionText = ""
     @State private var browserKeyMonitor: Any?
@@ -141,10 +142,12 @@ struct BrowserWorkspaceView: View {
         .onChange(of: viewModel.selectedChatSessionID) { _, _ in
             pauseAllBrowserMedia()
             ensureInitialTab()
+            isAddressEditing = false
             syncAddressTextWithActiveTab()
             questionText = ""
         }
         .onChange(of: activeSelectedTabID) { _, _ in
+            isAddressEditing = false
             syncAddressTextWithActiveTab()
             markVisibleTabInLiveStore()
             questionText = ""
@@ -316,6 +319,7 @@ struct BrowserWorkspaceView: View {
                 text: $addressText,
                 placeholder: "输入网址或搜索词，按 Return 打开",
                 focusRequestID: focusAddressRequestID,
+                onEditingChanged: { isAddressEditing = $0 },
                 onSubmit: navigateFromAddressBar
             )
             .frame(height: 28)
@@ -387,7 +391,10 @@ struct BrowserWorkspaceView: View {
             session.tabs.append(tab)
             if select { session.selectedTabID = tab.id }
         }
-        if select { addressText = normalized }
+        if select {
+            isAddressEditing = false
+            addressText = normalized
+        }
     }
 
     private func selectTab(_ id: BrowserTabState.ID) {
@@ -395,6 +402,7 @@ struct BrowserWorkspaceView: View {
             session.selectedTabID = id
             session.selectionPopover = nil
         }
+        isAddressEditing = false
         syncAddressTextWithActiveTab()
     }
 
@@ -425,6 +433,7 @@ struct BrowserWorkspaceView: View {
         if shouldReturnToConversation {
             viewModel.returnFromBrowserWorkspace()
         } else {
+            isAddressEditing = false
             syncAddressTextWithActiveTab()
         }
     }
@@ -451,7 +460,7 @@ struct BrowserWorkspaceView: View {
             session.tabs[index].lastAccessedAt = Date()
             session.tabs[index].restorationStatus = .live
         }
-        if tabID == activeSelectedTabID, !displayURL.isEmpty { addressText = displayURL }
+        if tabID == activeSelectedTabID, !displayURL.isEmpty, !isAddressEditing { addressText = displayURL }
 
         // Record browser history when page finishes loading
         if !state.isLoading, !state.url.isEmpty, !state.url.hasPrefix("connor://"), !state.url.hasPrefix("about:"), !state.url.hasPrefix("data:") {
@@ -464,7 +473,7 @@ struct BrowserWorkspaceView: View {
     }
 
     private func syncAddressTextWithActiveTab() {
-        guard let activeTab else { return }
+        guard !isAddressEditing, let activeTab else { return }
         addressText = activeTab.navigationState.url.isEmpty ? activeTab.initialURLString : activeTab.navigationState.url
     }
 
@@ -491,6 +500,7 @@ struct BrowserWorkspaceView: View {
     }
 
     private func navigateFromAddressBar() {
+        isAddressEditing = false
         let trimmed = addressText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let urlString = normalizedURLString(from: trimmed) else { return }
         viewModel.browserTargetURLString = urlString
@@ -821,6 +831,7 @@ private struct BrowserAddressTextField: NSViewRepresentable {
     @Binding var text: String
     var placeholder: String
     var focusRequestID: UUID
+    var onEditingChanged: (Bool) -> Void
     var onSubmit: () -> Void
 
     func makeNSView(context: Context) -> NSTextField {
@@ -838,7 +849,10 @@ private struct BrowserAddressTextField: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSTextField, context: Context) {
-        if nsView.stringValue != text {
+        context.coordinator.onEditingChanged = onEditingChanged
+        let editor = nsView.currentEditor()
+        let isEditing = nsView.window?.firstResponder === editor || nsView.window?.firstResponder === nsView
+        if !isEditing, nsView.stringValue != text {
             context.coordinator.isApplyingSwiftUIValue = true
             nsView.stringValue = text
             context.coordinator.isApplyingSwiftUIValue = false
@@ -851,18 +865,28 @@ private struct BrowserAddressTextField: NSViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text, onSubmit: onSubmit)
+        Coordinator(text: $text, onEditingChanged: onEditingChanged, onSubmit: onSubmit)
     }
 
     final class Coordinator: NSObject, NSTextFieldDelegate {
         @Binding var text: String
+        var onEditingChanged: (Bool) -> Void
         var onSubmit: () -> Void
         var lastFocusRequestID: UUID?
         var isApplyingSwiftUIValue = false
 
-        init(text: Binding<String>, onSubmit: @escaping () -> Void) {
+        init(text: Binding<String>, onEditingChanged: @escaping (Bool) -> Void, onSubmit: @escaping () -> Void) {
             _text = text
+            self.onEditingChanged = onEditingChanged
             self.onSubmit = onSubmit
+        }
+
+        func controlTextDidBeginEditing(_ notification: Notification) {
+            onEditingChanged(true)
+        }
+
+        func controlTextDidEndEditing(_ notification: Notification) {
+            onEditingChanged(false)
         }
 
         func controlTextDidChange(_ notification: Notification) {
@@ -870,10 +894,7 @@ private struct BrowserAddressTextField: NSViewRepresentable {
                   let field = notification.object as? NSTextField else { return }
             let newValue = field.stringValue
             guard text != newValue else { return }
-            DispatchQueue.main.async { [weak self] in
-                guard let self, self.text != newValue else { return }
-                self.text = newValue
-            }
+            text = newValue
         }
 
         func scheduleFocus(for field: NSTextField) {
@@ -889,6 +910,7 @@ private struct BrowserAddressTextField: NSViewRepresentable {
         func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {
                 text = (control as? NSTextField)?.stringValue ?? text
+                onEditingChanged(false)
                 onSubmit()
                 return true
             }
