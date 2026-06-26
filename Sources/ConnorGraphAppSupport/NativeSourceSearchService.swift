@@ -159,18 +159,21 @@ public actor NativeSourceSearchService {
         let allQueryTokens = normalizedQuery.tokens.map(\.value)
         let softStopWords = normalizedQuery.softStopTokenValues
         let now = Date()
-        let candidates = documents.values.filter { document in
+        let filteredDocuments = documents.values.filter { document in
             if let kinds = query.sourceKinds, !kinds.contains(document.sourceKind) { return false }
             if let ids = query.sourceInstanceIDs, !(document.sourceInstanceID.map { ids.contains($0) } ?? false) { return false }
             if !query.includeHidden, document.state["isHidden"] == "true" { return false }
             if !query.includeArchived, document.state["isArchived"] == "true" { return false }
             if let temporalFilter = query.temporalFilter, !temporalFilter.contains(document.temporal, sourceKind: document.sourceKind) { return false }
             if !Self.matchesFieldConstraints(query.fieldConstraints, document: document) { return false }
+            return true
+        }
+        let candidates = filteredDocuments.filter { document in
             if tokens.isEmpty { return true }
             return Self.score(document: document, tokens: tokens, phrase: normalizedQuery.normalizedText, now: now, rankingProfile: query.rankingProfile).lexicalScore > 0
         }
 
-        let corpusStatistics = Self.corpusStatistics(for: Array(documents.values), tokens: tokens)
+        let corpusStatistics = Self.corpusStatistics(for: Array(filteredDocuments), tokens: tokens)
         let results = candidates.map { document -> NativeSearchResult in
             let scored = Self.score(document: document, tokens: tokens, phrase: normalizedQuery.normalizedText, now: now, rankingProfile: query.rankingProfile, corpusStatistics: corpusStatistics)
             let matchedTerms = Self.matchedTerms(for: document, tokens: tokens)
