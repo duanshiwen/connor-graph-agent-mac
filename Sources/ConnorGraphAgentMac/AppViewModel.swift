@@ -1229,19 +1229,6 @@ final class AppViewModel: NSObject, ObservableObject {
         ))
     }
 
-    nonisolated private static func withGlobalSearchTimeout<T: Sendable>(milliseconds: Int, operation: @escaping @Sendable () async throws -> T) async throws -> T {
-        try await withThrowingTaskGroup(of: T.self) { group in
-            group.addTask { try await operation() }
-            group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(milliseconds) * 1_000_000)
-                throw GlobalSearchTimeoutError.hardTimeout(milliseconds: milliseconds)
-            }
-            guard let value = try await group.next() else { throw GlobalSearchTimeoutError.hardTimeout(milliseconds: milliseconds) }
-            group.cancelAll()
-            return value
-        }
-    }
-
     private func applyGlobalSearchNativeHealth(_ health: NativeSourceSearchHealthSnapshot, query: String, tokens: [String]) {
         guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == query else { return }
         var state = globalSearchPreviewState

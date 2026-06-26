@@ -45,13 +45,38 @@ struct GlobalSearchPreviewCoordinatorTests {
         #expect(received.allSatisfy { $0.errorMessage == nil })
         #expect(elapsed < 0.2)
     }
+
+    @Test func previewResultsCancellationStopsOutstandingSearches() async throws {
+        let backend = DelayedNativeSourceSearchBackend(delays: [
+            .mail: 20_000_000,
+            .rss: 400_000_000,
+            .calendar: 400_000_000,
+            .browserHistory: 400_000_000
+        ])
+        let coordinator = GlobalSearchPreviewCoordinator(backend: backend, timeoutMilliseconds: 1_000)
+        var iterator: AsyncStream<GlobalSearchNativePreviewSectionResult>.Iterator? = coordinator
+            .previewResults(query: "phoenix", limitsBySource: [.mail: 3, .rss: 3, .calendar: 3, .browserHistory: 3])
+            .makeAsyncIterator()
+
+        _ = await iterator?.next()
+        iterator = nil
+        try await Task.sleep(nanoseconds: 80_000_000)
+
+        let cancelledKinds = await backend.cancelledKinds()
+        #expect(!cancelledKinds.isEmpty)
+    }
 }
 
 private actor DelayedNativeSourceSearchBackend: NativeSourceSearchBackend {
     var delays: [NativeSearchSourceKind: UInt64]
+    private var cancelled: Set<NativeSearchSourceKind> = []
 
     init(delays: [NativeSearchSourceKind: UInt64]) {
         self.delays = delays
+    }
+
+    func cancelledKinds() -> Set<NativeSearchSourceKind> {
+        cancelled
     }
 
     func upsert(_ documents: [NativeSearchDocument]) async throws {}
@@ -62,7 +87,12 @@ private actor DelayedNativeSourceSearchBackend: NativeSourceSearchBackend {
     func search(_ query: NativeSearchQuery) async throws -> [NativeSearchResult] {
         let kind = query.sourceKinds?.first ?? .mail
         if let delay = delays[kind] {
-            try await Task.sleep(nanoseconds: delay)
+            do {
+                try await Task.sleep(nanoseconds: delay)
+            } catch is CancellationError {
+                cancelled.insert(kind)
+                throw CancellationError()
+            }
         }
         return [Self.result(kind: kind)]
     }
