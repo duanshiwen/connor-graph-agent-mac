@@ -85,11 +85,32 @@ public actor SQLiteNativeSourceSearchBackend: NativeSourceSearchBackend {
     }
 
     public func search(_ query: NativeSearchQuery) async throws -> [NativeSearchResult] {
+        try searchPrepared(query).results
+    }
+
+    public func searchGrouped(_ query: NativeSearchQuery, limitsBySource: [NativeSearchSourceKind: Int]) async throws -> [NativeSearchSourceKind: [NativeSearchResult]] {
+        let globalLimit = max(limitsBySource.values.reduce(0, +), query.limit)
+        var expanded = query
+        expanded.sourceKinds = Set(limitsBySource.keys)
+        expanded.limit = NativeSearchLimitPolicy.clampSearchLimit(max(globalLimit, 1))
+        let results = try searchPrepared(expanded).results
+        var grouped: [NativeSearchSourceKind: [NativeSearchResult]] = [:]
+        for result in results {
+            let limit = limitsBySource[result.sourceKind] ?? query.limit
+            if grouped[result.sourceKind, default: []].count < limit {
+                grouped[result.sourceKind, default: []].append(result)
+            }
+        }
+        return grouped
+    }
+
+    private func searchPrepared(_ query: NativeSearchQuery) throws -> (results: [NativeSearchResult], usedMatch: Bool) {
         let normalizedQuery = NativeSearchQueryNormalizer.normalize(query.text)
         let tokens = normalizedQuery.scoringTokens.map(\.value)
         let allQueryTokens = normalizedQuery.tokens.map(\.value)
         let softStopWords = normalizedQuery.softStopTokenValues
-        let candidateDocuments = try loadCandidates(query: query, tokens: tokens)
+        let loaded = try loadCandidates(query: query, normalizedQuery: normalizedQuery)
+        let candidateDocuments = loaded.documents
         let corpusStatistics = NativeSourceSearchService.corpusStatistics(for: candidateDocuments, tokens: tokens)
         let now = Date()
         let results = candidateDocuments.compactMap { document -> NativeSearchResult? in
@@ -103,7 +124,7 @@ public actor SQLiteNativeSourceSearchBackend: NativeSourceSearchBackend {
             if !tokens.isEmpty, scored.lexicalScore <= 0 { return nil }
             let matchedTerms = NativeSourceSearchService.matchedTerms(for: document, tokens: tokens)
             let snippet = query.includeBodySnippets ? NativeSourceSearchService.bestSnippet(for: document, tokens: matchedTerms.isEmpty ? tokens : matchedTerms) : document.summary
-            let rankReason = "backend=sqlite-fts5; bm25=\(NativeSourceSearchService.rounded(scored.lexicalScore)); idf=\(NativeSourceSearchService.idfReason(tokens: tokens, statistics: corpusStatistics)); freshness=\(NativeSourceSearchService.rounded(scored.freshnessScore)); fields=\(scored.matchedFields.joined(separator: ","))"
+            let rankReason = "backend=sqlite-fts5; match=\(loaded.usedMatch); bm25=\(NativeSourceSearchService.rounded(scored.lexicalScore)); idf=\(NativeSourceSearchService.idfReason(tokens: tokens, statistics: corpusStatistics)); freshness=\(NativeSourceSearchService.rounded(scored.freshnessScore)); fields=\(scored.matchedFields.joined(separator: ","))"
             let timeReason = NativeSourceSearchService.timeReason(for: document, temporalFilter: query.temporalFilter)
             return NativeSearchResult(
                 id: document.id,
@@ -132,9 +153,9 @@ public actor SQLiteNativeSourceSearchBackend: NativeSourceSearchBackend {
                 )
             )
         }
-        return Array(results.sorted { lhs, rhs in
+        return (Array(results.sorted { lhs, rhs in
             NativeSourceSearchService.compare(lhs, rhs, sort: query.temporalSort)
-        }.prefix(query.limit))
+        }.prefix(query.limit)), loaded.usedMatch)
     }
 
     public func health() async -> NativeSourceSearchHealthSnapshot {
@@ -283,54 +304,60 @@ public actor SQLiteNativeSourceSearchBackend: NativeSourceSearchBackend {
         return try queryRows("SELECT id FROM native_search_docs WHERE source_kind = ?", bindings: [.text(kind.rawValue)]).compactMap { $0[0].text }
     }
 
-    private func loadCandidates(query: NativeSearchQuery, tokens: [String]) throws -> [NativeSearchDocument] {
-        var sql = "SELECT document_json FROM native_search_docs"
-        var clauses: [String] = []
+    private func loadCandidates(query: NativeSearchQuery, normalizedQuery: NativeSearchNormalizedQuery) throws -> (documents: [NativeSearchDocument], usedMatch: Bool) {
+        let matchQuery = NativeSourceSearchFTSQueryBuilder.query(for: normalizedQuery)
+        let useMatch = !matchQuery.isEmpty
         var bindings: [SQLiteBinding] = []
+        var clauses: [String] = []
+        let selectPrefix: String
+        if useMatch {
+            selectPrefix = """
+            SELECT d.document_json FROM native_search_fts f
+            JOIN native_search_docs d ON d.id = f.id
+            """
+            clauses.append("native_search_fts MATCH ?")
+            bindings.append(.text(matchQuery))
+        } else {
+            selectPrefix = "SELECT document_json FROM native_search_docs d"
+        }
         if let kinds = query.sourceKinds, !kinds.isEmpty {
-            clauses.append("source_kind IN (\(Array(repeating: "?", count: kinds.count).joined(separator: ",")))")
+            clauses.append("d.source_kind IN (\(Array(repeating: "?", count: kinds.count).joined(separator: ",")))")
             bindings.append(contentsOf: kinds.map { .text($0.rawValue) })
         }
         if let ids = query.sourceInstanceIDs, !ids.isEmpty {
-            clauses.append("source_instance_id IN (\(Array(repeating: "?", count: ids.count).joined(separator: ",")))")
+            clauses.append("d.source_instance_id IN (\(Array(repeating: "?", count: ids.count).joined(separator: ",")))")
             bindings.append(contentsOf: ids.map { .text($0) })
         }
-        if !query.includeHidden { clauses.append("is_hidden = 0") }
-        if !query.includeArchived { clauses.append("is_archived = 0") }
+        if !query.includeHidden { clauses.append("d.is_hidden = 0") }
+        if !query.includeArchived { clauses.append("d.is_archived = 0") }
         if let temporalFilter = query.temporalFilter {
             if let start = temporalFilter.start {
-                clauses.append("primary_time >= ?")
+                clauses.append("d.primary_time >= ?")
                 bindings.append(.double(start.timeIntervalSince1970))
             }
             if let end = temporalFilter.end {
-                clauses.append("primary_time < ?")
+                clauses.append("d.primary_time < ?")
                 bindings.append(.double(end.timeIntervalSince1970))
             }
         }
-        if !tokens.isEmpty {
-            let tokenClauses = tokens.map { _ in "search_text LIKE ?" }.joined(separator: " OR ")
-            clauses.append("(\(tokenClauses))")
-            bindings.append(contentsOf: tokens.map { .text("%\($0)%") })
-        }
+        var sql = selectPrefix
         if !clauses.isEmpty { sql += " WHERE " + clauses.joined(separator: " AND ") }
-        sql += " LIMIT 1000"
-        return try queryRows(sql, bindings: bindings).compactMap { row in
+        if useMatch {
+            sql += " ORDER BY bm25(native_search_fts) ASC, d.primary_time DESC"
+        } else {
+            sql += " ORDER BY d.primary_time DESC"
+        }
+        sql += " LIMIT ?"
+        bindings.append(.int(max(query.limit, 1)))
+        let documents: [NativeSearchDocument] = try queryRows(sql, bindings: bindings).compactMap { row -> NativeSearchDocument? in
             guard let data = row[0].blob else { return nil }
             return try decoder.decode(NativeSearchDocument.self, from: data)
         }
+        return (documents, useMatch)
     }
 
     private func searchableText(for document: NativeSearchDocument) -> String {
-        [
-            document.title,
-            document.summary,
-            document.participants.joined(separator: " "),
-            document.location ?? "",
-            document.body ?? "",
-            document.metadata.values.joined(separator: " ")
-        ]
-        .joined(separator: " ")
-        .lowercased()
+        NativeSourceSearchIndexedTextBuilder.searchableText(for: document)
     }
 
     private enum SQLiteBinding {

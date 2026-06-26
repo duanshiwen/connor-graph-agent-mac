@@ -7,11 +7,23 @@ public protocol NativeSourceSearchBackend: Sendable {
     func deleteBySource(kind: NativeSearchSourceKind, sourceInstanceID: String?) async throws
     func rebuildSource(kind: NativeSearchSourceKind, sourceInstanceID: String?, documents: [NativeSearchDocument]) async throws
     func search(_ query: NativeSearchQuery) async throws -> [NativeSearchResult]
+    func searchGrouped(_ query: NativeSearchQuery, limitsBySource: [NativeSearchSourceKind: Int]) async throws -> [NativeSearchSourceKind: [NativeSearchResult]]
     func searchPage(_ request: NativeSearchPageRequest) async throws -> NativeSearchPage
     func health() async -> NativeSourceSearchHealthSnapshot
 }
 
 public extension NativeSourceSearchBackend {
+    func searchGrouped(_ query: NativeSearchQuery, limitsBySource: [NativeSearchSourceKind: Int]) async throws -> [NativeSearchSourceKind: [NativeSearchResult]] {
+        var grouped: [NativeSearchSourceKind: [NativeSearchResult]] = [:]
+        for (kind, limit) in limitsBySource {
+            var sourceQuery = query
+            sourceQuery.sourceKinds = [kind]
+            sourceQuery.limit = limit
+            grouped[kind] = try await search(sourceQuery)
+        }
+        return grouped
+    }
+
     func searchPage(_ request: NativeSearchPageRequest) async throws -> NativeSearchPage {
         let backendKind = String(describing: Self.self)
         let signature = NativeSearchQuerySignature.signature(for: request.query)
