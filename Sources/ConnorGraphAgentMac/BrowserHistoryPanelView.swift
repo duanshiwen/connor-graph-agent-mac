@@ -90,14 +90,22 @@ struct BrowserHistoryPanelView: View {
     // MARK: - Empty State
 
     private var emptyState: some View {
-        VStack(spacing: 8) {
+        let isSearching = !viewModel.browserHistorySearchQuery.isEmpty
+
+        return VStack(spacing: 8) {
             Spacer()
             Image(systemName: "clock")
                 .font(.system(size: 32))
                 .foregroundStyle(.tertiary)
-            Text(viewModel.browserHistorySearchQuery.isEmpty ? "暂无浏览记录" : "没有匹配的记录")
-                .font(BrowserFloatingTypography.hint)
+            Text(isSearching ? "没有找到匹配的浏览记录" : "还没有浏览记录")
+                .font(BrowserFloatingTypography.hint.weight(.semibold))
                 .foregroundStyle(.secondary)
+            Text(isSearching ? "换个关键词试试，或者回到浏览器继续打开新的网页。" : "你在康纳同学里打开过的网页会出现在这里。之后可以从历史记录回到资料现场，继续和会话一起工作。")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+                .padding(.horizontal, 18)
             Spacer()
         }
         .frame(maxWidth: .infinity)
