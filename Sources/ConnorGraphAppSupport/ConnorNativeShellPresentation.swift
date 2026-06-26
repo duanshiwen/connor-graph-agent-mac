@@ -231,25 +231,25 @@ public struct ConnorNativeShellPresentation: Codable, Sendable, Equatable {
         defaultSelection: .agentChat,
         sidebarGroups: [
             ConnorNativeShellSidebarGroup(id: "work", title: "Work", items: [
-                ConnorNativeShellSidebarItem(id: .agentChat, title: "Sessions", subtitle: "Graph-backed conversations", systemImage: "message.fill", isPrimary: true, emptyStateTitle: "No sessions yet", emptyStateActionTitle: "New Session"),
-                ConnorNativeShellSidebarItem(id: .browserWorkspace, title: "Browser Workspace", subtitle: "In-app browsing surface", systemImage: "globe", emptyStateTitle: "Browser hidden", emptyStateActionTitle: "Toggle Browser")
+                ConnorNativeShellSidebarItem(id: .agentChat, title: "Sessions", subtitle: "Graph-backed conversations", systemImage: "message.fill", isPrimary: true, emptyStateTitle: "还没有会话", emptyStateActionTitle: "开始新会话"),
+                ConnorNativeShellSidebarItem(id: .browserWorkspace, title: "Browser Workspace", subtitle: "In-app browsing surface", systemImage: "globe", emptyStateTitle: "浏览器暂时收起", emptyStateActionTitle: "打开浏览器")
             ]),
             ConnorNativeShellSidebarGroup(id: "memory", title: "Memory", items: [
-                ConnorNativeShellSidebarItem(id: .graphMemory, title: "Graph Memory", subtitle: "Context, feedback, review", systemImage: "brain.head.profile", badgeStyle: .warning, isPrimary: true, riskLevel: .medium, emptyStateTitle: "No memory reviews", emptyStateActionTitle: "Inspect Memory"),
+                ConnorNativeShellSidebarItem(id: .graphMemory, title: "Graph Memory", subtitle: "Context, feedback, review", systemImage: "brain.head.profile", badgeStyle: .warning, isPrimary: true, riskLevel: .medium, emptyStateTitle: "暂无记忆审查", emptyStateActionTitle: "查看记忆"),
                 ConnorNativeShellSidebarItem(id: .search, title: "Search", subtitle: "Hybrid graph retrieval", systemImage: "magnifyingglass"),
                 ConnorNativeShellSidebarItem(id: .graphEntities, title: "Graph", subtitle: "Entities, statements, episodes", systemImage: "point.3.connected.trianglepath.dotted")
             ]),
             ConnorNativeShellSidebarGroup(id: "governance", title: "Governance", items: [
-                ConnorNativeShellSidebarItem(id: .approvals, title: "Approvals", subtitle: "Permissions and reviews", systemImage: "checkmark.shield", badgeStyle: .warning, isPrimary: true, riskLevel: .high, emptyStateTitle: "No pending approvals", emptyStateActionTitle: "Review Policy"),
+                ConnorNativeShellSidebarItem(id: .approvals, title: "Approvals", subtitle: "Permissions and reviews", systemImage: "checkmark.shield", badgeStyle: .warning, isPrimary: true, riskLevel: .high, emptyStateTitle: "暂无待审批事项", emptyStateActionTitle: "查看权限策略"),
                 ConnorNativeShellSidebarItem(id: .automation, title: "Automation", subtitle: "Rules, history, rate limits", systemImage: "bolt.badge.clock", badgeStyle: .warning, riskLevel: .medium),
-                ConnorNativeShellSidebarItem(id: .localAutomationSurface, title: "Local API / CLI", subtitle: "Scriptable automation surface", systemImage: "terminal", badgeStyle: .info, isPrimary: true, riskLevel: .medium, emptyStateTitle: "No local automation calls", emptyStateActionTitle: "Copy CLI Command"),
+                ConnorNativeShellSidebarItem(id: .localAutomationSurface, title: "Local API / CLI", subtitle: "Scriptable automation surface", systemImage: "terminal", badgeStyle: .info, isPrimary: true, riskLevel: .medium, emptyStateTitle: "暂无本地自动化调用", emptyStateActionTitle: "复制 CLI 命令"),
                 ConnorNativeShellSidebarItem(id: .productOS, title: "Product OS", subtitle: "Registry, labels, readiness", systemImage: "square.grid.2x2", isPrimary: true)
             ]),
             ConnorNativeShellSidebarGroup(id: "extensions", title: "Extensions", items: [
-                ConnorNativeShellSidebarItem(id: .mail, title: "Mail", subtitle: "Native mail", systemImage: "envelope.badge.shield.half.filled", badgeStyle: .info, isPrimary: true, riskLevel: .high, emptyStateTitle: "No mail accounts", emptyStateActionTitle: "Add Mail Account"),
-                ConnorNativeShellSidebarItem(id: .calendar, title: "Calendar", subtitle: "Native schedule source", systemImage: "calendar", badgeStyle: .info, isPrimary: true, riskLevel: .medium, emptyStateTitle: "No calendar accounts", emptyStateActionTitle: "Add Account"),
-                ConnorNativeShellSidebarItem(id: .contacts, title: "Contacts", subtitle: "Native contacts source", systemImage: "person.crop.circle.badge", badgeStyle: .info, isPrimary: true, riskLevel: .medium, emptyStateTitle: "No contact accounts", emptyStateActionTitle: "Add Account"),
-                ConnorNativeShellSidebarItem(id: .rss, title: "RSS", subtitle: "Native feed intelligence", systemImage: "dot.radiowaves.left.and.right", badgeStyle: .info, isPrimary: true, riskLevel: .medium, emptyStateTitle: "No RSS sources", emptyStateActionTitle: "Add RSS Source"),
+                ConnorNativeShellSidebarItem(id: .mail, title: "Mail", subtitle: "Native mail", systemImage: "envelope.badge.shield.half.filled", badgeStyle: .info, isPrimary: true, riskLevel: .high, emptyStateTitle: "还没有连接邮箱", emptyStateActionTitle: "添加邮箱账户"),
+                ConnorNativeShellSidebarItem(id: .calendar, title: "Calendar", subtitle: "Native schedule source", systemImage: "calendar", badgeStyle: .info, isPrimary: true, riskLevel: .medium, emptyStateTitle: "还没有连接日历", emptyStateActionTitle: "添加账户"),
+                ConnorNativeShellSidebarItem(id: .contacts, title: "Contacts", subtitle: "Native contacts source", systemImage: "person.crop.circle.badge", badgeStyle: .info, isPrimary: true, riskLevel: .medium, emptyStateTitle: "还没有连接通讯录", emptyStateActionTitle: "添加账户"),
+                ConnorNativeShellSidebarItem(id: .rss, title: "RSS", subtitle: "Native feed intelligence", systemImage: "dot.radiowaves.left.and.right", badgeStyle: .info, isPrimary: true, riskLevel: .medium, emptyStateTitle: "还没有添加 RSS 源", emptyStateActionTitle: "添加 RSS 源"),
                 ConnorNativeShellSidebarItem(id: .sources, title: "Sources", subtitle: "MCP source runtime", systemImage: "externaldrive.connected.to.line.below", riskLevel: .medium),
                 ConnorNativeShellSidebarItem(id: .skills, title: "Skills", subtitle: "Governed instruction profiles", systemImage: "sparkles.rectangle.stack")
             ]),
@@ -258,8 +258,8 @@ public struct ConnorNativeShellPresentation: Codable, Sendable, Equatable {
             ])
         ],
         commands: [
-            ConnorNativeShellCommand(id: .newSession, title: "New Session", systemImage: "square.and.pencil", keyboardShortcut: "⌘N", target: .agentChat, groupID: "work", isPrimaryAction: true, keywords: ["chat", "conversation"]),
-            ConnorNativeShellCommand(id: .toggleBrowser, title: "Toggle Browser", systemImage: "globe", keyboardShortcut: "⌘B", target: .browserWorkspace, groupID: "work", keywords: ["browser", "web"]),
+            ConnorNativeShellCommand(id: .newSession, title: "开始新会话", systemImage: "square.and.pencil", keyboardShortcut: "⌘N", target: .agentChat, groupID: "work", isPrimaryAction: true, keywords: ["chat", "conversation", "会话"]),
+            ConnorNativeShellCommand(id: .toggleBrowser, title: "打开浏览器", systemImage: "globe", keyboardShortcut: "⌘B", target: .browserWorkspace, groupID: "work", keywords: ["browser", "web", "浏览器"]),
             ConnorNativeShellCommand(id: .openGraphMemoryReview, title: "Open Graph Memory", systemImage: "brain.head.profile", keyboardShortcut: "⌘2", target: .graphMemory, groupID: "memory", isPrimaryAction: true, riskLevel: .medium, keywords: ["memory", "review", "graph"]),
             ConnorNativeShellCommand(id: .openApprovals, title: "Open Approvals", systemImage: "checkmark.shield", keyboardShortcut: "⌘3", target: .approvals, groupID: "governance", isPrimaryAction: true, riskLevel: .high, keywords: ["permission", "approval", "policy"]),
             ConnorNativeShellCommand(id: .openSources, title: "Open Sources", systemImage: "externaldrive.connected.to.line.below", keyboardShortcut: "⌘4", target: .sources, groupID: "extensions", keywords: ["mcp", "source", "tools"]),
