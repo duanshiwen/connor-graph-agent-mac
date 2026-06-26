@@ -98,6 +98,37 @@ struct NativeSourceSearchServiceTests {
         #expect(results.first?.resultTimeLabel == "Event starts")
     }
 
+    @Test func chineseSemanticQueryRanksRealPhraseAboveBoundaryGramNoise() async throws {
+        let service = NativeSourceSearchService()
+        try await service.upsert([
+            NativeSearchDocument(
+                id: "movie-real",
+                sourceKind: .rss,
+                externalID: "movie-real",
+                title: "西雅图不相信眼泪影评",
+                summary: "关于西雅图、不相信与眼泪这些关键词的完整影评。",
+                body: "这是一篇讨论西雅图不相信眼泪的电影评论。",
+                temporal: NativeSearchTemporalMetadata(primaryTime: Date(timeIntervalSince1970: 2_000), primaryTimeKind: .publishedAt, publishedAt: Date(timeIntervalSince1970: 2_000)),
+                contentHash: "movie-real"
+            ),
+            NativeSearchDocument(
+                id: "movie-noise",
+                sourceKind: .rss,
+                externalID: "movie-noise",
+                title: "咖啡地图",
+                summary: "雅图 图不 不相 信眼 这些碎片只是噪音。",
+                body: "雅图 图不 不相 信眼",
+                temporal: NativeSearchTemporalMetadata(primaryTime: Date(timeIntervalSince1970: 3_000), primaryTimeKind: .publishedAt, publishedAt: Date(timeIntervalSince1970: 3_000)),
+                contentHash: "movie-noise"
+            )
+        ])
+
+        let results = try await service.search(NativeSearchQuery(text: "西雅图眼泪", sourceKinds: [.rss], limit: 10, includeBodySnippets: true))
+
+        #expect(results.first?.id == "movie-real")
+        #expect(results.map(\.id).contains("movie-real"))
+    }
+
     @Test func persistentIndexSurvivesRestart() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("NativeSourceSearchServiceTests-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }

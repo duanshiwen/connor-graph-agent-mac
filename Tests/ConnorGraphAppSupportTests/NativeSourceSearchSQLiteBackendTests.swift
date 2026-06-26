@@ -76,6 +76,19 @@ struct NativeSourceSearchSQLiteBackendTests {
         #expect(results[0].highlights.contains("搜索性能") || results[0].highlights.contains("搜索"))
     }
 
+    @Test func sqliteBackendRanksSemanticChinesePhraseAboveBoundaryGramNoise() async throws {
+        let backend = try SQLiteNativeSourceSearchBackend(databaseURL: temporaryDatabaseURL())
+        try await backend.upsert([
+            document(id: "movie-real", kind: .rss, title: "西雅图不相信眼泪影评", summary: "完整影评", body: "这是一篇讨论西雅图不相信眼泪的电影评论。"),
+            document(id: "movie-noise", kind: .rss, title: "咖啡地图", summary: "雅图 图不 不相 信眼", body: "雅图 图不 不相 信眼")
+        ])
+
+        let results = try await backend.search(NativeSearchQuery(text: "西雅图眼泪", sourceKinds: [.rss], limit: 10, includeBodySnippets: true))
+
+        #expect(results.first?.id == "movie-real")
+        #expect(results.map(\.id).contains("movie-real"))
+    }
+
     @Test func sqliteBackendSearchesBrowserHistoryDocuments() async throws {
         let backend = try SQLiteNativeSourceSearchBackend(databaseURL: temporaryDatabaseURL())
         let record = BrowserHistoryRecord(
