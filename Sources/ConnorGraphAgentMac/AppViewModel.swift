@@ -2428,9 +2428,9 @@ final class AppViewModel: NSObject, ObservableObject {
     private func performMemoryOSPipelineTask(_ request: MemoryOSPipelineTaskRequest) async throws -> String {
         guard let memoryOSFacade else { throw TaskTargetRunnerError.unsupportedTarget("memory_os.pipeline") }
         switch request.operationName {
-        case "plan_l1_to_l2_jobs":
-            let jobs = try memoryOSFacade.enqueueL1ToL2BackgroundJobs()
-            return "Memory OS planned \(jobs.count) L1→L2 job(s)"
+        case "plan_l1_unified_projection_jobs":
+            let jobs = try memoryOSFacade.enqueueL1UnifiedProjectionBackgroundJobs()
+            return "Memory OS planned \(jobs.count) L1 unified projection job(s)"
         case "plan_l2_to_knowledge_jobs":
             let jobs = try memoryOSFacade.enqueueL2ToKnowledgeBackgroundJobs()
             return "Memory OS planned \(jobs.count) L2→Knowledge job(s)"

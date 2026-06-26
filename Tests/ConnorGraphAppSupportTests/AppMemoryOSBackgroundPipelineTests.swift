@@ -5,7 +5,7 @@ import ConnorGraphMemory
 import ConnorGraphStore
 import ConnorGraphAppSupport
 
-@Test func appMemoryOSFacadeEnqueuesL1ToL2BackgroundJobsFromPendingCaptures() throws {
+@Test func appMemoryOSFacadeEnqueuesL1UnifiedProjectionBackgroundJobsFromPendingCaptures() throws {
     let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSBackgroundPipelineDatabaseURL().path)
     try store.migrate()
     let facade = AppMemoryOSFacade(store: store)
@@ -14,12 +14,12 @@ import ConnorGraphAppSupport
         _ = try facade.ingestChatMessage(messageID: "message-\(index)", sessionID: "session", role: "user", content: "Important memory content \(index)", occurredAt: now.addingTimeInterval(Double(index)))
     }
 
-    let enqueued = try facade.enqueueL1ToL2BackgroundJobs(policy: MemoryOSL1ProcessingTriggerPolicy(minPendingCount: 2, maxEventsPerBlock: 2, maxTokensPerBlock: 1000), now: now)
+    let enqueued = try facade.enqueueL1UnifiedProjectionBackgroundJobs(policy: MemoryOSL1ProcessingTriggerPolicy(minPendingCount: 2, maxEventsPerBlock: 2, maxTokensPerBlock: 1000), now: now)
 
     #expect(enqueued.count == 2)
-    let runnable = try store.runnableQueueItems(kind: MemoryOSBackgroundJobKind.l1ProcessBlockToL2.rawValue, limit: 10, now: now)
+    let runnable = try store.runnableQueueItems(kind: MemoryOSBackgroundJobKind.l1UnifiedProjection.rawValue, limit: 10, now: now)
     #expect(runnable.count == 2)
-    let payload = try store.decode(MemoryOSL1ToL2JobDraft.self, runnable[0].payloadJSON)
+    let payload = try store.decode(MemoryOSL1UnifiedProjectionJobDraft.self, runnable[0].payloadJSON)
     #expect(payload.schemaName == "MemoryOSL1UnifiedProjectionOutput")
     #expect(payload.prompt.contains("L2 operational facts"))
     #expect(payload.prompt.contains("L3 reusable knowledge candidates"))

@@ -184,7 +184,7 @@ public struct AppMemoryOSCLIInspector: Sendable {
         let l1 = MemoryOSL1ProcessingTriggerPolicy()
         let l2 = MemoryOSL2KnowledgeSynthesisTriggerPolicy()
         return MemoryOSCLIPipelinePolicy(
-            l1ToL2: MemoryOSCLIL1PipelinePolicy(
+            l1UnifiedProjection: MemoryOSCLIL1PipelinePolicy(
                 minPendingCount: l1.minPendingCount,
                 maxEventsPerBlock: l1.maxEventsPerBlock,
                 maxTokensPerBlock: l1.maxTokensPerBlock,
@@ -200,8 +200,8 @@ public struct AppMemoryOSCLIInspector: Sendable {
     }
 
     public func planL1(policy: MemoryOSL1ProcessingTriggerPolicy = MemoryOSL1ProcessingTriggerPolicy(), now: Date = Date()) throws -> MemoryOSCLIPlanResult {
-        let jobs = try AppMemoryOSFacade(store: store).enqueueL1ToL2BackgroundJobs(policy: policy, now: now)
-        return MemoryOSCLIPlanResult(plannedJobs: jobs.count, kind: MemoryOSBackgroundJobKind.l1ProcessBlockToL2.rawValue, jobIDs: jobs.map(\.id))
+        let jobs = try AppMemoryOSFacade(store: store).enqueueL1UnifiedProjectionBackgroundJobs(policy: policy, now: now)
+        return MemoryOSCLIPlanResult(plannedJobs: jobs.count, kind: MemoryOSBackgroundJobKind.l1UnifiedProjection.rawValue, jobIDs: jobs.map(\.id))
     }
 
     public func planL2(policy: MemoryOSL2KnowledgeSynthesisTriggerPolicy = MemoryOSL2KnowledgeSynthesisTriggerPolicy(), now: Date = Date()) throws -> MemoryOSCLIPlanResult {
@@ -411,8 +411,8 @@ public struct AppMemoryOSCLIInspector: Sendable {
     private func queueContextText(for row: MemoryOSCLIRow) throws -> String {
         guard let kind = row.values["kind"], let payload = row.values["payload_json"] else { return "" }
         switch kind {
-        case MemoryOSBackgroundJobKind.l1ProcessBlockToL2.rawValue:
-            let draft = try? store.decode(MemoryOSL1ToL2JobDraft.self, payload)
+        case MemoryOSBackgroundJobKind.l1UnifiedProjection.rawValue:
+            let draft = try? store.decode(MemoryOSL1UnifiedProjectionJobDraft.self, payload)
             return try provenanceContent(forCaptureEventIDs: draft?.captureEventIDs ?? [])
         case MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue:
             let draft = try? store.decode(MemoryOSL2ToKnowledgeJobDraft.self, payload)
@@ -616,11 +616,11 @@ public struct MemoryOSCLISearchHit: Codable, Sendable, Equatable {
 }
 
 public struct MemoryOSCLIPipelinePolicy: Codable, Sendable, Equatable {
-    public var l1ToL2: MemoryOSCLIL1PipelinePolicy
+    public var l1UnifiedProjection: MemoryOSCLIL1PipelinePolicy
     public var l2ToKnowledge: MemoryOSCLIL2PipelinePolicy
 
     enum CodingKeys: String, CodingKey {
-        case l1ToL2 = "l1_to_l2"
+        case l1UnifiedProjection = "l1_unified_projection"
         case l2ToKnowledge = "l2_to_knowledge"
     }
 }

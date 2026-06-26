@@ -5,14 +5,14 @@ import ConnorGraphMemory
 
 @Suite("Memory OS Background Prompt Contract Tests")
 struct MemoryOSBackgroundPromptContractTests {
-    @Test func l1ToL2PromptRendersCaptureEventsAsJSONArray() throws {
+    @Test func l1UnifiedProjectionPromptRendersCaptureEventsAsJSONArray() throws {
         let now = Date(timeIntervalSince1970: 1_780_000_000)
         let events = [
             MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: now, tokenEstimate: 42, metadata: ["span_id": "span-1", "source_kind": "mail", "title": "Mail A", "content_preview": "User wants L1 cleared after successful processing."]),
             MemoryOSCaptureEvent(id: "cap-2", provenanceObjectID: "prov-2", eventType: "source_event", occurredAt: now.addingTimeInterval(60), tokenEstimate: 84, metadata: ["span_id": "span-2", "source_kind": "rss", "title": "RSS B", "content_preview": "Memory OS should preserve L0 as durable evidence."])
         ]
 
-        let prompt = MemoryOSL1ToL2PromptBuilder().prompt(for: events)
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: events)
 
         #expect(prompt.contains("\"l1_capture_events\""))
         #expect(prompt.contains("\"capture_event_id\" : \"cap-1\"") || prompt.contains("\"capture_event_id\": \"cap-1\""))
@@ -51,7 +51,7 @@ struct MemoryOSBackgroundPromptContractTests {
     @Test func l1PromptStatesL1IsActiveBufferAndL0IsDurableEvidence() {
         let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
 
-        let prompt = MemoryOSL1ToL2PromptBuilder().prompt(for: [event])
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
 
         #expect(prompt.contains("L0 is the durable provenance layer"))
         #expect(prompt.contains("L1 is the active processing buffer"))
@@ -61,7 +61,7 @@ struct MemoryOSBackgroundPromptContractTests {
     @Test func l1PromptDefinesDisciplinedFactExtractionWorkflow() {
         let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
 
-        let prompt = MemoryOSL1ToL2PromptBuilder().prompt(for: [event])
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
 
         #expect(prompt.contains("Read L1 events in chronological order"))
         #expect(prompt.contains("Extract candidate operational facts per event"))
@@ -76,7 +76,7 @@ struct MemoryOSBackgroundPromptContractTests {
     @Test func l1PromptDefinesUnifiedProjectionIntoL2L3AndL4() {
         let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
 
-        let prompt = MemoryOSL1ToL2PromptBuilder().prompt(for: [event])
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
 
         #expect(prompt.contains("L1 unified projection"))
         #expect(prompt.contains("L2 operational facts"))
@@ -91,7 +91,7 @@ struct MemoryOSBackgroundPromptContractTests {
     @Test func l1PromptIncludesPromotionFiltersAndStableL4EntityRules() {
         let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
 
-        let prompt = MemoryOSL1ToL2PromptBuilder().prompt(for: [event])
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
 
         #expect(prompt.contains("signal_quality"))
         #expect(prompt.contains("reuse_scope"))
@@ -123,7 +123,7 @@ struct MemoryOSBackgroundPromptContractTests {
     @Test func l1PromptDeclaresAllAllowedL2PredicatesAndAssertionKinds() {
         let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
 
-        let prompt = MemoryOSL1ToL2PromptBuilder().prompt(for: [event])
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
 
         #expect(prompt.contains("Allowed L2 assertion_kind values"))
         #expect(prompt.contains("observed"))
@@ -138,7 +138,7 @@ struct MemoryOSBackgroundPromptContractTests {
     @Test func l1PromptDeclaresL2BusinessFactTaxonomyAndMetadataRequirement() {
         let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
 
-        let prompt = MemoryOSL1ToL2PromptBuilder().prompt(for: [event])
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
 
         #expect(prompt.contains("L2 fact taxonomy"))
         #expect(prompt.contains("profile_preference"))
@@ -161,7 +161,7 @@ struct MemoryOSBackgroundPromptContractTests {
     @Test func l1PromptDefinesCurrentUserAndOtherPersonBoundary() {
         let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
 
-        let prompt = MemoryOSL1ToL2PromptBuilder().prompt(for: [event])
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
 
         #expect(prompt.contains("The current user is the human operating this Connor installation/session"))
         #expect(prompt.contains("Other named or described people are other_person entities"))
@@ -172,7 +172,7 @@ struct MemoryOSBackgroundPromptContractTests {
     @Test func l1PromptRequiresPersonRoleMetadataForProfileFacts() {
         let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
 
-        let prompt = MemoryOSL1ToL2PromptBuilder().prompt(for: [event])
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
 
         #expect(prompt.contains("metadata.person_role"))
         #expect(prompt.contains("current_user"))
@@ -184,7 +184,7 @@ struct MemoryOSBackgroundPromptContractTests {
     @Test func l1PromptClarifiesPersonProfileFactRouting() {
         let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
 
-        let prompt = MemoryOSL1ToL2PromptBuilder().prompt(for: [event])
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
 
         #expect(prompt.contains("Current-user preferences, habits, goals, stable traits, constraints, emotional-support preferences, communication preferences, interaction guidance and knowledge background are L2 profile_preference facts"))
         #expect(prompt.contains("Other-person profile facts may also be L2 profile_preference or relationship facts"))
@@ -195,7 +195,7 @@ struct MemoryOSBackgroundPromptContractTests {
     @Test func l1PromptRequiresMaturePersonFeatureMetadataAndIdentitySignals() {
         let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
 
-        let prompt = MemoryOSL1ToL2PromptBuilder().prompt(for: [event])
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
 
         #expect(prompt.contains("Person feature extraction policy"))
         #expect(prompt.contains("metadata.profile_dimension"))

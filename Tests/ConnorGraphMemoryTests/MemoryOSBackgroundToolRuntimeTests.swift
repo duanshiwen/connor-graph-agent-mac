@@ -18,7 +18,7 @@ struct MemoryOSBackgroundToolRuntimeTests {
     }
 
     @Test func workerPreservesExecutorToolTraceMetadata() throws {
-        let draft = MemoryOSL1ToL2JobDraft(id: "job-tool-trace", captureEventIDs: ["cap-1"], provenanceObjectIDs: ["prov-1"], sourceSpanIDs: ["span-1"], prompt: "Extract facts.", metadata: ["event_count": "1"])
+        let draft = MemoryOSL1UnifiedProjectionJobDraft(id: "job-tool-trace", captureEventIDs: ["cap-1"], provenanceObjectIDs: ["prov-1"], sourceSpanIDs: ["span-1"], prompt: "Extract facts.", metadata: ["event_count": "1"])
         let executor = ToolTraceExecutor(response: MemoryOSBackgroundModelResponse(rawArtifactJSON: "{}", metadata: ["tool_trace_count": "2", "tool_trace_ids": "call-1,call-2"]))
 
         let result = try MemoryOSBackgroundJobWorker(executor: executor).run(draft)

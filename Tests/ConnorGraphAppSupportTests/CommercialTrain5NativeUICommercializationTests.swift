@@ -13,8 +13,11 @@ struct CommercialTrain5NativeUICommercializationTests {
         #expect(shell.sidebarGroups.map(\.title) == ["Work", "Memory", "Governance", "Extensions", "System"])
         #expect(shell.item(for: .agentChat)?.isPrimary == true)
         #expect(shell.item(for: .approvals)?.riskLevel == .high)
-        #expect(shell.item(for: .agentChat)?.emptyStateActionTitle == "New Session")
+        #expect(shell.item(for: .agentChat)?.emptyStateTitle == "还没有会话")
+        #expect(shell.item(for: .agentChat)?.emptyStateActionTitle == "开始新会话")
+        #expect(shell.item(for: .browserWorkspace)?.emptyStateActionTitle == "打开浏览器")
         #expect(shell.commands.first?.id == .newSession)
+        #expect(shell.commands.first?.title == "开始新会话")
         #expect(shell.commands.filter(\.isPrimaryAction).count >= 5)
         #expect(shell.commands.filter { $0.keyboardShortcut != nil }.count >= 8)
     }
