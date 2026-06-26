@@ -17,8 +17,11 @@ struct EmbeddedWebView: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: BrowserWebViewContainerView, context: Context) {
+        let previousWebView = nsView.attachedWebView
         nsView.attach(webView)
-        onWebViewCreated(webView)
+        if previousWebView !== webView {
+            onWebViewCreated(webView)
+        }
     }
 
     static let selectionObserverScript = """
