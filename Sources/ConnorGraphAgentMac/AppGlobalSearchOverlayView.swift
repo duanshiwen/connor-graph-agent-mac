@@ -107,7 +107,7 @@ struct AppGlobalSearchOverlayView: View {
             .padding(.horizontal, AppShellLayout.spaceS)
             .padding(.top, AppShellLayout.spaceXS)
 
-            if state.isLoading, results.isEmpty {
+            if state.isSectionLoading(.chatSessions), results.isEmpty {
                 GlobalSearchLoadingSourceRow()
             } else if results.isEmpty {
                 GlobalSearchEmptySourceRow(title: GlobalSearchSectionKind.chatSessions.emptyTitle)
@@ -165,7 +165,7 @@ struct AppGlobalSearchOverlayView: View {
             .padding(.horizontal, AppShellLayout.spaceS)
             .padding(.top, AppShellLayout.spaceXS)
 
-            if state.isLoading, pageResults.isEmpty {
+            if state.isSectionLoading(.browserHistory), pageResults.isEmpty {
                 GlobalSearchLoadingSourceRow()
             } else if pageResults.isEmpty {
                 GlobalSearchEmptySourceRow(title: GlobalSearchSectionKind.browserHistory.emptyTitle)
@@ -247,7 +247,7 @@ struct AppGlobalSearchOverlayView: View {
             .padding(.horizontal, AppShellLayout.spaceS)
             .padding(.top, AppShellLayout.spaceXS)
 
-            if state.isLoading, results.isEmpty {
+            if state.isSectionLoading(kind), results.isEmpty {
                 GlobalSearchLoadingSourceRow()
             } else if results.isEmpty {
                 GlobalSearchEmptySourceRow(title: kind.emptyTitle)
