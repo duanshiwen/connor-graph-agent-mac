@@ -236,10 +236,10 @@ struct AppMemoryOSCLIInspectorTests {
         let inspector = AppMemoryOSCLIInspector(store: store)
         _ = try inspector.planL1(policy: MemoryOSL1ProcessingTriggerPolicy(minPendingCount: 1, maxEventsPerBlock: 10), now: now)
 
-        let queue = try inspector.queue(limit: 10, status: "pending", kind: MemoryOSBackgroundJobKind.l1UnifiedProjection.rawValue)
+        let queue = try inspector.queue(limit: 10, status: "pending", kind: MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue)
 
         #expect(queue.count == 1)
-        #expect(queue[0].values["kind"] == MemoryOSBackgroundJobKind.l1UnifiedProjection.rawValue)
+        #expect(queue[0].values["kind"] == MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue)
         #expect(queue[0].values["status"] == "pending")
         #expect(queue[0].values["context_text"] == "诗闻正在测试 Connor Memory OS CLI。")
     }
@@ -266,7 +266,7 @@ struct AppMemoryOSCLIInspectorTests {
         let l2Plan = try inspector.planL2(policy: MemoryOSL2KnowledgeSynthesisTriggerPolicy(minPendingStatementCount: 1, maxStatementsPerBlock: 10), now: now)
 
         #expect(l1Plan.plannedJobs == 1)
-        #expect(l1Plan.kind == MemoryOSBackgroundJobKind.l1UnifiedProjection.rawValue)
+        #expect(l1Plan.kind == MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue)
         #expect(l1Plan.jobIDs.count == 1)
         #expect(l2Plan.plannedJobs == 1)
         #expect(l2Plan.kind == MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue)

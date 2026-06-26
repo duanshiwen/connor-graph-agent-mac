@@ -18,7 +18,7 @@ import ConnorGraphAppSupport
     #expect(summaries.count == 1)
     #expect(!summaries[0].accepted)
     #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l1_capture_events;").first?.first == "1")
-    let queued = try store.query(sql: "SELECT status, attempt_count FROM memory_l1_processing_queue WHERE kind = '\(MemoryOSBackgroundJobKind.l1UnifiedProjection.rawValue)';")
+    let queued = try store.query(sql: "SELECT status, attempt_count FROM memory_l1_processing_queue WHERE kind = '\(MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue)';")
     #expect(queued.first?[0] == MemoryOSQueueStatus.retryScheduled.rawValue)
     #expect(queued.first?[1] == "1")
     #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l1_queue_attempts;").first?.first == "1")
