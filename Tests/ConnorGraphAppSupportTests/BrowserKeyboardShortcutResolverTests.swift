@@ -39,6 +39,30 @@ struct BrowserKeyboardShortcutResolverTests {
         #expect(resolver.shortcut(isEscape: true, hasSelectionPopover: false) == nil)
     }
 
+    @Test func plainTextInputDoesNotTriggerBrowserShortcut() {
+        let resolver = BrowserKeyboardShortcutResolver()
+
+        #expect(resolver.shortcut(character: "a") == nil)
+        #expect(resolver.shortcut(character: "1") == nil)
+        #expect(resolver.shortcut(character: ".") == nil)
+    }
+
+    @Test func plainTextInputDoesNotTriggerBrowserShortcutWhenSelectionPopoverExists() {
+        let resolver = BrowserKeyboardShortcutResolver()
+
+        #expect(resolver.shortcut(character: "a", hasSelectionPopover: true) == nil)
+        #expect(resolver.shortcut(character: "1", hasSelectionPopover: true) == nil)
+    }
+
+    @Test func customShortcutRequiresConfiguredModifiers() {
+        let settings = AgentRuntimeShortcutSettings(bindings: [
+            .focusBrowserAddress: AgentRuntimeKeyboardShortcut(key: "l", command: true)
+        ])
+
+        #expect(BrowserKeyboardShortcutResolver().shortcut(character: "l", settings: settings) == nil)
+        #expect(BrowserKeyboardShortcutResolver().shortcut(character: "l", isCommandDown: true, settings: settings) == .focusAddress)
+    }
+
     @Test func customShortcutSettingsDriveBrowserResolver() {
         let settings = AgentRuntimeShortcutSettings(bindings: [
             .newBrowserTab: AgentRuntimeKeyboardShortcut(key: "u", command: true, shift: true)
