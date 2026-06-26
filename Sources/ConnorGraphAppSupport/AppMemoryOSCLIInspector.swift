@@ -180,6 +180,18 @@ public struct AppMemoryOSCLIInspector: Sendable {
         }
     }
 
+    public func runs(limit: Int = 20) throws -> [MemoryOSBackgroundRunRecord] {
+        try store.backgroundRuns(limit: safeLimit(limit))
+    }
+
+    public func runMessages(runID: String) throws -> [MemoryOSBackgroundMessageRecord] {
+        try store.backgroundMessages(runID: runID)
+    }
+
+    public func runToolCalls(runID: String) throws -> [MemoryOSBackgroundToolCallRecord] {
+        try store.backgroundToolCalls(runID: runID)
+    }
+
     public func pipelinePolicy() -> MemoryOSCLIPipelinePolicy {
         let l1 = MemoryOSL1ProcessingTriggerPolicy()
         let l2 = MemoryOSL2KnowledgeSynthesisTriggerPolicy()

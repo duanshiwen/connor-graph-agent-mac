@@ -58,12 +58,16 @@ public enum AppMemoryOSCLIRouter {
             return try routeTrace(args: Array(args.dropFirst()), inspector: inspector, encoder: encoder)
         case "queue":
             return try encode(try inspector.queue(limit: intOption("--limit", in: args, default: 20), status: optionValue("--status", in: args), kind: optionValue("--kind", in: args)), encoder: encoder)
+        case "runs":
+            return try encode(try inspector.runs(limit: intOption("--limit", in: args, default: 20)), encoder: encoder)
+        case "run":
+            return try routeRun(args: Array(args.dropFirst()), inspector: inspector, encoder: encoder)
         case "debug-reset-foundation-kg":
             return try encode(try debugResetFoundationKG(), encoder: encoder)
         case "pipeline":
             return try routePipeline(args: Array(args.dropFirst()), inspector: inspector, encoder: encoder)
         default:
-            return try encode(MemoryOSCLIError(error: "unknown_memory_command", usage: "connor memory status|search|query-graph|l0|l1|l2|l3|l4|trace|search-index"), encoder: encoder)
+            return try encode(MemoryOSCLIError(error: "unknown_memory_command", usage: "connor memory status|search|query-graph|l0|l1|l2|l3|l4|trace|search-index|queue|runs|run|pipeline"), encoder: encoder)
         }
     }
 
@@ -189,6 +193,20 @@ public enum AppMemoryOSCLIRouter {
                 encoder: encoder
             )
         default: return try encode(MemoryOSCLIError(error: "unknown_trace_command", usage: "connor memory trace evidence [--span id[,id]] [--statement id[,id]] [--belief id[,id]] [--limit N]"), encoder: encoder)
+        }
+    }
+
+    private static func routeRun(args: [String], inspector: AppMemoryOSCLIInspector, encoder: JSONEncoder) throws -> String {
+        guard let runID = args.first, !runID.hasPrefix("--") else {
+            return try encode(MemoryOSCLIError(error: "missing_run_id", usage: "connor memory run <run-id> [messages|tool-calls]"), encoder: encoder)
+        }
+        switch args.dropFirst().first ?? "messages" {
+        case "messages":
+            return try encode(try inspector.runMessages(runID: runID), encoder: encoder)
+        case "tool-calls":
+            return try encode(try inspector.runToolCalls(runID: runID), encoder: encoder)
+        default:
+            return try encode(MemoryOSCLIError(error: "unknown_run_command", usage: "connor memory run <run-id> [messages|tool-calls]"), encoder: encoder)
         }
     }
 

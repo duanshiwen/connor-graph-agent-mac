@@ -210,7 +210,26 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(result.hits.allSatisfy { $0.layer == "L4" })
     }
 
-    @Test func memoryOSCLIInspectorListsQueueItems() throws {
+    @Test func memoryOSCLIRouterRoutesBackgroundRunsCommands() throws {
+    let store = try makeMemoryOSCLIInspectorStore()
+    let now = Date(timeIntervalSince1970: 10_000)
+    try store.save(backgroundRun: MemoryOSBackgroundRunRecord(id: "run-1", queueItemID: "queue-1", kind: MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue, source: "l1_capture_events", status: .succeeded, startedAt: now, finishedAt: now, modelID: "model", statelessBatch: true))
+    try store.save(backgroundMessage: MemoryOSBackgroundMessageRecord(id: "msg-1", runID: "run-1", sequence: 0, role: .user, content: "batch prompt"))
+    try store.save(backgroundToolCall: MemoryOSBackgroundToolCallRecord(id: "tool-1", runID: "run-1", iteration: 1, toolName: "memory_os_search", argumentsJSON: "{}", status: .succeeded, startedAt: now, finishedAt: now))
+    let inspector = AppMemoryOSCLIInspector(store: store, databasePath: store.databasePath)
+    let encoder = JSONEncoder()
+
+    let runs = try AppMemoryOSCLIRouter.route(args: ["runs"], inspector: inspector, encoder: encoder)
+    let messages = try AppMemoryOSCLIRouter.route(args: ["run", "run-1", "messages"], inspector: inspector, encoder: encoder)
+    let toolCalls = try AppMemoryOSCLIRouter.route(args: ["run", "run-1", "tool-calls"], inspector: inspector, encoder: encoder)
+
+    #expect(runs.contains("run-1"))
+    #expect(runs.contains("statelessBatch"))
+    #expect(messages.contains("batch prompt"))
+    #expect(toolCalls.contains("memory_os_search"))
+}
+
+@Test func memoryOSCLIInspectorListsQueueItems() throws {
         let store = try makeMemoryOSCLIInspectorStore()
         let now = Date(timeIntervalSince1970: 20_000)
         try seedMemoryOSCLIInspectorFixture(store: store, now: now)
