@@ -159,6 +159,13 @@ struct AppGlobalSearchTests {
         #expect(!state.isLoading)
     }
 
+    @Test func globalSearchTimeoutErrorsAreNotShownAsUserFacingPreviewErrors() throws {
+        let error = GlobalSearchTimeoutError.hardTimeout(milliseconds: 800)
+
+        #expect(AppViewModel.userFacingGlobalSearchErrorMessage(for: error) == nil)
+        #expect(AppViewModel.userFacingGlobalSearchErrorMessage(for: NSError(domain: "test", code: 1)) != nil)
+    }
+
     @Test func globalSearchMatchesChineseSentenceQueriesInChatSessions() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
