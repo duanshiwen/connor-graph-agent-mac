@@ -5,10 +5,19 @@ import ConnorGraphAppSupport
 struct AppGlobalSearchOverlayView: View {
     @ObservedObject var viewModel: AppViewModel
     @State private var browserHistoryPage: Int = 0
+    @State private var contentHeight: CGFloat = 0
+
+    private enum Layout {
+        static let width: CGFloat = 640
+        static let maxHeight: CGFloat = 760
+    }
 
     private let browserHistoryPageSize = 3
     private var state: GlobalSearchPreviewState { viewModel.globalSearchPreviewState }
     private var query: String { viewModel.globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var overlayHeight: CGFloat? {
+        contentHeight > 0 ? min(contentHeight, Layout.maxHeight) : nil
+    }
 
     var body: some View {
         ScrollView(.vertical) {
@@ -28,16 +37,23 @@ struct AppGlobalSearchOverlayView: View {
             }
             .padding(AppShellLayout.spaceS)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(key: GlobalSearchOverlayContentHeightKey.self, value: proxy.size.height)
+                }
+            )
         }
-        .scrollIndicators(.visible)
-        .frame(width: 640, alignment: .topLeading)
-        .frame(maxHeight: 760, alignment: .topLeading)
+        .scrollIndicators(contentHeight > Layout.maxHeight ? .visible : .hidden)
+        .frame(width: Layout.width, height: overlayHeight, alignment: .topLeading)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: AppShellLayout.radiusL, style: .continuous)
                 .stroke(AppShellColors.hairline, lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.12), radius: 18, x: 0, y: 10)
+        .onPreferenceChange(GlobalSearchOverlayContentHeightKey.self) { height in
+            contentHeight = height
+        }
         .onChange(of: state.query) { _, _ in
             browserHistoryPage = 0
         }
@@ -521,5 +537,13 @@ private struct GlobalSearchResultRow: View {
         case .rss: .orange
         case .browserHistory: .teal
         }
+    }
+}
+
+private struct GlobalSearchOverlayContentHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
