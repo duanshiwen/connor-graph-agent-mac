@@ -112,6 +112,21 @@ struct AppGlobalSearchTests {
         #expect(fixture.viewModel.globalSearchPreviewState.searchTokens.contains("泰国"))
     }
 
+    @Test func globalSearchDisplayTokensHideLowValueQuestionFillers() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        fixture.viewModel.updateGlobalSearchQuery("去雅加达玩一个星期需要多少钱")
+        await fixture.viewModel.refreshGlobalSearchPreview(for: "去雅加达玩一个星期需要多少钱")
+
+        let tokens = fixture.viewModel.globalSearchPreviewState.searchTokens
+        #expect(tokens.contains("雅加达"))
+        #expect(!tokens.contains("一个"))
+        #expect(!tokens.contains("星期"))
+        #expect(!tokens.contains("需要"))
+        #expect(!tokens.contains("多少"))
+    }
+
     @Test func globalSearchDisplayTokensHideFallbackCJKGrams() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
@@ -262,7 +277,7 @@ struct AppGlobalSearchTests {
         #expect(fixture.viewModel.globalSearchPreviewState.browserHistoryResults.first?.title == "Swift History")
     }
 
-    @Test func globalSearchKeepsMultipleBrowserHistoryPages() async throws {
+    @Test func globalSearchKeepsPreviewLimitedBrowserHistoryPages() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
@@ -274,7 +289,7 @@ struct AppGlobalSearchTests {
 
         await fixture.viewModel.refreshGlobalSearchPreview(for: "paged-history")
 
-        #expect(fixture.viewModel.globalSearchPreviewState.browserHistoryResults.count == 5)
+        #expect(fixture.viewModel.globalSearchPreviewState.browserHistoryResults.count == 3)
     }
 
     @Test func openingBrowserHistoryResultFocusesExistingTab() throws {
