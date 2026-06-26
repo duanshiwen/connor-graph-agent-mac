@@ -188,14 +188,22 @@ struct BrowserBookmarksPanelView: View {
     // MARK: - Empty State
 
     private var emptyState: some View {
-        VStack(spacing: 8) {
+        let isSearching = !searchText.isEmpty
+
+        return VStack(spacing: 8) {
             Spacer()
             Image(systemName: "star")
                 .font(.system(size: 32))
                 .foregroundStyle(.tertiary)
-            Text(searchText.isEmpty ? "暂无收藏" : "没有匹配的收藏")
-                .font(BrowserFloatingTypography.hint)
+            Text(isSearching ? "没有找到匹配的收藏" : "还没有收藏网页")
+                .font(BrowserFloatingTypography.hint.weight(.semibold))
                 .foregroundStyle(.secondary)
+            Text(isSearching ? "可以换个关键词，或者查看全部收藏。" : "遇到想反复查看的资料，可以点星标收藏。康纳同学会把它留在这个工作区里，方便之后继续阅读和提问。")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+                .padding(.horizontal, 18)
             Spacer()
         }
         .frame(maxWidth: .infinity)
