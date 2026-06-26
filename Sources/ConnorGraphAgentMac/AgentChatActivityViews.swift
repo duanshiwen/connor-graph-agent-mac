@@ -64,9 +64,11 @@ struct AgentEventTimelineView: View {
 struct AgentChatEmptyStateView: View {
     var body: some View {
         VStack(spacing: 12) {
-            Image(systemName: "sparkles.rectangle.stack")
-                .font(.system(size: AgentChatTypography.largeIconSize))
-                .foregroundStyle(.secondary)
+            Image("ConnorAvatar")
+                .resizable()
+                .scaledToFit()
+                .frame(width: AgentChatTypography.largeIconSize, height: AgentChatTypography.largeIconSize)
+                .accessibilityHidden(true)
             Text("我是康纳同学，你的个人助理")
                 .font(AgentChatTypography.title)
             Text("我会忠实、可靠、勤奋地陪你处理工作与生活：整理资料、推进任务、安排日程、分析邮件与浏览内容，并结合你的长期记忆和当前上下文，帮你把信息汇总成更好的判断与下一步行动。")
