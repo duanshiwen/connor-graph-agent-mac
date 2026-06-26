@@ -30,6 +30,9 @@ struct TopSearchTextField: NSViewRepresentable {
         textField.focusRingType = .none
         textField.lineBreakMode = .byTruncatingTail
         textField.cell?.sendsActionOnEndEditing = false
+        textField.onMouseDown = { [weak coordinator = context.coordinator] in
+            coordinator?.activateFromUserInteraction()
+        }
         return textField
     }
 
@@ -39,6 +42,11 @@ struct TopSearchTextField: NSViewRepresentable {
         }
         nsView.placeholderString = placeholder
         context.coordinator.isFocused = $isFocused
+        if let textField = nsView as? TopSearchSelectAllOnFocusTextField {
+            textField.onMouseDown = { [weak coordinator = context.coordinator] in
+                coordinator?.activateFromUserInteraction()
+            }
+        }
         context.coordinator.syncFocusStateIfNeeded(isFocused, in: nsView)
         if context.coordinator.lastFocusRequestID != focusRequestID {
             context.coordinator.lastFocusRequestID = focusRequestID
@@ -102,10 +110,14 @@ struct TopSearchTextField: NSViewRepresentable {
             }
         }
 
-        func controlTextDidBeginEditing(_ notification: Notification) {
+        func activateFromUserInteraction() {
             lastSyncedFocusState = true
             isFocused.wrappedValue = true
             onFocus?()
+        }
+
+        func controlTextDidBeginEditing(_ notification: Notification) {
+            activateFromUserInteraction()
         }
 
         func controlTextDidEndEditing(_ notification: Notification) {
@@ -146,5 +158,12 @@ struct TopSearchTextField: NSViewRepresentable {
     }
 }
 
-final class TopSearchSelectAllOnFocusTextField: NSTextField {}
+final class TopSearchSelectAllOnFocusTextField: NSTextField {
+    var onMouseDown: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        onMouseDown?()
+        super.mouseDown(with: event)
+    }
+}
 
