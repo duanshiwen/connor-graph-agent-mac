@@ -107,4 +107,26 @@ struct NativeSourceSearchQueryNormalizationTests {
         #expect(normalized.strongTokenValues.contains("搜索"))
         #expect(normalized.strongTokenValues.contains("优化"))
     }
+
+    @Test func normalizerUsesSharedLexiconForTravelCostQuestionFillers() {
+        let normalized = NativeSearchQueryNormalizer.normalize("去雅加达玩一个星期需要多少钱")
+
+        #expect(normalized.strongTokenValues.contains("去雅加达玩一个星期需要多少钱"))
+        #expect(normalized.strongTokenValues.contains("雅加达"))
+        #expect(normalized.softStopTokenValues.contains("去"))
+        #expect(normalized.softStopTokenValues.contains("一个"))
+        #expect(normalized.softStopTokenValues.contains("星期"))
+        #expect(normalized.softStopTokenValues.contains("需要"))
+        #expect(normalized.softStopTokenValues.contains("多少"))
+    }
+
+    @Test func normalizerKeepsSearchableFallbackWhenTemporalQueryIsMostlyFiltered() {
+        let normalized = NativeSearchQueryNormalizer.normalize("现在星期几")
+
+        #expect(!normalized.scoringTokens.isEmpty)
+        #expect(normalized.softStopTokenValues.contains("现在"))
+        #expect(normalized.softStopTokenValues.contains("星期"))
+        #expect(normalized.softStopTokenValues.contains("几"))
+    }
 }
+
