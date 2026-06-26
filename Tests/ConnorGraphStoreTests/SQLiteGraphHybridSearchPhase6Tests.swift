@@ -84,6 +84,47 @@ private func temporaryPhase6SearchDatabaseURL(_ name: String = UUID().uuidString
     #expect(hit.metadata["retrieval_pipeline"] == "fts+graph_expansion+rrf+local_rerank")
 }
 
+@Test func graphRetrievalLexicalOverlapUsesSharedTextFilterLexicon() async throws {
+    let store = try SQLiteGraphKernelStore(path: temporaryPhase6SearchDatabaseURL().path)
+    try store.migrate()
+    let now = Date(timeIntervalSince1970: 4_000)
+    let person = GraphEntity(id: "person-shiwen", graphID: "default", name: "诗闻", entityKind: .personObject, scope: .personal, canonicalClassID: "person")
+    let trip = GraphEntity(id: "trip-jakarta", graphID: "default", name: "雅加达旅行", entityKind: .lifeObject, scope: .personal, canonicalClassID: "trip")
+    try store.upsert(entity: person)
+    try store.upsert(entity: trip)
+    try store.upsert(statement: GraphStatement(
+        id: "statement-jakarta-cost",
+        graphID: "default",
+        subjectEntityID: person.id,
+        predicate: .prefers,
+        objectEntityID: trip.id,
+        statementText: "诗闻关注雅加达旅行费用规划。",
+        validAt: now,
+        committedAt: now,
+        confidence: 0.9
+    ))
+
+    let service = SQLiteGraphHybridSearchService(store: store)
+    let response = try await service.search(query: GraphSearchQuery(
+        text: "去雅加达玩一个星期需要多少钱",
+        graphID: "default",
+        includeEntities: false,
+        includeStatements: false,
+        includeEpisodes: false,
+        limit: 10,
+        centerEntityIDs: [person.id],
+        reranking: GraphRerankingConfig(strategies: [.graphitiLocal], graphExpansionDepth: 1)
+    ))
+    let hit = try #require(response.hits.first { $0.ownerID == "statement-jakarta-cost" })
+
+    #expect(hit.metadata["matched_terms"]?.contains("雅加达") == true)
+    #expect(hit.metadata["matched_terms"]?.contains("一个") != true)
+    #expect(hit.metadata["matched_terms"]?.contains("星期") != true)
+    #expect(hit.metadata["matched_terms"]?.contains("需要") != true)
+    #expect(hit.metadata["matched_terms"]?.contains("多少") != true)
+    #expect(hit.metadata["rerank_reasons"]?.contains("lexical_overlap") == true)
+}
+
 @Test func agentContextRenderedTextIncludesRetrievalReason() throws {
     let context = AgentContext(
         query: "graph retrieval",
