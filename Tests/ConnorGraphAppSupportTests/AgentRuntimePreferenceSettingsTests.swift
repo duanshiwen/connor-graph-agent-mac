@@ -53,6 +53,36 @@ struct AgentRuntimePreferenceSettingsTests {
         #expect(preferences.genderIdentity.isEmpty)
         #expect(preferences.birthDate.isEmpty)
         #expect(preferences.notes.isEmpty)
+        #expect(preferences.defaultSearchEngine == .bing)
+    }
+
+    @Test func decodesLegacyPreferencesWithoutDefaultSearchEngineAsBing() throws {
+        let data = Data("""
+        {
+          "displayName": "Alex",
+          "timezone": "Europe/London",
+          "preferredLanguage": "English",
+          "city": "London",
+          "country": "United Kingdom",
+          "notes": "Prefers concise answers."
+        }
+        """.utf8)
+
+        let preferences = try JSONDecoder().decode(AgentRuntimePreferenceSettings.self, from: data)
+
+        #expect(preferences.defaultSearchEngine == .bing)
+    }
+
+    @Test func decodesExplicitDefaultSearchEngine() throws {
+        let data = Data("""
+        {
+          "defaultSearchEngine": "duckDuckGo"
+        }
+        """.utf8)
+
+        let preferences = try JSONDecoder().decode(AgentRuntimePreferenceSettings.self, from: data)
+
+        #expect(preferences.defaultSearchEngine == .duckDuckGo)
     }
 
     @Test func decodesLegacyPreferencesWithoutLanguage() throws {
