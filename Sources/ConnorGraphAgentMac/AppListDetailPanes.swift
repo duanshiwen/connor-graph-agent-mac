@@ -43,6 +43,69 @@ struct CraftListPaneView: View {
     }
 }
 
+private struct ListSearchFilterBanner: View {
+    var query: String
+    var sourceTitle: String
+    var onClear: () -> Void
+
+    private var trimmedQuery: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        if !trimmedQuery.isEmpty {
+            HStack(spacing: 6) {
+                Image(systemName: "line.3.horizontal.decrease.circle")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Text("正在筛选\(sourceTitle)：")
+                    .font(AppListTypography.rowCaption)
+                    .foregroundStyle(.secondary)
+                Text("“\(trimmedQuery)”")
+                    .font(AppListTypography.rowCaptionEmphasized)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                Button(action: onClear) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .help("清除筛选")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .padding(.horizontal, 8)
+            .padding(.bottom, 6)
+        }
+    }
+}
+
+private func listSearchTerms(for query: String) -> [String] {
+    let normalized = NativeSearchQueryNormalizer.normalize(query)
+    var seen: Set<String> = []
+    let terms = normalized.scoringTokens
+        .map(\.value)
+        .filter { !$0.isEmpty }
+        .filter { $0.count >= 2 || query.count <= 2 }
+        .filter { seen.insert($0).inserted }
+    if !terms.isEmpty { return terms }
+    return query
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .split(whereSeparator: { $0.isWhitespace || $0.isNewline })
+        .map(String.init)
+        .filter { !$0.isEmpty }
+}
+
+private func listSearchTextMatches(_ text: String, terms: [String]) -> Bool {
+    let lower = text.lowercased()
+    let matchedCount = terms.filter { lower.localizedCaseInsensitiveContains($0) }.count
+    let requiredMatches = min(max(terms.count, 1), 2)
+    return matchedCount >= requiredMatches
+}
+
 struct CraftCalendarListPane: View {
     @ObservedObject var viewModel: AppViewModel
 
@@ -65,12 +128,19 @@ struct CraftCalendarListPane: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
 
+            ListSearchFilterBanner(query: viewModel.calendarSearchQuery, sourceTitle: "日历") {
+                viewModel.calendarSearchQuery = ""
+            }
+
             if viewModel.calendarBrowserPresentation.daySections.isEmpty {
                 ContentUnavailableView("暂无日程", systemImage: "calendar", description: Text("添加支持 Calendar capability 的账户后，日程会显示在这里。"))
                     .padding(.top, 80)
+            } else if filteredCalendarSections.isEmpty {
+                ContentUnavailableView("没有匹配的日程", systemImage: "calendar.badge.exclamationmark", description: Text("清除筛选后可查看全部日程。"))
+                    .padding(.top, 80)
             } else {
                 CalendarSectionScrollView(
-                    sections: viewModel.calendarBrowserPresentation.daySections,
+                    sections: filteredCalendarSections,
                     selectedID: viewModel.selectedCalendarEventID,
                     onSelect: { viewModel.selectedCalendarEventID = $0 }
                 )
@@ -79,6 +149,21 @@ struct CraftCalendarListPane: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .sheet(isPresented: $viewModel.isPresentingAddCalendarSourceSheet) {
             AddCalendarSourceSheet(viewModel: viewModel)
+        }
+    }
+
+    private var filteredCalendarSections: [NativeCalendarDaySectionPresentation] {
+        let query = viewModel.calendarSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return viewModel.calendarBrowserPresentation.daySections }
+        let normalized = query.lowercased()
+        return viewModel.calendarBrowserPresentation.daySections.compactMap { section in
+            let events = section.events.filter { event in
+                event.title.lowercased().contains(normalized)
+                    || event.timeText.lowercased().contains(normalized)
+                    || (event.location?.lowercased().contains(normalized) ?? false)
+            }
+            guard !events.isEmpty else { return nil }
+            return NativeCalendarDaySectionPresentation(id: section.id, title: section.title, events: events)
         }
     }
 }
@@ -296,8 +381,12 @@ struct CraftSessionListPane: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
 
+            ListSearchFilterBanner(query: viewModel.sessionSearchQuery, sourceTitle: "对话历史") {
+                viewModel.sessionSearchQuery = ""
+            }
+
             if visibleSessions.isEmpty {
-                ContentUnavailableView("暂无会话", systemImage: "bubble.left", description: Text("点击左上角新建会话开始。"))
+                ContentUnavailableView(sessionEmptyTitle, systemImage: "bubble.left", description: Text(sessionEmptyDescription))
                     .padding(.top, 80)
             } else {
                 ScrollView {
@@ -339,7 +428,22 @@ struct CraftSessionListPane: View {
     }
 
     private var visibleSessions: [AgentSession] {
-        viewModel.chatSessions
+        let query = viewModel.sessionSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return viewModel.chatSessions }
+        let terms = listSearchTerms(for: query)
+        guard !terms.isEmpty else { return viewModel.chatSessions }
+        return viewModel.chatSessions.filter { session in
+            listSearchTextMatches(session.title, terms: terms)
+                || session.messages.contains { listSearchTextMatches($0.content, terms: terms) }
+        }
+    }
+
+    private var sessionEmptyTitle: String {
+        viewModel.sessionSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "暂无会话" : "没有匹配的对话"
+    }
+
+    private var sessionEmptyDescription: String {
+        viewModel.sessionSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "点击左上角新建会话开始。" : "清除筛选后可查看全部对话。"
     }
 
     private var sessionListTitle: String {
@@ -359,7 +463,7 @@ struct CraftMailListPane: View {
     }
 
     private var visibleMessages: [MailMessageSummary] {
-        presentation.messages(accountID: nil, mailboxID: nil, query: "")
+        presentation.messages(accountID: nil, mailboxID: nil, query: viewModel.mailSearchQuery)
     }
 
     var body: some View {
@@ -380,11 +484,18 @@ struct CraftMailListPane: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
 
+            ListSearchFilterBanner(query: viewModel.mailSearchQuery, sourceTitle: "邮件") {
+                viewModel.mailSearchQuery = ""
+            }
+
             if presentation.accounts.isEmpty {
                 ContentUnavailableView("暂无邮件账户", systemImage: "envelope.badge", description: Text("点击右上角 + 添加邮件账户。"))
                     .padding(.top, 80)
             } else if presentation.messages.isEmpty {
                 ContentUnavailableView("尚未同步邮件", systemImage: "tray", description: Text("账户已添加，但当前 Mail Runtime 尚未完成远端邮箱发现和邮件拉取。同步完成后邮件会按时间显示在这里。"))
+                    .padding(.top, 80)
+            } else if visibleMessages.isEmpty {
+                ContentUnavailableView("没有匹配的邮件", systemImage: "envelope.badge", description: Text("清除筛选后可查看全部邮件。"))
                     .padding(.top, 80)
             } else {
                 List(visibleMessages) { message in
@@ -1242,7 +1353,7 @@ struct CraftRSSListPane: View {
     @ObservedObject var viewModel: AppViewModel
 
     private var presentation: NativeRSSBrowserPresentation { viewModel.rssBrowserPresentation }
-    private var visibleItems: [RSSItemSummary] { presentation.items(sourceID: nil, query: "") }
+    private var visibleItems: [RSSItemSummary] { presentation.items(sourceID: nil, query: viewModel.rssSearchQuery) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1262,11 +1373,18 @@ struct CraftRSSListPane: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
 
+            ListSearchFilterBanner(query: viewModel.rssSearchQuery, sourceTitle: "RSS") {
+                viewModel.rssSearchQuery = ""
+            }
+
             if presentation.sources.isEmpty {
                 ContentUnavailableView("暂无 RSS 订阅源", systemImage: "dot.radiowaves.left.and.right", description: Text("点击右上角 + 添加 RSS / Atom / JSON Feed。"))
                     .padding(.top, 80)
             } else if presentation.items.isEmpty {
                 ContentUnavailableView("暂无文章", systemImage: "newspaper", description: Text("订阅源同步后的文章会在这里按时间显示。"))
+                    .padding(.top, 80)
+            } else if visibleItems.isEmpty {
+                ContentUnavailableView("没有匹配的 RSS", systemImage: "newspaper", description: Text("清除筛选后可查看全部 RSS。"))
                     .padding(.top, 80)
             } else {
                 List(visibleItems) { item in
