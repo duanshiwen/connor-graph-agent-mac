@@ -369,6 +369,7 @@ final class AppViewModel: NSObject, ObservableObject {
     @Published var isGlobalSearchOverlayPresented: Bool = false
     @Published var globalSearchPreviewState: GlobalSearchPreviewState = .empty
     @Published var globalSearchSelectedItem: GlobalSearchSelectableItem? = .action(.newChat)
+    @Published private(set) var globalSearchTimings: [GlobalSearchSectionTiming] = []
     @Published var governanceConfig: AppSessionGovernanceConfig = .default
     @Published var productOSRegistry: ProductOSRegistrySnapshot = .default
     @Published var automationConfig: ProductOSAutomationConfig = .default
@@ -1145,7 +1146,10 @@ final class AppViewModel: NSObject, ObservableObject {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         let tokens = globalSearchDisplayTokens(for: trimmed)
+        globalSearchTimings = []
+        let chatStartedAt = Date()
         let chatSessionResults = await searchChatSessions(query: trimmed, limit: 3)
+        recordGlobalSearchTiming(query: trimmed, section: "chatSessions", startedAt: chatStartedAt, returnedCount: chatSessionResults.count, backend: sessionSearchIndexService == nil ? "fallback-scan" : "session-fts")
         guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
 
         globalSearchPreviewState = GlobalSearchPreviewState(
@@ -1159,7 +1163,11 @@ final class AppViewModel: NSObject, ObservableObject {
 
         let limits: [NativeSearchSourceKind: Int] = [.mail: 3, .calendar: 3, .rss: 3, .browserHistory: 3]
         do {
-            let grouped = try await searchNativeSourcesForPreview(query: trimmed, limitsBySource: limits)
+            let nativeStartedAt = Date()
+            let grouped = try await withGlobalSearchTimeout(milliseconds: 800) {
+                try await self.searchNativeSourcesForPreview(query: trimmed, limitsBySource: limits)
+            }
+            recordGlobalSearchTiming(query: trimmed, section: "nativeGrouped", startedAt: nativeStartedAt, returnedCount: grouped.values.reduce(0) { $0 + $1.count }, backend: nativeSourceSearchBackend.map { String(describing: type(of: $0)) } ?? "fallback")
             guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
             for kind in NativeSearchSourceKind.allCases {
                 applyGlobalSearchNativeSectionResult(
@@ -1169,6 +1177,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 )
             }
         } catch {
+            recordGlobalSearchTiming(query: trimmed, section: "nativeGrouped", startedAt: Date(), returnedCount: 0, backend: "error:\(String(describing: error))")
             for kind in NativeSearchSourceKind.allCases {
                 applyGlobalSearchNativeSectionResult(
                     GlobalSearchNativeSectionResult(kind: GlobalSearchSectionKind(nativeSourceKind: kind), results: [], errorMessage: String(describing: error)),
@@ -1176,6 +1185,31 @@ final class AppViewModel: NSObject, ObservableObject {
                     tokens: tokens
                 )
             }
+        }
+    }
+
+    private func recordGlobalSearchTiming(query: String, section: String, startedAt: Date, returnedCount: Int, backend: String) {
+        globalSearchTimings.append(GlobalSearchSectionTiming(
+            query: query,
+            section: section,
+            startedAt: startedAt,
+            endedAt: Date(),
+            candidateCount: returnedCount,
+            returnedCount: returnedCount,
+            backend: backend
+        ))
+    }
+
+    private func withGlobalSearchTimeout<T: Sendable>(milliseconds: Int, operation: @escaping @Sendable () async throws -> T) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask { try await operation() }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(milliseconds) * 1_000_000)
+                throw GlobalSearchTimeoutError.hardTimeout(milliseconds: milliseconds)
+            }
+            guard let value = try await group.next() else { throw GlobalSearchTimeoutError.hardTimeout(milliseconds: milliseconds) }
+            group.cancelAll()
+            return value
         }
     }
 
