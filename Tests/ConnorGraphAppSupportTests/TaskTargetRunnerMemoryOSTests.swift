@@ -14,7 +14,7 @@ import ConnorGraphAppSupport
     )
     let l1Task = ConnorTaskDefinition(
         id: "memory-os.plan-l1",
-        name: "Plan L1 to L2 jobs",
+        name: "Plan L1 unified projection jobs",
         origin: .system,
         trigger: ConnorTaskTrigger(kind: .scheduled, intervalSeconds: 300, recurrence: .interval),
         target: ConnorTaskTarget(targetKind: "memory_os.pipeline", targetID: "default", operationName: "plan_l1_unified_projection_jobs"),

@@ -331,7 +331,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         queueItem: MemoryOSQueueItem? = nil,
         processingRunID: String? = nil,
         artifactType: String = "graph_structured_extraction",
-        schemaName: String = "GraphStructuredExtractionOutput",
+        schemaName: String = "MemoryOSL1UnifiedProjectionOutput",
         now: Date = Date()
     ) throws -> MemoryOSProjectionRunSummary {
         let envelope = MemoryOSArtifactEnvelopeService().envelope(rawContent: rawContent, artifactType: artifactType, schemaName: schemaName, modelID: modelID, queueItemID: queueItem?.id, processingRunID: processingRunID, now: now)
@@ -522,7 +522,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
                 processingKind: .knowledgeSynthesis,
                 status: .pending,
                 sourceArtifactID: sourceArtifactID,
-                metadata: ["created_by": "l1_to_l2_projection", "source_artifact_id": sourceArtifactID]
+                metadata: ["created_by": "l1_unified_projection", "source_artifact_id": sourceArtifactID]
             ))
         }
         _ = try AppMemoryOSPipelineTriggerCoordinator(facade: self).evaluateAfterL2PendingStatements(now: now)

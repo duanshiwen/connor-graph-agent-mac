@@ -689,7 +689,7 @@ public struct MemoryOSBackgroundJobWorker<Executor: MemoryOSBackgroundModelExecu
         """
         \(draft.prompt)
 
-        \(MemoryOSBackgroundToolCatalog.promptSection(for: tools, stage: "L1→L2 extraction"))
+        \(MemoryOSBackgroundToolCatalog.promptSection(for: tools, stage: "L1 unified projection"))
 
         Stage-specific tool policy:
         - Prefer the provided L1 packet first.
