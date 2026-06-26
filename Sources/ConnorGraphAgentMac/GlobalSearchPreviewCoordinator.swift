@@ -83,6 +83,10 @@ struct GlobalSearchPreviewCoordinator: Sendable {
                     }
 
                     for await result in group {
+                        guard !Task.isCancelled else {
+                            group.cancelAll()
+                            break
+                        }
                         continuation.yield(result)
                     }
                     continuation.finish()
