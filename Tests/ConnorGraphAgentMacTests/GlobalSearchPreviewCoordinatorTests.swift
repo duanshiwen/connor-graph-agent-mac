@@ -23,6 +23,28 @@ struct GlobalSearchPreviewCoordinatorTests {
         #expect(first.results.map(\.id) == ["mail-result"])
         #expect(elapsed < 0.12)
     }
+
+    @Test func previewResultsSettleSlowSourcesAtPreviewTimeout() async throws {
+        let backend = DelayedNativeSourceSearchBackend(delays: [
+            .mail: 400_000_000,
+            .rss: 400_000_000,
+            .calendar: 400_000_000,
+            .browserHistory: 400_000_000
+        ])
+        let coordinator = GlobalSearchPreviewCoordinator(backend: backend, timeoutMilliseconds: 80)
+        let started = Date()
+        var received: [GlobalSearchNativePreviewSectionResult] = []
+
+        for await result in coordinator.previewResults(query: "phoenix", limitsBySource: [.mail: 3, .rss: 3, .calendar: 3, .browserHistory: 3]) {
+            received.append(result)
+        }
+
+        let elapsed = Date().timeIntervalSince(started)
+        #expect(received.count == NativeSearchSourceKind.allCases.count)
+        #expect(received.allSatisfy { $0.results.isEmpty })
+        #expect(received.allSatisfy { $0.errorMessage == nil })
+        #expect(elapsed < 0.2)
+    }
 }
 
 private actor DelayedNativeSourceSearchBackend: NativeSourceSearchBackend {
