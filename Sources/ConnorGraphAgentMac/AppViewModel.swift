@@ -1181,11 +1181,7 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func searchChatSessions(query: String, limit: Int) -> [GlobalSearchSessionResult] {
-        let terms = query
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .split(whereSeparator: { $0.isWhitespace || $0.isNewline })
-            .map(String.init)
-            .filter { !$0.isEmpty }
+        let terms = Self.globalSearchMatchTerms(for: query)
         guard !terms.isEmpty else { return [] }
         return allChatSessions
             .compactMap { session -> (result: GlobalSearchSessionResult, score: Double)? in
@@ -1224,13 +1220,33 @@ final class AppViewModel: NSObject, ObservableObject {
             .map(\.result)
     }
 
+    private static func globalSearchMatchTerms(for query: String) -> [String] {
+        let normalized = NativeSearchQueryNormalizer.normalize(query)
+        var seen: Set<String> = []
+        let normalizedTerms = normalized.scoringTokens
+            .map(\.value)
+            .filter { !$0.isEmpty }
+            .filter { $0.count >= 2 || query.count <= 2 }
+            .filter { seen.insert($0).inserted }
+        if !normalizedTerms.isEmpty { return normalizedTerms }
+        return query
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(whereSeparator: { $0.isWhitespace || $0.isNewline })
+            .map(String.init)
+            .filter { !$0.isEmpty }
+    }
+
     private static func globalSearchMatchScore(text: String, terms: [String], weight: Double) -> Double {
         let lower = text.lowercased()
-        guard terms.allSatisfy({ lower.localizedCaseInsensitiveContains($0) }) else { return 0 }
-        let exactBonus = terms.reduce(0.0) { partial, term in
+        let matchedTerms = terms.filter { lower.localizedCaseInsensitiveContains($0) }
+        guard !matchedTerms.isEmpty else { return 0 }
+        let requiredMatches = min(max(terms.count, 1), 2)
+        guard matchedTerms.count >= requiredMatches else { return 0 }
+        let coverage = Double(matchedTerms.count) / Double(max(terms.count, 1))
+        let exactBonus = matchedTerms.reduce(0.0) { partial, term in
             partial + (lower == term.lowercased() ? 2.0 : 0.0)
         }
-        return weight + exactBonus
+        return weight * (0.75 + coverage) + exactBonus
     }
 
     private static func globalSearchSnippet(text: String, terms: [String], maxLength: Int = 120) -> String {
