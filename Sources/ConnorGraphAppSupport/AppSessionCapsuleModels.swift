@@ -226,7 +226,7 @@ public enum BrowserBuiltInPage: Sendable {
         <head>
           <meta charset="utf-8">
           <meta name="viewport" content="width=device-width, initial-scale=1">
-          <title>页面无法打开</title>
+          <title>这个页面暂时打不开</title>
           <style>
             :root { color-scheme: light dark; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }
             body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: radial-gradient(circle at 28% 18%, rgba(255,59,48,.16), transparent 32%), Canvas; color: CanvasText; }
