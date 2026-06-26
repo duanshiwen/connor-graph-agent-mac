@@ -14,10 +14,10 @@ public actor FileBackedMailSourceStore: MailSourceRepository, TimeAwareMailSourc
     private let fileManager: FileManager
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
-    private let searchService: NativeSourceSearchService?
+    private let searchService: (any NativeSourceSearchBackend)?
     private var hasPrimedSearchIndex: Bool
 
-    public init(storagePaths: AppStoragePaths, fileManager: FileManager = .default, searchService: NativeSourceSearchService? = nil) {
+    public init(storagePaths: AppStoragePaths, fileManager: FileManager = .default, searchService: (any NativeSourceSearchBackend)? = nil) {
         self.storeURL = storagePaths.applicationSupportDirectory
             .appendingPathComponent("mail", isDirectory: true)
             .appendingPathComponent("mail-store.json")
@@ -31,7 +31,7 @@ public actor FileBackedMailSourceStore: MailSourceRepository, TimeAwareMailSourc
         self.hasPrimedSearchIndex = false
     }
 
-    public init(storeURL: URL, fileManager: FileManager = .default, searchService: NativeSourceSearchService? = nil) {
+    public init(storeURL: URL, fileManager: FileManager = .default, searchService: (any NativeSourceSearchBackend)? = nil) {
         self.storeURL = storeURL
         self.fileManager = fileManager
         self.encoder = JSONEncoder()
@@ -135,7 +135,7 @@ public actor FileBackedMailSourceStore: MailSourceRepository, TimeAwareMailSourc
 
     private func primeSearchIndexIfNeeded(snapshot: Snapshot) async throws {
         guard let searchService, !hasPrimedSearchIndex else { return }
-        try await searchService.rebuildSource(kind: .mail, documents: snapshot.messages.map(NativeSourceSearchAdapters.mailDocument(from:)))
+        try await searchService.rebuildSource(kind: .mail, sourceInstanceID: nil, documents: snapshot.messages.map(NativeSourceSearchAdapters.mailDocument(from:)))
         hasPrimedSearchIndex = true
     }
 
