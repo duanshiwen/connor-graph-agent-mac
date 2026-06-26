@@ -1239,26 +1239,6 @@ final class AppViewModel: NSObject, ObservableObject {
         }
     }
 
-    private func searchNativeSourcesForPreview(query: String, limitsBySource: [NativeSearchSourceKind: Int]) async throws -> [NativeSearchSourceKind: [NativeSearchResult]] {
-        if let nativeSourceSearchBackend {
-            return try await nativeSourceSearchBackend.searchGrouped(
-                NativeSearchQuery(
-                    text: query,
-                    sourceKinds: Set(limitsBySource.keys),
-                    limit: limitsBySource.values.reduce(0, +),
-                    includeBodySnippets: true,
-                    rankingProfile: .recentFirst
-                ),
-                limitsBySource: limitsBySource
-            )
-        }
-        var grouped: [NativeSearchSourceKind: [NativeSearchResult]] = [:]
-        for (kind, limit) in limitsBySource {
-            grouped[kind] = fallbackNativeSearchResults(kind: kind, query: query, limit: limit)
-        }
-        return grouped
-    }
-
     private func applyGlobalSearchNativeHealth(_ health: NativeSourceSearchHealthSnapshot, query: String, tokens: [String]) {
         guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == query else { return }
         var state = globalSearchPreviewState
