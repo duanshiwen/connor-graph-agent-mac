@@ -42,6 +42,17 @@ final class ChatViewportController: ObservableObject {
     var isPinnedToBottom: Bool { snapshot.isPinnedToBottom }
     var shouldShowJumpToLatest: Bool { snapshot.shouldShowJumpToLatest }
     var pendingNewItemCount: Int { snapshot.pendingNewItemCount }
+    var isResolvingInitialAnchor: Bool {
+        if pendingInitialAnchor != nil { return true }
+        if pendingScrollCommand?.target == .bottom(animated: false) { return true }
+        if pendingScrollCommand?.target == .top(animated: false) { return true }
+        switch snapshot.mode {
+        case .programmaticScroll(.bottom(animated: false)), .programmaticScroll(.top(animated: false)):
+            return true
+        default:
+            return false
+        }
+    }
 
     func updateMetrics(_ metrics: ChatViewportMetrics) {
         latestMetrics = metrics
@@ -68,8 +79,13 @@ final class ChatViewportController: ObservableObject {
         itemCount: Int,
         initialAnchor: ChatViewportInitialAnchor = .bottom
     ) {
-        currentDataSetItemCount = itemCount
+        let previousItemCount = currentDataSetItemCount
         guard currentDataSetID != id else {
+            currentDataSetItemCount = itemCount
+            if previousItemCount == 0, itemCount > 0, initialAnchor != .none {
+                pendingInitialAnchor = initialAnchor
+                Self.logger.debug("Chat viewport same dataset became non-empty dataset=\(id.description, privacy: .public) generation=\(self.replacementGeneration, privacy: .public) itemCount=\(itemCount, privacy: .public) initialAnchor=\(String(describing: initialAnchor), privacy: .public)")
+            }
             completePendingInitialAnchorIfNeeded()
             return
         }
@@ -131,7 +147,9 @@ final class ChatViewportController: ObservableObject {
 
     func completePendingInitialAnchorIfNeeded() {
         guard let pendingInitialAnchor,
-              latestMetrics != nil,
+              let latestMetrics,
+              latestMetrics.viewportHeight > 0,
+              latestMetrics.contentHeight > 0,
               currentDataSetItemCount > 0
         else { return }
 

@@ -1,4 +1,5 @@
 import SwiftUI
+import ConnorGraphAppSupport
 
 struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where Item.ID: Hashable {
     var dataSetID: ChatViewportDataSetID
@@ -23,6 +24,15 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
 
     private var bottomSentinelID: String {
         dataSetID.namespacedElementID("commercial-chat-viewport-bottom-sentinel")
+    }
+
+    private var hasLaidOutInitialItems: Bool {
+        !items.isEmpty && viewportHeight > 0 && contentHeight > 0
+    }
+
+    private var initialLatestAnchorTaskID: String {
+        let phase = items.isEmpty ? "empty" : (hasLaidOutInitialItems ? "ready" : "pending")
+        return "\(dataSetID.description)::\(phase)"
     }
 
     init(
@@ -90,6 +100,7 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                         }
                     )
                 }
+                .defaultScrollAnchor(.bottom)
                 .coordinateSpace(name: coordinateSpaceName)
                 .id(dataSetID)
                 .background(
@@ -125,8 +136,14 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
                     controller.replaceDataSetIfNeeded(id: dataSetID, itemCount: newCount, initialAnchor: .bottom)
                 }
                 .onChange(of: controller.pendingScrollCommand?.id) { _, _ in
-                    guard let command = controller.consumePendingScrollCommand() else { return }
-                    perform(command, proxy: proxy)
+                    consumePendingScrollCommandIfAvailable(proxy: proxy)
+                }
+                .task(id: controller.pendingScrollCommand?.id) {
+                    consumePendingScrollCommandIfAvailable(proxy: proxy)
+                }
+                .task(id: initialLatestAnchorTaskID) {
+                    guard hasLaidOutInitialItems else { return }
+                    scheduleInitialLatestAnchorRetries(proxy: proxy)
                 }
 
                 if configuration.showsJumpToLatestButton,
@@ -162,13 +179,20 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
     }
 
     private func requestOlderItemsIfNeeded() {
-        guard hasOlderItems,
-              !isLoadingOlderItems,
-              !didRequestOlderItemsForCurrentTopReach,
-              viewportHeight > 0,
-              max(0, -topSentinelMinY) <= configuration.topLoadTriggerOffset
-        else {
-            if max(0, -topSentinelMinY) > configuration.topLoadTriggerOffset * 2 {
+        let distanceToTop = max(0, -topSentinelMinY)
+        guard ChatViewportTopLoadPolicy.shouldRequestOlderItems(
+            hasOlderItems: hasOlderItems,
+            isLoadingOlderItems: isLoadingOlderItems,
+            didRequestOlderItemsForCurrentTopReach: didRequestOlderItemsForCurrentTopReach,
+            viewportHeight: viewportHeight,
+            distanceToTop: distanceToTop,
+            topLoadTriggerOffset: configuration.topLoadTriggerOffset,
+            isResolvingInitialAnchor: controller.isResolvingInitialAnchor
+        ) else {
+            if ChatViewportTopLoadPolicy.shouldResetTopReachRequest(
+                distanceToTop: distanceToTop,
+                topLoadTriggerOffset: configuration.topLoadTriggerOffset
+            ) {
                 didRequestOlderItemsForCurrentTopReach = false
             }
             return
@@ -178,13 +202,79 @@ struct CommercialChatViewport<Item: Identifiable, RowContent: View>: View where 
         onTopReached?()
     }
 
+    private func consumePendingScrollCommandIfAvailable(proxy: ScrollViewProxy) {
+        guard let command = controller.consumePendingScrollCommand() else { return }
+        DispatchQueue.main.async {
+            perform(command, proxy: proxy)
+        }
+    }
+
+    private func scheduleInitialLatestAnchorRetries(proxy: ScrollViewProxy) {
+        let scheduledDataSetID = dataSetID
+        for delay in AgentChatCollapseScrollSchedule.decisionDelays {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                guard dataSetID == scheduledDataSetID else { return }
+                switch initialLatestAnchorDecision() {
+                case .scrollToLatest:
+                    scrollToLatestRenderedItem(proxy: proxy, animated: false)
+                case .wait, .settleWithoutScroll, .stop:
+                    return
+                }
+            }
+        }
+    }
+
+    private func initialLatestAnchorDecision() -> ChatViewportInitialAnchorDecision {
+        ChatViewportInitialAnchorPolicy.decision(
+            itemCount: items.count,
+            viewportHeight: viewportHeight,
+            contentHeight: contentHeight,
+            distanceToBottom: measuredDistanceToBottom,
+            bottomPinThreshold: configuration.bottomPinThreshold,
+            isLoadingOlderItems: isLoadingOlderItems,
+            isPrependingOlderItems: isPrependingOlderItems,
+            isResolvingInitialAnchor: controller.isResolvingInitialAnchor,
+            isPinnedToBottom: controller.isPinnedToBottom
+        )
+    }
+
+    private var measuredDistanceToBottom: CGFloat {
+        if bottomSentinelMaxY > 0 {
+            return max(0, bottomSentinelMaxY - viewportHeight)
+        }
+        return max(0, contentHeight - viewportHeight)
+    }
+
+    private var isPrependingOlderItems: Bool {
+        if case .correctingAfterDataChange(.prepend) = controller.snapshot.mode {
+            return true
+        }
+        return false
+    }
+
+    private func scrollToLatestRenderedItem(proxy: ScrollViewProxy, animated: Bool) {
+        let operation = {
+            if let lastItem = items.last {
+                proxy.scrollTo(rowID(for: lastItem), anchor: .bottom)
+            } else {
+                proxy.scrollTo(bottomSentinelID, anchor: .bottom)
+            }
+        }
+
+        if animated {
+            withAnimation(.easeOut(duration: 0.22), operation)
+        } else {
+            operation()
+        }
+    }
+
     private func perform(_ command: ChatViewportScrollCommand, proxy: ScrollViewProxy) {
         let operation = {
             switch command.target {
             case .top:
                 proxy.scrollTo(topSentinelID, anchor: .top)
             case .bottom:
-                proxy.scrollTo(bottomSentinelID, anchor: .bottom)
+                scrollToLatestRenderedItem(proxy: proxy, animated: false)
             case let .item(id, anchor, _):
                 proxy.scrollTo(id, anchor: anchor.unitPoint)
             }
