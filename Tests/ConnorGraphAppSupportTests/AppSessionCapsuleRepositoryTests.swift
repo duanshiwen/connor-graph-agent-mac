@@ -187,8 +187,16 @@ struct AppSessionCapsuleRepositoryTests {
         let tab = AppBrowserTabSnapshot(initialURLString: "", currentURLString: "")
 
         #expect(tab.restoredURLString == BrowserBuiltInPage.blankURLString)
-        #expect(BrowserBuiltInPage.blankHTML.contains("Connor Browser"))
-        #expect(BrowserBuiltInPage.errorHTML(failedURLString: "https://bad.example", message: "offline").contains("https://bad.example"))
+        #expect(BrowserBuiltInPage.blankHTML.contains("康纳同学 · 浏览器"))
+        #expect(BrowserBuiltInPage.blankHTML.contains("康纳同学的浏览起点"))
+        #expect(BrowserBuiltInPage.blankHTML.contains("每个会话都有独立的浏览标签、网页选区和工作上下文"))
+
+        let errorHTML = BrowserBuiltInPage.errorHTML(failedURLString: "https://bad.example?q=<x>", message: "offline & blocked")
+        #expect(errorHTML.contains("康纳同学 · 页面状态"))
+        #expect(errorHTML.contains("这个页面暂时打不开"))
+        #expect(errorHTML.contains("换一种方式查找资料"))
+        #expect(errorHTML.contains("https://bad.example?q=&lt;x&gt;"))
+        #expect(errorHTML.contains("offline &amp; blocked"))
     }
 
     @Test("built in pages do not expose custom URL scheme to WebKit loading")
