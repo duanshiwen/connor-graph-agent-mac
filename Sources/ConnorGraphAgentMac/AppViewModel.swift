@@ -1191,66 +1191,24 @@ final class AppViewModel: NSObject, ObservableObject {
     }
 
     private func refreshIndexedGlobalSearchNativePreviewSections(query: String, tokens: [String], limitsBySource: [NativeSearchSourceKind: Int], backend: any NativeSourceSearchBackend) async {
-        let backendName = String(describing: type(of: backend))
-        await withTaskGroup(of: GlobalSearchNativeSectionResult.self) { group in
-            for kind in NativeSearchSourceKind.allCases {
-                let limit = limitsBySource[kind] ?? 3
-                group.addTask {
-                    let startedAt = Date()
-                    do {
-                        let results = try await Self.withGlobalSearchTimeout(milliseconds: 250) {
-                            try await backend.search(NativeSearchQuery(
-                                text: query,
-                                sourceKinds: [kind],
-                                limit: limit,
-                                includeBodySnippets: true,
-                                rankingProfile: .recentFirst
-                            ))
-                        }
-                        return GlobalSearchNativeSectionResult(
-                            kind: GlobalSearchSectionKind(nativeSourceKind: kind),
-                            results: results,
-                            errorMessage: nil,
-                            timing: GlobalSearchSectionTiming(
-                                query: query,
-                                section: GlobalSearchSectionKind(nativeSourceKind: kind).rawValue,
-                                startedAt: startedAt,
-                                endedAt: Date(),
-                                candidateCount: results.count,
-                                returnedCount: results.count,
-                                backend: backendName
-                            )
-                        )
-                    } catch {
-                        let userFacingErrorMessage = Self.userFacingGlobalSearchErrorMessage(for: error)
-                        return GlobalSearchNativeSectionResult(
-                            kind: GlobalSearchSectionKind(nativeSourceKind: kind),
-                            results: [],
-                            errorMessage: userFacingErrorMessage,
-                            timing: GlobalSearchSectionTiming(
-                                query: query,
-                                section: GlobalSearchSectionKind(nativeSourceKind: kind).rawValue,
-                                startedAt: startedAt,
-                                endedAt: Date(),
-                                candidateCount: 0,
-                                returnedCount: 0,
-                                backend: "error:\(String(describing: error))"
-                            )
-                        )
-                    }
-                }
-            }
-
-            for await sectionResult in group {
-                guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == query else {
-                    group.cancelAll()
-                    return
-                }
-                if let timing = sectionResult.timing {
-                    globalSearchTimings.append(timing)
-                }
-                applyGlobalSearchNativeSectionResult(sectionResult, query: query, tokens: tokens)
-            }
+        let coordinator = GlobalSearchPreviewCoordinator(
+            backend: backend,
+            timeoutMilliseconds: 250,
+            errorMessage: Self.userFacingGlobalSearchErrorMessage(for:)
+        )
+        for await sectionResult in coordinator.previewResults(query: query, limitsBySource: limitsBySource) {
+            guard globalSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) == query else { return }
+            globalSearchTimings.append(sectionResult.timing)
+            applyGlobalSearchNativeSectionResult(
+                GlobalSearchNativeSectionResult(
+                    kind: GlobalSearchSectionKind(nativeSourceKind: sectionResult.kind),
+                    results: sectionResult.results,
+                    errorMessage: sectionResult.errorMessage,
+                    timing: sectionResult.timing
+                ),
+                query: query,
+                tokens: tokens
+            )
         }
     }
 
