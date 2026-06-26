@@ -21,7 +21,7 @@ import ConnorGraphAppSupport
     #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l2_statements;").first?.first == "1")
     #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l1_capture_events;").first?.first == "0")
     #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l0_provenance_objects;").first?.first == "2")
-    #expect(try store.runnableQueueItems(kind: MemoryOSBackgroundJobKind.l1UnifiedProjection.rawValue, limit: 10, now: now).isEmpty)
+    #expect(try store.runnableQueueItems(kind: MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue, limit: 10, now: now).isEmpty)
     let states = try store.l2ProcessingStates(processingKind: .knowledgeSynthesis, status: .pending, limit: 10)
     let state = try #require(states.first)
     #expect(states.count == 1)
