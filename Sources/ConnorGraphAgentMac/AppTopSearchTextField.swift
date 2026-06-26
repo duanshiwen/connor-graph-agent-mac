@@ -39,18 +39,7 @@ struct TopSearchTextField: NSViewRepresentable {
         }
         nsView.placeholderString = placeholder
         context.coordinator.isFocused = $isFocused
-        let fieldEditor = nsView.currentEditor()
-        let hasAppKitFocus = nsView.window?.firstResponder === nsView || nsView.window?.firstResponder === fieldEditor
-        if !isFocused, hasAppKitFocus {
-            DispatchQueue.main.async {
-                guard nsView.window?.firstResponder === nsView || nsView.window?.firstResponder === nsView.currentEditor() else { return }
-                nsView.window?.makeFirstResponder(nil)
-            }
-        } else if isFocused, !hasAppKitFocus {
-            DispatchQueue.main.async {
-                nsView.window?.makeFirstResponder(nsView)
-            }
-        }
+        context.coordinator.syncFocusStateIfNeeded(isFocused, in: nsView)
         if context.coordinator.lastFocusRequestID != focusRequestID {
             context.coordinator.lastFocusRequestID = focusRequestID
             guard focusRequestID != nil else { return }
@@ -74,6 +63,7 @@ struct TopSearchTextField: NSViewRepresentable {
         @Binding var text: String
         var isFocused: Binding<Bool>
         var lastFocusRequestID: UUID?
+        var lastSyncedFocusState = false
         var shouldSelectAllOnNextFocus = false
         var onSubmit: (() -> Void)?
         var onMoveUp: (() -> Void)?
@@ -93,12 +83,33 @@ struct TopSearchTextField: NSViewRepresentable {
             self.onBlur = onBlur
         }
 
+        @MainActor
+        func syncFocusStateIfNeeded(_ desiredFocusState: Bool, in textField: NSTextField) {
+            guard desiredFocusState != lastSyncedFocusState else { return }
+            lastSyncedFocusState = desiredFocusState
+            let fieldEditor = textField.currentEditor()
+            let hasAppKitFocus = textField.window?.firstResponder === textField || textField.window?.firstResponder === fieldEditor
+            if desiredFocusState, !hasAppKitFocus {
+                DispatchQueue.main.async { [weak textField] in
+                    textField?.window?.makeFirstResponder(textField)
+                }
+            } else if !desiredFocusState, hasAppKitFocus {
+                DispatchQueue.main.async { [weak textField] in
+                    guard let textField,
+                          textField.window?.firstResponder === textField || textField.window?.firstResponder === textField.currentEditor() else { return }
+                    textField.window?.makeFirstResponder(nil)
+                }
+            }
+        }
+
         func controlTextDidBeginEditing(_ notification: Notification) {
+            lastSyncedFocusState = true
             isFocused.wrappedValue = true
             onFocus?()
         }
 
         func controlTextDidEndEditing(_ notification: Notification) {
+            lastSyncedFocusState = false
             isFocused.wrappedValue = false
             onBlur?()
         }
