@@ -417,6 +417,7 @@ struct BrowserWorkspaceView: View {
             session.tabs.remove(at: index)
             session.webViewsByTabID[id] = nil
             session.selectionPopover = session.selectionPopover?.tabID == id ? nil : session.selectionPopover
+            webViewsByTabID[id] = nil
 
             if session.tabs.isEmpty {
                 session.selectedTabID = nil
@@ -439,11 +440,14 @@ struct BrowserWorkspaceView: View {
     }
 
     private func setWebView(_ webView: WKWebView, for tabID: BrowserTabState.ID) {
-        mutateActiveSession { session in
-            guard let index = session.tabs.firstIndex(where: { $0.id == tabID }) else { return }
-            session.webViewsByTabID[tabID] = webView
-            if session.tabs.indices.contains(index) { session.tabs[index].webView = webView }
-            if session.selectedTabID == nil { session.selectedTabID = tabID }
+        if webViewsByTabID[tabID] === webView { return }
+        webViewsByTabID[tabID] = webView
+
+        if activeSelectedTabID == nil {
+            mutateActiveSession { session in
+                guard session.tabs.contains(where: { $0.id == tabID }) else { return }
+                session.selectedTabID = tabID
+            }
         }
     }
 
