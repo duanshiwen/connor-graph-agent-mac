@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		6D47A2000000000000000003 /* Sources/ConnorGraphAgentMac/GlobalSearchPreviewCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D47A1000000000000000003 /* Sources/ConnorGraphAgentMac/GlobalSearchPreviewCoordinator.swift */; };
 		A0000000000000000000003B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000003A /* Assets.xcassets */; };
 		A00000000000000000000001 /* Sources/ConnorGraphAgentMac/ConnorGraphAgentMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000002 /* Sources/ConnorGraphAgentMac/ConnorGraphAgentMacApp.swift */; };
 		A00000000000000000000003 /* ConnorGraphCore in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000004 /* ConnorGraphCore */; };
@@ -99,6 +100,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		6D47A1000000000000000003 /* Sources/ConnorGraphAgentMac/GlobalSearchPreviewCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/GlobalSearchPreviewCoordinator.swift; sourceTree = "<group>"; };
 		A0000000000000000000003A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Sources/ConnorGraphAgentMac/Assets.xcassets; sourceTree = "<group>"; };
 		A00000000000000000000002 /* Sources/ConnorGraphAgentMac/ConnorGraphAgentMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ConnorGraphAgentMac/ConnorGraphAgentMacApp.swift; sourceTree = "<group>"; };
 		A00000000000000000000011 /* ConnorGraphAgentMacApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ConnorGraphAgentMacApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -271,6 +273,7 @@
 				C00000000000000000000005 /* Sources/ConnorGraphAgentMac/AppCommercialReadinessDashboardBuilder.swift */,
 				6D47A1000000000000000002 /* Sources/ConnorGraphAgentMac/AppGlobalSearchOverlayView.swift */,
 				6D47A1000000000000000001 /* Sources/ConnorGraphAgentMac/AppGlobalSearchModels.swift */,
+				6D47A1000000000000000003 /* Sources/ConnorGraphAgentMac/GlobalSearchPreviewCoordinator.swift */,
 				C00000000000000000000007 /* Sources/ConnorGraphAgentMac/AppNavigationTypes.swift */,
 				C00000000000000000000008 /* Sources/ConnorGraphAgentMac/AppShellViews.swift */,
 				C00000000000000000000009 /* Sources/ConnorGraphAgentMac/AppViewModelFactory.swift */,
@@ -467,6 +470,7 @@
 				D00000000000000000000005 /* Sources/ConnorGraphAgentMac/AppCommercialReadinessDashboardBuilder.swift in Sources */,
 				6D47A2000000000000000002 /* Sources/ConnorGraphAgentMac/AppGlobalSearchOverlayView.swift in Sources */,
 				6D47A2000000000000000001 /* Sources/ConnorGraphAgentMac/AppGlobalSearchModels.swift in Sources */,
+				6D47A2000000000000000003 /* Sources/ConnorGraphAgentMac/GlobalSearchPreviewCoordinator.swift in Sources */,
 				D00000000000000000000007 /* Sources/ConnorGraphAgentMac/AppNavigationTypes.swift in Sources */,
 				D00000000000000000000008 /* Sources/ConnorGraphAgentMac/AppShellViews.swift in Sources */,
 				D00000000000000000000009 /* Sources/ConnorGraphAgentMac/AppViewModelFactory.swift in Sources */,
