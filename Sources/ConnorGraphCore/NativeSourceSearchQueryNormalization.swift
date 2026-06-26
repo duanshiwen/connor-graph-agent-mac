@@ -1,4 +1,5 @@
 import Foundation
+import NaturalLanguage
 
 public enum NativeSearchQueryTokenKind: String, Codable, Sendable, Equatable, Hashable {
     case word
@@ -44,6 +45,14 @@ public struct NativeSearchNormalizedQuery: Codable, Sendable, Equatable, Hashabl
         let strong = strongTokens
         return strong.isEmpty ? tokens : strong
     }
+
+    public var displayTokens: [NativeSearchQueryToken] {
+        scoringTokens.filter { token in
+            !token.isSoftStopWord && token.kind != .cjkGram
+        }
+    }
+
+    public var displayTokenValues: [String] { displayTokens.map(\.value) }
 }
 
 public enum NativeSearchQueryNormalizer {
@@ -84,31 +93,49 @@ public enum NativeSearchQueryNormalizer {
     }
 
     private static func tokenizeCJK(_ text: String) -> [NativeSearchQueryToken] {
-        var remaining = text
+        let compact = String(text.filter { !$0.isWhitespace })
+        guard !compact.isEmpty else { return [] }
+
         var tokens: [NativeSearchQueryToken] = []
-        for stop in chineseSoftStopWords.sorted(by: { $0.count > $1.count }) {
-            while let range = remaining.range(of: stop) {
-                let before = String(remaining[..<range.lowerBound])
-                tokens.append(contentsOf: cjkStrongTokens(before))
-                tokens.append(NativeSearchQueryToken(value: stop, kind: .cjk, weight: 0.1, isSoftStopWord: true))
-                remaining = String(remaining[range.upperBound...])
-            }
-        }
-        tokens.append(contentsOf: cjkStrongTokens(remaining))
+        tokens.append(NativeSearchQueryToken(value: compact, kind: .phrase, weight: 1.4, isSoftStopWord: false))
+        tokens.append(contentsOf: semanticCJKTokens(compact))
+        tokens.append(contentsOf: fallbackCJKGrams(compact))
         return tokens
     }
 
-    private static func cjkStrongTokens(_ text: String) -> [NativeSearchQueryToken] {
-        let chars = Array(text).filter { !$0.isWhitespace }
-        guard !chars.isEmpty else { return [] }
-        let value = String(chars)
-        if chars.count <= 2 {
-            return [NativeSearchQueryToken(value: value, kind: .cjk, weight: 1, isSoftStopWord: false)]
+    private static func semanticCJKTokens(_ text: String) -> [NativeSearchQueryToken] {
+        let tokenizer = NLTokenizer(unit: .word)
+        tokenizer.string = text
+        var tokens: [NativeSearchQueryToken] = []
+        let fullRange = text.startIndex..<text.endIndex
+        tokenizer.enumerateTokens(in: fullRange) { range, _ in
+            let value = String(text[range]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty else { return true }
+            let isStop = chineseSoftStopWords.contains(value)
+            tokens.append(NativeSearchQueryToken(value: value, kind: .cjk, weight: isStop ? 0.1 : 1, isSoftStopWord: isStop))
+            return true
         }
-        var tokens = [NativeSearchQueryToken(value: value, kind: .cjk, weight: 1, isSoftStopWord: false)]
+
+        if tokens.isEmpty {
+            let isStop = chineseSoftStopWords.contains(text)
+            return [NativeSearchQueryToken(value: text, kind: .cjk, weight: isStop ? 0.1 : 1, isSoftStopWord: isStop)]
+        }
+        return tokens
+    }
+
+    private static func fallbackCJKGrams(_ text: String) -> [NativeSearchQueryToken] {
+        let chars = Array(text).filter { !$0.isWhitespace }
+        guard chars.count > 1 else { return [] }
+        var tokens: [NativeSearchQueryToken] = []
+        if chars.count >= 3 {
+            for index in 0...(chars.count - 3) {
+                let gram = String(chars[index...index + 2])
+                tokens.append(NativeSearchQueryToken(value: gram, kind: .cjkGram, weight: 0.35, isSoftStopWord: false))
+            }
+        }
         for index in 0..<(chars.count - 1) {
             let gram = String(chars[index...index + 1])
-            tokens.append(NativeSearchQueryToken(value: gram, kind: .cjkGram, weight: 0.8, isSoftStopWord: false))
+            tokens.append(NativeSearchQueryToken(value: gram, kind: .cjkGram, weight: 0.25, isSoftStopWord: false))
         }
         return tokens
     }
