@@ -69,3 +69,42 @@ import ConnorGraphAppSupport
     #expect(statement.metadata["statement_kind"] == "external_id")
     #expect(statement.metadata["external_id_value"] == "/m/example")
 }
+
+@Test func foundationKGMapperMapsCommonWikidataPropertiesToControlledL4Predicates() throws {
+    let cases: [(property: String, targetKind: String, expected: String)] = [
+        ("P17", "entity", "LOCATED_IN"),
+        ("P131", "entity", "LOCATED_IN"),
+        ("P276", "entity", "HAS_LOCATION"),
+        ("P625", "literal", "HAS_COORDINATE"),
+        ("P50", "entity", "AUTHORED_BY"),
+        ("P170", "entity", "CREATED_BY"),
+        ("P178", "entity", "DEVELOPED_BY"),
+        ("P112", "entity", "FOUNDED_BY"),
+        ("P127", "entity", "OWNED_BY"),
+        ("P921", "entity", "ABOUT"),
+        ("P366", "entity", "USED_FOR"),
+        ("P101", "entity", "FIELD_OF_WORK"),
+        ("P452", "entity", "IN_INDUSTRY"),
+        ("P425", "entity", "FIELD_OF_WORK"),
+        ("P856", "literal", "HAS_OFFICIAL_WEBSITE"),
+        ("P460", "entity", "SAID_TO_BE_SAME_AS"),
+        ("P461", "entity", "OPPOSITE_OF"),
+        ("P2579", "entity", "STUDIED_BY"),
+        ("P1269", "entity", "FACET_OF")
+    ]
+
+    for item in cases {
+        let edge = FoundationKGEdgeRecord(sourceID: "Q1000", predicate: item.property, targetID: item.targetKind == "entity" ? "Q2000" : nil, targetKind: item.targetKind, value: item.targetKind == "literal" ? "literal-value" : nil, source: "wikidata")
+        let statement = FoundationKGMemoryOSMapper.mapEdgeStatement(
+            edge,
+            sourceName: "Example",
+            propertyName: item.property,
+            targetName: item.targetKind == "entity" ? "Target" : nil,
+            targetExists: item.targetKind == "entity",
+            builtAt: Date(timeIntervalSince1970: 2_000)
+        )
+
+        #expect(statement?.predicate.rawValue == item.expected)
+        #expect(statement?.metadata["predicate"] == item.property)
+    }
+}
