@@ -340,7 +340,7 @@ private final class LocalToolsCredentialStore: CredentialStore, @unchecked Senda
     let names = controller.toolRegistry.definitions.map(\.name)
 
     #expect(!names.contains("memory_os_dashboard_summary"))
-    #expect(names.contains("memory_os_ingest_observation"))
+    #expect(!names.contains("memory_os_ingest_observation"))
     #expect(!names.contains("memory_os_project_structured_artifact"))
     #expect(names.contains("memory_os_l2_find_entities"))
     #expect(names.contains("memory_os_l2_update_entities"))
