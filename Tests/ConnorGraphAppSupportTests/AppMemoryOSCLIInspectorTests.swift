@@ -475,17 +475,21 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(output.contains("evidenced_by"))
     }
 
-    @Test func memoryOSCLIRouterRoutesL2FindCommand() throws {
+    @Test func memoryOSCLIRouterRoutesL2EntityCommands() throws {
         let store = try makeMemoryOSCLIInspectorStore()
         try seedMemoryOSCLIInspectorFixture(store: store)
         let inspector = AppMemoryOSCLIInspector(store: store)
         let encoder = memoryOSCLITestEncoder()
 
-        let output = try AppMemoryOSCLIRouter.route(args: ["l2", "find", "康纳", "--predicate", "describes", "--limit", "5"], inspector: inspector, encoder: encoder)
+        let updateJSON = #"{"entities":[{"name":"《迟到的青春期》","type":"work_object","aliases":"迟到的青春期, Late Puberty","statements":[{"text":"《迟到的青春期》马尼拉一个月阶段的明确决策是：不去贫民窟。","connectedEntity":"《迟到的青春期》马尼拉一个月阶段","connectedEntityType":"work_object","factType":"decision","polarity":"exclude","originalPhrase":"不去贫民窟"}]}]}"#
+        let update = try AppMemoryOSCLIRouter.route(args: ["l2", "update-entities", "--json", updateJSON], inspector: inspector, encoder: encoder)
+        let find = try AppMemoryOSCLIRouter.route(args: ["l2", "find-entities", "Late Puberty"], inspector: inspector, encoder: encoder)
+        let oldFind = try AppMemoryOSCLIRouter.route(args: ["l2", "find", "康纳"], inspector: inspector, encoder: encoder)
 
-        #expect(output.contains("stmt-1"))
-        #expect(output.contains("node-1"))
-        #expect(output.contains("span-1"))
+        #expect(update.contains("updatedEntities"))
+        #expect(find.contains("《迟到的青春期》"))
+        #expect(find.contains("不去贫民窟"))
+        #expect(oldFind.contains("unknown_l2_command"))
     }
 
     @Test func memoryOSCLIRouterRoutesL3ExpandCommand() throws {
