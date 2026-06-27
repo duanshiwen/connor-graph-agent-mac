@@ -11,6 +11,7 @@ public enum MemoryOSL4RelationCategory: String, Codable, Sendable, CaseIterable,
     case governance
     case causality
     case contribution
+    case location
     case reference
 }
 
@@ -33,6 +34,7 @@ public enum MemoryOSL4RelationPredicate: String, Codable, Sendable, CaseIterable
     case partOf = "PART_OF"
     case contains = "CONTAINS"
     case memberOf = "MEMBER_OF"
+    case overlapsWith = "OVERLAPS_WITH"
 
     // Dependency / constraint
     case dependsOn = "DEPENDS_ON"
@@ -51,6 +53,8 @@ public enum MemoryOSL4RelationPredicate: String, Codable, Sendable, CaseIterable
     case usedFor = "USED_FOR"
     case specializes = "SPECIALIZES"
     case generalizes = "GENERALIZES"
+    case fieldOfWork = "FIELD_OF_WORK"
+    case inIndustry = "IN_INDUSTRY"
 
     // Provenance / evidence
     case derivedFrom = "DERIVED_FROM"
@@ -88,13 +92,27 @@ public enum MemoryOSL4RelationPredicate: String, Codable, Sendable, CaseIterable
     case curatedBy = "CURATED_BY"
     case authoredBy = "AUTHORED_BY"
     case publishedBy = "PUBLISHED_BY"
+    case developedBy = "DEVELOPED_BY"
+    case foundedBy = "FOUNDED_BY"
     case stakeholderOf = "STAKEHOLDER_OF"
     case worksOn = "WORKS_ON"
 
+    // Location / place / coordinates
+    case locatedIn = "LOCATED_IN"
+    case hasLocation = "HAS_LOCATION"
+    case hasCoordinate = "HAS_COORDINATE"
+
     // Communication / reference / weak relation
+    case differentFrom = "DIFFERENT_FROM"
+    case oppositeOf = "OPPOSITE_OF"
+    case saidToBeSameAs = "SAID_TO_BE_SAME_AS"
+    case facetOf = "FACET_OF"
+    case studiedBy = "STUDIED_BY"
     case about = "ABOUT"
     case mentions = "MENTIONS"
     case relatedTo = "RELATED_TO"
+    case hasOfficialWebsite = "HAS_OFFICIAL_WEBSITE"
+    case hasIdentifier = "HAS_IDENTIFIER"
     case associatedWith = "ASSOCIATED_WITH"
 }
 
@@ -105,13 +123,13 @@ public extension MemoryOSL4RelationPredicate {
             return .identity
         case .instanceOf, .subclassOf, .broaderThan, .narrowerThan:
             return .taxonomy
-        case .hasPart, .partOf, .contains, .memberOf:
+        case .hasPart, .partOf, .contains, .memberOf, .overlapsWith:
             return .composition
         case .dependsOn, .requires, .enables, .prevents, .constrains:
             return .dependency
         case .supportsCapability, .implements, .uses:
             return .capability
-        case .appliesTo, .usedFor, .specializes, .generalizes:
+        case .appliesTo, .usedFor, .specializes, .generalizes, .fieldOfWork, .inIndustry:
             return .applicability
         case .derivedFrom, .basedOn, .supportedBy, .cites, .quotes, .generatedBy, .validatedBy, .attributedTo:
             return .provenance
@@ -119,9 +137,11 @@ public extension MemoryOSL4RelationPredicate {
             return .governance
         case .causes, .influences, .mitigates, .risks:
             return .causality
-        case .createdBy, .maintainedBy, .ownedBy, .responsibleFor, .contributedBy, .reviewedBy, .curatedBy, .authoredBy, .publishedBy, .stakeholderOf, .worksOn:
+        case .createdBy, .maintainedBy, .ownedBy, .responsibleFor, .contributedBy, .reviewedBy, .curatedBy, .authoredBy, .publishedBy, .developedBy, .foundedBy, .stakeholderOf, .worksOn:
             return .contribution
-        case .about, .mentions, .relatedTo, .associatedWith:
+        case .locatedIn, .hasLocation, .hasCoordinate:
+            return .location
+        case .differentFrom, .oppositeOf, .saidToBeSameAs, .facetOf, .studiedBy, .about, .mentions, .hasOfficialWebsite, .hasIdentifier, .relatedTo, .associatedWith:
             return .reference
         }
     }
@@ -134,6 +154,10 @@ public extension MemoryOSL4RelationPredicate {
         case .closeMatch: return .closeMatch
         case .relatedTo: return .relatedTo
         case .associatedWith: return .associatedWith
+        case .overlapsWith: return .overlapsWith
+        case .differentFrom: return .differentFrom
+        case .oppositeOf: return .oppositeOf
+        case .saidToBeSameAs: return .saidToBeSameAs
         case .hasPart: return .partOf
         case .partOf: return .hasPart
         case .broaderThan: return .narrowerThan
@@ -148,7 +172,7 @@ public extension MemoryOSL4RelationPredicate {
 
     var isSymmetric: Bool {
         switch self {
-        case .sameAs, .equivalentTo, .exactMatch, .closeMatch, .relatedTo, .associatedWith:
+        case .sameAs, .equivalentTo, .exactMatch, .closeMatch, .overlapsWith, .differentFrom, .oppositeOf, .saidToBeSameAs, .relatedTo, .associatedWith:
             return true
         default:
             return false
@@ -157,7 +181,7 @@ public extension MemoryOSL4RelationPredicate {
 
     var isTransitive: Bool {
         switch self {
-        case .sameAs, .equivalentTo, .subclassOf, .broaderThan, .narrowerThan, .partOf, .dependsOn:
+        case .sameAs, .equivalentTo, .subclassOf, .broaderThan, .narrowerThan, .partOf, .locatedIn, .dependsOn:
             return true
         default:
             return false
@@ -166,7 +190,7 @@ public extension MemoryOSL4RelationPredicate {
 
     var isStrict: Bool {
         switch self {
-        case .closeMatch, .about, .mentions, .relatedTo, .associatedWith, .influences:
+        case .closeMatch, .overlapsWith, .differentFrom, .oppositeOf, .saidToBeSameAs, .facetOf, .studiedBy, .about, .mentions, .hasOfficialWebsite, .hasIdentifier, .relatedTo, .associatedWith, .influences:
             return false
         default:
             return true
@@ -183,11 +207,11 @@ public extension MemoryOSL4RelationPredicate {
             return 0.88
         case .instanceOf, .subclassOf, .broaderThan, .narrowerThan:
             return 0.9
-        case .hasPart, .partOf, .contains, .memberOf, .dependsOn, .requires:
+        case .hasPart, .partOf, .contains, .memberOf, .overlapsWith, .dependsOn, .requires:
             return 0.8
         case .implements, .appliesTo, .derivedFrom, .basedOn, .supportedBy, .validatedBy, .generatedBy:
             return 0.75
-        case .enables, .prevents, .constrains, .supportsCapability, .uses, .usedFor, .specializes, .generalizes:
+        case .enables, .prevents, .constrains, .supportsCapability, .uses, .usedFor, .specializes, .generalizes, .fieldOfWork, .inIndustry:
             return 0.72
         case .decides, .decidedBy, .governs, .compliesWith, .violates, .replaces, .supersedes, .deprecates:
             return 0.72
@@ -195,10 +219,18 @@ public extension MemoryOSL4RelationPredicate {
             return 0.7
         case .influences:
             return 0.65
-        case .createdBy, .maintainedBy, .ownedBy, .responsibleFor, .contributedBy, .reviewedBy, .curatedBy, .authoredBy, .publishedBy, .stakeholderOf, .worksOn:
+        case .createdBy, .maintainedBy, .ownedBy, .responsibleFor, .contributedBy, .reviewedBy, .curatedBy, .authoredBy, .publishedBy, .developedBy, .foundedBy, .stakeholderOf, .worksOn:
             return 0.68
+        case .locatedIn, .hasLocation:
+            return 0.7
+        case .hasCoordinate:
+            return 0.58
+        case .differentFrom, .oppositeOf, .saidToBeSameAs, .facetOf, .studiedBy:
+            return 0.62
         case .cites, .quotes, .attributedTo:
             return 0.68
+        case .hasOfficialWebsite, .hasIdentifier:
+            return 0.55
         case .about:
             return 0.6
         case .mentions:
@@ -225,6 +257,7 @@ public extension MemoryOSL4RelationPredicate {
         case .partOf: return "Subject is a durable structural part of object."
         case .contains: return "Subject contains object as a member, item, or contained concept."
         case .memberOf: return "Subject is a member of object group, organization, collection, or work object."
+        case .overlapsWith: return "Subject partially overlaps with object without asserting containment, identity, or hierarchy."
         case .dependsOn: return "Subject depends on object."
         case .requires: return "Subject requires object as a necessary condition."
         case .enables: return "Subject enables object capability, process, or outcome."
@@ -237,6 +270,8 @@ public extension MemoryOSL4RelationPredicate {
         case .usedFor: return "Subject is used for object purpose or capability."
         case .specializes: return "Subject specializes object abstraction, pattern, or concept."
         case .generalizes: return "Subject generalizes object specialization, pattern, or concept."
+        case .fieldOfWork: return "Subject has object as a durable field of work, research, or practice."
+        case .inIndustry: return "Subject belongs to or operates in object industry or sector."
         case .derivedFrom: return "Subject is derived from object evidence, source, or prior artifact."
         case .basedOn: return "Subject is based on object source, work, evidence, or idea."
         case .supportedBy: return "Subject is supported by object evidence, source, or justification."
@@ -266,10 +301,22 @@ public extension MemoryOSL4RelationPredicate {
         case .curatedBy: return "Subject was curated by object person, group, or organization."
         case .authoredBy: return "Subject was authored by object person, group, or organization."
         case .publishedBy: return "Subject was published by object person, group, or organization."
+        case .developedBy: return "Subject was developed by object person, group, organization, or project."
+        case .foundedBy: return "Subject organization, project, or initiative was founded by object person or organization."
         case .stakeholderOf: return "Subject is a stakeholder of object work object, project, product, or decision."
         case .worksOn: return "Subject works on object project, product, research topic, or work object."
+        case .locatedIn: return "Subject is durably located in object place, region, jurisdiction, or container place."
+        case .hasLocation: return "Subject has object as a location, venue, or place associated with it."
+        case .hasCoordinate: return "Subject has object coordinate value or geospatial literal."
+        case .differentFrom: return "Subject is explicitly distinct from object and should not be merged with it."
+        case .oppositeOf: return "Subject is semantically opposite to object."
+        case .saidToBeSameAs: return "Source claims subject may be the same as object, but identity is not strong enough for SAME_AS."
+        case .facetOf: return "Subject is a facet, aspect, or view of object."
+        case .studiedBy: return "Subject is studied by object field, discipline, method, or research area."
         case .about: return "Subject is primarily about object."
         case .mentions: return "Subject mentions object without making it the primary topic."
+        case .hasOfficialWebsite: return "Subject has object URL as official website or canonical web presence."
+        case .hasIdentifier: return "Subject has object literal as an external identifier or registry identifier."
         case .relatedTo: return "Weak fallback relation for durable related concepts/entities when no more specific predicate applies."
         case .associatedWith: return "Weak association relation between stable concepts/entities."
         }

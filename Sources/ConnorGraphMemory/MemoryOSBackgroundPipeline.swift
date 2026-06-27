@@ -169,7 +169,7 @@ private enum MemoryOSL4RelationPromptGuide {
         let grouped = Dictionary(grouping: MemoryOSL4RelationPredicate.allCases, by: \.category)
         let orderedCategories: [MemoryOSL4RelationCategory] = [
             .identity, .taxonomy, .composition, .dependency, .capability, .applicability,
-            .provenance, .governance, .causality, .contribution, .reference
+            .provenance, .governance, .causality, .contribution, .location, .reference
         ]
         let lines = orderedCategories.compactMap { category -> String? in
             guard let predicates = grouped[category], !predicates.isEmpty else { return nil }

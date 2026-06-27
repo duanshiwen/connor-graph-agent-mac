@@ -225,12 +225,29 @@ public enum FoundationKGMemoryOSMapper {
         case "P279": return .subclassOf
         case "P361": return .partOf
         case "P527": return .hasPart
-        case "P1382": return .partOf
+        case "P1382": return .overlapsWith
+        case "P17", "P131": return .locatedIn
+        case "P276": return .hasLocation
+        case "P625": return .hasCoordinate
+        case "P50": return .authoredBy
+        case "P170": return .createdBy
+        case "P178": return .developedBy
+        case "P112": return .foundedBy
+        case "P127": return .ownedBy
+        case "P921": return .about
+        case "P366": return .usedFor
+        case "P101", "P425": return .fieldOfWork
+        case "P452": return .inIndustry
+        case "P856": return .hasOfficialWebsite
+        case "P460": return .saidToBeSameAs
+        case "P461": return .oppositeOf
+        case "P2579": return .studiedBy
+        case "P1269": return .facetOf
         case "P155": return .supersedes
         case "P156": return .replaces
         case "P828": return .causes
         case "P1542": return .causes
-        case "P1889": return .relatedTo
+        case "P1889": return .differentFrom
         default:
             if let predicate = MemoryOSL4RelationPredicate(rawValue: property) { return predicate }
             return targetKind == "entity" ? .relatedTo : .associatedWith
