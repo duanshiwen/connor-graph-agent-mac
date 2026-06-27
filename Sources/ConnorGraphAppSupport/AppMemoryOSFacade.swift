@@ -423,7 +423,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
     }
 
     public func runBackgroundAIQueueOnce<Executor: MemoryOSBackgroundModelExecutor>(executor: Executor, workerID: String = "memory-os-background-ai-worker", limit: Int = 5, now: Date = Date()) throws -> [MemoryOSProjectionRunSummary] {
-        let kinds = [MemoryOSBackgroundJobKind.l1UnifiedProjection.rawValue, MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue]
+        let kinds = MemoryOSBackgroundJobKind.l1ExecutableRawValues + [MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue]
         let candidates = try kinds.flatMap { kind in
             try store.runnableQueueItems(kind: kind, limit: limit, now: now)
         }.sorted { lhs, rhs in
@@ -436,8 +436,9 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
             guard let leased = try store.leaseQueueItem(id: candidate.id, workerID: workerID, now: now) else { continue }
             do {
                 switch leased.kind {
-                case MemoryOSBackgroundJobKind.l1UnifiedProjection.rawValue:
-                    let draft = try store.decode(MemoryOSL1UnifiedProjectionJobDraft.self, leased.payloadJSON)
+                case let kind where MemoryOSBackgroundJobKind.isL1KnowledgeKind(kind):
+                    var draft = try store.decode(MemoryOSL1UnifiedProjectionJobDraft.self, leased.payloadJSON)
+                    draft.metadata = backgroundRunMetadata(draft.metadata, queueItem: leased)
                     let result = try MemoryOSBackgroundJobWorker(executor: executor).run(draft)
                     let summary = try projectAndRecordLLMArtifact(rawContent: result.rawArtifactJSON, modelID: result.metadata["model_id"] ?? workerID, queueItem: leased, processingRunID: result.jobID, artifactType: result.artifactType, schemaName: result.schemaName, now: now)
                     if summary.accepted {
@@ -450,7 +451,8 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
                     }
                     summaries.append(summary)
                 case MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue:
-                    let draft = try store.decode(MemoryOSL2ToKnowledgeJobDraft.self, leased.payloadJSON)
+                    var draft = try store.decode(MemoryOSL2ToKnowledgeJobDraft.self, leased.payloadJSON)
+                    draft.metadata = backgroundRunMetadata(draft.metadata, queueItem: leased)
                     let result = try MemoryOSBackgroundJobWorker(executor: executor).run(draft)
                     let summary = try projectAndRecordLLMArtifact(rawContent: result.rawArtifactJSON, modelID: result.metadata["model_id"] ?? workerID, queueItem: leased, processingRunID: result.jobID, artifactType: result.artifactType, schemaName: result.schemaName, now: now)
                     if summary.accepted {
@@ -475,6 +477,13 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
             }
         }
         return summaries
+    }
+
+    private func backgroundRunMetadata(_ metadata: [String: String], queueItem: MemoryOSQueueItem) -> [String: String] {
+        metadata.merging([
+            "queue_item_id": queueItem.id,
+            "background_run_id": "memory-run:\(queueItem.id)"
+        ]) { current, _ in current }
     }
 
     public func recordQueueSuccess(_ item: MemoryOSQueueItem, now: Date = Date()) throws -> MemoryOSQueueItem {

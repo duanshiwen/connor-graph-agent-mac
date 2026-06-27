@@ -21,7 +21,7 @@ import ConnorGraphMemory
     let jobs = MemoryOSL1UnifiedProjectionJobPlanner(policy: policy).planJobs(from: events, now: now)
 
     #expect(jobs.count == 3)
-    #expect(jobs.first?.kind == MemoryOSBackgroundJobKind.l1UnifiedProjection.rawValue)
+    #expect(jobs.first?.kind == MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue)
     #expect(jobs.first?.captureEventIDs == ["capture-0", "capture-1"])
     #expect(jobs.first?.sourceSpanIDs == ["span-0", "span-1"])
     #expect(jobs.first?.schemaName == "MemoryOSL1UnifiedProjectionOutput")

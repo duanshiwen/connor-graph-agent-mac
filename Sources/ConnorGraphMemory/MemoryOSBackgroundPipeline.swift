@@ -2,8 +2,17 @@ import Foundation
 import ConnorGraphCore
 
 public enum MemoryOSBackgroundJobKind: String, Sendable, Codable, Equatable, CaseIterable {
+    case l1SynthesizeKnowledge = "memory.l1.synthesize_knowledge"
     case l1UnifiedProjection = "memory.l1.unified_projection"
     case l2SynthesizeKnowledge = "memory.l2.synthesize_knowledge"
+
+    public static var l1ExecutableRawValues: [String] {
+        [Self.l1SynthesizeKnowledge.rawValue, Self.l1UnifiedProjection.rawValue]
+    }
+
+    public static func isL1KnowledgeKind(_ rawValue: String) -> Bool {
+        l1ExecutableRawValues.contains(rawValue)
+    }
 }
 
 public enum MemoryOSTriggerReason: String, Sendable, Codable, Equatable, CaseIterable {
@@ -81,7 +90,7 @@ public struct MemoryOSL1UnifiedProjectionJobDraft: Sendable, Codable, Equatable,
     public var createdAt: Date
     public var metadata: [String: String]
 
-    public init(id: String = UUID().uuidString, kind: String = MemoryOSBackgroundJobKind.l1UnifiedProjection.rawValue, captureEventIDs: [String], provenanceObjectIDs: [String], sourceSpanIDs: [String], schemaName: String = "MemoryOSL1UnifiedProjectionOutput", prompt: String, createdAt: Date = Date(), metadata: [String: String] = [:]) {
+    public init(id: String = UUID().uuidString, kind: String = MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue, captureEventIDs: [String], provenanceObjectIDs: [String], sourceSpanIDs: [String], schemaName: String = "MemoryOSL1UnifiedProjectionOutput", prompt: String, createdAt: Date = Date(), metadata: [String: String] = [:]) {
         self.id = id
         self.kind = kind
         self.captureEventIDs = captureEventIDs
@@ -113,6 +122,45 @@ public struct MemoryOSL2ToKnowledgeJobDraft: Sendable, Codable, Equatable, Ident
         self.prompt = prompt
         self.createdAt = createdAt
         self.metadata = metadata
+    }
+}
+
+public enum MemoryOSKnowledgeJobSource: String, Sendable, Codable, Equatable, CaseIterable {
+    case l1CaptureEvents = "l1_capture_events"
+    case l2Statements = "l2_statements"
+}
+
+public struct MemoryOSKnowledgeSynthesisJobDraft: Sendable, Codable, Equatable, Identifiable {
+    public var id: String
+    public var kind: String
+    public var source: MemoryOSKnowledgeJobSource
+    public var schemaName: String
+    public var artifactType: String
+    public var prompt: String
+    public var sourceRecordIDs: [String]
+    public var evidenceSpanIDs: [String]
+    public var createdAt: Date
+    public var metadata: [String: String]
+
+    public init(id: String, kind: String, source: MemoryOSKnowledgeJobSource, schemaName: String, artifactType: String, prompt: String, sourceRecordIDs: [String], evidenceSpanIDs: [String], createdAt: Date, metadata: [String: String] = [:]) {
+        self.id = id
+        self.kind = kind
+        self.source = source
+        self.schemaName = schemaName
+        self.artifactType = artifactType
+        self.prompt = prompt
+        self.sourceRecordIDs = sourceRecordIDs
+        self.evidenceSpanIDs = evidenceSpanIDs
+        self.createdAt = createdAt
+        self.metadata = metadata
+    }
+
+    public init(l1 draft: MemoryOSL1UnifiedProjectionJobDraft) {
+        self.init(id: draft.id, kind: draft.kind, source: .l1CaptureEvents, schemaName: draft.schemaName, artifactType: "memory_os_l1_unified_projection", prompt: draft.prompt, sourceRecordIDs: draft.captureEventIDs, evidenceSpanIDs: draft.sourceSpanIDs, createdAt: draft.createdAt, metadata: draft.metadata)
+    }
+
+    public init(l2 draft: MemoryOSL2ToKnowledgeJobDraft) {
+        self.init(id: draft.id, kind: draft.kind, source: .l2Statements, schemaName: draft.schemaName, artifactType: "memory_os_knowledge_extraction", prompt: draft.prompt, sourceRecordIDs: draft.statementIDs, evidenceSpanIDs: draft.evidenceSpanIDs, createdAt: draft.createdAt, metadata: draft.metadata)
     }
 }
 
