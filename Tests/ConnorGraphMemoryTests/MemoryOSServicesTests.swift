@@ -22,6 +22,16 @@ import ConnorGraphMemory
     #expect(result.provenanceObject == nil)
 }
 
+@Test func memoryOSIngestionArchivesShortNonEmptyContent() {
+    let result = MemoryOSIngestionService().ingest(MemoryOSIngestionInput(sourceType: .manual, title: "Short", content: "好", occurredAt: Date()))
+
+    #expect(result.decision.action == .archive)
+    #expect(result.decision.reason == "archive_by_default_with_evidence")
+    #expect(result.provenanceObject?.content == "好")
+    #expect(result.span?.text == "好")
+    #expect(result.captureEvent?.provenanceObjectID == result.provenanceObject?.id)
+}
+
 @Test func memoryOSTimeBlockBuilderSplitsAcrossDays() {
     let builder = MemoryOSTimeBlockBuilder(targetTokenLimit: 100, hardTokenLimit: 200)
     let day1 = Date(timeIntervalSince1970: 1_000)

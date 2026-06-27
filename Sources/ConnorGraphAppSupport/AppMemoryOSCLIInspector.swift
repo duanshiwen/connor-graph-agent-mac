@@ -94,13 +94,13 @@ public struct AppMemoryOSCLIInspector: Sendable {
 
     public func listL1Pending(limit: Int = 20) throws -> [MemoryOSCLIRow] {
         try rows(sql: """
-        SELECT c.id, c.provenance_object_id, c.event_type, c.occurred_at, c.token_estimate, c.processing_state, c.metadata_json, o.title, o.content
+        SELECT c.id, c.provenance_object_id, c.event_type, c.occurred_at, c.token_estimate, c.processing_state, c.metadata_json, o.title, o.content, o.content
         FROM memory_l1_capture_events c
         JOIN memory_l0_provenance_objects o ON o.id = c.provenance_object_id
         WHERE c.processing_state IN ('pending', 'queued')
         ORDER BY c.occurred_at ASC, c.id ASC
         LIMIT \(safeLimit(limit))
-        """, columns: ["id", "provenance_object_id", "event_type", "occurred_at", "token_estimate", "processing_state", "metadata_json", "provenance_title", "provenance_content"])
+        """, columns: ["id", "provenance_object_id", "event_type", "occurred_at", "token_estimate", "processing_state", "metadata_json", "provenance_title", "provenance_content", "content"])
     }
 
     public func listL2Statements(limit: Int = 20) throws -> [MemoryOSCLIRow] {
@@ -342,9 +342,12 @@ public struct AppMemoryOSCLIInspector: Sendable {
             """, columns: ["id", "source_type", "source_id", "title", "content", "content_hash", "occurred_at", "ingested_at", "session_id", "work_object_id", "confidentiality", "status", "metadata_json"])
         case "L1":
             return try firstRecord(layer: "L1", sql: """
-            SELECT id, provenance_object_id, event_type, occurred_at, token_estimate, processing_state, metadata_json
-            FROM memory_l1_capture_events WHERE id = \(store.quote(id)) LIMIT 1
-            """, columns: ["id", "provenance_object_id", "event_type", "occurred_at", "token_estimate", "processing_state", "metadata_json"])
+            SELECT c.id, c.provenance_object_id, c.event_type, c.occurred_at, c.token_estimate, c.processing_state, c.metadata_json, o.title, o.content, o.content
+            FROM memory_l1_capture_events c
+            JOIN memory_l0_provenance_objects o ON o.id = c.provenance_object_id
+            WHERE c.id = \(store.quote(id))
+            LIMIT 1
+            """, columns: ["id", "provenance_object_id", "event_type", "occurred_at", "token_estimate", "processing_state", "metadata_json", "provenance_title", "provenance_content", "content"])
         case "L2":
             return try firstRecord(layer: "L2", sql: """
             SELECT id, subject_id, predicate, object_id, text, assertion_kind, confidence, valid_at, committed_at, evidence_span_ids_json, source_artifact_id, metadata_json
