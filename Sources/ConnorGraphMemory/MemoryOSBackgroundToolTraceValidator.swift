@@ -64,6 +64,9 @@ public struct MemoryOSBackgroundToolTraceValidator: Sendable {
             if nonEmptyArray(dict["conceptRelations"]), !(succeededToolNames.contains("memory_os_expand_l4") || succeededToolNames.contains("memory_os_l4_find_entity") || succeededToolNames.contains("memory_os_l4_neighbors")) {
                 issues.append(issue(code: "missing_l4_relation_trace", message: "Knowledge artifact emits L4 relations without successful L4 graph lookup/expansion trace.", severity: modeSeverity))
             }
+            if containsHighRiskL4Relation(dict), !succeededToolNames.contains("memory_os_search") {
+                issues.append(issue(code: "missing_high_risk_l4_relation_search_trace", message: "Knowledge artifact emits high-risk L4 relation predicates without a successful memory_os_search trace.", severity: modeSeverity))
+            }
         }
 
         return issues
@@ -89,6 +92,23 @@ public struct MemoryOSBackgroundToolTraceValidator: Sendable {
             }
             return false
         }.count
+    }
+
+    private func containsHighRiskL4Relation(_ dict: [String: Any]) -> Bool {
+        guard let relations = dict["conceptRelations"] as? [[String: Any]] else { return false }
+        let highRisk: Set<String> = [
+            MemoryOSL4RelationPredicate.sameAs.rawValue,
+            MemoryOSL4RelationPredicate.equivalentTo.rawValue,
+            MemoryOSL4RelationPredicate.exactMatch.rawValue,
+            MemoryOSL4RelationPredicate.causes.rawValue,
+            MemoryOSL4RelationPredicate.risks.rawValue,
+            MemoryOSL4RelationPredicate.supersedes.rawValue,
+            MemoryOSL4RelationPredicate.deprecates.rawValue
+        ]
+        return relations.contains { relation in
+            guard let predicate = relation["predicate"] as? String else { return false }
+            return highRisk.contains(predicate)
+        }
     }
 
     private func containsProfileOrPersonFacts(_ dict: [String: Any]) -> Bool {
