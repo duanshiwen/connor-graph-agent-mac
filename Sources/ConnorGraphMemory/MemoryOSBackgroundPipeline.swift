@@ -164,6 +164,33 @@ public struct MemoryOSKnowledgeSynthesisJobDraft: Sendable, Codable, Equatable, 
     }
 }
 
+private enum MemoryOSL4RelationPromptGuide {
+    static func render() -> String {
+        let grouped = Dictionary(grouping: MemoryOSL4RelationPredicate.allCases, by: \.category)
+        let orderedCategories: [MemoryOSL4RelationCategory] = [
+            .identity, .taxonomy, .composition, .dependency, .capability, .applicability,
+            .provenance, .governance, .causality, .contribution, .reference
+        ]
+        let lines = orderedCategories.compactMap { category -> String? in
+            guard let predicates = grouped[category], !predicates.isEmpty else { return nil }
+            return "- \(category.rawValue): " + predicates.map(\.rawValue).joined(separator: ", ")
+        }
+        return """
+        Allowed L4 relation predicates / MemoryOSL4RelationPredicate raw values:
+        \(lines.joined(separator: "\n"))
+
+        L4 relation predicate rules:
+        - For conceptRelations.predicate, use only the raw values listed above.
+        - Do not invent predicates. Do not output natural-language predicates such as is_a, has_a, can_do, supports, contains_part, or relates_to.
+        - Map is_a to INSTANCE_OF when an entity is an instance of a type/class; map is_a to SUBCLASS_OF when a class/concept is a subtype of another class/concept; use BROADER_THAN/NARROWER_THAN for weak concept hierarchy.
+        - Map has_a to HAS_PART for durable composition, CONTAINS for containment, SUPPORTS_CAPABILITY for capability, USES for tool/resource usage, or REQUIRES for necessary conditions.
+        - RELATED_TO only as a last resort and include metadata.reason.
+        - SAME_AS, EQUIVALENT_TO, EXACT_MATCH, CAUSES, RISKS, SUPERSEDES and DEPRECATES require strong evidence and search-backed identity/context checks.
+        - Ordinary attributes and literal values should remain L2 facts; do not create L4 entities or conceptRelations just to hold property values.
+        """
+    }
+}
+
 public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
     public init() {}
 
@@ -244,6 +271,8 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
 
         Allowed L2 predicates / GraphPredicate raw values:
         \(Self.allowedPredicateGuide())
+
+        \(MemoryOSL4RelationPromptGuide.render())
 
         L2 fact taxonomy:
         - profile_preference: current-user profile facts and explicitly evidenced person profile facts, including preference, dislike, habit, goal, stable trait, stable personal context, knowledge background, communication preference, or personalized operating preference.
@@ -401,6 +430,8 @@ public struct MemoryOSL2ToKnowledgePromptBuilder: Sendable {
         You must record the search-backed judgment for every accepted or rejected candidate: searched layers, duplicate/novelty outcome, reuse/rejection reason, and reused entity/concept ids when applicable.
         Do not promote ordinary personal or operational facts into L3. If a fact should be more accurate, propose refined L2 facts as append-only follow-up material rather than overwriting history.
         Output only MemoryOSKnowledgeExtractionOutput JSON for accepted knowledge candidates and L4 concepts/relations.
+
+        \(MemoryOSL4RelationPromptGuide.render())
 
         L2 statements are provided as an ordered JSON packet:
         \(Self.renderJSON(packet))
