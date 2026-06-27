@@ -1,122 +1,111 @@
 import Foundation
 import ConnorGraphAgent
 import ConnorGraphCore
+import ConnorGraphMemory
 import ConnorGraphStore
 
-public struct MemoryOSIngestObservationTool: AgentTool {
-    public let name = "memory_os_ingest_observation"
-    public let description = "Archive an evidence-backed observation into Connor Memory OS L0 provenance and L1 capture. This replaces legacy graph staging/candidate-write tools."
-    public let permission: AgentPermissionCapability = .proposeGraphWrite
+public struct MemoryOSL2FindEntitiesTool: AgentTool {
+    public let name = "memory_os_l2_find_entities"
+    public let description = "Find Memory OS L2 working-memory entities by exact name or alias. Provide possible names/aliases in one string separated by comma, Chinese comma, dunhao, semicolon, or newline. Returns only LLM-relevant entity name, aliases, type, summary, statement text, relation, and connected entity."
+    public let permission: AgentPermissionCapability = .readGraph
     public let inputSchema = AgentToolInputSchema.object(properties: [
-        "title": .string(description: "Short human-readable observation title."),
-        "content": .string(description: "Raw observed content to archive as provenance."),
-        "sourceID": .string(description: "Optional external source/message id."),
-        "sessionID": .string(description: "Optional session id. Defaults to current session."),
-        "role": .string(description: "Optional source role such as user, assistant, tool, external. Defaults to tool.")
-    ], required: ["title", "content"])
-
-    private let facade: AppMemoryOSFacade
-
-    public init(facade: AppMemoryOSFacade) {
-        self.facade = facade
-    }
-
-    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        guard let title = arguments.string("title"), !title.isEmpty else {
-            throw AgentToolError.invalidArguments("title is required")
-        }
-        guard let content = arguments.string("content"), !content.isEmpty else {
-            throw AgentToolError.invalidArguments("content is required")
-        }
-        let sourceID = arguments.string("sourceID") ?? context.toolCallID
-        let sessionID = arguments.string("sessionID") ?? context.sessionID
-        let role = arguments.string("role") ?? "tool"
-        let result = try facade.ingestChatMessage(
-            messageID: sourceID,
-            sessionID: sessionID,
-            role: role,
-            content: content,
-            occurredAt: Date(),
-            metadata: ["title": title, "toolCallID": context.toolCallID, "runID": context.runID]
-        )
-        let provenanceObjectID = result.provenanceObject?.id ?? ""
-        let spanID = result.span?.id ?? ""
-        let captureEventID = result.captureEvent?.id ?? ""
-        let decisionAction = String(describing: result.decision.action)
-        let payload: [String: Any] = [
-            "decision": decisionAction,
-            "decisionReason": result.decision.reason,
-            "provenanceObjectID": provenanceObjectID,
-            "spanID": spanID,
-            "captureEventID": captureEventID
-        ]
-        let json = try Self.renderJSON(payload)
-        let citations = [provenanceObjectID, spanID, captureEventID].filter { !$0.isEmpty }
-        return AgentToolResult(
-            toolCallID: context.toolCallID,
-            toolName: name,
-            contentText: "Memory OS ingestion decision: \(decisionAction). Provenance object: \(provenanceObjectID.isEmpty ? "none" : provenanceObjectID).",
-            contentJSON: json,
-            citations: citations
-        )
-    }
-
-    private static func renderJSON(_ object: [String: Any]) throws -> String {
-        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
-        return String(data: data, encoding: .utf8) ?? "{}"
-    }
-}
-
-public struct MemoryOSProjectStructuredArtifactTool: AgentTool {
-    public let name = "memory_os_project_structured_artifact"
-    public let description = "Validate and project a Memory OS structured artifact. GraphStructuredExtractionOutput projects operational facts into L2/L4; MemoryOSKnowledgeExtractionOutput projects reusable knowledge into L3 and concept entities/relations into L4. The artifact is persisted and audited before projection."
-    public let permission: AgentPermissionCapability = .proposeGraphWrite
-    public let inputSchema = AgentToolInputSchema.object(properties: [
-        "rawContent": .string(description: "Raw structured artifact JSON to validate and project."),
-        "modelID": .string(description: "Model identifier that produced the artifact."),
-        "schemaName": .string(description: "Artifact schema. Defaults to GraphStructuredExtractionOutput. Use MemoryOSKnowledgeExtractionOutput for L3 knowledge candidates."),
-        "artifactType": .string(description: "Optional artifact type. Defaults to graph_structured_extraction."),
-        "processingRunID": .string(description: "Optional processing run id for audit correlation.")
-    ], required: ["rawContent", "modelID"])
+        "names": .string(description: "Possible entity names or aliases separated by comma, Chinese comma, dunhao, semicolon, or newline. Exact name/alias matching; no limit parameter.")
+    ], required: ["names"])
 
     private let facade: AppMemoryOSFacade
 
     public init(facade: AppMemoryOSFacade) { self.facade = facade }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        guard let rawContent = arguments.string("rawContent"), !rawContent.isEmpty else {
-            throw AgentToolError.invalidArguments("rawContent is required")
+        guard let names = arguments.string("names"), !names.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw AgentToolError.invalidArguments("names is required")
         }
-        guard let modelID = arguments.string("modelID"), !modelID.isEmpty else {
-            throw AgentToolError.invalidArguments("modelID is required")
-        }
-        let runID = arguments.string("processingRunID") ?? context.runID
-        let schemaName = arguments.string("schemaName") ?? "GraphStructuredExtractionOutput"
-        let artifactType = arguments.string("artifactType") ?? (schemaName == "MemoryOSKnowledgeExtractionOutput" ? "memory_os_knowledge_extraction" : "graph_structured_extraction")
-        let summary = try facade.projectAndRecordLLMArtifact(rawContent: rawContent, modelID: modelID, processingRunID: runID, artifactType: artifactType, schemaName: schemaName)
-        let payload: [String: Any] = [
-            "artifactID": summary.artifactID,
-            "accepted": summary.accepted,
-            "nodeCount": summary.nodeCount,
-            "statementCount": summary.statementCount,
-            "entityCount": summary.entityCount,
-            "entityStatementCount": summary.entityStatementCount,
-            "knowledgeRecordCount": summary.beliefCount,
-            "issueCount": summary.issues.count
-        ]
-        let json = try Self.renderJSON(payload)
+        let result = try facade.findMemoryOSL2Entities(MemoryOSL2FindEntitiesRequest(names: names))
+        let json = try Self.renderJSON(result)
         return AgentToolResult(
             toolCallID: context.toolCallID,
             toolName: name,
-            contentText: summary.accepted ? "Memory OS projected artifact \(summary.artifactID): \(summary.statementCount) L2 statements, \(summary.entityCount) L4 entities, \(summary.beliefCount) L3 knowledge records." : "Memory OS rejected artifact \(summary.artifactID): \(summary.issues.count) validation issue(s).",
+            contentText: result.matches.isEmpty ? result.message : "Found \(result.matches.count) Memory OS L2 entity match(es).",
             contentJSON: json,
-            citations: [summary.artifactID]
+            citations: []
         )
     }
 
-    private static func renderJSON(_ object: [String: Any]) throws -> String {
-        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+    private static func renderJSON<T: Encodable>(_ object: T) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try encoder.encode(object)
         return String(data: data, encoding: .utf8) ?? "{}"
+    }
+}
+
+public struct MemoryOSL2UpdateEntitiesTool: AgentTool {
+    public let name = "memory_os_l2_update_entities"
+    public let description = "Update Memory OS L2 entity-centered working memory. Use this for concise entity summaries and useful statements. Do not provide evidence or internal IDs; L0 remains the provenance layer."
+    public let permission: AgentPermissionCapability = .proposeGraphWrite
+    public let inputSchema = AgentToolInputSchema.object(properties: [
+        "entities": .array(items: .object(properties: [
+            "name": .string(description: "Entity display name."),
+            "type": .string(description: "Entity type such as entity, person_object, work_object, life_object, event, place, artifact, document, concept, metric, or time_expression. Defaults to entity if omitted."),
+            "aliases": .string(description: "Optional aliases separated by comma, Chinese comma, dunhao, semicolon, or newline."),
+            "summary": .string(description: "Optional concise summary."),
+            "statements": .array(items: .object(properties: [
+                "text": .string(description: "Complete natural-language L2 statement. Preserve important original wording and negation."),
+                "relation": .string(description: "Optional GraphPredicate relation. Defaults to RELATED_TO when uncertain."),
+                "connectedEntity": .string(description: "Optional connected entity name."),
+                "connectedEntityType": .string(description: "Optional connected entity type."),
+                "factType": .string(description: "Optional fact type such as fact, decision, plan, task, preference, constraint, profile, status, event, or note."),
+                "polarity": .string(description: "Optional polarity such as affirm, exclude, reject, cancel, defer, supersede, or unknown."),
+                "originalPhrase": .string(description: "Optional original phrase to preserve user wording, especially for negative decisions.")
+            ], required: ["text"]), description: "Statements associated with this entity.")
+        ], required: ["name"]), description: "Entities to update in one batch.")
+    ], required: ["entities"])
+
+    private let facade: AppMemoryOSFacade
+
+    public init(facade: AppMemoryOSFacade) { self.facade = facade }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        let request = try Self.decodeRequest(arguments)
+        let result = try facade.updateMemoryOSL2Entities(request)
+        let json = try Self.renderJSON(result)
+        return AgentToolResult(
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: "Updated \(result.updatedEntities.count) Memory OS L2 entit(ies).",
+            contentJSON: json,
+            citations: []
+        )
+    }
+
+    private static func decodeRequest(_ arguments: AgentToolArguments) throws -> MemoryOSL2UpdateEntitiesRequest {
+        guard let entities = arguments.array("entities") else {
+            throw AgentToolError.invalidArguments("entities is required")
+        }
+        let object = SendableJSONValue.object(["entities": .array(entities)])
+        let data = try JSONSerialization.data(withJSONObject: object.jsonCompatibleObject(), options: [])
+        return try JSONDecoder().decode(MemoryOSL2UpdateEntitiesRequest.self, from: data)
+    }
+
+    private static func renderJSON<T: Encodable>(_ object: T) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try encoder.encode(object)
+        return String(data: data, encoding: .utf8) ?? "{}"
+    }
+}
+
+private extension SendableJSONValue {
+    func jsonCompatibleObject() -> Any {
+        switch self {
+        case .string(let value): value
+        case .int(let value): value
+        case .double(let value): value
+        case .bool(let value): value
+        case .object(let object): object.mapValues { $0.jsonCompatibleObject() }
+        case .array(let array): array.map { $0.jsonCompatibleObject() }
+        case .null: NSNull()
+        }
     }
 }
 
@@ -880,8 +869,8 @@ public struct MemoryOSReadProvenanceTool: AgentTool {
 
 public extension AgentToolRegistry {
     mutating func registerMemoryOSTools(facade: AppMemoryOSFacade) {
-        register(MemoryOSIngestObservationTool(facade: facade))
-        register(MemoryOSProjectStructuredArtifactTool(facade: facade))
+        register(MemoryOSL2FindEntitiesTool(facade: facade))
+        register(MemoryOSL2UpdateEntitiesTool(facade: facade))
         register(MemoryOSGetCurrentUserProfileTool(facade: facade))
         register(MemoryOSUpdateCurrentUserProfileTool(facade: facade))
         register(MemoryOSContextTool(facade: facade))

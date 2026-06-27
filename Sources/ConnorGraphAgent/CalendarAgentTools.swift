@@ -75,7 +75,7 @@ public struct CalendarSearchEventsTool: AgentTool {
     public let runtime: any AgentCalendarRuntime
     public let recorder: (any NativeSourceReferenceRecording)?
     public var name: String { "calendar_search_events" }
-    public var description: String { "Search Connor-owned calendar events and return full event details directly; no separate calendar detail fetch is needed." }
+    public var description: String { "Search Connor-owned calendar events as candidate results; use calendar_read with operation get_event for selected event detail reads that should become Memory OS evidence." }
     public var permission: AgentPermissionCapability { .readCalendar }
     public var inputSchema: AgentToolInputSchema {
         .object(properties: [
@@ -107,8 +107,8 @@ public struct CalendarSearchEventsTool: AgentTool {
             runID: context.runID,
             sessionID: context.sessionID
         )
-        await recorder?.record(events.map { NativeSourceReference.calendarEvent($0, query: arguments.string("query"), strength: .fullEventResult, toolName: name, context: context) })
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(events.count) calendar event details; search results are already full event records", contentJSON: try MailJSON.encode(events))
+        await recorder?.record(events.map { NativeSourceReference.calendarEvent($0, query: arguments.string("query"), strength: .summaryCandidate, toolName: name, context: context) })
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Found \(events.count) calendar event candidates; read a selected event detail to persist it into Memory OS", contentJSON: try MailJSON.encode(events))
     }
 }
 
@@ -139,8 +139,8 @@ public struct CalendarReadTool: AgentTool {
             return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Listed \(calendars.count) calendars", contentJSON: try MailJSON.encode(calendars))
         case "list_events", "get_agenda":
             let events = try await runtime.listEvents(calendarID: arguments.string("calendarID").map(CalendarID.init(rawValue:)), runID: context.runID, sessionID: context.sessionID)
-            await recorder?.record(events.map { NativeSourceReference.calendarEvent($0, query: nil, strength: .fullEventResult, toolName: name, context: context) })
-            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Listed \(events.count) calendar events", contentJSON: try MailJSON.encode(events))
+            await recorder?.record(events.map { NativeSourceReference.calendarEvent($0, query: nil, strength: .summaryCandidate, toolName: name, context: context) })
+            return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Listed \(events.count) calendar event candidates", contentJSON: try MailJSON.encode(events))
         case "get_event":
             guard let eventID = arguments.string("eventID") else { throw AgentToolError.invalidArguments("eventID is required") }
             let event = try await runtime.getEvent(id: CalendarEventID(rawValue: eventID), runID: context.runID, sessionID: context.sessionID)

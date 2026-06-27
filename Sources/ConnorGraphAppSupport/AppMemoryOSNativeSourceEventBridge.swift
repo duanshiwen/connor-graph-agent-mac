@@ -1,6 +1,7 @@
 import Foundation
 import ConnorGraphCore
 import ConnorGraphMemory
+import ConnorGraphAgent
 
 public struct AppMemoryOSNativeSourceEventBridge: Sendable {
     private let facade: AppMemoryOSFacade
@@ -23,11 +24,22 @@ public struct AppMemoryOSNativeSourceEventBridge: Sendable {
     }
 
     @discardableResult
-    public func ingestCalendarEvent(id: String, title: String, notes: String, accountID: String? = nil, occurredAt: Date = Date(), metadata: [String: String] = [:]) throws -> MemoryOSIngestionResult {
+    public func ingestCalendarEvent(
+        id: String,
+        title: String,
+        notes: String,
+        accountID: String? = nil,
+        occurredAt: Date = Date(),
+        metadata: [String: String] = [:],
+        start: Date? = nil,
+        end: Date? = nil,
+        location: String? = nil,
+        attendees: [String] = []
+    ) throws -> MemoryOSIngestionResult {
         try facade.ingestSourceEvent(
             sourceID: "calendar:\(id)",
             title: title,
-            content: notes,
+            content: CalendarEventMemoryContentFormatter.format(title: title, start: start, end: end, location: location, notes: notes, attendees: attendees),
             occurredAt: occurredAt,
             sourceKind: "calendar",
             accountID: accountID,

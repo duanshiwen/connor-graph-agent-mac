@@ -27,14 +27,14 @@ import ConnorGraphMemory
     #expect(!artifact.contentHash.isEmpty)
 }
 
-@Test func memoryOSLLMArtifactValidatorRejectsMissingEvidenceBeforeProjection() throws {
+@Test func memoryOSLLMArtifactValidatorAcceptsOperationalProjectionWithoutEvidence() throws {
     let output = GraphStructuredExtractionOutput(
         entities: [
             GraphStructuredExtractedEntity(localID: "person-1", name: "诗闻"),
             GraphStructuredExtractedEntity(localID: "project-1", name: "Connor Memory OS")
         ],
         statements: [
-            GraphStructuredExtractedStatement(subjectLocalID: "person-1", predicate: .relatedTo, objectLocalID: "project-1", statementText: "Missing evidence must not enter Memory OS.")
+            GraphStructuredExtractedStatement(subjectLocalID: "person-1", predicate: .relatedTo, objectLocalID: "project-1", statementText: "L2 working memory no longer requires evidence spans.")
         ],
         evidenceSpans: []
     )
@@ -43,8 +43,8 @@ import ConnorGraphMemory
     let artifact = MemoryOSArtifactEnvelopeService().envelope(rawContent: raw, modelID: "test-model")
     let result = MemoryOSLLMArtifactValidator().validateStructuredExtractionArtifact(artifact)
 
-    #expect(!result.accepted)
-    #expect(result.issues.contains { $0.code == "schema_validation_failed" })
+    #expect(result.accepted)
+    #expect(result.issues.isEmpty)
 }
 
 @Test func memoryOSQueueTransitionRetriesThenDeadLettersWithBackoff() {

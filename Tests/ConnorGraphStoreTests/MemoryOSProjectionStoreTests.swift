@@ -39,7 +39,8 @@ private func temporaryMemoryOSProjectionDatabaseURL(_ name: String = UUID().uuid
 
     #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l2_nodes;").first?.first == "2")
     #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l2_statements;").first?.first == "1")
-    #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l2_statement_evidence WHERE span_id = 'span-1';").first?.first == "1")
+    #expect(try store.query(sql: "SELECT evidence_span_ids_json FROM memory_l2_statements WHERE id = 'statement-1';").first?.first == "[\"span-1\"]")
+    #expect(try store.query(sql: "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'memory_l2_statement_evidence';").isEmpty)
     #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l3_beliefs;").first?.first == "1")
     #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l4_entities;").first?.first == "2")
     #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l4_entity_statements;").first?.first == "1")

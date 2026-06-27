@@ -49,7 +49,7 @@ struct NativeSourceReferenceToolHookTests {
         #expect(references[0].content.contains("Snippet for message-1"))
     }
 
-    @Test func calendarSearchRecordsFullEventResults() async throws {
+    @Test func calendarSearchRecordsSummaryCandidates() async throws {
         let recorder = SpyNativeSourceReferenceRecorder()
         let event = CalendarEvent(
             id: CalendarEventID(rawValue: "event-1"),
@@ -70,9 +70,58 @@ struct NativeSourceReferenceToolHookTests {
         let references = await recorder.references
         #expect(references.count == 1)
         #expect(references[0].sourceKind == .calendar)
-        #expect(references[0].referenceStrength == .fullEventResult)
+        #expect(references[0].referenceStrength == .summaryCandidate)
         #expect(references[0].content.contains("Room A"))
         #expect(references[0].content.contains("Discuss source ingestion"))
+    }
+
+    @Test func calendarListEventsRecordsSummaryCandidates() async throws {
+        let recorder = SpyNativeSourceReferenceRecorder()
+        let event = CalendarEvent(
+            id: CalendarEventID(rawValue: "event-1"),
+            calendarID: CalendarID(rawValue: "calendar-work"),
+            title: "Weekly Planning",
+            start: CalendarEventDateTime(date: Date(timeIntervalSince1970: 2_000)),
+            end: CalendarEventDateTime(date: Date(timeIntervalSince1970: 3_000))
+        )
+        let runtime = InMemoryAgentCalendarRuntime(events: [event])
+        let tool = CalendarReadTool(runtime: runtime, recorder: recorder)
+        _ = try await tool.execute(
+            arguments: try AgentToolArguments(json: "{\"operation\":\"list_events\"}"),
+            context: Self.context(toolCallID: "call-calendar-list")
+        )
+
+        let references = await recorder.references
+        #expect(references.count == 1)
+        #expect(references[0].sourceKind == .calendar)
+        #expect(references[0].referenceStrength == .summaryCandidate)
+        #expect(references[0].content.contains("Title: Weekly Planning"))
+    }
+
+    @Test func calendarGetEventRecordsDetailReadWithoutNotes() async throws {
+        let recorder = SpyNativeSourceReferenceRecorder()
+        let event = CalendarEvent(
+            id: CalendarEventID(rawValue: "event-title-only"),
+            calendarID: CalendarID(rawValue: "calendar-work"),
+            title: "Dentist Appointment",
+            start: CalendarEventDateTime(date: Date(timeIntervalSince1970: 2_000)),
+            end: CalendarEventDateTime(date: Date(timeIntervalSince1970: 3_000))
+        )
+        let runtime = InMemoryAgentCalendarRuntime(events: [event])
+        let tool = CalendarReadTool(runtime: runtime, recorder: recorder)
+        _ = try await tool.execute(
+            arguments: try AgentToolArguments(json: "{\"operation\":\"get_event\",\"eventID\":\"event-title-only\"}"),
+            context: Self.context(toolCallID: "call-calendar-get")
+        )
+
+        let references = await recorder.references
+        #expect(references.count == 1)
+        #expect(references[0].sourceKind == .calendar)
+        #expect(references[0].sourceRecordID == "event-title-only")
+        #expect(references[0].referenceStrength == .detailRead)
+        #expect(references[0].content.contains("Title: Dentist Appointment"))
+        #expect(references[0].content.contains("Start:"))
+        #expect(references[0].content.contains("End:"))
     }
 
     @Test func rssGetItemRecordsDetailReference() async throws {
