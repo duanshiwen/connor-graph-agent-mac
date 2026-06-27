@@ -293,6 +293,42 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(output.contains("queue_runs"))
     }
 
+    @Test func memoryOSCLIDebugRunNextExecutesQueueWithTrace() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        let now = Date(timeIntervalSince1970: 40_000)
+        try seedMemoryOSCLIInspectorFixture(store: store, now: now)
+        let inspector = AppMemoryOSCLIInspector(store: store)
+        let plan = try inspector.planL1(policy: MemoryOSL1ProcessingTriggerPolicy(minPendingCount: 1, maxEventsPerBlock: 10), now: now)
+        let queueID = try #require(plan.jobIDs.first)
+        let model = MemoryOSCLIDebugScriptedLoopModel(script: [
+            MemoryOSBackgroundLoopModelResponse(
+                assistantText: "Searching before projection.",
+                toolCalls: [MemoryOSBackgroundToolCall(id: "tool-1", name: "memory_os_search", argumentsJSON: #"{"query":"Connor","layers":["L2","L3","L4"],"limit":5}"#)]
+            ),
+            MemoryOSBackgroundLoopModelResponse(finalArtifactJSON: try memoryOSCLIDebugEncodedL1Artifact(), metadata: ["final": "true"])
+        ])
+
+        let result = try inspector.debugRunNextBackgroundAI(
+            kind: MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue,
+            limit: 1,
+            model: model,
+            configuration: MemoryOSBackgroundToolLoopConfiguration(maxToolIterations: 4),
+            now: now
+        )
+
+        let run = try #require(result.queueRuns.first)
+        #expect(result.status == "completed")
+        #expect(run.queueItemID == queueID)
+        #expect(run.runID == "memory-run:\(queueID)")
+        #expect(run.modelID == "cli-debug-scripted-model")
+        #expect(run.status == "succeeded")
+        #expect(run.messageCount >= 3)
+        #expect(run.toolCallCount == 1)
+        #expect(run.messages.contains { $0.role == .assistant && $0.content == "Searching before projection." })
+        #expect(run.toolCalls.first?.toolName == "memory_os_search")
+        #expect(run.projectionSummary?.accepted == true)
+    }
+
     @Test func memoryOSCLIRouterRoutesStatusCommand() throws {
         let store = try makeMemoryOSCLIInspectorStore()
         let output = try AppMemoryOSCLIRouter.route(args: ["status"], inspector: AppMemoryOSCLIInspector(store: store), encoder: memoryOSCLITestEncoder())
@@ -532,4 +568,37 @@ private func seedMemoryOSCLIInspectorFixture(store: SQLiteMemoryOSStore, now: Da
     try store.upsert(belief: belief)
     let entity = MemoryOSEntity(id: "entity-1", stableKey: "concept:connor-memory-os", entityType: "concept", name: "Connor Memory OS", aliases: ["Memory OS"], summary: "康纳同学的长期记忆系统", confidence: 0.93, createdAt: now, updatedAt: now, validFrom: now, metadata: ["stage": "l4"])
     try store.upsert(entity: entity)
+}
+
+private final class MemoryOSCLIDebugScriptedLoopModel: MemoryOSBackgroundToolLoopModel, @unchecked Sendable {
+    let modelID = "cli-debug-scripted-model"
+    private var script: [MemoryOSBackgroundLoopModelResponse]
+
+    init(script: [MemoryOSBackgroundLoopModelResponse]) {
+        self.script = script
+    }
+
+    func complete(_ request: MemoryOSBackgroundLoopModelRequest) throws -> MemoryOSBackgroundLoopModelResponse {
+        guard !script.isEmpty else { return MemoryOSBackgroundLoopModelResponse(finalArtifactJSON: "{}") }
+        return script.removeFirst()
+    }
+}
+
+private func memoryOSCLIDebugEncodedL1Artifact() throws -> String {
+    let output = MemoryOSL1UnifiedProjectionOutput(
+        operationalEntities: [
+            GraphStructuredExtractedEntity(localID: "project-1", name: "Connor Memory OS", entityKind: .workObject, scope: .project, confidence: 0.93, evidenceSpanIDs: ["span-1"])
+        ],
+        operationalStatements: [
+            GraphStructuredExtractedStatement(explicitID: "stmt-debug-1", subjectLocalID: "project-1", predicate: .relatedTo, objectLocalID: "project-1", statementText: "Connor Memory OS 正在被 CLI 调试。", confidence: 0.91, evidenceSpanIDs: ["span-1"])
+        ],
+        evidenceSpans: [GraphStructuredEvidenceSpan(id: "span-1", text: "Connor Memory OS CLI")],
+        knowledgeCandidates: [],
+        conceptEntities: [],
+        conceptRelations: [],
+        promotionDecisions: []
+    )
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    return String(data: try encoder.encode(output), encoding: .utf8)!
 }

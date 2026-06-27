@@ -249,6 +249,55 @@ public struct AppMemoryOSCLIInspector: Sendable {
         )
     }
 
+    public func debugRunNextBackgroundAI<Model: MemoryOSBackgroundToolLoopModel>(kind: String? = nil, limit: Int = 1, model: Model, configuration: MemoryOSBackgroundToolLoopConfiguration = MemoryOSBackgroundToolLoopConfiguration(), now: Date = Date()) throws -> MemoryOSCLIDebugAIRunResult {
+        let effectiveLimit = safeLimit(limit)
+        let executableKinds = kind.map { [$0] } ?? (MemoryOSBackgroundJobKind.l1ExecutableRawValues + [MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue])
+        let plannedCandidates = try executableKinds.flatMap { executableKind in
+            try store.runnableQueueItems(kind: executableKind, limit: effectiveLimit, now: now)
+        }.sorted { lhs, rhs in
+            if lhs.priority != rhs.priority { return lhs.priority > rhs.priority }
+            return lhs.createdAt < rhs.createdAt
+        }.prefix(effectiveLimit)
+        guard !plannedCandidates.isEmpty else {
+            return MemoryOSCLIDebugAIRunResult(status: "no_runnable_jobs", command: "memory pipeline debug-run-next", requestedKind: kind, requestedLimit: effectiveLimit, queueRuns: [])
+        }
+
+        let facade = AppMemoryOSFacade(store: store, searchKernel: searchKernel)
+        let executor = MemoryOSHeadlessKnowledgeLoopExecutor(
+            model: model,
+            toolExecutor: MemoryOSBackgroundToolExecutor(facade: facade),
+            store: store,
+            configuration: configuration,
+            now: { now }
+        )
+        let summaries = try facade.runBackgroundAIQueueOnce(executor: executor, limit: effectiveLimit, now: now, kinds: executableKinds)
+        let queueRuns = try plannedCandidates.enumerated().map { index, candidate in
+            let runID = "memory-run:\(candidate.id)"
+            let messages = try store.backgroundMessages(runID: runID)
+            let toolCalls = try store.backgroundToolCalls(runID: runID)
+            let run = try store.backgroundRuns(limit: max(20, effectiveLimit * 4)).first { $0.id == runID }
+            return MemoryOSCLIDebugAIQueueRun(
+                queueItemID: candidate.id,
+                kind: candidate.kind,
+                runID: run?.id ?? (messages.isEmpty && toolCalls.isEmpty ? nil : runID),
+                modelID: run?.modelID ?? model.modelID,
+                status: run?.status.rawValue ?? (summaries.indices.contains(index) ? (summaries[index].accepted ? "succeeded" : "failed") : "unknown"),
+                messageCount: messages.count,
+                toolCallCount: toolCalls.count,
+                projectionSummary: summaries.indices.contains(index) ? summaries[index] : nil,
+                messages: messages,
+                toolCalls: toolCalls
+            )
+        }
+        return MemoryOSCLIDebugAIRunResult(
+            status: queueRuns.isEmpty ? "no_runnable_jobs" : "completed",
+            command: "memory pipeline debug-run-next",
+            requestedKind: kind,
+            requestedLimit: effectiveLimit,
+            queueRuns: queueRuns
+        )
+    }
+
     public func searchIndexStats(fileManager: FileManager = .default) throws -> MemoryOSCLISearchIndexStats {
         guard let searchKernel else { throw MemoryOSCLISearchIndexError.kernelUnavailable }
         let meta = try readSearchIndexMeta(indexDirectory: searchKernel.indexDirectory, fileManager: fileManager)
@@ -732,6 +781,33 @@ public struct MemoryOSCLIDebugAIQueueRun: Codable, Sendable, Equatable {
     public var status: String
     public var messageCount: Int
     public var toolCallCount: Int
+    public var projectionSummary: MemoryOSProjectionRunSummary?
+    public var messages: [MemoryOSBackgroundMessageRecord]
+    public var toolCalls: [MemoryOSBackgroundToolCallRecord]
+
+    public init(
+        queueItemID: String,
+        kind: String,
+        runID: String?,
+        modelID: String?,
+        status: String,
+        messageCount: Int,
+        toolCallCount: Int,
+        projectionSummary: MemoryOSProjectionRunSummary? = nil,
+        messages: [MemoryOSBackgroundMessageRecord] = [],
+        toolCalls: [MemoryOSBackgroundToolCallRecord] = []
+    ) {
+        self.queueItemID = queueItemID
+        self.kind = kind
+        self.runID = runID
+        self.modelID = modelID
+        self.status = status
+        self.messageCount = messageCount
+        self.toolCallCount = toolCallCount
+        self.projectionSummary = projectionSummary
+        self.messages = messages
+        self.toolCalls = toolCalls
+    }
 
     enum CodingKeys: String, CodingKey {
         case queueItemID = "queue_item_id"
@@ -741,6 +817,9 @@ public struct MemoryOSCLIDebugAIQueueRun: Codable, Sendable, Equatable {
         case status
         case messageCount = "message_count"
         case toolCallCount = "tool_call_count"
+        case projectionSummary = "projection_summary"
+        case messages
+        case toolCalls = "tool_calls"
     }
 }
 
