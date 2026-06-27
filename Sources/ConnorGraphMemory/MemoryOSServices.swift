@@ -23,9 +23,6 @@ public struct MemoryOSPreIngestionFilter: Sendable {
         if trimmed.isEmpty {
             return MemoryOSPreIngestionDecision(action: .discard, reason: "empty_content", confidence: 1.0)
         }
-        if trimmed.count < 3 {
-            return MemoryOSPreIngestionDecision(action: .discard, reason: "too_short", confidence: 0.9)
-        }
         return MemoryOSPreIngestionDecision(action: .archive, reason: "archive_by_default_with_evidence", confidence: 0.8)
     }
 }

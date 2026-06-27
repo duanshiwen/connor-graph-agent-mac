@@ -82,6 +82,7 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(events[0].values["token_estimate"] == "12")
         #expect(events[0].values["provenance_title"] == "User message")
         #expect(events[0].values["provenance_content"] == "诗闻正在测试 Connor Memory OS CLI。")
+        #expect(events[0].values["content"] == "诗闻正在测试 Connor Memory OS CLI。")
     }
 
     @Test func memoryOSCLIInspectorListsL2StatementsAndPendingKnowledge() throws {
@@ -145,6 +146,9 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(l0.record.values["id"] == "object-1")
         #expect(l1.layer == "L1")
         #expect(l1.record.values["id"] == "event-1")
+        #expect(l1.record.values["provenance_title"] == "User message")
+        #expect(l1.record.values["provenance_content"] == "诗闻正在测试 Connor Memory OS CLI。")
+        #expect(l1.record.values["content"] == "诗闻正在测试 Connor Memory OS CLI。")
         #expect(l2.layer == "L2")
         #expect(l2.record.values["id"] == "stmt-1")
         #expect(l3.layer == "L3")
