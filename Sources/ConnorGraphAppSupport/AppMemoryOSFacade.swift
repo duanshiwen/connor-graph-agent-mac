@@ -159,6 +159,14 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         return try SQLiteMemoryOSUnifiedRetrievalService(store: store).search(query)
     }
 
+    public func findMemoryOSL2Entities(_ request: MemoryOSL2FindEntitiesRequest) throws -> MemoryOSL2FindEntitiesResult {
+        try MemoryOSL2EntityMemoryService(repository: SQLiteMemoryOSL2EntityMemoryRepository(store: store)).findEntities(request)
+    }
+
+    public func updateMemoryOSL2Entities(_ request: MemoryOSL2UpdateEntitiesRequest) throws -> MemoryOSL2UpdateEntitiesResult {
+        try MemoryOSL2EntityMemoryService(repository: SQLiteMemoryOSL2EntityMemoryRepository(store: store)).updateEntities(request)
+    }
+
     @discardableResult
     public func ensureCurrentUserAnchor(now: Date = Date()) throws -> MemoryOSEntity {
         try MemoryOSPersonIdentityService().ensureCurrentUserAnchor(store: store, now: now)

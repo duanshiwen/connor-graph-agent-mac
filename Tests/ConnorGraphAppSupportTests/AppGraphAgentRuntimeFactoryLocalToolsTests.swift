@@ -341,7 +341,9 @@ private final class LocalToolsCredentialStore: CredentialStore, @unchecked Senda
 
     #expect(!names.contains("memory_os_dashboard_summary"))
     #expect(names.contains("memory_os_ingest_observation"))
-    #expect(names.contains("memory_os_project_structured_artifact"))
+    #expect(!names.contains("memory_os_project_structured_artifact"))
+    #expect(names.contains("memory_os_l2_find_entities"))
+    #expect(names.contains("memory_os_l2_update_entities"))
     #expect(names.contains("memory_os_get_current_user_profile"))
     #expect(names.contains("memory_os_search"))
     #expect(names.contains("memory_os_expand_l4"))
@@ -356,6 +358,20 @@ private final class LocalToolsCredentialStore: CredentialStore, @unchecked Senda
     #expect(names.contains("memory_os_read_provenance"))
     #expect(!names.contains("graph_ingest_episode"))
     #expect(!names.contains("graph_propose_write"))
+
+    let schemaKeys = controller.toolRegistry.definitions
+        .filter { $0.name == "memory_os_l2_find_entities" || $0.name == "memory_os_l2_update_entities" }
+        .flatMap { collectSchemaKeys($0.inputSchema.jsonObject) }
+    #expect(!schemaKeys.contains("evidence"))
+    #expect(!schemaKeys.contains("supportQuote"))
+    #expect(!schemaKeys.contains("evidenceSpanIDs"))
+    #expect(!schemaKeys.contains("rawContent"))
+    #expect(!schemaKeys.contains("modelID"))
+    #expect(!schemaKeys.contains("schemaName"))
+    #expect(!schemaKeys.contains("artifactType"))
+    #expect(!schemaKeys.contains("processingRunID"))
+    #expect(!schemaKeys.contains("entityID"))
+    #expect(!schemaKeys.contains("statementID"))
 }
 
 @Test func agentLoopRuntimeFactoryRegistersNativeMailToolsWithFileBackedRuntime() async throws {
@@ -402,4 +418,20 @@ private final class LocalToolsCredentialStore: CredentialStore, @unchecked Senda
         )
     )
     #expect(result.contentJSON?.contains("Connor Mail") == true)
+}
+
+private func collectSchemaKeys(_ object: [String: Any]) -> [String] {
+    var keys: [String] = []
+    if let properties = object["properties"] as? [String: Any] {
+        keys.append(contentsOf: properties.keys)
+        for value in properties.values {
+            if let nested = value as? [String: Any] {
+                keys.append(contentsOf: collectSchemaKeys(nested))
+            }
+        }
+    }
+    if let items = object["items"] as? [String: Any] {
+        keys.append(contentsOf: collectSchemaKeys(items))
+    }
+    return keys
 }
