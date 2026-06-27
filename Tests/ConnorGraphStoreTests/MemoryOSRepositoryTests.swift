@@ -7,7 +7,7 @@ private func temporaryMemoryOSRepositoryDatabaseURL(_ name: String = UUID().uuid
     FileManager.default.temporaryDirectory.appendingPathComponent("\(name).sqlite")
 }
 
-@Test func memoryOSRepositoriesCanPersistEvidenceBackedStatement() throws {
+@Test func memoryOSRepositoriesPersistL2StatementWithoutEvidenceJoinTable() throws {
     let store = try SQLiteMemoryOSStore(path: temporaryMemoryOSRepositoryDatabaseURL().path)
     try store.migrate()
     let now = Date(timeIntervalSince1970: 1_000)
@@ -21,6 +21,8 @@ private func temporaryMemoryOSRepositoryDatabaseURL(_ name: String = UUID().uuid
     try store.upsert(node: node)
     try store.upsert(statement: statement)
 
-    let evidenceRows = try store.query(sql: "SELECT statement_id, span_id FROM memory_l2_statement_evidence WHERE statement_id = 'stmt-repo'")
-    #expect(evidenceRows == [["stmt-repo", "span-repo"]])
+    let statementRows = try store.query(sql: "SELECT id, evidence_span_ids_json FROM memory_l2_statements WHERE id = 'stmt-repo'")
+    #expect(statementRows == [["stmt-repo", "[\"span-repo\"]"]])
+    let evidenceTables = try store.query(sql: "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'memory_l2_statement_evidence'")
+    #expect(evidenceTables.isEmpty)
 }
