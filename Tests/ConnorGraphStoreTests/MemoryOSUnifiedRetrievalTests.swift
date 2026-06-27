@@ -32,14 +32,18 @@ import ConnorGraphStore
     let now = Date(timeIntervalSince1970: 4_000)
     try store.upsert(entity: MemoryOSEntity(id: "entity-elasticity", stableKey: "economics:concept:elasticity", entityType: "concept", name: "Elasticity", summary: "Elasticity concept", confidence: 0.9))
     try store.upsert(entity: MemoryOSEntity(id: "entity-price", stableKey: "economics:parameter:price", entityType: "parameter", name: "Price", summary: "Price parameter", confidence: 0.9))
+    try store.upsert(entity: MemoryOSEntity(id: "entity-market", stableKey: "economics:concept:market", entityType: "concept", name: "Market", summary: "Market concept", confidence: 0.9))
     try store.upsert(entityStatement: MemoryOSEntityStatement(id: "relation-1", entityID: "entity-elasticity", predicate: .influences, objectEntityID: "entity-price", text: "Elasticity varies with price.", assertionKind: .summarized, confidence: 0.88, validAt: now, committedAt: now))
+    try store.upsert(entityStatement: MemoryOSEntityStatement(id: "relation-2", entityID: "entity-elasticity", predicate: .sameAs, objectEntityID: "entity-market", text: "Elasticity is treated as the same as this market concept in a fixture.", assertionKind: .summarized, confidence: 0.88, validAt: now, committedAt: now))
 
     let service = SQLiteMemoryOSUnifiedRetrievalService(store: store)
     let expansion = try service.expandL4(entityID: "entity-elasticity", depth: 1, limit: 10)
 
     #expect(expansion.map(\.recordID).contains("relation-1"))
+    #expect(expansion.map(\.recordID).contains("relation-2"))
     #expect(expansion.first?.depth == 1)
-    #expect(expansion.first?.relatedEntityID == "entity-price")
+    #expect(expansion.first?.recordID == "relation-2")
+    #expect((expansion.first?.score ?? 0) > (expansion.first(where: { $0.recordID == "relation-1" })?.score ?? 0))
 }
 
 private func temporaryMemoryOSUnifiedRetrievalDatabaseURL() -> URL {

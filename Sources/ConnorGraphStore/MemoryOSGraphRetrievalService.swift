@@ -1,4 +1,5 @@
 import Foundation
+import ConnorGraphCore
 
 public enum MemoryOSGraphLayer: String, Sendable, Codable, Equatable, Hashable, CaseIterable {
     case l0 = "L0"
@@ -523,6 +524,7 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
         let edges = statements.map { row in
             let evidence = (try? store.decode([String].self, row[5])) ?? []
             evidenceRefs.append(contentsOf: evidence)
+            let relationMetadata = l4RelationMetadata(predicate: row[2])
             return MemoryOSGraphEdge(
                 id: row[0],
                 layer: .l4,
@@ -532,7 +534,7 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
                 evidenceRefs: evidence,
                 confidence: Double(row[6]),
                 validAt: row[7].isEmpty ? nil : row[7],
-                metadata: ["statement_text": row[4], "direction": row[8]]
+                metadata: ["statement_text": row[4], "direction": row[8]].merging(relationMetadata) { current, _ in current }
             )
         }
         return MemoryOSGraphSubgraph(nodes: nodes, edges: edges, evidenceRefs: Array(Set(evidenceRefs)).sorted(), provenanceRefs: [], explanation: "L4 neighbors query: entity \(entityID), direction \(query.direction.rawValue); returned \(edges.count) edge(s).")
@@ -589,7 +591,7 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
                 evidenceRefs: evidence,
                 confidence: Double(row[9]),
                 validAt: row[10].isEmpty ? nil : row[10],
-                metadata: ["statement_text": row[7]]
+                metadata: ["statement_text": row[7]].merging(l4RelationMetadata(predicate: row[5])) { current, _ in current }
             ))
         }
 
@@ -638,6 +640,17 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
             provenanceRefs: Array(provenanceRefs).sorted(),
             explanation: "\(explanationPrefix) returned \(nodes.count) node(s), \(edges.count) edge(s).\(suffix)"
         )
+    }
+
+    private func l4RelationMetadata(predicate rawValue: String) -> [String: String] {
+        guard let predicate = MemoryOSL4RelationPredicate(rawValue: rawValue) else {
+            return ["relation_category": "unknown", "retrieval_weight": "1.0"]
+        }
+        return [
+            "relation_category": predicate.category.rawValue,
+            "retrieval_weight": String(predicate.retrievalWeight),
+            "relation_strict": String(predicate.isStrict)
+        ]
     }
 
     private func l4Nodes(ids: [String]) throws -> [MemoryOSGraphNode] {
