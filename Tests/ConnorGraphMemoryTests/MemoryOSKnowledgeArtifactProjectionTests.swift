@@ -35,7 +35,7 @@ import ConnorGraphMemory
             MemoryOSExtractedConceptEntity(localID: "parameter-x", name: "某参数", conceptType: "parameter", domain: "economics", summary: "影响供需弹性空间变化的参数。", confidence: 0.82, evidenceSpanIDs: ["span-theory-1"])
         ],
         conceptRelations: [
-            MemoryOSExtractedConceptRelation(subjectLocalID: "concept-elasticity", predicate: "varies_with", objectLocalID: "parameter-x", text: "供需弹性空间会随着某参数变化而改变。", confidence: 0.84, evidenceSpanIDs: ["span-theory-1"])
+            MemoryOSExtractedConceptRelation(subjectLocalID: "concept-elasticity", predicate: .influences, objectLocalID: "parameter-x", text: "供需弹性空间会随着某参数变化而改变。", confidence: 0.84, evidenceSpanIDs: ["span-theory-1"])
         ],
         evidenceSpans: [MemoryOSKnowledgeEvidenceSpan(id: "span-theory-1", text: "供需弹性空间会随着某参数变化。")]
     )

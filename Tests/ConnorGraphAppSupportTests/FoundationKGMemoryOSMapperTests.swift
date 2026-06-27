@@ -45,7 +45,8 @@ import ConnorGraphAppSupport
     )
 
     #expect(statement?.entityID == "wikidata:Q1000")
-    #expect(statement?.predicate == "P31")
+    #expect(statement?.predicate == .instanceOf)
+    #expect(statement?.metadata["predicate"] == "P31")
     #expect(statement?.objectEntityID == "wikidata:Q5")
     #expect(statement?.text == "Example -- instance of --> human")
     #expect(statement?.metadata["target_resolution"] == "resolved")
@@ -61,7 +62,8 @@ import ConnorGraphAppSupport
     )
 
     #expect(statement.entityID == "wikidata:Q1000")
-    #expect(statement.predicate == "P646")
+    #expect(statement.predicate == .sameAs)
+    #expect(statement.metadata["predicate"] == "P646")
     #expect(statement.objectEntityID == nil)
     #expect(statement.text == "Example -- Freebase ID --> /m/example")
     #expect(statement.metadata["statement_kind"] == "external_id")

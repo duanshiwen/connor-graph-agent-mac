@@ -467,12 +467,13 @@ public struct MemoryOSProjectionService: Sendable {
             )
         }
         let entityStatements = output.statements.compactMap { statement -> MemoryOSEntityStatement? in
-            guard let subject = entityByLocalID[statement.subjectLocalID] else { return nil }
+            guard let subject = entityByLocalID[statement.subjectLocalID],
+                  let predicate = MemoryOSL4RelationPredicate(rawValue: statement.predicate.rawValue) else { return nil }
             let object = entityByLocalID[statement.objectLocalID]
             return MemoryOSEntityStatement(
                 id: "l4-statement:\(artifactID):\(statement.id)",
                 entityID: subject.id,
-                predicate: statement.predicate.rawValue,
+                predicate: predicate,
                 objectEntityID: object?.id,
                 text: statement.statementText,
                 assertionKind: .observed,
@@ -680,7 +681,7 @@ public struct MemoryOSCurrentViewService: Sendable {
 
     public func currentEntityStatements(_ statements: [MemoryOSEntityStatement], now: Date = Date()) -> [MemoryOSCurrentViewRecord] {
         let groups = Dictionary(grouping: statements) { statement in
-            [statement.entityID, statement.predicate, statement.objectEntityID ?? ""].joined(separator: "|")
+            [statement.entityID, statement.predicate.rawValue, statement.objectEntityID ?? ""].joined(separator: "|")
         }
         return groups.keys.sorted().compactMap { key in
             guard let candidates = groups[key], let selected = bestEntityStatement(from: candidates) else { return nil }

@@ -34,8 +34,8 @@ import ConnorGraphMemory
 @Test func memoryOSCurrentEntityProfileIsDerivedFromTemporalEntityStatements() {
     let older = Date(timeIntervalSince1970: 1_000)
     let newer = Date(timeIntervalSince1970: 2_000)
-    let old = MemoryOSEntityStatement(id: "entity-stmt-old", entityID: "entity-shiwen", predicate: "current_work", text: "心理咨询", confidence: 0.9, validAt: older, committedAt: older, evidenceSpanIDs: ["span-old"])
-    let new = MemoryOSEntityStatement(id: "entity-stmt-new", entityID: "entity-shiwen", predicate: "current_work", text: "Agent OS", confidence: 0.8, validAt: newer, committedAt: newer, evidenceSpanIDs: ["span-new"])
+    let old = MemoryOSEntityStatement(id: "entity-stmt-old", entityID: "entity-shiwen", predicate: .relatedTo, text: "心理咨询", confidence: 0.9, validAt: older, committedAt: older, evidenceSpanIDs: ["span-old"])
+    let new = MemoryOSEntityStatement(id: "entity-stmt-new", entityID: "entity-shiwen", predicate: .relatedTo, text: "Agent OS", confidence: 0.8, validAt: newer, committedAt: newer, evidenceSpanIDs: ["span-new"])
 
     let profile = MemoryOSCurrentViewService().currentEntityProfile(entityID: "entity-shiwen", statements: [old, new], now: newer)
 

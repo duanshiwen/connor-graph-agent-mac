@@ -124,7 +124,7 @@ public struct MemoryOSPersonIdentityService: Sendable {
             append(MemoryOSRetrievalHit(
                 layer: .l4,
                 recordID: statement.id,
-                title: statement.predicate,
+                title: statement.predicate.rawValue,
                 summary: statement.text,
                 matchedText: statement.text,
                 score: statement.confidence,
@@ -234,10 +234,13 @@ public struct MemoryOSPersonIdentityService: Sendable {
         LIMIT \(limit)
         """)
         return try rows.map { row in
-            MemoryOSEntityStatement(
+            guard let predicate = MemoryOSL4RelationPredicate(rawValue: row[2]) else {
+                throw NSError(domain: "MemoryOSPersonIdentityService", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid L4 relation predicate: \(row[2])"])
+            }
+            return MemoryOSEntityStatement(
                 id: row[0],
                 entityID: row[1],
-                predicate: row[2],
+                predicate: predicate,
                 objectEntityID: row[3].isEmpty ? nil : row[3],
                 text: row[4],
                 assertionKind: MemoryOSAssertionKind(rawValue: row[5]) ?? .observed,

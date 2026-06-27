@@ -168,7 +168,7 @@ public enum FoundationKGMemoryOSMapper {
         return MemoryOSEntityStatement(
             id: "foundation-kg:stmt:\(sha1(deterministicKey))",
             entityID: namespacedEntityID(edge.sourceID),
-            predicate: edge.predicate,
+            predicate: l4Predicate(forWikidataProperty: edge.predicate, targetKind: edge.targetKind),
             objectEntityID: objectEntityID,
             text: "\(sourceName) -- \(propertyDisplay) --> \(targetDisplay)",
             assertionKind: .observed,
@@ -197,7 +197,7 @@ public enum FoundationKGMemoryOSMapper {
         return MemoryOSEntityStatement(
             id: "foundation-kg:external:\(sha1(deterministicKey))",
             entityID: namespacedEntityID(externalID.nodeID),
-            predicate: externalID.property,
+            predicate: .sameAs,
             objectEntityID: nil,
             text: "\(sourceName) -- \(propertyDisplay) --> \(externalID.value)",
             assertionKind: .observed,
@@ -217,6 +217,24 @@ public enum FoundationKGMemoryOSMapper {
                 "deterministic_key": deterministicKey
             ]
         )
+    }
+
+    private static func l4Predicate(forWikidataProperty property: String, targetKind: String) -> MemoryOSL4RelationPredicate {
+        switch property {
+        case "P31": return .instanceOf
+        case "P279": return .subclassOf
+        case "P361": return .partOf
+        case "P527": return .hasPart
+        case "P1382": return .partOf
+        case "P155": return .supersedes
+        case "P156": return .replaces
+        case "P828": return .causes
+        case "P1542": return .causes
+        case "P1889": return .relatedTo
+        default:
+            if let predicate = MemoryOSL4RelationPredicate(rawValue: property) { return predicate }
+            return targetKind == "entity" ? .relatedTo : .associatedWith
+        }
     }
 
     private static func entityType(for kind: String) -> String {

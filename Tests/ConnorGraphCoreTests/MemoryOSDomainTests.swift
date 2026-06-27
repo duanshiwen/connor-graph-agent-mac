@@ -97,7 +97,7 @@ import ConnorGraphCore
             MemoryOSExtractedConceptEntity(localID: "concept-1", name: "L1 unified projection", conceptType: "memory_architecture_pattern", domain: "software-engineering", summary: "A single L1 extraction pass that can emit L2, L3, and L4 records.", evidenceSpanIDs: ["span-1"])
         ],
         conceptRelations: [
-            MemoryOSExtractedConceptRelation(id: "rel-1", subjectLocalID: "concept-1", predicate: "produces", objectLocalID: "concept-1", text: "L1 unified projection produces layered memory records.", evidenceSpanIDs: ["span-1"])
+            MemoryOSExtractedConceptRelation(id: "rel-1", subjectLocalID: "concept-1", predicate: .hasPart, objectLocalID: "concept-1", text: "L1 unified projection produces layered memory records.", evidenceSpanIDs: ["span-1"])
         ],
         promotionDecisions: [
             MemoryOSL1PromotionDecision(candidateID: "knowledge-1", accepted: true, signalQualityAccepted: true, reuseScopeAccepted: true, noveltyAccepted: true, structurabilityAccepted: true, reasons: ["All filters pass"], evidenceStatementIDs: ["stmt-1"], evidenceSpanIDs: ["span-1"])
@@ -115,4 +115,57 @@ import ConnorGraphCore
     #expect(decoded.knowledgeCandidates.first?.evidenceStatementIDs == ["stmt-1"])
     #expect(decoded.conceptEntities.first?.localID == "concept-1")
     #expect(decoded.promotionDecisions.first?.accepted == true)
+    #expect(decoded.conceptRelations.first?.predicate == .hasPart)
+}
+
+@Test func memoryOSL4RelationPredicateRejectsUnknownJSONValues() throws {
+    let validJSON = """
+    {
+      "id": "rel-1",
+      "subjectLocalID": "memory-os",
+      "predicate": "HAS_PART",
+      "objectLocalID": "l4",
+      "text": "Memory OS has L4.",
+      "confidence": 0.8,
+      "evidenceSpanIDs": ["span-1"],
+      "metadata": {}
+    }
+    """.data(using: .utf8)!
+
+    let decoded = try JSONDecoder().decode(MemoryOSExtractedConceptRelation.self, from: validJSON)
+    #expect(decoded.predicate == .hasPart)
+
+    let invalidJSON = """
+    {
+      "id": "rel-2",
+      "subjectLocalID": "memory-os",
+      "predicate": "has_a",
+      "objectLocalID": "l4",
+      "text": "Memory OS has L4.",
+      "confidence": 0.8,
+      "evidenceSpanIDs": ["span-1"],
+      "metadata": {}
+    }
+    """.data(using: .utf8)!
+
+    #expect(throws: DecodingError.self) {
+        _ = try JSONDecoder().decode(MemoryOSExtractedConceptRelation.self, from: invalidJSON)
+    }
+}
+
+@Test func memoryOSEntityStatementCarriesTypedL4Predicate() throws {
+    let statement = MemoryOSEntityStatement(
+        id: "stmt-1",
+        entityID: "entity-memory-os",
+        predicate: .dependsOn,
+        objectEntityID: "entity-l0",
+        text: "Memory OS depends on provenance.",
+        confidence: 0.9,
+        evidenceSpanIDs: ["span-1"]
+    )
+
+    let data = try JSONEncoder().encode(statement)
+    let decoded = try JSONDecoder().decode(MemoryOSEntityStatement.self, from: data)
+
+    #expect(decoded.predicate == .dependsOn)
 }

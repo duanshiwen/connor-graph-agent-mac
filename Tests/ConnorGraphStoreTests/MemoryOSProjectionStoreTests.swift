@@ -28,7 +28,7 @@ private func temporaryMemoryOSProjectionDatabaseURL(_ name: String = UUID().uuid
             MemoryOSEntity(id: "entity-project", stableKey: "project:work_object:connor-memory-os", entityType: "work_object", name: "Connor Memory OS", summary: "Memory OS", confidence: 0.93, createdAt: now, updatedAt: now)
         ],
         entityStatements: [
-            MemoryOSEntityStatement(id: "entity-statement-1", entityID: "entity-person", predicate: "RELATED_TO", objectEntityID: "entity-project", text: "诗闻正在推进 Connor Memory OS H4。", assertionKind: .observed, confidence: 0.94, validAt: now, committedAt: now, evidenceSpanIDs: ["span-1"], sourceArtifactID: "artifact-1")
+            MemoryOSEntityStatement(id: "entity-statement-1", entityID: "entity-person", predicate: .relatedTo, objectEntityID: "entity-project", text: "诗闻正在推进 Connor Memory OS H4。", assertionKind: .observed, confidence: 0.94, validAt: now, committedAt: now, evidenceSpanIDs: ["span-1"], sourceArtifactID: "artifact-1")
         ],
         beliefs: [
             MemoryOSBelief(id: "belief-1", topic: "RELATED_TO", statement: "诗闻正在推进 Connor Memory OS H4。", projectionKind: .observed, confidence: 0.94, evidenceStatementIDs: ["statement-1"], validAt: now, projectedAt: now, sourceArtifactID: "artifact-1")
