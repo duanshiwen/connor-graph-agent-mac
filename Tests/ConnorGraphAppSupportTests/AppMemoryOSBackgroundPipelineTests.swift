@@ -21,7 +21,7 @@ import ConnorGraphAppSupport
     #expect(runnable.count == 2)
     let payload = try store.decode(MemoryOSL1UnifiedProjectionJobDraft.self, runnable[0].payloadJSON)
     #expect(payload.schemaName == "MemoryOSL1UnifiedProjectionOutput")
-    #expect(payload.prompt.contains("L2 operational facts"))
+    #expect(payload.prompt.contains("L2 entity-centered working memory"))
     #expect(payload.prompt.contains("L3 reusable knowledge candidates"))
     #expect(payload.prompt.contains("L4 stable entities"))
 }
