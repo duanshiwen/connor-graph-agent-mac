@@ -21,7 +21,7 @@ import ConnorGraphAppSupport
     let enqueued = try coordinator.evaluateAfterL1Capture(now: now)
 
     #expect(enqueued.count == 4)
-    let runnable = try store.runnableQueueItems(kind: MemoryOSBackgroundJobKind.l1UnifiedProjection.rawValue, limit: 10, now: now)
+    let runnable = try store.runnableQueueItems(kind: MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue, limit: 10, now: now)
     #expect(runnable.count == 4)
 }
 
@@ -37,7 +37,7 @@ import ConnorGraphAppSupport
     let enqueued = try coordinator.runDailySweep(now: occurredAt.addingTimeInterval(24 * 60 * 60))
 
     #expect(enqueued.count == 1)
-    #expect(enqueued.first?.kind == MemoryOSBackgroundJobKind.l1UnifiedProjection.rawValue)
+    #expect(enqueued.first?.kind == MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue)
 }
 
 @Test func coordinatorEnqueuesL2ToKnowledgeWhenPendingStatementCountReaches100() throws {
