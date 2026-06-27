@@ -6,7 +6,7 @@ import ConnorGraphAppSupport
 
 @Suite("App Memory OS Native Source Reference Recorder Tests")
 struct AppMemoryOSNativeSourceReferenceRecorderTests {
-    @Test func recorderPersistsReferencesIntoL0AndL1WithMetadata() async throws {
+    @Test func recorderPersistsDetailReadReferencesIntoL0AndL1WithMetadata() async throws {
         let store = try SQLiteMemoryOSStore(path: temporaryNativeSourceReferenceRecorderDatabaseURL().path)
         try store.migrate()
         let facade = AppMemoryOSFacade(store: store)
@@ -40,6 +40,53 @@ struct AppMemoryOSNativeSourceReferenceRecorderTests {
         #expect(l0[4].contains("browser_history_get"))
         #expect(l0[4].contains("call-browser-get"))
         #expect(l0[4].contains("detail_read"))
+    }
+
+    @Test func recorderSkipsCandidateReferencesWithoutPersistingToL0OrL1() async throws {
+        let store = try SQLiteMemoryOSStore(path: temporaryNativeSourceReferenceRecorderDatabaseURL().path)
+        try store.migrate()
+        let recorder = AppMemoryOSNativeSourceReferenceRecorder(facade: AppMemoryOSFacade(store: store))
+        let reference = NativeSourceReference(
+            sourceKind: .calendar,
+            sourceRecordID: "event-1",
+            title: "Team Sync",
+            content: "Title: Team Sync\nStart: 2026-06-27T10:00:00Z\nEnd: 2026-06-27T11:00:00Z\nLocation: \nNotes: \nAttendees: ",
+            occurredAt: Date(timeIntervalSince1970: 12_000),
+            referenceStrength: .fullEventResult,
+            toolName: "calendar_search_events",
+            toolCallID: "call-calendar-search",
+            runID: "run-1"
+        )
+
+        await recorder.record([reference])
+
+        #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l0_provenance_objects;").first?.first == "0")
+        #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l1_capture_events;").first?.first == "0")
+    }
+
+    @Test func recorderPersistsCalendarDetailReadWithoutNotesUsingStructuredEventContent() async throws {
+        let store = try SQLiteMemoryOSStore(path: temporaryNativeSourceReferenceRecorderDatabaseURL().path)
+        try store.migrate()
+        let recorder = AppMemoryOSNativeSourceReferenceRecorder(facade: AppMemoryOSFacade(store: store))
+        let reference = NativeSourceReference(
+            sourceKind: .calendar,
+            sourceRecordID: "event-title-only",
+            title: "Dentist Appointment",
+            content: "Title: Dentist Appointment\nStart: 2026-06-27T10:00:00Z\nEnd: 2026-06-27T11:00:00Z\nLocation: \nNotes: \nAttendees: ",
+            occurredAt: Date(timeIntervalSince1970: 12_000),
+            referenceStrength: .detailRead,
+            toolName: "calendar_read",
+            toolCallID: "call-calendar-get",
+            runID: "run-1"
+        )
+
+        await recorder.record([reference])
+
+        #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l1_capture_events;").first?.first == "1")
+        let content = try #require(try store.query(sql: "SELECT content FROM memory_l0_provenance_objects LIMIT 1;").first?.first)
+        #expect(content.contains("Title: Dentist Appointment"))
+        #expect(content.contains("Start:"))
+        #expect(content.contains("End:"))
     }
 }
 

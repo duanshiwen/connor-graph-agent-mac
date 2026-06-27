@@ -9,7 +9,7 @@ public struct AppMemoryOSNativeSourceReferenceRecorder: NativeSourceReferenceRec
     }
 
     public func record(_ references: [NativeSourceReference]) async {
-        for reference in references where !reference.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        for reference in references where shouldCapture(reference) && !reference.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             do {
                 _ = try facade.ingestSourceEvent(
                     sourceID: reference.deduplicationKey,
@@ -27,6 +27,15 @@ public struct AppMemoryOSNativeSourceReferenceRecorder: NativeSourceReferenceRec
                 // inspected through Memory OS operational diagnostics in future hardening stages.
                 continue
             }
+        }
+    }
+
+    private func shouldCapture(_ reference: NativeSourceReference) -> Bool {
+        switch reference.referenceStrength {
+        case .detailRead:
+            return true
+        case .summaryCandidate, .fullEventResult:
+            return false
         }
     }
 }
