@@ -262,7 +262,7 @@ final class FoundationKGSeedSQLiteWriter {
         """) { statement in
             bind(statement, 1, entityStatement.id)
             bind(statement, 2, entityStatement.entityID)
-            bind(statement, 3, entityStatement.predicate)
+            bind(statement, 3, entityStatement.predicate.rawValue)
             bind(statement, 4, entityStatement.objectEntityID)
             bind(statement, 5, entityStatement.text)
             bind(statement, 6, entityStatement.assertionKind.rawValue)
@@ -279,7 +279,7 @@ final class FoundationKGSeedSQLiteWriter {
         VALUES (?, ?, ?)
         """) { statement in
             bind(statement, 1, entityStatement.id)
-            bind(statement, 2, entityStatement.predicate)
+            bind(statement, 2, entityStatement.predicate.rawValue)
             bind(statement, 3, entityStatement.text)
             try step(statement)
         }

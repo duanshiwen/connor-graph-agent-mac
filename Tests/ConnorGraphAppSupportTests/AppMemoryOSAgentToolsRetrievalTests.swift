@@ -32,7 +32,7 @@ import ConnorGraphAppSupport
     let now = Date(timeIntervalSince1970: 12_000)
     try store.upsert(entity: MemoryOSEntity(id: "entity-memory-os", stableKey: "system:connor-memory-os", entityType: "system", name: "Connor Memory OS", summary: "Background memory infrastructure", confidence: 0.95))
     try store.upsert(entity: MemoryOSEntity(id: "entity-l4", stableKey: "layer:l4", entityType: "memory_layer", name: "L4 Stable Entity / Concept Layer", summary: "Stores stable entities and concepts", confidence: 0.95))
-    try store.upsert(entityStatement: MemoryOSEntityStatement(id: "relation-l4", entityID: "entity-memory-os", predicate: "contains_layer", objectEntityID: "entity-l4", text: "Connor Memory OS contains L4 Stable Entity / Concept Layer.", assertionKind: .summarized, confidence: 0.92, validAt: now, committedAt: now, evidenceSpanIDs: []))
+    try store.upsert(entityStatement: MemoryOSEntityStatement(id: "relation-l4", entityID: "entity-memory-os", predicate: .hasPart, objectEntityID: "entity-l4", text: "Connor Memory OS contains L4 Stable Entity / Concept Layer.", assertionKind: .summarized, confidence: 0.92, validAt: now, committedAt: now, evidenceSpanIDs: []))
 
     let tool = MemoryOSContextTool(facade: facade)
     let result = try await tool.execute(arguments: AgentToolArguments(json: #"{"query":"Connor Memory OS L4","taskIntent":"explainRelationship","layers":["L4"],"graphDepth":1,"maxContextCharacters":4000}"#), context: memoryOSToolContext())
@@ -53,7 +53,7 @@ import ConnorGraphAppSupport
     let now = Date(timeIntervalSince1970: 10_000)
     let user = MemoryOSEntity(id: "person-current", stableKey: "current_user", entityType: "person", name: "Current User", aliases: ["primary user"], createdAt: now, updatedAt: now, metadata: ["role": "current_user"])
     try store.upsert(entity: user)
-    try store.upsert(entityStatement: MemoryOSEntityStatement(id: "l4-user-pref-1", entityID: user.id, predicate: "prefers", text: "current_user prefers structured architectural explanations.", confidence: 0.92, validAt: now, committedAt: now, evidenceSpanIDs: ["span-user-1"]))
+    try store.upsert(entityStatement: MemoryOSEntityStatement(id: "l4-user-pref-1", entityID: user.id, predicate: .relatedTo, text: "current_user prefers structured architectural explanations.", confidence: 0.92, validAt: now, committedAt: now, evidenceSpanIDs: ["span-user-1"]))
     try store.upsert(node: MemoryOSNode(id: "node-current-user", stableKey: "current_user_profile", nodeType: "person_profile", name: "current_user profile"))
     try store.upsert(statement: MemoryOSStatement(id: "stmt-user-1", subjectID: "node-current-user", predicate: "has_preference", text: "current_user prefers concise phase-by-phase execution updates.", confidence: 0.9, validAt: now, committedAt: now, evidenceSpanIDs: ["span-user-2"]))
 
@@ -105,7 +105,7 @@ import ConnorGraphAppSupport
     try store.upsert(entityStatement: MemoryOSEntityStatement(
         id: "generic-user-stmt",
         entityID: genericUser.id,
-        predicate: "P279",
+        predicate: .subclassOf,
         text: "communication user -- P279 --> 消费者",
         confidence: 0.9,
         validAt: now,
@@ -135,8 +135,8 @@ import ConnorGraphAppSupport
     let otherPerson = MemoryOSEntity(id: "person-other", stableKey: "person:other:alice", entityType: "person", name: "Alice", aliases: ["user research expert"], createdAt: now, updatedAt: now, metadata: ["person_role": "other_person"])
     try store.upsert(entity: currentUser)
     try store.upsert(entity: otherPerson)
-    try store.upsert(entityStatement: MemoryOSEntityStatement(id: "current-pref", entityID: currentUser.id, predicate: "prefers", text: "Current user prefers architectural implementation plans.", confidence: 0.9, validAt: now, committedAt: now, evidenceSpanIDs: [], metadata: ["person_role": "current_user", "profile_dimension": "interaction_guidance"]))
-    try store.upsert(entityStatement: MemoryOSEntityStatement(id: "other-pref", entityID: otherPerson.id, predicate: "prefers", text: "Alice has deep focus expertise in quantum gardening and user profiles.", confidence: 0.99, validAt: now, committedAt: now, evidenceSpanIDs: [], metadata: ["person_role": "other_person", "profile_dimension": "knowledge_background"]))
+    try store.upsert(entityStatement: MemoryOSEntityStatement(id: "current-pref", entityID: currentUser.id, predicate: .relatedTo, text: "Current user prefers architectural implementation plans.", confidence: 0.9, validAt: now, committedAt: now, evidenceSpanIDs: [], metadata: ["person_role": "current_user", "profile_dimension": "interaction_guidance"]))
+    try store.upsert(entityStatement: MemoryOSEntityStatement(id: "other-pref", entityID: otherPerson.id, predicate: .relatedTo, text: "Alice has deep focus expertise in quantum gardening and user profiles.", confidence: 0.99, validAt: now, committedAt: now, evidenceSpanIDs: [], metadata: ["person_role": "other_person", "profile_dimension": "knowledge_background"]))
 
     let tool = MemoryOSGetCurrentUserProfileTool(facade: facade)
     let result = try await tool.execute(arguments: AgentToolArguments(json: #"{"limit":10,"focus":"quantum gardening user profiles"}"#), context: memoryOSToolContext())
@@ -194,7 +194,7 @@ import ConnorGraphAppSupport
     let entityB = MemoryOSEntity(id: "entity-b", stableKey: "entity-b", entityType: "concept", name: "价格变化", createdAt: now, updatedAt: now)
     try store.upsert(entity: entityA)
     try store.upsert(entity: entityB)
-    try store.upsert(entityStatement: MemoryOSEntityStatement(id: "l4-stmt-1", entityID: entityA.id, predicate: "relates_to", objectEntityID: entityB.id, text: "供需弹性关联价格变化。", confidence: 0.9, validAt: now, committedAt: now, evidenceSpanIDs: ["span-1"]))
+    try store.upsert(entityStatement: MemoryOSEntityStatement(id: "l4-stmt-1", entityID: entityA.id, predicate: .relatedTo, objectEntityID: entityB.id, text: "供需弹性关联价格变化。", confidence: 0.9, validAt: now, committedAt: now, evidenceSpanIDs: ["span-1"]))
 
     let tool = MemoryOSExpandL4Tool(facade: facade)
     let result = try await tool.execute(arguments: AgentToolArguments(json: #"{"entityID":"entity-a","depth":1,"limit":10}"#), context: memoryOSToolContext())

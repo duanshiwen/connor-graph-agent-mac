@@ -433,14 +433,14 @@ public struct MemoryOSExtractedConceptEntity: Codable, Sendable, Equatable, Iden
 public struct MemoryOSExtractedConceptRelation: Codable, Sendable, Equatable, Identifiable {
     public var id: String
     public var subjectLocalID: String
-    public var predicate: String
+    public var predicate: MemoryOSL4RelationPredicate
     public var objectLocalID: String
     public var text: String
     public var confidence: Double
     public var evidenceSpanIDs: [String]
     public var metadata: [String: String]
 
-    public init(id: String = UUID().uuidString, subjectLocalID: String, predicate: String, objectLocalID: String, text: String, confidence: Double = 0.5, evidenceSpanIDs: [String] = [], metadata: [String: String] = [:]) {
+    public init(id: String = UUID().uuidString, subjectLocalID: String, predicate: MemoryOSL4RelationPredicate, objectLocalID: String, text: String, confidence: Double = 0.5, evidenceSpanIDs: [String] = [], metadata: [String: String] = [:]) {
         self.id = id
         self.subjectLocalID = subjectLocalID
         self.predicate = predicate
@@ -561,7 +561,7 @@ public struct MemoryOSEntity: Codable, Sendable, Equatable, Identifiable {
 public struct MemoryOSEntityStatement: Codable, Sendable, Equatable, Identifiable {
     public var id: String
     public var entityID: String
-    public var predicate: String
+    public var predicate: MemoryOSL4RelationPredicate
     public var objectEntityID: String?
     public var text: String
     public var assertionKind: MemoryOSAssertionKind
@@ -572,7 +572,7 @@ public struct MemoryOSEntityStatement: Codable, Sendable, Equatable, Identifiabl
     public var sourceArtifactID: String?
     public var metadata: [String: String]
 
-    public init(id: String = UUID().uuidString, entityID: String, predicate: String, objectEntityID: String? = nil, text: String, assertionKind: MemoryOSAssertionKind = .observed, confidence: Double = 0.5, validAt: Date = Date(), committedAt: Date = Date(), evidenceSpanIDs: [String] = [], sourceArtifactID: String? = nil, metadata: [String: String] = [:]) {
+    public init(id: String = UUID().uuidString, entityID: String, predicate: MemoryOSL4RelationPredicate, objectEntityID: String? = nil, text: String, assertionKind: MemoryOSAssertionKind = .observed, confidence: Double = 0.5, validAt: Date = Date(), committedAt: Date = Date(), evidenceSpanIDs: [String] = [], sourceArtifactID: String? = nil, metadata: [String: String] = [:]) {
         self.id = id; self.entityID = entityID; self.predicate = predicate; self.objectEntityID = objectEntityID; self.text = text; self.assertionKind = assertionKind; self.confidence = confidence; self.validAt = validAt; self.committedAt = committedAt; self.evidenceSpanIDs = evidenceSpanIDs; self.sourceArtifactID = sourceArtifactID; self.metadata = metadata
     }
 }

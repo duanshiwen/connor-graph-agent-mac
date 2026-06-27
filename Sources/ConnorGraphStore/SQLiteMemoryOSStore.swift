@@ -390,7 +390,7 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         try execute("""
         INSERT OR REPLACE INTO memory_l4_entity_statements
         (id, entity_id, predicate, object_entity_id, text, assertion_kind, confidence, valid_at, committed_at, evidence_span_ids_json, source_artifact_id, metadata_json)
-        VALUES (\(quote(statement.id)), \(quote(statement.entityID)), \(quote(statement.predicate)), \(quote(statement.objectEntityID)), \(quote(statement.text)), \(quote(statement.assertionKind.rawValue)), \(statement.confidence), \(quote(iso(statement.validAt))), \(quote(iso(statement.committedAt))), \(quote(json(statement.evidenceSpanIDs))), \(quote(statement.sourceArtifactID)), \(quote(json(statement.metadata))))
+        VALUES (\(quote(statement.id)), \(quote(statement.entityID)), \(quote(statement.predicate.rawValue)), \(quote(statement.objectEntityID)), \(quote(statement.text)), \(quote(statement.assertionKind.rawValue)), \(statement.confidence), \(quote(iso(statement.validAt))), \(quote(iso(statement.committedAt))), \(quote(json(statement.evidenceSpanIDs))), \(quote(statement.sourceArtifactID)), \(quote(json(statement.metadata))))
         """)
         try execute("DELETE FROM memory_l4_entity_statement_evidence WHERE statement_id = \(quote(statement.id));")
         for spanID in statement.evidenceSpanIDs {
@@ -401,7 +401,7 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
             """)
         }
         try execute("DELETE FROM memory_l4_statements_fts WHERE statement_id = \(quote(statement.id));")
-        try execute("INSERT INTO memory_l4_statements_fts(statement_id, predicate, text) VALUES (\(quote(statement.id)), \(quote(statement.predicate)), \(quote(statement.text)))")
+        try execute("INSERT INTO memory_l4_statements_fts(statement_id, predicate, text) VALUES (\(quote(statement.id)), \(quote(statement.predicate.rawValue)), \(quote(statement.text)))")
         try enqueueSearchIndexChange(layer: "L4", recordID: statement.id)
     }
 

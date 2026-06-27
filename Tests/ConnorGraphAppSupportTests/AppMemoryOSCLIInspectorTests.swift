@@ -324,7 +324,7 @@ struct AppMemoryOSCLIInspectorTests {
         try seedMemoryOSCLIInspectorFixture(store: store)
         let now = Date(timeIntervalSince1970: 10_000)
         try store.upsert(entity: MemoryOSEntity(id: "class-memory-system", stableKey: "class:memory-system", entityType: "class", name: "Memory System", aliases: ["记忆系统"], summary: "Memory system class", confidence: 0.9, createdAt: now, updatedAt: now))
-        try store.upsert(entityStatement: MemoryOSEntityStatement(id: "entity-is-instance", entityID: "entity-1", predicate: "P31", objectEntityID: "class-memory-system", text: "Connor Memory OS is an instance of Memory System.", confidence: 0.9, validAt: now, committedAt: now))
+        try store.upsert(entityStatement: MemoryOSEntityStatement(id: "entity-is-instance", entityID: "entity-1", predicate: .instanceOf, objectEntityID: "class-memory-system", text: "Connor Memory OS is an instance of Memory System.", confidence: 0.9, validAt: now, committedAt: now))
         let inspector = AppMemoryOSCLIInspector(store: store)
 
         let l2 = try inspector.queryGraph(text: "Connor", intent: .l2Statements, entityID: nil, classEntityIDs: [], predicates: ["describes"], direction: .both, includeEvidence: true, limit: 10)
@@ -339,9 +339,9 @@ struct AppMemoryOSCLIInspectorTests {
         let l4Entity = try inspector.queryGraph(text: "Memory OS", intent: .l4Entity, entityID: nil, classEntityIDs: [], predicates: [], direction: .both, includeEvidence: false, limit: 10)
         #expect(l4Entity.nodes.contains { $0.id == "entity-1" && $0.layer == .l4 })
 
-        let l4Instances = try inspector.queryGraph(text: "记忆系统", intent: .l4Instances, entityID: nil, classEntityIDs: ["class-memory-system"], predicates: ["P31"], direction: .both, includeEvidence: false, limit: 10)
+        let l4Instances = try inspector.queryGraph(text: "记忆系统", intent: .l4Instances, entityID: nil, classEntityIDs: ["class-memory-system"], predicates: ["INSTANCE_OF"], direction: .both, includeEvidence: false, limit: 10)
         #expect(l4Instances.nodes.contains { $0.id == "entity-1" && $0.layer == .l4 })
-        #expect(l4Instances.edges.contains { $0.id == "entity-is-instance" && $0.predicate == "P31" })
+        #expect(l4Instances.edges.contains { $0.id == "entity-is-instance" && $0.predicate == "INSTANCE_OF" })
     }
 
     @Test func memoryOSCLIRouterRoutesTraceEvidenceCommand() throws {
@@ -389,7 +389,7 @@ struct AppMemoryOSCLIInspectorTests {
         try seedMemoryOSCLIInspectorFixture(store: store)
         let now = Date(timeIntervalSince1970: 10_000)
         try store.upsert(entity: MemoryOSEntity(id: "entity-graph", stableKey: "concept:graph", entityType: "concept", name: "Graph", summary: "Graph concept", confidence: 0.9, createdAt: now, updatedAt: now))
-        try store.upsert(entityStatement: MemoryOSEntityStatement(id: "entity-edge-1", entityID: "entity-1", predicate: "relates_to", objectEntityID: "entity-graph", text: "Connor Memory OS relates to Graph.", confidence: 0.9, validAt: now, committedAt: now))
+        try store.upsert(entityStatement: MemoryOSEntityStatement(id: "entity-edge-1", entityID: "entity-1", predicate: .relatedTo, objectEntityID: "entity-graph", text: "Connor Memory OS relates to Graph.", confidence: 0.9, validAt: now, committedAt: now))
         let inspector = AppMemoryOSCLIInspector(store: store)
         let encoder = memoryOSCLITestEncoder()
 

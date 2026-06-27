@@ -90,7 +90,7 @@ import ConnorGraphMemory
             MemoryOSExtractedConceptEntity(localID: "concept-1", name: "L1 unified projection", conceptType: "memory_architecture_pattern", domain: "software-engineering", summary: "A single L1 extraction pass that can emit L2, L3, and L4 records.", evidenceSpanIDs: ["span-1"])
         ],
         conceptRelations: [
-            MemoryOSExtractedConceptRelation(id: "rel-1", subjectLocalID: "concept-1", predicate: "produces", objectLocalID: "concept-1", text: "L1 unified projection produces layered memory records.", evidenceSpanIDs: ["span-1"])
+            MemoryOSExtractedConceptRelation(id: "rel-1", subjectLocalID: "concept-1", predicate: .hasPart, objectLocalID: "concept-1", text: "L1 unified projection produces layered memory records.", evidenceSpanIDs: ["span-1"])
         ],
         promotionDecisions: [MemoryOSL1PromotionDecision(candidateID: "knowledge-1", accepted: true, signalQualityAccepted: true, reuseScopeAccepted: true, noveltyAccepted: true, structurabilityAccepted: true, evidenceStatementIDs: ["stmt-1"], evidenceSpanIDs: ["span-1"])]
     )
