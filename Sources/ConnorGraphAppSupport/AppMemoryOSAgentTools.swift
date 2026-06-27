@@ -591,7 +591,7 @@ public struct MemoryOSQueryGraphTool: AgentTool {
         "intent": .string(description: "auto, l2Statements, l3Beliefs, l4Entity, l4Neighbors, l4Instances, or evidence. Defaults to auto."),
         "entityID": .string(description: "Optional known L4 entity id for neighbor queries."),
         "classEntityIDs": .array(items: .string(description: "Optional L4 class ids for instance queries."), description: "Optional class ids."),
-        "predicates": .array(items: .string(description: "Optional predicate filter."), description: "Optional predicate filters such as P31 or P17."),
+        "predicates": .array(items: .string(description: "Optional controlled L4 predicate filter."), description: "Optional predicate filters such as INSTANCE_OF or HAS_PART."),
         "direction": .string(description: "outgoing, incoming, or both for neighbor queries. Defaults to both."),
         "includeEvidence": .boolean(description: "Trace returned L2/L3 evidence to L0 provenance. Defaults to false."),
         "limit": .number(description: "Maximum graph records. Defaults to 50.")
@@ -772,11 +772,11 @@ private enum MemoryOSL4GraphToolPayload {
 
 public struct MemoryOSL4InstancesTool: AgentTool {
     public let name = "memory_os_l4_instances"
-    public let description = "Query Memory OS L4 graph for instances of one or more class entities using predicates such as P31. Use this for list/all/which/有哪些/所有/列出 class membership questions after resolving the class entity id; unlike memory_os_search, this returns graph-structured instance edges."
+    public let description = "Query Memory OS L4 graph for instances of one or more class entities using controlled L4 predicates such as INSTANCE_OF. Use this for list/all/which/有哪些/所有/列出 class membership questions after resolving the class entity id; unlike memory_os_search, this returns graph-structured instance edges."
     public let permission: AgentPermissionCapability = .readGraph
     public let inputSchema = AgentToolInputSchema.object(properties: [
         "classEntityIDs": .array(items: .string(description: "L4 class entity id such as wikidata:Q6256 or wikidata:Q3624078."), description: "Class entity ids to enumerate instances for."),
-        "predicates": .array(items: .string(description: "Predicate id, usually P31 for instance-of."), description: "Optional predicates. Defaults to P31."),
+        "predicates": .array(items: .string(description: "Controlled L4 predicate raw value, usually INSTANCE_OF for instance-of."), description: "Optional predicates. Defaults to INSTANCE_OF."),
         "limit": .number(description: "Maximum instance edges. Defaults to 100, capped at 1000.")
     ], required: ["classEntityIDs"])
 
@@ -791,10 +791,11 @@ public struct MemoryOSL4InstancesTool: AgentTool {
         }
         let predicates = parseStringArray(arguments.array("predicates"))
         let limit = max(1, min(arguments.int("limit") ?? 100, 1_000))
-        let subgraph = try facade.queryMemoryOSL4Instances(classEntityIDs: classIDs, predicates: predicates.isEmpty ? ["P31"] : predicates, limit: limit)
+        let effectivePredicates = predicates.isEmpty ? [MemoryOSL4RelationPredicate.instanceOf.rawValue] : predicates
+        let subgraph = try facade.queryMemoryOSL4Instances(classEntityIDs: classIDs, predicates: effectivePredicates, limit: limit)
         let payload: [String: Any] = [
             "classEntityIDs": classIDs,
-            "predicates": predicates.isEmpty ? ["P31"] : predicates,
+            "predicates": effectivePredicates,
             "nodeCount": subgraph.nodes.count,
             "edgeCount": subgraph.edges.count,
             "nodes": subgraph.nodes.map { node in

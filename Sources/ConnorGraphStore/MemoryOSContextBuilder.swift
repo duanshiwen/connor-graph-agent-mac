@@ -1,4 +1,5 @@
 import Foundation
+import ConnorGraphCore
 
 public struct MemoryOSPredicateLabel: Sendable, Codable, Equatable {
     public var predicate: String
@@ -31,12 +32,11 @@ public struct MemoryOSPredicateLabelRegistry: Sendable {
 
     public static let defaultLabels: [String: MemoryOSPredicateLabel] = {
         let values = [
-            MemoryOSPredicateLabel(predicate: "P31", displayName: "instance of", forwardTemplate: "{source} is an instance of {target}", relationKind: "taxonomy"),
-            MemoryOSPredicateLabel(predicate: "P279", displayName: "subclass of", forwardTemplate: "{source} is a subclass of {target}", relationKind: "taxonomy"),
-            MemoryOSPredicateLabel(predicate: "P17", displayName: "country", forwardTemplate: "{source} belongs to country {target}", relationKind: "attribute"),
-            MemoryOSPredicateLabel(predicate: "contains_layer", displayName: "contains layer", forwardTemplate: "{source} contains {target}", relationKind: "structural"),
-            MemoryOSPredicateLabel(predicate: "uses_layer", displayName: "uses layer", forwardTemplate: "{source} uses {target}", relationKind: "structural"),
-            MemoryOSPredicateLabel(predicate: "relatedTo", displayName: "related to", forwardTemplate: "{source} is related to {target}"),
+            MemoryOSPredicateLabel(predicate: MemoryOSL4RelationPredicate.instanceOf.rawValue, displayName: "instance of", forwardTemplate: "{source} is an instance of {target}", relationKind: "taxonomy"),
+            MemoryOSPredicateLabel(predicate: MemoryOSL4RelationPredicate.subclassOf.rawValue, displayName: "subclass of", forwardTemplate: "{source} is a subclass of {target}", relationKind: "taxonomy"),
+            MemoryOSPredicateLabel(predicate: MemoryOSL4RelationPredicate.hasPart.rawValue, displayName: "has part", forwardTemplate: "{source} has part {target}", relationKind: "structural"),
+            MemoryOSPredicateLabel(predicate: MemoryOSL4RelationPredicate.uses.rawValue, displayName: "uses", forwardTemplate: "{source} uses {target}", relationKind: "structural"),
+            MemoryOSPredicateLabel(predicate: MemoryOSL4RelationPredicate.relatedTo.rawValue, displayName: "related to", forwardTemplate: "{source} is related to {target}"),
             MemoryOSPredicateLabel(predicate: "prefers", displayName: "prefers", forwardTemplate: "{source} prefers {target}", relationKind: "preference"),
             MemoryOSPredicateLabel(predicate: "dislikes", displayName: "dislikes", forwardTemplate: "{source} dislikes {target}", relationKind: "preference"),
             MemoryOSPredicateLabel(predicate: "hasGoal", displayName: "has goal", forwardTemplate: "{source} has goal {target}", relationKind: "profile"),

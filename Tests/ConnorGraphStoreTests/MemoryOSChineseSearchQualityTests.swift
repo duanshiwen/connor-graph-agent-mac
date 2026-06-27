@@ -36,11 +36,11 @@ struct MemoryOSChineseSearchQualityTests {
     @Test func l4InstancesReturnsGraphStructuredCountryMembership() throws {
         let store = try makeStore()
         try seedCountryGraph(store)
-        let subgraph = try SQLiteMemoryOSGraphRetrievalService(store: store).l4Instances(MemoryOSL4InstanceQuery(classEntityIDs: ["wikidata:Q6256"], predicates: ["P31"], limit: 10))
+        let subgraph = try SQLiteMemoryOSGraphRetrievalService(store: store).l4Instances(MemoryOSL4InstanceQuery(classEntityIDs: ["wikidata:Q6256"], predicates: ["INSTANCE_OF"], limit: 10))
 
         #expect(subgraph.nodes.contains { $0.id == "wikidata:Q6256" && $0.metadata["role"] == "class" })
         #expect(subgraph.nodes.contains { $0.id == "wikidata:Q148" && $0.metadata["role"] == "instance" })
-        #expect(subgraph.edges.contains { $0.sourceID == "wikidata:Q148" && $0.targetID == "wikidata:Q6256" && $0.predicate == "P31" })
+        #expect(subgraph.edges.contains { $0.sourceID == "wikidata:Q148" && $0.targetID == "wikidata:Q6256" && $0.predicate == "INSTANCE_OF" })
     }
 
     private func makeStore() throws -> SQLiteMemoryOSStore {
@@ -72,7 +72,7 @@ struct MemoryOSChineseSearchQualityTests {
         INSERT OR REPLACE INTO memory_l4_entity_statements
         (id, entity_id, predicate, object_entity_id, text, assertion_kind, confidence, valid_at, committed_at, evidence_span_ids_json, source_artifact_id, metadata_json)
         VALUES
-        ('stmt-q148-instance-country', 'wikidata:Q148', 'P31', 'wikidata:Q6256', '中华人民共和国 -- 隶属于 --> 地理、地域意义上的国家、地区', 'fact', 0.9, '2026-06-24T00:00:00Z', '2026-06-24T00:00:00Z', '[]', NULL, '{}');
+        ('stmt-q148-instance-country', 'wikidata:Q148', 'INSTANCE_OF', 'wikidata:Q6256', '中华人民共和国 -- 隶属于 --> 地理、地域意义上的国家、地区', 'fact', 0.9, '2026-06-24T00:00:00Z', '2026-06-24T00:00:00Z', '[]', NULL, '{}');
         """)
         try store.execute("""
         INSERT INTO memory_l4_entities_fts(entity_id, entity_type, name, aliases, summary)
@@ -83,7 +83,7 @@ struct MemoryOSChineseSearchQualityTests {
         """)
         try store.execute("""
         INSERT INTO memory_l4_statements_fts(statement_id, predicate, text)
-        VALUES ('stmt-q148-instance-country', 'P31', '中华人民共和国 -- 隶属于 --> 地理、地域意义上的国家、地区');
+        VALUES ('stmt-q148-instance-country', 'INSTANCE_OF', '中华人民共和国 -- 隶属于 --> 地理、地域意义上的国家、地区');
         """)
     }
 }

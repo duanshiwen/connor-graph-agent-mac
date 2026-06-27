@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import ConnorGraphCore
 import ConnorGraphStore
 
 @Test func memoryOSContextBuilderCreatesEntityRelationAndEvidenceBoundText() throws {
@@ -19,7 +20,7 @@ import ConnorGraphStore
     ]
     let expansions = [
         "entity-memory-os": [
-            MemoryOSL4ExpansionHit(recordID: "relation-1", sourceEntityID: "entity-memory-os", relatedEntityID: "entity-l4", predicate: "contains_layer", text: "Connor Memory OS contains L4 Stable Entity / Concept Layer.", depth: 1, score: 1.0)
+            MemoryOSL4ExpansionHit(recordID: "relation-1", sourceEntityID: "entity-memory-os", relatedEntityID: "entity-l4", predicate: MemoryOSL4RelationPredicate.hasPart.rawValue, text: "Connor Memory OS contains L4 Stable Entity / Concept Layer.", depth: 1, score: 1.0)
         ]
     ]
 

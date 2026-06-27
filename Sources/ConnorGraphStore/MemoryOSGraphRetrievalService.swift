@@ -176,9 +176,9 @@ public struct MemoryOSL4InstanceQuery: Sendable, Codable, Equatable {
     public var predicates: [String]
     public var limit: Int
 
-    public init(classEntityIDs: [String], predicates: [String] = ["P31"], limit: Int = 100) {
+    public init(classEntityIDs: [String], predicates: [String] = [MemoryOSL4RelationPredicate.instanceOf.rawValue], limit: Int = 100) {
         self.classEntityIDs = classEntityIDs
-        self.predicates = predicates.isEmpty ? ["P31"] : predicates
+        self.predicates = predicates.isEmpty ? [MemoryOSL4RelationPredicate.instanceOf.rawValue] : predicates
         self.limit = limit
     }
 }
@@ -216,7 +216,7 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
                 classIDs = resolved.nodes.map(\.id)
             }
             if !classIDs.isEmpty {
-                subgraphs.append(try l4Instances(MemoryOSL4InstanceQuery(classEntityIDs: classIDs, predicates: predicates.isEmpty ? ["P31"] : predicates, limit: limit)))
+                subgraphs.append(try l4Instances(MemoryOSL4InstanceQuery(classEntityIDs: classIDs, predicates: predicates.isEmpty ? [MemoryOSL4RelationPredicate.instanceOf.rawValue] : predicates, limit: limit)))
             }
         case .evidence:
             if !text.isEmpty {

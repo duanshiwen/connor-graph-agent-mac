@@ -72,9 +72,9 @@ private func makeGoldenSQLiteFixture(at url: URL) throws {
     INSERT INTO memory_l4_entity_aliases VALUES ('a5','wikidata:Q7275','国家','国家','2026-06-24','{}');
     INSERT INTO memory_l4_entity_aliases VALUES ('a6','wikidata:P31','P31','p31','2026-06-24','{}');
     INSERT INTO memory_l4_entity_aliases VALUES ('a7','wikidata:P17','P17','p17','2026-06-24','{}');
-    INSERT INTO memory_l4_entity_statements VALUES ('st1','wikidata:Q148','P31','wikidata:Q7275','中国 instance of 国家','fact',0.9,'2026-06-24','2026-06-24','[]',NULL,'{}');
-    INSERT INTO memory_l4_entity_statements VALUES ('st2','wikidata:Q142','P31','wikidata:Q7275','法国 instance of 国家','fact',0.9,'2026-06-24','2026-06-24','[]',NULL,'{}');
-    INSERT INTO memory_l4_entity_statements VALUES ('st3','wikidata:Q17','P31','wikidata:Q7275','日本 instance of 国家','fact',0.9,'2026-06-24','2026-06-24','[]',NULL,'{}');
+    INSERT INTO memory_l4_entity_statements VALUES ('st1','wikidata:Q148','INSTANCE_OF','wikidata:Q7275','中国 instance of 国家','fact',0.9,'2026-06-24','2026-06-24','[]',NULL,'{}');
+    INSERT INTO memory_l4_entity_statements VALUES ('st2','wikidata:Q142','INSTANCE_OF','wikidata:Q7275','法国 instance of 国家','fact',0.9,'2026-06-24','2026-06-24','[]',NULL,'{}');
+    INSERT INTO memory_l4_entity_statements VALUES ('st3','wikidata:Q17','INSTANCE_OF','wikidata:Q7275','日本 instance of 国家','fact',0.9,'2026-06-24','2026-06-24','[]',NULL,'{}');
     """
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
