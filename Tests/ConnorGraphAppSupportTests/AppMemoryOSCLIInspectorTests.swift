@@ -192,6 +192,20 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(result.hits[0].id == "stmt-1")
     }
 
+    @Test func memoryOSCLIInspectorSearchesL1WithContent() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        try seedMemoryOSCLIInspectorFixture(store: store)
+        let inspector = AppMemoryOSCLIInspector(store: store)
+
+        let result = try inspector.search(query: "Connor", layers: ["L1"], limit: 10)
+
+        #expect(result.query == "Connor")
+        #expect(result.hits.count == 1)
+        #expect(result.hits[0].layer == "L1")
+        #expect(result.hits[0].id == "event-1")
+        #expect(result.hits[0].content == "诗闻正在测试 Connor Memory OS CLI。")
+    }
+
     @Test func memoryOSCLIInspectorSearchesAcrossL3AndL4() throws {
         let store = try makeMemoryOSCLIInspectorStore()
         try seedMemoryOSCLIInspectorFixture(store: store)

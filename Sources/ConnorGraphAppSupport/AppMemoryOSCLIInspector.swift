@@ -392,6 +392,7 @@ public struct AppMemoryOSCLIInspector: Sendable {
                     id: hit.recordID,
                     title: hit.title,
                     snippet: hit.summary.isEmpty ? hit.matchedText : hit.summary,
+                    content: searchHitContent(for: hit),
                     score: hit.score,
                     evidenceRefs: hit.evidenceRefs,
                     provenanceRefs: hit.provenanceRefs,
@@ -399,6 +400,25 @@ public struct AppMemoryOSCLIInspector: Sendable {
                 )
             }
         )
+    }
+
+    private func searchHitContent(for hit: MemoryOSRetrievalHit) -> String {
+        if hit.layer == .l1,
+           let content = try? l1ProvenanceContent(captureEventID: hit.recordID),
+           !content.isEmpty {
+            return content
+        }
+        return hit.matchedText
+    }
+
+    private func l1ProvenanceContent(captureEventID: String) throws -> String {
+        try store.query(sql: """
+        SELECT o.content
+        FROM memory_l1_capture_events c
+        JOIN memory_l0_provenance_objects o ON o.id = c.provenance_object_id
+        WHERE c.id = \(store.quote(captureEventID))
+        LIMIT 1
+        """).first?.first ?? ""
     }
 
     public func read(layer: String, id: String) throws -> MemoryOSCLIRecord? {
@@ -699,6 +719,7 @@ public struct MemoryOSCLISearchHit: Codable, Sendable, Equatable {
     public var id: String
     public var title: String
     public var snippet: String
+    public var content: String
     public var score: Double
     public var evidenceRefs: [String]
     public var provenanceRefs: [String]
@@ -709,6 +730,7 @@ public struct MemoryOSCLISearchHit: Codable, Sendable, Equatable {
         case id
         case title
         case snippet
+        case content
         case score
         case evidenceRefs = "evidence_refs"
         case provenanceRefs = "provenance_refs"
