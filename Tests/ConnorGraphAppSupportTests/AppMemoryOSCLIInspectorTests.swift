@@ -281,7 +281,7 @@ struct AppMemoryOSCLIInspectorTests {
         let store = try makeMemoryOSCLIInspectorStore()
         let inspector = AppMemoryOSCLIInspector(store: store)
         let output = try AppMemoryOSCLIRouter.route(
-            args: ["pipeline", "debug-run-next", "--kind", MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue, "--limit", "1"],
+            args: ["pipeline", "debug-run-next", "--kind", MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue, "--limit", "1", "--format", "json"],
             inspector: inspector,
             encoder: memoryOSCLITestEncoder()
         )
@@ -291,6 +291,53 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(output.contains("requested_kind"))
         #expect(output.contains(MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue))
         #expect(output.contains("queue_runs"))
+    }
+
+    @Test func memoryOSCLIRouterRoutesPipelineDebugRunNextTextFormat() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        let inspector = AppMemoryOSCLIInspector(store: store)
+        let output = try AppMemoryOSCLIRouter.route(
+            args: ["pipeline", "debug-run-next", "--format", "text"],
+            inspector: inspector,
+            encoder: memoryOSCLITestEncoder()
+        )
+
+        #expect(output.contains("Memory OS Debug AI Run"))
+        #expect(output.contains("No runnable background AI jobs"))
+        #expect(output.contains("plan-l1"))
+    }
+
+    @Test func memoryOSCLIDebugTranscriptRendererIncludesMessagesAndToolCalls() throws {
+        let now = Date(timeIntervalSince1970: 50_000)
+        let result = MemoryOSCLIDebugAIRunResult(
+            status: "completed",
+            command: "memory pipeline debug-run-next",
+            requestedKind: MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue,
+            requestedLimit: 1,
+            queueRuns: [MemoryOSCLIDebugAIQueueRun(
+                queueItemID: "queue-1",
+                kind: MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue,
+                runID: "memory-run:queue-1",
+                modelID: "model",
+                status: "succeeded",
+                messageCount: 2,
+                toolCallCount: 1,
+                projectionSummary: MemoryOSProjectionRunSummary(artifactID: "artifact-1", accepted: true, statementCount: 1),
+                messages: [
+                    MemoryOSBackgroundMessageRecord(id: "msg-1", runID: "memory-run:queue-1", sequence: 0, role: .user, content: "Prompt sent to AI"),
+                    MemoryOSBackgroundMessageRecord(id: "msg-2", runID: "memory-run:queue-1", sequence: 1, role: .assistant, content: "Assistant response")
+                ],
+                toolCalls: [MemoryOSBackgroundToolCallRecord(id: "tool-1", runID: "memory-run:queue-1", iteration: 1, toolName: "memory_os_search", argumentsJSON: "{}", resultJSON: "{\"hits\":[]}", status: .succeeded, startedAt: now, finishedAt: now)]
+            )]
+        )
+
+        let transcript = MemoryOSDebugAIRunTranscriptRenderer.render(result)
+
+        #expect(transcript.contains("Prompt sent to AI"))
+        #expect(transcript.contains("Assistant response"))
+        #expect(transcript.contains("memory_os_search"))
+        #expect(transcript.contains("Projection: accepted=true"))
+        #expect(transcript.contains("swift run connor memory run memory-run:queue-1 messages"))
     }
 
     @Test func memoryOSCLIDebugRunNextExecutesQueueWithTrace() throws {
