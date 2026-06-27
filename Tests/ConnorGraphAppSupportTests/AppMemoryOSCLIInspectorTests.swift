@@ -384,6 +384,29 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(output.contains("supported_by"))
     }
 
+    @Test func memoryOSCLIInspectorListsL4Predicates() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        let inspector = AppMemoryOSCLIInspector(store: store)
+
+        let predicates = inspector.listL4Predicates()
+
+        #expect(predicates.contains { $0.predicate == "INSTANCE_OF" && $0.category == "taxonomy" })
+        #expect(predicates.contains { $0.predicate == "HAS_PART" && $0.inverse == "PART_OF" })
+        #expect(predicates.contains { $0.predicate == "RELATED_TO" && $0.strict == false })
+    }
+
+    @Test func memoryOSCLIRouterRoutesL4PredicatesCommand() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        let inspector = AppMemoryOSCLIInspector(store: store)
+        let encoder = memoryOSCLITestEncoder()
+
+        let output = try AppMemoryOSCLIRouter.route(args: ["l4", "predicates"], inspector: inspector, encoder: encoder)
+
+        #expect(output.contains("INSTANCE_OF"))
+        #expect(output.contains("retrieval_weight"))
+        #expect(output.contains("taxonomy"))
+    }
+
     @Test func memoryOSCLIRouterRoutesL4FindAndNeighborsCommands() throws {
         let store = try makeMemoryOSCLIInspectorStore()
         try seedMemoryOSCLIInspectorFixture(store: store)
