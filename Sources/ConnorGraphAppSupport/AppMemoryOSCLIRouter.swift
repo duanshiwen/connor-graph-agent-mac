@@ -1,4 +1,5 @@
 import Foundation
+import ConnorGraphCore
 import ConnorGraphMemory
 import ConnorGraphStore
 
@@ -143,6 +144,8 @@ public enum AppMemoryOSCLIRouter {
         switch args.first ?? "entities" {
         case "entities":
             return try encode(try inspector.listL4Entities(limit: intOption("--limit", in: args, default: 20)), encoder: encoder)
+        case "predicates":
+            return try encode(inspector.listL4Predicates(), encoder: encoder)
         case "find":
             guard let text = args.dropFirst().first, !text.hasPrefix("--") else {
                 return try encode(MemoryOSCLIError(error: "missing_entity_query", usage: "connor memory l4 find <text> [--limit N]"), encoder: encoder)
@@ -150,24 +153,24 @@ public enum AppMemoryOSCLIRouter {
             return try encode(try inspector.findL4Entity(text: text, limit: intOption("--limit", in: args, default: 20)), encoder: encoder)
         case "neighbors":
             guard let entityID = args.dropFirst().first, !entityID.hasPrefix("--") else {
-                return try encode(MemoryOSCLIError(error: "missing_entity_id", usage: "connor memory l4 neighbors <entity-id> [--direction outgoing|incoming|both] [--predicate P31,P17] [--limit N]"), encoder: encoder)
+                return try encode(MemoryOSCLIError(error: "missing_entity_id", usage: "connor memory l4 neighbors <entity-id> [--direction outgoing|incoming|both] [--predicate INSTANCE_OF,HAS_PART] [--limit N]"), encoder: encoder)
             }
             let direction = optionValue("--direction", in: args).flatMap(MemoryOSGraphDirection.init(rawValue:)) ?? .both
             return try encode(try inspector.listL4Neighbors(entityID: entityID, direction: direction, predicates: optionValue("--predicate", in: args).map(splitCSV) ?? [], limit: intOption("--limit", in: args, default: 100)), encoder: encoder)
         case "instances":
             guard let classIDs = args.dropFirst().first, !classIDs.hasPrefix("--") else {
-                return try encode(MemoryOSCLIError(error: "missing_class_entity_ids", usage: "connor memory l4 instances <class-id[,class-id...]> [--predicate P31] [--limit N]"), encoder: encoder)
+                return try encode(MemoryOSCLIError(error: "missing_class_entity_ids", usage: "connor memory l4 instances <class-id[,class-id...]> [--predicate INSTANCE_OF] [--limit N]"), encoder: encoder)
             }
             return try encode(
                 try inspector.listL4Instances(
                     classEntityIDs: splitCSV(classIDs),
-                    predicates: optionValue("--predicate", in: args).map(splitCSV) ?? ["P31"],
+                    predicates: optionValue("--predicate", in: args).map(splitCSV) ?? [MemoryOSL4RelationPredicate.instanceOf.rawValue],
                     limit: intOption("--limit", in: args, default: 100)
                 ),
                 encoder: encoder
             )
         default:
-            return try encode(MemoryOSCLIError(error: "unknown_l4_command", usage: "connor memory l4 entities|find|neighbors|instances"), encoder: encoder)
+            return try encode(MemoryOSCLIError(error: "unknown_l4_command", usage: "connor memory l4 entities|predicates|find|neighbors|instances"), encoder: encoder)
         }
     }
 

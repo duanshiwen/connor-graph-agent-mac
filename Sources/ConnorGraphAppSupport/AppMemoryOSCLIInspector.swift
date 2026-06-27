@@ -151,6 +151,24 @@ public struct AppMemoryOSCLIInspector: Sendable {
         """, columns: ["id", "stable_key", "entity_type", "name", "aliases_json", "summary", "confidence", "created_at", "updated_at", "valid_from", "metadata_json"])
     }
 
+    public func listL4Predicates() -> [MemoryOSCLIL4Predicate] {
+        MemoryOSL4RelationPredicate.allCases.map { predicate in
+            MemoryOSCLIL4Predicate(
+                predicate: predicate.rawValue,
+                category: predicate.category.rawValue,
+                inverse: predicate.inverse?.rawValue,
+                symmetric: predicate.isSymmetric,
+                transitive: predicate.isTransitive,
+                strict: predicate.isStrict,
+                retrievalWeight: predicate.retrievalWeight,
+                description: predicate.description
+            )
+        }.sorted { lhs, rhs in
+            if lhs.category != rhs.category { return lhs.category < rhs.category }
+            return lhs.predicate < rhs.predicate
+        }
+    }
+
     public func findL4Entity(text: String, limit: Int = 20) throws -> MemoryOSGraphSubgraph {
         try AppMemoryOSFacade(store: store, searchKernel: searchKernel).findMemoryOSL4Entity(text: text, limit: safeLimit(limit))
     }
@@ -159,7 +177,7 @@ public struct AppMemoryOSCLIInspector: Sendable {
         try AppMemoryOSFacade(store: store, searchKernel: searchKernel).queryMemoryOSL4Neighbors(entityID: entityID, direction: direction, predicates: predicates, limit: safeLimit(limit))
     }
 
-    public func listL4Instances(classEntityIDs: [String], predicates: [String] = ["P31"], limit: Int = 100) throws -> MemoryOSGraphSubgraph {
+    public func listL4Instances(classEntityIDs: [String], predicates: [String] = [MemoryOSL4RelationPredicate.instanceOf.rawValue], limit: Int = 100) throws -> MemoryOSGraphSubgraph {
         try SQLiteMemoryOSGraphRetrievalService(store: store).l4Instances(MemoryOSL4InstanceQuery(classEntityIDs: classEntityIDs, predicates: predicates, limit: safeLimit(limit)))
     }
 
@@ -828,6 +846,28 @@ public struct MemoryOSCLIL2Counts: Codable, Sendable, Equatable {
 
 public struct MemoryOSCLIL3Counts: Codable, Sendable, Equatable {
     public var beliefs: Int
+}
+
+public struct MemoryOSCLIL4Predicate: Codable, Sendable, Equatable {
+    public var predicate: String
+    public var category: String
+    public var inverse: String?
+    public var symmetric: Bool
+    public var transitive: Bool
+    public var strict: Bool
+    public var retrievalWeight: Double
+    public var description: String
+
+    enum CodingKeys: String, CodingKey {
+        case predicate
+        case category
+        case inverse
+        case symmetric
+        case transitive
+        case strict
+        case retrievalWeight = "retrieval_weight"
+        case description
+    }
 }
 
 public struct MemoryOSCLIL4Counts: Codable, Sendable, Equatable {
