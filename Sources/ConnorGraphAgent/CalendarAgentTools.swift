@@ -75,7 +75,7 @@ public struct CalendarSearchEventsTool: AgentTool {
     public let runtime: any AgentCalendarRuntime
     public let recorder: (any NativeSourceReferenceRecording)?
     public var name: String { "calendar_search_events" }
-    public var description: String { "Search Connor-owned calendar events and return full event details directly; no separate calendar detail fetch is needed." }
+    public var description: String { "Search Connor-owned calendar events as candidate results; use calendar_read with operation get_event for selected event detail reads that should become Memory OS evidence." }
     public var permission: AgentPermissionCapability { .readCalendar }
     public var inputSchema: AgentToolInputSchema {
         .object(properties: [

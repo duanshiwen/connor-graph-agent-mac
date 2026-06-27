@@ -39,6 +39,16 @@ struct CalendarContactsAgentToolsTests {
         #expect(result.contentJSON?.contains("产品讨论") == true)
     }
 
+    @Test func calendarSearchEventsToolDescribesCandidatesAndSelectedDetailReads() {
+        let tool = CalendarSearchEventsTool(runtime: InMemoryAgentCalendarRuntime())
+
+        #expect(tool.description.contains("candidate"))
+        #expect(tool.description.contains("calendar_read"))
+        #expect(tool.description.contains("get_event"))
+        #expect(!tool.description.contains("no separate calendar detail fetch is needed"))
+        #expect(!tool.description.contains("return full event details directly"))
+    }
+
     @Test func calendarSearchEventsToolReturnsEventCandidatesWithDetailsInForegroundResult() async throws {
         let event = CalendarEvent(
             id: CalendarEventID(rawValue: "event-design-review"),
