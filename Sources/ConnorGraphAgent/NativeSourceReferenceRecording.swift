@@ -200,7 +200,7 @@ public extension NativeSourceReference {
             sourceKind: .calendar,
             sourceRecordID: event.id.rawValue,
             title: event.title,
-            content: calendarEventContent(event),
+            content: CalendarEventMemoryContentFormatter.format(event: event),
             occurredAt: event.start.date,
             sessionID: context.sessionID,
             referenceStrength: strength,
@@ -216,17 +216,6 @@ public extension NativeSourceReference {
                 "is_all_day": String(event.isAllDay)
             ]
         )
-    }
-
-    private static func calendarEventContent(_ event: CalendarEvent) -> String {
-        """
-        Title: \(event.title)
-        Start: \(ISO8601DateFormatter().string(from: event.start.date))
-        End: \(ISO8601DateFormatter().string(from: event.end.date))
-        Location: \(event.location ?? "")
-        Notes: \(event.notes ?? "")
-        Attendees: \(event.attendees.map { attendee in attendee.email ?? attendee.name ?? attendee.id.rawValue }.joined(separator: ", "))
-        """
     }
 
     static func rssSummary(_ summary: RSSItemSummary, query: String?, toolName: String, context: AgentToolExecutionContext) -> NativeSourceReference {
