@@ -27,7 +27,7 @@ public struct AppMemoryOSNativeSourceEventBridge: Sendable {
         try facade.ingestSourceEvent(
             sourceID: "calendar:\(id)",
             title: title,
-            content: notes,
+            content: calendarEventContent(title: title, notes: notes),
             occurredAt: occurredAt,
             sourceKind: "calendar",
             accountID: accountID,
@@ -72,6 +72,13 @@ public struct AppMemoryOSNativeSourceEventBridge: Sendable {
             sessionID: sessionID,
             metadata: metadata.merging(["attachment_id": id]) { current, _ in current }
         )
+    }
+
+    private func calendarEventContent(title: String, notes: String) -> String {
+        """
+        Title: \(title)
+        Notes: \(notes)
+        """
     }
 
 }
