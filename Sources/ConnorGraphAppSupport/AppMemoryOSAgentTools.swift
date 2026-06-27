@@ -4,70 +4,6 @@ import ConnorGraphCore
 import ConnorGraphMemory
 import ConnorGraphStore
 
-public struct MemoryOSIngestObservationTool: AgentTool {
-    public let name = "memory_os_ingest_observation"
-    public let description = "Archive an evidence-backed observation into Connor Memory OS L0 provenance and L1 capture. This replaces legacy graph staging/candidate-write tools."
-    public let permission: AgentPermissionCapability = .proposeGraphWrite
-    public let inputSchema = AgentToolInputSchema.object(properties: [
-        "title": .string(description: "Short human-readable observation title."),
-        "content": .string(description: "Raw observed content to archive as provenance."),
-        "sourceID": .string(description: "Optional external source/message id."),
-        "sessionID": .string(description: "Optional session id. Defaults to current session."),
-        "role": .string(description: "Optional source role such as user, assistant, tool, external. Defaults to tool.")
-    ], required: ["title", "content"])
-
-    private let facade: AppMemoryOSFacade
-
-    public init(facade: AppMemoryOSFacade) {
-        self.facade = facade
-    }
-
-    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        guard let title = arguments.string("title"), !title.isEmpty else {
-            throw AgentToolError.invalidArguments("title is required")
-        }
-        guard let content = arguments.string("content"), !content.isEmpty else {
-            throw AgentToolError.invalidArguments("content is required")
-        }
-        let sourceID = arguments.string("sourceID") ?? context.toolCallID
-        let sessionID = arguments.string("sessionID") ?? context.sessionID
-        let role = arguments.string("role") ?? "tool"
-        let result = try facade.ingestChatMessage(
-            messageID: sourceID,
-            sessionID: sessionID,
-            role: role,
-            content: content,
-            occurredAt: Date(),
-            metadata: ["title": title, "toolCallID": context.toolCallID, "runID": context.runID]
-        )
-        let provenanceObjectID = result.provenanceObject?.id ?? ""
-        let spanID = result.span?.id ?? ""
-        let captureEventID = result.captureEvent?.id ?? ""
-        let decisionAction = String(describing: result.decision.action)
-        let payload: [String: Any] = [
-            "decision": decisionAction,
-            "decisionReason": result.decision.reason,
-            "provenanceObjectID": provenanceObjectID,
-            "spanID": spanID,
-            "captureEventID": captureEventID
-        ]
-        let json = try Self.renderJSON(payload)
-        let citations = [provenanceObjectID, spanID, captureEventID].filter { !$0.isEmpty }
-        return AgentToolResult(
-            toolCallID: context.toolCallID,
-            toolName: name,
-            contentText: "Memory OS ingestion decision: \(decisionAction). Provenance object: \(provenanceObjectID.isEmpty ? "none" : provenanceObjectID).",
-            contentJSON: json,
-            citations: citations
-        )
-    }
-
-    private static func renderJSON(_ object: [String: Any]) throws -> String {
-        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
-        return String(data: data, encoding: .utf8) ?? "{}"
-    }
-}
-
 public struct MemoryOSL2FindEntitiesTool: AgentTool {
     public let name = "memory_os_l2_find_entities"
     public let description = "Find Memory OS L2 working-memory entities by exact name or alias. Provide possible names/aliases in one string separated by comma, Chinese comma, dunhao, semicolon, or newline. Returns only LLM-relevant entity name, aliases, type, summary, statement text, relation, and connected entity."
@@ -933,7 +869,6 @@ public struct MemoryOSReadProvenanceTool: AgentTool {
 
 public extension AgentToolRegistry {
     mutating func registerMemoryOSTools(facade: AppMemoryOSFacade) {
-        register(MemoryOSIngestObservationTool(facade: facade))
         register(MemoryOSL2FindEntitiesTool(facade: facade))
         register(MemoryOSL2UpdateEntitiesTool(facade: facade))
         register(MemoryOSGetCurrentUserProfileTool(facade: facade))
