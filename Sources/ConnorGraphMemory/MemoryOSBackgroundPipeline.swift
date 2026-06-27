@@ -217,19 +217,19 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         Layer semantics:
         - L0 is the durable provenance layer and source of raw evidence.
         - L1 is the active processing buffer / ordered memory sequence.
-        - L2 is operational facts / working memory.
+        - L2 is entity-centered working memory, not an evidence store; L0 remains the durable provenance/evidence layer.
         - L3 is reusable knowledge: standards, principles, frameworks, decision bases, processes and durable cognitive structures.
         - L4 is stable entities, concept entities and durable entity/concept relations.
         - A successful L1 unified projection clears the processed L1 buffer only after artifact acceptance; failures preserve L1 for retry or dead-letter review.
 
         Goal:
-        - Produce evidence-backed L2 operational facts / working memory.
+        - Produce L2 entity-centered working memory: important entities, aliases, summaries, and useful statements.
         - Produce conservative L3 reusable knowledge candidates only when all promotion filters pass.
         - Produce L4 stable entities, concept entities and durable relations when entity identity or concept structure is clear.
         - Ignore noise, duplicates, transient wording and unsupported guesses.
-        - You must search existing L2 operational memory before deciding whether a fact is new, duplicate or a refinement.
+        - You must search existing L2 entity-centered working memory before deciding whether an entity or statement is new, duplicate or a refinement.
         - You must search existing L3/L4 before emitting any L3 knowledge candidate, L4 stable entity, L4 concept entity, or L4 durable relation.
-        - You must record search/judgment evidence in metadata or promotionDecisions: searched layers, duplicate/novelty outcome, reuse/rejection reason, and reused entity/concept ids when applicable.
+        - You must record search/judgment rationale in metadata or promotionDecisions: searched layers, duplicate/novelty outcome, reuse/rejection reason, and reused entity/concept ids when applicable.
         - If raw L0 material is needed, request the referenced provenance object or span instead of guessing.
         - Output only MemoryOSL1UnifiedProjectionOutput JSON.
 
@@ -252,17 +252,17 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
 
         L1 unified output contract:
         - Output schema is MemoryOSL1UnifiedProjectionOutput JSON with operationalEntities, operationalStatements, evidenceSpans, knowledgeCandidates, conceptEntities, conceptRelations, promotionDecisions, warnings, confidence and metadata.
-        - operationalEntities and operationalStatements are the L2 operational graph section.
+        - operationalEntities and operationalStatements are the legacy/internal projection shape for the L2 entity-centered working-memory section.
         - knowledgeCandidates are L3 candidates and must pass all promotion filters.
         - conceptEntities and conceptRelations are the L4 stable concept/entity graph section.
         - Each operational statement must use a predicate from the allowed GraphPredicate raw values below.
-        - Each operational statement should represent one atomic operational fact, not a broad interpretation.
+        - Each operational statement should be a complete natural-language memory claim; statement text is the semantic authority, while predicates are retrieval/routing handles.
         - Use statement metadata to preserve extraction discipline and downstream routing.
         - Required statement metadata keys when applicable: metadata.l2_fact_type, metadata.capture_event_ids, metadata.provenance_object_ids, metadata.span_ids.
         - For person/profile facts, also set metadata.person_role to current_user, other_person, or ambiguous_person; set metadata.person_resolution to resolved, ambiguous, or needs_confirmation when applicable.
         - metadata.capture_event_ids, metadata.provenance_object_ids and metadata.span_ids should be comma-separated stable ids when multiple inputs support the same consolidated fact.
         - L3 knowledgeCandidates.evidenceStatementIDs must reference operationalStatements local statement ids from this same artifact.
-        - L3 knowledgeCandidates.evidenceSpanIDs and L4 conceptRelations.evidenceSpanIDs must reference evidenceSpans ids.
+        - Do not ask LLM tools to provide evidence, supportQuote, source IDs, span IDs, model IDs, schema names, artifact types, processing run IDs, entity IDs, or statement IDs for L2 updates.
 
         Allowed L2 assertion_kind values:
         - observed: directly stated or directly observed in the L1 event / L0 evidence.
@@ -273,6 +273,14 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         \(Self.allowedPredicateGuide())
 
         \(MemoryOSL4RelationPromptGuide.render())
+
+        L2 entity tool contract:
+        - Use memory_os_l2_find_entities(names) to check existing L2 entities by exact name/alias. Provide likely aliases in one string separated by comma, Chinese comma, dunhao, semicolon, or newline.
+        - Use memory_os_l2_update_entities(entities[]) to update L2 working memory in batches.
+        - For update statements, provide text, optional relation, optional connectedEntity, optional connectedEntityType, optional factType, optional polarity, and optional originalPhrase.
+        - If relation is uncertain, omit it or use RELATED_TO.
+        - Do not create entities for every noun phrase; create or update only objects likely to be useful future retrieval anchors.
+        - Preserve negative or exclusion semantics explicitly. Example: text = "《迟到的青春期》马尼拉一个月阶段的明确决策是：不去贫民窟。", factType = decision, polarity = exclude, originalPhrase = "不去贫民窟".
 
         L2 fact taxonomy:
         - profile_preference: current-user profile facts and explicitly evidenced person profile facts, including preference, dislike, habit, goal, stable trait, stable personal context, knowledge background, communication preference, or personalized operating preference.
@@ -323,11 +331,11 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         1. Read L1 events in chronological order.
         2. Extract candidate operational facts per event for L2.
         3. Drop noise, transient wording, unsupported guesses and purely stylistic duplicates.
-        4. Consolidate duplicate operational facts across events while preserving all evidence references.
+        4. Consolidate duplicate operational facts across events while preserving useful entity names, aliases, statement text and original wording.
         5. If a fact refines an existing L2 fact, emit append-only refinement material rather than overwriting history.
-        6. Every emitted operational fact must cite at least one capture_event_id and at least one provenance_object_id or span_id.
+        6. L2 itself does not require evidence spans; keep provenance identifiers only as optional internal metadata when already available from L1/L0.
         7. Choose the most precise allowed predicate and the most appropriate metadata.l2_fact_type for every operational statement.
-        8. Before emitting or rejecting L3/L4 candidates, search L2/L3/L4 for related facts, existing knowledge, duplicate concepts, reusable entities and supersession context.
+        8. For L2, prefer memory_os_l2_find_entities and memory_os_l2_update_entities. Before emitting or rejecting L3/L4 candidates, search L2/L3/L4 for related facts, existing knowledge, duplicate concepts, reusable entities and supersession context.
         9. Separately evaluate whether any extracted material qualifies as L3 reusable knowledge using all four promotion filters, and record the search-backed judgment in promotionDecisions.
         10. Separately evaluate whether any stable L4 entity, concept entity, or durable relation should be emitted, reused, or rejected, and record the search-backed judgment in metadata or promotionDecisions.
         11. Do not produce unsupported guesses, broad conclusions without evidence, or knowledge/entity records that fail the rules above.
