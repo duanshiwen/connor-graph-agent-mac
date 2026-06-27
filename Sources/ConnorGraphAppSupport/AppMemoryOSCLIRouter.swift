@@ -219,15 +219,49 @@ public enum AppMemoryOSCLIRouter {
         case "plan-l1", "plan-l1-knowledge": return try encode(try inspector.planL1(), encoder: encoder)
         case "plan-l2", "plan-l2-knowledge": return try encode(try inspector.planL2(), encoder: encoder)
         case "debug-run-next":
-            return try encode(
-                try inspector.debugRunNextBackgroundAI(
-                    kind: optionValue("--kind", in: args),
-                    limit: intOption("--limit", in: args, default: 1)
-                ),
-                encoder: encoder
-            )
+            return try routePipelineDebugRunNext(args: args, inspector: inspector, encoder: encoder)
         default: return try encode(MemoryOSCLIError(error: "unknown_pipeline_command", usage: "connor memory pipeline policy|plan-l1-knowledge|plan-l2-knowledge|debug-run-next"), encoder: encoder)
         }
+    }
+
+    private static func routePipelineDebugRunNext(args: [String], inspector: AppMemoryOSCLIInspector, encoder: JSONEncoder) throws -> String {
+        let kind = optionValue("--kind", in: args)
+        let limit = intOption("--limit", in: args, default: 1)
+        let format = optionValue("--format", in: args) ?? "text"
+        let maxToolIterations = intOption("--max-tool-iterations", in: args, default: MemoryOSBackgroundToolLoopConfiguration().maxToolIterations)
+        let maxToolResultBytes = intOption("--max-tool-result-bytes", in: args, default: MemoryOSBackgroundToolLoopConfiguration().maxToolResultBytes)
+        let result: MemoryOSCLIDebugAIRunResult
+        if try inspector.hasRunnableBackgroundAIJob(kind: kind, limit: limit) {
+            let model = try makeLiveDebugLoopModel()
+            result = try inspector.debugRunNextBackgroundAI(
+                kind: kind,
+                limit: limit,
+                model: model,
+                configuration: MemoryOSBackgroundToolLoopConfiguration(maxToolIterations: maxToolIterations, maxToolResultBytes: maxToolResultBytes)
+            )
+        } else {
+            result = try inspector.debugRunNextBackgroundAI(kind: kind, limit: limit)
+        }
+        switch format {
+        case "json":
+            return try encode(result, encoder: encoder)
+        case "text":
+            return MemoryOSDebugAIRunTranscriptRenderer.render(result)
+        default:
+            return try encode(MemoryOSCLIError(error: "unknown_debug_run_format", usage: "connor memory pipeline debug-run-next [--format text|json]"), encoder: encoder)
+        }
+    }
+
+    private static func makeLiveDebugLoopModel() throws -> AgentModelBackgroundToolLoopModel {
+        let paths = try AppStoragePaths.live()
+        try paths.ensureDirectoryHierarchy()
+        let graphStore = try AppGraphBootstrapper(paths: paths).bootstrapStore()
+        let factory = AppGraphAgentRuntimeFactory(
+            store: graphStore,
+            settingsRepository: AppLLMSettingsRepository(),
+            storagePaths: paths
+        )
+        return AgentModelBackgroundToolLoopModel(provider: factory.makeAgentModelProvider())
     }
 
     private static func debugResetFoundationKG() throws -> [String: String] {

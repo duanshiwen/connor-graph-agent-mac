@@ -239,6 +239,15 @@ public struct AppMemoryOSCLIInspector: Sendable {
         return MemoryOSCLIPlanResult(plannedJobs: jobs.count, kind: MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue, jobIDs: jobs.map(\.id))
     }
 
+    public func hasRunnableBackgroundAIJob(kind: String? = nil, limit: Int = 1, now: Date = Date()) throws -> Bool {
+        let effectiveLimit = safeLimit(limit)
+        let executableKinds = kind.map { [$0] } ?? (MemoryOSBackgroundJobKind.l1ExecutableRawValues + [MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue])
+        for executableKind in executableKinds where try !store.runnableQueueItems(kind: executableKind, limit: effectiveLimit, now: now).isEmpty {
+            return true
+        }
+        return false
+    }
+
     public func debugRunNextBackgroundAI(kind: String? = nil, limit: Int = 1) throws -> MemoryOSCLIDebugAIRunResult {
         MemoryOSCLIDebugAIRunResult(
             status: "no_runnable_jobs",
@@ -763,6 +772,14 @@ public struct MemoryOSCLIDebugAIRunResult: Codable, Sendable, Equatable {
     public var requestedKind: String?
     public var requestedLimit: Int
     public var queueRuns: [MemoryOSCLIDebugAIQueueRun]
+
+    public init(status: String, command: String, requestedKind: String? = nil, requestedLimit: Int, queueRuns: [MemoryOSCLIDebugAIQueueRun]) {
+        self.status = status
+        self.command = command
+        self.requestedKind = requestedKind
+        self.requestedLimit = requestedLimit
+        self.queueRuns = queueRuns
+    }
 
     enum CodingKeys: String, CodingKey {
         case status
