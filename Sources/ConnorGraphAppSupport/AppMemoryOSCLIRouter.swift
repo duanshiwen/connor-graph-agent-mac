@@ -107,18 +107,19 @@ public enum AppMemoryOSCLIRouter {
         switch args.first ?? "statements" {
         case "statements": return try encode(try inspector.listL2Statements(limit: intOption("--limit", in: args, default: 20)), encoder: encoder)
         case "pending-knowledge": return try encode(try inspector.listL2PendingKnowledge(limit: intOption("--limit", in: args, default: 20)), encoder: encoder)
-        case "find":
-            let text = args.dropFirst().first.flatMap { $0.hasPrefix("--") ? nil : $0 } ?? ""
-            return try encode(
-                try inspector.findL2Statements(
-                    text: text,
-                    subjectID: optionValue("--subject", in: args),
-                    predicates: optionValue("--predicate", in: args).map(splitCSV) ?? [],
-                    limit: intOption("--limit", in: args, default: 50)
-                ),
-                encoder: encoder
-            )
-        default: return try encode(MemoryOSCLIError(error: "unknown_l2_command", usage: "connor memory l2 statements|pending-knowledge|find [text] [--subject id] [--predicate p1,p2] [--limit N]"), encoder: encoder)
+        case "find-entities":
+            guard let names = args.dropFirst().first, !names.hasPrefix("--") else {
+                return try encode(MemoryOSCLIError(error: "missing_l2_entity_names", usage: "connor memory l2 find-entities <names>"), encoder: encoder)
+            }
+            return try encode(try inspector.findL2Entities(names: names), encoder: encoder)
+        case "update-entities":
+            guard let raw = try l2UpdateEntitiesJSON(args: args) else {
+                return try encode(MemoryOSCLIError(error: "missing_l2_entities_json", usage: "connor memory l2 update-entities --json <json> | --file <file>"), encoder: encoder)
+            }
+            let data = Data(raw.utf8)
+            let request = try JSONDecoder().decode(MemoryOSL2UpdateEntitiesRequest.self, from: data)
+            return try encode(try inspector.updateL2Entities(request), encoder: encoder)
+        default: return try encode(MemoryOSCLIError(error: "unknown_l2_command", usage: "connor memory l2 statements|pending-knowledge|find-entities <names>|update-entities --json <json>|--file <file>"), encoder: encoder)
         }
     }
 
@@ -298,6 +299,14 @@ public enum AppMemoryOSCLIRouter {
     private static func encode<T: Encodable>(_ value: T, encoder: JSONEncoder) throws -> String {
         let data = try encoder.encode(value)
         return String(decoding: data, as: UTF8.self)
+    }
+
+    private static func l2UpdateEntitiesJSON(args: [String]) throws -> String? {
+        if let raw = optionValue("--json", in: args) { return raw }
+        if let file = optionValue("--file", in: args) {
+            return try String(contentsOfFile: file, encoding: .utf8)
+        }
+        return nil
     }
 
     private static func optionValue(_ name: String, in args: [String]) -> String? {

@@ -125,8 +125,12 @@ public struct AppMemoryOSCLIInspector: Sendable {
         """, columns: ["statement_id", "processing_kind", "status", "source_artifact_id", "processed_by_artifact_id", "last_attempt_at", "metadata_json", "subject_id", "predicate", "object_id", "statement_text", "evidence_span_ids_json", "evidence_span_texts"])
     }
 
-    public func findL2Statements(text: String = "", subjectID: String? = nil, predicates: [String] = [], limit: Int = 50) throws -> MemoryOSGraphSubgraph {
-        try AppMemoryOSFacade(store: store, searchKernel: searchKernel).findMemoryOSL2Statements(text: text, subjectID: subjectID, predicates: predicates, limit: safeLimit(limit))
+    public func findL2Entities(names: String) throws -> MemoryOSL2FindEntitiesResult {
+        try AppMemoryOSFacade(store: store, searchKernel: searchKernel).findMemoryOSL2Entities(MemoryOSL2FindEntitiesRequest(names: names))
+    }
+
+    public func updateL2Entities(_ request: MemoryOSL2UpdateEntitiesRequest) throws -> MemoryOSL2UpdateEntitiesResult {
+        try AppMemoryOSFacade(store: store, searchKernel: searchKernel).updateMemoryOSL2Entities(request)
     }
 
     public func listL3Beliefs(limit: Int = 20) throws -> [MemoryOSCLIRow] {
