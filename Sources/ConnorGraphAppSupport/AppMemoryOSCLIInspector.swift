@@ -239,6 +239,16 @@ public struct AppMemoryOSCLIInspector: Sendable {
         return MemoryOSCLIPlanResult(plannedJobs: jobs.count, kind: MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue, jobIDs: jobs.map(\.id))
     }
 
+    public func debugRunNextBackgroundAI(kind: String? = nil, limit: Int = 1) throws -> MemoryOSCLIDebugAIRunResult {
+        MemoryOSCLIDebugAIRunResult(
+            status: "no_runnable_jobs",
+            command: "memory pipeline debug-run-next",
+            requestedKind: kind,
+            requestedLimit: safeLimit(limit),
+            queueRuns: []
+        )
+    }
+
     public func searchIndexStats(fileManager: FileManager = .default) throws -> MemoryOSCLISearchIndexStats {
         guard let searchKernel else { throw MemoryOSCLISearchIndexError.kernelUnavailable }
         let meta = try readSearchIndexMeta(indexDirectory: searchKernel.indexDirectory, fileManager: fileManager)
@@ -695,6 +705,42 @@ public struct MemoryOSCLIPlanResult: Codable, Sendable, Equatable {
         case plannedJobs = "planned_jobs"
         case kind
         case jobIDs = "job_ids"
+    }
+}
+
+public struct MemoryOSCLIDebugAIRunResult: Codable, Sendable, Equatable {
+    public var status: String
+    public var command: String
+    public var requestedKind: String?
+    public var requestedLimit: Int
+    public var queueRuns: [MemoryOSCLIDebugAIQueueRun]
+
+    enum CodingKeys: String, CodingKey {
+        case status
+        case command
+        case requestedKind = "requested_kind"
+        case requestedLimit = "requested_limit"
+        case queueRuns = "queue_runs"
+    }
+}
+
+public struct MemoryOSCLIDebugAIQueueRun: Codable, Sendable, Equatable {
+    public var queueItemID: String
+    public var kind: String
+    public var runID: String?
+    public var modelID: String?
+    public var status: String
+    public var messageCount: Int
+    public var toolCallCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case queueItemID = "queue_item_id"
+        case kind
+        case runID = "run_id"
+        case modelID = "model_id"
+        case status
+        case messageCount = "message_count"
+        case toolCallCount = "tool_call_count"
     }
 }
 

@@ -277,6 +277,22 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(l2Plan.jobIDs.count == 1)
     }
 
+    @Test func memoryOSCLIRouterRoutesPipelineDebugRunNextCommand() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        let inspector = AppMemoryOSCLIInspector(store: store)
+        let output = try AppMemoryOSCLIRouter.route(
+            args: ["pipeline", "debug-run-next", "--kind", MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue, "--limit", "1"],
+            inspector: inspector,
+            encoder: memoryOSCLITestEncoder()
+        )
+
+        #expect(output.contains("debug-run-next"))
+        #expect(output.contains("no_runnable_jobs"))
+        #expect(output.contains("requested_kind"))
+        #expect(output.contains(MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue))
+        #expect(output.contains("queue_runs"))
+    }
+
     @Test func memoryOSCLIRouterRoutesStatusCommand() throws {
         let store = try makeMemoryOSCLIInspectorStore()
         let output = try AppMemoryOSCLIRouter.route(args: ["status"], inspector: AppMemoryOSCLIInspector(store: store), encoder: memoryOSCLITestEncoder())
