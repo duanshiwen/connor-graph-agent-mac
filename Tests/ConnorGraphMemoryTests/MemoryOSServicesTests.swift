@@ -158,6 +158,18 @@ import ConnorGraphMemory
     #expect(validation.issues.contains { $0.code == "current_user_generic_alias" })
 }
 
+@Test func memoryOSArtifactValidatorRejectsL1UnifiedConceptRelationWithoutRequiredMetadata() throws {
+    var output = makeAcceptedL1UnifiedProjectionOutput()
+    output.conceptRelations[0].metadata = [:]
+    let raw = String(data: try JSONEncoder().encode(output), encoding: .utf8)!
+    let artifact = MemoryOSArtifactEnvelopeService().envelope(rawContent: raw, artifactType: "memory_os_l1_unified_projection", schemaName: "MemoryOSL1UnifiedProjectionOutput", modelID: "test-model")
+
+    let validation = MemoryOSLLMArtifactValidator().validateStructuredExtractionArtifact(artifact)
+
+    #expect(!validation.accepted)
+    #expect(validation.issues.contains { $0.code == "missing_l4_relation_metadata" })
+}
+
 @Test func memoryOSArtifactValidatorRejectsL1UnifiedConceptRelationWithUnknownEntity() throws {
     var output = makeAcceptedL1UnifiedProjectionOutput()
     output.conceptRelations[0].objectLocalID = "missing-concept"
@@ -199,7 +211,7 @@ private func makeAcceptedL1UnifiedProjectionOutput() -> MemoryOSL1UnifiedProject
             MemoryOSExtractedConceptEntity(localID: "concept-1", name: "L1 unified projection", conceptType: "memory_architecture_pattern", domain: "software-engineering", summary: "A single L1 extraction pass that can emit L2, L3, and L4 records.", evidenceSpanIDs: ["span-1"])
         ],
         conceptRelations: [
-            MemoryOSExtractedConceptRelation(id: "rel-1", subjectLocalID: "concept-1", predicate: .hasPart, objectLocalID: "concept-1", text: "L1 unified projection produces layered memory records.", evidenceSpanIDs: ["span-1"])
+            MemoryOSExtractedConceptRelation(id: "rel-1", subjectLocalID: "concept-1", predicate: .relatedTo, objectLocalID: "concept-1", text: "L1 unified projection relates to layered memory records.", evidenceSpanIDs: ["span-1"], metadata: ["reason": "The concept describes layered memory projection discipline."])
         ],
         promotionDecisions: [
             MemoryOSL1PromotionDecision(candidateID: "knowledge-1", accepted: true, signalQualityAccepted: true, reuseScopeAccepted: true, noveltyAccepted: true, structurabilityAccepted: true, reasons: ["All filters pass"], evidenceStatementIDs: ["stmt-1"], evidenceSpanIDs: ["span-1"])

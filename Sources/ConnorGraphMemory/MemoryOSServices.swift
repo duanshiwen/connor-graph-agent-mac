@@ -281,19 +281,9 @@ public struct MemoryOSLLMArtifactValidator: Sendable {
             }
         }
 
+        let relationValidator = MemoryOSL4RelationConstraintValidator()
         for relation in conceptRelations {
-            if !entityIDs.contains(relation.subjectLocalID) {
-                issues.append(MemoryOSValidationIssue(code: "unknown_relation_subject", message: "Concept relation references unknown subject: \(relation.subjectLocalID)."))
-            }
-            if !entityIDs.contains(relation.objectLocalID) {
-                issues.append(MemoryOSValidationIssue(code: "unknown_relation_object", message: "Concept relation references unknown object: \(relation.objectLocalID)."))
-            }
-            if relation.evidenceSpanIDs.isEmpty {
-                issues.append(MemoryOSValidationIssue(code: "missing_relation_evidence", message: "Concept relation requires evidence spans: \(relation.id)."))
-            }
-            for spanID in relation.evidenceSpanIDs where !evidenceSpanIDs.contains(spanID) {
-                issues.append(MemoryOSValidationIssue(code: "unknown_evidence_span", message: "Concept relation references unknown evidence span: \(spanID)."))
-            }
+            issues.append(contentsOf: relationValidator.validate(relation: relation, conceptEntities: conceptEntities, evidenceSpanIDs: evidenceSpanIDs))
         }
 
         return issues
