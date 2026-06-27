@@ -46,12 +46,12 @@ import ConnorGraphMemory
     #expect(blocks.count == 2)
 }
 
-@Test func memoryOSStatementValidatorRequiresEvidenceForTemporalStatements() {
-    let statement = MemoryOSStatement(subjectID: "n1", predicate: "states", text: "No evidence")
+@Test func memoryOSStatementValidatorAllowsWorkingMemoryStatementsWithoutEvidence() {
+    let statement = MemoryOSStatement(subjectID: "n1", predicate: "states", text: "No evidence is required at L2")
 
     let issues = MemoryOSStatementValidator().validate(statement)
 
-    #expect(issues.contains { $0.code == "missing_evidence" })
+    #expect(!issues.contains { $0.code == "missing_evidence" })
 }
 
 @Test func memoryOSProjectionServiceRanksLatestTemporalStatementsFirst() {

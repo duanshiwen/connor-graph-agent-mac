@@ -140,7 +140,7 @@ public struct MemoryOSLLMArtifactValidator: Sendable {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             let output = try decoder.decode(GraphStructuredExtractionOutput.self, from: data)
-            try output.validate(requireStatementEvidence: true)
+            try output.validate(requireStatementEvidence: false)
             return MemoryOSArtifactValidationResult(artifactID: artifact.id, accepted: true, normalizedRecordCount: output.entities.count + output.statements.count)
         } catch let error as GraphStructuredExtractionValidationError {
             return MemoryOSArtifactValidationResult(artifactID: artifact.id, accepted: false, issues: [MemoryOSValidationIssue(code: "schema_validation_failed", message: error.description)])
@@ -186,7 +186,7 @@ public struct MemoryOSLLMArtifactValidator: Sendable {
                 confidence: output.confidence,
                 metadata: output.metadata
             )
-            try graphOutput.validate(requireStatementEvidence: true)
+            try graphOutput.validate(requireStatementEvidence: false)
 
             var issues = validatePersonProfileSections(
                 entities: output.operationalEntities,
@@ -234,9 +234,6 @@ public struct MemoryOSLLMArtifactValidator: Sendable {
             let missing = required.filter { (statement.metadata[$0] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             if !missing.isEmpty {
                 issues.append(MemoryOSValidationIssue(code: "missing_profile_person_metadata", message: "profile_preference statement \(statement.id) is missing metadata keys: \(missing.joined(separator: ", "))."))
-            }
-            if statement.evidenceSpanIDs.isEmpty {
-                issues.append(MemoryOSValidationIssue(code: "missing_profile_evidence", message: "profile_preference statement \(statement.id) requires evidence spans."))
             }
             if statement.metadata["person_role"] == "current_user" {
                 let anchor = statement.metadata["identity_anchor"] ?? statement.metadata["identity_anchor_id"] ?? ""
@@ -326,7 +323,6 @@ public struct MemoryOSStatementValidator: Sendable {
     public func validate(_ statement: MemoryOSStatement) -> [MemoryOSValidationIssue] {
         var issues: [MemoryOSValidationIssue] = []
         if statement.confidence < 0 || statement.confidence > 1 { issues.append(MemoryOSValidationIssue(code: "confidence_out_of_range", message: "Confidence must be between 0 and 1.")) }
-        if statement.evidenceSpanIDs.isEmpty { issues.append(MemoryOSValidationIssue(code: "missing_evidence", message: "Temporal semantic statements require evidence spans.")) }
         if statement.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { issues.append(MemoryOSValidationIssue(code: "empty_statement", message: "Statement text must not be empty.")) }
         return issues
     }
@@ -362,7 +358,7 @@ public struct MemoryOSProjectionService: Sendable {
             switch artifact.schemaName {
             case "GraphStructuredExtractionOutput":
                 let output = try decoder.decode(GraphStructuredExtractionOutput.self, from: data)
-                try output.validate(requireStatementEvidence: true)
+                try output.validate(requireStatementEvidence: false)
                 let batch = projectionBatch(from: output, artifactID: artifact.id, now: now)
                 return MemoryOSProjectionBuildResult(accepted: true, batch: batch, validation: validation)
             case "MemoryOSKnowledgeExtractionOutput":
