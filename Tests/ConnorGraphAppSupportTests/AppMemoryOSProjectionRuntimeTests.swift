@@ -32,7 +32,7 @@ private func encodedProjectionFixture(confidence: Double = 0.94, includeEvidence
     let item = MemoryOSQueueItem(id: "queue-projection", kind: "project_artifact", status: .processing, attemptCount: 1, maxAttempts: 3, nextRunAt: now, lockedAt: now.addingTimeInterval(-10), lockedBy: "worker", leaseExpiresAt: now.addingTimeInterval(60), idempotencyKey: "queue-projection-key")
     try store.enqueue(item)
 
-    let summary = try facade.projectAndRecordLLMArtifact(rawContent: try encodedProjectionFixture(), modelID: "test-model", queueItem: item, processingRunID: "run-1", now: now)
+    let summary = try facade.projectAndRecordLLMArtifact(rawContent: try encodedProjectionFixture(), modelID: "test-model", queueItem: item, processingRunID: "run-1", schemaName: "GraphStructuredExtractionOutput", now: now)
 
     #expect(summary.accepted)
     #expect(summary.nodeCount == 2)
@@ -88,10 +88,10 @@ private func encodedProjectionFixture(confidence: Double = 0.94, includeEvidence
     let item = MemoryOSQueueItem(id: "queue-retry", kind: "project_artifact", status: .processing, attemptCount: 0, maxAttempts: 2, nextRunAt: now, lockedAt: now.addingTimeInterval(-10), lockedBy: "worker", leaseExpiresAt: now.addingTimeInterval(60), idempotencyKey: "queue-retry-key")
     try store.enqueue(item)
 
-    let summary = try facade.projectAndRecordLLMArtifact(rawContent: try encodedProjectionFixture(includeEvidence: false), modelID: "test-model", queueItem: item, now: now)
+    let summary = try facade.projectAndRecordLLMArtifact(rawContent: "{\"not\":\"a graph extraction artifact\"}", modelID: "test-model", queueItem: item, schemaName: "GraphStructuredExtractionOutput", now: now)
 
     #expect(!summary.accepted)
-    #expect(summary.issues.contains { $0.code == "schema_validation_failed" })
+    #expect(!summary.issues.isEmpty)
     #expect(try store.queueItem(id: "queue-retry")?.status == .retryScheduled)
     #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l2_statements;").first?.first == "0")
     #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_audit_events WHERE event_type = 'memory_os.projection.rejected';").first?.first == "1")

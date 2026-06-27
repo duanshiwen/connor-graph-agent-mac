@@ -159,6 +159,14 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         return try SQLiteMemoryOSUnifiedRetrievalService(store: store).search(query)
     }
 
+    public func findMemoryOSL2Entities(_ request: MemoryOSL2FindEntitiesRequest) throws -> MemoryOSL2FindEntitiesResult {
+        try MemoryOSL2EntityMemoryService(repository: SQLiteMemoryOSL2EntityMemoryRepository(store: store)).findEntities(request)
+    }
+
+    public func updateMemoryOSL2Entities(_ request: MemoryOSL2UpdateEntitiesRequest) throws -> MemoryOSL2UpdateEntitiesResult {
+        try MemoryOSL2EntityMemoryService(repository: SQLiteMemoryOSL2EntityMemoryRepository(store: store)).updateEntities(request)
+    }
+
     @discardableResult
     public func ensureCurrentUserAnchor(now: Date = Date()) throws -> MemoryOSEntity {
         try MemoryOSPersonIdentityService().ensureCurrentUserAnchor(store: store, now: now)
@@ -422,8 +430,8 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         }
     }
 
-    public func runBackgroundAIQueueOnce<Executor: MemoryOSBackgroundModelExecutor>(executor: Executor, workerID: String = "memory-os-background-ai-worker", limit: Int = 5, now: Date = Date()) throws -> [MemoryOSProjectionRunSummary] {
-        let kinds = MemoryOSBackgroundJobKind.l1ExecutableRawValues + [MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue]
+    public func runBackgroundAIQueueOnce<Executor: MemoryOSBackgroundModelExecutor>(executor: Executor, workerID: String = "memory-os-background-ai-worker", limit: Int = 5, now: Date = Date(), kinds requestedKinds: [String]? = nil) throws -> [MemoryOSProjectionRunSummary] {
+        let kinds = requestedKinds ?? (MemoryOSBackgroundJobKind.l1ExecutableRawValues + [MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue])
         let candidates = try kinds.flatMap { kind in
             try store.runnableQueueItems(kind: kind, limit: limit, now: now)
         }.sorted { lhs, rhs in

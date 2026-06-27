@@ -94,13 +94,13 @@ public struct AppMemoryOSCLIInspector: Sendable {
 
     public func listL1Pending(limit: Int = 20) throws -> [MemoryOSCLIRow] {
         try rows(sql: """
-        SELECT c.id, c.provenance_object_id, c.event_type, c.occurred_at, c.token_estimate, c.processing_state, c.metadata_json, o.title, o.content
+        SELECT c.id, c.provenance_object_id, c.event_type, c.occurred_at, c.token_estimate, c.processing_state, c.metadata_json, o.title, o.content, o.content
         FROM memory_l1_capture_events c
         JOIN memory_l0_provenance_objects o ON o.id = c.provenance_object_id
         WHERE c.processing_state IN ('pending', 'queued')
         ORDER BY c.occurred_at ASC, c.id ASC
         LIMIT \(safeLimit(limit))
-        """, columns: ["id", "provenance_object_id", "event_type", "occurred_at", "token_estimate", "processing_state", "metadata_json", "provenance_title", "provenance_content"])
+        """, columns: ["id", "provenance_object_id", "event_type", "occurred_at", "token_estimate", "processing_state", "metadata_json", "provenance_title", "provenance_content", "content"])
     }
 
     public func listL2Statements(limit: Int = 20) throws -> [MemoryOSCLIRow] {
@@ -125,8 +125,12 @@ public struct AppMemoryOSCLIInspector: Sendable {
         """, columns: ["statement_id", "processing_kind", "status", "source_artifact_id", "processed_by_artifact_id", "last_attempt_at", "metadata_json", "subject_id", "predicate", "object_id", "statement_text", "evidence_span_ids_json", "evidence_span_texts"])
     }
 
-    public func findL2Statements(text: String = "", subjectID: String? = nil, predicates: [String] = [], limit: Int = 50) throws -> MemoryOSGraphSubgraph {
-        try AppMemoryOSFacade(store: store, searchKernel: searchKernel).findMemoryOSL2Statements(text: text, subjectID: subjectID, predicates: predicates, limit: safeLimit(limit))
+    public func findL2Entities(names: String) throws -> MemoryOSL2FindEntitiesResult {
+        try AppMemoryOSFacade(store: store, searchKernel: searchKernel).findMemoryOSL2Entities(MemoryOSL2FindEntitiesRequest(names: names))
+    }
+
+    public func updateL2Entities(_ request: MemoryOSL2UpdateEntitiesRequest) throws -> MemoryOSL2UpdateEntitiesResult {
+        try AppMemoryOSFacade(store: store, searchKernel: searchKernel).updateMemoryOSL2Entities(request)
     }
 
     public func listL3Beliefs(limit: Int = 20) throws -> [MemoryOSCLIRow] {
@@ -239,6 +243,74 @@ public struct AppMemoryOSCLIInspector: Sendable {
         return MemoryOSCLIPlanResult(plannedJobs: jobs.count, kind: MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue, jobIDs: jobs.map(\.id))
     }
 
+    public func hasRunnableBackgroundAIJob(kind: String? = nil, limit: Int = 1, now: Date = Date()) throws -> Bool {
+        let effectiveLimit = safeLimit(limit)
+        let executableKinds = kind.map { [$0] } ?? (MemoryOSBackgroundJobKind.l1ExecutableRawValues + [MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue])
+        for executableKind in executableKinds where try !store.runnableQueueItems(kind: executableKind, limit: effectiveLimit, now: now).isEmpty {
+            return true
+        }
+        return false
+    }
+
+    public func debugRunNextBackgroundAI(kind: String? = nil, limit: Int = 1) throws -> MemoryOSCLIDebugAIRunResult {
+        MemoryOSCLIDebugAIRunResult(
+            status: "no_runnable_jobs",
+            command: "memory pipeline debug-run-next",
+            requestedKind: kind,
+            requestedLimit: safeLimit(limit),
+            queueRuns: []
+        )
+    }
+
+    public func debugRunNextBackgroundAI<Model: MemoryOSBackgroundToolLoopModel>(kind: String? = nil, limit: Int = 1, model: Model, configuration: MemoryOSBackgroundToolLoopConfiguration = MemoryOSBackgroundToolLoopConfiguration(), now: Date = Date()) throws -> MemoryOSCLIDebugAIRunResult {
+        let effectiveLimit = safeLimit(limit)
+        let executableKinds = kind.map { [$0] } ?? (MemoryOSBackgroundJobKind.l1ExecutableRawValues + [MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue])
+        let plannedCandidates = try executableKinds.flatMap { executableKind in
+            try store.runnableQueueItems(kind: executableKind, limit: effectiveLimit, now: now)
+        }.sorted { lhs, rhs in
+            if lhs.priority != rhs.priority { return lhs.priority > rhs.priority }
+            return lhs.createdAt < rhs.createdAt
+        }.prefix(effectiveLimit)
+        guard !plannedCandidates.isEmpty else {
+            return MemoryOSCLIDebugAIRunResult(status: "no_runnable_jobs", command: "memory pipeline debug-run-next", requestedKind: kind, requestedLimit: effectiveLimit, queueRuns: [])
+        }
+
+        let facade = AppMemoryOSFacade(store: store, searchKernel: searchKernel)
+        let executor = MemoryOSHeadlessKnowledgeLoopExecutor(
+            model: model,
+            toolExecutor: MemoryOSBackgroundToolExecutor(facade: facade),
+            store: store,
+            configuration: configuration,
+            now: { now }
+        )
+        let summaries = try facade.runBackgroundAIQueueOnce(executor: executor, limit: effectiveLimit, now: now, kinds: executableKinds)
+        let queueRuns = try plannedCandidates.enumerated().map { index, candidate in
+            let runID = "memory-run:\(candidate.id)"
+            let messages = try store.backgroundMessages(runID: runID)
+            let toolCalls = try store.backgroundToolCalls(runID: runID)
+            let run = try store.backgroundRuns(limit: max(20, effectiveLimit * 4)).first { $0.id == runID }
+            return MemoryOSCLIDebugAIQueueRun(
+                queueItemID: candidate.id,
+                kind: candidate.kind,
+                runID: run?.id ?? (messages.isEmpty && toolCalls.isEmpty ? nil : runID),
+                modelID: run?.modelID ?? model.modelID,
+                status: run?.status.rawValue ?? (summaries.indices.contains(index) ? (summaries[index].accepted ? "succeeded" : "failed") : "unknown"),
+                messageCount: messages.count,
+                toolCallCount: toolCalls.count,
+                projectionSummary: summaries.indices.contains(index) ? summaries[index] : nil,
+                messages: messages,
+                toolCalls: toolCalls
+            )
+        }
+        return MemoryOSCLIDebugAIRunResult(
+            status: queueRuns.isEmpty ? "no_runnable_jobs" : "completed",
+            command: "memory pipeline debug-run-next",
+            requestedKind: kind,
+            requestedLimit: effectiveLimit,
+            queueRuns: queueRuns
+        )
+    }
+
     public func searchIndexStats(fileManager: FileManager = .default) throws -> MemoryOSCLISearchIndexStats {
         guard let searchKernel else { throw MemoryOSCLISearchIndexError.kernelUnavailable }
         let meta = try readSearchIndexMeta(indexDirectory: searchKernel.indexDirectory, fileManager: fileManager)
@@ -324,6 +396,7 @@ public struct AppMemoryOSCLIInspector: Sendable {
                     id: hit.recordID,
                     title: hit.title,
                     snippet: hit.summary.isEmpty ? hit.matchedText : hit.summary,
+                    content: searchHitContent(for: hit),
                     score: hit.score,
                     evidenceRefs: hit.evidenceRefs,
                     provenanceRefs: hit.provenanceRefs,
@@ -331,6 +404,25 @@ public struct AppMemoryOSCLIInspector: Sendable {
                 )
             }
         )
+    }
+
+    private func searchHitContent(for hit: MemoryOSRetrievalHit) -> String {
+        if hit.layer == .l1,
+           let content = try? l1ProvenanceContent(captureEventID: hit.recordID),
+           !content.isEmpty {
+            return content
+        }
+        return hit.matchedText
+    }
+
+    private func l1ProvenanceContent(captureEventID: String) throws -> String {
+        try store.query(sql: """
+        SELECT o.content
+        FROM memory_l1_capture_events c
+        JOIN memory_l0_provenance_objects o ON o.id = c.provenance_object_id
+        WHERE c.id = \(store.quote(captureEventID))
+        LIMIT 1
+        """).first?.first ?? ""
     }
 
     public func read(layer: String, id: String) throws -> MemoryOSCLIRecord? {
@@ -342,9 +434,12 @@ public struct AppMemoryOSCLIInspector: Sendable {
             """, columns: ["id", "source_type", "source_id", "title", "content", "content_hash", "occurred_at", "ingested_at", "session_id", "work_object_id", "confidentiality", "status", "metadata_json"])
         case "L1":
             return try firstRecord(layer: "L1", sql: """
-            SELECT id, provenance_object_id, event_type, occurred_at, token_estimate, processing_state, metadata_json
-            FROM memory_l1_capture_events WHERE id = \(store.quote(id)) LIMIT 1
-            """, columns: ["id", "provenance_object_id", "event_type", "occurred_at", "token_estimate", "processing_state", "metadata_json"])
+            SELECT c.id, c.provenance_object_id, c.event_type, c.occurred_at, c.token_estimate, c.processing_state, c.metadata_json, o.title, o.content, o.content
+            FROM memory_l1_capture_events c
+            JOIN memory_l0_provenance_objects o ON o.id = c.provenance_object_id
+            WHERE c.id = \(store.quote(id))
+            LIMIT 1
+            """, columns: ["id", "provenance_object_id", "event_type", "occurred_at", "token_estimate", "processing_state", "metadata_json", "provenance_title", "provenance_content", "content"])
         case "L2":
             return try firstRecord(layer: "L2", sql: """
             SELECT id, subject_id, predicate, object_id, text, assertion_kind, confidence, valid_at, committed_at, evidence_span_ids_json, source_artifact_id, metadata_json
@@ -628,6 +723,7 @@ public struct MemoryOSCLISearchHit: Codable, Sendable, Equatable {
     public var id: String
     public var title: String
     public var snippet: String
+    public var content: String
     public var score: Double
     public var evidenceRefs: [String]
     public var provenanceRefs: [String]
@@ -638,6 +734,7 @@ public struct MemoryOSCLISearchHit: Codable, Sendable, Equatable {
         case id
         case title
         case snippet
+        case content
         case score
         case evidenceRefs = "evidence_refs"
         case provenanceRefs = "provenance_refs"
@@ -692,6 +789,80 @@ public struct MemoryOSCLIPlanResult: Codable, Sendable, Equatable {
         case plannedJobs = "planned_jobs"
         case kind
         case jobIDs = "job_ids"
+    }
+}
+
+public struct MemoryOSCLIDebugAIRunResult: Codable, Sendable, Equatable {
+    public var status: String
+    public var command: String
+    public var requestedKind: String?
+    public var requestedLimit: Int
+    public var queueRuns: [MemoryOSCLIDebugAIQueueRun]
+
+    public init(status: String, command: String, requestedKind: String? = nil, requestedLimit: Int, queueRuns: [MemoryOSCLIDebugAIQueueRun]) {
+        self.status = status
+        self.command = command
+        self.requestedKind = requestedKind
+        self.requestedLimit = requestedLimit
+        self.queueRuns = queueRuns
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case status
+        case command
+        case requestedKind = "requested_kind"
+        case requestedLimit = "requested_limit"
+        case queueRuns = "queue_runs"
+    }
+}
+
+public struct MemoryOSCLIDebugAIQueueRun: Codable, Sendable, Equatable {
+    public var queueItemID: String
+    public var kind: String
+    public var runID: String?
+    public var modelID: String?
+    public var status: String
+    public var messageCount: Int
+    public var toolCallCount: Int
+    public var projectionSummary: MemoryOSProjectionRunSummary?
+    public var messages: [MemoryOSBackgroundMessageRecord]
+    public var toolCalls: [MemoryOSBackgroundToolCallRecord]
+
+    public init(
+        queueItemID: String,
+        kind: String,
+        runID: String?,
+        modelID: String?,
+        status: String,
+        messageCount: Int,
+        toolCallCount: Int,
+        projectionSummary: MemoryOSProjectionRunSummary? = nil,
+        messages: [MemoryOSBackgroundMessageRecord] = [],
+        toolCalls: [MemoryOSBackgroundToolCallRecord] = []
+    ) {
+        self.queueItemID = queueItemID
+        self.kind = kind
+        self.runID = runID
+        self.modelID = modelID
+        self.status = status
+        self.messageCount = messageCount
+        self.toolCallCount = toolCallCount
+        self.projectionSummary = projectionSummary
+        self.messages = messages
+        self.toolCalls = toolCalls
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case queueItemID = "queue_item_id"
+        case kind
+        case runID = "run_id"
+        case modelID = "model_id"
+        case status
+        case messageCount = "message_count"
+        case toolCallCount = "tool_call_count"
+        case projectionSummary = "projection_summary"
+        case messages
+        case toolCalls = "tool_calls"
     }
 }
 

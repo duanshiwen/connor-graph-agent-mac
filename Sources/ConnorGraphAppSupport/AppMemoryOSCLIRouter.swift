@@ -107,18 +107,19 @@ public enum AppMemoryOSCLIRouter {
         switch args.first ?? "statements" {
         case "statements": return try encode(try inspector.listL2Statements(limit: intOption("--limit", in: args, default: 20)), encoder: encoder)
         case "pending-knowledge": return try encode(try inspector.listL2PendingKnowledge(limit: intOption("--limit", in: args, default: 20)), encoder: encoder)
-        case "find":
-            let text = args.dropFirst().first.flatMap { $0.hasPrefix("--") ? nil : $0 } ?? ""
-            return try encode(
-                try inspector.findL2Statements(
-                    text: text,
-                    subjectID: optionValue("--subject", in: args),
-                    predicates: optionValue("--predicate", in: args).map(splitCSV) ?? [],
-                    limit: intOption("--limit", in: args, default: 50)
-                ),
-                encoder: encoder
-            )
-        default: return try encode(MemoryOSCLIError(error: "unknown_l2_command", usage: "connor memory l2 statements|pending-knowledge|find [text] [--subject id] [--predicate p1,p2] [--limit N]"), encoder: encoder)
+        case "find-entities":
+            guard let names = args.dropFirst().first, !names.hasPrefix("--") else {
+                return try encode(MemoryOSCLIError(error: "missing_l2_entity_names", usage: "connor memory l2 find-entities <names>"), encoder: encoder)
+            }
+            return try encode(try inspector.findL2Entities(names: names), encoder: encoder)
+        case "update-entities":
+            guard let raw = try l2UpdateEntitiesJSON(args: args) else {
+                return try encode(MemoryOSCLIError(error: "missing_l2_entities_json", usage: "connor memory l2 update-entities --json <json> | --file <file>"), encoder: encoder)
+            }
+            let data = Data(raw.utf8)
+            let request = try JSONDecoder().decode(MemoryOSL2UpdateEntitiesRequest.self, from: data)
+            return try encode(try inspector.updateL2Entities(request), encoder: encoder)
+        default: return try encode(MemoryOSCLIError(error: "unknown_l2_command", usage: "connor memory l2 statements|pending-knowledge|find-entities <names>|update-entities --json <json>|--file <file>"), encoder: encoder)
         }
     }
 
@@ -218,8 +219,50 @@ public enum AppMemoryOSCLIRouter {
         case "policy": return try encode(inspector.pipelinePolicy(), encoder: encoder)
         case "plan-l1", "plan-l1-knowledge": return try encode(try inspector.planL1(), encoder: encoder)
         case "plan-l2", "plan-l2-knowledge": return try encode(try inspector.planL2(), encoder: encoder)
-        default: return try encode(MemoryOSCLIError(error: "unknown_pipeline_command", usage: "connor memory pipeline policy|plan-l1-knowledge|plan-l2-knowledge"), encoder: encoder)
+        case "debug-run-next":
+            return try routePipelineDebugRunNext(args: args, inspector: inspector, encoder: encoder)
+        default: return try encode(MemoryOSCLIError(error: "unknown_pipeline_command", usage: "connor memory pipeline policy|plan-l1-knowledge|plan-l2-knowledge|debug-run-next"), encoder: encoder)
         }
+    }
+
+    private static func routePipelineDebugRunNext(args: [String], inspector: AppMemoryOSCLIInspector, encoder: JSONEncoder) throws -> String {
+        let kind = optionValue("--kind", in: args)
+        let limit = intOption("--limit", in: args, default: 1)
+        let format = optionValue("--format", in: args) ?? "text"
+        let maxToolIterations = intOption("--max-tool-iterations", in: args, default: MemoryOSBackgroundToolLoopConfiguration().maxToolIterations)
+        let maxToolResultBytes = intOption("--max-tool-result-bytes", in: args, default: MemoryOSBackgroundToolLoopConfiguration().maxToolResultBytes)
+        let result: MemoryOSCLIDebugAIRunResult
+        if try inspector.hasRunnableBackgroundAIJob(kind: kind, limit: limit) {
+            let model = try makeLiveDebugLoopModel()
+            result = try inspector.debugRunNextBackgroundAI(
+                kind: kind,
+                limit: limit,
+                model: model,
+                configuration: MemoryOSBackgroundToolLoopConfiguration(maxToolIterations: maxToolIterations, maxToolResultBytes: maxToolResultBytes)
+            )
+        } else {
+            result = try inspector.debugRunNextBackgroundAI(kind: kind, limit: limit)
+        }
+        switch format {
+        case "json":
+            return try encode(result, encoder: encoder)
+        case "text":
+            return MemoryOSDebugAIRunTranscriptRenderer.render(result)
+        default:
+            return try encode(MemoryOSCLIError(error: "unknown_debug_run_format", usage: "connor memory pipeline debug-run-next [--format text|json]"), encoder: encoder)
+        }
+    }
+
+    private static func makeLiveDebugLoopModel() throws -> AgentModelBackgroundToolLoopModel {
+        let paths = try AppStoragePaths.live()
+        try paths.ensureDirectoryHierarchy()
+        let graphStore = try AppGraphBootstrapper(paths: paths).bootstrapStore()
+        let factory = AppGraphAgentRuntimeFactory(
+            store: graphStore,
+            settingsRepository: AppLLMSettingsRepository(),
+            storagePaths: paths
+        )
+        return AgentModelBackgroundToolLoopModel(provider: factory.makeAgentModelProvider())
     }
 
     private static func debugResetFoundationKG() throws -> [String: String] {
@@ -256,6 +299,14 @@ public enum AppMemoryOSCLIRouter {
     private static func encode<T: Encodable>(_ value: T, encoder: JSONEncoder) throws -> String {
         let data = try encoder.encode(value)
         return String(decoding: data, as: UTF8.self)
+    }
+
+    private static func l2UpdateEntitiesJSON(args: [String]) throws -> String? {
+        if let raw = optionValue("--json", in: args) { return raw }
+        if let file = optionValue("--file", in: args) {
+            return try String(contentsOfFile: file, encoding: .utf8)
+        }
+        return nil
     }
 
     private static func optionValue(_ name: String, in args: [String]) -> String? {

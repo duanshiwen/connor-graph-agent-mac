@@ -3,10 +3,10 @@ import Testing
 import ConnorGraphCore
 import ConnorGraphMemory
 
-@Test func memoryOSProcessingPipelineRejectsTemporalStatementWithoutEvidenceBeforeWrite() {
-    let statement = MemoryOSStatement(subjectID: "node", predicate: "claims", text: "Invalid because evidence is missing.")
+@Test func memoryOSProcessingPipelineAcceptsWorkingMemoryStatementWithoutEvidenceBeforeWrite() {
+    let statement = MemoryOSStatement(subjectID: "node", predicate: "claims", text: "Valid L2 working memory without evidence.")
     let issues = MemoryOSStatementValidator().validate(statement)
-    #expect(!issues.isEmpty)
+    #expect(issues.isEmpty)
 }
 
 @Test func memoryOSProcessingPipelineAcceptsEvidenceBackedTemporalStatement() {

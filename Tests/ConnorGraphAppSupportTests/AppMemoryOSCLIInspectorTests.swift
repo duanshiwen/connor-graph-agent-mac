@@ -82,6 +82,7 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(events[0].values["token_estimate"] == "12")
         #expect(events[0].values["provenance_title"] == "User message")
         #expect(events[0].values["provenance_content"] == "诗闻正在测试 Connor Memory OS CLI。")
+        #expect(events[0].values["content"] == "诗闻正在测试 Connor Memory OS CLI。")
     }
 
     @Test func memoryOSCLIInspectorListsL2StatementsAndPendingKnowledge() throws {
@@ -145,6 +146,9 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(l0.record.values["id"] == "object-1")
         #expect(l1.layer == "L1")
         #expect(l1.record.values["id"] == "event-1")
+        #expect(l1.record.values["provenance_title"] == "User message")
+        #expect(l1.record.values["provenance_content"] == "诗闻正在测试 Connor Memory OS CLI。")
+        #expect(l1.record.values["content"] == "诗闻正在测试 Connor Memory OS CLI。")
         #expect(l2.layer == "L2")
         #expect(l2.record.values["id"] == "stmt-1")
         #expect(l3.layer == "L3")
@@ -186,6 +190,20 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(result.hits.count == 1)
         #expect(result.hits[0].layer == "L2")
         #expect(result.hits[0].id == "stmt-1")
+    }
+
+    @Test func memoryOSCLIInspectorSearchesL1WithContent() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        try seedMemoryOSCLIInspectorFixture(store: store)
+        let inspector = AppMemoryOSCLIInspector(store: store)
+
+        let result = try inspector.search(query: "Connor", layers: ["L1"], limit: 10)
+
+        #expect(result.query == "Connor")
+        #expect(result.hits.count == 1)
+        #expect(result.hits[0].layer == "L1")
+        #expect(result.hits[0].id == "event-1")
+        #expect(result.hits[0].content == "诗闻正在测试 Connor Memory OS CLI。")
     }
 
     @Test func memoryOSCLIInspectorSearchesAcrossL3AndL4() throws {
@@ -273,6 +291,105 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(l2Plan.jobIDs.count == 1)
     }
 
+    @Test func memoryOSCLIRouterRoutesPipelineDebugRunNextCommand() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        let inspector = AppMemoryOSCLIInspector(store: store)
+        let output = try AppMemoryOSCLIRouter.route(
+            args: ["pipeline", "debug-run-next", "--kind", MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue, "--limit", "1", "--format", "json"],
+            inspector: inspector,
+            encoder: memoryOSCLITestEncoder()
+        )
+
+        #expect(output.contains("debug-run-next"))
+        #expect(output.contains("no_runnable_jobs"))
+        #expect(output.contains("requested_kind"))
+        #expect(output.contains(MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue))
+        #expect(output.contains("queue_runs"))
+    }
+
+    @Test func memoryOSCLIRouterRoutesPipelineDebugRunNextTextFormat() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        let inspector = AppMemoryOSCLIInspector(store: store)
+        let output = try AppMemoryOSCLIRouter.route(
+            args: ["pipeline", "debug-run-next", "--format", "text"],
+            inspector: inspector,
+            encoder: memoryOSCLITestEncoder()
+        )
+
+        #expect(output.contains("Memory OS Debug AI Run"))
+        #expect(output.contains("No runnable background AI jobs"))
+        #expect(output.contains("plan-l1"))
+    }
+
+    @Test func memoryOSCLIDebugTranscriptRendererIncludesMessagesAndToolCalls() throws {
+        let now = Date(timeIntervalSince1970: 50_000)
+        let result = MemoryOSCLIDebugAIRunResult(
+            status: "completed",
+            command: "memory pipeline debug-run-next",
+            requestedKind: MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue,
+            requestedLimit: 1,
+            queueRuns: [MemoryOSCLIDebugAIQueueRun(
+                queueItemID: "queue-1",
+                kind: MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue,
+                runID: "memory-run:queue-1",
+                modelID: "model",
+                status: "succeeded",
+                messageCount: 2,
+                toolCallCount: 1,
+                projectionSummary: MemoryOSProjectionRunSummary(artifactID: "artifact-1", accepted: true, statementCount: 1),
+                messages: [
+                    MemoryOSBackgroundMessageRecord(id: "msg-1", runID: "memory-run:queue-1", sequence: 0, role: .user, content: "Prompt sent to AI"),
+                    MemoryOSBackgroundMessageRecord(id: "msg-2", runID: "memory-run:queue-1", sequence: 1, role: .assistant, content: "Assistant response")
+                ],
+                toolCalls: [MemoryOSBackgroundToolCallRecord(id: "tool-1", runID: "memory-run:queue-1", iteration: 1, toolName: "memory_os_search", argumentsJSON: "{}", resultJSON: "{\"hits\":[]}", status: .succeeded, startedAt: now, finishedAt: now)]
+            )]
+        )
+
+        let transcript = MemoryOSDebugAIRunTranscriptRenderer.render(result)
+
+        #expect(transcript.contains("Prompt sent to AI"))
+        #expect(transcript.contains("Assistant response"))
+        #expect(transcript.contains("memory_os_search"))
+        #expect(transcript.contains("Projection: accepted=true"))
+        #expect(transcript.contains("swift run connor memory run memory-run:queue-1 messages"))
+    }
+
+    @Test func memoryOSCLIDebugRunNextExecutesQueueWithTrace() throws {
+        let store = try makeMemoryOSCLIInspectorStore()
+        let now = Date(timeIntervalSince1970: 40_000)
+        try seedMemoryOSCLIInspectorFixture(store: store, now: now)
+        let inspector = AppMemoryOSCLIInspector(store: store)
+        let plan = try inspector.planL1(policy: MemoryOSL1ProcessingTriggerPolicy(minPendingCount: 1, maxEventsPerBlock: 10), now: now)
+        let queueID = try #require(plan.jobIDs.first)
+        let model = MemoryOSCLIDebugScriptedLoopModel(script: [
+            MemoryOSBackgroundLoopModelResponse(
+                assistantText: "Searching before projection.",
+                toolCalls: [MemoryOSBackgroundToolCall(id: "tool-1", name: "memory_os_search", argumentsJSON: #"{"query":"Connor","layers":["L2","L3","L4"],"limit":5}"#)]
+            ),
+            MemoryOSBackgroundLoopModelResponse(finalArtifactJSON: try memoryOSCLIDebugEncodedL1Artifact(), metadata: ["final": "true"])
+        ])
+
+        let result = try inspector.debugRunNextBackgroundAI(
+            kind: MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue,
+            limit: 1,
+            model: model,
+            configuration: MemoryOSBackgroundToolLoopConfiguration(maxToolIterations: 4),
+            now: now
+        )
+
+        let run = try #require(result.queueRuns.first)
+        #expect(result.status == "completed")
+        #expect(run.queueItemID == queueID)
+        #expect(run.runID == "memory-run:\(queueID)")
+        #expect(run.modelID == "cli-debug-scripted-model")
+        #expect(run.status == "succeeded")
+        #expect(run.messageCount >= 3)
+        #expect(run.toolCallCount == 1)
+        #expect(run.messages.contains { $0.role == .assistant && $0.content == "Searching before projection." })
+        #expect(run.toolCalls.first?.toolName == "memory_os_search")
+        #expect(run.projectionSummary?.accepted == true)
+    }
+
     @Test func memoryOSCLIRouterRoutesStatusCommand() throws {
         let store = try makeMemoryOSCLIInspectorStore()
         let output = try AppMemoryOSCLIRouter.route(args: ["status"], inspector: AppMemoryOSCLIInspector(store: store), encoder: memoryOSCLITestEncoder())
@@ -358,17 +475,21 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(output.contains("evidenced_by"))
     }
 
-    @Test func memoryOSCLIRouterRoutesL2FindCommand() throws {
+    @Test func memoryOSCLIRouterRoutesL2EntityCommands() throws {
         let store = try makeMemoryOSCLIInspectorStore()
         try seedMemoryOSCLIInspectorFixture(store: store)
         let inspector = AppMemoryOSCLIInspector(store: store)
         let encoder = memoryOSCLITestEncoder()
 
-        let output = try AppMemoryOSCLIRouter.route(args: ["l2", "find", "康纳", "--predicate", "describes", "--limit", "5"], inspector: inspector, encoder: encoder)
+        let updateJSON = #"{"entities":[{"name":"《迟到的青春期》","type":"work_object","aliases":"迟到的青春期, Late Puberty","statements":[{"text":"《迟到的青春期》马尼拉一个月阶段的明确决策是：不去贫民窟。","connectedEntity":"《迟到的青春期》马尼拉一个月阶段","connectedEntityType":"work_object","factType":"decision","polarity":"exclude","originalPhrase":"不去贫民窟"}]}]}"#
+        let update = try AppMemoryOSCLIRouter.route(args: ["l2", "update-entities", "--json", updateJSON], inspector: inspector, encoder: encoder)
+        let find = try AppMemoryOSCLIRouter.route(args: ["l2", "find-entities", "Late Puberty"], inspector: inspector, encoder: encoder)
+        let oldFind = try AppMemoryOSCLIRouter.route(args: ["l2", "find", "康纳"], inspector: inspector, encoder: encoder)
 
-        #expect(output.contains("stmt-1"))
-        #expect(output.contains("node-1"))
-        #expect(output.contains("span-1"))
+        #expect(update.contains("updatedEntities"))
+        #expect(find.contains("《迟到的青春期》"))
+        #expect(find.contains("不去贫民窟"))
+        #expect(oldFind.contains("unknown_l2_command"))
     }
 
     @Test func memoryOSCLIRouterRoutesL3ExpandCommand() throws {
@@ -512,4 +633,37 @@ private func seedMemoryOSCLIInspectorFixture(store: SQLiteMemoryOSStore, now: Da
     try store.upsert(belief: belief)
     let entity = MemoryOSEntity(id: "entity-1", stableKey: "concept:connor-memory-os", entityType: "concept", name: "Connor Memory OS", aliases: ["Memory OS"], summary: "康纳同学的长期记忆系统", confidence: 0.93, createdAt: now, updatedAt: now, validFrom: now, metadata: ["stage": "l4"])
     try store.upsert(entity: entity)
+}
+
+private final class MemoryOSCLIDebugScriptedLoopModel: MemoryOSBackgroundToolLoopModel, @unchecked Sendable {
+    let modelID = "cli-debug-scripted-model"
+    private var script: [MemoryOSBackgroundLoopModelResponse]
+
+    init(script: [MemoryOSBackgroundLoopModelResponse]) {
+        self.script = script
+    }
+
+    func complete(_ request: MemoryOSBackgroundLoopModelRequest) throws -> MemoryOSBackgroundLoopModelResponse {
+        guard !script.isEmpty else { return MemoryOSBackgroundLoopModelResponse(finalArtifactJSON: "{}") }
+        return script.removeFirst()
+    }
+}
+
+private func memoryOSCLIDebugEncodedL1Artifact() throws -> String {
+    let output = MemoryOSL1UnifiedProjectionOutput(
+        operationalEntities: [
+            GraphStructuredExtractedEntity(localID: "project-1", name: "Connor Memory OS", entityKind: .workObject, scope: .project, confidence: 0.93, evidenceSpanIDs: ["span-1"])
+        ],
+        operationalStatements: [
+            GraphStructuredExtractedStatement(explicitID: "stmt-debug-1", subjectLocalID: "project-1", predicate: .relatedTo, objectLocalID: "project-1", statementText: "Connor Memory OS 正在被 CLI 调试。", confidence: 0.91, evidenceSpanIDs: ["span-1"])
+        ],
+        evidenceSpans: [GraphStructuredEvidenceSpan(id: "span-1", text: "Connor Memory OS CLI")],
+        knowledgeCandidates: [],
+        conceptEntities: [],
+        conceptRelations: [],
+        promotionDecisions: []
+    )
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    return String(data: try encoder.encode(output), encoding: .utf8)!
 }

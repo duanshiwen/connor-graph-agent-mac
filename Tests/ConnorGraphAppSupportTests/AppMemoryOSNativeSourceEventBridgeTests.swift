@@ -27,6 +27,36 @@ import ConnorGraphAppSupport
     #expect(sourceKinds.contains("attachment"))
 }
 
+@Test func nativeSourceEventBridgeIngestsCalendarEventWithoutNotesUsingTitleContent() throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryNativeSourceBridgeDatabaseURL().path)
+    try store.migrate()
+    let bridge = AppMemoryOSNativeSourceEventBridge(facade: AppMemoryOSFacade(store: store))
+    let now = Date(timeIntervalSince1970: 11_000)
+
+    let result = try bridge.ingestCalendarEvent(
+        id: "calendar-title-only",
+        title: "Dentist Appointment",
+        notes: "",
+        accountID: "calendar-account",
+        occurredAt: now,
+        start: Date(timeIntervalSince1970: 12_000),
+        end: Date(timeIntervalSince1970: 12_900),
+        location: "Clinic",
+        attendees: ["shiwen@example.com"]
+    )
+
+    #expect(result.decision.action == .archive)
+    #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l0_provenance_objects;").first?.first == "1")
+    #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l1_capture_events;").first?.first == "1")
+    let content = try #require(try store.query(sql: "SELECT content FROM memory_l0_provenance_objects LIMIT 1;").first?.first)
+    #expect(content.contains("Title: Dentist Appointment"))
+    #expect(content.contains("Start: 1970-01-01T03:20:00Z"))
+    #expect(content.contains("End: 1970-01-01T03:35:00Z"))
+    #expect(content.contains("Location: Clinic"))
+    #expect(content.contains("Notes:"))
+    #expect(content.contains("Attendees: shiwen@example.com"))
+}
+
 private func temporaryNativeSourceBridgeDatabaseURL() -> URL {
     FileManager.default.temporaryDirectory.appendingPathComponent("native-source-memory-bridge-\(UUID().uuidString).sqlite")
 }

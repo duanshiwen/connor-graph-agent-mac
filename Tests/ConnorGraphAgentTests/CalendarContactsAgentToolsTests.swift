@@ -35,11 +35,21 @@ struct CalendarContactsAgentToolsTests {
         )
 
         #expect(result.toolName == "calendar_read")
-        #expect(result.contentText.contains("Listed 1 calendar events"))
+        #expect(result.contentText.contains("Listed 1 calendar event candidates"))
         #expect(result.contentJSON?.contains("产品讨论") == true)
     }
 
-    @Test func calendarSearchEventsToolReturnsFullEventDetails() async throws {
+    @Test func calendarSearchEventsToolDescribesCandidatesAndSelectedDetailReads() {
+        let tool = CalendarSearchEventsTool(runtime: InMemoryAgentCalendarRuntime())
+
+        #expect(tool.description.contains("candidate"))
+        #expect(tool.description.contains("calendar_read"))
+        #expect(tool.description.contains("get_event"))
+        #expect(!tool.description.contains("no separate calendar detail fetch is needed"))
+        #expect(!tool.description.contains("return full event details directly"))
+    }
+
+    @Test func calendarSearchEventsToolReturnsEventCandidatesWithDetailsInForegroundResult() async throws {
         let event = CalendarEvent(
             id: CalendarEventID(rawValue: "event-design-review"),
             calendarID: CalendarID(rawValue: "calendar-work"),
@@ -58,7 +68,7 @@ struct CalendarContactsAgentToolsTests {
         )
 
         #expect(result.toolName == "calendar_search_events")
-        #expect(result.contentText.contains("full event records"))
+        #expect(result.contentText.contains("calendar event candidates"))
         #expect(result.contentJSON?.contains("Memory OS 设计评审") == true)
         #expect(result.contentJSON?.contains("会议室 A") == true)
         #expect(result.contentJSON?.contains("shiwen@example.com") == true)
