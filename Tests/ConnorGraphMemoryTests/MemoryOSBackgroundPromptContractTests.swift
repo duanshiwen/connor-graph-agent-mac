@@ -135,6 +135,36 @@ struct MemoryOSBackgroundPromptContractTests {
         }
     }
 
+    @Test func l1PromptDeclaresAllowedL4RelationPredicatesAndMappingRules() {
+        let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
+
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
+
+        #expect(prompt.contains("Allowed L4 relation predicates"))
+        #expect(prompt.contains("Do not invent predicates"))
+        #expect(prompt.contains("Map is_a"))
+        #expect(prompt.contains("Map has_a"))
+        #expect(prompt.contains("RELATED_TO only as a last resort"))
+        for predicate in MemoryOSL4RelationPredicate.allCases {
+            #expect(prompt.contains(predicate.rawValue))
+        }
+    }
+
+    @Test func l2KnowledgePromptDeclaresAllowedL4RelationPredicatesAndMappingRules() {
+        let statement = MemoryOSStatement(id: "stmt-1", subjectID: "node-1", predicate: "requires", text: "Knowledge synthesis requires L4 predicate discipline.", confidence: 0.97, evidenceSpanIDs: ["span-1"])
+
+        let prompt = MemoryOSL2ToKnowledgePromptBuilder().prompt(for: [statement])
+
+        #expect(prompt.contains("Allowed L4 relation predicates"))
+        #expect(prompt.contains("Do not invent predicates"))
+        #expect(prompt.contains("Map is_a"))
+        #expect(prompt.contains("Map has_a"))
+        #expect(prompt.contains("RELATED_TO only as a last resort"))
+        #expect(prompt.contains("INSTANCE_OF"))
+        #expect(prompt.contains("HAS_PART"))
+        #expect(prompt.contains("SUPPORTS_CAPABILITY"))
+    }
+
     @Test func l1PromptDeclaresL2BusinessFactTaxonomyAndMetadataRequirement() {
         let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
 
