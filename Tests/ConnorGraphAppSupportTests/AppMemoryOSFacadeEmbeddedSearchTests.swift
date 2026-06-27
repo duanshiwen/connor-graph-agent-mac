@@ -43,7 +43,7 @@ private func makeEmbeddedSearchFixture(at url: URL) throws {
     INSERT INTO memory_l3_beliefs VALUES ('b1','图谱','图谱检索应当 graph-first','knowledge',0.9,'[]','2026-06-24','2026-06-24',NULL,'{}');
     INSERT INTO memory_l4_entities VALUES ('wikidata:Q148','wikidata:Q148','country','中华人民共和国','["中国"]','东亚国家',0.9,'2026-06-24','2026-06-24',NULL,'{}');
     INSERT INTO memory_l4_entity_aliases VALUES ('a1','wikidata:Q148','China','china','2026-06-24','{}');
-    INSERT INTO memory_l4_entity_statements VALUES ('st1','wikidata:Q148','P31','wikidata:Q6256','中国 instance of 国家','fact',0.9,'2026-06-24','2026-06-24','[]',NULL,'{}');
+    INSERT INTO memory_l4_entity_statements VALUES ('st1','wikidata:Q148','INSTANCE_OF','wikidata:Q6256','中国 instance of 国家','fact',0.9,'2026-06-24','2026-06-24','[]',NULL,'{}');
     """
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")

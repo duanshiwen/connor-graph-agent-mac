@@ -202,7 +202,7 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         try SQLiteMemoryOSGraphRetrievalService(store: store).l4Neighbors(MemoryOSL4NeighborsQuery(entityID: entityID, direction: direction, predicates: predicates, limit: limit))
     }
 
-    public func queryMemoryOSL4Instances(classEntityIDs: [String], predicates: [String] = ["P31"], limit: Int = 100) throws -> MemoryOSGraphSubgraph {
+    public func queryMemoryOSL4Instances(classEntityIDs: [String], predicates: [String] = [MemoryOSL4RelationPredicate.instanceOf.rawValue], limit: Int = 100) throws -> MemoryOSGraphSubgraph {
         try SQLiteMemoryOSGraphRetrievalService(store: store).l4Instances(MemoryOSL4InstanceQuery(classEntityIDs: classEntityIDs, predicates: predicates, limit: limit))
     }
 
