@@ -67,8 +67,8 @@ struct MemoryOSBackgroundPromptContractTests {
         #expect(prompt.contains("Extract candidate operational facts per event"))
         #expect(prompt.contains("Drop noise"))
         #expect(prompt.contains("Consolidate duplicate operational facts"))
-        #expect(prompt.contains("Every emitted operational fact must cite at least one capture_event_id"))
-        #expect(prompt.contains("provenance_object_id or span_id"))
+        #expect(prompt.contains("L2 itself does not require evidence spans"))
+        #expect(prompt.contains("provenance identifiers only as optional internal metadata"))
         #expect(!prompt.contains("Do not create L3 knowledge records"))
         #expect(prompt.contains("Do not promote ordinary operational facts into L3"))
     }
@@ -79,13 +79,28 @@ struct MemoryOSBackgroundPromptContractTests {
         let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
 
         #expect(prompt.contains("L1 unified projection"))
-        #expect(prompt.contains("L2 operational facts"))
+        #expect(prompt.contains("L2 entity-centered working memory"))
         #expect(prompt.contains("L3 reusable knowledge candidates"))
         #expect(prompt.contains("L4 stable entities"))
         #expect(prompt.contains("MemoryOSL1UnifiedProjectionOutput"))
-        #expect(prompt.contains("must search existing L2 operational memory"))
+        #expect(prompt.contains("memory_os_l2_find_entities"))
+        #expect(prompt.contains("memory_os_l2_update_entities"))
         #expect(prompt.contains("must search existing L3/L4"))
-        #expect(prompt.contains("record search/judgment evidence"))
+        #expect(prompt.contains("record search/judgment rationale"))
+    }
+
+    @Test func l1PromptTeachesL2NoEvidenceAndNegativeDecisionPreservation() {
+        let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
+
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
+
+        #expect(prompt.contains("L2 is entity-centered working memory, not an evidence store"))
+        #expect(prompt.contains("Do not ask LLM tools to provide evidence"))
+        #expect(prompt.contains("statement text is the semantic authority"))
+        #expect(prompt.contains("Preserve negative or exclusion semantics explicitly"))
+        #expect(prompt.contains("不去贫民窟"))
+        #expect(prompt.contains("polarity = exclude"))
+        #expect(prompt.contains("originalPhrase"))
     }
 
     @Test func l1PromptIncludesPromotionFiltersAndStableL4EntityRules() {
