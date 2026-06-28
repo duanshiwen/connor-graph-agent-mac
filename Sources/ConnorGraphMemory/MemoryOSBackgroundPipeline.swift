@@ -295,7 +295,7 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         - Required statement metadata keys when applicable: metadata.l2_fact_type, metadata.capture_event_ids, metadata.provenance_object_ids, metadata.span_ids.
         - For person/profile facts, also set metadata.person_role to current_user, other_person, or ambiguous_person; set metadata.person_resolution to resolved, ambiguous, or needs_confirmation when applicable.
         - metadata.capture_event_ids, metadata.provenance_object_ids and metadata.span_ids should be comma-separated stable ids when multiple inputs support the same consolidated fact.
-        - L3 knowledgeCandidates.evidenceStatementIDs must reference operationalStatements local statement ids from this same artifact.
+        - knowledgeCandidates may include evidenceStatementIDs for artifact-level validation and promotion judgment, but L3 storage will only persist claim as statement, discipline domain, related L4 concept names/aliases, created_at and updated_at.
         - Do not ask LLM tools to provide evidence, supportQuote, source IDs, span IDs, model IDs, schema names, artifact types, processing run IDs, entity IDs, or statement IDs for L2 updates.
 
         Allowed L2 assertion_kind values:
@@ -376,11 +376,28 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         - signal_quality: pass only if the material is substantial knowledge rather than noise, style, or a one-off detail.
         - reuse_scope: pass only if the material will be reusable across future sessions, tasks, projects or decisions.
         - novelty: pass only if the material is new or materially enriches existing L3/L4 memory.
-        - structurability: pass only if it can be assigned category, knowledge_type, scope, domain, and related concept entities.
+        - structurability: pass only if it can be written as one complete reusable knowledge statement, assigned exactly one discipline domain, and optionally associated with durable L4 concept entity names or aliases.
         - All four filters must pass before emitting a knowledgeCandidate.
         - promotionDecisions must record signal_quality, reuse_scope, novelty, structurability, accepted/rejected reasons, evidence ids, searched layers, duplicate/novelty judgment, and reused entity/concept ids when applicable.
         - Do not promote ordinary operational facts into L3.
         - Do not promote personal preferences, one-off tasks, calendar facts, transient environment details or implementation status into L3 unless they encode a reusable rule, standard, framework, process, or decision basis.
+
+        L3 discipline domain rules:
+        - Every accepted knowledgeCandidate must include a non-empty domain.
+        - Domain means discipline classification / subject classification.
+        - Domain is not a topic, title, category, tag, work object, project name, product name, module name, person name, entity name, or object alias.
+        - Use lowercase kebab-case.
+        - Prefer stable discipline names such as software-engineering, computer-science, artificial-intelligence, information-systems, knowledge-management, psychology, cognitive-science, economics, management, sociology, political-science, education, linguistics, philosophy, design, finance, health-sciences, humanities, social-sciences, natural-sciences, engineering-and-technology, general-knowledge.
+        - Before emitting L3 knowledge candidates, use memory_os_l3_list_domains when available to inspect current L3 discipline domains and reuse an existing discipline domain when it fits.
+        - Use general-knowledge only when no meaningful discipline can be determined; explain why in promotionDecisions.metadata.domain_reason.
+
+        L3 related object names rules:
+        - related_object_names is a comma-separated list of durable L4 concept entity names or aliases.
+        - It must not contain project names, product names, module names, file names, people names, session IDs, temporary work objects, local environment objects, one-off task names, or ordinary L2 operational anchors.
+        - Use related_object_names only when the named concept is stable enough to belong to L4 as a concept entity.
+        - Prefer canonical L4 concept names when known; aliases are allowed only when they are established concept aliases.
+        - Store related concept names in knowledgeCandidates.metadata.related_object_names.
+        - Do not use related_object_names as tags, evidence references, or separate related entity arrays for L3 storage.
 
         Stable L4 entity rules:
         - Create or reuse L4 stable entities for people, organizations, projects/work objects, products, locations, durable documents/artifacts, and durable concepts/frameworks/standards.
@@ -403,7 +420,7 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         9. L2 itself does not require evidence spans; keep provenance identifiers only as optional internal metadata when already available from L1/L0.
         10. Choose the most precise allowed predicate and the most appropriate metadata.l2_fact_type for every operational statement.
         11. For L2, prefer memory_os_l2_find_entities and memory_os_l2_update_entities. Before emitting or rejecting L3/L4 candidates, search L2/L3/L4 for related facts, existing knowledge, duplicate concepts, reusable entities and supersession context.
-        12. Separately evaluate whether any extracted material qualifies as L3 reusable knowledge using all four promotion filters, and record the search-backed judgment in promotionDecisions.
+        12. Separately evaluate whether any extracted material qualifies as L3 reusable knowledge using all four promotion filters. For accepted candidates, write a complete claim, choose exactly one non-empty discipline domain, optionally provide metadata.related_object_names containing durable L4 concept entity names or aliases, and record domain reasoning in promotionDecisions.
         13. Separately evaluate whether any stable L4 entity, concept entity, or durable relation should be emitted, reused, or rejected, and record the search-backed judgment in metadata or promotionDecisions.
         14. Do not produce unsupported guesses, broad conclusions without evidence, or knowledge/entity records that fail the rules above.
 
@@ -484,7 +501,22 @@ public struct MemoryOSL2ToKnowledgePromptBuilder: Sendable {
         1. signal quality: is this knowledge rather than noise?
         2. reuse scope: will this be reusable in the future?
         3. novelty: is this new or a material enrichment?
-        4. structurability: can it be mapped to category, knowledge type, scope, domain, work object/person and concept entities?
+        4. structurability: can it be written as one complete reusable knowledge statement, assigned exactly one discipline domain, and optionally associated with durable L4 concept entity names or aliases?
+
+        L3 discipline domain rules:
+        - Every accepted knowledgeCandidate must include a non-empty domain.
+        - Domain means discipline classification / subject classification.
+        - Domain is not a topic, title, category, tag, work object, project name, product name, module name, person name, entity name, or object alias.
+        - Use lowercase kebab-case and prefer stable discipline names such as software-engineering, computer-science, artificial-intelligence, information-systems, knowledge-management, psychology, cognitive-science, economics, management, sociology, political-science, education, linguistics, philosophy, design, finance, health-sciences, humanities, social-sciences, natural-sciences, engineering-and-technology, general-knowledge.
+        - Before emitting L3 knowledge candidates, use memory_os_l3_list_domains when available to inspect current L3 discipline domains and reuse an existing discipline domain when it fits.
+        - Use general-knowledge only when no meaningful discipline can be determined; explain why in metadata or promotion reasoning.
+
+        L3 related object names rules:
+        - Store related L4 concept names in knowledgeCandidate.metadata.related_object_names.
+        - metadata.related_object_names is a comma-separated list of durable L4 concept entity names or aliases.
+        - It must not contain project names, product names, module names, file names, people names, session IDs, temporary work objects, local environment objects, one-off task names, or ordinary L2 operational anchors.
+        - Use metadata.related_object_names only when the named concept is stable enough to belong to L4 as a concept entity.
+        - Do not use related_object_names as tags, evidence references, or separate related entity arrays for L3 storage.
 
         Accepted knowledge candidates must include explicit AI judgment fields equivalent to:
         - signal_quality: pass/fail plus reason
