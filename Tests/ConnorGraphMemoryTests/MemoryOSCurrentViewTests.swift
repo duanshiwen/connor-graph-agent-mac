@@ -43,3 +43,15 @@ import ConnorGraphMemory
     #expect(profile.records.first?.selectedRecordID == "entity-stmt-new")
     #expect(profile.records.first?.value == "Agent OS")
 }
+
+@Test func memoryOSCurrentEntityProfileIgnoresConfidenceWhenSelectingCurrentStatement() {
+    let older = Date(timeIntervalSince1970: 1_000)
+    let newer = Date(timeIntervalSince1970: 2_000)
+    let highConfidenceOld = MemoryOSEntityStatement(id: "entity-stmt-old", entityID: "entity-shiwen", predicate: .relatedTo, text: "Old high confidence relation", confidence: 0.99, validAt: older, committedAt: older, evidenceSpanIDs: ["span-old"])
+    let lowConfidenceNew = MemoryOSEntityStatement(id: "entity-stmt-new", entityID: "entity-shiwen", predicate: .relatedTo, text: "New low confidence relation", confidence: 0.01, validAt: newer, committedAt: newer, evidenceSpanIDs: [])
+
+    let profile = MemoryOSCurrentViewService().currentEntityProfile(entityID: "entity-shiwen", statements: [highConfidenceOld, lowConfidenceNew], now: newer)
+
+    #expect(profile.records.first?.selectedRecordID == "entity-stmt-new")
+    #expect(profile.records.first?.value == "New low confidence relation")
+}
