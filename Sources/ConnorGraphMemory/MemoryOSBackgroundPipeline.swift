@@ -120,12 +120,14 @@ private enum MemoryOSL4RelationPromptGuide {
         \(lines.joined(separator: "\n"))
 
         L4 relation predicate rules:
+        - For conceptRelations, use subjectName and objectName to reference conceptEntities by exact name.
+        - Do not use local IDs or internal references; cross-reference by name only.
         - For conceptRelations.predicate, use only the raw values listed above.
         - Do not invent predicates. Do not output natural-language predicates such as is_a, has_a, can_do, supports, contains_part, or relates_to.
         - Map is_a to INSTANCE_OF when an entity is an instance of a type/class; map is_a to SUBCLASS_OF when a class/concept is a subtype of another class/concept; use BROADER_THAN/NARROWER_THAN for weak concept hierarchy.
         - Map has_a to HAS_PART for durable composition, CONTAINS for containment, SUPPORTS_CAPABILITY for capability, USES for tool/resource usage, or REQUIRES for necessary conditions.
         - RELATED_TO only as a last resort and include metadata.reason.
-        - SAME_AS, EQUIVALENT_TO, EXACT_MATCH, CAUSES, RISKS, SUPERSEDES and DEPRECATES require strong evidence and search-backed identity/context checks.
+        - SAME_AS, EQUIVALENT_TO, EXACT_MATCH, CAUSES, RISKS, SUPERSEDES and DEPRECATES are high-impact identity and causality predicates; verify the relation is semantically correct before using them.
         - Ordinary attributes and literal values should remain L2 facts; do not create L4 entities or conceptRelations just to hold property values.
         """
     }
