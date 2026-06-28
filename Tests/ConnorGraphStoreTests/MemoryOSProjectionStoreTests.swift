@@ -31,7 +31,7 @@ private func temporaryMemoryOSProjectionDatabaseURL(_ name: String = UUID().uuid
             MemoryOSEntityStatement(id: "entity-statement-1", entityID: "entity-person", predicate: .relatedTo, objectEntityID: "entity-project", text: "诗闻正在推进 Connor Memory OS H4。", assertionKind: .observed, confidence: 0.94, validAt: now, committedAt: now, evidenceSpanIDs: ["span-1"], sourceArtifactID: "artifact-1")
         ],
         beliefs: [
-            MemoryOSBelief(id: "belief-1", topic: "RELATED_TO", statement: "诗闻正在推进 Connor Memory OS H4。", projectionKind: .observed, confidence: 0.94, evidenceStatementIDs: ["statement-1"], validAt: now, projectedAt: now, sourceArtifactID: "artifact-1")
+            MemoryOSBelief(id: "belief-1", statement: "长期记忆系统应当支持可观察的投影批次。", domain: "software-engineering", relatedObjectNames: "Memory architecture", createdAt: now, updatedAt: now)
         ]
     )
 

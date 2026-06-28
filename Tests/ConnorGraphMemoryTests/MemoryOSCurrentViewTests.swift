@@ -20,8 +20,8 @@ import ConnorGraphMemory
 
 @Test func memoryOSCurrentViewReturnsDiagnosticOnlyForAmbiguousTemporalCandidates() {
     let now = Date(timeIntervalSince1970: 3_000)
-    let first = MemoryOSBelief(id: "belief-a", topic: "product_route", statement: "B2B", confidence: 0.82, evidenceStatementIDs: ["stmt-a"], validAt: now, projectedAt: now)
-    let second = MemoryOSBelief(id: "belief-b", topic: "product_route", statement: "consumer", confidence: 0.85, evidenceStatementIDs: ["stmt-b"], validAt: now.addingTimeInterval(60), projectedAt: now.addingTimeInterval(60))
+    let first = MemoryOSBelief(id: "belief-a", statement: "B2B", domain: "management", createdAt: now, updatedAt: now)
+    let second = MemoryOSBelief(id: "belief-b", statement: "consumer", domain: "management", createdAt: now.addingTimeInterval(60), updatedAt: now.addingTimeInterval(60))
 
     let records = MemoryOSCurrentViewService().currentBeliefs([first, second], now: now)
 

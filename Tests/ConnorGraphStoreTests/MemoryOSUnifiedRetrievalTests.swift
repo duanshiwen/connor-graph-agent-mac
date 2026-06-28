@@ -15,7 +15,7 @@ import ConnorGraphStore
     let node = MemoryOSNode(id: "node-1", stableKey: "knowledge:concept:elasticity-node", nodeType: "concept", name: "Elasticity", summary: "Operational fact node")
     try store.upsert(node: node)
     try store.upsert(statement: MemoryOSStatement(id: "statement-1", subjectID: node.id, predicate: "varies_with", text: "Elasticity varies with price sensitivity.", confidence: 0.9, validAt: now, committedAt: now, evidenceSpanIDs: [span.id]))
-    try store.upsert(belief: MemoryOSBelief(id: "knowledge-1", topic: "economics:theory", statement: "Elasticity is a reusable lens for price-response analysis.", projectionKind: .summarized, confidence: 0.86, evidenceStatementIDs: ["statement-1"], validAt: now, projectedAt: now))
+    try store.upsert(belief: MemoryOSBelief(id: "knowledge-1", statement: "Elasticity is a reusable lens for price-response analysis.", domain: "economics", relatedObjectNames: "Elasticity", createdAt: now, updatedAt: now))
     try store.upsert(entity: MemoryOSEntity(id: "entity-1", stableKey: "economics:concept:elasticity", entityType: "concept", name: "Elasticity", aliases: ["price elasticity"], summary: "A concept for price-response analysis", confidence: 0.9))
 
     let service = SQLiteMemoryOSUnifiedRetrievalService(store: store)
