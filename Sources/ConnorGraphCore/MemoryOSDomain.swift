@@ -329,10 +329,10 @@ public struct MemoryOSKnowledgeCandidate: Codable, Sendable, Equatable, Identifi
     public var confidence: Double
     public var evidenceStatementIDs: [String]
     public var evidenceSpanIDs: [String]
-    public var relatedEntityIDs: [String]
+    public var relatedEntityNames: [String]
     public var metadata: [String: String]
 
-    public init(id: String = UUID().uuidString, title: String, claim: String, category: String? = nil, knowledgeType: String? = nil, scope: String? = nil, domain: String? = nil, workObjectID: String? = nil, signalAssessment: MemoryOSKnowledgeSignalAssessment = MemoryOSKnowledgeSignalAssessment(), confidence: Double = 0.5, evidenceStatementIDs: [String] = [], evidenceSpanIDs: [String] = [], relatedEntityIDs: [String] = [], metadata: [String: String] = [:]) {
+    public init(id: String = UUID().uuidString, title: String, claim: String, category: String? = nil, knowledgeType: String? = nil, scope: String? = nil, domain: String? = nil, workObjectID: String? = nil, signalAssessment: MemoryOSKnowledgeSignalAssessment = MemoryOSKnowledgeSignalAssessment(), confidence: Double = 0.5, evidenceStatementIDs: [String] = [], evidenceSpanIDs: [String] = [], relatedEntityNames: [String] = [], metadata: [String: String] = [:]) {
         self.id = id
         self.title = title
         self.claim = claim
@@ -345,7 +345,7 @@ public struct MemoryOSKnowledgeCandidate: Codable, Sendable, Equatable, Identifi
         self.confidence = confidence
         self.evidenceStatementIDs = evidenceStatementIDs
         self.evidenceSpanIDs = evidenceSpanIDs
-        self.relatedEntityIDs = relatedEntityIDs
+        self.relatedEntityNames = relatedEntityNames
         self.metadata = metadata
     }
 }
@@ -534,49 +534,36 @@ public enum MemoryOSEntityType: String, Codable, Sendable, Equatable, CaseIterab
     ]
 }
 
-public struct MemoryOSExtractedConceptEntity: Codable, Sendable, Equatable, Identifiable {
-    public var id: String { localID }
-    public var localID: String
+public struct MemoryOSExtractedConceptEntity: Codable, Sendable, Equatable {
     public var name: String
     public var conceptType: String
     public var domain: String?
     public var summary: String
     public var aliases: [String]
-    public var confidence: Double
-    public var evidenceSpanIDs: [String]
     public var metadata: [String: String]
 
-    public init(localID: String, name: String, conceptType: String = "concept", domain: String? = nil, summary: String = "", aliases: [String] = [], confidence: Double = 0.5, evidenceSpanIDs: [String] = [], metadata: [String: String] = [:]) {
-        self.localID = localID
+    public init(name: String, conceptType: String = "concept", domain: String? = nil, summary: String = "", aliases: [String] = [], metadata: [String: String] = [:]) {
         self.name = name
         self.conceptType = conceptType
         self.domain = domain
         self.summary = summary
         self.aliases = aliases
-        self.confidence = confidence
-        self.evidenceSpanIDs = evidenceSpanIDs
         self.metadata = metadata
     }
 }
 
-public struct MemoryOSExtractedConceptRelation: Codable, Sendable, Equatable, Identifiable {
-    public var id: String
-    public var subjectLocalID: String
+public struct MemoryOSExtractedConceptRelation: Codable, Sendable, Equatable {
+    public var subjectName: String
     public var predicate: MemoryOSL4RelationPredicate
-    public var objectLocalID: String
+    public var objectName: String
     public var text: String
-    public var confidence: Double
-    public var evidenceSpanIDs: [String]
     public var metadata: [String: String]
 
-    public init(id: String = UUID().uuidString, subjectLocalID: String, predicate: MemoryOSL4RelationPredicate, objectLocalID: String, text: String, confidence: Double = 0.5, evidenceSpanIDs: [String] = [], metadata: [String: String] = [:]) {
-        self.id = id
-        self.subjectLocalID = subjectLocalID
+    public init(subjectName: String, predicate: MemoryOSL4RelationPredicate, objectName: String, text: String, metadata: [String: String] = [:]) {
+        self.subjectName = subjectName
         self.predicate = predicate
-        self.objectLocalID = objectLocalID
+        self.objectName = objectName
         self.text = text
-        self.confidence = confidence
-        self.evidenceSpanIDs = evidenceSpanIDs
         self.metadata = metadata
     }
 }
@@ -635,10 +622,8 @@ public struct MemoryOSL1UnifiedProjectionOutput: Codable, Sendable, Equatable {
     public var conceptRelations: [MemoryOSExtractedConceptRelation]
     public var promotionDecisions: [MemoryOSL1PromotionDecision]
     public var warnings: [GraphStructuredExtractionWarning]
-    public var confidence: Double?
     public var metadata: [String: String]
-
-    public init(operationalEntities: [GraphStructuredExtractedEntity] = [], operationalStatements: [GraphStructuredExtractedStatement] = [], evidenceSpans: [GraphStructuredEvidenceSpan] = [], knowledgeCandidates: [MemoryOSKnowledgeCandidate] = [], conceptEntities: [MemoryOSExtractedConceptEntity] = [], conceptRelations: [MemoryOSExtractedConceptRelation] = [], promotionDecisions: [MemoryOSL1PromotionDecision] = [], warnings: [GraphStructuredExtractionWarning] = [], confidence: Double? = nil, metadata: [String: String] = [:]) {
+    public init(operationalEntities: [GraphStructuredExtractedEntity] = [], operationalStatements: [GraphStructuredExtractedStatement] = [], evidenceSpans: [GraphStructuredEvidenceSpan] = [], knowledgeCandidates: [MemoryOSKnowledgeCandidate] = [], conceptEntities: [MemoryOSExtractedConceptEntity] = [], conceptRelations: [MemoryOSExtractedConceptRelation] = [], promotionDecisions: [MemoryOSL1PromotionDecision] = [], warnings: [GraphStructuredExtractionWarning] = [], metadata: [String: String] = [:]) {
         self.operationalEntities = operationalEntities
         self.operationalStatements = operationalStatements
         self.evidenceSpans = evidenceSpans
@@ -647,7 +632,6 @@ public struct MemoryOSL1UnifiedProjectionOutput: Codable, Sendable, Equatable {
         self.conceptRelations = conceptRelations
         self.promotionDecisions = promotionDecisions
         self.warnings = warnings
-        self.confidence = confidence
         self.metadata = metadata
     }
 }

@@ -469,7 +469,6 @@ public struct MemoryOSUpdateCurrentUserProfileTool: AgentTool {
             conceptRelations: [],
             promotionDecisions: [],
             warnings: [],
-            confidence: 0.9,
             metadata: [
                 "schema_purpose": "current_user_fact_update",
                 "person_role": "current_user",
@@ -561,37 +560,6 @@ public struct MemoryOSQueryGraphTool: AgentTool {
         let payload = MemoryOSL4GraphToolPayload.render(subgraph: subgraph, extra: ["query": text, "intent": intent.rawValue, "entityID": arguments.string("entityID") ?? "", "classEntityIDs": classIDs, "predicates": predicates, "direction": direction.rawValue, "includeEvidence": includeEvidence])
         let json = try MemoryOSL4GraphToolPayload.renderJSON(payload)
         return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Memory OS query_graph returned \(subgraph.nodes.count) node(s) and \(subgraph.edges.count) edge(s).", contentJSON: json, citations: subgraph.nodes.map(\.id) + subgraph.edges.map(\.id) + subgraph.evidenceRefs + subgraph.provenanceRefs)
-    }
-
-    private static func parseStringArray(_ values: [SendableJSONValue]?) -> [String] {
-        values?.compactMap { $0.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty } ?? []
-    }
-}
-
-public struct MemoryOSTraceEvidenceTool: AgentTool {
-    public let name = "memory_os_trace_evidence"
-    public let description = "Trace Memory OS evidence from L3 beliefs or L2 statements down to exact L0 provenance spans and objects. Use this when answer quality depends on source verification."
-    public let permission: AgentPermissionCapability = .readGraph
-    public let inputSchema = AgentToolInputSchema.object(properties: [
-        "spanIDs": .array(items: .string(description: "L0 span id."), description: "Optional L0 span ids."),
-        "statementIDs": .array(items: .string(description: "L2 statement id."), description: "Optional L2 statement ids."),
-        "beliefIDs": .array(items: .string(description: "L3 belief id."), description: "Optional L3 belief ids."),
-        "limit": .number(description: "Maximum traced nodes/refs. Defaults to 100.")
-    ], required: [])
-
-    private let facade: AppMemoryOSFacade
-    public init(facade: AppMemoryOSFacade) { self.facade = facade }
-
-    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        let spanIDs = Self.parseStringArray(arguments.array("spanIDs"))
-        let statementIDs = Self.parseStringArray(arguments.array("statementIDs"))
-        let beliefIDs = Self.parseStringArray(arguments.array("beliefIDs"))
-        guard !spanIDs.isEmpty || !statementIDs.isEmpty || !beliefIDs.isEmpty else { throw AgentToolError.invalidArguments("At least one of spanIDs, statementIDs, or beliefIDs is required") }
-        let limit = max(1, min(arguments.int("limit") ?? 100, 500))
-        let subgraph = try facade.traceMemoryOSEvidence(spanIDs: spanIDs, statementIDs: statementIDs, beliefIDs: beliefIDs, limit: limit)
-        let payload = MemoryOSL4GraphToolPayload.render(subgraph: subgraph, extra: ["spanIDs": spanIDs, "statementIDs": statementIDs, "beliefIDs": beliefIDs])
-        let json = try MemoryOSL4GraphToolPayload.renderJSON(payload)
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Evidence trace returned \(subgraph.nodes.count) node(s) and \(subgraph.edges.count) edge(s).", contentJSON: json, citations: subgraph.evidenceRefs + subgraph.provenanceRefs)
     }
 
     private static func parseStringArray(_ values: [SendableJSONValue]?) -> [String] {
@@ -845,6 +813,122 @@ public struct MemoryOSReadProvenanceTool: AgentTool {
     }
 }
 
+// MARK: - L4 Direct Write Tool
+
+public struct MemoryOSL4UpdateEntitiesTool: AgentTool {
+    public let name = "memory_os_l4_update_entities"
+    public let description = "Write L4 stable entities and entity-to-entity relations directly. Use this for durable concept/entity anchors. Entities are upserted by name+type+domain; relations are always appended. Do not provide confidence, evidence, or internal IDs."
+    public let permission: AgentPermissionCapability = .proposeGraphWrite
+    public let inputSchema = AgentToolInputSchema.object(properties: [
+        "entities": .array(items: .object(properties: [
+            "name": .string(description: "Entity name (used as unique reference key within this call)."),
+            "type": .string(description: "Entity type. Defaults to concept. See MemoryOSEntityType for valid values."),
+            "domain": .string(description: "Optional domain/scope such as knowledge-management, software-engineering."),
+            "summary": .string(description: "Optional concise summary."),
+            "aliases": .string(description: "Optional aliases separated by comma or semicolon.")
+        ], required: ["name"]), description: "L4 entities to upsert."),
+        "relations": .array(items: .object(properties: [
+            "subjectName": .string(description: "Subject entity name (must match an entity.name in this call)."),
+            "predicate": .string(description: "L4 relation predicate raw value such as INSTANCE_OF, PART_OF, RELATED_TO."),
+            "objectName": .string(description: "Object entity name (must match an entity.name in this call)."),
+            "text": .string(description: "Optional natural-language description of the relation.")
+        ], required: ["subjectName", "predicate", "objectName"]), description: "L4 entity relations to append.")
+    ], required: ["entities"])
+
+    private let facade: AppMemoryOSFacade
+
+    public init(facade: AppMemoryOSFacade) { self.facade = facade }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        let request = try Self.decodeRequest(arguments)
+        let result = try facade.writeMemoryOSL4Entities(entities: request.entities, relations: request.relations)
+        let json = try Self.renderJSON(result)
+        return AgentToolResult(
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: "Created \(result.createdEntityCount) L4 entit(ies) and \(result.createdRelationCount) relation(s).",
+            contentJSON: json,
+            citations: []
+        )
+    }
+
+    private struct L4WriteRequest: Codable {
+        var entities: [MemoryOSL4EntityInput]
+        var relations: [MemoryOSL4RelationInput]
+    }
+
+    private static func decodeRequest(_ arguments: AgentToolArguments) throws -> L4WriteRequest {
+        guard let entities = arguments.array("entities") else {
+            throw AgentToolError.invalidArguments("entities is required")
+        }
+        let relations = arguments.array("relations") ?? []
+        let object = SendableJSONValue.object([
+            "entities": .array(entities),
+            "relations": .array(relations)
+        ])
+        let data = try JSONSerialization.data(withJSONObject: object.jsonCompatibleObject(), options: [])
+        return try JSONDecoder().decode(L4WriteRequest.self, from: data)
+    }
+
+    private static func renderJSON<T: Encodable>(_ object: T) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try encoder.encode(object)
+        return String(data: data, encoding: .utf8) ?? "{}"
+    }
+}
+
+// MARK: - L3 Direct Write Tool
+
+public struct MemoryOSL3UpdateBeliefsTool: AgentTool {
+    public let name = "memory_os_l3_update_beliefs"
+    public let description = "Write L3 reusable knowledge statements directly. Use this for cross-session knowledge/theory records. Do not provide confidence, evidence, or internal IDs."
+    public let permission: AgentPermissionCapability = .proposeGraphWrite
+    public let inputSchema = AgentToolInputSchema.object(properties: [
+        "beliefs": .array(items: .object(properties: [
+            "statement": .string(description: "Complete knowledge claim statement."),
+            "domain": .string(description: "Discipline domain in lowercase kebab-case (e.g. knowledge-management, software-engineering, psychology). Defaults to general-knowledge."),
+            "relatedEntityNames": .string(description: "Optional comma-separated L4 concept entity names or aliases associated with this knowledge.")
+        ], required: ["statement"]), description: "L3 knowledge beliefs to write.")
+    ], required: ["beliefs"])
+
+    private let facade: AppMemoryOSFacade
+
+    public init(facade: AppMemoryOSFacade) { self.facade = facade }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        let beliefs = try Self.decodeBeliefs(arguments)
+        let result = try facade.writeMemoryOSL3Beliefs(beliefs)
+        let json = try Self.renderJSON(result)
+        return AgentToolResult(
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: "Created \(result.createdBeliefCount) L3 belief(s).",
+            contentJSON: json,
+            citations: []
+        )
+    }
+
+    private static func decodeBeliefs(_ arguments: AgentToolArguments) throws -> [MemoryOSL3BeliefInput] {
+        guard let items = arguments.array("beliefs") else { return [] }
+        let object = SendableJSONValue.object(["beliefs": .array(items)])
+        let data = try JSONSerialization.data(withJSONObject: object.jsonCompatibleObject(), options: [])
+        let wrapper = try JSONDecoder().decode(L3WriteEnvelope.self, from: data)
+        return wrapper.beliefs
+    }
+
+    private struct L3WriteEnvelope: Codable {
+        var beliefs: [MemoryOSL3BeliefInput]
+    }
+
+    private static func renderJSON<T: Encodable>(_ object: T) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try encoder.encode(object)
+        return String(data: data, encoding: .utf8) ?? "{}"
+    }
+}
+
 public extension AgentToolRegistry {
     mutating func registerMemoryOSTools(facade: AppMemoryOSFacade) {
         register(MemoryOSL2FindEntitiesTool(facade: facade))
@@ -854,7 +938,6 @@ public extension AgentToolRegistry {
         register(MemoryOSContextTool(facade: facade))
         register(MemoryOSSearchTool(facade: facade))
         register(MemoryOSQueryGraphTool(facade: facade))
-        register(MemoryOSTraceEvidenceTool(facade: facade))
         register(MemoryOSL2FindStatementsTool(facade: facade))
         register(MemoryOSL3ExpandBeliefTool(facade: facade))
         register(MemoryOSL3ListDomainsTool(facade: facade))
@@ -862,6 +945,8 @@ public extension AgentToolRegistry {
         register(MemoryOSL4FindEntityTool(facade: facade))
         register(MemoryOSL4NeighborsTool(facade: facade))
         register(MemoryOSL4InstancesTool(facade: facade))
+        register(MemoryOSL4UpdateEntitiesTool(facade: facade))
+        register(MemoryOSL3UpdateBeliefsTool(facade: facade))
         register(MemoryOSReadRecordTool(facade: facade))
         register(MemoryOSReadProvenanceTool(facade: facade))
     }
