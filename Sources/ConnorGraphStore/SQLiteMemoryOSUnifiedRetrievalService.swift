@@ -110,7 +110,7 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
             guard !frontier.isEmpty, results.count < limit else { break }
             let quoted = frontier.map { store.quote($0) }.joined(separator: ",")
             let rows = try store.query(sql: """
-            SELECT id, entity_id, predicate, object_entity_id, text, confidence
+            SELECT id, entity_id, predicate, object_entity_id, text
             FROM memory_l4_entity_statements
             WHERE entity_id IN (\(quoted)) OR (object_entity_id IS NOT NULL AND object_entity_id IN (\(quoted)))
             ORDER BY committed_at DESC
@@ -121,7 +121,7 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
                 let source = row[1]
                 let object = row[3].isEmpty ? nil : row[3]
                 let related = source == entityID || frontier.contains(source) ? object : source
-                let score = l4ExpansionScore(predicate: row[2], confidence: Double(row[5]) ?? 1.0, depth: currentDepth)
+                let score = l4ExpansionScore(predicate: row[2], depth: currentDepth)
                 results.append(MemoryOSL4ExpansionHit(recordID: row[0], sourceEntityID: source, relatedEntityID: related, predicate: row[2], text: row[4], depth: currentDepth, score: score))
                 if let related, !visited.contains(related) {
                     visited.insert(related)
@@ -136,10 +136,10 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
         }.prefix(limit))
     }
 
-    private func l4ExpansionScore(predicate rawValue: String, confidence: Double, depth: Int) -> Double {
+    private func l4ExpansionScore(predicate rawValue: String, depth: Int) -> Double {
         let relationWeight = MemoryOSL4RelationPredicate(rawValue: rawValue)?.retrievalWeight ?? 1.0
         let depthDecay = 1.0 / Double(max(depth, 1))
-        return relationWeight * confidence * depthDecay
+        return relationWeight * depthDecay
     }
 
     private func searchL0(_ text: String, limit: Int) throws -> [MemoryOSRetrievalHit] {
