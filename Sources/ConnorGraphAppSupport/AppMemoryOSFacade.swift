@@ -202,6 +202,10 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         try SQLiteMemoryOSGraphRetrievalService(store: store).l3ExpandBelief(MemoryOSL3BeliefExpandQuery(beliefID: beliefID, topic: topic, text: text, limit: limit))
     }
 
+    public func listMemoryOSL3Domains() throws -> [MemoryOSL3DomainSummary] {
+        try store.listL3Domains()
+    }
+
     public func findMemoryOSL4Entity(text: String, limit: Int = 20) throws -> MemoryOSGraphSubgraph {
         try SQLiteMemoryOSGraphRetrievalService(store: store).l4FindEntity(MemoryOSL4EntityFindQuery(text: text, limit: limit))
     }
@@ -672,13 +676,11 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
             payload = ["layer": "L2", "recordID": row[0], "record": ["id": row[0], "subjectID": row[1], "predicate": row[2], "objectID": row[3], "text": row[4], "assertionKind": row[5], "confidence": Double(row[6]) ?? 0, "validAt": row[7], "committedAt": row[8], "evidenceSpanIDs": evidence, "sourceArtifactID": row[10], "metadata": metadata], "evidenceRefs": evidence, "provenanceRefs": [], "entityRefs": [row[1], row[3]].filter { !$0.isEmpty }]
         case "L3":
             let rows = try store.query(sql: """
-            SELECT id, topic, statement, projection_kind, confidence, evidence_statement_ids_json, valid_at, projected_at, source_artifact_id, metadata_json
+            SELECT id, statement, domain, related_object_names, created_at, updated_at
             FROM memory_l3_beliefs WHERE id = \(quotedID) LIMIT 1
             """)
             guard let row = rows.first else { throw SQLiteMemoryOSStoreError.missingRecord("Missing L3 knowledge record: \(recordID)") }
-            let evidence = (try? store.decode([String].self, row[5])) ?? []
-            let metadata = (try? store.decode([String: String].self, row[9])) ?? [:]
-            payload = ["layer": "L3", "recordID": row[0], "record": ["id": row[0], "topic": row[1], "statement": row[2], "projectionKind": row[3], "confidence": Double(row[4]) ?? 0, "evidenceStatementIDs": evidence, "validAt": row[6], "projectedAt": row[7], "sourceArtifactID": row[8], "metadata": metadata], "evidenceRefs": evidence, "provenanceRefs": [], "entityRefs": []]
+            payload = ["layer": "L3", "recordID": row[0], "record": ["id": row[0], "statement": row[1], "domain": row[2], "relatedObjectNames": row[3], "createdAt": row[4], "updatedAt": row[5]], "evidenceRefs": [], "provenanceRefs": [], "entityRefs": []]
         case "L4":
             if let entity = try store.entity(id: recordID) {
                 payload = ["layer": "L4", "recordID": entity.id, "record": ["id": entity.id, "stableKey": entity.stableKey, "entityType": entity.entityType, "name": entity.name, "aliases": entity.aliases, "summary": entity.summary, "confidence": entity.confidence, "createdAt": Self.iso8601(entity.createdAt), "updatedAt": Self.iso8601(entity.updatedAt), "validFrom": entity.validFrom.map(Self.iso8601) ?? "", "metadata": entity.metadata], "evidenceRefs": [], "provenanceRefs": [], "entityRefs": [entity.id]]

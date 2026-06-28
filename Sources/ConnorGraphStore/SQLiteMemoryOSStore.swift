@@ -80,6 +80,7 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
 
     public func migrate() throws {
         try configurePragmas()
+        try rebuildLegacyL3BeliefSchemaIfNeeded()
         try execute(Self.schemaSQL)
         try execute("PRAGMA user_version = \(Self.currentSchemaVersion);")
         try execute("""
@@ -94,6 +95,15 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
 
     public func tableNames() throws -> Set<String> {
         Set(try queryStrings(sql: "SELECT name FROM sqlite_master WHERE type IN ('table', 'view')"))
+    }
+
+    private func rebuildLegacyL3BeliefSchemaIfNeeded() throws {
+        let tables = try tableNames()
+        guard tables.contains("memory_l3_beliefs") else { return }
+        let columns = try query(sql: "PRAGMA table_info(memory_l3_beliefs);").map { $0[1] }
+        guard columns.contains("topic") || columns.contains("projection_kind") || columns.contains("metadata_json") else { return }
+        try execute("DROP TABLE IF EXISTS memory_l3_beliefs_fts;")
+        try execute("DROP TABLE IF EXISTS memory_l3_beliefs;")
     }
 
     public func indexNames() throws -> Set<String> {

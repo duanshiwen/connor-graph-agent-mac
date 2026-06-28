@@ -627,13 +627,14 @@ public struct MemoryOSL2FindStatementsTool: AgentTool {
 
 public struct MemoryOSL3ExpandBeliefTool: AgentTool {
     public let name = "memory_os_l3_expand_belief"
-    public let description = "Expand Memory OS L3 belief nodes to their supporting L2 statements. Use this before memory_os_trace_evidence when derived knowledge requires source grounding."
+    public let description = "Expand Memory OS L3 statement nodes. L3 no longer stores supporting L2 evidence edges; related_object_names are durable L4 concept names/aliases only."
     public let permission: AgentPermissionCapability = .readGraph
     public let inputSchema = AgentToolInputSchema.object(properties: [
-        "beliefID": .string(description: "Optional L3 belief id."),
-        "topic": .string(description: "Optional belief topic filter."),
-        "text": .string(description: "Optional text query over belief topic/statement."),
-        "limit": .number(description: "Maximum belief nodes. Defaults to 20.")
+        "beliefID": .string(description: "Optional L3 statement/belief id."),
+        "domain": .string(description: "Optional discipline domain filter."),
+        "topic": .string(description: "Deprecated alias for domain."),
+        "text": .string(description: "Optional text query over statement only."),
+        "limit": .number(description: "Maximum L3 statement nodes. Defaults to 20.")
     ], required: [])
 
     private let facade: AppMemoryOSFacade
@@ -641,14 +642,31 @@ public struct MemoryOSL3ExpandBeliefTool: AgentTool {
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
         let beliefID = arguments.string("beliefID")
-        let topic = arguments.string("topic")
+        let domain = arguments.string("domain") ?? arguments.string("topic")
         let text = arguments.string("text")
-        guard !(beliefID ?? "").isEmpty || !(topic ?? "").isEmpty || !(text ?? "").isEmpty else { throw AgentToolError.invalidArguments("At least one of beliefID, topic, or text is required") }
+        guard !(beliefID ?? "").isEmpty || !(domain ?? "").isEmpty || !(text ?? "").isEmpty else { throw AgentToolError.invalidArguments("At least one of beliefID, domain, or text is required") }
         let limit = max(1, min(arguments.int("limit") ?? 20, 100))
-        let subgraph = try facade.expandMemoryOSL3Belief(beliefID: beliefID, topic: topic, text: text, limit: limit)
-        let payload = MemoryOSL4GraphToolPayload.render(subgraph: subgraph, extra: ["beliefID": beliefID ?? "", "topic": topic ?? "", "query": text ?? ""])
+        let subgraph = try facade.expandMemoryOSL3Belief(beliefID: beliefID, topic: domain, text: text, limit: limit)
+        let payload = MemoryOSL4GraphToolPayload.render(subgraph: subgraph, extra: ["beliefID": beliefID ?? "", "domain": domain ?? "", "query": text ?? ""])
         let json = try MemoryOSL4GraphToolPayload.renderJSON(payload)
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "L3 belief expansion returned \(subgraph.nodes.count) node(s) and \(subgraph.edges.count) edge(s).", contentJSON: json, citations: subgraph.nodes.map(\.id) + subgraph.edges.map(\.id))
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "L3 statement expansion returned \(subgraph.nodes.count) node(s).", contentJSON: json, citations: subgraph.nodes.map(\.id) + subgraph.edges.map(\.id))
+    }
+}
+
+public struct MemoryOSL3ListDomainsTool: AgentTool {
+    public let name = "memory_os_l3_list_domains"
+    public let description = "List current Memory OS L3 discipline domains and counts. Use this before emitting L3 knowledge candidates to reuse stable discipline domains."
+    public let permission: AgentPermissionCapability = .readGraph
+    public let inputSchema = AgentToolInputSchema.object(properties: [:], required: [])
+
+    private let facade: AppMemoryOSFacade
+    public init(facade: AppMemoryOSFacade) { self.facade = facade }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        let domains = try facade.listMemoryOSL3Domains()
+        let data = try JSONEncoder().encode(["domains": domains])
+        let json = String(data: data, encoding: .utf8) ?? "{}"
+        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "L3 has \(domains.count) discipline domain(s).", contentJSON: json, citations: domains.map(\.domain))
     }
 }
 
@@ -839,6 +857,7 @@ public extension AgentToolRegistry {
         register(MemoryOSTraceEvidenceTool(facade: facade))
         register(MemoryOSL2FindStatementsTool(facade: facade))
         register(MemoryOSL3ExpandBeliefTool(facade: facade))
+        register(MemoryOSL3ListDomainsTool(facade: facade))
         register(MemoryOSExpandL4Tool(facade: facade))
         register(MemoryOSL4FindEntityTool(facade: facade))
         register(MemoryOSL4NeighborsTool(facade: facade))

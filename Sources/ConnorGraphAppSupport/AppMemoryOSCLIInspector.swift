@@ -135,11 +135,15 @@ public struct AppMemoryOSCLIInspector: Sendable {
 
     public func listL3Beliefs(limit: Int = 20) throws -> [MemoryOSCLIRow] {
         try rows(sql: """
-        SELECT id, topic, statement, projection_kind, confidence, evidence_statement_ids_json, valid_at, projected_at, source_artifact_id, metadata_json
+        SELECT id, statement, domain, related_object_names, created_at, updated_at
         FROM memory_l3_beliefs
-        ORDER BY projected_at DESC, id ASC
+        ORDER BY updated_at DESC, id ASC
         LIMIT \(safeLimit(limit))
-        """, columns: ["id", "topic", "statement", "projection_kind", "confidence", "evidence_statement_ids_json", "valid_at", "projected_at", "source_artifact_id", "metadata_json"])
+        """, columns: ["id", "statement", "domain", "related_object_names", "created_at", "updated_at"])
+    }
+
+    public func listL3Domains() throws -> [MemoryOSL3DomainSummary] {
+        try store.listL3Domains()
     }
 
     public func expandL3Belief(beliefID: String? = nil, topic: String? = nil, text: String? = nil, limit: Int = 20) throws -> MemoryOSGraphSubgraph {
@@ -447,9 +451,9 @@ public struct AppMemoryOSCLIInspector: Sendable {
             """, columns: ["id", "subject_id", "predicate", "object_id", "text", "assertion_kind", "confidence", "valid_at", "committed_at", "evidence_span_ids_json", "source_artifact_id", "metadata_json"])
         case "L3":
             return try firstRecord(layer: "L3", sql: """
-            SELECT id, topic, statement, projection_kind, confidence, evidence_statement_ids_json, valid_at, projected_at, source_artifact_id, metadata_json
+            SELECT id, statement, domain, related_object_names, created_at, updated_at
             FROM memory_l3_beliefs WHERE id = \(store.quote(id)) LIMIT 1
-            """, columns: ["id", "topic", "statement", "projection_kind", "confidence", "evidence_statement_ids_json", "valid_at", "projected_at", "source_artifact_id", "metadata_json"])
+            """, columns: ["id", "statement", "domain", "related_object_names", "created_at", "updated_at"])
         case "L4":
             return try firstRecord(layer: "L4", sql: """
             SELECT id, stable_key, entity_type, name, aliases_json, summary, confidence, created_at, updated_at, valid_from, metadata_json
