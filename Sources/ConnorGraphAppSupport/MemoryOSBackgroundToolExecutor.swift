@@ -32,7 +32,6 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
         "memory_os_search",
         "memory_os_read_record",
         "memory_os_read_provenance",
-        "memory_os_trace_evidence",
         "memory_os_expand_l4",
         "memory_os_l4_find_entity",
         "memory_os_l4_neighbors"
@@ -70,14 +69,6 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
             let spanID = args.string("spanID")
             let json = try facade.readMemoryOSProvenanceJSON(provenanceObjectID: provenanceObjectID, spanID: spanID)
             return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: json, contentText: "Read L0 provenance \(provenanceObjectID).", citations: [provenanceObjectID] + [spanID].compactMap { $0 })
-
-        case "memory_os_trace_evidence":
-            let spanIDs = args.stringArray("spanIDs") ?? []
-            let statementIDs = args.stringArray("statementIDs") ?? []
-            let beliefIDs = args.stringArray("beliefIDs") ?? []
-            let limit = args.int("limit") ?? 100
-            let graph = try facade.traceMemoryOSEvidence(spanIDs: spanIDs, statementIDs: statementIDs, beliefIDs: beliefIDs, limit: limit)
-            return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: facade.store.json(graph), contentText: "Traced evidence graph.", citations: spanIDs + statementIDs + beliefIDs)
 
         case "memory_os_expand_l4":
             let entityID = try args.requiredString("entityID")

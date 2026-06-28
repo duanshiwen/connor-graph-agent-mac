@@ -55,9 +55,6 @@ public enum AppMemoryOSCLIRouter {
                 ),
                 encoder: encoder
             )
-        case "trace":
-            return try routeTrace(args: Array(args.dropFirst()), inspector: inspector, encoder: encoder)
-        case "queue":
             return try encode(try inspector.queue(limit: intOption("--limit", in: args, default: 20), status: optionValue("--status", in: args), kind: optionValue("--kind", in: args)), encoder: encoder)
         case "runs":
             return try encode(try inspector.runs(limit: intOption("--limit", in: args, default: 20)), encoder: encoder)
@@ -184,20 +181,6 @@ public enum AppMemoryOSCLIRouter {
         }
     }
 
-    private static func routeTrace(args: [String], inspector: AppMemoryOSCLIInspector, encoder: JSONEncoder) throws -> String {
-        switch args.first ?? "evidence" {
-        case "evidence":
-            return try encode(
-                try inspector.traceEvidence(
-                    spanIDs: optionValue("--span", in: args).map(splitCSV) ?? [],
-                    statementIDs: optionValue("--statement", in: args).map(splitCSV) ?? [],
-                    beliefIDs: optionValue("--belief", in: args).map(splitCSV) ?? [],
-                    limit: intOption("--limit", in: args, default: 100)
-                ),
-                encoder: encoder
-            )
-        default: return try encode(MemoryOSCLIError(error: "unknown_trace_command", usage: "connor memory trace evidence [--span id[,id]] [--statement id[,id]] [--belief id[,id]] [--limit N]"), encoder: encoder)
-        }
     }
 
     private static func routeRun(args: [String], inspector: AppMemoryOSCLIInspector, encoder: JSONEncoder) throws -> String {
@@ -320,7 +303,6 @@ public enum AppMemoryOSCLIRouter {
     private static func splitCSV(_ value: String) -> [String] {
         value.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
     }
-}
 
 public struct MemoryOSCLIError: Codable, Sendable, Equatable {
     public var error: String
