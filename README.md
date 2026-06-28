@@ -256,23 +256,24 @@ Layer contract:
 - **L1 Capture Ledger / Processing Queue**：durable capture events and operational queue state.
 - **L2 Operational Memory**：append-only temporal facts extracted from validated evidence.
 - **L3 Knowledge Layer**：reusable theories, claims, frameworks, patterns, standards, processes, SOPs and decision bases.
-- **L4 Stable Entity / Concept Layer**：stable anchors for people, projects, organizations, work objects and concepts.
+- **L4 Stable Entity / Concept Layer**：relaxed stable anchors for people, projects, organizations, work objects and concepts. L4 confidence/evidence fields are optional annotations, not relation acceptance gates.
 
 Write path:
 
 1. Chat messages, browser selections and native-source evidence enter through `AppMemoryOSFacade`.
 2. Raw evidence is preserved as L0/L1.
 3. LLMs may propose structured artifacts.
-4. Repositories accept projections only after artifact preservation, schema validation, evidence validation, audit logging and transactional projection.
+4. Repositories accept projections after artifact preservation, schema validation, audit logging and transactional projection. L0/L1 preserve provenance; L4 relation acceptance does not depend on LLM-provided confidence or required evidence spans.
 
 Background AI jobs:
 
-- `memory.l1.unified_projection`：groups pending L1 captures and projects evidence-backed operational facts into L2 plus stable entity facts into L4.
+- `memory.l1.unified_projection`：groups pending L1 captures and projects operational facts into L2 plus relaxed stable entity facts into L4.
 - `memory.l2.synthesize_knowledge`：groups pending L2 statements and promotes only reusable knowledge into L3/L4 through the four filters: signal quality, reuse scope, novelty and structurability.
 
 Important rules:
 
 - High confidence alone never promotes L2 facts to L3.
+- L4 does not use LLM-provided confidence or required evidence spans as relation gates; see `Docs/MemoryOS/L4RelaxedEntityGraph.md`.
 - Historical semantic records are append-only; currentness is derived by query/current-view logic.
 - Processed L1 capture events are physically deleted after accepted projection because L0 remains durable evidence.
 - L2 organization state is tracked outside immutable fact rows.
