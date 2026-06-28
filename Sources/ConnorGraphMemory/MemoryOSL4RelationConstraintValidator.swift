@@ -39,11 +39,19 @@ public enum MemoryOSL4RelationConstraintRegistry {
     }
 
     private static let typeLikeConceptTypes: Set<String> = [
-        "class", "type", "concept_type", "entity_type", "category", "taxonomy_class", "ontology_class", "kind", "role", "framework_type"
+        MemoryOSEntityType.concept.rawValue,
+        MemoryOSEntityType.role.rawValue,
+        MemoryOSEntityType.framework.rawValue,
+        MemoryOSEntityType.standard.rawValue
     ]
 
     private static let conceptLikeTypes: Set<String> = [
-        "concept", "class", "type", "category", "framework", "standard", "principle", "pattern", "method", "theory", "domain", "knowledge_type"
+        MemoryOSEntityType.concept.rawValue,
+        MemoryOSEntityType.framework.rawValue,
+        MemoryOSEntityType.standard.rawValue,
+        MemoryOSEntityType.theory.rawValue,
+        MemoryOSEntityType.discipline.rawValue,
+        MemoryOSEntityType.rule.rawValue
     ]
 }
 
@@ -106,24 +114,20 @@ public struct MemoryOSL4RelationConstraintValidator: Sendable {
     }
 
     private func matchesType(_ type: String, allowed: Set<String>) -> Bool {
-        let normalized = normalizeType(type)
-        if allowed.contains(normalized) { return true }
-        return allowed.contains { normalized.contains($0) || $0.contains(normalized) }
+        let normalized = MemoryOSEntityType.normalizeRawType(type)
+        return allowed.contains(normalized)
     }
 
     private func compatibleIdentityTypes(_ lhs: String, _ rhs: String) -> Bool {
-        normalizeType(lhs) == normalizeType(rhs)
+        MemoryOSEntityType.normalizeRawType(lhs) == MemoryOSEntityType.normalizeRawType(rhs)
     }
 
     private func isGovernanceLike(_ type: String) -> Bool {
-        let normalized = normalizeType(type)
-        return ["decision", "rule", "policy", "standard", "constraint", "requirement", "sop", "runbook"].contains { normalized.contains($0) }
-    }
-
-    private func normalizeType(_ type: String) -> String {
-        type.trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-            .replacingOccurrences(of: "-", with: "_")
-            .replacingOccurrences(of: " ", with: "_")
+        let normalized = MemoryOSEntityType.normalizeRawType(type)
+        return [
+            MemoryOSEntityType.decision.rawValue,
+            MemoryOSEntityType.rule.rawValue,
+            MemoryOSEntityType.standard.rawValue
+        ].contains(normalized)
     }
 }
