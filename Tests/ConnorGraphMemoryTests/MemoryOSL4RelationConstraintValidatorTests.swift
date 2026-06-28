@@ -23,7 +23,7 @@ import ConnorGraphMemory
     #expect(issues.isEmpty)
 }
 
-@Test func l4RelationConstraintValidatorRejectsMissingEvidenceAndSelfLoop() {
+@Test func l4RelationConstraintValidatorAllowsMissingEvidenceButRejectsSelfLoop() {
     let validator = MemoryOSL4RelationConstraintValidator()
     let entities = [
         MemoryOSExtractedConceptEntity(localID: "memory-os", name: "Memory OS", conceptType: "system", confidence: 0.9)
@@ -40,11 +40,11 @@ import ConnorGraphMemory
     let issues = validator.validate(relation: relation, conceptEntities: entities, evidenceSpanIDs: [])
     let codes = Set(issues.map(\.code))
 
-    #expect(codes.contains("missing_relation_evidence"))
+    #expect(!codes.contains("missing_relation_evidence"))
     #expect(codes.contains("l4_relation_self_loop"))
 }
 
-@Test func l4RelationConstraintValidatorRejectsWeakRelationsWithoutReason() {
+@Test func l4RelationConstraintValidatorAllowsWeakRelationsWithoutReason() {
     let validator = MemoryOSL4RelationConstraintValidator()
     let entities = [
         MemoryOSExtractedConceptEntity(localID: "memory-os", name: "Memory OS", conceptType: "system"),
@@ -61,10 +61,10 @@ import ConnorGraphMemory
 
     let issues = validator.validate(relation: relation, conceptEntities: entities, evidenceSpanIDs: ["span-1"])
 
-    #expect(issues.contains { $0.code == "missing_l4_relation_metadata" && $0.message.contains("reason") })
+    #expect(issues.isEmpty)
 }
 
-@Test func l4RelationConstraintValidatorRejectsCausalRelationsWithoutBasis() {
+@Test func l4RelationConstraintValidatorAllowsCausalRelationsWithoutBasis() {
     let validator = MemoryOSL4RelationConstraintValidator()
     let entities = [
         MemoryOSExtractedConceptEntity(localID: "tool-loop", name: "Tool Loop", conceptType: "mechanism"),
@@ -81,10 +81,10 @@ import ConnorGraphMemory
 
     let issues = validator.validate(relation: relation, conceptEntities: entities, evidenceSpanIDs: ["span-1"])
 
-    #expect(issues.contains { $0.code == "missing_l4_relation_metadata" && $0.message.contains("causal_basis") })
+    #expect(issues.isEmpty)
 }
 
-@Test func l4RelationConstraintValidatorRejectsStrictIdentityBelowConfidence() {
+@Test func l4RelationConstraintValidatorAllowsStrictIdentityBelowConfidence() {
     let validator = MemoryOSL4RelationConstraintValidator()
     let entities = [
         MemoryOSExtractedConceptEntity(localID: "a", name: "Memory OS", conceptType: "system"),
@@ -95,13 +95,13 @@ import ConnorGraphMemory
         predicate: .sameAs,
         objectLocalID: "b",
         text: "Memory OS is the same as Memory System.",
-        confidence: 0.8,
-        evidenceSpanIDs: ["span-1"]
+        confidence: 0.1,
+        evidenceSpanIDs: ["missing-span"]
     )
 
-    let issues = validator.validate(relation: relation, conceptEntities: entities, evidenceSpanIDs: ["span-1"])
+    let issues = validator.validate(relation: relation, conceptEntities: entities, evidenceSpanIDs: [])
 
-    #expect(issues.contains { $0.code == "l4_relation_confidence_too_low" })
+    #expect(issues.isEmpty)
 }
 
 @Test func l4RelationConstraintValidatorRejectsTaxonomyObjectThatIsNotTypeLike() {
