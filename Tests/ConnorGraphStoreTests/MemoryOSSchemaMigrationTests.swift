@@ -76,9 +76,15 @@ private func temporaryMemoryOSSchemaDatabaseURL(_ name: String = UUID().uuidStri
     #expect(!l2Columns.contains("status"))
     #expect(!l2Columns.contains("invalid_at"))
 
-    #expect(l3Columns.contains("projection_kind"))
-    #expect(l3Columns.contains("valid_at"))
-    #expect(l3Columns.contains("projected_at"))
+    #expect(l3Columns.contains("statement"))
+    #expect(l3Columns.contains("domain"))
+    #expect(l3Columns.contains("related_object_names"))
+    #expect(l3Columns.contains("created_at"))
+    #expect(l3Columns.contains("updated_at"))
+    #expect(!l3Columns.contains("topic"))
+    #expect(!l3Columns.contains("projection_kind"))
+    #expect(!l3Columns.contains("projected_at"))
+    #expect(!l3Columns.contains("metadata_json"))
     #expect(!l3Columns.contains("status"))
 
     #expect(l4Columns.contains("assertion_kind"))
