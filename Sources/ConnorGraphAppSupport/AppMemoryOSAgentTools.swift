@@ -313,86 +313,53 @@ public struct MemoryOSGetCurrentUserProfileTool: AgentTool {
 
 public struct MemoryOSUpdateCurrentUserProfileTool: AgentTool {
     public let name = "memory_os_update_current_user_profile"
-    public let description = "Append evidence-backed current-user profile observations to Connor Memory OS. Ensures the protected current_user Person anchor, archives provenance, and projects scoped L2/L4 profile facts without using generic user search terms."
+    public let description = "Append current-user-scoped L2 fact statements to Connor Memory OS. Provide only statement, factType, and relation; the tool owns protected current_user anchoring, metadata construction, timestamps, confidence defaults, and projection details."
     public let permission: AgentPermissionCapability = .proposeGraphWrite
     public let inputSchema = AgentToolInputSchema.object(properties: [
-        "observations": .array(items: .object(properties: [
-            "profileDimension": .string(description: "Profile dimension such as preference, habit, stable_trait, communication_preference, knowledge_background, emotional_support_preference, goal, constraint, personal_context, or interaction_guidance."),
-            "statement": .string(description: "Evidence-backed profile statement about the current user."),
-            "evidence": .string(description: "Quoted or summarized evidence supporting the statement."),
-            "confidence": .number(description: "Confidence from 0.0 to 1.0."),
-            "source": .string(description: "Evidence source such as user_explicit, observed_behavior, repeated_pattern, or assistant_inference."),
-            "stability": .string(description: "one_off, emerging, or stable."),
-            "sensitivity": .string(description: "normal or sensitive."),
-            "validAt": .string(description: "Optional ISO8601 validity timestamp.")
-        ], required: ["profileDimension", "statement", "evidence"]), description: "Current user profile observations to append."),
-        "mode": .string(description: "append_observations or propose_profile_facts. Defaults to propose_profile_facts."),
+        "facts": .array(items: .object(properties: [
+            "statement": .string(description: "Complete natural-language fact statement about the current user."),
+            "factType": .string(description: "L2 fact type: profile_preference, project_state, task_commitment, calendar_time, communication, source_document, decision, implementation, environment_config, relationship, or other."),
+            "relation": .string(description: "GraphPredicate relation such as PREFERS, DISLIKES, HAS_HABIT, HAS_GOAL, COMMITTED_TO, RESPONSIBLE_FOR, DECIDED_BY, RELATED_TO, SUPERSEDES, POSTPONED_TO, IMPLEMENTS, or APPLIES_TO.")
+        ], required: ["statement", "factType", "relation"]), description: "Current-user facts to append."),
         "sessionID": .string(description: "Optional session id. Defaults to current session.")
-    ], required: ["observations"])
+    ], required: ["facts"])
 
     private let facade: AppMemoryOSFacade
 
     public init(facade: AppMemoryOSFacade) { self.facade = facade }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        let observations = try parseObservations(arguments)
-        guard !observations.isEmpty else { throw AgentToolError.invalidArguments("observations must not be empty") }
-        let mode = arguments.string("mode") ?? "propose_profile_facts"
-        let sessionID = arguments.string("sessionID") ?? context.sessionID
+        let facts = try parseFacts(arguments)
+        guard !facts.isEmpty else { throw AgentToolError.invalidArguments("facts must not be empty") }
         let now = Date()
         let anchor = try facade.ensureCurrentUserAnchor(now: now)
 
         var statementIDs: [String] = []
-        var provenanceIDs: [String] = []
         var artifactIDs: [String] = []
-        for (index, observation) in observations.enumerated() {
-            let sourceID = "current-user-profile-update:\(context.toolCallID):\(index)"
-            let ingestion = try facade.ingestChatMessage(
-                messageID: sourceID,
-                sessionID: sessionID,
-                role: "user",
-                content: observation.evidence,
-                occurredAt: now,
-                metadata: [
-                    "title": "Current user profile observation",
-                    "toolCallID": context.toolCallID,
-                    "runID": context.runID,
-                    "memory_os_update_mode": mode,
-                    "person_role": "current_user",
-                    "identity_anchor_id": anchor.id,
-                    "profile_dimension": observation.profileDimension,
-                    "evidence_quality": observation.source,
-                    "stability": observation.stability,
-                    "sensitivity": observation.sensitivity
-                ]
-            )
-            if let provenanceID = ingestion.provenanceObject?.id { provenanceIDs.append(provenanceID) }
-            let spanID = ingestion.span?.id ?? "span-current-user-profile-\(context.toolCallID)-\(index)"
-            let artifactJSON = try Self.currentUserProfileArtifactJSON(observation: observation, anchor: anchor, spanID: spanID, now: now)
+        for fact in facts {
+            let artifactJSON = try Self.currentUserFactArtifactJSON(fact: fact, anchor: anchor, now: now)
             let summary = try facade.projectAndRecordLLMArtifact(
                 rawContent: artifactJSON,
                 modelID: "memory_os_update_current_user_profile",
                 processingRunID: context.runID,
-                artifactType: "memory_os_current_user_profile_update",
+                artifactType: "memory_os_current_user_fact_update",
                 schemaName: "MemoryOSL1UnifiedProjectionOutput",
                 now: now
             )
             artifactIDs.append(summary.artifactID)
             guard summary.accepted else {
-                throw AgentToolError.invalidArguments("Current user profile update rejected: \(summary.issues.map(\.message).joined(separator: "; "))")
+                throw AgentToolError.invalidArguments("Current user fact update rejected: \(summary.issues.map(\.message).joined(separator: "; "))")
             }
             statementIDs.append(contentsOf: try facade.l2StatementIDs(sourceArtifactID: summary.artifactID))
         }
 
         let payload: [String: Any] = [
             "accepted": true,
-            "mode": mode,
             "currentUserMarker": "current_user",
             "currentUserEntityID": anchor.id,
             "statementIDs": statementIDs,
-            "provenanceObjectIDs": provenanceIDs,
             "artifactIDs": artifactIDs,
-            "scopePolicy": "append_only_evidence_backed_current_user_anchor"
+            "scopePolicy": "append_only_current_user_fact_anchor"
         ]
         let json = try Self.renderJSON(payload)
         return AgentToolResult(
@@ -400,56 +367,70 @@ public struct MemoryOSUpdateCurrentUserProfileTool: AgentTool {
             toolName: name,
             contentText: "Updated current_user profile with \(statementIDs.count) scoped Memory OS statement(s).",
             contentJSON: json,
-            citations: statementIDs + provenanceIDs + artifactIDs
+            citations: statementIDs + artifactIDs
         )
     }
 
-    private struct Observation {
-        var profileDimension: String
+    private struct CurrentUserFact {
         var statement: String
-        var evidence: String
-        var confidence: Double
-        var source: String
-        var stability: String
-        var sensitivity: String
-        var validAt: Date?
+        var factType: String
+        var relation: GraphPredicate
     }
 
-    private func parseObservations(_ arguments: AgentToolArguments) throws -> [Observation] {
-        guard let values = arguments.array("observations") else { throw AgentToolError.invalidArguments("observations is required") }
+    private func parseFacts(_ arguments: AgentToolArguments) throws -> [CurrentUserFact] {
+        guard arguments.values["observations"] == nil else { throw AgentToolError.invalidArguments("observations is no longer supported; use facts with statement, factType, and relation") }
+        guard arguments.values["mode"] == nil else { throw AgentToolError.invalidArguments("mode is no longer supported for current-user fact writes") }
+        guard let values = arguments.array("facts") else { throw AgentToolError.invalidArguments("facts is required") }
+        let allowedKeys = Set(["statement", "factType", "relation"])
         return try values.enumerated().map { index, value in
-            guard let object = value.objectValue else { throw AgentToolError.invalidArguments("observations[\(index)] must be an object") }
-            guard let dimension = object["profileDimension"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines), !dimension.isEmpty else { throw AgentToolError.invalidArguments("observations[\(index)].profileDimension is required") }
-            guard let statement = object["statement"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines), !statement.isEmpty else { throw AgentToolError.invalidArguments("observations[\(index)].statement is required") }
-            guard let evidence = object["evidence"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines), !evidence.isEmpty else { throw AgentToolError.invalidArguments("observations[\(index)].evidence is required") }
-            let confidence: Double
-            switch object["confidence"] {
-            case .double(let value): confidence = value
-            case .int(let value): confidence = Double(value)
-            default: confidence = 0.8
-            }
-            let validAt: Date?
-            if let raw = object["validAt"]?.stringValue, !raw.isEmpty {
-                validAt = ISO8601DateFormatter().date(from: raw)
-            } else {
-                validAt = nil
-            }
-            return Observation(
-                profileDimension: dimension,
-                statement: statement,
-                evidence: evidence,
-                confidence: max(0.0, min(confidence, 1.0)),
-                source: object["source"]?.stringValue ?? "user_explicit",
-                stability: object["stability"]?.stringValue ?? "emerging",
-                sensitivity: object["sensitivity"]?.stringValue ?? "normal",
-                validAt: validAt
-            )
+            guard let object = value.objectValue else { throw AgentToolError.invalidArguments("facts[\(index)] must be an object") }
+            let extraKeys = Set(object.keys).subtracting(allowedKeys)
+            guard extraKeys.isEmpty else { throw AgentToolError.invalidArguments("facts[\(index)] contains unsupported fields: \(extraKeys.sorted().joined(separator: ", "))") }
+            guard let statement = object["statement"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines), !statement.isEmpty else { throw AgentToolError.invalidArguments("facts[\(index)].statement is required") }
+            guard let factType = object["factType"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines), !factType.isEmpty else { throw AgentToolError.invalidArguments("facts[\(index)].factType is required") }
+            guard Self.allowedFactTypes.contains(factType) else { throw AgentToolError.invalidArguments("facts[\(index)].factType is not supported: \(factType)") }
+            guard let rawRelation = object["relation"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines), !rawRelation.isEmpty else { throw AgentToolError.invalidArguments("facts[\(index)].relation is required") }
+            return CurrentUserFact(statement: statement, factType: factType, relation: try Self.predicate(from: rawRelation))
         }
     }
 
-    private static func currentUserProfileArtifactJSON(observation: Observation, anchor: MemoryOSEntity, spanID: String, now: Date) throws -> String {
-        let predicate = predicate(for: observation.profileDimension)
+    private static let allowedFactTypes: Set<String> = [
+        "profile_preference",
+        "project_state",
+        "task_commitment",
+        "calendar_time",
+        "communication",
+        "source_document",
+        "decision",
+        "implementation",
+        "environment_config",
+        "relationship",
+        "other"
+    ]
+
+    private static func predicate(from raw: String) throws -> GraphPredicate {
+        let normalized = raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "-", with: "_")
+            .replacingOccurrences(of: " ", with: "_")
+            .uppercased()
+        if let predicate = GraphPredicate(rawValue: normalized) { return predicate }
+        throw AgentToolError.invalidArguments("Unsupported current-user fact relation: \(raw)")
+    }
+
+    private static func currentUserFactArtifactJSON(fact: CurrentUserFact, anchor: MemoryOSEntity, now: Date) throws -> String {
         let localID = "current_user"
+        var statementMetadata: [String: String] = [
+            "l2_fact_type": fact.factType,
+            "person_role": "current_user",
+            "person_resolution": "resolved",
+            "identity_anchor": "current_user",
+            "identity_anchor_id": anchor.id,
+            "source_stage": "current_user_fact_update_tool"
+        ]
+        if fact.factType == "profile_preference" {
+            statementMetadata["profile_dimension"] = "fact_statement"
+        }
         let output = MemoryOSL1UnifiedProjectionOutput(
             operationalEntities: [GraphStructuredExtractedEntity(
                 localID: localID,
@@ -459,7 +440,7 @@ public struct MemoryOSUpdateCurrentUserProfileTool: AgentTool {
                 aliases: [],
                 summary: "The human currently operating this Connor installation.",
                 confidence: 0.99,
-                evidenceSpanIDs: [spanID],
+                evidenceSpanIDs: [],
                 metadata: [
                     "stable_key": "current_user",
                     "person_role": "current_user",
@@ -471,37 +452,26 @@ public struct MemoryOSUpdateCurrentUserProfileTool: AgentTool {
                 ]
             )],
             operationalStatements: [GraphStructuredExtractedStatement(
-                explicitID: "current-user-profile-\(UUID().uuidString)",
+                explicitID: "current-user-fact-\(UUID().uuidString)",
                 subjectLocalID: localID,
-                predicate: predicate,
+                predicate: fact.relation,
                 objectLocalID: localID,
-                statementText: observation.statement,
-                confidence: observation.confidence,
-                validAt: observation.validAt ?? now,
+                statementText: fact.statement,
+                confidence: 0.9,
+                validAt: now,
                 referenceTime: now,
-                evidenceSpanIDs: [spanID],
-                metadata: [
-                    "l2_fact_type": "profile_preference",
-                    "person_role": "current_user",
-                    "person_resolution": "resolved",
-                    "identity_anchor": "current_user",
-                    "identity_anchor_id": anchor.id,
-                    "profile_dimension": observation.profileDimension,
-                    "evidence_quality": observation.source,
-                    "stability": observation.stability,
-                    "sensitivity": observation.sensitivity,
-                    "source_stage": "current_user_profile_update_tool"
-                ]
+                evidenceSpanIDs: [],
+                metadata: statementMetadata
             )],
-            evidenceSpans: [GraphStructuredEvidenceSpan(id: spanID, text: observation.evidence)],
+            evidenceSpans: [],
             knowledgeCandidates: [],
             conceptEntities: [],
             conceptRelations: [],
             promotionDecisions: [],
             warnings: [],
-            confidence: observation.confidence,
+            confidence: 0.9,
             metadata: [
-                "schema_purpose": "current_user_profile_update",
+                "schema_purpose": "current_user_fact_update",
                 "person_role": "current_user",
                 "identity_anchor_id": anchor.id
             ]
@@ -510,16 +480,6 @@ public struct MemoryOSUpdateCurrentUserProfileTool: AgentTool {
         encoder.dateEncodingStrategy = .iso8601
         let data = try encoder.encode(output)
         return String(data: data, encoding: .utf8) ?? "{}"
-    }
-
-    private static func predicate(for dimension: String) -> GraphPredicate {
-        switch dimension {
-        case "preference", "communication_preference", "interaction_guidance", "emotional_support_preference": return .prefers
-        case "dislike": return .dislikes
-        case "habit": return .hasHabit
-        case "goal": return .hasGoal
-        default: return .relatedTo
-        }
     }
 
     private static func renderJSON(_ object: [String: Any]) throws -> String {
