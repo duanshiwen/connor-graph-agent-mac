@@ -27,27 +27,6 @@ struct MemoryOSBackgroundPromptContractTests {
         #expect(prompt.range(of: "cap-1")!.lowerBound < prompt.range(of: "cap-2")!.lowerBound)
     }
 
-    @Test func l2ToKnowledgePromptRendersStatementsAsJSONArray() throws {
-        let now = Date(timeIntervalSince1970: 1_780_000_000)
-        let statements = [
-            MemoryOSStatement(id: "stmt-1", subjectID: "node-1", predicate: "prefers", text: "User prefers structured prompts.", confidence: 0.91, validAt: now, committedAt: now, evidenceSpanIDs: ["span-1"], metadata: ["processing_state": "pending"]),
-            MemoryOSStatement(id: "stmt-2", subjectID: "node-2", predicate: "requires", text: "Knowledge promotion requires four-filter judgment.", confidence: 0.88, validAt: now, committedAt: now.addingTimeInterval(60), evidenceSpanIDs: ["span-2", "span-3"], metadata: ["domain": "knowledge-management"])
-        ]
-
-        let prompt = MemoryOSL2ToKnowledgePromptBuilder().prompt(for: statements)
-
-        #expect(prompt.contains("\"l2_statements\""))
-        #expect(prompt.contains("\"statement_id\" : \"stmt-1\"") || prompt.contains("\"statement_id\": \"stmt-1\""))
-        #expect(prompt.contains("\"statement_id\" : \"stmt-2\"") || prompt.contains("\"statement_id\": \"stmt-2\""))
-        #expect(prompt.contains("\"subject_id\""))
-        #expect(prompt.contains("\"predicate\""))
-        #expect(prompt.contains("\"text\""))
-        #expect(prompt.contains("\"confidence\""))
-        #expect(prompt.contains("\"committed_at\""))
-        #expect(prompt.contains("\"evidence_span_ids\""))
-        #expect(prompt.contains("\"metadata\""))
-    }
-
     @Test func l1PromptStatesL1IsActiveBufferAndL0IsDurableEvidence() {
         let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
 
@@ -126,37 +105,6 @@ struct MemoryOSBackgroundPromptContractTests {
         #expect(prompt.contains("related_object_names is a comma-separated list of durable L4 concept entity names or aliases"))
         #expect(prompt.contains("must not contain project names, product names, module names, file names, people names"))
         #expect(prompt.contains("claim as statement, discipline domain, related L4 concept names/aliases"))
-    }
-
-    @Test func l2KnowledgePromptDefinesSimplifiedL3DisciplineDomainAndRelatedConceptRules() {
-        let statement = MemoryOSStatement(id: "stmt-1", subjectID: "node-1", predicate: "requires", text: "Reusable knowledge requires concept-level classification.")
-
-        let prompt = MemoryOSL2ToKnowledgePromptBuilder().prompt(for: [statement])
-
-        #expect(prompt.contains("Domain means discipline classification"))
-        #expect(prompt.contains("memory_os_l3_list_domains"))
-        #expect(prompt.contains("metadata.related_object_names"))
-        #expect(prompt.contains("durable L4 concept entity names or aliases"))
-        #expect(prompt.contains("must not contain project names, product names, module names, file names, people names"))
-    }
-
-    @Test func l2KnowledgePromptDefinesConservativeFourFilterReview() {
-        let statement = MemoryOSStatement(id: "stmt-1", subjectID: "node-1", predicate: "prefers", text: "User prefers conservative L3 promotion.", confidence: 0.97, evidenceSpanIDs: ["span-1"])
-
-        let prompt = MemoryOSL2ToKnowledgePromptBuilder().prompt(for: [statement])
-
-        #expect(prompt.contains("Most L2 facts should not become L3 knowledge"))
-        #expect(prompt.contains("High confidence alone is insufficient"))
-        #expect(prompt.contains("All four filters must pass"))
-        #expect(prompt.contains("signal_quality"))
-        #expect(prompt.contains("reuse_scope"))
-        #expect(prompt.contains("novelty"))
-        #expect(prompt.contains("structurability"))
-        #expect(prompt.contains("If any dimension fails, do not create L3"))
-        #expect(prompt.contains("If existing L3 already covers the idea, output no new L3 candidate"))
-        #expect(prompt.contains("If existing L4 already contains the concept, reuse it rather than creating a duplicate"))
-        #expect(prompt.contains("must search L2, L3 and L4"))
-        #expect(prompt.contains("record the search-backed judgment"))
     }
 
     @Test func l1PromptDefinesL2SemanticAnchorsBeyondPhysicalObjects() {
@@ -316,21 +264,6 @@ struct MemoryOSBackgroundPromptContractTests {
         }
     }
 
-    @Test func l2KnowledgePromptDeclaresAllowedL4RelationPredicatesAndMappingRules() {
-        let statement = MemoryOSStatement(id: "stmt-1", subjectID: "node-1", predicate: "requires", text: "Knowledge synthesis requires L4 predicate discipline.", confidence: 0.97, evidenceSpanIDs: ["span-1"])
-
-        let prompt = MemoryOSL2ToKnowledgePromptBuilder().prompt(for: [statement])
-
-        #expect(prompt.contains("Allowed L4 relation predicates"))
-        #expect(prompt.contains("Do not invent predicates"))
-        #expect(prompt.contains("Map is_a"))
-        #expect(prompt.contains("Map has_a"))
-        #expect(prompt.contains("RELATED_TO only as a last resort"))
-        #expect(prompt.contains("INSTANCE_OF"))
-        #expect(prompt.contains("HAS_PART"))
-        #expect(prompt.contains("SUPPORTS_CAPABILITY"))
-    }
-
     @Test func l1PromptDeclaresL2BusinessFactTaxonomyAndMetadataRequirement() {
         let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
 
@@ -406,29 +339,5 @@ struct MemoryOSBackgroundPromptContractTests {
         #expect(prompt.contains("Do not infer medical, psychological, or sensitive identity diagnoses"))
     }
 
-    @Test func l2KnowledgePromptPreservesProfileMetadataAndRejectsGenericUserIdentity() {
-        let statement = MemoryOSStatement(id: "stmt-1", subjectID: "node-1", predicate: "PREFERS", text: "The current user prefers structured implementation plans.", confidence: 0.97, evidenceSpanIDs: ["span-1"], metadata: ["l2_fact_type": "profile_preference", "person_role": "current_user"])
-
-        let prompt = MemoryOSL2ToKnowledgePromptBuilder().prompt(for: [statement])
-
-        #expect(prompt.contains("Current user is the structured identity anchor current_user"))
-        #expect(prompt.contains("not generic terms such as user, 用户, profile"))
-        #expect(prompt.contains("metadata.profile_dimension"))
-        #expect(prompt.contains("metadata.evidence_quality"))
-        #expect(prompt.contains("metadata.stability"))
-        #expect(prompt.contains("metadata.person_role"))
-        #expect(prompt.contains("metadata.person_resolution"))
-    }
-
-    @Test func l2KnowledgePromptDoesNotPromoteOrdinaryPersonFacts() {
-        let statement = MemoryOSStatement(id: "stmt-1", subjectID: "node-1", predicate: "PREFERS", text: "The current user prefers structured implementation plans.", confidence: 0.97, evidenceSpanIDs: ["span-1"], metadata: ["l2_fact_type": "profile_preference", "person_role": "current_user"])
-
-        let prompt = MemoryOSL2ToKnowledgePromptBuilder().prompt(for: [statement])
-
-        #expect(prompt.contains("Ordinary current-user profile facts"))
-        #expect(prompt.contains("Ordinary other-person profile facts"))
-        #expect(prompt.contains("Do not create L3 knowledge candidates for facts like"))
-        #expect(prompt.contains("Person-related L3 candidates must explain their reusable scope"))
-    }
 }
 

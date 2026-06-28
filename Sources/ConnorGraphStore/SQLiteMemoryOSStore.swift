@@ -32,7 +32,7 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         "memory_l0_provenance_objects", "memory_l0_provenance_spans", "memory_l0_derivations", "memory_l0_content_hashes",
         "memory_l1_capture_events", "memory_l1_time_blocks", "memory_l1_time_block_events", "memory_l1_processing_queue", "memory_l1_queue_attempts", "memory_l1_dead_letter_queue",
         "memory_background_runs", "memory_background_messages", "memory_background_tool_calls",
-        "memory_l2_nodes", "memory_l2_edges", "memory_l2_statements", "memory_l2_statement_processing_state", "memory_l2_episodes", "memory_l2_processing_runs", "memory_l2_processing_artifacts", "memory_l2_projections", "memory_l2_projection_items",
+        "memory_l2_nodes", "memory_l2_edges", "memory_l2_statements", "memory_l2_episodes", "memory_l2_processing_runs", "memory_l2_processing_artifacts", "memory_l2_projections", "memory_l2_projection_items",
         "memory_l3_beliefs", "memory_l3_belief_evidence", "memory_l3_belief_relations", "memory_l3_promotion_records",
         "memory_l4_entities", "memory_l4_entity_aliases", "memory_l4_entity_statements", "memory_l4_entity_statement_evidence", "memory_l4_archive_runs", "memory_l4_archive_statement_links", "memory_l4_merge_events", "memory_l4_split_events",
         "memory_l0_provenance_fts", "memory_l2_nodes_fts", "memory_l2_statements_fts", "memory_l3_beliefs_fts", "memory_l4_entities_fts", "memory_l4_statements_fts"
@@ -42,7 +42,7 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         "idx_memory_l0_provenance_source", "idx_memory_l0_provenance_time", "idx_memory_l0_spans_object",
         "idx_memory_l1_capture_state", "idx_memory_l1_time_blocks_status", "idx_memory_l1_queue_runnable", "idx_memory_l1_queue_idempotency",
         "idx_memory_background_runs_queue", "idx_memory_background_messages_run", "idx_memory_background_tool_calls_run",
-        "idx_memory_l2_nodes_key", "idx_memory_l2_statements_subject", "idx_memory_l2_statements_temporal", "idx_memory_l2_processing_state",
+        "idx_memory_l2_nodes_key", "idx_memory_l2_statements_subject", "idx_memory_l2_statements_temporal",
         "idx_memory_l3_beliefs_domain", "idx_memory_l3_beliefs_updated_at", "idx_memory_l3_belief_evidence_belief",
         "idx_memory_l4_entities_key", "idx_memory_l4_aliases_entity", "idx_memory_l4_statements_entity", "idx_memory_l4_statement_evidence_statement",
         "idx_memory_audit_events_time", "idx_memory_error_events_time", "idx_memory_search_index_queue_pending"
@@ -729,8 +729,6 @@ public extension SQLiteMemoryOSStore {
     CREATE TABLE IF NOT EXISTS memory_l2_statements (id TEXT PRIMARY KEY, subject_id TEXT NOT NULL, predicate TEXT NOT NULL, object_id TEXT, text TEXT NOT NULL, assertion_kind TEXT NOT NULL, confidence REAL NOT NULL, valid_at TEXT NOT NULL, committed_at TEXT NOT NULL, evidence_span_ids_json TEXT NOT NULL DEFAULT '[]', source_artifact_id TEXT, metadata_json TEXT NOT NULL DEFAULT '{}', FOREIGN KEY(subject_id) REFERENCES memory_l2_nodes(id));
     CREATE INDEX IF NOT EXISTS idx_memory_l2_statements_subject ON memory_l2_statements(subject_id, committed_at DESC);
     CREATE INDEX IF NOT EXISTS idx_memory_l2_statements_temporal ON memory_l2_statements(subject_id, predicate, valid_at DESC, confidence DESC, committed_at DESC);
-    CREATE TABLE IF NOT EXISTS memory_l2_statement_processing_state (statement_id TEXT NOT NULL, processing_kind TEXT NOT NULL, status TEXT NOT NULL, source_artifact_id TEXT, processed_by_artifact_id TEXT, last_attempt_at TEXT, metadata_json TEXT NOT NULL DEFAULT '{}', PRIMARY KEY(statement_id, processing_kind));
-    CREATE INDEX IF NOT EXISTS idx_memory_l2_processing_state ON memory_l2_statement_processing_state(processing_kind, status, last_attempt_at);
     CREATE TABLE IF NOT EXISTS memory_l2_episodes (id TEXT PRIMARY KEY, provenance_object_id TEXT, title TEXT NOT NULL, summary TEXT NOT NULL, occurred_at TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}');
     CREATE TABLE IF NOT EXISTS memory_l2_processing_runs (id TEXT PRIMARY KEY, queue_item_id TEXT, status TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT, metadata_json TEXT NOT NULL DEFAULT '{}');
     CREATE TABLE IF NOT EXISTS memory_l2_processing_artifacts (id TEXT PRIMARY KEY, processing_run_id TEXT NOT NULL, artifact_type TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}');

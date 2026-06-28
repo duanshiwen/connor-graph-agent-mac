@@ -4,7 +4,6 @@ import ConnorGraphCore
 public enum MemoryOSBackgroundJobKind: String, Sendable, Codable, Equatable, CaseIterable {
     case l1SynthesizeKnowledge = "memory.l1.synthesize_knowledge"
     case l1UnifiedProjection = "memory.l1.unified_projection"
-    case l2SynthesizeKnowledge = "memory.l2.synthesize_knowledge"
 
     public static var l1ExecutableRawValues: [String] {
         [Self.l1SynthesizeKnowledge.rawValue, Self.l1UnifiedProjection.rawValue]
@@ -46,39 +45,6 @@ public struct MemoryOSL1ProcessingTriggerPolicy: Sendable, Codable, Equatable {
     }
 }
 
-public struct MemoryOSL2KnowledgeSynthesisTriggerPolicy: Sendable, Codable, Equatable {
-    public var minPendingStatementCount: Int
-    public var maxStatementsPerBlock: Int
-    public var maxTokensPerBlock: Int
-    public var maxPendingAge: TimeInterval?
-
-    public init(minPendingStatementCount: Int = 100, maxStatementsPerBlock: Int = 30, maxTokensPerBlock: Int = 12_000, maxPendingAge: TimeInterval? = 24 * 60 * 60) {
-        self.minPendingStatementCount = minPendingStatementCount
-        self.maxStatementsPerBlock = maxStatementsPerBlock
-        self.maxTokensPerBlock = maxTokensPerBlock
-        self.maxPendingAge = maxPendingAge
-    }
-
-    public func triggerReason(statements: [MemoryOSStatement], now: Date = Date()) -> MemoryOSTriggerReason? {
-        let pending = pendingStatements(from: statements)
-        guard !pending.isEmpty else { return nil }
-        if pending.count >= minPendingStatementCount { return .pendingCountThreshold }
-        if let maxPendingAge, let oldest = pending.map(\.committedAt).min(), now.timeIntervalSince(oldest) >= maxPendingAge { return .pendingAgeThreshold }
-        return nil
-    }
-
-    public func shouldTrigger(statements: [MemoryOSStatement], now: Date = Date()) -> Bool {
-        triggerReason(statements: statements, now: now) != nil
-    }
-
-    public func pendingStatements(from statements: [MemoryOSStatement]) -> [MemoryOSStatement] {
-        statements.filter { statement in
-            let state = statement.metadata["processing_state"] ?? statement.metadata["knowledge_synthesis_state"]
-            return state == nil || state == "pending_knowledge_synthesis" || state == "pending"
-        }
-    }
-}
-
 public struct MemoryOSL1UnifiedProjectionJobDraft: Sendable, Codable, Equatable, Identifiable {
     public var id: String
     public var kind: String
@@ -103,31 +69,8 @@ public struct MemoryOSL1UnifiedProjectionJobDraft: Sendable, Codable, Equatable,
     }
 }
 
-public struct MemoryOSL2ToKnowledgeJobDraft: Sendable, Codable, Equatable, Identifiable {
-    public var id: String
-    public var kind: String
-    public var statementIDs: [String]
-    public var evidenceSpanIDs: [String]
-    public var schemaName: String
-    public var prompt: String
-    public var createdAt: Date
-    public var metadata: [String: String]
-
-    public init(id: String = UUID().uuidString, kind: String = MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue, statementIDs: [String], evidenceSpanIDs: [String], schemaName: String = "MemoryOSKnowledgeExtractionOutput", prompt: String, createdAt: Date = Date(), metadata: [String: String] = [:]) {
-        self.id = id
-        self.kind = kind
-        self.statementIDs = statementIDs
-        self.evidenceSpanIDs = evidenceSpanIDs
-        self.schemaName = schemaName
-        self.prompt = prompt
-        self.createdAt = createdAt
-        self.metadata = metadata
-    }
-}
-
 public enum MemoryOSKnowledgeJobSource: String, Sendable, Codable, Equatable, CaseIterable {
     case l1CaptureEvents = "l1_capture_events"
-    case l2Statements = "l2_statements"
 }
 
 public struct MemoryOSKnowledgeSynthesisJobDraft: Sendable, Codable, Equatable, Identifiable {
@@ -159,9 +102,6 @@ public struct MemoryOSKnowledgeSynthesisJobDraft: Sendable, Codable, Equatable, 
         self.init(id: draft.id, kind: draft.kind, source: .l1CaptureEvents, schemaName: draft.schemaName, artifactType: "memory_os_l1_unified_projection", prompt: draft.prompt, sourceRecordIDs: draft.captureEventIDs, evidenceSpanIDs: draft.sourceSpanIDs, createdAt: draft.createdAt, metadata: draft.metadata)
     }
 
-    public init(l2 draft: MemoryOSL2ToKnowledgeJobDraft) {
-        self.init(id: draft.id, kind: draft.kind, source: .l2Statements, schemaName: draft.schemaName, artifactType: "memory_os_knowledge_extraction", prompt: draft.prompt, sourceRecordIDs: draft.statementIDs, evidenceSpanIDs: draft.evidenceSpanIDs, createdAt: draft.createdAt, metadata: draft.metadata)
-    }
 }
 
 private enum MemoryOSL4RelationPromptGuide {
@@ -459,106 +399,6 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
     }
 }
 
-public struct MemoryOSL2ToKnowledgePromptBuilder: Sendable {
-    public init() {}
-
-    public func prompt(for statements: [MemoryOSStatement]) -> String {
-        let packet: [String: Any] = [
-            "l2_statements": statements.map { statement in
-                [
-                    "statement_id": statement.id,
-                    "subject_id": statement.subjectID,
-                    "predicate": statement.predicate,
-                    "object_id": statement.objectID ?? "",
-                    "text": statement.text,
-                    "assertion_kind": statement.assertionKind.rawValue,
-                    "confidence": statement.confidence,
-                    "valid_at": Self.iso8601(statement.validAt),
-                    "committed_at": Self.iso8601(statement.committedAt),
-                    "evidence_span_ids": statement.evidenceSpanIDs,
-                    "source_artifact_id": statement.sourceArtifactID ?? "",
-                    "metadata": statement.metadata
-                ] as [String: Any]
-            }
-        ]
-        return """
-        You are synthesizing Connor Memory OS L2 operational facts into reusable L3 knowledge and L4 concept graph records.
-
-        Layer semantics:
-        - L2 is operational facts / working memory, not reusable knowledge by default.
-        - L3 is reusable knowledge: theories, frameworks, standards, processes, decision bases and durable cognitive structures.
-        - L4 is stable entities, concept entities and concept relations.
-
-        Conservative review policy:
-        - Most L2 facts should not become L3 knowledge.
-        - High confidence alone is insufficient for L3 promotion.
-        - All four filters must pass before creating an L3 knowledge candidate.
-        - If any dimension fails, do not create L3.
-        - If existing L3 already covers the idea, output no new L3 candidate.
-        - If existing L4 already contains the concept, reuse it rather than creating a duplicate.
-
-        Use the four knowledge filters:
-        1. signal quality: is this knowledge rather than noise?
-        2. reuse scope: will this be reusable in the future?
-        3. novelty: is this new or a material enrichment?
-        4. structurability: can it be written as one complete reusable knowledge statement, assigned exactly one discipline domain, and optionally associated with durable L4 concept entity names or aliases?
-
-        L3 discipline domain rules:
-        - Every accepted knowledgeCandidate must include a non-empty domain.
-        - Domain means discipline classification / subject classification.
-        - Domain is not a topic, title, category, tag, work object, project name, product name, module name, person name, entity name, or object alias.
-        - Use lowercase kebab-case and prefer stable discipline names such as software-engineering, computer-science, artificial-intelligence, information-systems, knowledge-management, psychology, cognitive-science, economics, management, sociology, political-science, education, linguistics, philosophy, design, finance, health-sciences, humanities, social-sciences, natural-sciences, engineering-and-technology, general-knowledge.
-        - Before emitting L3 knowledge candidates, use memory_os_l3_list_domains when available to inspect current L3 discipline domains and reuse an existing discipline domain when it fits.
-        - Use general-knowledge only when no meaningful discipline can be determined; explain why in metadata or promotion reasoning.
-
-        L3 related object names rules:
-        - Store related L4 concept names in knowledgeCandidate.metadata.related_object_names.
-        - metadata.related_object_names is a comma-separated list of durable L4 concept entity names or aliases.
-        - It must not contain project names, product names, module names, file names, people names, session IDs, temporary work objects, local environment objects, one-off task names, or ordinary L2 operational anchors.
-        - Use metadata.related_object_names only when the named concept is stable enough to belong to L4 as a concept entity.
-        - Do not use related_object_names as tags, evidence references, or separate related entity arrays for L3 storage.
-
-        Accepted knowledge candidates must include explicit AI judgment fields equivalent to:
-        - signal_quality: pass/fail plus reason
-        - reuse_scope: pass/fail plus reason
-        - novelty: pass/fail plus reason
-        - structurability: pass/fail plus reason
-
-        Person/profile knowledge boundary:
-        - Ordinary current-user profile facts, preferences, habits, goals, traits, constraints, emotional-support preferences, knowledge background, interaction guidance and communication preferences should remain L2 operational memory by default.
-        - Ordinary other-person profile facts and relationships should also remain L2 by default.
-        - Do not create L3 knowledge candidates for facts like “X likes Y”, “the user prefers Z”, “person A knows person B”, or “current_user has trait T” unless the material is abstracted into a reusable principle, standard, process, framework or decision basis.
-        - If a person/profile L2 fact is inaccurate, stale, contradictory or too coarse, propose refined L2 facts as append-only follow-up material rather than promoting it to L3 or overwriting history.
-        - Person-related L3 candidates must explain their reusable scope, such as interaction policy, persona modeling standard, collaboration process, relationship reasoning standard or decision basis.
-        - Current user is the structured identity anchor current_user, not generic terms such as user, 用户, profile, or Foundation KG/Wikidata user concepts.
-        - Preserve metadata.profile_dimension, metadata.evidence_quality, metadata.stability, metadata.person_role and metadata.person_resolution when reviewing or refining person/profile facts.
-
-        You must search L2, L3 and L4 before deciding whether to produce knowledge candidates, concept entities, concept relations or refined L2 facts.
-        You must record the search-backed judgment for every accepted or rejected candidate: searched layers, duplicate/novelty outcome, reuse/rejection reason, and reused entity/concept ids when applicable.
-        Do not promote ordinary personal or operational facts into L3. If a fact should be more accurate, propose refined L2 facts as append-only follow-up material rather than overwriting history.
-        Output only MemoryOSKnowledgeExtractionOutput JSON for accepted knowledge candidates and L4 concepts/relations.
-
-        \(MemoryOSL4RelationPromptGuide.render())
-
-        L2 statements are provided as an ordered JSON packet:
-        \(Self.renderJSON(packet))
-        """
-    }
-
-    private static func iso8601(_ date: Date) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.string(from: date)
-    }
-
-    private static func renderJSON(_ object: [String: Any]) -> String {
-        guard JSONSerialization.isValidJSONObject(object),
-              let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]),
-              let json = String(data: data, encoding: .utf8) else { return "{}" }
-        return json
-    }
-}
-
 public struct MemoryOSL1UnifiedProjectionJobPlanner: Sendable {
     public var policy: MemoryOSL1ProcessingTriggerPolicy
     public var promptBuilder: MemoryOSL1UnifiedProjectionPromptBuilder
@@ -602,54 +442,6 @@ public struct MemoryOSL1UnifiedProjectionJobPlanner: Sendable {
             }
             current.append(event)
             tokens += event.tokenEstimate
-        }
-        if !current.isEmpty { chunks.append(current) }
-        return chunks
-    }
-}
-
-public struct MemoryOSL2ToKnowledgeJobPlanner: Sendable {
-    public var policy: MemoryOSL2KnowledgeSynthesisTriggerPolicy
-    public var promptBuilder: MemoryOSL2ToKnowledgePromptBuilder
-
-    public init(policy: MemoryOSL2KnowledgeSynthesisTriggerPolicy = MemoryOSL2KnowledgeSynthesisTriggerPolicy(), promptBuilder: MemoryOSL2ToKnowledgePromptBuilder = MemoryOSL2ToKnowledgePromptBuilder()) {
-        self.policy = policy
-        self.promptBuilder = promptBuilder
-    }
-
-    public func planJobs(from statements: [MemoryOSStatement], now: Date = Date()) -> [MemoryOSL2ToKnowledgeJobDraft] {
-        let pending = policy.pendingStatements(from: statements).sorted { $0.committedAt < $1.committedAt }
-        guard let triggerReason = policy.triggerReason(statements: pending, now: now) else { return [] }
-        return chunkStatements(pending).map { block in
-            MemoryOSL2ToKnowledgeJobDraft(
-                statementIDs: block.map(\.id),
-                evidenceSpanIDs: Array(Set(block.flatMap(\.evidenceSpanIDs))).sorted(),
-                prompt: promptBuilder.prompt(for: block),
-                createdAt: now,
-                metadata: [
-                    "statement_count": String(block.count),
-                    "source": "l2_pending_knowledge_synthesis",
-                    "trigger_reason": triggerReason.rawValue
-                ]
-            )
-        }
-    }
-
-    private func chunkStatements(_ statements: [MemoryOSStatement]) -> [[MemoryOSStatement]] {
-        var chunks: [[MemoryOSStatement]] = []
-        var current: [MemoryOSStatement] = []
-        var tokens = 0
-        for statement in statements {
-            let estimate = max(1, statement.text.count / 4)
-            let wouldExceedCount = current.count >= policy.maxStatementsPerBlock
-            let wouldExceedTokens = !current.isEmpty && tokens + estimate > policy.maxTokensPerBlock
-            if wouldExceedCount || wouldExceedTokens {
-                chunks.append(current)
-                current = []
-                tokens = 0
-            }
-            current.append(statement)
-            tokens += estimate
         }
         if !current.isEmpty { chunks.append(current) }
         return chunks
@@ -852,25 +644,6 @@ public struct MemoryOSBackgroundJobWorker<Executor: MemoryOSBackgroundModelExecu
         return MemoryOSBackgroundJobExecutionResult(jobID: draft.id, kind: draft.kind, rawArtifactJSON: response.rawArtifactJSON, schemaName: draft.schemaName, artifactType: artifactType, metadata: draft.metadata.merging(response.metadata) { _, new in new })
     }
 
-    public func run(_ draft: MemoryOSL2ToKnowledgeJobDraft) throws -> MemoryOSBackgroundJobExecutionResult {
-        let artifactType = "memory_os_knowledge_extraction"
-        let tools = MemoryOSBackgroundToolCatalog.l2ToKnowledgeTools()
-        let prompt = enrichedKnowledgePrompt(draft, tools: tools)
-        let request = MemoryOSBackgroundModelRequest(
-            jobID: draft.id,
-            kind: draft.kind,
-            schemaName: draft.schemaName,
-            artifactType: artifactType,
-            prompt: prompt,
-            sourceRecordIDs: draft.statementIDs,
-            evidenceSpanIDs: draft.evidenceSpanIDs,
-            metadata: draft.metadata,
-            availableTools: tools
-        )
-        let response = try executor.execute(request)
-        return MemoryOSBackgroundJobExecutionResult(jobID: draft.id, kind: draft.kind, rawArtifactJSON: response.rawArtifactJSON, schemaName: draft.schemaName, artifactType: artifactType, metadata: draft.metadata.merging(response.metadata) { _, new in new })
-    }
-
     private func enrichedL1Prompt(_ draft: MemoryOSL1UnifiedProjectionJobDraft, tools: [MemoryOSBackgroundToolDescriptor]) -> String {
         """
         \(draft.prompt)
@@ -895,27 +668,4 @@ public struct MemoryOSBackgroundJobWorker<Executor: MemoryOSBackgroundModelExecu
         """
     }
 
-    private func enrichedKnowledgePrompt(_ draft: MemoryOSL2ToKnowledgeJobDraft, tools: [MemoryOSBackgroundToolDescriptor]) -> String {
-        """
-        \(draft.prompt)
-
-        \(MemoryOSBackgroundToolCatalog.promptSection(for: tools, stage: "L2→Knowledge synthesis"))
-
-        Stage-specific tool policy:
-        - Must search L2, L3 and L4 before creating, reusing, or rejecting L3 knowledge, L4 concepts, concept relations, or refined L2 facts.
-        - Record search-backed judgment for every accepted or rejected candidate: searched layers, duplicate/novelty outcome, reuse/rejection reason, and reused entity/concept ids when applicable.
-        - Use memory_os_expand_l4 before adding concept relations or when concept identity is ambiguous.
-        - Use memory_os_read_record only when summary-level context is insufficient.
-        - Use memory_os_read_provenance when original evidence must be verified.
-
-        Job contract:
-        - job_id: \(draft.id)
-        - statement_ids: \(draft.statementIDs.joined(separator: ","))
-        - evidence_span_ids: \(draft.evidenceSpanIDs.joined(separator: ","))
-        - output_schema: \(draft.schemaName)
-        - retrieval: search L2/L3/L4 summaries first; request full records only when needed.
-        - L4 expansion: use depth-limited concept/entity traversal when relation context is needed.
-        - semantic boundary: use the four knowledge filters before proposing L3 knowledge.
-        """
-    }
 }
