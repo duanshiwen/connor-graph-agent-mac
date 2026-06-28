@@ -70,7 +70,63 @@ import ConnorGraphMemory
     let stored = try repository.findEntities(matchingNames: ["迟到的青春期"])
     #expect(stored.count == 1)
     #expect(stored[0].statements[0].relation == "RELATED_TO")
-    #expect(stored[0].statements[0].metadata["factType"] == "decision")
+    #expect(stored[0].statements[0].metadata["l2_fact_type"] == "decision")
+    #expect(stored[0].statements[0].metadata["factType"] == nil)
     #expect(stored[0].statements[0].metadata["polarity"] == "exclude")
     #expect(stored[0].statements[0].metadata["originalPhrase"] == "不去贫民窟")
+}
+
+@Test func l2EntityMemoryRejectsInvalidFactTypeWithoutPartialWrite() throws {
+    let repository = InMemoryMemoryOSL2EntityMemoryRepository()
+    let service = MemoryOSL2EntityMemoryService(repository: repository)
+
+    #expect(throws: MemoryOSL2EntityMemoryValidationError.invalidFactType(value: "decison", allowed: MemoryOSL2EntityMemoryService.allowedFactTypes)) {
+        _ = try service.updateEntities(MemoryOSL2UpdateEntitiesRequest(entities: [
+            MemoryOSL2EntityUpdate(
+                name: "Connor",
+                statements: [
+                    MemoryOSL2StatementUpdate(text: "Connor made a decision.", factType: "decison")
+                ]
+            )
+        ]))
+    }
+
+    #expect(try repository.findEntities(matchingNames: ["Connor"]).isEmpty)
+}
+
+@Test func l2EntityMemoryNormalizesRelationRawValue() throws {
+    let repository = InMemoryMemoryOSL2EntityMemoryRepository()
+    let service = MemoryOSL2EntityMemoryService(repository: repository)
+
+    _ = try service.updateEntities(MemoryOSL2UpdateEntitiesRequest(entities: [
+        MemoryOSL2EntityUpdate(
+            name: "Connor",
+            statements: [
+                MemoryOSL2StatementUpdate(text: "Connor relates to Memory OS.", relation: "related_to", factType: "implementation")
+            ]
+        )
+    ]))
+
+    let stored = try repository.findEntities(matchingNames: ["Connor"])
+    #expect(stored.count == 1)
+    #expect(stored[0].statements[0].relation == "RELATED_TO")
+    #expect(stored[0].statements[0].metadata["l2_fact_type"] == "implementation")
+}
+
+@Test func l2EntityMemoryRejectsInvalidRelationWithoutPartialWrite() throws {
+    let repository = InMemoryMemoryOSL2EntityMemoryRepository()
+    let service = MemoryOSL2EntityMemoryService(repository: repository)
+
+    #expect(throws: MemoryOSL2EntityMemoryValidationError.invalidRelation(value: "RELATE_TO", allowed: MemoryOSL2EntityMemoryService.allowedRelations)) {
+        _ = try service.updateEntities(MemoryOSL2UpdateEntitiesRequest(entities: [
+            MemoryOSL2EntityUpdate(
+                name: "Connor",
+                statements: [
+                    MemoryOSL2StatementUpdate(text: "Connor has a misspelled relation.", relation: "RELATE_TO", factType: "other")
+                ]
+            )
+        ]))
+    }
+
+    #expect(try repository.findEntities(matchingNames: ["Connor"]).isEmpty)
 }

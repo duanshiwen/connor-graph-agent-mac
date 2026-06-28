@@ -1,4 +1,5 @@
 import Foundation
+import ConnorGraphCore
 
 public struct MemoryOSL2FindEntitiesRequest: Codable, Sendable, Equatable {
     public var names: String
@@ -144,6 +145,20 @@ public struct MemoryOSL2StoredEntity: Codable, Sendable, Equatable, Identifiable
     }
 }
 
+public enum MemoryOSL2EntityMemoryValidationError: Error, Sendable, Equatable, CustomStringConvertible {
+    case invalidFactType(value: String, allowed: [String])
+    case invalidRelation(value: String, allowed: [String])
+
+    public var description: String {
+        switch self {
+        case .invalidFactType(let value, let allowed):
+            return "Invalid factType \"\(value)\". Allowed values: \(allowed.joined(separator: ", "))."
+        case .invalidRelation(let value, let allowed):
+            return "Invalid relation \"\(value)\". Expected GraphPredicate raw value. Allowed values: \(allowed.joined(separator: ", "))."
+        }
+    }
+}
+
 public struct MemoryOSL2StoredStatement: Codable, Sendable, Equatable, Identifiable {
     public var id: String
     public var text: String
@@ -167,6 +182,23 @@ public protocol MemoryOSL2EntityMemoryRepository: AnyObject, Sendable {
 }
 
 public final class MemoryOSL2EntityMemoryService: Sendable {
+    public static let allowedFactTypes = [
+        "profile_preference",
+        "project_state",
+        "task_commitment",
+        "calendar_time",
+        "communication",
+        "source_document",
+        "decision",
+        "implementation",
+        "environment_config",
+        "relationship",
+        "other"
+    ]
+
+    public static let allowedRelations = GraphPredicate.allCases.map(\.rawValue).sorted()
+
+    private static let allowedFactTypeSet = Set(allowedFactTypes)
     private let repository: MemoryOSL2EntityMemoryRepository
 
     public init(repository: MemoryOSL2EntityMemoryRepository) {
@@ -204,8 +236,9 @@ public final class MemoryOSL2EntityMemoryService: Sendable {
     }
 
     public func updateEntities(_ request: MemoryOSL2UpdateEntitiesRequest) throws -> MemoryOSL2UpdateEntitiesResult {
+        let normalizedRequest = try Self.normalized(request)
         var updated: [MemoryOSL2UpdatedEntitySummary] = []
-        for update in request.entities {
+        for update in normalizedRequest.entities {
             let aliases = Self.splitNames(update.aliases ?? "")
             let upsert = try repository.upsertEntity(update, aliases: aliases)
             let statementActions = try update.statements.map { statement in
@@ -214,6 +247,48 @@ public final class MemoryOSL2EntityMemoryService: Sendable {
             updated.append(MemoryOSL2UpdatedEntitySummary(name: upsert.entity.name, action: upsert.action, statementActions: statementActions))
         }
         return MemoryOSL2UpdateEntitiesResult(accepted: true, updatedEntities: updated, message: "Updated L2 entities and statements.")
+    }
+
+    private static func normalized(_ request: MemoryOSL2UpdateEntitiesRequest) throws -> MemoryOSL2UpdateEntitiesRequest {
+        MemoryOSL2UpdateEntitiesRequest(entities: try request.entities.map { update in
+            MemoryOSL2EntityUpdate(
+                name: update.name,
+                type: update.type,
+                aliases: update.aliases,
+                summary: update.summary,
+                statements: try update.statements.map(normalized)
+            )
+        })
+    }
+
+    private static func normalized(_ statement: MemoryOSL2StatementUpdate) throws -> MemoryOSL2StatementUpdate {
+        MemoryOSL2StatementUpdate(
+            text: statement.text,
+            relation: try normalizeRelation(statement.relation),
+            connectedEntity: statement.connectedEntity,
+            connectedEntityType: statement.connectedEntityType,
+            factType: try normalizeFactType(statement.factType),
+            polarity: statement.polarity,
+            originalPhrase: statement.originalPhrase
+        )
+    }
+
+    private static func normalizeFactType(_ raw: String?) throws -> String? {
+        guard let value = raw?.nilIfBlank else { return nil }
+        let normalized = value.lowercased()
+        guard allowedFactTypeSet.contains(normalized) else {
+            throw MemoryOSL2EntityMemoryValidationError.invalidFactType(value: value, allowed: allowedFactTypes)
+        }
+        return normalized
+    }
+
+    private static func normalizeRelation(_ raw: String?) throws -> String {
+        guard let value = raw?.nilIfBlank else { return GraphPredicate.relatedTo.rawValue }
+        let normalized = value.uppercased()
+        guard GraphPredicate(rawValue: normalized) != nil else {
+            throw MemoryOSL2EntityMemoryValidationError.invalidRelation(value: value, allowed: allowedRelations)
+        }
+        return normalized
     }
 }
 
@@ -258,7 +333,7 @@ public final class InMemoryMemoryOSL2EntityMemoryRepository: MemoryOSL2EntityMem
             return MemoryOSL2StatementActionSummary(text: text, action: "skipped_duplicate")
         }
         let metadata = [
-            "factType": statement.factType,
+            "l2_fact_type": statement.factType,
             "polarity": statement.polarity,
             "originalPhrase": statement.originalPhrase
         ].compactMapValues { $0?.nilIfBlank }
