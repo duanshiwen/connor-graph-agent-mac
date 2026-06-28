@@ -667,8 +667,12 @@ public struct MemoryOSCurrentViewService: Sendable {
         }
         return groups.keys.sorted().compactMap { key in
             guard let candidates = groups[key], let selected = bestEntityStatement(from: candidates) else { return nil }
-            let alternatives = candidates.filter { $0.id != selected.id }.sorted { $0.validAt > $1.validAt }
-            let diagnostics = ambiguityDiagnostics(selectedID: selected.id, candidates: candidates.map { ($0.id, $0.validAt, $0.confidence) }, now: now)
+            let alternatives = candidates.filter { $0.id != selected.id }.sorted { lhs, rhs in
+                if lhs.validAt != rhs.validAt { return lhs.validAt > rhs.validAt }
+                if lhs.committedAt != rhs.committedAt { return lhs.committedAt > rhs.committedAt }
+                return lhs.id < rhs.id
+            }
+            let diagnostics = l4AmbiguityDiagnostics(selectedID: selected.id, candidates: candidates.map { ($0.id, $0.validAt) }, now: now)
             return MemoryOSCurrentViewRecord(
                 layer: "L4",
                 key: key,
@@ -701,9 +705,18 @@ public struct MemoryOSCurrentViewService: Sendable {
     private func bestEntityStatement(from candidates: [MemoryOSEntityStatement]) -> MemoryOSEntityStatement? {
         candidates.sorted { lhs, rhs in
             if lhs.validAt != rhs.validAt { return lhs.validAt > rhs.validAt }
-            if lhs.confidence != rhs.confidence { return lhs.confidence > rhs.confidence }
-            return lhs.committedAt > rhs.committedAt
+            if lhs.committedAt != rhs.committedAt { return lhs.committedAt > rhs.committedAt }
+            return lhs.id < rhs.id
         }.first
+    }
+
+    private func l4AmbiguityDiagnostics(selectedID: String, candidates: [(id: String, validAt: Date)], now: Date) -> [MemoryOSCurrentViewDiagnostic] {
+        guard let selected = candidates.first(where: { $0.id == selectedID }) else { return [] }
+        let close = candidates.filter { candidate in
+            candidate.id != selectedID && abs(candidate.validAt.timeIntervalSince(selected.validAt)) <= 86_400
+        }
+        guard !close.isEmpty else { return [] }
+        return [MemoryOSCurrentViewDiagnostic(kind: "ambiguous_current_value", severity: "info", message: "Multiple temporal L4 records are close enough to be considered alternatives; currentness remains query-derived.", candidateRecordIDs: [selectedID] + close.map(\.id), createdAt: now)]
     }
 
     private func ambiguityDiagnostics(selectedID: String, candidates: [(id: String, validAt: Date, confidence: Double)], now: Date) -> [MemoryOSCurrentViewDiagnostic] {
