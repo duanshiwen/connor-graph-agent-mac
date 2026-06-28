@@ -56,7 +56,7 @@ public final class SQLiteMemoryOSL2EntityMemoryRepository: MemoryOSL2EntityMemor
             connectedID = nil
         }
         let metadata = [
-            "factType": statement.factType,
+            "l2_fact_type": statement.factType,
             "polarity": statement.polarity,
             "originalPhrase": statement.originalPhrase
         ].compactMapValues { $0?.nilIfBlank }
