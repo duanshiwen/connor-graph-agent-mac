@@ -3,6 +3,7 @@ import Testing
 import ConnorGraphAgent
 import ConnorGraphAppSupport
 import ConnorGraphCore
+import ConnorGraphMemory
 import ConnorGraphStore
 
 @Test func agentLoopRuntimeFactoryRegistersNativeLocalWorkspaceTools() throws {
@@ -372,6 +373,15 @@ private final class LocalToolsCredentialStore: CredentialStore, @unchecked Senda
     #expect(!schemaKeys.contains("processingRunID"))
     #expect(!schemaKeys.contains("entityID"))
     #expect(!schemaKeys.contains("statementID"))
+
+    let updateTool = try #require(controller.toolRegistry.definitions.first { $0.name == "memory_os_l2_update_entities" })
+    let schemaDescriptions = collectSchemaDescriptions(updateTool.inputSchema.jsonObject).joined(separator: "\n")
+    for factType in MemoryOSL2EntityMemoryService.allowedFactTypes {
+        #expect(schemaDescriptions.contains(factType))
+    }
+    #expect(schemaDescriptions.contains("Allowed values: profile_preference, project_state, task_commitment, calendar_time, communication, source_document, decision, implementation, environment_config, relationship, other"))
+    #expect(schemaDescriptions.contains("related_to -> RELATED_TO"))
+    #expect(schemaDescriptions.contains("invalid values are rejected"))
 }
 
 @Test func agentLoopRuntimeFactoryRegistersNativeMailToolsWithFileBackedRuntime() async throws {
@@ -418,6 +428,24 @@ private final class LocalToolsCredentialStore: CredentialStore, @unchecked Senda
         )
     )
     #expect(result.contentJSON?.contains("Connor Mail") == true)
+}
+
+private func collectSchemaDescriptions(_ object: [String: Any]) -> [String] {
+    var descriptions: [String] = []
+    if let description = object["description"] as? String {
+        descriptions.append(description)
+    }
+    if let properties = object["properties"] as? [String: Any] {
+        for value in properties.values {
+            if let nested = value as? [String: Any] {
+                descriptions.append(contentsOf: collectSchemaDescriptions(nested))
+            }
+        }
+    }
+    if let items = object["items"] as? [String: Any] {
+        descriptions.append(contentsOf: collectSchemaDescriptions(items))
+    }
+    return descriptions
 }
 
 private func collectSchemaKeys(_ object: [String: Any]) -> [String] {

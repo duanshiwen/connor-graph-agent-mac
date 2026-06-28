@@ -51,10 +51,10 @@ public struct MemoryOSL2UpdateEntitiesTool: AgentTool {
             "summary": .string(description: "Optional concise summary."),
             "statements": .array(items: .object(properties: [
                 "text": .string(description: "Complete natural-language L2 statement. Preserve important original wording and negation."),
-                "relation": .string(description: "Optional GraphPredicate relation. Defaults to RELATED_TO when uncertain."),
+                "relation": .string(description: "Optional GraphPredicate raw value. Defaults to RELATED_TO. Lowercase snake_case is normalized, e.g. related_to -> RELATED_TO; invalid values are rejected."),
                 "connectedEntity": .string(description: "Optional connected entity name."),
                 "connectedEntityType": .string(description: "Optional connected entity type."),
-                "factType": .string(description: "Optional fact type such as fact, decision, plan, task, preference, constraint, profile, status, event, or note."),
+                "factType": .string(description: "Optional L2 fact type. Allowed values: profile_preference, project_state, task_commitment, calendar_time, communication, source_document, decision, implementation, environment_config, relationship, other. Leave empty when unknown."),
                 "polarity": .string(description: "Optional polarity such as affirm, exclude, reject, cancel, defer, supersede, or unknown."),
                 "originalPhrase": .string(description: "Optional original phrase to preserve user wording, especially for negative decisions.")
             ], required: ["text"]), description: "Statements associated with this entity.")
