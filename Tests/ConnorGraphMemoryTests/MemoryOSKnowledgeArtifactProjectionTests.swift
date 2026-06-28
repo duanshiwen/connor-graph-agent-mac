@@ -63,7 +63,9 @@ import ConnorGraphMemory
     #expect(batch.beliefs.first?.domain == "economics")
     #expect(batch.beliefs.first?.statement.contains("供需弹性") == true)
     #expect(batch.entities.contains { $0.entityType == "concept" && $0.name == "供需弹性" })
-    #expect(batch.entities.contains { $0.entityType == "parameter" && $0.name == "某参数" })
+    #expect(batch.entities.contains { $0.entityType == "metric" && $0.name == "某参数" })
+    #expect(batch.entities.contains { $0.stableKey.contains(":metric:") && $0.name == "某参数" })
+    #expect(!batch.entities.contains { $0.entityType == "parameter" })
 }
 
 @Test func memoryOSProjectionServiceRejectsKnowledgeArtifactWithNoiseCandidate() throws {

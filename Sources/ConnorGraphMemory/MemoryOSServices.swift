@@ -504,7 +504,8 @@ public struct MemoryOSProjectionService: Sendable {
             next.relatedEntityIDs = candidate.relatedEntityIDs.map { localID in
                 let scope = output.conceptEntities.first { $0.localID == localID }?.domain ?? "knowledge"
                 if let concept = output.conceptEntities.first(where: { $0.localID == localID }) {
-                    let stableKey = MemoryOSStableKeyBuilder.stableKey(type: concept.conceptType, name: concept.name, scope: scope)
+                    let entityType = MemoryOSEntityType.normalizeRawType(concept.conceptType)
+                    let stableKey = MemoryOSStableKeyBuilder.stableKey(type: entityType, name: concept.name, scope: scope)
                     return "l4-entity:\(stableKey)"
                 }
                 return localID
@@ -536,11 +537,12 @@ public struct MemoryOSProjectionService: Sendable {
     public func projectionBatch(from output: MemoryOSKnowledgeExtractionOutput, artifactID: String, now: Date = Date()) -> MemoryOSProjectionBatch {
         let entityByLocalID = Dictionary(uniqueKeysWithValues: output.conceptEntities.map { concept in
             let scope = concept.domain ?? "knowledge"
-            let stableKey = MemoryOSStableKeyBuilder.stableKey(type: concept.conceptType, name: concept.name, scope: scope)
+            let entityType = MemoryOSEntityType.normalizeRawType(concept.conceptType)
+            let stableKey = MemoryOSStableKeyBuilder.stableKey(type: entityType, name: concept.name, scope: scope)
             let entity = MemoryOSEntity(
                 id: "l4-entity:\(stableKey)",
                 stableKey: stableKey,
-                entityType: concept.conceptType,
+                entityType: entityType,
                 name: concept.name,
                 aliases: concept.aliases,
                 summary: concept.summary,
