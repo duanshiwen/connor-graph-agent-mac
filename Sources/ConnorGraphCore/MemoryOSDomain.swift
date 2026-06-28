@@ -47,33 +47,6 @@ public enum MemoryOSProjectionKind: String, Codable, Sendable, Equatable, CaseIt
     case summarized
 }
 
-public enum MemoryOSL2ProcessingKind: String, Codable, Sendable, Equatable, CaseIterable {
-    case knowledgeSynthesis = "knowledge_synthesis"
-    case refinement
-    case entityResolution = "entity_resolution"
-}
-
-public struct MemoryOSL2StatementProcessingState: Codable, Sendable, Equatable, Identifiable {
-    public var id: String { "\(statementID):\(processingKind.rawValue)" }
-    public var statementID: String
-    public var processingKind: MemoryOSL2ProcessingKind
-    public var status: MemoryOSQueueStatus
-    public var sourceArtifactID: String?
-    public var processedByArtifactID: String?
-    public var lastAttemptAt: Date?
-    public var metadata: [String: String]
-
-    public init(statementID: String, processingKind: MemoryOSL2ProcessingKind, status: MemoryOSQueueStatus = .pending, sourceArtifactID: String? = nil, processedByArtifactID: String? = nil, lastAttemptAt: Date? = nil, metadata: [String: String] = [:]) {
-        self.statementID = statementID
-        self.processingKind = processingKind
-        self.status = status
-        self.sourceArtifactID = sourceArtifactID
-        self.processedByArtifactID = processedByArtifactID
-        self.lastAttemptAt = lastAttemptAt
-        self.metadata = metadata
-    }
-}
-
 public enum MemoryOSHealthStatus: String, Codable, Sendable, Equatable, CaseIterable {
     case healthy
     case warning
