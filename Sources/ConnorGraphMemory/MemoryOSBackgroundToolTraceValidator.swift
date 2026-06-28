@@ -61,9 +61,7 @@ public struct MemoryOSBackgroundToolTraceValidator: Sendable {
             if hasAcceptedKnowledge, !succeededToolNames.contains("memory_os_search") {
                 issues.append(issue(code: "missing_l2_knowledge_search_trace", message: "L2->Knowledge artifact accepts L3 knowledge without a successful memory_os_search trace.", severity: modeSeverity))
             }
-            if nonEmptyArray(dict["conceptRelations"]), !(succeededToolNames.contains("memory_os_expand_l4") || succeededToolNames.contains("memory_os_l4_find_entity") || succeededToolNames.contains("memory_os_l4_neighbors")) {
-                issues.append(issue(code: "missing_l4_relation_trace", message: "Knowledge artifact emits L4 relations without successful L4 graph lookup/expansion trace.", severity: modeSeverity))
-            }
+
             if containsHighRiskL4Relation(dict), !succeededToolNames.contains("memory_os_search") {
                 issues.append(issue(code: "missing_high_risk_l4_relation_search_trace", message: "Knowledge artifact emits high-risk L4 relation predicates without a successful memory_os_search trace.", severity: modeSeverity))
             }

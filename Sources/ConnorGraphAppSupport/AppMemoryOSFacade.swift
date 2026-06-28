@@ -102,6 +102,63 @@ public struct AppMemoryOSOperationalSummary: Sendable, Equatable, Codable {
     }
 }
 
+// MARK: - L4 Direct Write Types
+
+public struct MemoryOSL4EntityInput: Codable, Sendable, Equatable {
+    public var name: String
+    public var type: String
+    public var domain: String?
+    public var summary: String?
+    public var aliases: String?
+
+    public init(name: String, type: String = "concept", domain: String? = nil, summary: String? = nil, aliases: String? = nil) {
+        self.name = name; self.type = type; self.domain = domain; self.summary = summary; self.aliases = aliases
+    }
+}
+
+public struct MemoryOSL4RelationInput: Codable, Sendable, Equatable {
+    public var subjectName: String
+    public var predicate: MemoryOSL4RelationPredicate
+    public var objectName: String
+    public var text: String?
+
+    public init(subjectName: String, predicate: MemoryOSL4RelationPredicate, objectName: String, text: String? = nil) {
+        self.subjectName = subjectName; self.predicate = predicate; self.objectName = objectName; self.text = text
+    }
+}
+
+public struct MemoryOSL4WriteResult: Codable, Sendable, Equatable {
+    public var sourceID: String
+    public var createdEntityCount: Int
+    public var createdRelationCount: Int
+    public var entityNames: [String]
+
+    public init(sourceID: String, createdEntityCount: Int, createdRelationCount: Int, entityNames: [String]) {
+        self.sourceID = sourceID; self.createdEntityCount = createdEntityCount; self.createdRelationCount = createdRelationCount; self.entityNames = entityNames
+    }
+}
+
+// MARK: - L3 Direct Write Types
+
+public struct MemoryOSL3BeliefInput: Codable, Sendable, Equatable {
+    public var statement: String
+    public var domain: String?
+    public var relatedEntityNames: String?
+
+    public init(statement: String, domain: String? = nil, relatedEntityNames: String? = nil) {
+        self.statement = statement; self.domain = domain; self.relatedEntityNames = relatedEntityNames
+    }
+}
+
+public struct MemoryOSL3WriteResult: Codable, Sendable, Equatable {
+    public var sourceID: String
+    public var createdBeliefCount: Int
+
+    public init(sourceID: String, createdBeliefCount: Int) {
+        self.sourceID = sourceID; self.createdBeliefCount = createdBeliefCount
+    }
+}
+
 public struct AppMemoryOSFacade: @unchecked Sendable {
     public var store: SQLiteMemoryOSStore
     public var repository: AppMemoryOSRepository
@@ -190,10 +247,6 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         try SQLiteMemoryOSGraphRetrievalService(store: store).queryGraph(query)
     }
 
-    public func traceMemoryOSEvidence(spanIDs: [String] = [], statementIDs: [String] = [], beliefIDs: [String] = [], limit: Int = 100) throws -> MemoryOSGraphSubgraph {
-        try SQLiteMemoryOSGraphRetrievalService(store: store).traceEvidence(MemoryOSEvidenceTraceQuery(spanIDs: spanIDs, statementIDs: statementIDs, beliefIDs: beliefIDs, limit: limit))
-    }
-
     public func findMemoryOSL2Statements(text: String = "", subjectID: String? = nil, predicates: [String] = [], limit: Int = 50) throws -> MemoryOSGraphSubgraph {
         try SQLiteMemoryOSGraphRetrievalService(store: store).l2FindStatements(MemoryOSL2StatementFindQuery(text: text, subjectID: subjectID, predicates: predicates, limit: limit))
     }
@@ -216,6 +269,91 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
 
     public func queryMemoryOSL4Instances(classEntityIDs: [String], predicates: [String] = [MemoryOSL4RelationPredicate.instanceOf.rawValue], limit: Int = 100) throws -> MemoryOSGraphSubgraph {
         try SQLiteMemoryOSGraphRetrievalService(store: store).l4Instances(MemoryOSL4InstanceQuery(classEntityIDs: classEntityIDs, predicates: predicates, limit: limit))
+    }
+
+    // MARK: - Direct L4 Write
+
+    /// Write L4 entities and relations directly (no background pipeline).
+    /// Entities are upserted by stableKey; relations are always appended (UUID-based IDs).
+    public func writeMemoryOSL4Entities(entities: [MemoryOSL4EntityInput], relations: [MemoryOSL4RelationInput], artifactID: String? = nil, now: Date = Date()) throws -> MemoryOSL4WriteResult {
+        let sourceID = artifactID ?? "l4-direct-write:\(UUID().uuidString)"
+        var createdEntityCount = 0
+        var createdRelationCount = 0
+        var entityByName: [String: MemoryOSEntity] = [:]
+
+        for input in entities {
+            let normalizedType = MemoryOSEntityType.normalizeRawType(input.type)
+            let scope = input.domain ?? "knowledge"
+            let stableKey = MemoryOSStableKeyBuilder.stableKey(type: normalizedType, name: input.name, scope: scope)
+            let entityID = "l4-entity:\(stableKey)"
+            let aliases = MemoryOSL2EntityMemoryService.splitNames(input.aliases ?? "")
+            let entity = MemoryOSEntity(
+                id: entityID,
+                stableKey: stableKey,
+                entityType: normalizedType,
+                name: input.name,
+                aliases: aliases,
+                summary: input.summary ?? "",
+                confidence: 1.0,
+                createdAt: now,
+                updatedAt: now,
+                validFrom: now,
+                metadata: ["artifact_id": sourceID, "domain": scope]
+            )
+            try store.upsert(entity: entity)
+            entityByName[input.name] = entity
+            createdEntityCount += 1
+        }
+
+        for input in relations {
+            guard let subject = entityByName[input.subjectName] else { continue }
+            guard let object = entityByName[input.objectName] else { continue }
+            let statement = MemoryOSEntityStatement(
+                id: "l4-direct-relation:\(sourceID):\(UUID().uuidString)",
+                entityID: subject.id,
+                predicate: input.predicate,
+                objectEntityID: object.id,
+                text: input.text ?? "",
+                assertionKind: .summarized,
+                confidence: 1.0,
+                validAt: now,
+                committedAt: now,
+                evidenceSpanIDs: [],
+                sourceArtifactID: sourceID,
+                metadata: ["artifact_id": sourceID, "relation_type": "direct_write"]
+            )
+            try store.upsert(entityStatement: statement)
+            createdRelationCount += 1
+        }
+
+        return MemoryOSL4WriteResult(
+            sourceID: sourceID,
+            createdEntityCount: createdEntityCount,
+            createdRelationCount: createdRelationCount,
+            entityNames: Array(entityByName.keys)
+        )
+    }
+
+    // MARK: - Direct L3 Write
+
+    public func writeMemoryOSL3Beliefs(_ beliefs: [MemoryOSL3BeliefInput], artifactID: String? = nil, now: Date = Date()) throws -> MemoryOSL3WriteResult {
+        let sourceID = artifactID ?? "l3-direct-write:\(UUID().uuidString)"
+        var createdCount = 0
+
+        for input in beliefs {
+            let belief = MemoryOSBelief(
+                id: "l3-knowledge:\(UUID().uuidString)",
+                statement: input.statement,
+                domain: MemoryOSBelief.normalizedDisciplineDomain(input.domain),
+                relatedObjectNames: MemoryOSBelief.normalizedRelatedConceptNames(input.relatedEntityNames ?? ""),
+                createdAt: now,
+                updatedAt: now
+            )
+            try store.upsert(belief: belief)
+            createdCount += 1
+        }
+
+        return MemoryOSL3WriteResult(sourceID: sourceID, createdBeliefCount: createdCount)
     }
 
     public func ingestChatMessage(

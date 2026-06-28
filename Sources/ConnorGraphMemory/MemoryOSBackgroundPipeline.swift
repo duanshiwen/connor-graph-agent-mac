@@ -120,12 +120,14 @@ private enum MemoryOSL4RelationPromptGuide {
         \(lines.joined(separator: "\n"))
 
         L4 relation predicate rules:
+        - For conceptRelations, use subjectName and objectName to reference conceptEntities by exact name.
+        - Do not use local IDs or internal references; cross-reference by name only.
         - For conceptRelations.predicate, use only the raw values listed above.
         - Do not invent predicates. Do not output natural-language predicates such as is_a, has_a, can_do, supports, contains_part, or relates_to.
         - Map is_a to INSTANCE_OF when an entity is an instance of a type/class; map is_a to SUBCLASS_OF when a class/concept is a subtype of another class/concept; use BROADER_THAN/NARROWER_THAN for weak concept hierarchy.
         - Map has_a to HAS_PART for durable composition, CONTAINS for containment, SUPPORTS_CAPABILITY for capability, USES for tool/resource usage, or REQUIRES for necessary conditions.
         - RELATED_TO only as a last resort and include metadata.reason.
-        - SAME_AS, EQUIVALENT_TO, EXACT_MATCH, CAUSES, RISKS, SUPERSEDES and DEPRECATES require strong evidence and search-backed identity/context checks.
+        - SAME_AS, EQUIVALENT_TO, EXACT_MATCH, CAUSES, RISKS, SUPERSEDES and DEPRECATES are high-impact identity and causality predicates; verify the relation is semantically correct before using them.
         - Ordinary attributes and literal values should remain L2 facts; do not create L4 entities or conceptRelations just to hold property values.
         """
     }
@@ -344,8 +346,9 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         - The current user may be represented only through the protected stable_key current_user / metadata.person_role = current_user identity anchor. Do not add aliases such as user, 用户, 当前用户, profile, or current to this entity.
         - Named collaborators, contacts, family members and other durable people may be represented as stable person entities with metadata.person_role = other_person when identity evidence is sufficient.
         - Do not create or merge stable person entities when identity is ambiguous; emit warnings or ambiguous metadata instead.
-        - Create conceptEntities only when the concept has a stable name, useful summary, clear type, evidence, and future retrieval value.
-        - Create conceptRelations only when the relation is durable, evidence-backed, and useful for reasoning or retrieval.
+        - Create conceptEntities only when the concept has a stable name, useful summary, clear type, and future retrieval value.
+        - Create conceptRelations only when the relation is durable and useful for reasoning or retrieval.
+        - conceptRelations use subjectName and objectName to reference conceptEntities by name. Do not invent IDs or local references. Entity names within one extraction must be unique.
         - Do not create L4 entities for vague temporary phrases, one-off tasks, ephemeral UI wording, unsupported inferred categories, or purely stylistic wording.
 
         Workflow:
