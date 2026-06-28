@@ -148,25 +148,20 @@ import ConnorGraphAppSupport
     #expect(!json.contains("other-pref"))
 }
 
-@Test func memoryOSUpdateCurrentUserProfileCreatesAnchorAndEvidenceBackedL2Fact() async throws {
+@Test func memoryOSUpdateCurrentUserProfileWritesMinimalCurrentUserFact() async throws {
     let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
     try store.migrate()
     let facade = AppMemoryOSFacade(store: store)
     let tool = MemoryOSUpdateCurrentUserProfileTool(facade: facade)
     let result = try await tool.execute(arguments: AgentToolArguments(json: #"""
     {
-      "observations": [
+      "facts": [
         {
-          "profileDimension": "interaction_guidance",
           "statement": "Current user prefers mature systemic plans over minimal patches for architectural issues.",
-          "evidence": "请不要做最小修改，一次性把它改造成成熟稳定的程序功能。",
-          "confidence": 0.95,
-          "source": "user_explicit",
-          "stability": "stable",
-          "sensitivity": "normal"
+          "factType": "profile_preference",
+          "relation": "PREFERS"
         }
       ],
-      "mode": "propose_profile_facts",
       "sessionID": "session"
     }
     """#), context: memoryOSToolContext())
@@ -175,14 +170,75 @@ import ConnorGraphAppSupport
     #expect(result.toolName == "memory_os_update_current_user_profile")
     #expect(payload["accepted"] as? Bool == true)
     #expect(payload["currentUserEntityID"] as? String != nil)
+    #expect(payload["scopePolicy"] as? String == "append_only_current_user_fact_anchor")
     let statementIDs = try #require(payload["statementIDs"] as? [String])
     #expect(statementIDs.count == 1)
 
     let profile = try facade.currentUserProfileContext(limit: 10)
     #expect(profile.hitCount >= 1)
     let l2ProfileFact = try #require(profile.hits.first { $0.layer == .l2 })
+    #expect(l2ProfileFact.summary == "Current user prefers mature systemic plans over minimal patches for architectural issues.")
     #expect(l2ProfileFact.metadata["person_role"] == "current_user")
-    #expect(l2ProfileFact.metadata["profile_dimension"] == "interaction_guidance")
+    #expect(l2ProfileFact.metadata["identity_anchor"] == "current_user")
+    #expect(l2ProfileFact.metadata["l2_fact_type"] == "profile_preference")
+    #expect(l2ProfileFact.metadata["source_stage"] == "current_user_fact_update_tool")
+}
+
+@Test func memoryOSUpdateCurrentUserProfileRejectsExtraFactFields() async throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
+    try store.migrate()
+    let facade = AppMemoryOSFacade(store: store)
+    let tool = MemoryOSUpdateCurrentUserProfileTool(facade: facade)
+
+    await #expect(throws: Error.self) {
+        try await tool.execute(arguments: AgentToolArguments(json: #"""
+        {
+          "facts": [
+            {
+              "statement": "Current user prefers structured answers.",
+              "factType": "profile_preference",
+              "relation": "PREFERS",
+              "evidence": "not accepted"
+            }
+          ]
+        }
+        """#), context: memoryOSToolContext())
+    }
+}
+
+@Test func memoryOSUpdateCurrentUserProfileRejectsInvalidFactTypeAndRelation() async throws {
+    let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
+    try store.migrate()
+    let facade = AppMemoryOSFacade(store: store)
+    let tool = MemoryOSUpdateCurrentUserProfileTool(facade: facade)
+
+    await #expect(throws: Error.self) {
+        try await tool.execute(arguments: AgentToolArguments(json: #"""
+        {
+          "facts": [
+            {
+              "statement": "Current user prefers structured answers.",
+              "factType": "random_type",
+              "relation": "PREFERS"
+            }
+          ]
+        }
+        """#), context: memoryOSToolContext())
+    }
+
+    await #expect(throws: Error.self) {
+        try await tool.execute(arguments: AgentToolArguments(json: #"""
+        {
+          "facts": [
+            {
+              "statement": "Current user prefers structured answers.",
+              "factType": "profile_preference",
+              "relation": "UNKNOWN_RELATION"
+            }
+          ]
+        }
+        """#), context: memoryOSToolContext())
+    }
 }
 
 @Test func memoryOSExpandL4ToolReturnsDepthExpansion() async throws {
