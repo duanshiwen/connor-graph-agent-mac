@@ -256,7 +256,7 @@ Layer contract:
 - **L1 Capture Ledger / Processing Queue**：durable capture events and operational queue state.
 - **L2 Operational Memory**：append-only temporal facts extracted from validated evidence.
 - **L3 Knowledge Layer**：reusable theories, claims, frameworks, patterns, standards, processes, SOPs and decision bases.
-- **L4 Stable Entity / Concept Layer**：relaxed stable anchors for people, projects, organizations, work objects and concepts. L4 confidence/evidence fields are optional annotations, not relation acceptance gates.
+- **L4 Stable Entity / Concept Layer**：relaxed stable anchors for people, projects, organizations, work objects and concepts. L4 uses a controlled entity type vocabulary; confidence/evidence fields are optional annotations, not relation acceptance gates.
 
 Write path:
 
@@ -273,6 +273,7 @@ Background AI jobs:
 Important rules:
 
 - High confidence alone never promotes L2 facts to L3.
+- L4 normalizes raw LLM entity type labels into a controlled vocabulary; unsupported labels become `unknown` instead of schema-expanding one-off types.
 - L4 does not use LLM-provided confidence or required evidence spans as relation gates; see `Docs/MemoryOS/L4RelaxedEntityGraph.md`.
 - Historical semantic records are append-only; currentness is derived by query/current-view logic.
 - Processed L1 capture events are physically deleted after accepted projection because L0 remains durable evidence.
