@@ -116,6 +116,30 @@ struct MemoryOSBackgroundPromptContractTests {
         #expect(prompt.contains("Do not create L4 entities for vague temporary phrases"))
     }
 
+    @Test func l1PromptDefinesSimplifiedL3DisciplineDomainAndRelatedConceptRules() {
+        let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
+
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
+
+        #expect(prompt.contains("Domain means discipline classification"))
+        #expect(prompt.contains("memory_os_l3_list_domains"))
+        #expect(prompt.contains("related_object_names is a comma-separated list of durable L4 concept entity names or aliases"))
+        #expect(prompt.contains("must not contain project names, product names, module names, file names, people names"))
+        #expect(prompt.contains("claim as statement, discipline domain, related L4 concept names/aliases"))
+    }
+
+    @Test func l2KnowledgePromptDefinesSimplifiedL3DisciplineDomainAndRelatedConceptRules() {
+        let statement = MemoryOSStatement(id: "stmt-1", subjectID: "node-1", predicate: "requires", text: "Reusable knowledge requires concept-level classification.")
+
+        let prompt = MemoryOSL2ToKnowledgePromptBuilder().prompt(for: [statement])
+
+        #expect(prompt.contains("Domain means discipline classification"))
+        #expect(prompt.contains("memory_os_l3_list_domains"))
+        #expect(prompt.contains("metadata.related_object_names"))
+        #expect(prompt.contains("durable L4 concept entity names or aliases"))
+        #expect(prompt.contains("must not contain project names, product names, module names, file names, people names"))
+    }
+
     @Test func l2KnowledgePromptDefinesConservativeFourFilterReview() {
         let statement = MemoryOSStatement(id: "stmt-1", subjectID: "node-1", predicate: "prefers", text: "User prefers conservative L3 promotion.", confidence: 0.97, evidenceSpanIDs: ["span-1"])
 

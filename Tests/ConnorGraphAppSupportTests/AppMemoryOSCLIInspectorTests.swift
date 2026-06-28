@@ -114,8 +114,8 @@ struct AppMemoryOSCLIInspectorTests {
 
         #expect(beliefs.count == 1)
         #expect(beliefs[0].values["id"] == "belief-1")
-        #expect(beliefs[0].values["topic"] == "Connor Memory OS")
-        #expect(beliefs[0].values["source_artifact_id"] == "artifact-2")
+        #expect(beliefs[0].values["domain"] == "software-engineering")
+        #expect(beliefs[0].values["related_object_names"] == "Memory architecture")
     }
 
     @Test func memoryOSCLIInspectorListsL4Entities() throws {
@@ -430,7 +430,6 @@ struct AppMemoryOSCLIInspectorTests {
 
         #expect(output.contains("entity-1"))
         #expect(output.contains("stmt-1"))
-        #expect(output.contains("belief-1"))
         #expect(output.contains("span-1"))
         #expect(output.contains("object-1"))
         #expect(output.contains("query_graph"))
@@ -451,7 +450,7 @@ struct AppMemoryOSCLIInspectorTests {
 
         let l3 = try inspector.queryGraph(text: "observable", intent: .l3Beliefs, entityID: nil, classEntityIDs: [], predicates: [], direction: .both, includeEvidence: true, limit: 10)
         #expect(l3.nodes.contains { $0.id == "belief-1" && $0.layer == .l3 })
-        #expect(l3.edges.contains { $0.predicate == "supported_by" })
+        #expect(l3.edges.isEmpty)
 
         let l4Entity = try inspector.queryGraph(text: "Memory OS", intent: .l4Entity, entityID: nil, classEntityIDs: [], predicates: [], direction: .both, includeEvidence: false, limit: 10)
         #expect(l4Entity.nodes.contains { $0.id == "entity-1" && $0.layer == .l4 })
@@ -501,8 +500,8 @@ struct AppMemoryOSCLIInspectorTests {
         let output = try AppMemoryOSCLIRouter.route(args: ["l3", "expand", "observable", "--limit", "5"], inspector: inspector, encoder: encoder)
 
         #expect(output.contains("belief-1"))
-        #expect(output.contains("stmt-1"))
-        #expect(output.contains("supported_by"))
+        #expect(output.contains("software-engineering"))
+        #expect(!output.contains("supported_by"))
     }
 
     @Test func memoryOSCLIInspectorListsL4Predicates() throws {
@@ -629,7 +628,7 @@ private func seedMemoryOSCLIInspectorFixture(store: SQLiteMemoryOSStore, now: Da
     try store.upsert(statement: statement)
     try store.upsert(l2ProcessingState: MemoryOSL2StatementProcessingState(statementID: statement.id, processingKind: .knowledgeSynthesis, status: .pending, sourceArtifactID: "artifact-1", lastAttemptAt: nil, metadata: ["reason": "new_statement"]))
 
-    let belief = MemoryOSBelief(id: "belief-1", topic: "Connor Memory OS", statement: "Memory OS should be observable from CLI.", projectionKind: .summarized, confidence: 0.84, evidenceStatementIDs: [statement.id], validAt: now, projectedAt: now, sourceArtifactID: "artifact-2", metadata: ["stage": "l3"])
+    let belief = MemoryOSBelief(id: "belief-1", statement: "Memory OS should be observable from CLI.", domain: "software-engineering", relatedObjectNames: "Memory architecture", createdAt: now, updatedAt: now)
     try store.upsert(belief: belief)
     let entity = MemoryOSEntity(id: "entity-1", stableKey: "concept:connor-memory-os", entityType: "concept", name: "Connor Memory OS", aliases: ["Memory OS"], summary: "康纳同学的长期记忆系统", confidence: 0.93, createdAt: now, updatedAt: now, validFrom: now, metadata: ["stage": "l4"])
     try store.upsert(entity: entity)

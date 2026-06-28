@@ -65,12 +65,13 @@ import ConnorGraphMemory
     #expect(projection.first?.id == "new")
 }
 
-@Test func memoryOSBeliefValidatorRequiresEvidenceForTemporalBeliefProjections() {
-    let belief = MemoryOSBelief(topic: "memory", statement: "Memory is production-grade", projectionKind: .summarized, confidence: 0.9)
+@Test func memoryOSBeliefValidatorRequiresStatementAndDisciplineDomain() {
+    let belief = MemoryOSBelief(statement: "", domain: "")
 
     let issues = MemoryOSBeliefValidator().validate(belief)
 
-    #expect(issues.contains { $0.code == "missing_belief_evidence" })
+    #expect(issues.contains { $0.code == "empty_belief" })
+    #expect(belief.domain == "general-knowledge")
 }
 
 @Test func memoryOSEntityDisambiguationUsesStableKeyThenAlias() {

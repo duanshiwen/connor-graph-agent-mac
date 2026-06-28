@@ -48,7 +48,8 @@ import ConnorGraphMemory
         confidence: 0.86,
         evidenceStatementIDs: ["stmt-theory-1"],
         evidenceSpanIDs: ["span-theory-1"],
-        relatedEntityIDs: ["concept-supply-demand-elasticity", "parameter-x"]
+        relatedEntityIDs: ["concept-supply-demand-elasticity", "parameter-x"],
+        metadata: ["related_object_names": "Supply and demand elasticity, Parameter"]
     )
 
     let decision = MemoryOSKnowledgePromotionPolicy().evaluate(candidate)
@@ -56,15 +57,9 @@ import ConnorGraphMemory
 
     #expect(decision.accepted)
     #expect(decision.rejectedDimensions.isEmpty)
-    #expect(belief.topic == "economics:theory")
     #expect(belief.statement == candidate.claim)
-    #expect(belief.projectionKind == .summarized)
-    #expect(belief.evidenceStatementIDs == ["stmt-theory-1"])
-    #expect(belief.metadata["category"] == "economics")
-    #expect(belief.metadata["knowledge_type"] == "theory")
-    #expect(belief.metadata["scope"] == "general")
-    #expect(belief.metadata["domain"] == "economics")
-    #expect(belief.metadata["related_entity_ids"] == "concept-supply-demand-elasticity,parameter-x")
+    #expect(belief.domain == "economics")
+    #expect(belief.relatedObjectNames == "Supply and demand elasticity, Parameter")
 }
 
 @Test func knowledgePromotionRejectsAcceptedSignalsWithoutStructure() throws {
@@ -76,7 +71,7 @@ import ConnorGraphMemory
             reuseScopeAccepted: true,
             noveltyAccepted: true,
             structurabilityAccepted: false,
-            reasons: ["Missing category, knowledge type, scope and domain."]
+            reasons: ["Missing discipline domain."]
         ),
         confidence: 0.8,
         evidenceStatementIDs: ["stmt-1"]
