@@ -6,7 +6,7 @@ import ConnorGraphCore
 @Test func memoryOSContextCompilerRanksItemsAndRespectsBudget() {
     let now = Date(timeIntervalSince1970: 1_000)
     let statement = MemoryOSStatement(id: "stmt", subjectID: "n", predicate: "requires", text: "Memory OS requires evidence-backed statements.", assertionKind: .observed, confidence: 0.9, validAt: now, committedAt: now, evidenceSpanIDs: ["span"])
-    let belief = MemoryOSBelief(id: "belief", topic: "memory", statement: "Production memory must be auditable.", projectionKind: .observed, confidence: 0.95, evidenceStatementIDs: ["stmt"], validAt: now, projectedAt: now)
+    let belief = MemoryOSBelief(id: "belief", statement: "Production memory must be auditable.", domain: "knowledge-management", relatedObjectNames: "Semantic memory", createdAt: now, updatedAt: now)
     let entity = MemoryOSEntity(id: "entity", stableKey: "default:project:memory-os", entityType: "project", name: "Memory OS", summary: "Production memory architecture", confidence: 0.8)
 
     let contract = MemoryOSContextCompiler(tokenBudget: 100).compile(query: "memory", statements: [statement], beliefs: [belief], entities: [entity], now: now)
@@ -37,6 +37,6 @@ import ConnorGraphCore
 @Test func memoryOSWriteToolsCreateProposedBelief() {
     let belief = MemoryOSWriteTools().proposeBelief(topic: "memory", statement: "Memory needs governance.", evidenceStatementIDs: ["stmt"])
 
-    #expect(belief.projectionKind == .summarized)
-    #expect(belief.evidenceStatementIDs == ["stmt"])
+    #expect(belief.domain == "memory")
+    #expect(belief.statement == "Memory needs governance.")
 }

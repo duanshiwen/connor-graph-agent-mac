@@ -101,7 +101,8 @@ import ConnorGraphMemory
     #expect(batch.entities.count == 2)
     #expect(batch.entityStatements.count == 1)
     #expect(batch.beliefs.count == 1)
-    #expect(batch.beliefs.first?.evidenceStatementIDs == ["l2-statement:\(artifact.id):stmt-1"])
+    #expect(batch.beliefs.first?.domain == "software-engineering")
+    #expect(batch.beliefs.first?.statement.contains("L1 unified projection") == true)
     #expect(batch.entities.contains { $0.name == "Connor Memory OS" })
     #expect(batch.entities.contains { $0.name == "L1 unified projection" })
 }

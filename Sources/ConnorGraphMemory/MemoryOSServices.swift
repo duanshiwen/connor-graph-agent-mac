@@ -606,8 +606,7 @@ public struct MemoryOSBeliefValidator: Sendable {
     public func validate(_ belief: MemoryOSBelief) -> [MemoryOSValidationIssue] {
         var issues: [MemoryOSValidationIssue] = []
         if belief.statement.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { issues.append(MemoryOSValidationIssue(code: "empty_belief", message: "Belief statement must not be empty.")) }
-        if belief.confidence < 0 || belief.confidence > 1 { issues.append(MemoryOSValidationIssue(code: "confidence_out_of_range", message: "Confidence must be between 0 and 1.")) }
-        if belief.evidenceStatementIDs.isEmpty { issues.append(MemoryOSValidationIssue(code: "missing_belief_evidence", message: "Temporal belief projections require evidence statements.")) }
+        if belief.domain.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { issues.append(MemoryOSValidationIssue(code: "missing_belief_domain", message: "Belief discipline domain must not be empty.")) }
         return issues
     }
 }
@@ -638,19 +637,19 @@ public struct MemoryOSCurrentViewService: Sendable {
     }
 
     public func currentBeliefs(_ beliefs: [MemoryOSBelief], now: Date = Date()) -> [MemoryOSCurrentViewRecord] {
-        let groups = Dictionary(grouping: beliefs) { $0.topic }
-        return groups.keys.sorted().compactMap { topic in
-            guard let candidates = groups[topic], let selected = bestBelief(from: candidates) else { return nil }
-            let alternatives = candidates.filter { $0.id != selected.id }.sorted { $0.validAt > $1.validAt }
-            let diagnostics = ambiguityDiagnostics(selectedID: selected.id, candidates: candidates.map { ($0.id, $0.validAt, $0.confidence) }, now: now)
+        let groups = Dictionary(grouping: beliefs) { $0.domain }
+        return groups.keys.sorted().compactMap { domain in
+            guard let candidates = groups[domain], let selected = bestBelief(from: candidates) else { return nil }
+            let alternatives = candidates.filter { $0.id != selected.id }.sorted { $0.updatedAt > $1.updatedAt }
+            let diagnostics = ambiguityDiagnostics(selectedID: selected.id, candidates: candidates.map { ($0.id, $0.updatedAt, 1.0) }, now: now)
             return MemoryOSCurrentViewRecord(
                 layer: "L3",
-                key: topic,
+                key: domain,
                 value: selected.statement,
                 selectedRecordID: selected.id,
-                validAt: selected.validAt,
-                confidence: selected.confidence,
-                evidenceIDs: selected.evidenceStatementIDs,
+                validAt: selected.updatedAt,
+                confidence: 1.0,
+                evidenceIDs: [],
                 alternativeRecordIDs: alternatives.map(\.id),
                 diagnostics: diagnostics
             )
@@ -694,9 +693,8 @@ public struct MemoryOSCurrentViewService: Sendable {
 
     private func bestBelief(from candidates: [MemoryOSBelief]) -> MemoryOSBelief? {
         candidates.sorted { lhs, rhs in
-            if lhs.validAt != rhs.validAt { return lhs.validAt > rhs.validAt }
-            if lhs.confidence != rhs.confidence { return lhs.confidence > rhs.confidence }
-            return lhs.projectedAt > rhs.projectedAt
+            if lhs.updatedAt != rhs.updatedAt { return lhs.updatedAt > rhs.updatedAt }
+            return lhs.createdAt > rhs.createdAt
         }.first
     }
 

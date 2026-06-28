@@ -43,7 +43,7 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
         "idx_memory_l1_capture_state", "idx_memory_l1_time_blocks_status", "idx_memory_l1_queue_runnable", "idx_memory_l1_queue_idempotency",
         "idx_memory_background_runs_queue", "idx_memory_background_messages_run", "idx_memory_background_tool_calls_run",
         "idx_memory_l2_nodes_key", "idx_memory_l2_statements_subject", "idx_memory_l2_statements_temporal", "idx_memory_l2_processing_state",
-        "idx_memory_l3_beliefs_topic", "idx_memory_l3_beliefs_temporal", "idx_memory_l3_belief_evidence_belief",
+        "idx_memory_l3_beliefs_domain", "idx_memory_l3_beliefs_updated_at", "idx_memory_l3_belief_evidence_belief",
         "idx_memory_l4_entities_key", "idx_memory_l4_aliases_entity", "idx_memory_l4_statements_entity", "idx_memory_l4_statement_evidence_statement",
         "idx_memory_audit_events_time", "idx_memory_error_events_time", "idx_memory_search_index_queue_pending"
     ]
@@ -342,14 +342,31 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
     // MARK: - L3
 
     public func upsert(belief: MemoryOSBelief) throws {
+        let existingCreatedAt = try queryStrings(sql: "SELECT created_at FROM memory_l3_beliefs WHERE id = \(quote(belief.id)) LIMIT 1").first
+        let createdAt = existingCreatedAt ?? iso(belief.createdAt)
         try execute("""
         INSERT OR REPLACE INTO memory_l3_beliefs
-        (id, topic, statement, projection_kind, confidence, evidence_statement_ids_json, valid_at, projected_at, source_artifact_id, metadata_json)
-        VALUES (\(quote(belief.id)), \(quote(belief.topic)), \(quote(belief.statement)), \(quote(belief.projectionKind.rawValue)), \(belief.confidence), \(quote(json(belief.evidenceStatementIDs))), \(quote(iso(belief.validAt))), \(quote(iso(belief.projectedAt))), \(quote(belief.sourceArtifactID)), \(quote(json(belief.metadata))))
+        (id, statement, domain, related_object_names, created_at, updated_at)
+        VALUES (\(quote(belief.id)), \(quote(belief.statement)), \(quote(belief.domain)), \(quote(belief.relatedObjectNames)), \(quote(createdAt)), \(quote(iso(belief.updatedAt))))
         """)
         try execute("DELETE FROM memory_l3_beliefs_fts WHERE belief_id = \(quote(belief.id));")
-        try execute("INSERT INTO memory_l3_beliefs_fts(belief_id, topic, statement) VALUES (\(quote(belief.id)), \(quote(belief.topic)), \(quote(belief.statement)))")
+        try execute("INSERT INTO memory_l3_beliefs_fts(belief_id, statement) VALUES (\(quote(belief.id)), \(quote(belief.statement)))")
         try enqueueSearchIndexChange(layer: "L3", recordID: belief.id)
+    }
+
+    public func listL3Domains() throws -> [MemoryOSL3DomainSummary] {
+        try query(sql: """
+        SELECT domain, COUNT(*) AS belief_count, MAX(updated_at) AS latest_updated_at
+        FROM memory_l3_beliefs
+        GROUP BY domain
+        ORDER BY belief_count DESC, domain ASC
+        """).map { row in
+            MemoryOSL3DomainSummary(
+                domain: row[safe: 0] ?? "general-knowledge",
+                beliefCount: Int(row[safe: 1] ?? "0") ?? 0,
+                latestUpdatedAt: try (row[safe: 2]).map(date)
+            )
+        }
     }
 
     // MARK: - L4
@@ -647,6 +664,12 @@ public final class SQLiteMemoryOSStore: @unchecked Sendable {
     }
 }
 
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
+    }
+}
+
 public extension SQLiteMemoryOSStore {
     static let schemaSQL = """
     CREATE TABLE IF NOT EXISTS memory_schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}');
@@ -706,14 +729,14 @@ public extension SQLiteMemoryOSStore {
     CREATE VIRTUAL TABLE IF NOT EXISTS memory_l2_nodes_fts USING fts5(node_id UNINDEXED, node_type UNINDEXED, name, summary, tokenize = 'unicode61 remove_diacritics 2');
     CREATE VIRTUAL TABLE IF NOT EXISTS memory_l2_statements_fts USING fts5(statement_id UNINDEXED, predicate UNINDEXED, text, tokenize = 'unicode61 remove_diacritics 2');
 
-    CREATE TABLE IF NOT EXISTS memory_l3_beliefs (id TEXT PRIMARY KEY, topic TEXT NOT NULL, statement TEXT NOT NULL, projection_kind TEXT NOT NULL, confidence REAL NOT NULL, evidence_statement_ids_json TEXT NOT NULL DEFAULT '[]', valid_at TEXT NOT NULL, projected_at TEXT NOT NULL, source_artifact_id TEXT, metadata_json TEXT NOT NULL DEFAULT '{}');
-    CREATE INDEX IF NOT EXISTS idx_memory_l3_beliefs_topic ON memory_l3_beliefs(topic, projected_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_memory_l3_beliefs_temporal ON memory_l3_beliefs(topic, valid_at DESC, confidence DESC, projected_at DESC);
+    CREATE TABLE IF NOT EXISTS memory_l3_beliefs (id TEXT PRIMARY KEY, statement TEXT NOT NULL, domain TEXT NOT NULL DEFAULT 'general-knowledge', related_object_names TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+    CREATE INDEX IF NOT EXISTS idx_memory_l3_beliefs_domain ON memory_l3_beliefs(domain);
+    CREATE INDEX IF NOT EXISTS idx_memory_l3_beliefs_updated_at ON memory_l3_beliefs(updated_at DESC);
     CREATE TABLE IF NOT EXISTS memory_l3_belief_evidence (belief_id TEXT NOT NULL, statement_id TEXT NOT NULL, strength REAL NOT NULL DEFAULT 1.0, PRIMARY KEY(belief_id, statement_id));
     CREATE INDEX IF NOT EXISTS idx_memory_l3_belief_evidence_belief ON memory_l3_belief_evidence(belief_id);
     CREATE TABLE IF NOT EXISTS memory_l3_belief_relations (id TEXT PRIMARY KEY, source_belief_id TEXT NOT NULL, target_belief_id TEXT NOT NULL, relation_type TEXT NOT NULL, created_at TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}');
     CREATE TABLE IF NOT EXISTS memory_l3_promotion_records (id TEXT PRIMARY KEY, source_record_id TEXT NOT NULL, target_belief_id TEXT NOT NULL, promotion_reason TEXT NOT NULL, created_at TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}');
-    CREATE VIRTUAL TABLE IF NOT EXISTS memory_l3_beliefs_fts USING fts5(belief_id UNINDEXED, topic, statement, tokenize = 'unicode61 remove_diacritics 2');
+    CREATE VIRTUAL TABLE IF NOT EXISTS memory_l3_beliefs_fts USING fts5(belief_id UNINDEXED, statement, tokenize = 'unicode61 remove_diacritics 2');
 
     CREATE TABLE IF NOT EXISTS memory_l4_entities (id TEXT PRIMARY KEY, stable_key TEXT NOT NULL UNIQUE, entity_type TEXT NOT NULL, name TEXT NOT NULL, aliases_json TEXT NOT NULL DEFAULT '[]', summary TEXT NOT NULL DEFAULT '', confidence REAL NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, valid_from TEXT, metadata_json TEXT NOT NULL DEFAULT '{}');
     CREATE INDEX IF NOT EXISTS idx_memory_l4_entities_key ON memory_l4_entities(stable_key);

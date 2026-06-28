@@ -60,8 +60,8 @@ import ConnorGraphMemory
     #expect(batch.entities.count == 2)
     #expect(batch.entityStatements.count == 1)
     #expect(batch.statements.isEmpty)
-    #expect(batch.beliefs.first?.topic == "economics:theory")
-    #expect(batch.beliefs.first?.metadata["projection_reason"] == "knowledge_promotion_policy_accepted")
+    #expect(batch.beliefs.first?.domain == "economics")
+    #expect(batch.beliefs.first?.statement.contains("供需弹性") == true)
     #expect(batch.entities.contains { $0.entityType == "concept" && $0.name == "供需弹性" })
     #expect(batch.entities.contains { $0.entityType == "parameter" && $0.name == "某参数" })
 }
