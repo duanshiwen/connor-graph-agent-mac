@@ -181,8 +181,6 @@ public enum AppMemoryOSCLIRouter {
         }
     }
 
-    }
-
     private static func routeRun(args: [String], inspector: AppMemoryOSCLIInspector, encoder: JSONEncoder) throws -> String {
         guard let runID = args.first, !runID.hasPrefix("--") else {
             return try encode(MemoryOSCLIError(error: "missing_run_id", usage: "connor memory run <run-id> [messages|tool-calls]"), encoder: encoder)
@@ -303,6 +301,7 @@ public enum AppMemoryOSCLIRouter {
     private static func splitCSV(_ value: String) -> [String] {
         value.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
     }
+}
 
 public struct MemoryOSCLIError: Codable, Sendable, Equatable {
     public var error: String
