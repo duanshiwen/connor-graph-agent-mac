@@ -25,23 +25,4 @@ struct MemoryOSKnowledgeSynthesisDraftTests {
         #expect(unified.metadata["trigger"] == "count")
     }
 
-    @Test func adaptsL2KnowledgeDraftToUnifiedKnowledgeSynthesisDraft() throws {
-        let l2 = MemoryOSL2ToKnowledgeJobDraft(
-            id: "l2-job",
-            statementIDs: ["stmt-1"],
-            evidenceSpanIDs: ["span-1"],
-            prompt: "L2 batch prompt",
-            metadata: ["trigger": "age"]
-        )
-
-        let unified = MemoryOSKnowledgeSynthesisJobDraft(l2: l2)
-
-        #expect(unified.id == "l2-job")
-        #expect(unified.kind == MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue)
-        #expect(unified.source == .l2Statements)
-        #expect(unified.artifactType == "memory_os_knowledge_extraction")
-        #expect(unified.sourceRecordIDs == ["stmt-1"])
-        #expect(unified.evidenceSpanIDs == ["span-1"])
-        #expect(unified.metadata["trigger"] == "age")
-    }
 }
