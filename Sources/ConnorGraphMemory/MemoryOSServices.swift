@@ -183,7 +183,7 @@ public struct MemoryOSLLMArtifactValidator: Sendable {
                 statements: output.operationalStatements,
                 evidenceSpans: output.evidenceSpans,
                 warnings: output.warnings,
-                confidence: output.confidence,
+                confidence: nil,
                 metadata: output.metadata
             )
             try graphOutput.validate(requireStatementEvidence: false)
@@ -252,7 +252,7 @@ public struct MemoryOSLLMArtifactValidator: Sendable {
     private func validateKnowledgeSections(candidates: [MemoryOSKnowledgeCandidate], conceptEntities: [MemoryOSExtractedConceptEntity], conceptRelations: [MemoryOSExtractedConceptRelation], evidenceSpanIDs: Set<String>, allowedEvidenceStatementIDs: Set<String>?) -> [MemoryOSValidationIssue] {
         let promotion = MemoryOSKnowledgePromotionPolicy()
         var issues: [MemoryOSValidationIssue] = []
-        let entityIDs = Set(conceptEntities.map(\.localID))
+        let entityNames = Set(conceptEntities.map(\.name))
 
         for candidate in candidates {
             let decision = promotion.evaluate(candidate)
@@ -267,8 +267,8 @@ public struct MemoryOSLLMArtifactValidator: Sendable {
                     issues.append(MemoryOSValidationIssue(code: "unknown_knowledge_evidence_statement", message: "Knowledge candidate references unknown L1 operational statement: \(statementID)."))
                 }
             }
-            for entityID in candidate.relatedEntityIDs where !entityIDs.contains(entityID) {
-                issues.append(MemoryOSValidationIssue(code: "unknown_knowledge_entity", message: "Knowledge candidate references unknown concept entity: \(entityID)."))
+            for entityName in candidate.relatedEntityNames where !entityNames.contains(entityName) {
+                issues.append(MemoryOSValidationIssue(code: "unknown_knowledge_entity", message: "Knowledge candidate references unknown concept entity: \(entityName)."))
             }
             for spanID in candidate.evidenceSpanIDs where !evidenceSpanIDs.contains(spanID) {
                 issues.append(MemoryOSValidationIssue(code: "unknown_evidence_span", message: "Knowledge candidate references unknown evidence span: \(spanID)."))
@@ -277,7 +277,7 @@ public struct MemoryOSLLMArtifactValidator: Sendable {
 
         let relationValidator = MemoryOSL4RelationConstraintValidator()
         for relation in conceptRelations {
-            issues.append(contentsOf: relationValidator.validate(relation: relation, conceptEntities: conceptEntities, evidenceSpanIDs: evidenceSpanIDs))
+            issues.append(contentsOf: relationValidator.validate(relation: relation, conceptEntities: conceptEntities))
         }
 
         return issues
@@ -486,33 +486,40 @@ public struct MemoryOSProjectionService: Sendable {
     }
 
     public func projectionBatch(from output: MemoryOSL1UnifiedProjectionOutput, artifactID: String, now: Date = Date()) -> MemoryOSProjectionBatch {
+        // 1. operational -> L2 only (nodes + statements), no dual projection to L4
         let operationalOutput = GraphStructuredExtractionOutput(
             entities: output.operationalEntities,
             statements: output.operationalStatements,
             evidenceSpans: output.evidenceSpans,
             warnings: output.warnings,
-            confidence: output.confidence,
+            confidence: nil,
             metadata: output.metadata
         )
         let operationalBatch = projectionBatch(from: operationalOutput, artifactID: artifactID, now: now)
+
+        // 2. Map L2 statement IDs for knowledge candidate evidence references
         let localStatementIDMap = Dictionary(uniqueKeysWithValues: output.operationalStatements.map { statement in
             (statement.id, "l2-statement:\(artifactID):\(statement.id)")
         })
+
+        // 3. Build name index from conceptEntities for knowledge candidate resolution
+        let conceptEntityByName = Dictionary(uniqueKeysWithValues: output.conceptEntities.map { concept in
+            let scope = concept.domain ?? "knowledge"
+            let entityType = MemoryOSEntityType.normalizeRawType(concept.conceptType)
+            let stableKey = MemoryOSStableKeyBuilder.stableKey(type: entityType, name: concept.name, scope: scope)
+            let entityID = "l4-entity:\(stableKey)"
+            return (concept.name, entityID)
+        })
+
         let remappedCandidates = output.knowledgeCandidates.map { candidate in
             var next = candidate
             next.evidenceStatementIDs = candidate.evidenceStatementIDs.map { localStatementIDMap[$0] ?? $0 }
-            next.relatedEntityIDs = candidate.relatedEntityIDs.map { localID in
-                let scope = output.conceptEntities.first { $0.localID == localID }?.domain ?? "knowledge"
-                if let concept = output.conceptEntities.first(where: { $0.localID == localID }) {
-                    let entityType = MemoryOSEntityType.normalizeRawType(concept.conceptType)
-                    let stableKey = MemoryOSStableKeyBuilder.stableKey(type: entityType, name: concept.name, scope: scope)
-                    return "l4-entity:\(stableKey)"
-                }
-                return localID
-            }
+            next.relatedEntityNames = candidate.relatedEntityNames.compactMap { conceptEntityByName[$0] }
             next.metadata = next.metadata.merging(["source_stage": "l1_unified_projection"]) { _, new in new }
             return next
         }
+
+        // 4. concept entities/relations -> L4 (by name, not localID)
         let knowledgeOutput = MemoryOSKnowledgeExtractionOutput(
             knowledgeCandidates: remappedCandidates,
             conceptEntities: output.conceptEntities,
@@ -522,20 +529,21 @@ public struct MemoryOSProjectionService: Sendable {
             metadata: output.metadata.merging(["source_stage": "l1_unified_projection"]) { _, new in new }
         )
         let knowledgeBatch = projectionBatch(from: knowledgeOutput, artifactID: artifactID, now: now)
-        let entitiesByID = Dictionary(grouping: operationalBatch.entities + knowledgeBatch.entities, by: \.id).compactMapValues { $0.first }
 
+        // 5. No dual projection: operational -> L2, concept -> L4
         return MemoryOSProjectionBatch(
             artifactID: artifactID,
             nodes: operationalBatch.nodes,
             statements: operationalBatch.statements,
-            entities: Array(entitiesByID.values).sorted { $0.id < $1.id },
-            entityStatements: (operationalBatch.entityStatements + knowledgeBatch.entityStatements).sorted { $0.id < $1.id },
+            entities: knowledgeBatch.entities,
+            entityStatements: knowledgeBatch.entityStatements,
             beliefs: knowledgeBatch.beliefs
         )
     }
 
     public func projectionBatch(from output: MemoryOSKnowledgeExtractionOutput, artifactID: String, now: Date = Date()) -> MemoryOSProjectionBatch {
-        let entityByLocalID = Dictionary(uniqueKeysWithValues: output.conceptEntities.map { concept in
+        // Build L4 entities from conceptEntities, keyed by name (not localID)
+        let entityByName: [String: MemoryOSEntity] = Dictionary(uniqueKeysWithValues: output.conceptEntities.map { concept in
             let scope = concept.domain ?? "knowledge"
             let entityType = MemoryOSEntityType.normalizeRawType(concept.conceptType)
             let stableKey = MemoryOSStableKeyBuilder.stableKey(type: entityType, name: concept.name, scope: scope)
@@ -546,42 +554,44 @@ public struct MemoryOSProjectionService: Sendable {
                 name: concept.name,
                 aliases: concept.aliases,
                 summary: concept.summary,
-                confidence: concept.confidence,
+                confidence: 1.0,
                 createdAt: now,
                 updatedAt: now,
                 validFrom: now,
                 metadata: concept.metadata.merging([
                     "artifact_id": artifactID,
-                    "concept_local_id": concept.localID,
                     "domain": concept.domain ?? ""
                 ]) { _, new in new }
             )
-            return (concept.localID, entity)
+            return (concept.name, entity)
         })
 
+        // Build L4 entity statements from conceptRelations, resolving subject/object by name
         let entityStatements = output.conceptRelations.compactMap { relation -> MemoryOSEntityStatement? in
-            guard let subject = entityByLocalID[relation.subjectLocalID], let object = entityByLocalID[relation.objectLocalID] else { return nil }
+            guard let subject = entityByName[relation.subjectName],
+                  let object = entityByName[relation.objectName] else {
+                return nil
+            }
             return MemoryOSEntityStatement(
-                id: "l4-concept-relation:\(artifactID):\(relation.id)",
+                id: "l4-concept-relation:\(artifactID):\(UUID().uuidString)",
                 entityID: subject.id,
                 predicate: relation.predicate,
                 objectEntityID: object.id,
                 text: relation.text,
                 assertionKind: .summarized,
-                confidence: relation.confidence,
+                confidence: 1.0,
                 validAt: now,
                 committedAt: now,
-                evidenceSpanIDs: relation.evidenceSpanIDs,
+                evidenceSpanIDs: [],
                 sourceArtifactID: artifactID,
                 metadata: relation.metadata.merging([
                     "artifact_id": artifactID,
-                    "subject_local_id": relation.subjectLocalID,
-                    "object_local_id": relation.objectLocalID,
                     "relation_type": "concept_relation"
                 ]) { _, new in new }
             )
         }
 
+        // L3 beliefs from knowledge candidates (unchanged)
         let promotion = MemoryOSKnowledgePromotionPolicy()
         let beliefs = output.knowledgeCandidates.compactMap { candidate in
             promotion.makeKnowledgeBelief(
@@ -596,7 +606,7 @@ public struct MemoryOSProjectionService: Sendable {
             artifactID: artifactID,
             nodes: [],
             statements: [],
-            entities: Array(entityByLocalID.values).sorted { $0.id < $1.id },
+            entities: Array(entityByName.values).sorted { $0.id < $1.id },
             entityStatements: entityStatements,
             beliefs: beliefs
         )
