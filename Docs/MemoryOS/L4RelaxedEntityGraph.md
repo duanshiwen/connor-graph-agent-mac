@@ -10,11 +10,69 @@ It is responsible for:
 
 - stable entity anchors
 - names and aliases
-- entity type strings
+- controlled entity type strings
 - entity-to-entity relations
 - graph expansion over L4 relations
 
 L4 is not a truth adjudication layer.
+
+## Entity type policy
+
+L4 uses a controlled medium-size entity type vocabulary through `MemoryOSEntityType`.
+
+The canonical stored/projected type strings are:
+
+```text
+person
+organization
+group
+role
+population
+place
+facility
+spatial_object
+concept
+theory
+framework
+discipline
+standard
+language
+metric
+identifier_scheme
+creative_work
+document
+dataset
+software
+product
+media_object
+website
+project
+event
+process
+decision
+task
+rule
+agreement
+physical_object
+device
+vehicle
+biological_entity
+medical_entity
+chemical_entity
+economic_entity
+award
+unknown
+```
+
+LLM-provided raw labels are normalized at L4 projection and validation boundaries. For example:
+
+- `university`, `school`, `company`, `institution` -> `organization`
+- `scientist`, `author`, `researcher` -> `person`
+- `parameter`, `variable`, `indicator`, `measure` -> `metric`
+- `class`, `type`, `category`, `taxonomy_class`, `ontology_class` -> `concept`
+- unsupported raw labels -> `unknown`
+
+This is vocabulary hygiene, not a confidence/evidence gate. Unsupported raw labels should not expand the schema with one-off LLM type strings, but they also should not automatically turn L4 into a strict truth adjudication layer.
 
 ## Confidence and evidence policy
 
@@ -46,8 +104,8 @@ L4 validation still keeps structural checks:
 - relation object must exist in the extracted entity set
 - predicate must be a known `MemoryOSL4RelationPredicate`
 - obvious invalid self-loops are rejected for predicates such as `INSTANCE_OF`, `SUBCLASS_OF`, `HAS_PART`, `PART_OF`, `DEPENDS_ON` and `REQUIRES`
-- selected taxonomy predicates keep lightweight endpoint type sanity checks
-- `SAME_AS` still requires compatible normalized endpoint types
+- selected taxonomy predicates keep lightweight endpoint type sanity checks using controlled L4 entity type normalization
+- `SAME_AS` still requires compatible controlled endpoint types after normalization
 - governance-like relations still require at least one governance-like endpoint type
 
 ## Current-view selection
