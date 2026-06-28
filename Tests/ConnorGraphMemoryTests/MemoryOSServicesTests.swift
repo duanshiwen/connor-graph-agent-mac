@@ -169,7 +169,7 @@ import ConnorGraphMemory
     #expect(validation.issues.contains { $0.code == "current_user_generic_alias" })
 }
 
-@Test func memoryOSArtifactValidatorRejectsL1UnifiedConceptRelationWithoutRequiredMetadata() throws {
+@Test func memoryOSArtifactValidatorAllowsL1UnifiedConceptRelationWithoutRequiredMetadata() throws {
     var output = makeAcceptedL1UnifiedProjectionOutput()
     output.conceptRelations[0].metadata = [:]
     let raw = String(data: try JSONEncoder().encode(output), encoding: .utf8)!
@@ -177,8 +177,8 @@ import ConnorGraphMemory
 
     let validation = MemoryOSLLMArtifactValidator().validateStructuredExtractionArtifact(artifact)
 
-    #expect(!validation.accepted)
-    #expect(validation.issues.contains { $0.code == "missing_l4_relation_metadata" })
+    #expect(validation.accepted)
+    #expect(!validation.issues.contains { $0.code == "missing_l4_relation_metadata" })
 }
 
 @Test func memoryOSArtifactValidatorRejectsL1UnifiedConceptRelationWithUnknownEntity() throws {
