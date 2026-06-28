@@ -102,7 +102,7 @@ import ConnorGraphMemory
 
 
 @Test func backgroundJobKindsExposeOnlyL1ExecutableKinds() throws {
-    #expect(MemoryOSBackgroundJobKind.allCases.map(\.rawValue).contains("memory.l2.synthesize_knowledge") == false)
+    #expect(MemoryOSBackgroundJobKind.allCases == [.l1SynthesizeKnowledge, .l1UnifiedProjection])
     #expect(MemoryOSBackgroundJobKind.l1ExecutableRawValues == [
         MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue,
         MemoryOSBackgroundJobKind.l1UnifiedProjection.rawValue
