@@ -344,8 +344,9 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         - The current user may be represented only through the protected stable_key current_user / metadata.person_role = current_user identity anchor. Do not add aliases such as user, 用户, 当前用户, profile, or current to this entity.
         - Named collaborators, contacts, family members and other durable people may be represented as stable person entities with metadata.person_role = other_person when identity evidence is sufficient.
         - Do not create or merge stable person entities when identity is ambiguous; emit warnings or ambiguous metadata instead.
-        - Create conceptEntities only when the concept has a stable name, useful summary, clear type, evidence, and future retrieval value.
-        - Create conceptRelations only when the relation is durable, evidence-backed, and useful for reasoning or retrieval.
+        - Create conceptEntities only when the concept has a stable name, useful summary, clear type, and future retrieval value.
+        - Create conceptRelations only when the relation is durable and useful for reasoning or retrieval.
+        - conceptRelations use subjectName and objectName to reference conceptEntities by name. Do not invent IDs or local references. Entity names within one extraction must be unique.
         - Do not create L4 entities for vague temporary phrases, one-off tasks, ephemeral UI wording, unsupported inferred categories, or purely stylistic wording.
 
         Workflow:
