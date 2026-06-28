@@ -567,37 +567,6 @@ public struct MemoryOSQueryGraphTool: AgentTool {
     }
 }
 
-public struct MemoryOSTraceEvidenceTool: AgentTool {
-    public let name = "memory_os_trace_evidence"
-    public let description = "Trace Memory OS evidence from L3 beliefs or L2 statements down to exact L0 provenance spans and objects. Use this when answer quality depends on source verification."
-    public let permission: AgentPermissionCapability = .readGraph
-    public let inputSchema = AgentToolInputSchema.object(properties: [
-        "spanIDs": .array(items: .string(description: "L0 span id."), description: "Optional L0 span ids."),
-        "statementIDs": .array(items: .string(description: "L2 statement id."), description: "Optional L2 statement ids."),
-        "beliefIDs": .array(items: .string(description: "L3 belief id."), description: "Optional L3 belief ids."),
-        "limit": .number(description: "Maximum traced nodes/refs. Defaults to 100.")
-    ], required: [])
-
-    private let facade: AppMemoryOSFacade
-    public init(facade: AppMemoryOSFacade) { self.facade = facade }
-
-    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        let spanIDs = Self.parseStringArray(arguments.array("spanIDs"))
-        let statementIDs = Self.parseStringArray(arguments.array("statementIDs"))
-        let beliefIDs = Self.parseStringArray(arguments.array("beliefIDs"))
-        guard !spanIDs.isEmpty || !statementIDs.isEmpty || !beliefIDs.isEmpty else { throw AgentToolError.invalidArguments("At least one of spanIDs, statementIDs, or beliefIDs is required") }
-        let limit = max(1, min(arguments.int("limit") ?? 100, 500))
-        let subgraph = try facade.traceMemoryOSEvidence(spanIDs: spanIDs, statementIDs: statementIDs, beliefIDs: beliefIDs, limit: limit)
-        let payload = MemoryOSL4GraphToolPayload.render(subgraph: subgraph, extra: ["spanIDs": spanIDs, "statementIDs": statementIDs, "beliefIDs": beliefIDs])
-        let json = try MemoryOSL4GraphToolPayload.renderJSON(payload)
-        return AgentToolResult(toolCallID: context.toolCallID, toolName: name, contentText: "Evidence trace returned \(subgraph.nodes.count) node(s) and \(subgraph.edges.count) edge(s).", contentJSON: json, citations: subgraph.evidenceRefs + subgraph.provenanceRefs)
-    }
-
-    private static func parseStringArray(_ values: [SendableJSONValue]?) -> [String] {
-        values?.compactMap { $0.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty } ?? []
-    }
-}
-
 public struct MemoryOSL2FindStatementsTool: AgentTool {
     public let name = "memory_os_l2_find_statements"
     public let description = "Find Memory OS L2 statement edges by text, subject id, and/or predicate filters. Use this for working-fact graph queries before tracing exact evidence."
@@ -969,7 +938,6 @@ public extension AgentToolRegistry {
         register(MemoryOSContextTool(facade: facade))
         register(MemoryOSSearchTool(facade: facade))
         register(MemoryOSQueryGraphTool(facade: facade))
-        register(MemoryOSTraceEvidenceTool(facade: facade))
         register(MemoryOSL2FindStatementsTool(facade: facade))
         register(MemoryOSL3ExpandBeliefTool(facade: facade))
         register(MemoryOSL3ListDomainsTool(facade: facade))

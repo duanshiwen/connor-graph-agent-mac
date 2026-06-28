@@ -281,10 +281,9 @@ public struct MemoryOSContextBuilder: Sendable {
     private func makeNextActions(from hits: [MemoryOSRetrievalHit], evidence: [MemoryOSEvidenceContextCard]) -> [MemoryOSContextNextAction] {
         var actions: [MemoryOSContextNextAction] = []
         if let expandable = hits.first(where: { $0.canExpandDepth }), let entityID = expandable.entityRefs.first ?? Optional(expandable.recordID) {
-            actions.append(MemoryOSContextNextAction(toolName: "memory_os_expand_l4", reason: "Expand the strongest L4 entity neighborhood.", arguments: ["entityID": .string(entityID), "depth": .int(1)]))
+
         }
         if !evidence.isEmpty {
-            actions.append(MemoryOSContextNextAction(toolName: "memory_os_trace_evidence", reason: "Trace evidence for grounded verification.", arguments: ["spanIDs": .array(evidence.map { .string($0.evidenceRef) })]))
         }
         return actions
     }
