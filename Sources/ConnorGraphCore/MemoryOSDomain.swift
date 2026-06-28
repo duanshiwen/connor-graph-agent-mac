@@ -378,6 +378,162 @@ public struct MemoryOSKnowledgeEvidenceSpan: Codable, Sendable, Equatable, Ident
     }
 }
 
+public enum MemoryOSEntityType: String, Codable, Sendable, Equatable, CaseIterable {
+    case person
+    case organization
+    case group
+    case role
+    case population
+    case place
+    case facility
+    case spatialObject = "spatial_object"
+    case concept
+    case theory
+    case framework
+    case discipline
+    case standard
+    case language
+    case metric
+    case identifierScheme = "identifier_scheme"
+    case creativeWork = "creative_work"
+    case document
+    case dataset
+    case software
+    case product
+    case mediaObject = "media_object"
+    case website
+    case project
+    case event
+    case process
+    case decision
+    case task
+    case rule
+    case agreement
+    case physicalObject = "physical_object"
+    case device
+    case vehicle
+    case biologicalEntity = "biological_entity"
+    case medicalEntity = "medical_entity"
+    case chemicalEntity = "chemical_entity"
+    case economicEntity = "economic_entity"
+    case award
+    case unknown
+
+    public static func normalizeRawType(_ raw: String) -> String {
+        fromRawType(raw).rawValue
+    }
+
+    public static func fromRawType(_ raw: String) -> MemoryOSEntityType {
+        let normalized = normalizeToken(raw)
+        if let exact = MemoryOSEntityType(rawValue: normalized) {
+            return exact
+        }
+        return aliases[normalized] ?? .unknown
+    }
+
+    private static func normalizeToken(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "-", with: "_")
+            .replacingOccurrences(of: " ", with: "_")
+    }
+
+    private static let aliases: [String: MemoryOSEntityType] = [
+        "human": .person,
+        "scientist": .person,
+        "author": .person,
+        "researcher": .person,
+        "individual": .person,
+        "org": .organization,
+        "company": .organization,
+        "institution": .organization,
+        "university": .organization,
+        "school": .organization,
+        "college": .organization,
+        "agency": .organization,
+        "team": .group,
+        "community": .group,
+        "audience": .population,
+        "segment": .population,
+        "location": .place,
+        "geo": .place,
+        "gpe": .place,
+        "city": .place,
+        "country": .place,
+        "building": .facility,
+        "campus": .facility,
+        "space": .spatialObject,
+        "region": .spatialObject,
+        "area": .spatialObject,
+        "class": .concept,
+        "type": .concept,
+        "category": .concept,
+        "taxonomy_class": .concept,
+        "ontology_class": .concept,
+        "kind": .concept,
+        "concept_type": .concept,
+        "entity_type": .concept,
+        "principle": .concept,
+        "pattern": .concept,
+        "method": .framework,
+        "methodology": .framework,
+        "model": .framework,
+        "domain": .discipline,
+        "field": .discipline,
+        "policy": .rule,
+        "constraint": .rule,
+        "requirement": .rule,
+        "law": .rule,
+        "regulation": .rule,
+        "sop": .standard,
+        "runbook": .standard,
+        "knowledge_type": .standard,
+        "parameter": .metric,
+        "variable": .metric,
+        "indicator": .metric,
+        "measure": .metric,
+        "index": .metric,
+        "id_scheme": .identifierScheme,
+        "identifier": .identifierScheme,
+        "identifier_type": .identifierScheme,
+        "work": .creativeWork,
+        "book": .creativeWork,
+        "article": .document,
+        "paper": .document,
+        "report": .document,
+        "file": .document,
+        "data": .dataset,
+        "database": .dataset,
+        "app": .software,
+        "application": .software,
+        "tool": .software,
+        "service": .software,
+        "media": .mediaObject,
+        "image": .mediaObject,
+        "video": .mediaObject,
+        "site": .website,
+        "workflow": .process,
+        "procedure": .process,
+        "operation": .process,
+        "choice": .decision,
+        "job": .task,
+        "contract": .agreement,
+        "treaty": .agreement,
+        "object": .physicalObject,
+        "artifact": .physicalObject,
+        "machine": .device,
+        "organism": .biologicalEntity,
+        "species": .biologicalEntity,
+        "disease": .medicalEntity,
+        "condition": .medicalEntity,
+        "drug": .chemicalEntity,
+        "compound": .chemicalEntity,
+        "market": .economicEntity,
+        "currency": .economicEntity,
+        "prize": .award
+    ]
+}
+
 public struct MemoryOSExtractedConceptEntity: Codable, Sendable, Equatable, Identifiable {
     public var id: String { localID }
     public var localID: String
