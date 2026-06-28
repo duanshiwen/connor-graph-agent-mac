@@ -413,29 +413,8 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         }
     }
 
-    public func enqueueL2ToKnowledgeBackgroundJobs(policy: MemoryOSL2KnowledgeSynthesisTriggerPolicy = MemoryOSL2KnowledgeSynthesisTriggerPolicy(), now: Date = Date()) throws -> [MemoryOSQueueItem] {
-        let states = try store.l2ProcessingStates(processingKind: .knowledgeSynthesis, status: .pending, limit: max(policy.minPendingStatementCount * 2, policy.maxStatementsPerBlock * 4))
-        let statements = try statements(for: states.map(\.statementID))
-        let drafts = MemoryOSL2ToKnowledgeJobPlanner(policy: policy).planJobs(from: statements, now: now)
-        return try drafts.map { draft in
-            let payload = store.json(draft)
-            let item = MemoryOSQueueItem(
-                kind: draft.kind,
-                priority: 5,
-                payloadJSON: payload,
-                nextRunAt: now,
-                idempotencyKey: "\(draft.kind):\(draft.statementIDs.joined(separator: ","))",
-                payloadHash: String(payload.hashValue),
-                createdAt: now,
-                updatedAt: now
-            )
-            try store.enqueue(item)
-            return item
-        }
-    }
-
     public func runBackgroundAIQueueOnce<Executor: MemoryOSBackgroundModelExecutor>(executor: Executor, workerID: String = "memory-os-background-ai-worker", limit: Int = 5, now: Date = Date(), kinds requestedKinds: [String]? = nil) throws -> [MemoryOSProjectionRunSummary] {
-        let kinds = requestedKinds ?? (MemoryOSBackgroundJobKind.l1ExecutableRawValues + [MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue])
+        let kinds = requestedKinds ?? MemoryOSBackgroundJobKind.l1ExecutableRawValues
         let candidates = try kinds.flatMap { kind in
             try store.runnableQueueItems(kind: kind, limit: limit, now: now)
         }.sorted { lhs, rhs in
@@ -454,24 +433,9 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
                     let result = try MemoryOSBackgroundJobWorker(executor: executor).run(draft)
                     let summary = try projectAndRecordLLMArtifact(rawContent: result.rawArtifactJSON, modelID: result.metadata["model_id"] ?? workerID, queueItem: leased, processingRunID: result.jobID, artifactType: result.artifactType, schemaName: result.schemaName, now: now)
                     if summary.accepted {
-                        let statementIDs = try l2StatementIDs(sourceArtifactID: summary.artifactID)
-                        try markL2ProcessingStatesPending(statementIDs: statementIDs, sourceArtifactID: summary.artifactID, now: now)
                         try deleteL1CaptureEvents(ids: draft.captureEventIDs)
                         try saveBackgroundJobAudit(eventType: "memory_os.background_job.projected", subjectID: leased.id, payload: ["artifact_id": summary.artifactID], now: now)
                     } else {
-                        try saveBackgroundJobAudit(eventType: "memory_os.background_job.artifact_rejected", subjectID: leased.id, payload: ["artifact_id": summary.artifactID, "issue_count": String(summary.issues.count)], now: now)
-                    }
-                    summaries.append(summary)
-                case MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue:
-                    var draft = try store.decode(MemoryOSL2ToKnowledgeJobDraft.self, leased.payloadJSON)
-                    draft.metadata = backgroundRunMetadata(draft.metadata, queueItem: leased)
-                    let result = try MemoryOSBackgroundJobWorker(executor: executor).run(draft)
-                    let summary = try projectAndRecordLLMArtifact(rawContent: result.rawArtifactJSON, modelID: result.metadata["model_id"] ?? workerID, queueItem: leased, processingRunID: result.jobID, artifactType: result.artifactType, schemaName: result.schemaName, now: now)
-                    if summary.accepted {
-                        try markL2ProcessingStatesSucceeded(statementIDs: draft.statementIDs, artifactID: summary.artifactID, now: now)
-                        try saveBackgroundJobAudit(eventType: "memory_os.background_job.projected", subjectID: leased.id, payload: ["artifact_id": summary.artifactID], now: now)
-                    } else {
-                        try markL2ProcessingStatesFailed(statementIDs: draft.statementIDs, errorCode: "projection_validation_failed", errorMessage: summary.issues.map(\.message).joined(separator: "; "), now: now)
                         try saveBackgroundJobAudit(eventType: "memory_os.background_job.artifact_rejected", subjectID: leased.id, payload: ["artifact_id": summary.artifactID, "issue_count": String(summary.issues.count)], now: now)
                     }
                     summaries.append(summary)
@@ -534,44 +498,6 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         WHERE source_artifact_id = \(store.quote(sourceArtifactID))
         ORDER BY committed_at ASC, id ASC
         """)
-    }
-
-    private func markL2ProcessingStatesPending(statementIDs: [String], sourceArtifactID: String, now: Date) throws {
-        for statementID in statementIDs {
-            try store.upsert(l2ProcessingState: MemoryOSL2StatementProcessingState(
-                statementID: statementID,
-                processingKind: .knowledgeSynthesis,
-                status: .pending,
-                sourceArtifactID: sourceArtifactID,
-                metadata: ["created_by": "l1_unified_projection", "source_artifact_id": sourceArtifactID]
-            ))
-        }
-        _ = try AppMemoryOSPipelineTriggerCoordinator(facade: self).evaluateAfterL2PendingStatements(now: now)
-    }
-
-    private func markL2ProcessingStatesSucceeded(statementIDs: [String], artifactID: String, now: Date) throws {
-        for statementID in statementIDs {
-            try store.upsert(l2ProcessingState: MemoryOSL2StatementProcessingState(
-                statementID: statementID,
-                processingKind: .knowledgeSynthesis,
-                status: .succeeded,
-                processedByArtifactID: artifactID,
-                lastAttemptAt: now,
-                metadata: ["processed_by_artifact_id": artifactID]
-            ))
-        }
-    }
-
-    private func markL2ProcessingStatesFailed(statementIDs: [String], errorCode: String, errorMessage: String, now: Date) throws {
-        for statementID in statementIDs {
-            try store.upsert(l2ProcessingState: MemoryOSL2StatementProcessingState(
-                statementID: statementID,
-                processingKind: .knowledgeSynthesis,
-                status: .failed,
-                lastAttemptAt: now,
-                metadata: ["error_code": errorCode, "error_message": errorMessage]
-            ))
-        }
     }
 
     private func saveBackgroundJobAudit(eventType: String, subjectID: String, payload: [String: String], now: Date) throws {

@@ -26,29 +26,6 @@ import ConnorGraphAppSupport
     #expect(payload.prompt.contains("L4 stable entities"))
 }
 
-@Test func appMemoryOSFacadeEnqueuesL2ToKnowledgeJobsFromProcessingState() throws {
-    let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSBackgroundPipelineDatabaseURL().path)
-    try store.migrate()
-    let facade = AppMemoryOSFacade(store: store)
-    let now = Date(timeIntervalSince1970: 6_000)
-    for index in 0..<3 {
-        let node = MemoryOSNode(id: "node-\(index)", stableKey: "node-\(index)", nodeType: "topic", name: "Topic \(index)")
-        try store.upsert(node: node)
-        let statement = MemoryOSStatement(id: "statement-\(index)", subjectID: node.id, predicate: "observed", text: "Reusable pattern \(index)", confidence: 0.8, validAt: now, committedAt: now, evidenceSpanIDs: ["span-\(index)"])
-        try store.upsert(statement: statement)
-        try store.upsert(l2ProcessingState: MemoryOSL2StatementProcessingState(statementID: statement.id, processingKind: .knowledgeSynthesis, status: .pending, lastAttemptAt: now))
-    }
-
-    let enqueued = try facade.enqueueL2ToKnowledgeBackgroundJobs(policy: MemoryOSL2KnowledgeSynthesisTriggerPolicy(minPendingStatementCount: 2, maxStatementsPerBlock: 2), now: now)
-
-    #expect(enqueued.count == 2)
-    let runnable = try store.runnableQueueItems(kind: MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue, limit: 10, now: now)
-    #expect(runnable.count == 2)
-    let payload = try store.decode(MemoryOSL2ToKnowledgeJobDraft.self, runnable[0].payloadJSON)
-    #expect(payload.schemaName == "MemoryOSKnowledgeExtractionOutput")
-    #expect(payload.prompt.contains("four knowledge filters"))
-}
-
 @Test func projectionQueuePayloadPreservesKnowledgeSchema() throws {
     let payload = MemoryOSProjectionQueuePayload(rawContent: "{}", modelID: "model", processingRunID: "run", schemaName: "MemoryOSKnowledgeExtractionOutput", artifactType: "memory_os_knowledge_extraction")
 

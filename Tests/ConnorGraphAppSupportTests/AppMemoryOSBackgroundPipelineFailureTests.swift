@@ -25,29 +25,6 @@ import ConnorGraphAppSupport
     #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_audit_events WHERE event_type = 'memory_os.background_job.model_failed';").first?.first == "1")
 }
 
-@Test func l2ToKnowledgeBackgroundJobMarksProcessingStateFailedWhenArtifactRejected() throws {
-    let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSBackgroundFailureDatabaseURL().path)
-    try store.migrate()
-    let facade = AppMemoryOSFacade(store: store)
-    let now = Date(timeIntervalSince1970: 9_000)
-    let node = MemoryOSNode(id: "node-1", stableKey: "node-1", nodeType: "topic", name: "Knowledge")
-    try store.upsert(node: node)
-    let statement = MemoryOSStatement(id: "stmt-1", subjectID: node.id, predicate: "observed", text: "Potential knowledge", confidence: 0.8, validAt: now, committedAt: now, evidenceSpanIDs: ["span-1"])
-    try store.upsert(statement: statement)
-    try store.upsert(l2ProcessingState: MemoryOSL2StatementProcessingState(statementID: statement.id, processingKind: .knowledgeSynthesis, status: .pending, lastAttemptAt: now))
-    _ = try facade.enqueueL2ToKnowledgeBackgroundJobs(policy: MemoryOSL2KnowledgeSynthesisTriggerPolicy(minPendingStatementCount: 1), now: now)
-
-    let summaries = try facade.runBackgroundAIQueueOnce(executor: StaticRejectedMemoryOSBackgroundExecutor(), now: now)
-
-    #expect(summaries.count == 1)
-    #expect(!summaries[0].accepted)
-    let failedStates = try store.l2ProcessingStates(processingKind: .knowledgeSynthesis, status: .failed, limit: 10)
-    #expect(failedStates.count == 1)
-    #expect(failedStates[0].metadata["error_code"] == "projection_validation_failed")
-    #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_l3_beliefs;").first?.first == "0")
-    #expect(try store.query(sql: "SELECT COUNT(*) FROM memory_audit_events WHERE event_type = 'memory_os.background_job.artifact_rejected';").first?.first == "1")
-}
-
 @Test func backgroundJobDeadLettersAfterMaxAttemptsAndKeepsL1Buffer() throws {
     let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSBackgroundFailureDatabaseURL().path)
     try store.migrate()

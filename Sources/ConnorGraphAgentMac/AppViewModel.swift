@@ -2477,9 +2477,6 @@ final class AppViewModel: NSObject, ObservableObject {
         case "plan_l1_unified_projection_jobs":
             let jobs = try memoryOSFacade.enqueueL1UnifiedProjectionBackgroundJobs()
             return "Memory OS planned \(jobs.count) L1 unified projection job(s)"
-        case "plan_l2_to_knowledge_jobs":
-            let jobs = try memoryOSFacade.enqueueL2ToKnowledgeBackgroundJobs()
-            return "Memory OS planned \(jobs.count) L2→Knowledge job(s)"
         default:
             throw TaskTargetRunnerError.unsupportedTarget("memory_os.pipeline:\(request.operationName)")
         }
