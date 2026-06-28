@@ -60,30 +60,24 @@ public struct MemoryOSL4RelationConstraintValidator: Sendable {
 
     public func validate(
         relation: MemoryOSExtractedConceptRelation,
-        conceptEntities: [MemoryOSExtractedConceptEntity],
-        evidenceSpanIDs: Set<String>
+        conceptEntities: [MemoryOSExtractedConceptEntity]
     ) -> [MemoryOSValidationIssue] {
         var issues: [MemoryOSValidationIssue] = []
-        let entityByID = Dictionary(uniqueKeysWithValues: conceptEntities.map { ($0.localID, $0) })
+        let entityByName = Dictionary(uniqueKeysWithValues: conceptEntities.map { ($0.name, $0) })
 
-        guard let subject = entityByID[relation.subjectLocalID] else {
-            issues.append(MemoryOSValidationIssue(code: "unknown_relation_subject", message: "Concept relation references unknown subject: \(relation.subjectLocalID)."))
+        guard let subject = entityByName[relation.subjectName] else {
+            issues.append(MemoryOSValidationIssue(code: "unknown_relation_subject", message: "Concept relation references unknown subject: \(relation.subjectName)."))
             return issues
         }
-        guard let object = entityByID[relation.objectLocalID] else {
-            issues.append(MemoryOSValidationIssue(code: "unknown_relation_object", message: "Concept relation references unknown object: \(relation.objectLocalID)."))
+        guard let object = entityByName[relation.objectName] else {
+            issues.append(MemoryOSValidationIssue(code: "unknown_relation_object", message: "Concept relation references unknown object: \(relation.objectName)."))
             return issues
         }
 
         let constraint = MemoryOSL4RelationConstraintRegistry.constraint(for: relation.predicate)
 
-        // L4 is a relaxed entity graph layer. Confidence and evidence span references are
-        // optional annotations produced by upstream extraction; they are not treated as
-        // validation gates for whether a relation can participate in the L4 graph.
-        _ = evidenceSpanIDs
-
-        if relation.subjectLocalID == relation.objectLocalID && forbidsSelfLoop(relation.predicate) {
-            issues.append(MemoryOSValidationIssue(code: "l4_relation_self_loop", message: "L4 relation \(relation.predicate.rawValue) must not point an entity to itself: \(relation.subjectLocalID)."))
+        if relation.subjectName == relation.objectName && forbidsSelfLoop(relation.predicate) {
+            issues.append(MemoryOSValidationIssue(code: "l4_relation_self_loop", message: "L4 relation \(relation.predicate.rawValue) must not point an entity to itself: \(relation.subjectName)."))
         }
 
         if !constraint.allowedSubjectTypes.isEmpty && !matchesType(subject.conceptType, allowed: constraint.allowedSubjectTypes) {

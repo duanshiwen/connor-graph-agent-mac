@@ -469,7 +469,6 @@ public struct MemoryOSUpdateCurrentUserProfileTool: AgentTool {
             conceptRelations: [],
             promotionDecisions: [],
             warnings: [],
-            confidence: 0.9,
             metadata: [
                 "schema_purpose": "current_user_fact_update",
                 "person_role": "current_user",
