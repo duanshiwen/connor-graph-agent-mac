@@ -104,6 +104,26 @@ import ConnorGraphMemory
     #expect(issues.isEmpty)
 }
 
+@Test func l4RelationConstraintValidatorUsesControlledTypeAliasesForIdentityCompatibility() {
+    let validator = MemoryOSL4RelationConstraintValidator()
+    let entities = [
+        MemoryOSExtractedConceptEntity(localID: "pku", name: "北京大学", conceptType: "university"),
+        MemoryOSExtractedConceptEntity(localID: "peking", name: "Peking University", conceptType: "organization")
+    ]
+    let relation = MemoryOSExtractedConceptRelation(
+        subjectLocalID: "pku",
+        predicate: .sameAs,
+        objectLocalID: "peking",
+        text: "北京大学 is Peking University.",
+        confidence: 0.4,
+        evidenceSpanIDs: []
+    )
+
+    let issues = validator.validate(relation: relation, conceptEntities: entities, evidenceSpanIDs: [])
+
+    #expect(issues.isEmpty)
+}
+
 @Test func l4RelationConstraintValidatorRejectsTaxonomyObjectThatIsNotTypeLike() {
     let validator = MemoryOSL4RelationConstraintValidator()
     let entities = [
