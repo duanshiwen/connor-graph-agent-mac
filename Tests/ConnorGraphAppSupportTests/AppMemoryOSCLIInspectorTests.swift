@@ -37,7 +37,6 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(stats.tables["memory_l0_provenance_spans"] == 1)
         #expect(stats.tables["memory_l1_capture_events"] == 1)
         #expect(stats.tables["memory_l2_statements"] == 1)
-        #expect(stats.tables["memory_l2_statement_processing_state"] == 1)
         #expect(stats.tables["memory_l3_beliefs"] == 1)
         #expect(stats.tables["memory_l4_entities"] == 1)
         #expect(layers.l0.objects == 1)
@@ -45,7 +44,6 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(layers.l1.captureEvents == 1)
         #expect(layers.l1.pending == 1)
         #expect(layers.l2.statements == 1)
-        #expect(layers.l2.knowledgePending == 1)
         #expect(layers.l3.beliefs == 1)
         #expect(layers.l4.entities == 1)
     }
@@ -85,24 +83,17 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(events[0].values["content"] == "诗闻正在测试 Connor Memory OS CLI。")
     }
 
-    @Test func memoryOSCLIInspectorListsL2StatementsAndPendingKnowledge() throws {
+    @Test func memoryOSCLIInspectorListsL2Statements() throws {
         let store = try makeMemoryOSCLIInspectorStore()
         try seedMemoryOSCLIInspectorFixture(store: store)
         let inspector = AppMemoryOSCLIInspector(store: store)
 
         let statements = try inspector.listL2Statements(limit: 10)
-        let pending = try inspector.listL2PendingKnowledge(limit: 10)
 
         #expect(statements.count == 1)
         #expect(statements[0].values["id"] == "stmt-1")
         #expect(statements[0].values["predicate"] == "describes")
         #expect(statements[0].values["source_artifact_id"] == "artifact-1")
-        #expect(pending.count == 1)
-        #expect(pending[0].values["statement_id"] == "stmt-1")
-        #expect(pending[0].values["processing_kind"] == "knowledge_synthesis")
-        #expect(pending[0].values["status"] == "pending")
-        #expect(pending[0].values["statement_text"] == "Connor Memory OS 是康纳同学的重要系统。")
-        #expect(pending[0].values["evidence_span_texts"] == "Connor Memory OS CLI")
     }
 
     @Test func memoryOSCLIInspectorListsL3Beliefs() throws {
@@ -269,26 +260,20 @@ struct AppMemoryOSCLIInspectorTests {
         let policy = inspector.pipelinePolicy()
 
         #expect(policy.l1UnifiedProjection.maxPendingAgeSeconds == 86_400)
-        #expect(policy.l2ToKnowledge.maxPendingAgeSeconds == 86_400)
         #expect(policy.l1UnifiedProjection.minPendingCount == 100)
-        #expect(policy.l2ToKnowledge.minPendingStatementCount == 100)
     }
 
-    @Test func memoryOSCLIInspectorPlansL1AndL2JobsThroughFacade() throws {
+    @Test func memoryOSCLIInspectorPlansL1JobsThroughFacade() throws {
         let store = try makeMemoryOSCLIInspectorStore()
         let now = Date(timeIntervalSince1970: 30_000)
         try seedMemoryOSCLIInspectorFixture(store: store, now: now)
         let inspector = AppMemoryOSCLIInspector(store: store)
 
         let l1Plan = try inspector.planL1(policy: MemoryOSL1ProcessingTriggerPolicy(minPendingCount: 1, maxEventsPerBlock: 10), now: now)
-        let l2Plan = try inspector.planL2(policy: MemoryOSL2KnowledgeSynthesisTriggerPolicy(minPendingStatementCount: 1, maxStatementsPerBlock: 10), now: now)
 
         #expect(l1Plan.plannedJobs == 1)
         #expect(l1Plan.kind == MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue)
         #expect(l1Plan.jobIDs.count == 1)
-        #expect(l2Plan.plannedJobs == 1)
-        #expect(l2Plan.kind == MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue)
-        #expect(l2Plan.jobIDs.count == 1)
     }
 
     @Test func memoryOSCLIRouterRoutesPipelineDebugRunNextCommand() throws {

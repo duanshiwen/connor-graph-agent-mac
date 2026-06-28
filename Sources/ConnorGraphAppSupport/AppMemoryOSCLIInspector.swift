@@ -36,7 +36,6 @@ public struct AppMemoryOSCLIInspector: Sendable {
                 l1QueueItems: layers.l1.queueItems,
                 l2Nodes: layers.l2.nodes,
                 l2Statements: layers.l2.statements,
-                l2PendingKnowledge: layers.l2.knowledgePending,
                 l3Beliefs: layers.l3.beliefs,
                 l4Entities: layers.l4.entities,
                 l4EntityStatements: layers.l4.entityStatements
@@ -110,19 +109,6 @@ public struct AppMemoryOSCLIInspector: Sendable {
         ORDER BY committed_at DESC, id ASC
         LIMIT \(safeLimit(limit))
         """, columns: ["id", "subject_id", "predicate", "object_id", "text", "assertion_kind", "confidence", "valid_at", "committed_at", "evidence_span_ids_json", "source_artifact_id", "metadata_json"])
-    }
-
-    public func listL2PendingKnowledge(limit: Int = 20) throws -> [MemoryOSCLIRow] {
-        try rows(sql: """
-        SELECT p.statement_id, p.processing_kind, p.status, p.source_artifact_id, p.processed_by_artifact_id, p.last_attempt_at, p.metadata_json, s.subject_id, s.predicate, s.object_id, s.text, s.evidence_span_ids_json, COALESCE(GROUP_CONCAT(sp.text, '\n---\n'), '')
-        FROM memory_l2_statement_processing_state p
-        JOIN memory_l2_statements s ON s.id = p.statement_id
-        LEFT JOIN memory_l0_provenance_spans sp ON INSTR(s.evidence_span_ids_json, sp.id) > 0
-        WHERE p.processing_kind = 'knowledge_synthesis' AND p.status = 'pending'
-        GROUP BY p.statement_id, p.processing_kind, p.status, p.source_artifact_id, p.processed_by_artifact_id, p.last_attempt_at, p.metadata_json, s.subject_id, s.predicate, s.object_id, s.text, s.evidence_span_ids_json
-        ORDER BY p.last_attempt_at ASC, p.statement_id ASC
-        LIMIT \(safeLimit(limit))
-        """, columns: ["statement_id", "processing_kind", "status", "source_artifact_id", "processed_by_artifact_id", "last_attempt_at", "metadata_json", "subject_id", "predicate", "object_id", "statement_text", "evidence_span_ids_json", "evidence_span_texts"])
     }
 
     public func findL2Entities(names: String) throws -> MemoryOSL2FindEntitiesResult {
@@ -220,19 +206,12 @@ public struct AppMemoryOSCLIInspector: Sendable {
 
     public func pipelinePolicy() -> MemoryOSCLIPipelinePolicy {
         let l1 = MemoryOSL1ProcessingTriggerPolicy()
-        let l2 = MemoryOSL2KnowledgeSynthesisTriggerPolicy()
         return MemoryOSCLIPipelinePolicy(
             l1UnifiedProjection: MemoryOSCLIL1PipelinePolicy(
                 minPendingCount: l1.minPendingCount,
                 maxEventsPerBlock: l1.maxEventsPerBlock,
                 maxTokensPerBlock: l1.maxTokensPerBlock,
                 maxPendingAgeSeconds: l1.maxPendingAge.map(Int.init)
-            ),
-            l2ToKnowledge: MemoryOSCLIL2PipelinePolicy(
-                minPendingStatementCount: l2.minPendingStatementCount,
-                maxStatementsPerBlock: l2.maxStatementsPerBlock,
-                maxTokensPerBlock: l2.maxTokensPerBlock,
-                maxPendingAgeSeconds: l2.maxPendingAge.map(Int.init)
             )
         )
     }
@@ -242,14 +221,9 @@ public struct AppMemoryOSCLIInspector: Sendable {
         return MemoryOSCLIPlanResult(plannedJobs: jobs.count, kind: MemoryOSBackgroundJobKind.l1SynthesizeKnowledge.rawValue, jobIDs: jobs.map(\.id))
     }
 
-    public func planL2(policy: MemoryOSL2KnowledgeSynthesisTriggerPolicy = MemoryOSL2KnowledgeSynthesisTriggerPolicy(), now: Date = Date()) throws -> MemoryOSCLIPlanResult {
-        let jobs = try AppMemoryOSFacade(store: store).enqueueL2ToKnowledgeBackgroundJobs(policy: policy, now: now)
-        return MemoryOSCLIPlanResult(plannedJobs: jobs.count, kind: MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue, jobIDs: jobs.map(\.id))
-    }
-
     public func hasRunnableBackgroundAIJob(kind: String? = nil, limit: Int = 1, now: Date = Date()) throws -> Bool {
         let effectiveLimit = safeLimit(limit)
-        let executableKinds = kind.map { [$0] } ?? (MemoryOSBackgroundJobKind.l1ExecutableRawValues + [MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue])
+        let executableKinds = kind.map { [$0] } ?? MemoryOSBackgroundJobKind.l1ExecutableRawValues
         for executableKind in executableKinds where try !store.runnableQueueItems(kind: executableKind, limit: effectiveLimit, now: now).isEmpty {
             return true
         }
@@ -268,7 +242,7 @@ public struct AppMemoryOSCLIInspector: Sendable {
 
     public func debugRunNextBackgroundAI<Model: MemoryOSBackgroundToolLoopModel>(kind: String? = nil, limit: Int = 1, model: Model, configuration: MemoryOSBackgroundToolLoopConfiguration = MemoryOSBackgroundToolLoopConfiguration(), now: Date = Date()) throws -> MemoryOSCLIDebugAIRunResult {
         let effectiveLimit = safeLimit(limit)
-        let executableKinds = kind.map { [$0] } ?? (MemoryOSBackgroundJobKind.l1ExecutableRawValues + [MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue])
+        let executableKinds = kind.map { [$0] } ?? MemoryOSBackgroundJobKind.l1ExecutableRawValues
         let plannedCandidates = try executableKinds.flatMap { executableKind in
             try store.runnableQueueItems(kind: executableKind, limit: effectiveLimit, now: now)
         }.sorted { lhs, rhs in
@@ -508,9 +482,7 @@ public struct AppMemoryOSCLIInspector: Sendable {
             ),
             l2: MemoryOSCLIL2Counts(
                 nodes: try count("memory_l2_nodes"),
-                statements: try count("memory_l2_statements"),
-                knowledgePending: try count("memory_l2_statement_processing_state", where: "processing_kind = 'knowledge_synthesis' AND status = 'pending'"),
-                processingStates: try count("memory_l2_statement_processing_state")
+                statements: try count("memory_l2_statements")
             ),
             l3: MemoryOSCLIL3Counts(
                 beliefs: try count("memory_l3_beliefs")
@@ -543,9 +515,6 @@ public struct AppMemoryOSCLIInspector: Sendable {
         case let rawKind where MemoryOSBackgroundJobKind.isL1KnowledgeKind(rawKind):
             let draft = try? store.decode(MemoryOSL1UnifiedProjectionJobDraft.self, payload)
             return try provenanceContent(forCaptureEventIDs: draft?.captureEventIDs ?? [])
-        case MemoryOSBackgroundJobKind.l2SynthesizeKnowledge.rawValue:
-            let draft = try? store.decode(MemoryOSL2ToKnowledgeJobDraft.self, payload)
-            return try statementText(forStatementIDs: draft?.statementIDs ?? [])
         default:
             return ""
         }
@@ -748,11 +717,9 @@ public struct MemoryOSCLISearchHit: Codable, Sendable, Equatable {
 
 public struct MemoryOSCLIPipelinePolicy: Codable, Sendable, Equatable {
     public var l1UnifiedProjection: MemoryOSCLIL1PipelinePolicy
-    public var l2ToKnowledge: MemoryOSCLIL2PipelinePolicy
 
     enum CodingKeys: String, CodingKey {
         case l1UnifiedProjection = "l1_unified_projection"
-        case l2ToKnowledge = "l2_to_knowledge"
     }
 }
 
@@ -765,20 +732,6 @@ public struct MemoryOSCLIL1PipelinePolicy: Codable, Sendable, Equatable {
     enum CodingKeys: String, CodingKey {
         case minPendingCount = "min_pending_count"
         case maxEventsPerBlock = "max_events_per_block"
-        case maxTokensPerBlock = "max_tokens_per_block"
-        case maxPendingAgeSeconds = "max_pending_age_seconds"
-    }
-}
-
-public struct MemoryOSCLIL2PipelinePolicy: Codable, Sendable, Equatable {
-    public var minPendingStatementCount: Int
-    public var maxStatementsPerBlock: Int
-    public var maxTokensPerBlock: Int
-    public var maxPendingAgeSeconds: Int?
-
-    enum CodingKeys: String, CodingKey {
-        case minPendingStatementCount = "min_pending_statement_count"
-        case maxStatementsPerBlock = "max_statements_per_block"
         case maxTokensPerBlock = "max_tokens_per_block"
         case maxPendingAgeSeconds = "max_pending_age_seconds"
     }
@@ -879,7 +832,6 @@ private enum MemoryOSCLIInspectorTable {
         "memory_l1_dead_letter_queue",
         "memory_l2_nodes",
         "memory_l2_statements",
-        "memory_l2_statement_processing_state",
         "memory_l3_beliefs",
         "memory_l4_entities",
         "memory_l4_entity_statements"
@@ -924,7 +876,6 @@ public struct MemoryOSCLIStatusLayerCounts: Codable, Sendable, Equatable {
     public var l1QueueItems: Int
     public var l2Nodes: Int
     public var l2Statements: Int
-    public var l2PendingKnowledge: Int
     public var l3Beliefs: Int
     public var l4Entities: Int
     public var l4EntityStatements: Int
@@ -937,7 +888,6 @@ public struct MemoryOSCLIStatusLayerCounts: Codable, Sendable, Equatable {
         case l1QueueItems = "l1_queue_items"
         case l2Nodes = "l2_nodes"
         case l2Statements = "l2_statements"
-        case l2PendingKnowledge = "l2_pending_knowledge"
         case l3Beliefs = "l3_beliefs"
         case l4Entities = "l4_entities"
         case l4EntityStatements = "l4_entity_statements"
@@ -1008,14 +958,10 @@ public struct MemoryOSCLIL1Counts: Codable, Sendable, Equatable {
 public struct MemoryOSCLIL2Counts: Codable, Sendable, Equatable {
     public var nodes: Int
     public var statements: Int
-    public var knowledgePending: Int
-    public var processingStates: Int
 
     enum CodingKeys: String, CodingKey {
         case nodes
         case statements
-        case knowledgePending = "knowledge_pending"
-        case processingStates = "processing_states"
     }
 }
 

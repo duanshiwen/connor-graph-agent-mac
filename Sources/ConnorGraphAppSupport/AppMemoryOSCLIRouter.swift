@@ -106,7 +106,6 @@ public enum AppMemoryOSCLIRouter {
     private static func routeL2(args: [String], inspector: AppMemoryOSCLIInspector, encoder: JSONEncoder) throws -> String {
         switch args.first ?? "statements" {
         case "statements": return try encode(try inspector.listL2Statements(limit: intOption("--limit", in: args, default: 20)), encoder: encoder)
-        case "pending-knowledge": return try encode(try inspector.listL2PendingKnowledge(limit: intOption("--limit", in: args, default: 20)), encoder: encoder)
         case "find-entities":
             guard let names = args.dropFirst().first, !names.hasPrefix("--") else {
                 return try encode(MemoryOSCLIError(error: "missing_l2_entity_names", usage: "connor memory l2 find-entities <names>"), encoder: encoder)
@@ -119,7 +118,7 @@ public enum AppMemoryOSCLIRouter {
             let data = Data(raw.utf8)
             let request = try JSONDecoder().decode(MemoryOSL2UpdateEntitiesRequest.self, from: data)
             return try encode(try inspector.updateL2Entities(request), encoder: encoder)
-        default: return try encode(MemoryOSCLIError(error: "unknown_l2_command", usage: "connor memory l2 statements|pending-knowledge|find-entities <names>|update-entities --json <json>|--file <file>"), encoder: encoder)
+        default: return try encode(MemoryOSCLIError(error: "unknown_l2_command", usage: "connor memory l2 statements|find-entities <names>|update-entities --json <json>|--file <file>"), encoder: encoder)
         }
     }
 
@@ -219,10 +218,9 @@ public enum AppMemoryOSCLIRouter {
         switch args.first ?? "policy" {
         case "policy": return try encode(inspector.pipelinePolicy(), encoder: encoder)
         case "plan-l1", "plan-l1-knowledge": return try encode(try inspector.planL1(), encoder: encoder)
-        case "plan-l2", "plan-l2-knowledge": return try encode(try inspector.planL2(), encoder: encoder)
         case "debug-run-next":
             return try routePipelineDebugRunNext(args: args, inspector: inspector, encoder: encoder)
-        default: return try encode(MemoryOSCLIError(error: "unknown_pipeline_command", usage: "connor memory pipeline policy|plan-l1-knowledge|plan-l2-knowledge|debug-run-next"), encoder: encoder)
+        default: return try encode(MemoryOSCLIError(error: "unknown_pipeline_command", usage: "connor memory pipeline policy|plan-l1-knowledge|debug-run-next"), encoder: encoder)
         }
     }
 
