@@ -149,8 +149,6 @@ public struct AgentInstructionSection: Sendable, Equatable {
     - Use `memory_os_expand_l4` to inspect stable entity/concept neighborhoods and relations when broader graph context affects the answer.
     - Use `memory_os_l4_instances` for L4 class membership/list questions after resolving the class entity id; do not answer these questions from search summaries alone.
     - Use `memory_os_read_provenance` only when directly reading a known L0 provenance object/span is enough; prefer `memory_os_trace_evidence` when starting from L2/L3 claims.
-    - Use `memory_os_l4_update_entities` to write durable L4 stable entity anchors and entity-to-entity relations directly. Entities are upserted by name+type+domain; relations are always appended. Do not provide confidence, evidence, or internal IDs.
-    - Use `memory_os_l3_update_beliefs` to write L3 reusable knowledge/theory records directly. Provide statement, optional domain, and optional relatedEntityNames. Do not provide confidence, evidence, or internal IDs.
     - Search native personal sources when the user's request may involve mail, calendar events, RSS articles, or browser history that are not guaranteed to be represented in Memory OS: use `mail_search_messages`/`mail_get_message`, `calendar_search_events`, `rss_search_items`/`rss_get_item`, and `browser_history_search`/`browser_history_get` according to the Native Personal Source Tools workflow.
     - Then search current web information with `web_search` for external grounding, recent developments, documentation, facts, and best practices.
     - Use `web_fetch` to read original pages before relying on web search snippets; use `browser_fetch` only when direct page fetching or a lightweight page snapshot is more appropriate.
