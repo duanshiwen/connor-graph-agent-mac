@@ -525,18 +525,67 @@ public struct MemoryOSL1UnifiedProjectionOutput: Codable, Sendable, Equatable {
 
 public struct MemoryOSBelief: Codable, Sendable, Equatable, Identifiable {
     public var id: String
-    public var topic: String
     public var statement: String
-    public var projectionKind: MemoryOSProjectionKind
-    public var confidence: Double
-    public var evidenceStatementIDs: [String]
-    public var validAt: Date
-    public var projectedAt: Date
-    public var sourceArtifactID: String?
-    public var metadata: [String: String]
+    public var domain: String
+    public var relatedObjectNames: String
+    public var createdAt: Date
+    public var updatedAt: Date
 
-    public init(id: String = UUID().uuidString, topic: String, statement: String, projectionKind: MemoryOSProjectionKind = .observed, confidence: Double = 0.5, evidenceStatementIDs: [String] = [], validAt: Date = Date(), projectedAt: Date = Date(), sourceArtifactID: String? = nil, metadata: [String: String] = [:]) {
-        self.id = id; self.topic = topic; self.statement = statement; self.projectionKind = projectionKind; self.confidence = confidence; self.evidenceStatementIDs = evidenceStatementIDs; self.validAt = validAt; self.projectedAt = projectedAt; self.sourceArtifactID = sourceArtifactID; self.metadata = metadata
+    public init(id: String = UUID().uuidString, statement: String, domain: String, relatedObjectNames: String = "", createdAt: Date = Date(), updatedAt: Date = Date()) {
+        self.id = id
+        self.statement = statement
+        self.domain = Self.normalizedDisciplineDomain(domain)
+        self.relatedObjectNames = Self.normalizedRelatedConceptNames(relatedObjectNames)
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+
+    public static func normalizedDisciplineDomain(_ value: String?) -> String {
+        let raw = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !raw.isEmpty else { return "general-knowledge" }
+        let slug = raw
+            .lowercased()
+            .replacingOccurrences(of: "_", with: "-")
+            .replacingOccurrences(of: " ", with: "-")
+        let aliases = [
+            "cs": "computer-science",
+            "ai": "artificial-intelligence",
+            "ml": "artificial-intelligence",
+            "software": "software-engineering",
+            "knowledge-base": "knowledge-management",
+            "memory-os": "knowledge-management",
+            "agent-os": "software-engineering"
+        ]
+        return aliases[slug] ?? slug
+    }
+
+    public static func normalizedRelatedConceptNames(_ raw: String) -> String {
+        var seen: Set<String> = []
+        var values: [String] = []
+        for part in raw.split(whereSeparator: { char in
+            char == "," || char == "，" || char == "、" || char == ";" || char == "\n"
+        }) {
+            let value = String(part).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty else { continue }
+            let key = value.lowercased()
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            values.append(value)
+        }
+        return values.joined(separator: ", ")
+    }
+}
+
+public struct MemoryOSL3DomainSummary: Codable, Sendable, Equatable, Identifiable {
+    public var id: String { domain }
+    public var domain: String
+    public var beliefCount: Int
+    public var latestUpdatedAt: Date?
+
+    public init(domain: String, beliefCount: Int, latestUpdatedAt: Date? = nil) {
+        self.domain = MemoryOSBelief.normalizedDisciplineDomain(domain)
+        self.beliefCount = beliefCount
+        self.latestUpdatedAt = latestUpdatedAt
     }
 }
 

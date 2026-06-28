@@ -98,7 +98,7 @@ private func temporaryMemoryOSDatabaseURL(_ name: String = UUID().uuidString) ->
     try store.upsert(node: node)
     let statement = MemoryOSStatement(id: "stmt-1", subjectID: node.id, predicate: "requires", text: "Memory OS requires production-grade storage.", assertionKind: .observed, confidence: 0.9, validAt: now, committedAt: now, evidenceSpanIDs: [span.id])
     try store.upsert(statement: statement)
-    let belief = MemoryOSBelief(id: "belief-1", topic: "memory-os", statement: "Memory OS must be production-grade.", projectionKind: .observed, confidence: 0.95, evidenceStatementIDs: [statement.id], validAt: now, projectedAt: now)
+    let belief = MemoryOSBelief(id: "belief-1", statement: "Memory OS must be production-grade.", domain: "software-engineering", relatedObjectNames: "Semantic memory", createdAt: now, updatedAt: now)
     try store.upsert(belief: belief)
     let entity = MemoryOSEntity(id: "entity-1", stableKey: "default:project:memory-os", entityType: "project", name: "Memory OS", aliases: ["Connor Memory OS"], summary: "Stable entity for the memory system", confidence: 0.9, createdAt: now, updatedAt: now)
     try store.upsert(entity: entity)

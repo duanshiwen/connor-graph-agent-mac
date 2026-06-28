@@ -185,15 +185,28 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
 
     private func searchL3(_ text: String, limit: Int) throws -> [MemoryOSRetrievalHit] {
         try store.query(sql: """
-        SELECT f.belief_id, f.topic, f.statement, b.evidence_statement_ids_json, bm25(memory_l3_beliefs_fts) AS rank
+        SELECT f.belief_id, b.statement, b.domain, b.related_object_names, b.created_at, b.updated_at, bm25(memory_l3_beliefs_fts) AS rank
         FROM memory_l3_beliefs_fts f
         JOIN memory_l3_beliefs b ON b.id = f.belief_id
         WHERE memory_l3_beliefs_fts MATCH \(store.quote(ftsQuery(text)))
         ORDER BY rank
         LIMIT \(limit)
         """).map { row in
-            let evidence = (try? store.decode([String].self, row[3])) ?? []
-            return MemoryOSRetrievalHit(layer: .l3, recordID: row[0], title: row[1], summary: snippet(row[2], query: text), matchedText: row[2], score: score(fromFTSRank: row[4]), evidenceRefs: evidence)
+            let statement = row[1]
+            return MemoryOSRetrievalHit(
+                layer: .l3,
+                recordID: row[0],
+                title: String(statement.prefix(80)),
+                summary: snippet(statement, query: text),
+                matchedText: statement,
+                score: score(fromFTSRank: row[6]),
+                metadata: [
+                    "domain": row[2],
+                    "related_object_names": row[3],
+                    "created_at": row[4],
+                    "updated_at": row[5]
+                ]
+            )
         }
     }
 

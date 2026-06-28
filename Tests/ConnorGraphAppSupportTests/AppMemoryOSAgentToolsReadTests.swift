@@ -28,15 +28,15 @@ import ConnorGraphAppSupport
     try store.migrate()
     let facade = AppMemoryOSFacade(store: store)
     let now = Date(timeIntervalSince1970: 10_000)
-    try store.upsert(belief: MemoryOSBelief(id: "belief-1", topic: "Prompt governance", statement: "L3 records require reusable cognitive structure.", confidence: 0.93, evidenceStatementIDs: ["stmt-1"], validAt: now, projectedAt: now))
+    try store.upsert(belief: MemoryOSBelief(id: "belief-1", statement: "L3 records require reusable cognitive structure.", domain: "knowledge-management", relatedObjectNames: "Prompt governance", createdAt: now, updatedAt: now))
 
     let tool = MemoryOSReadRecordTool(facade: facade)
     let result = try await tool.execute(arguments: AgentToolArguments(json: #"{"layer":"L3","recordID":"belief-1"}"#), context: memoryOSReadToolContext())
 
     let json = try #require(result.contentJSON)
     #expect(json.contains("belief-1"))
+    #expect(json.contains("knowledge-management"))
     #expect(json.contains("Prompt governance"))
-    #expect(json.contains("stmt-1"))
 }
 
 @Test func memoryOSReadProvenanceToolReadsL0ObjectAndSpan() async throws {
