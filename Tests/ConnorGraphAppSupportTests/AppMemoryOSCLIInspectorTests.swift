@@ -611,7 +611,6 @@ private func seedMemoryOSCLIInspectorFixture(store: SQLiteMemoryOSStore, now: Da
     try store.upsert(node: node)
     let statement = MemoryOSStatement(id: "stmt-1", subjectID: node.id, predicate: "describes", text: "Connor Memory OS 是康纳同学的重要系统。", confidence: 0.91, validAt: now, committedAt: now, evidenceSpanIDs: [span.id], sourceArtifactID: "artifact-1", metadata: ["stage": "l2"])
     try store.upsert(statement: statement)
-    try store.upsert(l2ProcessingState: MemoryOSL2StatementProcessingState(statementID: statement.id, processingKind: .knowledgeSynthesis, status: .pending, sourceArtifactID: "artifact-1", lastAttemptAt: nil, metadata: ["reason": "new_statement"]))
 
     let belief = MemoryOSBelief(id: "belief-1", statement: "Memory OS should be observable from CLI.", domain: "software-engineering", relatedObjectNames: "Memory architecture", createdAt: now, updatedAt: now)
     try store.upsert(belief: belief)
