@@ -135,6 +135,133 @@ struct MemoryOSBackgroundPromptContractTests {
         #expect(prompt.contains("record the search-backed judgment"))
     }
 
+    @Test func l1PromptDefinesL2SemanticAnchorsBeyondPhysicalObjects() {
+        let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
+
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
+
+        #expect(prompt.contains("A L2 entity is any future-useful semantic anchor"))
+        #expect(prompt.contains("not only a physical object"))
+        #expect(prompt.contains("current_user"))
+        #expect(prompt.contains("person_object"))
+        #expect(prompt.contains("work_object"))
+        #expect(prompt.contains("life_object"))
+        #expect(prompt.contains("event"))
+        #expect(prompt.contains("place"))
+        #expect(prompt.contains("artifact"))
+        #expect(prompt.contains("document"))
+        #expect(prompt.contains("concept"))
+        #expect(prompt.contains("metric"))
+        #expect(prompt.contains("time_expression"))
+        #expect(prompt.contains("task topic"))
+        #expect(prompt.contains("decision topic"))
+        #expect(prompt.contains("project phase"))
+        #expect(prompt.contains("Do not create an entity merely because a noun phrase appears"))
+    }
+
+    @Test func l1PromptRequiresFactFirstEntitySecondExtraction() {
+        let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
+
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
+
+        #expect(prompt.contains("fact-first, entity-second"))
+        #expect(prompt.contains("first identify future-useful operational facts"))
+        #expect(prompt.contains("Classify each retained fact into exactly one metadata.l2_fact_type before creating entities"))
+        #expect(prompt.contains("Choose the minimal useful subject entity anchor"))
+        #expect(prompt.contains("statement text is the semantic authority"))
+        #expect(prompt.contains("Predicate/relation is a routing and retrieval handle"))
+        #expect(prompt.contains("Preserve negation, exclusion, rejection, cancellation, postponement, and supersession"))
+    }
+
+    @Test func l1PromptDefinesMinimumEntityPrinciple() {
+        let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
+
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
+
+        #expect(prompt.contains("Minimum entity principle"))
+        #expect(prompt.contains("Create or update the fewest entities needed"))
+        #expect(prompt.contains("A good L2 entity is a future retrieval anchor"))
+        #expect(prompt.contains("A bad L2 entity is merely a noun phrase"))
+        #expect(prompt.contains("Prefer attaching a statement to an existing broader anchor"))
+    }
+
+    @Test func l1PromptProvidesClassSpecificExtractionCues() {
+        let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
+
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
+
+        #expect(prompt.contains("Class-specific extraction cues"))
+        #expect(prompt.contains("profile_preference"))
+        #expect(prompt.contains("project_state"))
+        #expect(prompt.contains("task_commitment"))
+        #expect(prompt.contains("calendar_time"))
+        #expect(prompt.contains("communication"))
+        #expect(prompt.contains("source_document"))
+        #expect(prompt.contains("decision"))
+        #expect(prompt.contains("implementation"))
+        #expect(prompt.contains("environment_config"))
+        #expect(prompt.contains("relationship"))
+        #expect(prompt.contains("other"))
+        #expect(prompt.contains("selected option, explicit decision, rejection, approval, rationale"))
+        #expect(prompt.contains("code, architecture, runtime behavior, dependency, module relation, bug, fix, feature, test result"))
+        #expect(prompt.contains("branch, toolchain, credential boundary, config, permission mode, workspace path"))
+        #expect(prompt.contains("Use only when the fact is future-useful operational memory and no other category fits"))
+    }
+
+    @Test func l1PromptProvidesStatementWritingTemplates() {
+        let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
+
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
+
+        #expect(prompt.contains("Statement writing templates"))
+        #expect(prompt.contains("Preference:"))
+        #expect(prompt.contains("Project state:"))
+        #expect(prompt.contains("Decision:"))
+        #expect(prompt.contains("Task:"))
+        #expect(prompt.contains("Implementation:"))
+        #expect(prompt.contains("Source document:"))
+        #expect(prompt.contains("Relationship:"))
+        #expect(prompt.contains("Avoid vague statements"))
+    }
+
+    @Test func l1PromptDefinesProtectedCurrentUserPersonObjectAnchor() {
+        let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
+
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
+
+        #expect(prompt.contains("semantically a person_object"))
+        #expect(prompt.contains("protected identity anchor"))
+        #expect(prompt.contains("Do not create separate entities named"))
+        #expect(prompt.contains("Do not add generic aliases"))
+        #expect(prompt.contains("assistant-authored assumptions"))
+        #expect(prompt.contains("unless the user explicitly confirms them"))
+    }
+
+    @Test func l1PromptDocumentsMinimalCurrentUserFactWriteToolContract() {
+        let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
+
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
+
+        #expect(prompt.contains("memory_os_update_current_user_profile"))
+        #expect(prompt.contains("facts[].statement"))
+        #expect(prompt.contains("facts[].factType"))
+        #expect(prompt.contains("facts[].relation"))
+        #expect(prompt.contains("Do not provide evidence, confidence, metadata, validAt, profileDimension, source, stability, sensitivity, observations, or mode"))
+        #expect(prompt.contains("The tool owns current_user anchoring, metadata construction, timestamps, confidence defaults, and projection details"))
+    }
+
+    @Test func l1PromptSeparatesArtifactMetadataFromExternalToolArguments() {
+        let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
+
+        let prompt = MemoryOSL1UnifiedProjectionPromptBuilder().prompt(for: [event])
+
+        #expect(prompt.contains("Inside MemoryOSL1UnifiedProjectionOutput"))
+        #expect(prompt.contains("metadata.profile_dimension is an internal validation/routing key"))
+        #expect(prompt.contains("If no specific profile dimension is available, use fact_statement"))
+        #expect(prompt.contains("This metadata requirement is for this L1 artifact only"))
+        #expect(prompt.contains("Do not ask external write tools to provide metadata"))
+    }
+
     @Test func l1PromptDeclaresAllAllowedL2PredicatesAndAssertionKinds() {
         let event = MemoryOSCaptureEvent(id: "cap-1", provenanceObjectID: "prov-1", eventType: "source_event", occurredAt: Date(timeIntervalSince1970: 1_780_000_000), metadata: ["span_id": "span-1"])
 
