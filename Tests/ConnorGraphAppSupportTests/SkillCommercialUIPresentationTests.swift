@@ -57,7 +57,7 @@ struct SkillCommercialUIPresentationTests {
     }
 
     @Test func allSkillsAreVisibleRegardlessOfTier() throws {
-        let bundled = makeUISkillPackage(slug: "internal-helper")
+        var bundled = makeUISkillPackage(slug: "internal-helper")
         bundled.sourceTier = .bundled
         bundled.manifest.name = "Internal Helper"
         let visible = makeUISkillPackage(slug: "user-helper")
