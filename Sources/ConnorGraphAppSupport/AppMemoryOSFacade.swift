@@ -229,10 +229,10 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         try MemoryOSPersonIdentityService().ensureCurrentUserAnchor(store: store, now: now)
     }
 
-    public func currentUserProfileContext(limit: Int = 12, focus: String? = nil, now: Date = Date()) throws -> MemoryOSCurrentUserProfileContext {
+    public func currentUserProfileContext(now: Date = Date()) throws -> [String] {
         let anchor = try ensureCurrentUserAnchor(now: now)
         _ = anchor
-        return try MemoryOSPersonIdentityService().currentUserProfileContext(store: store, limit: limit, focus: focus, now: now)
+        return try MemoryOSPersonIdentityService().currentUserProfileContext(store: store, now: now)
     }
 
     public func expandMemoryOSL4(entityID: String, depth: Int = 1, limit: Int = 20) throws -> [MemoryOSL4ExpansionHit] {
