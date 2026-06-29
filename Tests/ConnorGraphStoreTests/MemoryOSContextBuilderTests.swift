@@ -57,3 +57,37 @@ import ConnorGraphStore
     #expect(package.diagnostics.contains { $0.kind == .budgetTruncated })
     #expect(package.budgetReport.truncatedBlockCount > 0)
 }
+
+@Test func buildFlatStringsFiltersSelfReferencingRelations() throws {
+    let hits: [MemoryOSRetrievalHit] = [
+        MemoryOSRetrievalHit(layer: .l4, recordID: "entity-a", title: "社会技术系统", summary: "A sociotechnical system.", matchedText: "", score: 1.0, entityRefs: ["entity-a"], metadata: ["entity_type": "concept"])
+    ]
+    let expansions: [String: [MemoryOSL4ExpansionHit]] = [
+        "entity-a": [
+            MemoryOSL4ExpansionHit(recordID: "self-ref", sourceEntityID: "entity-a", relatedEntityID: "entity-a", predicate: MemoryOSL4RelationPredicate.subclassOf.rawValue, text: "", depth: 1, score: 1.0),
+            MemoryOSL4ExpansionHit(recordID: "valid", sourceEntityID: "entity-a", relatedEntityID: "entity-b", predicate: MemoryOSL4RelationPredicate.hasPart.rawValue, text: "", depth: 1, score: 1.0)
+        ]
+    ]
+
+    let result = MemoryOSContextBuilder().buildFlatStrings(hits: hits, expansions: expansions, extraEntityNames: ["entity-b": "信息系统"])
+
+    #expect(result.contains { $0.contains("has part") && $0.contains("信息系统") })
+    #expect(!result.contains { $0.contains("subclass of") && $0.components(separatedBy: "社会技术系统").count > 2 })
+}
+
+@Test func buildFlatStringsFiltersNilTargetRelations() throws {
+    let hits: [MemoryOSRetrievalHit] = [
+        MemoryOSRetrievalHit(layer: .l4, recordID: "entity-c", title: "宇宙（系统）", summary: "", matchedText: "", score: 1.0, entityRefs: ["entity-c"], metadata: ["entity_type": "concept"])
+    ]
+    let expansions: [String: [MemoryOSL4ExpansionHit]] = [
+        "entity-c": [
+            MemoryOSL4ExpansionHit(recordID: "nil-target", sourceEntityID: "entity-c", relatedEntityID: nil, predicate: MemoryOSL4RelationPredicate.relatedTo.rawValue, text: "", depth: 1, score: 1.0),
+            MemoryOSL4ExpansionHit(recordID: "valid-2", sourceEntityID: "entity-c", relatedEntityID: "entity-d", predicate: MemoryOSL4RelationPredicate.about.rawValue, text: "", depth: 1, score: 1.0)
+        ]
+    ]
+
+    let result = MemoryOSContextBuilder().buildFlatStrings(hits: hits, expansions: expansions, extraEntityNames: ["entity-d": "模型"])
+
+    #expect(!result.contains { $0.contains("unknown") })
+    #expect(result.contains { $0.contains("relates to") && $0.contains("模型") })
+}
