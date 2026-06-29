@@ -930,24 +930,38 @@ public struct MemoryOSL3UpdateBeliefsTool: AgentTool {
 }
 
 public extension AgentToolRegistry {
-    mutating func registerMemoryOSTools(facade: AppMemoryOSFacade) {
-        register(MemoryOSL2FindEntitiesTool(facade: facade))
-        register(MemoryOSL2UpdateEntitiesTool(facade: facade))
-        register(MemoryOSGetCurrentUserProfileTool(facade: facade))
-        register(MemoryOSUpdateCurrentUserProfileTool(facade: facade))
+    /// Conversation-time read-only tools — only exposes context and user profile retrieval.
+    mutating func registerMemoryOSReadTools(facade: AppMemoryOSFacade) {
         register(MemoryOSContextTool(facade: facade))
-        register(MemoryOSSearchTool(facade: facade))
-        register(MemoryOSQueryGraphTool(facade: facade))
+        register(MemoryOSGetCurrentUserProfileTool(facade: facade))
+    }
+
+    /// Full tool set for batch/background jobs — includes write tools and low-level graph primitives.
+    mutating func registerMemoryOSFullTools(facade: AppMemoryOSFacade) {
+        registerMemoryOSReadTools(facade: facade)
+        // Write tools
+        register(MemoryOSL2UpdateEntitiesTool(facade: facade))
+        register(MemoryOSUpdateCurrentUserProfileTool(facade: facade))
+        register(MemoryOSL4UpdateEntitiesTool(facade: facade))
+        register(MemoryOSL3UpdateBeliefsTool(facade: facade))
+        // Low-level retrieval primitives
+        register(MemoryOSL2FindEntitiesTool(facade: facade))
         register(MemoryOSL2FindStatementsTool(facade: facade))
         register(MemoryOSL3ExpandBeliefTool(facade: facade))
         register(MemoryOSL3ListDomainsTool(facade: facade))
-        register(MemoryOSExpandL4Tool(facade: facade))
         register(MemoryOSL4FindEntityTool(facade: facade))
         register(MemoryOSL4NeighborsTool(facade: facade))
         register(MemoryOSL4InstancesTool(facade: facade))
-        register(MemoryOSL4UpdateEntitiesTool(facade: facade))
-        register(MemoryOSL3UpdateBeliefsTool(facade: facade))
+        register(MemoryOSExpandL4Tool(facade: facade))
+        register(MemoryOSQueryGraphTool(facade: facade))
         register(MemoryOSReadRecordTool(facade: facade))
         register(MemoryOSReadProvenanceTool(facade: facade))
+        register(MemoryOSSearchTool(facade: facade))
+    }
+
+    /// Legacy compatibility — forwards to registerMemoryOSFullTools.
+    @available(*, deprecated, message: "Use registerMemoryOSReadTools or registerMemoryOSFullTools")
+    mutating func registerMemoryOSTools(facade: AppMemoryOSFacade) {
+        registerMemoryOSFullTools(facade: facade)
     }
 }
