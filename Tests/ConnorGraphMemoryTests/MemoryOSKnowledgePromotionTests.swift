@@ -19,7 +19,7 @@ import ConnorGraphMemory
         ),
         confidence: 0.99,
         evidenceStatementIDs: ["stmt-fact-1"],
-        relatedEntityIDs: ["person-zhangsan"]
+        relatedEntityNames: ["person-zhangsan"]
     )
 
     let decision = MemoryOSKnowledgePromotionPolicy().evaluate(candidate)
@@ -48,7 +48,7 @@ import ConnorGraphMemory
         confidence: 0.86,
         evidenceStatementIDs: ["stmt-theory-1"],
         evidenceSpanIDs: ["span-theory-1"],
-        relatedEntityIDs: ["concept-supply-demand-elasticity", "parameter-x"],
+        relatedEntityNames: ["concept-supply-demand-elasticity", "parameter-x"],
         metadata: ["related_object_names": "Supply and demand elasticity, Parameter"]
     )
 
