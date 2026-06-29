@@ -44,7 +44,7 @@ public struct SessionSetStatusTool: AgentTool {
     private let repository: AppChatSessionRepository
     private let governanceConfig: AppSessionGovernanceConfig
 
-    public init(repository: AppChatSessionRepository, governanceConfig: AppSessionGovernanceConfig) {
+    public init(repository: AppChatSessionRepository, governanceConfig: AppSessionGovernanceConfig = .default) {
         self.repository = repository
         self.governanceConfig = governanceConfig
     }
@@ -86,7 +86,7 @@ public struct SessionSetStatusTool: AgentTool {
 }
 
 public extension AgentToolRegistry {
-    mutating func registerSessionStatusTools(repository: AppChatSessionRepository, governanceConfig: AppSessionGovernanceConfig) {
+    mutating func registerSessionStatusTools(repository: AppChatSessionRepository, governanceConfig: AppSessionGovernanceConfig = .default) {
         register(SessionGetStatusTool(repository: repository))
         register(SessionSetStatusTool(repository: repository, governanceConfig: governanceConfig))
         register(SessionListStatusesTool(governanceConfig: governanceConfig))

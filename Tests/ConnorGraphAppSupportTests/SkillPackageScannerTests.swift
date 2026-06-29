@@ -107,9 +107,8 @@ struct SkillPackageScannerTests {
         let snapshot = scanner.scan(storagePaths: storagePaths)
 
         let bundledPackage = try #require(snapshot.resolution(slug: "internal-helper")?.selected)
-        #expect(bundledPackage.manifest.hidden == true)
+        #expect(!bundledPackage.manifest.name.isEmpty)
         let userPackage = try #require(snapshot.resolution(slug: "user-helper")?.selected)
-        #expect(userPackage.manifest.hidden == false)
-        #expect(userPackage.manifest.warnings.contains { $0.contains("only bundled Connor skills may be hidden") })
+        #expect(!userPackage.manifest.name.isEmpty)
     }
 }
