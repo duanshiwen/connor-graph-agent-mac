@@ -73,7 +73,25 @@ public struct MemoryOSContextDeliveryService: Sendable {
             }
         }
 
-        return builder.buildFlatStrings(hits: allHits, expansions: allExpansions)
+        return builder.buildFlatStrings(hits: allHits, expansions: allExpansions, extraEntityNames: try resolveEntityNames(from: allExpansions))
+    }
+
+    private func resolveEntityNames(from expansions: [String: [MemoryOSL4ExpansionHit]]) throws -> [String: String] {
+        var ids = Set<String>()
+        for (_, relations) in expansions {
+            for r in relations {
+                ids.insert(r.sourceEntityID)
+                if let obj = r.relatedEntityID { ids.insert(obj) }
+            }
+        }
+        guard !ids.isEmpty else { return [:] }
+        let quoted = ids.map { store.quote($0) }.joined(separator: ",")
+        let rows = try store.query(sql: """
+        SELECT id, name FROM memory_l4_entities WHERE id IN (\(quoted))
+        """)
+        return Dictionary(uniqueKeysWithValues: rows.compactMap { row in
+            row[1].isEmpty ? nil : (row[0], row[1])
+        })
     }
 
     private func filter(_ hits: [MemoryOSL4ExpansionHit], policy: MemoryOSGraphExpansionPolicy) -> [MemoryOSL4ExpansionHit] {
