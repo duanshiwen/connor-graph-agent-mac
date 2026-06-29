@@ -73,14 +73,14 @@ import ConnorGraphMemory
                 confidence: 0.91,
                 evidenceStatementIDs: ["stmt-1"],
                 evidenceSpanIDs: ["span-1"],
-                relatedEntityIDs: ["concept-1"]
+                relatedEntityNames: ["concept-1"]
             )
         ],
         conceptEntities: [
-            MemoryOSExtractedConceptEntity(localID: "concept-1", name: "L1 unified projection", conceptType: "memory_architecture_pattern", domain: "software-engineering", summary: "A single L1 extraction pass that can emit L2, L3, and L4 records.", evidenceSpanIDs: ["span-1"])
+            MemoryOSExtractedConceptEntity(name: "L1 unified projection", conceptType: "memory_architecture_pattern", domain: "software-engineering", summary: "A single L1 extraction pass that can emit L2, L3, and L4 records.")
         ],
         conceptRelations: [
-            MemoryOSExtractedConceptRelation(id: "rel-1", subjectLocalID: "concept-1", predicate: .relatedTo, objectLocalID: "concept-1", text: "L1 unified projection relates to layered memory records.", evidenceSpanIDs: ["span-1"], metadata: ["reason": "The concept describes layered memory projection discipline."])
+            MemoryOSExtractedConceptRelation(subjectName: "L1 unified projection", predicate: .relatedTo, objectName: "L1 unified projection", text: "L1 unified projection relates to layered memory records.", metadata: ["reason": "The concept describes layered memory projection discipline."])
         ],
         promotionDecisions: [MemoryOSL1PromotionDecision(candidateID: "knowledge-1", accepted: true, signalQualityAccepted: true, reuseScopeAccepted: true, noveltyAccepted: true, structurabilityAccepted: true, evidenceStatementIDs: ["stmt-1"], evidenceSpanIDs: ["span-1"])]
     )

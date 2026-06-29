@@ -16,7 +16,7 @@ import ConnorGraphMemory
         text: "Memory OS has L4."
     )
 
-    let issues = validator.validate(relation: relation, conceptEntities: entities, evidenceSpanIDs: ["span-1"])
+    let issues = validator.validate(relation: relation, conceptEntities: entities)
 
     #expect(issues.isEmpty)
 }
@@ -33,7 +33,7 @@ import ConnorGraphMemory
         text: "Memory OS has itself."
     )
 
-    let issues = validator.validate(relation: relation, conceptEntities: entities, evidenceSpanIDs: [])
+    let issues = validator.validate(relation: relation, conceptEntities: entities)
     let codes = Set(issues.map(\.code))
 
     #expect(!codes.contains("missing_relation_evidence"))
@@ -53,7 +53,7 @@ import ConnorGraphMemory
         text: "Memory OS relates to graph."
     )
 
-    let issues = validator.validate(relation: relation, conceptEntities: entities, evidenceSpanIDs: ["span-1"])
+    let issues = validator.validate(relation: relation, conceptEntities: entities)
 
     #expect(issues.isEmpty)
 }
@@ -71,7 +71,7 @@ import ConnorGraphMemory
         text: "Tool loops cause quality."
     )
 
-    let issues = validator.validate(relation: relation, conceptEntities: entities, evidenceSpanIDs: ["span-1"])
+    let issues = validator.validate(relation: relation, conceptEntities: entities)
 
     #expect(issues.isEmpty)
 }
@@ -89,7 +89,7 @@ import ConnorGraphMemory
         text: "Memory OS is the same as Memory System."
     )
 
-    let issues = validator.validate(relation: relation, conceptEntities: entities, evidenceSpanIDs: [])
+    let issues = validator.validate(relation: relation, conceptEntities: entities)
 
     #expect(issues.isEmpty)
 }
@@ -107,7 +107,7 @@ import ConnorGraphMemory
         text: "北京大学 is Peking University."
     )
 
-    let issues = validator.validate(relation: relation, conceptEntities: entities, evidenceSpanIDs: [])
+    let issues = validator.validate(relation: relation, conceptEntities: entities)
 
     #expect(issues.isEmpty)
 }
@@ -125,7 +125,7 @@ import ConnorGraphMemory
         text: "Memory OS is an instance of SQLite."
     )
 
-    let issues = validator.validate(relation: relation, conceptEntities: entities, evidenceSpanIDs: ["span-1"])
+    let issues = validator.validate(relation: relation, conceptEntities: entities)
 
     #expect(issues.contains { $0.code == "l4_relation_object_type_not_allowed" })
 }
