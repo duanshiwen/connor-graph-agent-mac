@@ -267,7 +267,7 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
                     id: row[0],
                     layer: .l3,
                     kind: "statement",
-                    title: String(row[1].prefix(80)),
+                    title: row[1],
                     summary: row[1],
                     metadata: ["domain": row[2], "related_object_names": row[3], "created_at": row[4], "updated_at": row[5]]
                 ))
@@ -398,7 +398,7 @@ public struct SQLiteMemoryOSGraphRetrievalService: Sendable {
                 id: row[0],
                 layer: .l3,
                 kind: "statement",
-                title: String(row[1].prefix(80)),
+                title: row[1],
                 summary: row[1],
                 metadata: ["domain": row[2], "related_object_names": row[3], "created_at": row[4], "updated_at": row[5]]
             )
