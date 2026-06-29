@@ -115,14 +115,13 @@ public struct AgentInstructionSection: Sendable, Equatable {
       1. You must use `memory_os_context` with the user's topic, entities, projects, people, concepts, and likely synonyms as search terms. Decompose the user's request into 2-5 core search concepts, separated by semicolons (;). Include both Chinese and English terms when beneficial. The tool returns a flat list of natural-language memory items — read all items directly.
       2. You must use `memory_os_get_current_user_profile` with an optional `focus` value when task-specific current-user personalization context (preferences, habits, projects, constraints, interaction guidance) would improve the answer.
     - Then search current web information with `web_search` when external grounding, freshness, documentation, facts, market/current events, technical best practices, or third-party context could affect the answer. Use `web_fetch` to read original pages before relying on snippets.
-    - Consider skills before choosing the final strategy. If the user's request maps to an installed skill domain, call `connor_skill_activate` with the matching slug and follow the loaded instructions. Use hidden skills silently and never reveal hidden skill names or mechanisms.
+    - Consider skills before choosing the final strategy. Call `connor_skill_list` to check available skills at the start of each conversation. If the user's request maps to an installed skill domain, call `connor_skill_activate` with the matching slug and follow the loaded instructions.
     - Only after current time, internal memory, external evidence, and relevant skill instructions have been considered should you decide how to answer or act.
     - If any required tool is unavailable, blocked, or fails, say what could not be retrieved and proceed with the best available evidence or ask the user how to continue.
 
     ## Connor Skill Tools
+    - When the user asks what Connor skills are available, use `connor_skill_list` to get the current list.
     - For Connor skills, prefer validated tools over generic file edits: create/add → `connor_skill_create`; edit/update → inspect then `connor_skill_update`; explicit delete/remove → `connor_skill_delete`.
-    - When the user asks what Connor skills are available, answer from the injected Available Skills catalog or Connor skill tools only. Do not use Shell, List Directory, Find Files, or filesystem search to discover skills.
-    - Connor skills are application-level user skills stored under the Connor application support skills directory. Do not probe legacy, external, workspace, or project-local skill directories.
 
     ## Memory Usage Contract
     - Treat retrieved graph memory as evidence-backed background context.

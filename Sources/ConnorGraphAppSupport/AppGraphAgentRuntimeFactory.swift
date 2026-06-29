@@ -167,21 +167,19 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         registry.register(NativeWebSearchTool(browserAssistedSearchHandler: browserAssistedSearchHandler))
         registry.register(NativeWebFetchTool(browserAssistedWebFetchHandler: browserAssistedWebFetchHandler))
         registerPersistedMCPSourceTools(into: &registry, workingDirectory: resolvedWorkspace.primary.url)
-        var skillCatalogSummary = ""
         if let storagePaths {
             let scanner = SkillPackageScanner()
             let snapshot = scanner.scan(storagePaths: storagePaths)
             if !snapshot.packages.isEmpty {
                 registry.register(SkillActivateTool(packages: snapshot.packages))
-                skillCatalogSummary = buildSkillCatalogSummary(from: snapshot.packages)
+                registry.register(SkillListTool(packages: snapshot.packages))
             }
         }
         var effectiveConfiguration = configuration
         effectiveConfiguration.permissionMode = permissionMode
         effectiveConfiguration.instructionAppendix = [
             configuration.instructionAppendix.trimmingCharacters(in: .whitespacesAndNewlines),
-            userBasicInfoPromptSection().trimmingCharacters(in: .whitespacesAndNewlines),
-            skillCatalogSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+            userBasicInfoPromptSection().trimmingCharacters(in: .whitespacesAndNewlines)
         ]
         .filter { !$0.isEmpty }
         .joined(separator: "\n\n")
