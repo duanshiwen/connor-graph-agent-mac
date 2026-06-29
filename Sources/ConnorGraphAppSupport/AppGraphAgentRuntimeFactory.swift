@@ -97,7 +97,7 @@ public struct AppGraphAgentRuntimeFactory: @unchecked Sendable {
         registry.register(GraphSearchTool(searchService: searchService))
         let memoryOSFacade = makeMemoryOSFacade()
         if let memoryOSFacade {
-            registry.registerMemoryOSTools(facade: memoryOSFacade)
+            registry.registerMemoryOSReadTools(facade: memoryOSFacade)
         }
         let nativeSourceReferenceRecorder = memoryOSFacade.map { AppMemoryOSNativeSourceReferenceRecorder(facade: $0) }
         let settings = (try? settingsRepository.loadSettings()) ?? .default
