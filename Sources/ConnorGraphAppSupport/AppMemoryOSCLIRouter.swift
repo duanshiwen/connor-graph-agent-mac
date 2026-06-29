@@ -30,6 +30,11 @@ public enum AppMemoryOSCLIRouter {
                 return try encode(MemoryOSCLIError(error: "record_not_found", usage: "connor memory read <layer> <id>"), encoder: encoder)
             }
             return try encode(record, encoder: encoder)
+        case "context":
+            guard let query = args.dropFirst().first, !query.hasPrefix("--") else {
+                return try encode(MemoryOSCLIError(error: "missing_query", usage: "connor memory context <query>  — query can contain multiple terms separated by ;"), encoder: encoder)
+            }
+            return try encode(try inspector.context(query: query), encoder: encoder)
         case "search":
             guard let query = args.dropFirst().first, !query.hasPrefix("--") else {
                 return try encode(MemoryOSCLIError(error: "missing_query", usage: "connor memory search <query> [--layers L2,L3,L4] [--limit N]"), encoder: encoder)
@@ -65,7 +70,7 @@ public enum AppMemoryOSCLIRouter {
         case "pipeline":
             return try routePipeline(args: Array(args.dropFirst()), inspector: inspector, encoder: encoder)
         default:
-            return try encode(MemoryOSCLIError(error: "unknown_memory_command", usage: "connor memory status|search|query-graph|l0|l1|l2|l3|l4|search-index|queue|runs|run|pipeline"), encoder: encoder)
+            return try encode(MemoryOSCLIError(error: "unknown_memory_command", usage: "connor memory status|search|context|query-graph|l0|l1|l2|l3|l4|search-index|queue|runs|run|pipeline"), encoder: encoder)
         }
     }
 

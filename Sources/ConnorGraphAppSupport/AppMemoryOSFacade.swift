@@ -243,6 +243,10 @@ public struct AppMemoryOSFacade: @unchecked Sendable {
         try MemoryOSContextDeliveryService(store: store).context(request, generatedAt: generatedAt)
     }
 
+    public func memoryOSFlatContext(terms: [String]) throws -> [String] {
+        try MemoryOSContextDeliveryService(store: store).flatContext(terms: terms)
+    }
+
     public func queryMemoryOSGraph(_ query: MemoryOSGraphQuery) throws -> MemoryOSGraphSubgraph {
         try SQLiteMemoryOSGraphRetrievalService(store: store).queryGraph(query)
     }
