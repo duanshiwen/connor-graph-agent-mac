@@ -110,13 +110,6 @@ public struct SkillPackageScanner {
                 let parsed = try parser.parse(markdown: raw, slug: slug)
                 let supportingFiles = listSupportingFiles(in: entry)
                 var manifest = parsed.manifest
-                // Hidden skills are a Connor-owned built-in capability, not a user/project
-                // package feature. User-created skills must remain visible in the skill
-                // manager even if an LLM or hand-written frontmatter includes `hidden: true`.
-                if root.tier != .bundled, manifest.hidden {
-                    manifest.hidden = false
-                    manifest.warnings.append("Ignored hidden=true because only bundled Connor skills may be hidden.")
-                }
                 let package = SkillPackage(
                     id: SkillPackageID("\(root.tier.rawValue):\(entry.path)"),
                     slug: SkillSlug(slug),
