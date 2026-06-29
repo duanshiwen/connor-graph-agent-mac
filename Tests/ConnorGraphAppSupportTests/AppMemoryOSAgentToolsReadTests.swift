@@ -64,14 +64,20 @@ import ConnorGraphAppSupport
     let facade = AppMemoryOSFacade(store: store)
     var registry = AgentToolRegistry()
 
-    registry.registerMemoryOSTools(facade: facade)
+    registry.registerMemoryOSReadTools(facade: facade)
 
+    // Read-only registration should expose exactly 2 tools
+    #expect(registry.definition(named: "memory_os_context") != nil)
     #expect(registry.definition(named: "memory_os_get_current_user_profile") != nil)
-    #expect(registry.definition(named: "memory_os_read_record") != nil)
-    #expect(registry.definition(named: "memory_os_read_provenance") != nil)
+    #expect(registry.permission(named: "memory_os_context") == .readGraph)
     #expect(registry.permission(named: "memory_os_get_current_user_profile") == .readGraph)
-    #expect(registry.permission(named: "memory_os_read_record") == .readGraph)
-    #expect(registry.permission(named: "memory_os_read_provenance") == .readGraph)
+
+    // Write tools and low-level primitives should NOT be registered
+    #expect(registry.definition(named: "memory_os_l2_update_entities") == nil)
+    #expect(registry.definition(named: "memory_os_update_current_user_profile") == nil)
+    #expect(registry.definition(named: "memory_os_l2_find_entities") == nil)
+    #expect(registry.definition(named: "memory_os_l4_find_entity") == nil)
+    #expect(registry.definition(named: "memory_os_read_record") == nil)
 }
 
 private func memoryOSReadToolContext() -> AgentToolExecutionContext {
