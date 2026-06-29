@@ -215,7 +215,7 @@ private func makeAcceptedL1UnifiedProjectionOutput() -> MemoryOSL1UnifiedProject
                 confidence: 0.91,
                 evidenceStatementIDs: ["stmt-1"],
                 evidenceSpanIDs: ["span-1"],
-                relatedEntityNames: ["concept-1"]
+                relatedEntityNames: ["L1 unified projection"]
             )
         ],
         conceptEntities: [

@@ -27,7 +27,7 @@ import ConnorGraphMemory
                 confidence: 0.86,
                 evidenceStatementIDs: ["stmt-theory-1"],
                 evidenceSpanIDs: ["span-theory-1"],
-                relatedEntityNames: ["concept-elasticity", "parameter-x"]
+                relatedEntityNames: ["供需弹性", "某参数"]
             )
         ],
         conceptEntities: [
