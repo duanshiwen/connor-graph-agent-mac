@@ -389,11 +389,9 @@ public struct MemoryOSContextBuilder: Sendable {
                 let sourceName = entityIDToName[relation.sourceEntityID] ?? relation.sourceEntityID
                 let targetName = relation.relatedEntityID.flatMap { entityIDToName[$0] } ?? (relation.relatedEntityID ?? "unknown")
                 let label = predicateLabels.label(for: relation.predicate)
-                let sentence = relation.text.isEmpty
-                    ? label.forwardTemplate
-                        .replacingOccurrences(of: "{source}", with: sourceName)
-                        .replacingOccurrences(of: "{target}", with: targetName)
-                    : relation.text
+                let sentence = label.forwardTemplate
+                    .replacingOccurrences(of: "{source}", with: sourceName)
+                    .replacingOccurrences(of: "{target}", with: targetName)
                 append(sentence)
             }
         }
