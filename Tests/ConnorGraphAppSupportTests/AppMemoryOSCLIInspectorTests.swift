@@ -445,19 +445,7 @@ struct AppMemoryOSCLIInspectorTests {
         #expect(l4Instances.edges.contains { $0.id == "entity-is-instance" && $0.predicate == "INSTANCE_OF" })
     }
 
-    @Test func memoryOSCLIRouterRoutesTraceEvidenceCommand() throws {
-        let store = try makeMemoryOSCLIInspectorStore()
-        try seedMemoryOSCLIInspectorFixture(store: store)
-        let inspector = AppMemoryOSCLIInspector(store: store)
-        let encoder = memoryOSCLITestEncoder()
-
-        let output = try AppMemoryOSCLIRouter.route(args: ["trace", "evidence", "--statement", "stmt-1", "--limit", "10"], inspector: inspector, encoder: encoder)
-
-        #expect(output.contains("stmt-1"))
-        #expect(output.contains("span-1"))
-        #expect(output.contains("object-1"))
-        #expect(output.contains("evidenced_by"))
-    }
+    // trace evidence feature was removed - see git commit 'Delete memory_os_trace_evidence tool layer'
 
     @Test func memoryOSCLIRouterRoutesL2EntityCommands() throws {
         let store = try makeMemoryOSCLIInspectorStore()
