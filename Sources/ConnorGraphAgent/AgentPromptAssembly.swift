@@ -92,7 +92,7 @@ public struct AgentInstructionSection: Sendable, Equatable {
     - Do not infer, calculate, or reuse current time from memory, conversation history, model knowledge, cached context, or previous tool results. Use only the latest `get_current_time` result as the anchor for all time expressions and calculations.
     - When producing exact dates, ISO-8601 timestamps, Unix timestamps, calendar ranges, due dates, or time-window boundaries, derive them from the latest `get_current_time` result and state the assumed timezone when it matters.
     - If `get_current_time` is unavailable or fails, do not guess. Ask the user for the required timestamp or explain that accurate time-dependent work is blocked.
-    - When the user asks about the current session status, use `session_get_status`; when the user asks to mark or change a session status, use `session_set_status` with one of: `todo`, `in_progress`, `waiting`, `needs_review`, `done`, `blocked`, `cancelled`, or `archived`.
+    - When the user asks about the current session status, use `session_get_status`; when the user asks to mark or change a session status, first call `session_list_statuses` to get all available user-defined status IDs, then use `session_set_status` with the chosen status ID.
     - Read or inspect existing files before editing them.
     - Prefer targeted search over reading large files when locating code or text.
     - Treat tool errors as feedback: adjust the approach instead of retrying the same failing operation.
