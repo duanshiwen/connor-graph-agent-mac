@@ -343,7 +343,8 @@ public struct MemoryOSContextBuilder: Sendable {
     /// - Returns: Deduplicated array of natural-language memory items.
     public func buildFlatStrings(
         hits: [MemoryOSRetrievalHit],
-        expansions: [String: [MemoryOSL4ExpansionHit]]
+        expansions: [String: [MemoryOSL4ExpansionHit]],
+        extraEntityNames: [String: String] = [:]
     ) -> [String] {
         let sortedHits = hits.sorted { $0.score > $1.score }
 
@@ -386,8 +387,8 @@ public struct MemoryOSContextBuilder: Sendable {
         // Flatten expansion relations
         for (_, relations) in expansions {
             for relation in relations {
-                let sourceName = entityIDToName[relation.sourceEntityID] ?? relation.sourceEntityID
-                let targetName = relation.relatedEntityID.flatMap { entityIDToName[$0] } ?? (relation.relatedEntityID ?? "unknown")
+                let sourceName = extraEntityNames[relation.sourceEntityID] ?? entityIDToName[relation.sourceEntityID] ?? relation.sourceEntityID
+                let targetName = relation.relatedEntityID.flatMap { extraEntityNames[$0] ?? entityIDToName[$0] } ?? (relation.relatedEntityID ?? "unknown")
                 let label = predicateLabels.label(for: relation.predicate)
                 let sentence = label.forwardTemplate
                     .replacingOccurrences(of: "{source}", with: sourceName)
