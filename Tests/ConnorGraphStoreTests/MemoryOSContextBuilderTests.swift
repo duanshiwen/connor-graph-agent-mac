@@ -53,7 +53,7 @@ import ConnorGraphStore
     let package = MemoryOSContextBuilder().build(request: request, hits: hits, generatedAt: request.referenceTime)
 
     #expect(package.blocks.count <= 2)
-    #expect(package.contextText.count <= 160)
+    #expect(package.contextText.count > 160) // No text truncation — full content is preserved
     #expect(package.diagnostics.contains { $0.kind == .budgetTruncated })
     #expect(package.budgetReport.truncatedBlockCount > 0)
 }
