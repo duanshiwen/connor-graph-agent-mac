@@ -362,9 +362,13 @@ public struct MemoryOSL1UnifiedProjectionPromptBuilder: Sendable {
         8. If a fact refines an existing L2 fact, emit append-only refinement material rather than overwriting history.
         9. L2 itself does not require evidence spans; keep provenance identifiers only as optional internal metadata when already available from L1/L0.
         10. Choose the most precise allowed predicate and the most appropriate metadata.l2_fact_type for every operational statement.
-        11. For L2, prefer memory_os_l2_find_entities and memory_os_l2_update_entities. Before emitting or rejecting L3/L4 candidates, search L2/L3/L4 for related facts, existing knowledge, duplicate concepts, reusable entities and supersession context.
-        12. Separately evaluate whether any extracted material qualifies as L3 reusable knowledge using all four promotion filters. For accepted candidates, write a complete claim, choose exactly one non-empty discipline domain, optionally provide metadata.related_object_names containing durable L4 concept entity names or aliases, and record domain reasoning in promotionDecisions.
-        13. Separately evaluate whether any stable L4 entity, concept entity, or durable relation should be emitted, reused, or rejected, and record the search-backed judgment in metadata or promotionDecisions.
+        11. For L2, prefer memory_os_l2_find_entities and memory_os_l2_update_entities. Before emitting or rejecting L3/L4 candidates, search L2/L3/L4 for related facts, existing knowledge, duplicate concepts, reusable entities and supersession context. Prefer `memory_os_context` for this search — its relation cards reveal entity connections (e.g., "X is an instance of Y", "Z depends on W") that keyword search cannot provide.
+
+        11a. Graph-Assisted Entity Resolution: When searching for existing entities, use the relation cards from `memory_os_context` to disambiguate. Two entities with similar names can be distinguished by their graph connections (e.g., "AgentOS" as a project vs "AgentOS" as a concept are differentiated by INSTANCE_OF vs SUBCLASS_OF relations). If L4 shows "AgentOS project INSTANCE_OF personal AI platform" and new evidence mentions "a personal AI platform called AgentOS", this is the SAME entity despite different wording — reuse it.
+
+        12. Separately evaluate whether any extracted material qualifies as L3 reusable knowledge using all four promotion filters. Before accepting a knowledge candidate, check whether L4 graph relations already imply it: if "Framework X APPLIES_TO Domain Y" and "Domain Y STUDIED_BY Method Z" already exist, a candidate claiming "Framework X is relevant to Method Z" is implicit — flag it as a possible duplicate and explain in promotionDecisions. For accepted candidates, write a complete claim, choose exactly one non-empty discipline domain, optionally provide metadata.related_object_names containing durable L4 concept entity names or aliases, and record domain reasoning in promotionDecisions.
+
+        13. Separately evaluate whether any stable L4 entity, concept entity, or durable relation should be emitted, reused, or rejected. When creating conceptRelations, prioritize cross-domain connections that bridge previously separate graph clusters. If A→B→C already exists, a new direct A→C relation has less value than a relation connecting two unrelated branches. Record the search-backed judgment in metadata or promotionDecisions.
         14. Do not produce unsupported guesses, broad conclusions without evidence, or knowledge/entity records that fail the rules above.
 
         L1 capture events are provided as an ordered JSON packet:
@@ -496,11 +500,11 @@ public struct MemoryOSBackgroundToolResult: Sendable, Codable, Equatable {
 
 public enum MemoryOSBackgroundToolCatalog {
     public static func l1UnifiedProjectionTools() -> [MemoryOSBackgroundToolDescriptor] {
-        [searchTool(layers: ["L2", "L3", "L4"], usage: "Must use memory_os_search before deciding whether emitted L2 facts are new/refinements and before creating or reusing L3/L4 candidates; record duplicate/novelty judgment in metadata or promotionDecisions."), readProvenanceTool(), expandL4Tool(usage: "Use memory_os_expand_l4 when L4 entity identity, duplicate concept detection, or relation context is necessary for grounded L1 projection.")]
+        [contextTool(), expandL4Tool(usage: "Use memory_os_expand_l4 when L4 entity identity, duplicate concept detection, or relation context is necessary for grounded L1 projection."), readProvenanceTool()]
     }
 
     public static func l2ToKnowledgeTools() -> [MemoryOSBackgroundToolDescriptor] {
-        [searchTool(layers: ["L2", "L3", "L4"], usage: "Must search L2, L3 and L4 before creating, reusing or rejecting L3 knowledge, L4 concepts, concept relations, or refined L2 facts; record duplicate/novelty judgment and reuse/rejection rationale."), expandL4Tool(usage: "Use memory_os_expand_l4 before creating concept relations or when concept identity is ambiguous."), readRecordTool(), readProvenanceTool()]
+        [contextTool(), expandL4Tool(usage: "Use memory_os_expand_l4 before creating concept relations or when concept identity is ambiguous."), readRecordTool(), readProvenanceTool()]
     }
 
     public static func promptSection(for tools: [MemoryOSBackgroundToolDescriptor], stage: String) -> String {
@@ -520,15 +524,17 @@ public enum MemoryOSBackgroundToolCatalog {
         - Tool results are retrieval context, not final memory truth.
         - Do not invent evidence if a tool does not return enough context.
         - Do not output tool calls in the final artifact JSON.
+        - Prefer `memory_os_context` for entity disambiguation and duplicate detection; its relation cards reveal graph context that keyword search cannot provide.
+        - When `memory_os_context` returns entity cards with multiple incoming relations, scan them to resolve ambiguous entity names through their connections.
         """
     }
 
-    private static func searchTool(layers: [String], usage: String) -> MemoryOSBackgroundToolDescriptor {
+    private static func contextTool() -> MemoryOSBackgroundToolDescriptor {
         MemoryOSBackgroundToolDescriptor(
-            name: "memory_os_search",
-            description: "Search Connor Memory OS records across selected L0/L1/L2/L3/L4 layers and return ranked summaries, refs and expansion hints.",
-            inputSchemaJSON: "{\"query\":\"string\",\"layers\":\(jsonArray(layers)),\"limit\":\"number\"}",
-            usagePolicy: usage
+            name: "memory_os_context",
+            description: "Search Connor Memory OS L1-L4 with natural-language terms and return entity cards (「name」(type): summary) and relation cards (source predicateLabel target) as a flat array. Prefer this over keyword search for entity disambiguation, duplicate detection, and cross-domain connection discovery.",
+            inputSchemaJSON: "{\"query\":\"string (search terms separated by ;)\"}",
+            usagePolicy: "Must use memory_os_context before deciding whether emitted L2 facts are new/refinements and before creating or reusing L3/L4 candidates. Its relation cards reveal graph context that keyword search cannot. Record duplicate/novelty judgment in metadata or promotionDecisions."
         )
     }
 
@@ -557,11 +563,6 @@ public enum MemoryOSBackgroundToolCatalog {
             inputSchemaJSON: "{\"provenanceObjectID\":\"string\",\"spanID\":\"string|null\"}",
             usagePolicy: "Use when a prompt preview is insufficient, exact raw evidence is required, or an evidence citation needs validation."
         )
-    }
-
-    private static func jsonArray(_ values: [String]) -> String {
-        let quoted = values.map { "\\\"\($0)\\\"" }.joined(separator: ",")
-        return "[\(quoted)]"
     }
 }
 
