@@ -208,7 +208,8 @@ struct AgentMarkdownPreviewText: View {
     private func tableCell(_ text: String, isHeader: Bool, alignment: Alignment) -> some View {
         Text(renderTableCellInline(text))
             .font(isHeader ? font.weight(.semibold) : font)
-            .frame(minWidth: 92, maxWidth: 220, alignment: alignment)
+            .lineLimit(nil)
+            .frame(minWidth: 92, maxWidth: .infinity, alignment: alignment)
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
             .background(isHeader ? Color.secondary.opacity(0.10) : Color.clear)

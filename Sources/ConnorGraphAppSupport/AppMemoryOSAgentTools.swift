@@ -230,70 +230,29 @@ public struct MemoryOSSearchTool: AgentTool {
 
 public struct MemoryOSGetCurrentUserProfileTool: AgentTool {
     public let name = "memory_os_get_current_user_profile"
-    public let description = "Retrieve current-user personalization context from Connor Memory OS using the stable marker current_user. Returns relevant L2/L3/L4 summaries for preferences, habits, traits, projects, constraints, and interaction guidance without relying on mutable display names."
+    public let description = "Retrieve all current-user personalization context from Connor Memory OS. Returns a flat list of natural-language facts about preferences, habits, traits, projects, constraints, and interaction guidance."
     public let permission: AgentPermissionCapability = .readGraph
-    public let inputSchema = AgentToolInputSchema.object(properties: [
-        "limit": .number(description: "Maximum number of aggregated hits. Defaults to 12, capped at 50."),
-        "focus": .string(description: "Optional task-specific focus query to combine with current-user profile retrieval.")
-    ], required: [])
+    public let inputSchema = AgentToolInputSchema.object(properties: [:], required: [])
 
     private let facade: AppMemoryOSFacade
 
     public init(facade: AppMemoryOSFacade) { self.facade = facade }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        let limit = max(1, min(arguments.int("limit") ?? 12, 50))
-        let focus = arguments.string("focus")?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let profile = try facade.currentUserProfileContext(limit: limit, focus: focus)
-        let rows = profile.hits.map(Self.row)
-        let diagnostics = profile.diagnostics.map { diagnostic -> [String: Any] in
-            [
-                "id": diagnostic.id,
-                "kind": diagnostic.kind,
-                "severity": diagnostic.severity,
-                "message": diagnostic.message,
-                "candidateRecordIDs": diagnostic.candidateRecordIDs
-            ]
-        }
-        let payload: [String: Any] = [
-            "currentUserMarker": profile.currentUserMarker,
-            "resolvedCurrentUserEntityIDs": profile.resolvedCurrentUserEntityIDs,
-            "hitCount": rows.count,
-            "hits": rows,
-            "diagnostics": diagnostics,
-            "scopePolicy": profile.scopePolicy,
-            "identityPolicy": "Use current_user as the stable internal role marker. Never substitute generic user concepts, display names, aliases, or full-text search hits for the current user identity anchor."
-        ]
-        let json = try Self.renderJSON(payload)
+        let lines = try facade.currentUserProfileContext()
+        let json = try Self.renderJSON(lines)
         return AgentToolResult(
             toolCallID: context.toolCallID,
             toolName: name,
-            contentText: "Retrieved current_user profile context with \(rows.count) scoped Memory OS hit(s).",
+            contentText: "Retrieved current_user profile with \(lines.count) fact(s).",
             contentJSON: json,
-            citations: profile.hits.map(\.recordID)
+            citations: []
         )
     }
 
-    private static func row(_ hit: MemoryOSRetrievalHit) -> [String: Any] {
-        [
-            "layer": hit.layer.rawValue,
-            "recordID": hit.recordID,
-            "title": hit.title,
-            "summary": hit.summary,
-            "matchedText": hit.matchedText,
-            "score": hit.score,
-            "evidenceRefs": hit.evidenceRefs,
-            "provenanceRefs": hit.provenanceRefs,
-            "entityRefs": hit.entityRefs,
-            "canReadRaw": hit.canReadRaw,
-            "canExpandDepth": hit.canExpandDepth,
-            "metadata": hit.metadata
-        ]
-    }
-
-    private static func renderJSON(_ object: [String: Any]) throws -> String {
-        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
-        return String(data: data, encoding: .utf8) ?? "{}"
+    private static func renderJSON(_ lines: [String]) throws -> String {
+        let data = try JSONSerialization.data(withJSONObject: lines, options: [.sortedKeys])
+        return String(data: data, encoding: .utf8) ?? "[]"
     }
 }
 
