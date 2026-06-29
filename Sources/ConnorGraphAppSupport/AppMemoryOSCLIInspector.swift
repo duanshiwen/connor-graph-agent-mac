@@ -381,6 +381,15 @@ public struct AppMemoryOSCLIInspector: Sendable {
         )
     }
 
+    public func context(query: String) throws -> [String] {
+        let terms = query
+            .split { $0 == ";" || $0 == "\u{FF1B}" }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !terms.isEmpty else { return [] }
+        return try AppMemoryOSFacade(store: store).memoryOSFlatContext(terms: terms)
+    }
+
     private func searchHitContent(for hit: MemoryOSRetrievalHit) -> String {
         if hit.layer == .l1,
            let content = try? l1ProvenanceContent(captureEventID: hit.recordID),
