@@ -59,14 +59,14 @@ import ConnorGraphAppSupport
     try store.upsert(statement: MemoryOSStatement(id: "stmt-user-1", subjectID: "node-current-user", predicate: "has_preference", text: "current_user prefers concise phase-by-phase execution updates.", confidence: 0.9, validAt: now, committedAt: now, evidenceSpanIDs: ["span-user-2"]))
 
     let tool = MemoryOSGetCurrentUserProfileTool(facade: facade)
-    let result = try await tool.execute(arguments: AgentToolArguments(json: #"{"limit":10}"#), context: memoryOSToolContext())
+    let result = try await tool.execute(arguments: AgentToolArguments(json: #"{}"#), context: memoryOSToolContext())
 
     let json = try #require(result.contentJSON)
+    let lines = try JSONDecoder().decode([String].self, from: Data(json.utf8))
     #expect(result.toolName == "memory_os_get_current_user_profile")
     #expect(result.contentText.contains("current_user profile"))
-    #expect(json.contains("\"currentUserMarker\":\"current_user\""))
-    #expect(json.contains("structured architectural explanations"))
-    #expect(json.contains("phase-by-phase execution updates"))
+    #expect(lines.contains { $0.contains("structured architectural explanations") })
+    #expect(lines.contains { $0.contains("phase-by-phase execution updates") })
     #expect(!json.contains("shiwen"))
 }
 
@@ -115,38 +115,15 @@ import ConnorGraphAppSupport
     ))
 
     let tool = MemoryOSGetCurrentUserProfileTool(facade: facade)
-    let result = try await tool.execute(arguments: AgentToolArguments(json: #"{"limit":10}"#), context: memoryOSToolContext())
-
-    let payload = try memoryOSToolJSON(result)
-    #expect(result.toolName == "memory_os_get_current_user_profile")
-    #expect(payload["currentUserMarker"] as? String == "current_user")
-    #expect(payload["hitCount"] as? Int == 0)
-    let encoded = try String(data: JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]), encoding: .utf8) ?? ""
-    #expect(!encoded.contains("wikidata-user"))
-    #expect(!encoded.contains("communication user"))
-    #expect(!encoded.contains("使用电脑或网络服务的人"))
-}
-
-@Test func memoryOSGetCurrentUserProfileFocusDoesNotEscapeCurrentUserScope() async throws {
-    let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
-    try store.migrate()
-    let facade = AppMemoryOSFacade(store: store)
-    let now = Date(timeIntervalSince1970: 10_000)
-    let currentUser = MemoryOSEntity(id: "person-current", stableKey: "current_user", entityType: "person", name: "Current User", aliases: [], createdAt: now, updatedAt: now, metadata: ["person_role": "current_user"])
-    let otherPerson = MemoryOSEntity(id: "person-other", stableKey: "person:other:alice", entityType: "person", name: "Alice", aliases: ["user research expert"], createdAt: now, updatedAt: now, metadata: ["person_role": "other_person"])
-    try store.upsert(entity: currentUser)
-    try store.upsert(entity: otherPerson)
-    try store.upsert(entityStatement: MemoryOSEntityStatement(id: "current-pref", entityID: currentUser.id, predicate: .relatedTo, text: "Current user prefers architectural implementation plans.", confidence: 0.9, validAt: now, committedAt: now, evidenceSpanIDs: [], metadata: ["person_role": "current_user", "profile_dimension": "interaction_guidance"]))
-    try store.upsert(entityStatement: MemoryOSEntityStatement(id: "other-pref", entityID: otherPerson.id, predicate: .relatedTo, text: "Alice has deep focus expertise in quantum gardening and user profiles.", confidence: 0.99, validAt: now, committedAt: now, evidenceSpanIDs: [], metadata: ["person_role": "other_person", "profile_dimension": "knowledge_background"]))
-
-    let tool = MemoryOSGetCurrentUserProfileTool(facade: facade)
-    let result = try await tool.execute(arguments: AgentToolArguments(json: #"{"limit":10,"focus":"quantum gardening user profiles"}"#), context: memoryOSToolContext())
+    let result = try await tool.execute(arguments: AgentToolArguments(json: #"{}"#), context: memoryOSToolContext())
 
     let json = try #require(result.contentJSON)
-    #expect(json.contains("Current user prefers architectural implementation plans"))
-    #expect(!json.contains("Alice"))
-    #expect(!json.contains("quantum gardening"))
-    #expect(!json.contains("other-pref"))
+    let lines = try JSONDecoder().decode([String].self, from: Data(json.utf8))
+    #expect(result.toolName == "memory_os_get_current_user_profile")
+    #expect(lines.isEmpty)
+    #expect(!json.contains("wikidata-user"))
+    #expect(!json.contains("communication user"))
+    #expect(!json.contains("使用电脑或网络服务的人"))
 }
 
 @Test func memoryOSUpdateCurrentUserProfileWritesMinimalCurrentUserFact() async throws {
@@ -175,14 +152,9 @@ import ConnorGraphAppSupport
     let statementIDs = try #require(payload["statementIDs"] as? [String])
     #expect(statementIDs.count == 1)
 
-    let profile = try facade.currentUserProfileContext(limit: 10)
-    #expect(profile.hitCount >= 1)
-    let l2ProfileFact = try #require(profile.hits.first { $0.layer == .l2 })
-    #expect(l2ProfileFact.summary == "Current user prefers mature systemic plans over minimal patches for architectural issues.")
-    #expect(l2ProfileFact.metadata["person_role"] == "current_user")
-    #expect(l2ProfileFact.metadata["identity_anchor"] == "current_user")
-    #expect(l2ProfileFact.metadata["l2_fact_type"] == "profile_preference")
-    #expect(l2ProfileFact.metadata["source_stage"] == "current_user_fact_update_tool")
+    let profile = try facade.currentUserProfileContext()
+    #expect(!profile.isEmpty)
+    #expect(profile.contains { $0 == "Current user prefers mature systemic plans over minimal patches for architectural issues." })
 }
 
 @Test func memoryOSUpdateCurrentUserProfileRejectsExtraFactFields() async throws {
