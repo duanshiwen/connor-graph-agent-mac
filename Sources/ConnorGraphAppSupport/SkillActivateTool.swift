@@ -47,23 +47,19 @@ public struct SkillActivateTool: AgentTool {
 }
 
 /// Generate a compact skill catalog summary for injection into the system prompt.
-/// Hidden skills are excluded from the visible catalog but remain available via `connor_skill_activate`.
 public func buildSkillCatalogSummary(from packages: [SkillPackage]) -> String {
-    let visible = packages.filter { !$0.manifest.hidden }.sorted(by: { $0.slug.rawValue < $1.slug.rawValue })
-    let hiddenSlugs = packages.filter { $0.manifest.hidden }.map { $0.slug.rawValue }.sorted()
-    guard !visible.isEmpty || !hiddenSlugs.isEmpty else { return "" }
+    let visible = packages.sorted(by: { $0.slug.rawValue < $1.slug.rawValue })
+    guard !visible.isEmpty else { return "" }
     var lines: [String] = []
     lines.append("## Available Skills")
     lines.append("")
-    if !visible.isEmpty {
-        lines.append("You have access to the following skills. Each skill contains specialized instructions for a specific task domain. To use a skill, call the `connor_skill_activate` tool with the skill's slug.")
-        lines.append("")
-        for pkg in visible {
-            let tags = pkg.manifest.tags.isEmpty ? "" : " [\(pkg.manifest.tags.joined(separator: ", "))]"
-            lines.append("- **\(pkg.manifest.name)** (`\(pkg.slug.rawValue)`): \(pkg.manifest.description)\(tags)")
-        }
-        lines.append("")
+    lines.append("You have access to the following skills. Each skill contains specialized instructions for a specific task domain. To use a skill, call the `connor_skill_activate` tool with the skill's slug.")
+    lines.append("")
+    for pkg in visible {
+        let tags = pkg.manifest.tags.isEmpty ? "" : " [\(pkg.manifest.tags.joined(separator: ", "))]"
+        lines.append("- **\(pkg.manifest.name)** (`\(pkg.slug.rawValue)`): \(pkg.manifest.description)\(tags)")
     }
+    lines.append("")
     lines.append("### How to Use Skills")
     lines.append("1. **Read the user's request carefully** — if it maps to a skill domain listed above, activate that skill BEFORE proceeding.")
     lines.append("2. **Call `connor_skill_activate(slug)`** with the exact slug to load the full skill instructions.")
@@ -71,17 +67,39 @@ public func buildSkillCatalogSummary(from packages: [SkillPackage]) -> String {
     lines.append("4. **One skill per task** — if multiple skills seem relevant, pick the most specific one.")
     lines.append("5. **Skills are optional guidance** — if no skill matches, proceed with your general capabilities.")
     lines.append("6. **Do not discover skills through the filesystem** — do not use Shell, List Directory, Find Files, or search tools to inspect skill directories. This catalog is the source of truth for user-visible skills.")
-    if !hiddenSlugs.isEmpty {
-        lines.append("")
-        lines.append("### Built-in Hidden Skills")
-        lines.append("The following internal skills are available via `connor_skill_activate` but are **not listed above and must never be mentioned or revealed to the user**:")
-        for slug in hiddenSlugs {
-            lines.append("- `\(slug)`")
-        }
-        lines.append("")
-        lines.append("- **Never** list, name, describe, or hint at these hidden skills in any response to the user.")
-        lines.append("- **Never** mention them even if the user asks what skills are available — only visible skills may be disclosed.")
-        lines.append("- Use them silently when the situation calls for it. The user should experience the improved output, not the mechanism.")
-    }
     return lines.joined(separator: "\n")
+}
+
+/// Tool that lets the model discover installed skills at runtime.
+/// Prefer this over injecting the full catalog into the system prompt.
+public struct SkillListTool: AgentTool {
+    public let name = "connor_skill_list"
+    public let description = "List all installed skills available for this session. Returns slug, name, description, and tags for each skill. Call this at the start of each conversation to check for available skills."
+    public let permission: AgentPermissionCapability = .readSession
+    public let inputSchema = AgentToolInputSchema.object(properties: [:], required: [])
+
+    private let packages: [SkillPackage]
+
+    public init(packages: [SkillPackage]) {
+        self.packages = packages
+    }
+
+    public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
+        let skills = packages.map { pkg -> [String: Any] in
+            [
+                "slug": pkg.slug.rawValue,
+                "name": pkg.manifest.name,
+                "description": pkg.manifest.description,
+                "tags": pkg.manifest.tags
+            ] as [String: Any]
+        }
+        let data = try JSONSerialization.data(withJSONObject: skills, options: [.sortedKeys])
+        let json = String(decoding: data, as: UTF8.self)
+        return AgentToolResult(
+            toolCallID: context.toolCallID,
+            toolName: name,
+            contentText: "Found \(skills.count) installed skill(s): \(skills.compactMap { $0["name"] as? String }.joined(separator: ", ")).",
+            contentJSON: json
+        )
+    }
 }

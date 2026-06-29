@@ -150,7 +150,7 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
         ORDER BY rank
         LIMIT \(limit)
         """).map { row in
-            MemoryOSRetrievalHit(layer: .l0, recordID: row[0], title: row[1], summary: snippet(row[2], query: text), matchedText: row[2], score: score(fromFTSRank: row[3]), provenanceRefs: [row[0]], canReadRaw: true)
+            MemoryOSRetrievalHit(layer: .l0, recordID: row[0], title: row[1], summary: row[2], matchedText: row[2], score: score(fromFTSRank: row[3]), provenanceRefs: [row[0]], canReadRaw: true)
         }
     }
 
@@ -179,7 +179,7 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
         LIMIT \(limit)
         """).map { row in
             let evidence = (try? store.decode([String].self, row[3])) ?? []
-            return MemoryOSRetrievalHit(layer: .l2, recordID: row[0], title: row[1], summary: snippet(row[2], query: text), matchedText: row[2], score: score(fromFTSRank: row[5]), evidenceRefs: evidence, entityRefs: [row[4]])
+            return MemoryOSRetrievalHit(layer: .l2, recordID: row[0], title: row[1], summary: row[2], matchedText: row[2], score: score(fromFTSRank: row[5]), evidenceRefs: evidence, entityRefs: [row[4]])
         }
     }
 
@@ -196,8 +196,8 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
             return MemoryOSRetrievalHit(
                 layer: .l3,
                 recordID: row[0],
-                title: String(statement.prefix(80)),
-                summary: snippet(statement, query: text),
+                title: statement,
+                summary: statement,
                 matchedText: statement,
                 score: score(fromFTSRank: row[6]),
                 metadata: [
@@ -230,7 +230,7 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
             LIMIT \(limit - hits.count)
             """).map { row in
                 let evidence = (try? store.decode([String].self, row[3])) ?? []
-                return MemoryOSRetrievalHit(layer: .l4, recordID: row[0], title: row[1], summary: snippet(row[2], query: text), matchedText: row[2], score: score(fromFTSRank: row[6]), evidenceRefs: evidence, entityRefs: [row[4], row[5]].filter { !$0.isEmpty }, canExpandDepth: true)
+                return MemoryOSRetrievalHit(layer: .l4, recordID: row[0], title: row[1], summary: row[2], matchedText: row[2], score: score(fromFTSRank: row[6]), evidenceRefs: evidence, entityRefs: [row[4], row[5]].filter { !$0.isEmpty }, canExpandDepth: true)
             }
         }
         return hits
@@ -291,14 +291,4 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
         return Double(matched) / Double(terms.count)
     }
 
-    private func snippet(_ text: String, query: String, length: Int = 180) -> String {
-        guard text.count > length else { return text }
-        let lower = text.lowercased()
-        if let range = lower.range(of: query.lowercased()) {
-            let start = max(text.startIndex, text.index(range.lowerBound, offsetBy: -40, limitedBy: text.startIndex) ?? text.startIndex)
-            let end = min(text.endIndex, text.index(range.upperBound, offsetBy: 120, limitedBy: text.endIndex) ?? text.endIndex)
-            return String(text[start..<end])
-        }
-        return String(text.prefix(length))
-    }
 }

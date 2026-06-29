@@ -56,23 +56,22 @@ struct SkillCommercialUIPresentationTests {
         #expect(presentation.globalWarnings == ["Invalid skill x"])
     }
 
-    @Test func excludesHiddenSkillsFromVisibleSkillManagerCards() throws {
-        var hidden = makeUISkillPackage(slug: "internal-helper")
-        hidden.sourceTier = .bundled
-        hidden.manifest.hidden = true
-        hidden.manifest.name = "Internal Helper"
+    @Test func allSkillsAreVisibleRegardlessOfTier() throws {
+        let bundled = makeUISkillPackage(slug: "internal-helper")
+        bundled.sourceTier = .bundled
+        bundled.manifest.name = "Internal Helper"
         let visible = makeUISkillPackage(slug: "user-helper")
         let snapshot = SkillPackageScanSnapshot(
-            packages: [hidden, visible],
+            packages: [bundled, visible],
             resolutions: [
-                SkillResolution(slug: hidden.slug, selected: hidden, candidates: [hidden]),
+                SkillResolution(slug: bundled.slug, selected: bundled, candidates: [bundled]),
                 SkillResolution(slug: visible.slug, selected: visible, candidates: [visible])
             ]
         )
 
         let presentation = SkillCommercialUIPresentationBuilder().build(snapshot: snapshot)
 
-        #expect(presentation.cards.map(\.id) == ["user-helper"])
-        #expect(presentation.summary.total == 1)
+        #expect(presentation.cards.map { $0.id }.sorted() == ["internal-helper", "user-helper"])
+        #expect(presentation.summary.total == 2)
     }
 }
