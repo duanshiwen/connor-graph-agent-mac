@@ -165,7 +165,7 @@ public struct SQLiteMemoryOSUnifiedRetrievalService: Sendable {
         LIMIT \(limit)
         """).map { row in
             let metadata = (try? store.decode([String: String].self, row[3])) ?? [:]
-            return MemoryOSRetrievalHit(layer: .l1, recordID: row[0], title: row[1], summary: row[4], matchedText: snippet(row[5], query: text), score: lexicalScore(text, haystack: row[4] + " " + row[5]), evidenceRefs: metadata["span_id"].map { [$0] } ?? [], provenanceRefs: [row[2]], canReadRaw: true, metadata: metadata)
+            return MemoryOSRetrievalHit(layer: .l1, recordID: row[0], title: row[1], summary: row[4], matchedText: row[5], score: lexicalScore(text, haystack: row[4] + " " + row[5]), evidenceRefs: metadata["span_id"].map { [$0] } ?? [], provenanceRefs: [row[2]], canReadRaw: true, metadata: metadata)
         }
     }
 

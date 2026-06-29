@@ -25,7 +25,7 @@ import ConnorGraphAppSupport
     #expect(json.contains("Connor Memory OS"))
 }
 
-@Test func memoryOSContextToolReturnsCommercialContextPackage() async throws {
+@Test func memoryOSContextToolReturnsFlatStringArray() async throws {
     let store = try SQLiteMemoryOSStore(path: temporaryAppMemoryOSRetrievalToolDatabaseURL().path)
     try store.migrate()
     let facade = AppMemoryOSFacade(store: store)
@@ -35,15 +35,16 @@ import ConnorGraphAppSupport
     try store.upsert(entityStatement: MemoryOSEntityStatement(id: "relation-l4", entityID: "entity-memory-os", predicate: .hasPart, objectEntityID: "entity-l4", text: "Connor Memory OS contains L4 Stable Entity / Concept Layer.", assertionKind: .summarized, confidence: 0.92, validAt: now, committedAt: now, evidenceSpanIDs: []))
 
     let tool = MemoryOSContextTool(facade: facade)
-    let result = try await tool.execute(arguments: AgentToolArguments(json: #"{"query":"Connor Memory OS L4","taskIntent":"explainRelationship","layers":["L4"],"graphDepth":1,"maxContextCharacters":4000}"#), context: memoryOSToolContext())
+    let result = try await tool.execute(arguments: AgentToolArguments(json: #"{"query":"Connor Memory OS;L4"}"#), context: memoryOSToolContext())
 
-    let payload = try memoryOSToolJSON(result)
     #expect(result.toolName == "memory_os_context")
-    #expect(result.contentText.contains("Memory OS context package"))
-    #expect(payload["query"] as? String == "Connor Memory OS L4")
-    #expect(payload["contextText"] as? String != nil)
-    #expect((payload["relations"] as? [[String: Any]])?.contains { $0["id"] as? String == "relation-l4" } == true)
-    #expect((payload["rawRetrieval"] as? [String: Any])?["expandedRelationCount"] as? Int ?? 0 >= 1)
+    #expect(result.contentText.contains("item(s) for"))
+    #expect(result.contentText.contains("search term"))
+
+    let contentJSON = try #require(result.contentJSON)
+    let items = try JSONDecoder().decode([String].self, from: Data(contentJSON.utf8))
+    #expect(!items.isEmpty)
+    #expect(items.contains { $0.contains("Connor Memory OS") })
 }
 
 @Test func memoryOSGetCurrentUserProfileToolAggregatesCurrentUserHitsWithoutNameCoupling() async throws {

@@ -49,6 +49,33 @@ public struct MemoryOSContextDeliveryService: Sendable {
         return package
     }
 
+    /// Search Memory OS L1-L4 with multiple search terms in parallel, merge and deduplicate results.
+    /// - Parameter terms: Search terms extracted by the LLM (pre-split by semicolons).
+    /// - Returns: Deduplicated array of natural-language memory items.
+    public func flatContext(terms: [String]) throws -> [String] {
+        let layers: [MemoryOSRetrievalLayer] = [.l1, .l2, .l3, .l4]
+        let retrieval = SQLiteMemoryOSUnifiedRetrievalService(store: store)
+
+        var allHits: [MemoryOSRetrievalHit] = []
+        var allExpansions: [String: [MemoryOSL4ExpansionHit]] = [:]
+
+        for term in terms {
+            let hits = try retrieval.search(MemoryOSRetrievalQuery(
+                text: term, layers: layers, limit: 50, depth: 5
+            ))
+            allHits.append(contentsOf: hits)
+
+            for hit in hits where hit.layer == .l4 && hit.canExpandDepth {
+                guard let entityID = hit.entityRefs.first ?? Optional(hit.recordID) else { continue }
+                if allExpansions[entityID] != nil { continue }
+                let expanded = try retrieval.expandL4(entityID: entityID, depth: 5, limit: 8)
+                if !expanded.isEmpty { allExpansions[entityID] = expanded }
+            }
+        }
+
+        return builder.buildFlatStrings(hits: allHits, expansions: allExpansions)
+    }
+
     private func filter(_ hits: [MemoryOSL4ExpansionHit], policy: MemoryOSGraphExpansionPolicy) -> [MemoryOSL4ExpansionHit] {
         hits.filter { hit in
             if !policy.allowedPredicates.isEmpty && !policy.allowedPredicates.contains(hit.predicate) { return false }

@@ -342,4 +342,69 @@ public struct MemoryOSContextBuilder: Sendable {
         let sanitized = query.lowercased().filter { $0.isLetter || $0.isNumber }.prefix(24)
         return "\(sanitized)-\(Int(generatedAt.timeIntervalSince1970))"
     }
+
+    /// Build a flat array of natural-language strings from retrieval hits and L4 graph expansions.
+    /// - Parameters:
+    ///   - hits: Merged and sorted retrieval hits from all sub-queries.
+    ///   - expansions: L4 graph expansion results keyed by entity ID.
+    /// - Returns: Deduplicated array of natural-language memory items.
+    public func buildFlatStrings(
+        hits: [MemoryOSRetrievalHit],
+        expansions: [String: [MemoryOSL4ExpansionHit]]
+    ) -> [String] {
+        let sortedHits = hits.sorted { $0.score > $1.score }
+
+        // Build entityID → name map from L4 entity hits
+        var entityIDToName: [String: String] = [:]
+        for hit in sortedHits where hit.layer == .l4 && hit.metadata["entity_type"] != nil {
+            let entityID = hit.entityRefs.first ?? hit.recordID
+            entityIDToName[entityID] = hit.title
+        }
+
+        var seen: Set<String> = []
+        var result: [String] = []
+
+        func append(_ string: String) {
+            guard !seen.contains(string), !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            seen.insert(string)
+            result.append(string)
+        }
+
+        // Flatten hits
+        for hit in sortedHits {
+            switch hit.layer {
+            case .l0:
+                continue // L0 is not included per design
+            case .l1:
+                append("Capture event「\(hit.title)」: \(hit.matchedText)")
+            case .l2:
+                append(hit.matchedText)
+            case .l3:
+                append(hit.matchedText)
+            case .l4:
+                if let entityType = hit.metadata["entity_type"] {
+                    let text = hit.summary.isEmpty ? hit.matchedText : hit.summary
+                    append("「\(hit.title)」(\(entityType)): \(text)")
+                }
+                // L4 relation hits without entity_type are skipped (relations come from expansions)
+            }
+        }
+
+        // Flatten expansion relations
+        for (_, relations) in expansions {
+            for relation in relations {
+                let sourceName = entityIDToName[relation.sourceEntityID] ?? relation.sourceEntityID
+                let targetName = relation.relatedEntityID.flatMap { entityIDToName[$0] } ?? (relation.relatedEntityID ?? "unknown")
+                let label = predicateLabels.label(for: relation.predicate)
+                let sentence = relation.text.isEmpty
+                    ? label.forwardTemplate
+                        .replacingOccurrences(of: "{source}", with: sourceName)
+                        .replacingOccurrences(of: "{target}", with: targetName)
+                    : relation.text
+                append(sentence)
+            }
+        }
+
+        return result
+    }
 }
