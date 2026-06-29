@@ -119,7 +119,7 @@ public struct SkillManifestParser: Sendable {
             "disable-model-invocation", "disableModelInvocation", "user-invocable", "userInvocable",
             "model", "effort", "context", "agent", "shell", "icon", "tags",
             "version", "publisher", "x-connor", "connor", "requiredCapabilities",
-            "graphContextPolicy", "triggers", "hidden"
+            "graphContextPolicy", "triggers"
         ]
         var unsupported: [String] = []
         for key in fields.keys {
@@ -147,7 +147,7 @@ public struct SkillManifestParser: Sendable {
         let tags = array(fields, "tags") ?? []
         let version = string(fields, "version")
         let publisher = string(fields, "publisher")
-        let hidden = bool(fields, "hidden") ?? false
+        _ = bool(fields, "hidden") // accept but ignore — hidden is no longer supported
         let manifest = SkillManifest(
             name: resolvedName,
             description: description,
@@ -171,7 +171,6 @@ public struct SkillManifestParser: Sendable {
             tags: tags,
             version: version,
             publisher: publisher,
-            hidden: hidden,
             connor: connor,
             unsupportedFields: unsupported,
             warnings: warnings

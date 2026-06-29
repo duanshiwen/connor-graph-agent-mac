@@ -160,6 +160,14 @@ public struct AppChatSessionRepository: Sendable {
         return updated
     }
 
+    public func setStatus(sessionID: String, statusRaw: String) throws -> AgentSession {
+        let updated = try updateGovernance(sessionID: sessionID) { governance in
+            governance.status = AgentSessionStatus(rawValue: statusRaw) ?? .todo
+        }
+        try appendJournalEvent(runID: UUID().uuidString, sessionID: sessionID, kind: .sessionStatusChanged, action: "session_status_changed", message: "Session status changed to \(statusRaw)", metadata: ["status": statusRaw])
+        return updated
+    }
+
     @discardableResult
     public func setLabels(sessionID: String, labels: [AgentSessionLabel]) throws -> AgentSession {
         let updated = try updateGovernance(sessionID: sessionID) { governance in governance.labels = labels }

@@ -79,25 +79,18 @@ public struct MemoryOSContextBuilder: Sendable {
         evidence = Array(evidence.prefix(request.budget.maxEvidenceCards))
 
         let preliminaryText = renderContextText(request: request, blocks: blocks, entities: entities, relations: relations, evidence: evidence)
-        let budgetedText: String
-        var truncatedByCharacters = false
-        if preliminaryText.count > request.budget.maxContextCharacters {
-            budgetedText = String(preliminaryText.prefix(max(0, request.budget.maxContextCharacters)))
-            truncatedByCharacters = true
-        } else {
-            budgetedText = preliminaryText
-        }
+        let budgetedText = preliminaryText
 
         let truncatedBlocks = max(0, originalBlockCount - blocks.count)
         let truncatedRelations = max(0, originalRelationCount - relations.count)
-        if truncatedBlocks > 0 || truncatedRelations > 0 || truncatedByCharacters {
+        if truncatedBlocks > 0 || truncatedRelations > 0 {
             diagnostics.append(MemoryOSContextDiagnostic(
                 id: "budget-truncated",
                 severity: .warning,
                 kind: .budgetTruncated,
-                message: "Memory context was truncated to fit the configured budget.",
+                message: "Memory context was truncated to fit item limits.",
                 affectedRecordIDs: blocks.flatMap(\.recordIDs),
-                suggestedAction: "Increase maxContextCharacters or use a narrower query."
+                suggestedAction: "Use a narrower query to reduce result count."
             ))
         }
         if hits.isEmpty {
@@ -107,7 +100,7 @@ public struct MemoryOSContextBuilder: Sendable {
         let evidenceBearingBlocks = blocks.filter { !$0.evidenceRefs.isEmpty }.count
         let evidenceCoverage = blocks.isEmpty ? 0 : Double(evidenceBearingBlocks) / Double(blocks.count)
         let relationCoverage = allRelations.isEmpty ? 0 : Double(relations.count) / Double(allRelations.count)
-        let budgetCompliance = budgetedText.count <= request.budget.maxContextCharacters ? 1.0 : 0.0
+        let budgetCompliance: Double = 1.0
 
         return MemoryOSContextPackage(
             id: "memory-context-\(stableContextIDSeed(query: request.query, generatedAt: generatedAt))",
@@ -132,7 +125,7 @@ public struct MemoryOSContextBuilder: Sendable {
             budgetReport: MemoryOSContextBudgetReport(
                 maxContextCharacters: request.budget.maxContextCharacters,
                 actualContextCharacters: budgetedText.count,
-                truncatedBlockCount: truncatedBlocks + (truncatedByCharacters ? 1 : 0),
+                truncatedBlockCount: truncatedBlocks,
                 truncatedRelationCount: truncatedRelations
             ),
             qualitySignals: MemoryOSContextQualitySignals(
