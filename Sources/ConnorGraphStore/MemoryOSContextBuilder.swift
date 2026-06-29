@@ -190,7 +190,9 @@ public struct MemoryOSContextBuilder: Sendable {
     }
 
     private func makeRelations(from expansions: [String: [MemoryOSL4ExpansionHit]]) -> [MemoryOSRelationContextCard] {
-        expansions.values.flatMap { $0 }.sorted { lhs, rhs in
+        expansions.values.flatMap { $0 }.filter { hit in
+            hit.sourceEntityID != hit.relatedEntityID && hit.relatedEntityID != nil
+        }.sorted { lhs, rhs in
             if lhs.depth != rhs.depth { return lhs.depth < rhs.depth }
             return lhs.recordID < rhs.recordID
         }.map { hit in
@@ -387,8 +389,12 @@ public struct MemoryOSContextBuilder: Sendable {
         // Flatten expansion relations
         for (_, relations) in expansions {
             for relation in relations {
+                // Skip self-referencing relations (e.g. "X is a subclass of X")
+                guard relation.sourceEntityID != relation.relatedEntityID else { continue }
+                // Skip nil-target relations (renders as "X relates to unknown")
+                guard relation.relatedEntityID != nil else { continue }
                 let sourceName = extraEntityNames[relation.sourceEntityID] ?? entityIDToName[relation.sourceEntityID] ?? relation.sourceEntityID
-                let targetName = relation.relatedEntityID.flatMap { extraEntityNames[$0] ?? entityIDToName[$0] } ?? (relation.relatedEntityID ?? "unknown")
+                let targetName = extraEntityNames[relation.relatedEntityID!] ?? entityIDToName[relation.relatedEntityID!] ?? relation.relatedEntityID!
                 let label = predicateLabels.label(for: relation.predicate)
                 let sentence = label.forwardTemplate
                     .replacingOccurrences(of: "{source}", with: sourceName)
