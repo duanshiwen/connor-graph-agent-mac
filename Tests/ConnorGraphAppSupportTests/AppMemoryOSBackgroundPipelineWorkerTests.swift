@@ -71,10 +71,10 @@ private func encodedKnowledgeArtifact() throws -> String {
                 signalAssessment: MemoryOSKnowledgeSignalAssessment(signalQualityAccepted: true, reuseScopeAccepted: true, noveltyAccepted: true, structurabilityAccepted: true),
                 confidence: 0.84,
                 evidenceStatementIDs: ["stmt-1"],
-                relatedEntityIDs: ["concept-elasticity"]
+                relatedEntityNames: ["供需弹性"]
             )
         ],
-        conceptEntities: [MemoryOSExtractedConceptEntity(localID: "concept-elasticity", name: "供需弹性", conceptType: "concept", domain: "economics")]
+        conceptEntities: [MemoryOSExtractedConceptEntity(name: "供需弹性", conceptType: "concept", domain: "economics")]
     )
     let encoder = JSONEncoder()
     encoder.dateEncodingStrategy = .iso8601

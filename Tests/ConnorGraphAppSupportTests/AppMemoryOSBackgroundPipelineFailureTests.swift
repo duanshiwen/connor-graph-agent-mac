@@ -52,7 +52,7 @@ private struct ThrowingMemoryOSBackgroundExecutor: MemoryOSBackgroundModelExecut
 
 private struct StaticRejectedMemoryOSBackgroundExecutor: MemoryOSBackgroundModelExecutor {
     func execute(_ request: MemoryOSBackgroundModelRequest) throws -> MemoryOSBackgroundModelResponse {
-        MemoryOSBackgroundModelResponse(rawArtifactJSON: "{\"knowledgeCandidates\":[{\"id\":\"bad\",\"title\":\"Bad\",\"claim\":\"No evidence\",\"category\":\"general\",\"knowledgeType\":\"theory\",\"scope\":\"general\",\"domain\":\"general\",\"signalAssessment\":{\"signalQualityAccepted\":true,\"reuseScopeAccepted\":true,\"noveltyAccepted\":true,\"structurabilityAccepted\":true},\"confidence\":0.8,\"evidenceStatementIDs\":[],\"relatedEntityIDs\":[]}],\"conceptEntities\":[],\"conceptRelations\":[]}")
+        MemoryOSBackgroundModelResponse(rawArtifactJSON: "{\"knowledgeCandidates\":[{\"id\":\"bad\",\"title\":\"Bad\",\"claim\":\"No evidence\",\"category\":\"general\",\"knowledgeType\":\"theory\",\"scope\":\"general\",\"domain\":\"general\",\"signalAssessment\":{\"signalQualityAccepted\":true,\"reuseScopeAccepted\":true,\"noveltyAccepted\":true,\"structurabilityAccepted\":true},\"confidence\":0.8,\"evidenceStatementIDs\":[],\"relatedEntityNames\":[]}],\"conceptEntities\":[],\"conceptRelations\":[]}")
     }
 }
 
