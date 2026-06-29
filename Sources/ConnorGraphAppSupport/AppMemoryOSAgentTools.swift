@@ -111,18 +111,30 @@ private extension SendableJSONValue {
 
 public struct MemoryOSContextTool: AgentTool {
     public let name = "memory_os_context"
-    public let description = "Build a commercial-grade Memory OS context package for the AI by orchestrating L0-L4 retrieval, optional L4 graph expansion, deterministic organization, verbalization, diagnostics, and budget reporting. Prefer this over low-level memory_os_search when answering user questions from memory."
+    public let description = """
+        Search Connor Memory OS across L1-L4 layers and return matching items as natural-language sentences.
+
+        The query parameter accepts one or more search terms separated by semicolons (;).
+        For each term, Memory OS performs full-text search and graph expansion independently, then merges and deduplicates results.
+
+        When to use multiple terms:
+        - The user mentions several distinct entities, projects, or people
+        - The topic has both Chinese and English expressions
+        - The request spans multiple technical concepts
+        - You want to catch synonyms or aliases
+
+        Examples:
+        - Single concept: "Connor Graph Agent"
+        - Multiple concepts: "Connor Graph Agent;记忆系统;L4 relation predicates"
+        - Bilingual: "知识图谱;knowledge graph;entity resolution;实体解析"
+        - Person + project: "诗闻;Connor Graph Agent Mac;agent os architecture"
+
+        Keep each term focused — short keyword phrases work better than long sentences.
+        2-5 terms per call is the sweet spot.
+        """
     public let permission: AgentPermissionCapability = .readGraph
     public let inputSchema = AgentToolInputSchema.object(properties: [
-        "query": .string(description: "Natural-language memory context query."),
-        "taskIntent": .string(description: "auto, answerQuestion, planWork, verifyClaim, explainRelationship, listInstances, currentUserPersonalization, etc. Defaults to auto."),
-        "subjectHints": .array(items: .string(description: "Entity, project, person, or concept hint."), description: "Optional subject hints."),
-        "layers": .array(items: .string(description: "Layer name: L0, L1, L2, L3 or L4."), description: "Optional Memory OS layers. Defaults to all layers."),
-        "requireEvidence": .boolean(description: "Whether evidence should be required and diagnostics exposed. Defaults to false."),
-        "graphDepth": .number(description: "Optional L4 graph expansion depth. Defaults to 1, capped at 5."),
-        "maxContextCharacters": .number(description: "Maximum contextText characters. Defaults to commercial policy."),
-        "outputMode": .string(description: "compact, balanced, evidenceHeavy, or graphHeavy. Defaults to balanced."),
-        "language": .string(description: "zhHans, en, or bilingual. Defaults to zhHans.")
+        "query": .string(description: "Search terms separated by semicolons (;). Each term is searched independently. Include entity names, project names, concepts, and technical terms. Use both Chinese and English for bilingual topics. Chinese semicolon (；) is also accepted.")
     ], required: ["query"])
 
     private let facade: AppMemoryOSFacade
@@ -130,59 +142,33 @@ public struct MemoryOSContextTool: AgentTool {
     public init(facade: AppMemoryOSFacade) { self.facade = facade }
 
     public func execute(arguments: AgentToolArguments, context: AgentToolExecutionContext) async throws -> AgentToolResult {
-        guard let queryText = arguments.string("query")?.trimmingCharacters(in: .whitespacesAndNewlines), !queryText.isEmpty else {
+        guard let rawQuery = arguments.string("query")?.trimmingCharacters(in: .whitespacesAndNewlines), !rawQuery.isEmpty else {
             throw AgentToolError.invalidArguments("query is required")
         }
-        let intent = arguments.string("taskIntent").flatMap(MemoryOSTaskIntent.init(rawValue:)) ?? .auto
-        let layers = parseLayers(arguments.array("layers"))
-        let subjectHints = parseStringArray(arguments.array("subjectHints"))
-        let graphDepth = max(0, min(arguments.int("graphDepth") ?? 1, 5))
-        let budget = budget(maxContextCharacters: arguments.int("maxContextCharacters"))
-        let request = MemoryOSContextRequest(
-            query: queryText,
-            taskIntent: intent,
-            subjectHints: subjectHints,
-            layers: layers,
-            evidencePolicy: MemoryOSEvidencePolicy(required: arguments.bool("requireEvidence") ?? false),
-            graphPolicy: MemoryOSGraphExpansionPolicy(enabled: graphDepth > 0, maxDepth: graphDepth, maxEdgesPerSeed: 8, expansionStrategy: graphDepth > 0 ? .mixed : .none),
-            budget: budget,
-            outputMode: arguments.string("outputMode").flatMap(MemoryOSContextOutputMode.init(rawValue:)) ?? .balanced,
-            referenceTime: Date(),
-            language: arguments.string("language").flatMap(MemoryOSContextLanguage.init(rawValue:)) ?? .zhHans
-        )
-        let package = try facade.memoryOSContext(request)
-        let json = try Self.renderJSON(package)
+        let terms = splitQuery(rawQuery)
+        guard !terms.isEmpty else {
+            throw AgentToolError.invalidArguments("query contained no valid search terms")
+        }
+        let items = try facade.memoryOSFlatContext(terms: terms)
+        let json = try Self.renderJSON(items)
         return AgentToolResult(
             toolCallID: context.toolCallID,
             toolName: name,
-            contentText: "Memory OS context package returned \(package.blocks.count) block(s), \(package.entities.count) entity card(s), and \(package.relations.count) relation card(s).",
+            contentText: "Memory OS context returned \(items.count) item(s) for \(terms.count) search term(s): \(terms.joined(separator: ", ")).",
             contentJSON: json,
-            citations: package.blocks.flatMap(\.recordIDs) + package.entities.map(\.entityID) + package.relations.map(\.id) + package.evidence.map(\.evidenceRef)
+            citations: []
         )
     }
 
-    private func parseLayers(_ values: [SendableJSONValue]?) -> [MemoryOSRetrievalLayer] {
-        guard let values else { return MemoryOSRetrievalLayer.allCases }
-        let parsed = values.compactMap { $0.stringValue }.compactMap(MemoryOSRetrievalLayer.init(rawValue:))
-        return parsed.isEmpty ? MemoryOSRetrievalLayer.allCases : parsed
+    private func splitQuery(_ raw: String) -> [String] {
+        raw.split { $0 == ";" || $0 == "\u{FF1B}" }
+           .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+           .filter { !$0.isEmpty }
     }
 
-    private func parseStringArray(_ values: [SendableJSONValue]?) -> [String] {
-        values?.compactMap { $0.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty } ?? []
-    }
-
-    private func budget(maxContextCharacters: Int?) -> MemoryOSContextBudget {
-        var budget = MemoryOSContextBudget.commercialDefault
-        if let maxContextCharacters { budget.maxContextCharacters = max(500, min(maxContextCharacters, 50_000)) }
-        return budget
-    }
-
-    private static func renderJSON(_ object: MemoryOSContextPackage) throws -> String {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        let data = try encoder.encode(object)
-        return String(data: data, encoding: .utf8) ?? "{}"
+    private static func renderJSON(_ items: [String]) throws -> String {
+        let data = try JSONEncoder().encode(items)
+        return String(data: data, encoding: .utf8) ?? "[]"
     }
 }
 
