@@ -27,15 +27,15 @@ import ConnorGraphMemory
                 confidence: 0.86,
                 evidenceStatementIDs: ["stmt-theory-1"],
                 evidenceSpanIDs: ["span-theory-1"],
-                relatedEntityIDs: ["concept-elasticity", "parameter-x"]
+                relatedEntityNames: ["concept-elasticity", "parameter-x"]
             )
         ],
         conceptEntities: [
-            MemoryOSExtractedConceptEntity(localID: "concept-elasticity", name: "供需弹性", conceptType: "concept", domain: "economics", summary: "供给与需求变化敏感性的概念。", aliases: ["供需弹性空间"], confidence: 0.91, evidenceSpanIDs: ["span-theory-1"]),
-            MemoryOSExtractedConceptEntity(localID: "parameter-x", name: "某参数", conceptType: "parameter", domain: "economics", summary: "影响供需弹性空间变化的参数。", confidence: 0.82, evidenceSpanIDs: ["span-theory-1"])
+            MemoryOSExtractedConceptEntity(name: "供需弹性", conceptType: "concept", domain: "economics", summary: "供给与需求变化敏感性的概念。", aliases: ["供需弹性空间"]),
+            MemoryOSExtractedConceptEntity(name: "某参数", conceptType: "parameter", domain: "economics", summary: "影响供需弹性空间变化的参数。")
         ],
         conceptRelations: [
-            MemoryOSExtractedConceptRelation(subjectLocalID: "concept-elasticity", predicate: .influences, objectLocalID: "parameter-x", text: "供需弹性空间会随着某参数变化而改变。", confidence: 0.9, evidenceSpanIDs: ["span-theory-1"], metadata: ["causal_basis": "Evidence states the elasticity space changes with the parameter."])
+            MemoryOSExtractedConceptRelation(subjectName: "供需弹性", predicate: .influences, objectName: "某参数", text: "供需弹性空间会随着某参数变化而改变。", metadata: ["causal_basis": "Evidence states the elasticity space changes with the parameter."])
         ],
         evidenceSpans: [MemoryOSKnowledgeEvidenceSpan(id: "span-theory-1", text: "供需弹性空间会随着某参数变化。")]
     )

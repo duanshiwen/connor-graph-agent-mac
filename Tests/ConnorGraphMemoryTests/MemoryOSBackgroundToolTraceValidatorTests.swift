@@ -32,7 +32,7 @@ struct MemoryOSBackgroundToolTraceValidatorTests {
     }
 
     @Test func warnsWhenHighRiskL4RelationHasNoSearchTrace() throws {
-        let artifact = #"{"knowledgeCandidates":[],"conceptEntities":[{"id":"a"},{"id":"b"}],"conceptRelations":[{"id":"rel-1","predicate":"SAME_AS","subjectLocalID":"a","objectLocalID":"b"}],"warnings":[],"metadata":{}}"#
+        let artifact = #"{"knowledgeCandidates":[],"conceptEntities":[{"name":"a"},{"name":"b"}],"conceptRelations":[{"predicate":"SAME_AS","subjectName":"a","objectName":"b"}],"warnings":[],"metadata":{}}"#
         let expand = MemoryOSBackgroundToolCallRecord(
             id: "tool-1",
             runID: "run-1",
