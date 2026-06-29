@@ -71,7 +71,7 @@ import ConnorGraphStore
         ],
         rawRetrieval: MemoryOSRawRetrievalTrace(initialHitCount: 3, expandedRelationCount: 1, tracedEvidenceCount: 1, retrievalMethods: ["fts", "graph"]),
         suggestedNextActions: [
-            MemoryOSContextNextAction(toolName: "memory_os_trace_evidence", reason: "Verify relation evidence.", arguments: ["spanIDs": ["span-1"]])
+            MemoryOSContextNextAction(toolName: "memory_os_read_provenance", reason: "Verify relation evidence.", arguments: ["spanIDs": ["span-1"]])
         ],
         budgetReport: MemoryOSContextBudgetReport(maxContextCharacters: 6_000, actualContextCharacters: 120, truncatedBlockCount: 0, truncatedRelationCount: 0),
         qualitySignals: MemoryOSContextQualitySignals(relevanceScore: 0.9, evidenceCoverage: 1.0, relationCoverage: 1.0, redundancyRate: 0.0, staleLeakRate: 0.0, conflictSurfacingRate: 0.0, budgetCompliance: 1.0)
