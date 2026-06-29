@@ -6,16 +6,14 @@ import ConnorGraphMemory
 @Test func l4RelationConstraintValidatorAcceptsValidCompositionRelation() {
     let validator = MemoryOSL4RelationConstraintValidator()
     let entities = [
-        MemoryOSExtractedConceptEntity(localID: "memory-os", name: "Memory OS", conceptType: "system", confidence: 0.9, evidenceSpanIDs: ["span-1"]),
-        MemoryOSExtractedConceptEntity(localID: "l4", name: "L4", conceptType: "component", confidence: 0.9, evidenceSpanIDs: ["span-1"])
+        MemoryOSExtractedConceptEntity(name: "Memory OS", conceptType: "system"),
+        MemoryOSExtractedConceptEntity(name: "L4", conceptType: "component")
     ]
     let relation = MemoryOSExtractedConceptRelation(
-        subjectLocalID: "memory-os",
+        subjectName: "Memory OS",
         predicate: .hasPart,
-        objectLocalID: "l4",
-        text: "Memory OS has L4.",
-        confidence: 0.86,
-        evidenceSpanIDs: ["span-1"]
+        objectName: "L4",
+        text: "Memory OS has L4."
     )
 
     let issues = validator.validate(relation: relation, conceptEntities: entities, evidenceSpanIDs: ["span-1"])
@@ -26,15 +24,13 @@ import ConnorGraphMemory
 @Test func l4RelationConstraintValidatorAllowsMissingEvidenceButRejectsSelfLoop() {
     let validator = MemoryOSL4RelationConstraintValidator()
     let entities = [
-        MemoryOSExtractedConceptEntity(localID: "memory-os", name: "Memory OS", conceptType: "system", confidence: 0.9)
+        MemoryOSExtractedConceptEntity(name: "Memory OS", conceptType: "system")
     ]
     let relation = MemoryOSExtractedConceptRelation(
-        subjectLocalID: "memory-os",
+        subjectName: "Memory OS",
         predicate: .hasPart,
-        objectLocalID: "memory-os",
-        text: "Memory OS has itself.",
-        confidence: 0.9,
-        evidenceSpanIDs: []
+        objectName: "Memory OS",
+        text: "Memory OS has itself."
     )
 
     let issues = validator.validate(relation: relation, conceptEntities: entities, evidenceSpanIDs: [])
@@ -47,16 +43,14 @@ import ConnorGraphMemory
 @Test func l4RelationConstraintValidatorAllowsWeakRelationsWithoutReason() {
     let validator = MemoryOSL4RelationConstraintValidator()
     let entities = [
-        MemoryOSExtractedConceptEntity(localID: "memory-os", name: "Memory OS", conceptType: "system"),
-        MemoryOSExtractedConceptEntity(localID: "graph", name: "Graph", conceptType: "concept")
+        MemoryOSExtractedConceptEntity(name: "Memory OS", conceptType: "system"),
+        MemoryOSExtractedConceptEntity(name: "Graph", conceptType: "concept")
     ]
     let relation = MemoryOSExtractedConceptRelation(
-        subjectLocalID: "memory-os",
+        subjectName: "Memory OS",
         predicate: .relatedTo,
-        objectLocalID: "graph",
-        text: "Memory OS relates to graph.",
-        confidence: 0.7,
-        evidenceSpanIDs: ["span-1"]
+        objectName: "Graph",
+        text: "Memory OS relates to graph."
     )
 
     let issues = validator.validate(relation: relation, conceptEntities: entities, evidenceSpanIDs: ["span-1"])
@@ -67,16 +61,14 @@ import ConnorGraphMemory
 @Test func l4RelationConstraintValidatorAllowsCausalRelationsWithoutBasis() {
     let validator = MemoryOSL4RelationConstraintValidator()
     let entities = [
-        MemoryOSExtractedConceptEntity(localID: "tool-loop", name: "Tool Loop", conceptType: "mechanism"),
-        MemoryOSExtractedConceptEntity(localID: "quality", name: "Memory Quality", conceptType: "outcome")
+        MemoryOSExtractedConceptEntity(name: "Tool Loop", conceptType: "mechanism"),
+        MemoryOSExtractedConceptEntity(name: "Memory Quality", conceptType: "outcome")
     ]
     let relation = MemoryOSExtractedConceptRelation(
-        subjectLocalID: "tool-loop",
+        subjectName: "Tool Loop",
         predicate: .causes,
-        objectLocalID: "quality",
-        text: "Tool loops cause quality.",
-        confidence: 0.9,
-        evidenceSpanIDs: ["span-1"]
+        objectName: "Memory Quality",
+        text: "Tool loops cause quality."
     )
 
     let issues = validator.validate(relation: relation, conceptEntities: entities, evidenceSpanIDs: ["span-1"])
@@ -87,16 +79,14 @@ import ConnorGraphMemory
 @Test func l4RelationConstraintValidatorAllowsStrictIdentityBelowConfidence() {
     let validator = MemoryOSL4RelationConstraintValidator()
     let entities = [
-        MemoryOSExtractedConceptEntity(localID: "a", name: "Memory OS", conceptType: "system"),
-        MemoryOSExtractedConceptEntity(localID: "b", name: "Memory System", conceptType: "system")
+        MemoryOSExtractedConceptEntity(name: "Memory OS", conceptType: "system"),
+        MemoryOSExtractedConceptEntity(name: "Memory System", conceptType: "system")
     ]
     let relation = MemoryOSExtractedConceptRelation(
-        subjectLocalID: "a",
+        subjectName: "Memory OS",
         predicate: .sameAs,
-        objectLocalID: "b",
-        text: "Memory OS is the same as Memory System.",
-        confidence: 0.1,
-        evidenceSpanIDs: ["missing-span"]
+        objectName: "Memory System",
+        text: "Memory OS is the same as Memory System."
     )
 
     let issues = validator.validate(relation: relation, conceptEntities: entities, evidenceSpanIDs: [])
@@ -107,16 +97,14 @@ import ConnorGraphMemory
 @Test func l4RelationConstraintValidatorUsesControlledTypeAliasesForIdentityCompatibility() {
     let validator = MemoryOSL4RelationConstraintValidator()
     let entities = [
-        MemoryOSExtractedConceptEntity(localID: "pku", name: "北京大学", conceptType: "university"),
-        MemoryOSExtractedConceptEntity(localID: "peking", name: "Peking University", conceptType: "organization")
+        MemoryOSExtractedConceptEntity(name: "北京大学", conceptType: "university"),
+        MemoryOSExtractedConceptEntity(name: "Peking University", conceptType: "organization")
     ]
     let relation = MemoryOSExtractedConceptRelation(
-        subjectLocalID: "pku",
+        subjectName: "北京大学",
         predicate: .sameAs,
-        objectLocalID: "peking",
-        text: "北京大学 is Peking University.",
-        confidence: 0.4,
-        evidenceSpanIDs: []
+        objectName: "Peking University",
+        text: "北京大学 is Peking University."
     )
 
     let issues = validator.validate(relation: relation, conceptEntities: entities, evidenceSpanIDs: [])
@@ -127,16 +115,14 @@ import ConnorGraphMemory
 @Test func l4RelationConstraintValidatorRejectsTaxonomyObjectThatIsNotTypeLike() {
     let validator = MemoryOSL4RelationConstraintValidator()
     let entities = [
-        MemoryOSExtractedConceptEntity(localID: "memory-os", name: "Memory OS", conceptType: "system"),
-        MemoryOSExtractedConceptEntity(localID: "sqlite", name: "SQLite", conceptType: "technology")
+        MemoryOSExtractedConceptEntity(name: "Memory OS", conceptType: "system"),
+        MemoryOSExtractedConceptEntity(name: "SQLite", conceptType: "technology")
     ]
     let relation = MemoryOSExtractedConceptRelation(
-        subjectLocalID: "memory-os",
+        subjectName: "Memory OS",
         predicate: .instanceOf,
-        objectLocalID: "sqlite",
-        text: "Memory OS is an instance of SQLite.",
-        confidence: 0.9,
-        evidenceSpanIDs: ["span-1"]
+        objectName: "SQLite",
+        text: "Memory OS is an instance of SQLite."
     )
 
     let issues = validator.validate(relation: relation, conceptEntities: entities, evidenceSpanIDs: ["span-1"])
