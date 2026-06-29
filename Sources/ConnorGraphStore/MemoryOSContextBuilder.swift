@@ -370,30 +370,21 @@ public struct MemoryOSContextBuilder: Sendable {
             result.append(string)
         }
 
-        /// Prefer the longer of summary/matchedText — snippet() truncates to 180 chars.
-        func bestText(from hit: MemoryOSRetrievalHit) -> String {
-            let a = hit.matchedText
-            let b = hit.summary
-            if a.isEmpty { return b }
-            if b.isEmpty { return a }
-            return a.count >= b.count ? a : b
-        }
-
         // Flatten hits
         for hit in sortedHits {
             switch hit.layer {
             case .l0:
                 continue // L0 is not included per design
             case .l1:
-                append("Capture event「\(hit.title)」: \(bestText(from: hit))")
+                append("Capture event「\(hit.title)」: \(hit.matchedText)")
             case .l2:
-                append(bestText(from: hit))
+                append(hit.matchedText)
             case .l3:
-                append(bestText(from: hit))
+                append(hit.matchedText)
             case .l4:
                 if let entityType = hit.metadata["entity_type"] {
-                    let summary = bestText(from: hit)
-                    append("「\(hit.title)」(\(entityType)): \(summary)")
+                    let text = hit.summary.isEmpty ? hit.matchedText : hit.summary
+                    append("「\(hit.title)」(\(entityType)): \(text)")
                 }
                 // L4 relation hits without entity_type are skipped (relations come from expansions)
             }
