@@ -544,7 +544,24 @@ final class AppViewModel: NSObject, ObservableObject {
     private var agentRuntimeFactory: AppGraphAgentRuntimeFactory?
     private var hybridSearchService: (any GraphHybridSearchService)?
     private var isRunningBackgroundJobs: Bool = false
+    private var lastMemoryOSDailySweep: Date?
     private var hasScheduledMemoryOSSearchIndexRepair = false
+
+    private var backgroundAIExecutorProvider: BackgroundAIExecutorProvider? {
+        guard let agentRuntimeFactory, let memoryOSFacade else { return nil }
+        let factory = agentRuntimeFactory
+        let store = memoryOSFacade.store
+        return BackgroundAIExecutorProvider { facade in
+            let model = AgentModelBackgroundToolLoopModel(provider: factory.makeAgentModelProvider())
+            let executor = MemoryOSHeadlessKnowledgeLoopExecutor(
+                model: model,
+                toolExecutor: MemoryOSBackgroundToolExecutor(facade: facade),
+                store: store
+            )
+            let runs = try facade.runBackgroundAIQueueOnce(executor: executor, limit: 3)
+            return runs.count
+        }
+    }
     private var hasLoadedInitialChatSessions = false
     // Product chat path: NativeSessionManager owns Connor session state and talks to replaceable AgentBackend implementations.
     // fallbackChatSession is UI-only for demo/no-runtime states.
@@ -2223,9 +2240,23 @@ final class AppViewModel: NSObject, ObservableObject {
         isRunningBackgroundJobs = true
         defer { isRunningBackgroundJobs = false }
         do {
-            _ = try AppMemoryOSBackgroundJobRunner().runOnce(facade: memoryOSFacade)
+            _ = try AppMemoryOSBackgroundJobRunner(
+                aiExecutorProvider: backgroundAIExecutorProvider
+            ).runOnce(facade: memoryOSFacade)
         } catch {
             await MainActor.run { errorMessage = String(describing: error) }
+        }
+    }
+
+    func runDailySweepIfNeeded() async {
+        guard let memoryOSFacade else { return }
+        let now = Date()
+        guard lastMemoryOSDailySweep.map({ now.timeIntervalSince($0) > 86400 }) ?? true else { return }
+        lastMemoryOSDailySweep = now
+        do {
+            _ = try AppMemoryOSPipelineTriggerCoordinator(facade: memoryOSFacade).runDailySweep(now: now)
+        } catch {
+            // silent failure — does not block main flow
         }
     }
 
@@ -6290,6 +6321,7 @@ final class AppViewModel: NSObject, ObservableObject {
                 notificationBody: latestAssistantMessage.map { notificationPreview(from: $0.content) } ?? response.session.title
             )
             Task { await runBackgroundJobs() }
+            Task { await runDailySweepIfNeeded() }
             return latestAssistantMessage?.content
         } catch {
             let recoveredSession = (try? chatSessionRepository?.loadSession(id: submittingSessionID)) ?? manager.session
