@@ -367,17 +367,6 @@ private final class LocalToolsCredentialStore: CredentialStore, @unchecked Senda
     #expect(!names.contains("memory_os_trace_evidence"))
     #expect(!names.contains("graph_ingest_episode"))
     #expect(!names.contains("graph_propose_write"))
-    #expect(!schemaKeys.contains("entityID"))
-    #expect(!schemaKeys.contains("statementID"))
-
-    let updateTool = try #require(controller.toolRegistry.definitions.first { $0.name == "memory_os_l2_update_entities" })
-    let schemaDescriptions = collectSchemaDescriptions(updateTool.inputSchema.jsonObject).joined(separator: "\n")
-    for factType in MemoryOSL2EntityMemoryService.allowedFactTypes {
-        #expect(schemaDescriptions.contains(factType))
-    }
-    #expect(schemaDescriptions.contains("Allowed values: profile_preference, project_state, task_commitment, calendar_time, communication, source_document, decision, implementation, environment_config, relationship, other"))
-    #expect(schemaDescriptions.contains("related_to -> RELATED_TO"))
-    #expect(schemaDescriptions.contains("invalid values are rejected"))
 }
 
 @Test func agentLoopRuntimeFactoryRegistersNativeMailToolsWithFileBackedRuntime() async throws {

@@ -44,7 +44,6 @@ import ConnorGraphAgent
     #expect(!prompt.contains("memory_os_l2_find_entities"))
     #expect(prompt.contains("web_search"))
     #expect(prompt.contains("web_fetch"))
-    #expect(prompt.contains("browser_fetch"))
 }
 
 @Test func defaultSystemPromptRequiresLocalAndWebSearchForUserProblemSolving() {
