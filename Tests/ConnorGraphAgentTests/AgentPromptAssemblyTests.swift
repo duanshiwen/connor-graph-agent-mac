@@ -38,13 +38,12 @@ import ConnorGraphAgent
     #expect(prompt.contains("Then search current web information"))
     #expect(prompt.contains("Use `web_fetch` to read original pages"))
     #expect(prompt.contains("memory_os_context"))
-    #expect(prompt.contains("memory_os_search"))
-    #expect(prompt.contains("memory_os_read_record"))
-    #expect(prompt.contains("memory_os_expand_l4"))
-    #expect(prompt.contains("memory_os_read_provenance"))
+    #expect(prompt.contains("memory_os_get_current_user_profile"))
+    #expect(!prompt.contains("memory_os_search"))
+    #expect(!prompt.contains("memory_os_read_record"))
+    #expect(!prompt.contains("memory_os_l2_find_entities"))
     #expect(prompt.contains("web_search"))
     #expect(prompt.contains("web_fetch"))
-    #expect(prompt.contains("browser_fetch"))
 }
 
 @Test func defaultSystemPromptRequiresLocalAndWebSearchForUserProblemSolving() {
@@ -72,26 +71,24 @@ import ConnorGraphAgent
     #expect(prompt.contains("call `calendar_read` with `operation: get_event` for selected event details"))
     #expect(!prompt.contains("Calendar search results already return full event details"))
     #expect(prompt.contains("contentMarkdown"))
-    #expect(prompt.contains("automatically record selected detail source records into Memory OS L0/L1"))
-    #expect(prompt.contains("bounded summary candidates"))
-    #expect(prompt.contains("detail references"))
-    #expect(prompt.contains("Do not call an extra memory write tool for native source references"))
+    #expect(prompt.contains("automatically capture source references into Memory OS L1"))
+    #expect(prompt.contains("Do not attempt to write to memory directly"))
 }
 
 @Test func defaultSystemPromptRequiresTaskBootstrapWorkflowOrder() throws {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
     let currentTimeIndex = try #require(prompt.range(of: "At the start of every user task")?.lowerBound)
-    let profileIndex = try #require(prompt.range(of: "memory_os_get_current_user_profile", range: currentTimeIndex..<prompt.endIndex)?.lowerBound)
-    let memorySearchIndex = try #require(prompt.range(of: "memory_os_context", range: profileIndex..<prompt.endIndex)?.lowerBound)
-    let webSearchIndex = try #require(prompt.range(of: "web_search", range: memorySearchIndex..<prompt.endIndex)?.lowerBound)
+    let contextIndex = try #require(prompt.range(of: "memory_os_context", range: currentTimeIndex..<prompt.endIndex)?.lowerBound)
+    let profileIndex = try #require(prompt.range(of: "memory_os_get_current_user_profile", range: contextIndex..<prompt.endIndex)?.lowerBound)
+    let webSearchIndex = try #require(prompt.range(of: "web_search", range: profileIndex..<prompt.endIndex)?.lowerBound)
     let skillIndex = try #require(prompt.range(of: "connor_skill_activate", range: webSearchIndex..<prompt.endIndex)?.lowerBound)
     let synthesizeIndex = try #require(prompt.range(of: "Only after current time, internal memory, external evidence, and relevant skill instructions", range: skillIndex..<prompt.endIndex)?.lowerBound)
 
-    #expect(currentTimeIndex < profileIndex)
-    #expect(profileIndex < memorySearchIndex)
-    #expect(memorySearchIndex < webSearchIndex)
-    #expect(prompt.contains("Use low-level `memory_os_search` when you specifically need candidate entry-point rows"))
+    #expect(currentTimeIndex < contextIndex)
+    #expect(contextIndex < profileIndex)
+    #expect(profileIndex < webSearchIndex)
+    #expect(!prompt.contains("Other memory graph tools are available"))
     #expect(webSearchIndex < skillIndex)
     #expect(skillIndex < synthesizeIndex)
 }
@@ -110,27 +107,18 @@ import ConnorGraphAgent
 
     #expect(prompt.contains("## Current User Personalization Workflow"))
     #expect(prompt.contains("current_user"))
-    #expect(prompt.contains("normal Person instance anchored by the protected internal role marker"))
-    #expect(prompt.contains("do not use mutable display names, aliases, natural-language terms, or generic user concepts as identity keys"))
+    #expect(prompt.contains("Person instance anchored by the protected internal role marker"))
+    #expect(prompt.contains("do not use mutable display names, aliases, or generic user concepts as identity keys"))
     #expect(prompt.contains("memory_os_get_current_user_profile"))
-    #expect(prompt.contains("memory_os_update_current_user_profile"))
-    #expect(prompt.contains("Provide only `statement`, `factType`, and `relation`"))
-    #expect(prompt.contains("the tool owns current_user anchoring, metadata, timestamps, confidence defaults, and projection details"))
-    #expect(!prompt.contains("Provide evidence and profile dimension"))
-    #expect(prompt.contains("resolvedCurrentUserEntityIDs"))
-    #expect(prompt.contains("generic L4/Foundation KG user concepts are not the current user"))
-    #expect(prompt.contains("memory_os_read_record"))
-    #expect(prompt.contains("memory_os_read_provenance"))
-    #expect(!prompt.contains("using queries such as `current_user`"))
+    #expect(!prompt.contains("memory_os_update_current_user_profile"))
+    #expect(!prompt.contains("memory_os_search"))
     #expect(!prompt.localizedCaseInsensitiveContains("shiwen"))
 }
 
 @Test func defaultSystemPromptRequiresCurrentUserLookupBeforeAnswering() {
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
-    #expect(prompt.contains("Use `memory_os_get_current_user_profile` as the only dedicated current-user profile retrieval tool"))
-    #expect(prompt.contains("Do not use `memory_os_search` queries such as `current_user`"))
-    #expect(prompt.contains("first call `memory_os_get_current_user_profile` with a `focus` value"))
+    #expect(prompt.contains("memory_os_get_current_user_profile"))
     #expect(prompt.contains("never let older profile memory override the user's latest explicit request"))
     #expect(prompt.contains("If the user changes their name"))
     #expect(!prompt.localizedCaseInsensitiveContains("shiwen"))
@@ -140,8 +128,6 @@ import ConnorGraphAgent
     let prompt = AgentInstructionSection.defaultConnorInstruction
 
     #expect(prompt.contains("memory_os_get_current_user_profile"))
-    #expect(prompt.contains("dedicated current-user profile retrieval tool"))
-    #expect(prompt.contains("structured current_user anchor"))
     #expect(!prompt.localizedCaseInsensitiveContains("shiwen"))
 }
 
@@ -225,7 +211,7 @@ import ConnorGraphAgent
     )
     let assembly = AgentPromptAssembler().assemble(request: request, memoryContract: nil)
 
-    let transformed = try await AgentPromptBudgetTransformer(maxEstimatedTokens: 4_200).transform(
+    let transformed = try await AgentPromptBudgetTransformer(maxEstimatedTokens: 3_500).transform(
         assembly,
         projectionMode: .structuredContextMessages
     )
