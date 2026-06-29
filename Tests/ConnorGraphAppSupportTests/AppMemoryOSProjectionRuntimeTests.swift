@@ -64,7 +64,7 @@ private func encodedProjectionFixture(confidence: Double = 0.94, includeEvidence
                 signalAssessment: MemoryOSKnowledgeSignalAssessment(signalQualityAccepted: true, reuseScopeAccepted: true, noveltyAccepted: true, structurabilityAccepted: true),
                 confidence: 0.84,
                 evidenceStatementIDs: ["stmt-1"],
-                relatedEntityNames: ["concept-elasticity"]
+                relatedEntityNames: ["供需弹性"]
             )
         ],
         conceptEntities: [MemoryOSExtractedConceptEntity(name: "供需弹性", conceptType: "concept", domain: "economics")]
