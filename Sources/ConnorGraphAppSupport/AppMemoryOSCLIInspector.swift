@@ -83,10 +83,6 @@ public struct AppMemoryOSCLIInspector: Sendable {
         """, columns: ["id", "provenance_object_id", "start_offset", "end_offset", "text", "metadata_json"])
     }
 
-    public func queryGraph(text: String = "", intent: MemoryOSGraphQueryIntent = .auto, entityID: String? = nil, classEntityIDs: [String] = [], predicates: [String] = [], direction: MemoryOSGraphDirection = .both, includeEvidence: Bool = false, limit: Int = 50) throws -> MemoryOSGraphSubgraph {
-        try AppMemoryOSFacade(store: store, searchKernel: searchKernel).queryMemoryOSGraph(MemoryOSGraphQuery(text: text, intent: intent, entityID: entityID, classEntityIDs: classEntityIDs, predicates: predicates, direction: direction, includeEvidence: includeEvidence, limit: safeLimit(limit)))
-    }
-
 
     public func listL1Pending(limit: Int = 20) throws -> [MemoryOSCLIRow] {
         try rows(sql: """
