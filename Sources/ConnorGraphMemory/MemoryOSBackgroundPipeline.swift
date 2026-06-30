@@ -556,8 +556,8 @@ public enum MemoryOSBackgroundToolCatalog {
         MemoryOSBackgroundToolDescriptor(
             name: "memory_os_update_current_user_profile",
             description: "Write current-user-scoped L2 fact statements. Automatically handles current_user anchor, timestamps, and projection.",
-            inputSchemaJSON: "{\"facts\":[{\"statement\":\"string\",\"factType\":\"string\",\"relation\":\"GraphPredicate\"}]}",
-            usagePolicy: "MANDATORY for current-user facts. When evidence identifies the human operator (first-person references with source support), use this tool instead of memory_os_l2_update_entities. Only provide statement, factType, and relation."
+            inputSchemaJSON: "{\"facts\":[{\"statement\":\"string\",\"factType\":\"string\",\"relation\":\"GraphPredicate (e.g., PREFERS, ABOUT, RELATED_TO)\"}]}",
+            usagePolicy: "MANDATORY for current-user facts. When evidence identifies the human operator (first-person references with source support), use this tool instead of memory_os_l2_update_entities. Only provide statement, factType, and relation. For interests/preferences, use PREFERS. For topic relations, use ABOUT. Invalid relations will fallback to RELATED_TO."
         )
     }
 
