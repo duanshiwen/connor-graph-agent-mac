@@ -1,6 +1,6 @@
 # Connor Graph Agent Mac
 
-文档更新时间：2026-06-30 11:30 GMT+8  
+文档更新时间：2026-06-30 12:02 GMT+8  
 定位：本 README 只记录当前架构、边界、运行布局和开发约束，不作为历史 changelog。
 
 Connor Graph Agent Mac 是一个 Swift / SwiftUI macOS 应用与 SwiftPM package。它的目标不是图谱编辑器，也不是 LLM SDK 外壳，而是一个本地优先的 **memory-os-native Agent OS**。
@@ -355,7 +355,7 @@ MemoryOSStatement         // id, subjectID, predicate, objectID?, text, assertio
 
 // L2 simplified entity model (for LLM tool interface)
 MemoryOSL2StoredEntity    // id, name, type, aliases[], summary, statements[]
-MemoryOSL2StoredStatement // id, text, relation, connectedEntityName, metadata
+MemoryOSL2StoredStatement // id, text, relation, metadata (historical connectedEntityName column preserved)
 ```
 
 **L3 models**:
@@ -420,7 +420,7 @@ LLM-facing Memory OS tools, registered in `AppMemoryOSAgentTools.swift`:
 | `memory_os_context` | All | Retrieve Memory OS context package for current conversation (retrieval + context building) |
 | `memory_os_read_record` | All | Read a single Memory OS record by layer and ID |
 | `memory_os_l2_find_entities` | L2 | Find L2 working-memory entities by exact name or alias |
-| `memory_os_l2_update_entities` | L2 | Upsert L2 entities and append statements; entity names split/dedup/upsert; connected entities auto-created |
+| `memory_os_l2_update_entities` | L2 | Upsert L2 entities and append statements; entity names split/dedup/upsert |
 | `memory_os_l3_write_beliefs` | L3 | Direct-write L3 beliefs (bypasses promotion policy; domain + statement validated) |
 | `memory_os_l4_write_entities` | L4 | Direct-write L4 entities and relations; entity type normalized via `MemoryOSEntityType.normalizeRawType()`; structural validation applied |
 | `memory_os_provenance` | L0 | Read provenance object with optional span detail |
