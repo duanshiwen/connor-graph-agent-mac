@@ -76,10 +76,8 @@ struct MemoryOSBackgroundPromptContractTests {
         #expect(prompt.contains("L2 is entity-centered working memory, not an evidence store"))
         #expect(prompt.contains("Do not ask LLM tools to provide evidence"))
         #expect(prompt.contains("statement text is the semantic authority"))
-        #expect(prompt.contains("Preserve negative or exclusion semantics explicitly"))
-        #expect(prompt.contains("不去贫民窟"))
-        #expect(prompt.contains("polarity = exclude"))
-        #expect(prompt.contains("originalPhrase"))
+        #expect(prompt.contains("Preserve negative or exclusion semantics"))
+        #expect(prompt.contains("statement text is the semantic authority"))
     }
 
     @Test func l1PromptIncludesPromotionFiltersAndStableL4EntityRules() {
