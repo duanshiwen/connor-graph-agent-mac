@@ -22,14 +22,14 @@ public struct MemoryOSContextDeliveryService: Sendable {
 
         if request.graphPolicy.enabled && request.graphPolicy.maxDepth > 0 && request.graphPolicy.expansionStrategy != .none {
             for hit in hits where hit.layer == .l4 && hit.canExpandDepth {
-                guard let entityID = hit.entityRefs.first ?? Optional(hit.recordID) else { continue }
+                let entityRef = hit.title.isEmpty ? (hit.entityRefs.first ?? hit.recordID) : hit.title
                 let expanded = try retrieval.expandL4(
-                    entityID: entityID,
+                    entityName: entityRef,
                     depth: request.graphPolicy.maxDepth,
                     limit: request.graphPolicy.maxEdgesPerSeed
                 )
                 let filtered = filter(expanded, policy: request.graphPolicy)
-                if !filtered.isEmpty { expansions[entityID] = filtered }
+                if !filtered.isEmpty { expansions[hit.recordID] = filtered }
             }
         } else {
             diagnostics.append(MemoryOSContextDiagnostic(
@@ -66,10 +66,10 @@ public struct MemoryOSContextDeliveryService: Sendable {
             allHits.append(contentsOf: hits)
 
             for hit in hits where hit.layer == .l4 && hit.canExpandDepth {
-                guard let entityID = hit.entityRefs.first ?? Optional(hit.recordID) else { continue }
-                if allExpansions[entityID] != nil { continue }
-                let expanded = try retrieval.expandL4(entityID: entityID, depth: 5, limit: 8)
-                if !expanded.isEmpty { allExpansions[entityID] = expanded }
+                if allExpansions[hit.recordID] != nil { continue }
+                let entityRef = hit.title.isEmpty ? (hit.entityRefs.first ?? hit.recordID) : hit.title
+                let expanded = try retrieval.expandL4(entityName: entityRef, depth: 5, limit: 8)
+                if !expanded.isEmpty { allExpansions[hit.recordID] = expanded }
             }
         }
 

@@ -76,16 +76,13 @@ public struct MemoryOSBackgroundToolExecutor: @unchecked Sendable {
 
         case "memory_os_expand_l4":
             let entityName = try args.requiredString("entityName")
-            let depth = args.int("depth") ?? 1
-            let limit = args.int("limit") ?? 20
-            // Resolve entity name → ID via findMemoryOSL4Entity
-            let found = try facade.findMemoryOSL4Entity(text: entityName, limit: 1)
-            guard let node = found.nodes.first else {
-                return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: "{}", contentText: "No L4 entity found matching '\(entityName)'. Try a different search term.", citations: [])
+            let depth = args.int("depth") ?? 5
+            let limit = args.int("limit") ?? 200
+            let hits = try facade.expandMemoryOSL4(entityName: entityName, depth: depth, limit: limit)
+            if hits.isEmpty {
+                return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: "{}", contentText: "No L4 entity found matching '\(entityName)'.", citations: [])
             }
-            let entityID = node.id
-            let hits = try facade.expandMemoryOSL4(entityID: entityID, depth: depth, limit: limit)
-            return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: facade.store.json(hits), contentText: "Expanded L4 entity '\(entityName)' (ID: \(entityID)) to depth \(depth).", citations: [entityID] + hits.map(\.recordID))
+            return MemoryOSBackgroundToolResult(callID: call.id, name: call.name, contentJSON: facade.store.json(hits), contentText: "Expanded L4 entity '\(entityName)' to depth \(depth).", citations: hits.map(\.recordID))
 
         case "memory_os_l4_find_entity":
             let text = try args.requiredString("text")
