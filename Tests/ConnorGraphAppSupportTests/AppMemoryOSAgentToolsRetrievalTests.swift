@@ -226,7 +226,7 @@ import ConnorGraphAppSupport
     try store.upsert(entityStatement: MemoryOSEntityStatement(id: "l4-stmt-1", entityID: entityA.id, predicate: .relatedTo, objectEntityID: entityB.id, text: "供需弹性关联价格变化。", confidence: 0.9, validAt: now, committedAt: now, evidenceSpanIDs: ["span-1"]))
 
     let tool = MemoryOSExpandL4Tool(facade: facade)
-    let result = try await tool.execute(arguments: AgentToolArguments(json: #"{"entityID":"entity-a","depth":1,"limit":10}"#), context: memoryOSToolContext())
+    let result = try await tool.execute(arguments: AgentToolArguments(json: #"{"entityName":"供需弹性","depth":1,"limit":10}"#), context: memoryOSToolContext())
 
     let json = try #require(result.contentJSON)
     #expect(result.toolName == "memory_os_expand_l4")
