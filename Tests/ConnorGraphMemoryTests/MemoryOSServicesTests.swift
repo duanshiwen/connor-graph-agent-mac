@@ -230,3 +230,41 @@ private func makeAcceptedL1UnifiedProjectionOutput() -> MemoryOSL1UnifiedProject
         metadata: ["stage": "l1_unified_projection"]
     )
 }
+
+@Test func ingestionServiceGeneratesContentPreviewAndTitle() throws {
+    let service = MemoryOSIngestionService()
+    let longContent = String(repeating: "This is a test message for content preview generation. ", count: 10)
+    let input = MemoryOSIngestionInput(
+        sourceType: .chatMessage,
+        sourceID: "msg-1",
+        title: "Test Message",
+        content: longContent,
+        occurredAt: Date(timeIntervalSince1970: 100),
+        sessionID: "session-1"
+    )
+    let result = service.ingest(input)
+    
+    #expect(result.captureEvent != nil)
+    #expect(result.captureEvent?.metadata["content_preview"] != nil)
+    #expect(result.captureEvent?.metadata["content_preview"]?.hasSuffix("...") == true)
+    #expect(result.captureEvent?.metadata["content_preview"]?.count == 203) // 200 + "..."
+    #expect(result.captureEvent?.metadata["title"] == "Test Message")
+}
+
+@Test func ingestionServiceGeneratesShortContentPreviewWithoutTruncation() throws {
+    let service = MemoryOSIngestionService()
+    let shortContent = "Short message"
+    let input = MemoryOSIngestionInput(
+        sourceType: .chatMessage,
+        sourceID: "msg-2",
+        title: "Short Message",
+        content: shortContent,
+        occurredAt: Date(timeIntervalSince1970: 100),
+        sessionID: "session-1"
+    )
+    let result = service.ingest(input)
+    
+    #expect(result.captureEvent != nil)
+    #expect(result.captureEvent?.metadata["content_preview"] == shortContent)
+    #expect(result.captureEvent?.metadata["title"] == "Short Message")
+}
