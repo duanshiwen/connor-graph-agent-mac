@@ -109,20 +109,20 @@ import ConnorGraphMemory
     #expect(stored[0].statements[0].metadata["l2_fact_type"] == "implementation")
 }
 
-@Test func l2EntityMemoryRejectsInvalidRelationWithoutPartialWrite() throws {
+@Test func l2EntityMemoryFallsBackToRelatedToForInvalidRelation() throws {
     let repository = InMemoryMemoryOSL2EntityMemoryRepository()
     let service = MemoryOSL2EntityMemoryService(repository: repository)
 
-    #expect(throws: MemoryOSL2EntityMemoryValidationError.invalidRelation(value: "RELATE_TO", allowed: MemoryOSL2EntityMemoryService.allowedRelations)) {
-        _ = try service.updateEntities(MemoryOSL2UpdateEntitiesRequest(entities: [
-            MemoryOSL2EntityUpdate(
-                name: "Connor",
-                statements: [
-                    MemoryOSL2StatementUpdate(text: "Connor has a misspelled relation.", relation: "RELATE_TO", factType: "other")
-                ]
-            )
-        ]))
-    }
+    _ = try service.updateEntities(MemoryOSL2UpdateEntitiesRequest(entities: [
+        MemoryOSL2EntityUpdate(
+            name: "Connor",
+            statements: [
+                MemoryOSL2StatementUpdate(text: "Connor has a misspelled relation.", relation: "RELATE_TO", factType: "other")
+            ]
+        )
+    ]))
 
-    #expect(try repository.findEntities(matchingNames: ["Connor"]).isEmpty)
+    let stored = try repository.findEntities(matchingNames: ["Connor"])
+    #expect(stored.count == 1)
+    #expect(stored[0].statements[0].relation == "RELATED_TO")
 }
